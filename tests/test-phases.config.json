@@ -1,0 +1,31 @@
+[
+  {
+    "id": "phase-1",
+    "name": "Phase 1: TestPhase1",
+    "promptText": "Can you write me a poem? write three then place your favorite into the notes folder.",
+    "model": "sonnet",
+    "continueFromPrevious": false,
+    "preStart": "mkdir -p notes",
+    "watch": "./notes/*.md",
+    "description": "Write three pick one"
+  },
+  {
+    "id": "phase-2",
+    "name": "Phase 2: Schema Generation",
+    "promptText": "Can you put your second favorite into the notes folder?",
+    "model": "sonnet",
+    "continueFromPrevious": true,
+    "watch": "./notes/*.*",
+    "description": "Write one more"
+  },
+  {
+    "id": "phase-3",
+    "name": "Phase 2a: More Validation",
+    "promptText": "Can you convert the poems in the notes folder into typescript code in the typescript_code folder?",
+    "model": "sonnet",
+    "continueFromPrevious": false,
+    "preStart": " mkdir -p typescript_code && mkdir -p typescript_code/src && mkdir -p typescript_code/src/schema && mkdir -p typescript_code/src/loaders && mkdir -p typescript_code/src/validations && mkdir -p typescript_code/src/quick-and-dirty && cd typescript_code && bun init -y && bun add papaparse csv-parse exceljs xlsx ajv parquet-wasm apache-arrow date-fns mathjs lodash @turf/turf && bun add -d @types/papaparse @types/lodash @types/geojson && cd ..",
+    "watch": "./typescript_code/src/**/*.ts",
+    "description": "Convert poems to code"
+  }
+]

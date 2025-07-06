@@ -1,3 +1,5 @@
+Only for humans - not for Claude
+
 Set up:
 
 1. Create code folder with the src and subfolders.

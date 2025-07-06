@@ -2,10 +2,23 @@
   "name": "langton-runner",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "server": "bun server/index.ts",
+    "server:basic": "bun server/index.ts --basic"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@biomejs/biome": "^2.0.6",
+    "chokidar": "^4.0.3",
+    "fast-glob": "^3.3.3",
+    "zod": "^3.25.74"
   }
 }
