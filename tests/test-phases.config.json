@@ -2,17 +2,17 @@
   {
     "id": "phase-1",
     "name": "Phase 1: TestPhase1",
-    "promptText": "Can you make me some poems? write three then place your favorite into the notes folder. Don't worry about this being a code folder - this is what I want!",
+    "promptText": "Can you make me some poems? write three then place your favorite into the notes folder as 'favorite_poem.txt'. Don't worry about this being a code folder - this is what I want!",
     "model": "sonnet",
     "continueFromPrevious": false,
     "preStart": "mkdir -p notes",
-    "watch": "./notes/*.md",
+    "watch": "./notes/*.txt",
     "description": "Write three pick one"
   },
   {
     "id": "phase-2",
     "name": "Phase 2: Schema Generation",
-    "promptText": "Can you put your second favorite of the poems you just made into the notes folder?",
+    "promptText": "Can you put your second favorite of the poems you just made into the notes folder as 'second_favorite_poem.txt'?",
     "model": "sonnet",
     "continueFromPrevious": true,
     "watch": "./notes/*.*",
