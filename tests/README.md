@@ -9,7 +9,7 @@ bun run test
 ```
 
 ### What the test does
-The end-to-end test (`happy-path.test.ts`) runs a complete server workflow:
+The end-to-end test (`happy-path-e2e.ts`) runs a complete server workflow:
 
 1. **Pre-test cleanup**: Removes any previous test artifacts
 2. **Starts the server**: With the test configuration in `test-phases.config.json`
@@ -28,16 +28,19 @@ The end-to-end test (`happy-path.test.ts`) runs a complete server workflow:
 ### Test Scripts
 
 - `bun run test` - Run the full E2E test suite
-- `bun run pre-test` - Just run the pre-test cleanup
+- `bun run test:check` - Check if environment is ready for testing
+- `bun run test:sanity` - Detailed environment and configuration check
 - `bun run test:e2e` - Run E2E test directly (includes pre-test)
+- `bun run test:cleanup` - Manually clean up test server and optionally test area
+- `bun run pre-test` - Just run the pre-test cleanup
 
 ### Important Notes
 
 1. **Working Directory**: Tests MUST be run from the project root (where package.json is)
 2. **Test Area**: All test artifacts are created in `tests/test-area/`
-3. **No Auto-cleanup**: After tests complete, artifacts are preserved for inspection
-4. **Server Remains Running**: To save API costs, the server isn't killed after tests
-5. **Cost**: Running the full test will use Claude API credits (3 phases with Sonnet)
+3. **Auto-cleanup**: The server is gracefully shut down after tests complete
+4. **Cost**: Running the full test will use Claude API credits (3 phases with Sonnet)
+5. **Artifacts**: Test outputs are preserved in `tests/test-area/` for inspection
 
 ### Test Configuration
 
@@ -54,10 +57,4 @@ If tests fail:
 2. Ensure no other server instance is running on port 7777
 3. Check `tests/test-area/.logs/` for Claude session logs
 4. Look at server logs in `tests/test-area/server.log`
-
-### Manual Cleanup
-
-To manually clean test artifacts:
-```bash
-rm -rf tests/test-area/.logs tests/test-area/.langton-server.lock tests/test-area/notes tests/test-area/typescript_code
-```
+5. Run `bun run test:cleanup` to clean up any stuck processes

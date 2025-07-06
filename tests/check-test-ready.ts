@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 import fs from "node:fs";
-import path from "node:path";
 
 const colors = {
   reset: "\x1b[0m",
@@ -72,13 +71,10 @@ checks.push({
   message: claudeAvailable ? "Claude CLI found" : "Claude CLI not found in PATH",
 });
 
-// Check 7: API key
-const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
-checks.push({
-  name: "API key",
-  pass: hasApiKey,
-  message: hasApiKey ? "ANTHROPIC_API_KEY set" : "Missing ANTHROPIC_API_KEY environment variable",
-});
+// Note: We don't check for ANTHROPIC_API_KEY since it can be:
+// - Set in environment
+// - Passed via CLI args
+// - Configured in Claude global settings
 
 // Print results
 checks.forEach((check) => {
@@ -89,22 +85,23 @@ checks.forEach((check) => {
 
 ready = checks.every((c) => c.pass);
 
-console.log("\n" + "=".repeat(50));
+console.log(`\n${"=".repeat(50)}`);
 if (ready) {
   console.log(`${colors.green}✅ All checks passed! Ready to run tests.${colors.reset}`);
   console.log(`\nRun: ${colors.blue}bun run test${colors.reset}`);
 } else {
-  console.log(`${colors.red}❌ Some checks failed. Please fix issues before running tests.${colors.reset}`);
-  
+  console.log(
+    `${colors.red}❌ Some checks failed. Please fix issues before running tests.${colors.reset}`,
+  );
+
   // Provide helpful fixes
   if (!inCorrectDir) {
     console.log(`\n${colors.yellow}Fix: cd to the project root directory${colors.reset}`);
   }
   if (!claudeAvailable) {
-    console.log(`\n${colors.yellow}Fix: Install Claude CLI - https://docs.anthropic.com/en/docs/claude-code${colors.reset}`);
-  }
-  if (!hasApiKey) {
-    console.log(`\n${colors.yellow}Fix: export ANTHROPIC_API_KEY="your-api-key"${colors.reset}`);
+    console.log(
+      `\n${colors.yellow}Fix: Install Claude CLI - https://docs.anthropic.com/en/docs/claude-code${colors.reset}`,
+    );
   }
   if (!noLockFile) {
     console.log(`\n${colors.yellow}Fix: rm ${lockFile}${colors.reset}`);

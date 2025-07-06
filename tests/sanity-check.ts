@@ -24,7 +24,7 @@ if (fs.existsSync("package.json")) {
     const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
     isCorrectDir = pkg.name === "langton-runner";
     console.log(`Package name: ${colors.yellow}${pkg.name}${colors.reset}`);
-  } catch (e) {
+  } catch (_e) {
     console.log(`${colors.red}Error reading package.json${colors.reset}`);
   }
 }
@@ -42,17 +42,17 @@ console.log(`\n${colors.blue}Test Configuration:${colors.reset}`);
 const testConfigPath = path.join(cwd, "tests/test-phases.config.json");
 if (fs.existsSync(testConfigPath)) {
   console.log(`${colors.green}✓ Test config exists${colors.reset}: ${testConfigPath}`);
-  
+
   // Parse and show phases
   try {
     const phases = JSON.parse(fs.readFileSync(testConfigPath, "utf-8"));
     console.log(`\nPhases to run:`);
-    phases.forEach((phase: any) => {
+    phases.forEach((phase: { id?: string; name?: string; model?: string; watch?: string }) => {
       console.log(`  - ${colors.yellow}${phase.id}${colors.reset}: ${phase.name}`);
       console.log(`    Model: ${phase.model}`);
       console.log(`    Watch: ${phase.watch || "none"}`);
     });
-  } catch (e) {
+  } catch (_e) {
     console.log(`${colors.red}Error parsing test config${colors.reset}`);
   }
 } else {
@@ -66,18 +66,18 @@ console.log(`Test area path: ${colors.yellow}${testAreaPath}${colors.reset}`);
 
 if (fs.existsSync(testAreaPath)) {
   console.log(`${colors.yellow}⚠ Test area exists${colors.reset}`);
-  
+
   // List contents
   const contents = fs.readdirSync(testAreaPath);
   if (contents.length > 0) {
     console.log(`\nCurrent contents:`);
-    contents.forEach(item => {
+    contents.forEach((item) => {
       const itemPath = path.join(testAreaPath, item);
       const stat = fs.statSync(itemPath);
       const icon = stat.isDirectory() ? "📁" : "📄";
       console.log(`  ${icon} ${item}`);
     });
-    
+
     console.log(`\n${colors.yellow}⚠ Test area is not empty!${colors.reset}`);
     console.log(`Running 'bun run pre-test:cleanup' will DELETE everything in:`);
     console.log(`  ${colors.red}${testAreaPath}${colors.reset}`);
@@ -90,9 +90,15 @@ if (fs.existsSync(testAreaPath)) {
 
 // Check server spawn configuration
 console.log(`\n${colors.blue}Server Configuration:${colors.reset}`);
-console.log(`Server will run with working directory: ${colors.yellow}${testAreaPath}${colors.reset}`);
-console.log(`This means Claude will create files in: ${colors.yellow}${testAreaPath}${colors.reset}`);
-console.log(`Server executable: ${colors.yellow}${path.join(cwd, "server/index.ts")}${colors.reset}`);
+console.log(
+  `Server will run with working directory: ${colors.yellow}${testAreaPath}${colors.reset}`,
+);
+console.log(
+  `This means Claude will create files in: ${colors.yellow}${testAreaPath}${colors.reset}`,
+);
+console.log(
+  `Server executable: ${colors.yellow}${path.join(cwd, "server/index.ts")}${colors.reset}`,
+);
 
 // Check for existing server
 const lockFilePath = path.join(testAreaPath, ".langton-server.lock");
@@ -107,14 +113,22 @@ if (fs.existsSync(lockFilePath)) {
 
 // Safety warnings
 console.log(`\n${colors.blue}Safety Summary:${colors.reset}`);
-console.log(`1. Test will run in isolated directory: ${colors.green}${testAreaPath}${colors.reset}`);
-console.log(`2. Pre-test will ${colors.red}DELETE${colors.reset} and recreate: ${colors.yellow}${testAreaPath}${colors.reset}`);
+console.log(
+  `1. Test will run in isolated directory: ${colors.green}${testAreaPath}${colors.reset}`,
+);
+console.log(
+  `2. Pre-test will ${colors.red}DELETE${colors.reset} and recreate: ${colors.yellow}${testAreaPath}${colors.reset}`,
+);
 console.log(`3. Server working directory will be: ${colors.green}${testAreaPath}${colors.reset}`);
-console.log(`4. All Claude-created files will be in: ${colors.green}${testAreaPath}${colors.reset}`);
+console.log(
+  `4. All Claude-created files will be in: ${colors.green}${testAreaPath}${colors.reset}`,
+);
 console.log(`5. Your project files will ${colors.green}NOT${colors.reset} be affected`);
 
 console.log(`\n${colors.blue}Commands:${colors.reset}`);
-console.log(`- ${colors.yellow}bun run pre-test:cleanup${colors.reset} - Wipe and recreate test area`);
+console.log(
+  `- ${colors.yellow}bun run pre-test:cleanup${colors.reset} - Wipe and recreate test area`,
+);
 console.log(`- ${colors.yellow}bun run test:check${colors.reset} - Run readiness checks`);
 console.log(`- ${colors.yellow}bun run test${colors.reset} - Run full test suite`);
 

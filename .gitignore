@@ -3,6 +3,7 @@
 # Logs
 
 tests/test-area
+tests/test-results
 
 logs
 _.log

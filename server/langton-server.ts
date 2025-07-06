@@ -987,10 +987,19 @@ export class LangtonServer extends EventEmitter {
     }
 
     if (fs.existsSync(this.config.lockFile)) {
-      fs.unlinkSync(this.config.lockFile);
+      try {
+        fs.unlinkSync(this.config.lockFile);
+        this.logger.log("Lock file removed");
+      } catch (error) {
+        this.logger.log(`Failed to remove lock file: ${error}`, "error");
+      }
     }
 
     this.logger.log("Server shutdown complete");
-    process.exit(0);
+
+    // Small delay to ensure log is written and lock file removal completes
+    setTimeout(() => {
+      process.exit(0);
+    }, 100);
   }
 }
