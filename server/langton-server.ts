@@ -45,7 +45,7 @@ import {
 
 /**
  * Main server class that orchestrates Claude phases.
- * 
+ *
  * Responsibilities:
  * - WebSocket server management (single client)
  * - Phase execution and lifecycle
@@ -58,7 +58,7 @@ import {
 export class LangtonServer extends EventEmitter {
   private server: Server | null = null;
   private client: ServerWebSocket<unknown> | null = null;
-  private config: ServerConfig;
+  public readonly config: ServerConfig;
   private logger: Logger;
   private currentPhase: PhaseState | null = null;
   private completedPhases: CompletedPhase[] = [];
@@ -86,14 +86,14 @@ export class LangtonServer extends EventEmitter {
 
   /**
    * Initialize and start the WebSocket server.
-   * 
+   *
    * Steps:
    * 1. Check for existing lock file (prevent multiple instances)
    * 2. Create lock file with current PID
    * 3. Load previous session state from logs
    * 4. Start WebSocket server on configured port
    * 5. Set up process termination handlers
-   * 
+   *
    * @throws Error if server is already running
    */
   async start(): Promise<void> {
@@ -122,7 +122,6 @@ export class LangtonServer extends EventEmitter {
         open: (ws) => this.handleConnection(ws),
         message: (ws, message) => this.handleMessage(ws, message),
         close: (ws) => this.handleClose(ws),
-        error: (ws, error) => this.handleError(ws, error),
       },
       fetch(req, server) {
         // Upgrade to WebSocket
@@ -169,6 +168,9 @@ export class LangtonServer extends EventEmitter {
 
     // Check for incomplete phases
     this.checkIncompletePhases();
+
+    // Auto-start the next available phase
+    this.autoStartNextPhase();
   }
 
   private handleMessage(_ws: ServerWebSocket<unknown>, message: string | Buffer): void {
@@ -187,10 +189,6 @@ export class LangtonServer extends EventEmitter {
   private handleClose(_ws: ServerWebSocket<unknown>): void {
     this.logger.log("Client disconnected - shutting down server");
     this.shutdown("client disconnect");
-  }
-
-  private handleError(_ws: ServerWebSocket<unknown>, error: Error): void {
-    this.logger.log(`WebSocket error: ${error.message}`, "error");
   }
 
   async handleCommand(command: ClientCommand): Promise<void> {
@@ -253,13 +251,13 @@ export class LangtonServer extends EventEmitter {
 
   /**
    * Load state from previous sessions by parsing Claude log files.
-   * 
+   *
    * For each phase:
    * 1. Check if log file exists
    * 2. Extract session ID, success status, and token usage
    * 3. Calculate costs from token usage
    * 4. Add to completedPhases if successful
-   * 
+   *
    * This allows the server to resume where it left off after restarts.
    */
   private async loadPreviousState(): Promise<void> {
@@ -271,7 +269,6 @@ export class LangtonServer extends EventEmitter {
       const { sessionId, success, cost } = loadPhaseStateFromLog(logPath, this.config.costsPerMTok);
 
       if (sessionId && success) {
-        this.totalCost += cost;
         this.completedPhases.push({
           phaseId: phase.id,
           sessionId,
@@ -287,6 +284,9 @@ export class LangtonServer extends EventEmitter {
       }
     }
 
+    // Calculate total cost from loaded phases
+    this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
+
     this.logger.log(
       `Loaded ${
         this.completedPhases.length
@@ -296,10 +296,10 @@ export class LangtonServer extends EventEmitter {
 
   /**
    * Start execution of a specific phase.
-   * 
+   *
    * @param phaseId - ID of the phase to start
    * @param skipPreCommands - Skip pre-start commands (useful for retries)
-   * 
+   *
    * Process:
    * 1. Validate phase exists and no phase is currently running
    * 2. Run pre-start command if specified
@@ -349,7 +349,19 @@ export class LangtonServer extends EventEmitter {
         await this.shutdown("missing previous session");
         return;
       }
-      this.logger.log(`Continuing from previous session: ${previousSessionId}`);
+      this.logger.log(
+        `Phase ${phase.id} will continue from previous session: ${previousSessionId}`,
+      );
+
+      // Send info event about continuation
+      this.sendEvent({
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Continuing from previous session: ${previousSessionId}`,
+        },
+      } as InfoEvent);
     }
 
     // Create phase state
@@ -382,6 +394,7 @@ export class LangtonServer extends EventEmitter {
         phaseName: phase.name,
         phaseDescription: phase.description,
         sessionId: this.currentPhase.sessionId,
+        previousSessionId: previousSessionId || undefined,
         startTime: this.currentPhase.startTime.toISOString(),
       },
     } as PhaseStartedEvent);
@@ -425,11 +438,11 @@ export class LangtonServer extends EventEmitter {
 
   /**
    * Spawn Claude CLI process for a phase.
-   * 
+   *
    * @param phase - Phase configuration
    * @param _sessionId - Current session ID (unused but kept for API)
    * @param previousSessionId - Session to continue from (if any)
-   * 
+   *
    * Handles:
    * - Creating log directory and streams
    * - Building Claude CLI arguments
@@ -465,9 +478,17 @@ export class LangtonServer extends EventEmitter {
       args.push("-c", "--resume", previousSessionId);
     }
 
+    // Set up environment variables for Claude process
+    const env = { ...process.env };
+    if (this.config.anthropicBaseURL) {
+      env.ANTHROPIC_BASE_URL = this.config.anthropicBaseURL;
+      this.logger.log(`Using custom Anthropic base URL: ${this.config.anthropicBaseURL}`);
+    }
+
     this.claudeProcess = spawn("claude", args, {
       cwd: this.config.projectPath,
       stdio: ["pipe", "pipe", "pipe"],
+      env,
     });
 
     const logStream = fs.createWriteStream(logPath);
@@ -527,8 +548,21 @@ export class LangtonServer extends EventEmitter {
 
   private handleSystemMessage(msg: SystemMessage, phaseId: string): void {
     if (msg.subtype === "init" && msg.session_id && this.currentPhase) {
+      const oldSessionId = this.currentPhase.sessionId;
       this.currentPhase.sessionId = msg.session_id;
-      this.logger.log(`Updated session ID for phase ${phaseId}: ${msg.session_id}`);
+      this.logger.log(
+        `Updated session ID for phase ${phaseId}: ${msg.session_id} (was: ${oldSessionId})`,
+      );
+
+      // Send info event about actual session ID
+      this.sendEvent({
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Claude started with session ID: ${msg.session_id}`,
+        },
+      } as InfoEvent);
     }
   }
 
@@ -542,14 +576,17 @@ export class LangtonServer extends EventEmitter {
       };
 
       const messageCost = calculateCost(usage, this.config.costsPerMTok);
-      this.totalCost += messageCost;
 
       if (this.currentPhase) {
-        this.currentPhase.phaseCost += messageCost;
-        this.currentPhase.phaseTokens.inputTokens += usage.inputTokens;
-        this.currentPhase.phaseTokens.outputTokens += usage.outputTokens;
-        this.currentPhase.phaseTokens.cacheCreationTokens += usage.cacheCreationTokens;
-        this.currentPhase.phaseTokens.cacheReadTokens += usage.cacheReadTokens;
+        // Store the latest cumulative usage - Claude reports cumulative totals
+        this.currentPhase.phaseTokens = usage;
+        this.currentPhase.phaseCost = messageCost;
+
+        this.logger.log(
+          `Phase ${phaseId} token update - Total cost: $${messageCost.toFixed(4)} ` +
+            `(${usage.inputTokens} in, ${usage.outputTokens} out, ` +
+            `${usage.cacheCreationTokens} cache create, ${usage.cacheReadTokens} cache read)`,
+        );
       }
 
       this.sendEvent({
@@ -625,14 +662,25 @@ export class LangtonServer extends EventEmitter {
     const success = exitCode === 0;
     const phaseCost = this.currentPhase.phaseCost;
 
-    this.completedPhases.push({
-      phaseId: this.currentPhase.phase.id,
-      sessionId: this.currentPhase.sessionId,
-      success,
-      cost: phaseCost,
-      duration,
-      completedAt: new Date(),
-    });
+    // Only add to completed phases if successful (to track costs accurately)
+    if (success) {
+      this.completedPhases.push({
+        phaseId: this.currentPhase.phase.id,
+        sessionId: this.currentPhase.sessionId,
+        success,
+        cost: phaseCost,
+        duration,
+        completedAt: new Date(),
+      });
+
+      // Recalculate total cost from all completed phases
+      this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
+
+      this.logger.log(
+        `Phase ${this.currentPhase.phase.id} completed - Cost: $${phaseCost.toFixed(4)}, ` +
+          `Total project cost: $${this.totalCost.toFixed(4)}`,
+      );
+    }
 
     this.sendEvent({
       id: generateId(),
@@ -652,6 +700,11 @@ export class LangtonServer extends EventEmitter {
     if (!success && !this.isShuttingDown) {
       this.sendError(`Phase failed with exit code ${exitCode}`, true);
       this.shutdown("phase failure");
+    } else if (success && !this.isShuttingDown) {
+      // Auto-continue to next phase after a short delay
+      setTimeout(() => {
+        this.autoStartNextPhase();
+      }, 1000);
     }
   }
 
@@ -777,6 +830,54 @@ export class LangtonServer extends EventEmitter {
         } as IncompletePhaseEvent);
       }
     }
+  }
+
+  /**
+   * Automatically start the next available phase if none is running.
+   * Called on connection and after phase completion.
+   */
+  private async autoStartNextPhase(): Promise<void> {
+    if (this.currentPhase || this.isShuttingDown) {
+      return; // Phase already running or shutting down
+    }
+
+    // Determine next phase to run
+    const nextPhaseIndex = this.getNextPhaseIndex();
+    if (nextPhaseIndex === -1) {
+      this.logger.log("All phases completed - shutting down");
+      this.sendEvent({
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: "All phases completed successfully. Server shutting down.",
+        },
+      } as InfoEvent);
+
+      setTimeout(() => {
+        this.shutdown("all phases completed");
+      }, 2000);
+      return;
+    }
+
+    const nextPhase = this.config.phases[nextPhaseIndex];
+    this.logger.log(`Auto-starting phase: ${nextPhase.name}`);
+    await this.startPhase(nextPhase.id);
+  }
+
+  private getNextPhaseIndex(): number {
+    if (this.completedPhases.length === 0) {
+      return this.config.phases.length > 0 ? 0 : -1;
+    }
+
+    const lastCompleted = this.completedPhases[this.completedPhases.length - 1];
+    const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
+
+    if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
+      return lastIndex + 1;
+    }
+
+    return -1; // All phases completed
   }
 
   private async startNextPhase(): Promise<void> {

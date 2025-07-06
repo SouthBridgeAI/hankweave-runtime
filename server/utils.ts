@@ -33,15 +33,9 @@ export class Logger {
     }
   }
 
-  logSocketTraffic(
-    socketLogFile: string,
-    direction: "in" | "out",
-    data: unknown
-  ): void {
+  logSocketTraffic(socketLogFile: string, direction: "in" | "out", data: unknown): void {
     const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] [${direction.toUpperCase()}] ${JSON.stringify(
-      data
-    )}\n`;
+    const logLine = `[${timestamp}] [${direction.toUpperCase()}] ${JSON.stringify(data)}\n`;
 
     const logsDir = path.dirname(socketLogFile);
     if (!fs.existsSync(logsDir)) {
@@ -65,14 +59,10 @@ export function extractSessionIdFromLog(logPath: string): string | null {
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (trimmed && trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      if (trimmed?.startsWith("{") && trimmed.endsWith("}")) {
         try {
           const parsed = JSON.parse(trimmed);
-          if (
-            parsed.type === "system" &&
-            parsed.subtype === "init" &&
-            parsed.session_id
-          ) {
+          if (parsed.type === "system" && parsed.subtype === "init" && parsed.session_id) {
             return parsed.session_id;
           }
         } catch {
@@ -102,7 +92,7 @@ export function extractSessionIdFromLog(logPath: string): string | null {
  */
 export async function scanWatchedFiles(
   projectPath: string,
-  pattern: string
+  pattern: string,
 ): Promise<{ path: string; content: string }[]> {
   const files: { path: string; content: string }[] = [];
 
@@ -139,10 +129,7 @@ export async function scanWatchedFiles(
  * @param pattern - Glob pattern to match files
  * @returns Root nodes of the file tree
  */
-export async function buildFileTree(
-  projectPath: string,
-  pattern: string
-): Promise<FileNode[]> {
+export async function buildFileTree(projectPath: string, pattern: string): Promise<FileNode[]> {
   const tree: FileNode[] = [];
 
   try {

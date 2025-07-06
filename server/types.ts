@@ -95,6 +95,9 @@ export interface ServerConfig {
 
   /** Interval in milliseconds for parsing Claude log files (default: 1000) */
   logParsingInterval: number;
+
+  /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
+  anthropicBaseURL?: string;
 }
 
 // ============================================================================
@@ -241,6 +244,8 @@ export interface PhaseStartedEvent extends ServerEvent {
     phaseDescription?: string;
     /** Claude session ID for this execution */
     sessionId: string;
+    /** Previous session ID if continuing from another phase */
+    previousSessionId?: string;
     /** ISO 8601 timestamp of phase start */
     startTime: string;
   };

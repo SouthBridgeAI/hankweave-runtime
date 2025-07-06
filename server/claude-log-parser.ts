@@ -29,11 +29,11 @@ export interface ClaudeLogParserOptions {
 
 /**
  * Real-time parser for Claude's JSON log output.
- * 
+ *
  * Watches a log file and parses new lines as they're written,
  * validating them against the Claude session schema and calling
  * appropriate callbacks for each message type.
- * 
+ *
  * Uses both file watching and periodic polling to ensure no
  * messages are missed.
  */
@@ -135,14 +135,14 @@ export class ClaudeLogParser {
 
 /**
  * Load phase execution state from a Claude log file.
- * 
+ *
  * Used during server startup to recover previous session state.
  * Extracts:
  * - Session ID from init message
  * - Success status from result message
  * - Token usage from all assistant messages
  * - Calculated costs based on token usage
- * 
+ *
  * @param logPath - Path to Claude log file
  * @param costsPerMTok - Cost configuration for calculations
  * @returns Phase state information

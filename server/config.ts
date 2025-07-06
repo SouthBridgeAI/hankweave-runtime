@@ -31,7 +31,7 @@ const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one p
 /**
  * Default server configuration values.
  * Can be overridden by passing config to LangtonServer constructor.
- * 
+ *
  * Note: projectPath and phases must be provided by the user.
  */
 export const DEFAULT_CONFIG: Omit<ServerConfig, "projectPath" | "phases"> = {
@@ -41,10 +41,10 @@ export const DEFAULT_CONFIG: Omit<ServerConfig, "projectPath" | "phases"> = {
   socketLogFile: ".logs/websocket.log",
   serverLogFile: ".logs/server.log",
   costsPerMTok: {
-    input: 3.0,        // $3 per million input tokens
-    inputCache: 3.75,  // $3.75 per million tokens when creating cache
-    cacheRead: 0.3,    // $0.30 per million tokens from cache
-    output: 15.0,      // $15 per million output tokens
+    input: 3.0, // $3 per million input tokens
+    inputCache: 3.75, // $3.75 per million tokens when creating cache
+    cacheRead: 0.3, // $0.30 per million tokens from cache
+    output: 15.0, // $15 per million output tokens
   },
   logParsingInterval: 1000, // Check for new log entries every second
 };
@@ -55,11 +55,11 @@ export const DEFAULT_CONFIG: Omit<ServerConfig, "projectPath" | "phases"> = {
 
 /**
  * Load and validate phase configuration from a JSON file.
- * 
+ *
  * The file should contain an array of phase configurations.
  * Each phase is validated against the schema to ensure required
  * fields are present and either promptFile or promptText is provided.
- * 
+ *
  * @param configPath - Path to the JSON configuration file
  * @returns Validated array of phase configurations
  * @throws Error with detailed validation messages if config is invalid
@@ -93,14 +93,14 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
 
 /**
  * Calculate the cost in dollars for a given token usage.
- * 
+ *
  * Uses the configured costs per million tokens for each token type.
  * This matches Claude's pricing model with separate rates for:
  * - Standard input tokens
  * - Cache creation tokens
  * - Cache read tokens
  * - Output tokens
- * 
+ *
  * @param usage - Token counts by type
  * @param costs - Cost configuration per million tokens
  * @returns Total cost in dollars
