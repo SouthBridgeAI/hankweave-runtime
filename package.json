@@ -11,11 +11,12 @@
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
     "test": "bun run test:e2e",
+    "test:sanity": "bun tests/sanity-check.ts",
     "test:check": "bun tests/check-test-ready.ts",
     "test:e2e": "bun run pre-test && bun tests/happy-path.test.ts",
     "pre-test": "bun run test:check && bun run pre-test:cleanup",
     "pre-test:check-dir": "test -f package.json || (echo '❌ Error: Must run from project root' && exit 1)",
-    "pre-test:cleanup": "rm -rf tests/test-area/.logs tests/test-area/.langton-server.lock tests/test-area/notes tests/test-area/typescript_code 2>/dev/null || true"
+    "pre-test:cleanup": "rm -rf tests/test-area && mkdir -p tests/test-area && echo '✅ Test area cleaned and recreated'"
   },
   "devDependencies": {
     "@types/bun": "latest"

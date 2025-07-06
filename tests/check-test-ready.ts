@@ -15,12 +15,20 @@ console.log(`\n${colors.blue}Checking test readiness...${colors.reset}\n`);
 let ready = true;
 const checks: { name: string; pass: boolean; message?: string }[] = [];
 
-// Check 1: In correct directory
-const inCorrectDir = fs.existsSync("package.json") && fs.existsSync("server/index.ts");
+// Check 1: In correct directory - check for specific package.json content
+let inCorrectDir = false;
+try {
+  if (fs.existsSync("package.json")) {
+    const packageJson = JSON.parse(fs.readFileSync("package.json", "utf-8"));
+    inCorrectDir = packageJson.name === "langton-runner" && fs.existsSync("server/index.ts");
+  }
+} catch {
+  inCorrectDir = false;
+}
 checks.push({
   name: "Working directory",
   pass: inCorrectDir,
-  message: inCorrectDir ? "In project root" : "Must run from project root directory",
+  message: inCorrectDir ? "In langton-runner root" : "Must run from langton-runner root directory",
 });
 
 // Check 2: Test config exists
