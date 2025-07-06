@@ -18,3 +18,4 @@ While running:
 TODOs:
 
 1. Use full paths for folders and replace those in the prompts.
+2. safe_exec and that journey
