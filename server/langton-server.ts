@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
-import { type FSWatcher, watch } from "chokidar";
+import { minimatch } from "minimatch";
 import type {
   AssistantMessage,
   ResultMessage,
@@ -63,7 +63,12 @@ export class LangtonServer extends EventEmitter {
   private logger: Logger;
   private currentPhase: PhaseState | null = null;
   private completedPhases: CompletedPhase[] = [];
-  private fileWatcher: FSWatcher | null = null;
+  private watchedPattern: string | null = null;
+  private recentFileAccess: {
+    path: string;
+    content: string;
+    timestamp: Date;
+  } | null = null;
   private claudeProcess: ChildProcess | null = null;
   private totalCost = 0;
   private serverStartTime: Date;
@@ -247,6 +252,7 @@ export class LangtonServer extends EventEmitter {
         fileTree: [],
         totalCost: this.totalCost,
         totalTime: totalTime,
+        recentFileAccess: this.recentFileAccess,
       },
     } as StateSnapshotEvent);
   }
@@ -381,9 +387,10 @@ export class LangtonServer extends EventEmitter {
       },
     };
 
-    // Start file watcher
+    // Store watch pattern for tool-based tracking
     if (phase.watch) {
-      this.startFileWatcher(phase.watch);
+      this.watchedPattern = phase.watch;
+      this.logger.log(`Watching pattern: ${phase.watch}`);
     }
 
     // Send phase started event
@@ -401,24 +408,39 @@ export class LangtonServer extends EventEmitter {
       },
     } as PhaseStartedEvent);
 
-    // Send initial file states
+    // Send initial file states if any exist
     if (phase.watch) {
       const files = await scanWatchedFiles(this.config.projectPath, phase.watch);
-      for (const file of files) {
-        this.sendEvent({
-          id: generateId(),
-          timestamp: new Date().toISOString(),
-          type: "file.updated",
-          data: {
-            path: file.path,
-            filename: path.basename(file.path),
-            content: file.content,
-            action: "created",
-          },
-        } as FileUpdatedEvent);
-      }
 
-      await this.sendFileTreeUpdate();
+      // Only send events if we have files
+      if (files.length > 0) {
+        for (const file of files) {
+          this.sendEvent({
+            id: generateId(),
+            timestamp: new Date().toISOString(),
+            type: "file.updated",
+            data: {
+              path: file.path,
+              filename: path.basename(file.path),
+              content: file.content,
+              action: "created",
+            },
+          } as FileUpdatedEvent);
+        }
+
+        // Store most recent file
+        const mostRecent = files.reduce((latest, file) =>
+          new Date(file.lastModified) > new Date(latest.lastModified) ? file : latest,
+        );
+        this.recentFileAccess = {
+          path: mostRecent.path,
+          content: mostRecent.content,
+          timestamp: new Date(mostRecent.lastModified),
+        };
+
+        // Send file tree update
+        await this.sendFileTreeUpdate();
+      }
     }
 
     // Start Claude process
@@ -483,7 +505,7 @@ export class LangtonServer extends EventEmitter {
     // Handle system prompt if provided
     if (phase.appendSystemPromptFile || phase.appendSystemPromptText) {
       let systemPromptContent: string;
-      
+
       try {
         if (phase.appendSystemPromptFile) {
           systemPromptContent = fs.readFileSync(phase.appendSystemPromptFile, "utf-8");
@@ -492,17 +514,22 @@ export class LangtonServer extends EventEmitter {
         } else {
           throw new Error("No system prompt file or text provided");
         }
-        
+
         // Replace PROJECT_DIR placeholders in system prompt
-        const processedSystemPrompt = systemPromptContent.replace(/<%PROJECT_DIR%>/g, this.config.projectPath);
-        
+        const processedSystemPrompt = systemPromptContent.replace(
+          /<%PROJECT_DIR%>/g,
+          this.config.projectPath,
+        );
+
         // Escape and add system prompt argument
         args.push("--append-system-prompt", escapeShellArg(processedSystemPrompt));
-        
+
         this.logger.log(`Added system prompt to Claude (${processedSystemPrompt.length} chars)`);
       } catch (error) {
         this.sendError(
-          `Failed to process system prompt: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to process system prompt: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
           true,
         );
         this.shutdown("system prompt error");
@@ -665,6 +692,16 @@ export class LangtonServer extends EventEmitter {
         } as AssistantActionEvent);
       } else if (item.type === "tool_use") {
         const toolItem = item as ToolUseContent;
+
+        // Handle file-related tool calls
+        const fileTools = ["Read", "Write", "Edit", "MultiEdit"];
+        if (fileTools.includes(toolItem.name)) {
+          // Call async function without awaiting to avoid blocking
+          this.handleFileToolCall(toolItem.name, toolItem.input).catch((err) => {
+            this.logger.log(`Error handling file tool call: ${err}`, "error");
+          });
+        }
+
         this.sendEvent({
           id: generateId(),
           timestamp: new Date().toISOString(),
@@ -682,132 +719,209 @@ export class LangtonServer extends EventEmitter {
   }
 
   private handleResultMessage(msg: ResultMessage, phaseId: string): void {
+    this.logger.log(`Phase ${phaseId} result message received: ${msg.subtype}`);
     if (msg.subtype === "success") {
       this.logger.log(`Phase ${phaseId} completed successfully`);
+
+      // Update final token usage and cost from result message
+      if (msg.usage && this.currentPhase) {
+        const finalUsage: TokenUsage = {
+          inputTokens: msg.usage.input_tokens || 0,
+          outputTokens: msg.usage.output_tokens || 0,
+          cacheCreationTokens: msg.usage.cache_creation_input_tokens || 0,
+          cacheReadTokens: msg.usage.cache_read_input_tokens || 0,
+        };
+
+        // Use the total cost from the result message which is most accurate
+        const finalCost = msg.total_cost_usd || calculateCost(finalUsage, this.config.costsPerMTok);
+
+        this.currentPhase.phaseTokens = finalUsage;
+        this.currentPhase.phaseCost = finalCost;
+
+        this.logger.log(
+          `Phase ${phaseId} final cost from result: $${finalCost.toFixed(4)} ` +
+            `(${finalUsage.inputTokens} in, ${finalUsage.outputTokens} out, ` +
+            `${finalUsage.cacheCreationTokens} cache create, ${finalUsage.cacheReadTokens} cache read)`,
+        );
+
+        // Send a final token usage event with the correct values
+        this.sendEvent({
+          id: generateId(),
+          timestamp: new Date().toISOString(),
+          type: "token.usage",
+          data: {
+            phaseId,
+            ...finalUsage,
+            totalCost: finalCost,
+          },
+        } as TokenUsageEvent);
+      }
     }
   }
 
   private handlePhaseComplete(exitCode: number): void {
     if (!this.currentPhase) return;
 
-    const duration = Date.now() - this.currentPhase.startTime.getTime();
-    const success = exitCode === 0;
-    const phaseCost = this.currentPhase.phaseCost;
+    // Give the log parser a moment to catch up with the result message
+    setTimeout(() => {
+      if (!this.currentPhase) return;
 
-    // Add to completed phases (even if skipped, to track progress)
-    if (success || this.isSkippingPhase) {
-      this.completedPhases.push({
-        phaseId: this.currentPhase.phase.id,
-        sessionId: this.currentPhase.sessionId,
-        success,
-        cost: phaseCost,
-        duration,
-        completedAt: new Date(),
-      });
+      const duration = Date.now() - this.currentPhase.startTime.getTime();
+      const success = exitCode === 0;
+      const phaseCost = this.currentPhase.phaseCost;
 
-      // Recalculate total cost from all completed phases
-      this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
+      // Add to completed phases (even if skipped, to track progress)
+      if (success || this.isSkippingPhase) {
+        this.completedPhases.push({
+          phaseId: this.currentPhase.phase.id,
+          sessionId: this.currentPhase.sessionId,
+          success,
+          cost: phaseCost,
+          duration,
+          completedAt: new Date(),
+        });
 
-      this.logger.log(
-        `Phase ${this.currentPhase.phase.id} ${success ? 'completed' : 'skipped'} - Cost: $${phaseCost.toFixed(4)}, ` +
-          `Total project cost: $${this.totalCost.toFixed(4)}`,
-      );
-    }
+        // Recalculate total cost from all completed phases
+        this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
 
-    this.sendEvent({
-      id: generateId(),
-      timestamp: new Date().toISOString(),
-      type: "phase.completed",
-      data: {
-        phaseId: this.currentPhase.phase.id,
-        success,
-        cost: phaseCost,
-        duration,
-        exitCode,
-      },
-    } as PhaseCompletedEvent);
+        this.logger.log(
+          `Phase ${this.currentPhase.phase.id} ${
+            success ? "completed" : "skipped"
+          } - Cost: $${phaseCost.toFixed(4)}, ` +
+            `Total project cost: $${this.totalCost.toFixed(4)}`,
+        );
+      }
 
-    this.cleanupCurrentPhase();
+      this.sendEvent({
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        type: "phase.completed",
+        data: {
+          phaseId: this.currentPhase.phase.id,
+          success,
+          cost: phaseCost,
+          duration,
+          exitCode,
+        },
+      } as PhaseCompletedEvent);
 
-    // Send updated state snapshot after phase completion
-    this.sendStateSnapshot();
+      this.cleanupCurrentPhase();
 
-    if (!success && !this.isShuttingDown) {
-      if (this.isSkippingPhase) {
-        // Phase was skipped, not failed - continue to next phase
-        this.logger.log("Phase was skipped, continuing to next phase");
-        this.isSkippingPhase = false;
+      // Send updated state snapshot after phase completion
+      this.sendStateSnapshot();
+
+      if (!success && !this.isShuttingDown) {
+        if (this.isSkippingPhase) {
+          // Phase was skipped, not failed - continue to next phase
+          this.logger.log("Phase was skipped, continuing to next phase");
+          this.isSkippingPhase = false;
+          setTimeout(() => {
+            this.autoStartNextPhase();
+          }, 1000);
+        } else {
+          this.sendError(`Phase failed with exit code ${exitCode}`, true);
+          this.shutdown("phase failure");
+        }
+      } else if (success && !this.isShuttingDown) {
+        // Auto-continue to next phase after a short delay
         setTimeout(() => {
           this.autoStartNextPhase();
         }, 1000);
-      } else {
-        this.sendError(`Phase failed with exit code ${exitCode}`, true);
-        this.shutdown("phase failure");
       }
-    } else if (success && !this.isShuttingDown) {
-      // Auto-continue to next phase after a short delay
-      setTimeout(() => {
-        this.autoStartNextPhase();
-      }, 1000);
-    }
+    }, 1000); // Give 1s for result message to be parsed
   }
 
-  private startFileWatcher(pattern: string): void {
-    this.fileWatcher = watch(pattern, {
-      cwd: this.config.projectPath,
-      ignored: ["node_modules/**", ".logs/**", ".git/**"],
-      persistent: true,
-    });
+  private async handleFileToolCall(
+    toolName: string,
+    toolInput: Record<string, unknown> | undefined,
+  ): Promise<void> {
+    if (!this.watchedPattern) return;
 
-    this.fileWatcher.on("change", (filePath) => {
-      this.handleFileChange(filePath, "modified");
-    });
-
-    this.fileWatcher.on("add", (filePath) => {
-      this.handleFileChange(filePath, "created");
-    });
-
-    this.fileWatcher.on("unlink", (filePath) => {
-      this.handleFileChange(filePath, "deleted");
-    });
-  }
-
-  private handleFileChange(filePath: string, action: "created" | "modified" | "deleted"): void {
-    const fullPath = path.join(this.config.projectPath, filePath);
-    const filename = path.basename(filePath);
-
+    let filePath: string | null = null;
+    let action: "created" | "modified" | "deleted" = "modified";
     let content = "";
-    if (action !== "deleted" && fs.existsSync(fullPath)) {
-      try {
-        content = fs.readFileSync(fullPath, "utf-8");
-      } catch (error) {
-        this.logger.log(
-          `Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-        return;
+
+    // Extract file path based on tool type
+    switch (toolName) {
+      case "Read":
+        filePath = toolInput?.file_path as string;
+        action = "modified"; // Read doesn't change the file
+        break;
+      case "Write":
+        filePath = toolInput?.file_path as string;
+        content = (toolInput?.content as string) || "";
+        action = fs.existsSync(path.join(this.config.projectPath, filePath))
+          ? "modified"
+          : "created";
+        break;
+      case "Edit":
+      case "MultiEdit":
+        filePath = toolInput?.file_path as string;
+        action = "modified";
+        break;
+    }
+
+    if (!filePath) return;
+
+    // Make path relative if it's absolute
+    if (path.isAbsolute(filePath)) {
+      filePath = path.relative(this.config.projectPath, filePath);
+    }
+
+    // Check if file matches watch pattern
+    const normalizedPattern = this.watchedPattern.replace(/^\.\//g, "");
+    const normalizedPath = filePath.replace(/^\.\//g, "");
+
+    if (!minimatch(normalizedPath, normalizedPattern, { matchBase: true })) {
+      return;
+    }
+
+    // Read current file content if not provided
+    if (!content) {
+      const fullPath = path.join(this.config.projectPath, filePath);
+      if (fs.existsSync(fullPath)) {
+        try {
+          content = fs.readFileSync(fullPath, "utf-8");
+        } catch (error) {
+          this.logger.log(
+            `Error reading file ${filePath}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            "error",
+          );
+          return;
+        }
       }
     }
 
+    // Store recent file access
+    this.recentFileAccess = {
+      path: filePath,
+      content,
+      timestamp: new Date(),
+    };
+
+    // Send file update event
     this.sendEvent({
       id: generateId(),
       timestamp: new Date().toISOString(),
       type: "file.updated",
       data: {
         path: filePath,
-        filename,
+        filename: path.basename(filePath),
         content,
         action,
       },
     } as FileUpdatedEvent);
 
-    this.sendFileTreeUpdate();
+    // Send file tree update
+    await this.sendFileTreeUpdate();
   }
 
   private async sendFileTreeUpdate(): Promise<void> {
-    if (!this.currentPhase?.phase.watch) return;
+    if (!this.watchedPattern) return;
 
-    const tree = await buildFileTree(this.config.projectPath, this.currentPhase.phase.watch);
+    const tree = await buildFileTree(this.config.projectPath, this.watchedPattern);
 
     this.sendEvent({
       id: generateId(),
@@ -981,10 +1095,8 @@ export class LangtonServer extends EventEmitter {
       this.claudeProcess = null;
     }
 
-    if (this.fileWatcher) {
-      this.fileWatcher.close();
-      this.fileWatcher = null;
-    }
+    this.watchedPattern = null;
+    this.recentFileAccess = null;
 
     if (this.logParser) {
       this.logParser.stop();

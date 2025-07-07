@@ -88,13 +88,13 @@ export function extractSessionIdFromLog(logPath: string): string | null {
  *
  * @param projectPath - Base directory to search from
  * @param pattern - Glob pattern
- * @returns Array of files with paths and contents
+ * @returns Array of files with paths, contents, and last modified times
  */
 export async function scanWatchedFiles(
   projectPath: string,
   pattern: string,
-): Promise<{ path: string; content: string }[]> {
-  const files: { path: string; content: string }[] = [];
+): Promise<{ path: string; content: string; lastModified: string }[]> {
+  const files: { path: string; content: string; lastModified: string }[] = [];
 
   try {
     const matches = await fg(pattern, {
@@ -107,7 +107,12 @@ export async function scanWatchedFiles(
       const fullPath = path.join(projectPath, match);
       try {
         const content = fs.readFileSync(fullPath, "utf-8");
-        files.push({ path: match, content });
+        const stats = fs.statSync(fullPath);
+        files.push({
+          path: match,
+          content,
+          lastModified: stats.mtime.toISOString(),
+        });
       } catch {
         // Skip unreadable files
       }
@@ -124,6 +129,7 @@ export async function scanWatchedFiles(
  *
  * Creates a tree structure suitable for UI display, with directories
  * as nodes containing their children. Used for filetree.updated events.
+ * Includes last modified times for files.
  *
  * @param projectPath - Base directory
  * @param pattern - Glob pattern to match files
@@ -154,6 +160,7 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
             name: part,
             path: currentPath,
             isDirectory: false,
+            lastModified: file.lastModified,
           };
 
           if (parent) {

@@ -3,6 +3,8 @@ import type {
   AssistantActionEvent,
   ClientCommand,
   ErrorEvent,
+  FileTreeUpdatedEvent,
+  FileUpdatedEvent,
   IncompletePhaseEvent,
   InfoEvent,
   NextPhaseCommand,
@@ -10,6 +12,7 @@ import type {
   PhaseStartedEvent,
   ServerEvent,
   SkipPhaseCommand,
+  StateSnapshotEvent,
   TokenUsageEvent,
 } from "./types.js";
 import { generateId } from "./utils.js";
@@ -34,7 +37,7 @@ export class BasicTUI {
     private server: EventEmitter & {
       config?: { port?: number };
       shutdown: (reason: string) => Promise<void>;
-    }
+    },
   ) {
     this.connectToServer();
     this.setupKeyboardInput();
@@ -81,10 +84,15 @@ export class BasicTUI {
         console.log(`\n🚀 [${timestamp}] Server ready!`);
         break;
 
-      case "state.snapshot":
-        // Optionally show state snapshot details
+      case "state.snapshot": {
+        const snapshotData = (event as StateSnapshotEvent).data;
         console.log(`\n📸 [${timestamp}] State snapshot received`);
+        if (snapshotData.recentFileAccess) {
+          console.log(`   Recent file: ${snapshotData.recentFileAccess.path}`);
+        }
+        console.log(`   Total cost: $${snapshotData.totalCost.toFixed(4)}`);
         break;
+      }
 
       case "phase.started": {
         const startData = (event as PhaseStartedEvent).data;
@@ -101,13 +109,11 @@ export class BasicTUI {
 
       case "phase.completed": {
         const completeData = (event as PhaseCompletedEvent).data;
-        console.log(
-          `\n✅ [${timestamp}] Completed: Phase ${completeData.phaseId}`
-        );
+        console.log(`\n✅ [${timestamp}] Completed: Phase ${completeData.phaseId}`);
         console.log(
           `   Cost: $${completeData.cost.toFixed(4)}, Duration: ${(
             completeData.duration / 1000
-          ).toFixed(1)}s`
+          ).toFixed(1)}s`,
         );
         break;
       }
@@ -126,16 +132,19 @@ export class BasicTUI {
 
       case "token.usage": {
         const usageData = (event as TokenUsageEvent).data;
-        console.log(
-          `\n📊 [${timestamp}] Tokens used - Cost: $${usageData.totalCost.toFixed(
-            4
-          )}`
-        );
+        console.log(`\n📊 [${timestamp}] Tokens used - Cost: $${usageData.totalCost.toFixed(4)}`);
         break;
       }
 
       case "file.updated": {
-        // Optionally show file updates
+        const fileData = (event as FileUpdatedEvent).data;
+        console.log(`\n📄 [${timestamp}] File ${fileData.action}: ${fileData.path}`);
+        break;
+      }
+
+      case "filetree.updated": {
+        const treeData = (event as FileTreeUpdatedEvent).data;
+        console.log(`\n🌲 [${timestamp}] File tree updated (${treeData.tree.length} root items)`);
         break;
       }
 
@@ -147,17 +156,13 @@ export class BasicTUI {
 
       case "incomplete.phase": {
         const incompleteData = (event as IncompletePhaseEvent).data;
-        console.log(
-          `\n⚠️  [${timestamp}] Incomplete phase detected: ${incompleteData.phaseName}`
-        );
+        console.log(`\n⚠️  [${timestamp}] Incomplete phase detected: ${incompleteData.phaseName}`);
         console.log(`   ${incompleteData.message}`);
         break;
       }
 
       case "info": {
-        console.log(
-          `\nℹ️  [${timestamp}] ${(event as InfoEvent).data.message}`
-        );
+        console.log(`\nℹ️  [${timestamp}] ${(event as InfoEvent).data.message}`);
         break;
       }
 
@@ -165,7 +170,7 @@ export class BasicTUI {
         // Show all unknown events for debugging
         console.log(
           `\n📨 [${timestamp}] ${event.type}:`,
-          JSON.stringify("data" in event ? event.data : {}, null, 2)
+          JSON.stringify("data" in event ? event.data : {}, null, 2),
         );
     }
   }

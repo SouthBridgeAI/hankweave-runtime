@@ -3,8 +3,6 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { generateId } from "../../server/utils.js";
-
 // Import test utilities and types from happy path test
 import type {
   ClientCommand,
@@ -17,6 +15,7 @@ import type {
   SkipPhaseCommand,
   StateSnapshotEvent,
 } from "../../server/types.js";
+import { generateId } from "../../server/utils.js";
 
 // Test configuration - using a simple two-phase config for this test
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
@@ -39,17 +38,18 @@ const TEST_PHASES = [
     continueFromPrevious: false,
     preStart: "mkdir -p notes",
     watch: "./notes/*.txt",
-    description: "Create a test file"
+    description: "Create a test file",
   },
   {
     id: "phase-2",
     name: "Phase 2: Final Phase",
-    promptText: "Create a file called 'test2.txt' in the notes folder with the text 'Goodbye World'",
+    promptText:
+      "Create a file called 'test2.txt' in the notes folder with the text 'Goodbye World'",
     model: "sonnet",
     continueFromPrevious: false,
     watch: "./notes/*.txt",
-    description: "Create another test file"
-  }
+    description: "Create another test file",
+  },
 ];
 
 // Colors for output
@@ -120,7 +120,7 @@ class TestWSClient {
         this.connected = false;
         this.connectionClosed = true;
         console.log(`${colors.gray}WebSocket connection closed${colors.reset}`);
-        
+
         // Resolve any pending connection close waiters
         const closeWaiters = this.eventPromises.get("__connection_closed__");
         if (closeWaiters) {
@@ -315,7 +315,9 @@ function startServer(): ChildProcess {
   });
 
   serverProcess.on("exit", (code, signal) => {
-    console.log(`${colors.gray}Server exited with code ${code} and signal ${signal}${colors.reset}`);
+    console.log(
+      `${colors.gray}Server exited with code ${code} and signal ${signal}${colors.reset}`,
+    );
     serverLogStream.write(
       `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
     );
@@ -407,13 +409,17 @@ async function runSkipQuitTest(): Promise<void> {
 
   // Server should shutdown since all phases are done
   console.log(`${colors.blue}Waiting for server to shutdown...${colors.reset}`);
-  
+
   // Wait for info event about all phases completed
   try {
     const infoEvent = await testState.client.waitForEvent("info", 5000);
-    console.log(`${colors.green}✓ Received info event: ${(infoEvent as InfoEvent).data?.message}${colors.reset}`);
+    console.log(
+      `${colors.green}✓ Received info event: ${(infoEvent as InfoEvent).data?.message}${colors.reset}`,
+    );
   } catch (e) {
-    console.log(`${colors.yellow}No info event received (server may have shut down quickly)${colors.reset}`);
+    console.log(
+      `${colors.yellow}No info event received (server may have shut down quickly)${colors.reset}`,
+    );
   }
 
   // Wait for connection to close
@@ -433,7 +439,7 @@ async function runSkipQuitTest(): Promise<void> {
           resolve(undefined);
         }
       }, 100);
-      
+
       // Timeout after 10 seconds
       setTimeout(() => {
         clearInterval(checkInterval);
@@ -537,14 +543,16 @@ describe("Skip Last Phase and Quit E2E Test", () => {
   describe("Final State", () => {
     test("Final state snapshot shows both phases with correct status", () => {
       const stateSnapshots = testState.client?.getEventsByType("state.snapshot") || [];
-      const finalSnapshot = stateSnapshots[stateSnapshots.length - 1] as StateSnapshotEvent | undefined;
-      
+      const finalSnapshot = stateSnapshots[stateSnapshots.length - 1] as
+        | StateSnapshotEvent
+        | undefined;
+
       if (finalSnapshot) {
         // Both phases should be in completed phases (including skipped phase 2)
         expect(finalSnapshot.data?.completedPhases?.length).toBe(2);
         // Check that phase 1 was successful and phase 2 was not
-        const phase1 = finalSnapshot.data?.completedPhases?.find(p => p.phaseId === "phase-1");
-        const phase2 = finalSnapshot.data?.completedPhases?.find(p => p.phaseId === "phase-2");
+        const phase1 = finalSnapshot.data?.completedPhases?.find((p) => p.phaseId === "phase-1");
+        const phase2 = finalSnapshot.data?.completedPhases?.find((p) => p.phaseId === "phase-2");
         expect(phase1?.success).toBe(true);
         expect(phase2?.success).toBe(false);
       }
@@ -554,7 +562,7 @@ describe("Skip Last Phase and Quit E2E Test", () => {
       const finalStateSnapshot = [...testState.events]
         .reverse()
         .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
-      
+
       // Cost should be greater than 0 but only from phase 1
       expect(finalStateSnapshot?.data?.totalCost || 0).toBeGreaterThan(0);
       expect(finalStateSnapshot?.data?.totalCost || 0).toBeLessThan(0.1); // Reasonable cost for one phase
@@ -578,7 +586,7 @@ describe("Skip Last Phase and Quit E2E Test", () => {
       const completionInfo = infoEvents.find(
         (e) => (e as InfoEvent).data?.message?.includes("All phases completed") || false,
       );
-      
+
       // Server should announce all phases completed before shutting down
       expect(completionInfo).toBeDefined();
     });
@@ -593,9 +601,13 @@ describe("Skip Last Phase and Quit E2E Test", () => {
   });
 
   describe("Timing", () => {
-    test("Test completed within timeout", () => {
-      expect(testState.events.length).toBeGreaterThan(0);
-    }, TEST_TIMEOUT);
+    test(
+      "Test completed within timeout",
+      () => {
+        expect(testState.events.length).toBeGreaterThan(0);
+      },
+      TEST_TIMEOUT,
+    );
   });
 });
 

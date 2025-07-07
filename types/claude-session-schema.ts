@@ -231,6 +231,27 @@ export const resultMessageSchema = z.object({
 
   // Final result or summary of the session
   result: z.string(),
+
+  // Session ID
+  session_id: z.string().optional(),
+
+  // Total cost in USD
+  total_cost_usd: z.number().optional(),
+
+  // Token usage summary
+  usage: z
+    .object({
+      input_tokens: z.number().int().nonnegative().optional(),
+      output_tokens: z.number().int().nonnegative().optional(),
+      cache_creation_input_tokens: z.number().int().nonnegative().optional(),
+      cache_read_input_tokens: z.number().int().nonnegative().optional(),
+      server_tool_use: z
+        .object({
+          web_search_requests: z.number().int().nonnegative().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 /**

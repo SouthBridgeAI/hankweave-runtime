@@ -21,23 +21,20 @@ TODOs:
 
 1. Use full paths for folders and replace those in the prompts.
 2. safe_exec and that journey
-3. Make use of system prompts
-4. Implement actual workspace copying in and out instead of running commands which can be brittle
-5. Retry system and error handling?
-6. Use git commits to rollback changes?
-7. Actually tracking file edits to show what changed instead of chokidar
-8. Extracting data after phases or at completion?
-9. Adding description streaming with flash
+3. Implement actual workspace copying in and out instead of running commands which can be brittle
+4. Retry system and error handling?
+5. Use git commits to rollback changes?
+6. Actually tracking file edits to show what changed instead of chokidar
+7. Extracting data after phases or at completion?
+8. Adding description streaming with flash
 
 TODOs for Schema thing:
 
-1. Tightening - see what can be converted to enums
-2. Clean up the existing directory instead of making new loader
-3. Generating questions that can be used to validate the system at the end
-4. Warn about silent failures in schemas
-5. Check for default value injection
-6. Does phase 2b forget about timeouts?
-7. Some of the phases don't put things in the src directory but instead directly in the typescript directory
+1. Clean up the existing directory instead of making new loader
+2. Warn about silent failures in schemas
+3. Check for default value injection
+4. Does phase 2b forget about timeouts?
+5. Some of the phases don't put things in the src directory but instead directly in the typescript directory
 
 Experimental:
 

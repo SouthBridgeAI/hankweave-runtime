@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { type FSWatcher, watch } from "chokidar";
 import {
   type AssistantMessage,
   logMessageSchema,
@@ -40,17 +39,12 @@ export interface ClaudeLogParserOptions {
 export class ClaudeLogParser {
   private buffer = ""; // Incomplete line buffer
   private lastPosition = 0; // Last read position in file
-  private logWatcher?: FSWatcher;
   private logTimer?: NodeJS.Timeout;
 
   constructor(private options: ClaudeLogParserOptions) {}
 
   start(): void {
-    const { logPath, parsingInterval } = this.options;
-
-    // Set up file watcher
-    this.logWatcher = watch(logPath, { persistent: true });
-    this.logWatcher.on("change", () => this.parseLogFile());
+    const { parsingInterval } = this.options;
 
     // Set up periodic parsing
     this.logTimer = setInterval(() => this.parseLogFile(), parsingInterval);
@@ -60,10 +54,6 @@ export class ClaudeLogParser {
   }
 
   stop(): void {
-    if (this.logWatcher) {
-      this.logWatcher.close();
-      this.logWatcher = undefined;
-    }
     if (this.logTimer) {
       clearInterval(this.logTimer);
       this.logTimer = undefined;
@@ -189,21 +179,45 @@ export function loadPhaseStateFromLog(
 
         if (entry.type === "result" && entry.subtype === "success") {
           success = true;
+
+          // Use final usage from result message if available
+          if (entry.usage) {
+            tokens.inputTokens = entry.usage.input_tokens || 0;
+            tokens.outputTokens = entry.usage.output_tokens || 0;
+            tokens.cacheCreationTokens = entry.usage.cache_creation_input_tokens || 0;
+            tokens.cacheReadTokens = entry.usage.cache_read_input_tokens || 0;
+          }
+
+          // If total_cost_usd is provided, we'll use it directly in cost calculation
+          if (entry.total_cost_usd !== undefined) {
+            // Store it temporarily - we'll return it directly
+            (tokens as any)._totalCost = entry.total_cost_usd;
+          }
         }
 
-        if (entry.type === "assistant" && entry.message.usage) {
+        // Only use assistant message usage if we haven't found result usage yet
+        if (entry.type === "assistant" && entry.message.usage && !(tokens as any)._totalCost) {
+          // Claude reports cumulative usage, so we take the last one
           const usage = entry.message.usage;
-          tokens.inputTokens += usage.input_tokens || 0;
-          tokens.outputTokens += usage.output_tokens || 0;
-          tokens.cacheCreationTokens += usage.cache_creation_input_tokens || 0;
-          tokens.cacheReadTokens += usage.cache_read_input_tokens || 0;
+          tokens.inputTokens = usage.input_tokens || 0;
+          tokens.outputTokens = usage.output_tokens || 0;
+          tokens.cacheCreationTokens = usage.cache_creation_input_tokens || 0;
+          tokens.cacheReadTokens = usage.cache_read_input_tokens || 0;
         }
       } catch {
         // Skip invalid lines
       }
     }
 
-    const cost = calculateCost(tokens, costsPerMTok);
+    // Use the total cost from result message if available, otherwise calculate
+    const cost =
+      (tokens as any)._totalCost !== undefined
+        ? (tokens as any)._totalCost
+        : calculateCost(tokens, costsPerMTok);
+
+    // Clean up temporary property
+    delete (tokens as any)._totalCost;
+
     return { sessionId, success, cost, tokens };
   } catch (error) {
     console.error(`Error loading state from log ${logPath}:`, error);

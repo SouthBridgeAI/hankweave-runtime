@@ -46,11 +46,11 @@ Examples:
       phases,
       anthropicBaseURL,
     };
-    
+
     if (port) {
       serverConfig.port = parseInt(port, 10);
     }
-    
+
     const server = new LangtonServer(serverConfig);
 
     await server.start();

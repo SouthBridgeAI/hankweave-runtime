@@ -88,15 +88,15 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
     const configDir = path.dirname(configPath);
     const resolvedConfig = result.data.map((phase) => {
       const resolved = { ...phase };
-      
+
       if (phase.promptFile && !path.isAbsolute(phase.promptFile)) {
         resolved.promptFile = path.resolve(configDir, phase.promptFile);
       }
-      
+
       if (phase.appendSystemPromptFile && !path.isAbsolute(phase.appendSystemPromptFile)) {
         resolved.appendSystemPromptFile = path.resolve(configDir, phase.appendSystemPromptFile);
       }
-      
+
       return resolved;
     });
 

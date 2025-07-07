@@ -3,8 +3,6 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { generateId } from "../../server/utils.js";
-
 // Import test utilities and types from happy path test
 import type {
   AssistantActionEvent,
@@ -17,6 +15,7 @@ import type {
   SkipPhaseCommand,
   StateSnapshotEvent,
 } from "../../server/types.js";
+import { generateId } from "../../server/utils.js";
 
 // Test configuration
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
@@ -39,26 +38,28 @@ const TEST_PHASES = [
     continueFromPrevious: false,
     preStart: "mkdir -p notes",
     watch: "./notes/*.txt",
-    description: "Write three pick one"
+    description: "Write three pick one",
   },
   {
     id: "phase-2",
     name: "Phase 2: Second Phase",
-    promptText: "Create a file called 'test2.txt' in the notes folder with the text 'Phase 2 was here'",
+    promptText:
+      "Create a file called 'test2.txt' in the notes folder with the text 'Phase 2 was here'",
     model: "sonnet",
     continueFromPrevious: false, // Don't continue from skipped phase
     watch: "./notes/*.*",
-    description: "Write another file"
+    description: "Write another file",
   },
   {
     id: "phase-3",
     name: "Phase 3: Third Phase",
-    promptText: "Create a file called 'test3.txt' in the notes folder with the text 'Phase 3 completed'",
+    promptText:
+      "Create a file called 'test3.txt' in the notes folder with the text 'Phase 3 completed'",
     model: "sonnet",
     continueFromPrevious: false,
     watch: "./notes/*.*",
-    description: "Write final file"
-  }
+    description: "Write final file",
+  },
 ];
 
 // Colors for output
@@ -227,7 +228,14 @@ async function setupTestDirectory(): Promise<void> {
   console.log(`${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`);
 
   // Clean up previous test artifacts
-  const artifactsToClean = [".logs", ".langton-server.lock", "notes", "typescript_code", "test-phases-skip-continue.config.json", "phase1Prompt.md"];
+  const artifactsToClean = [
+    ".logs",
+    ".langton-server.lock",
+    "notes",
+    "typescript_code",
+    "test-phases-skip-continue.config.json",
+    "phase1Prompt.md",
+  ];
 
   for (const artifact of artifactsToClean) {
     const artifactPath = path.join(TEST_DIR, artifact);
@@ -368,7 +376,6 @@ async function runSkipContinueTest(): Promise<void> {
   console.log(`${colors.gray}Waiting for server to process skip...${colors.reset}`);
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-
   // Phase 2 should auto-start after skip
   testState.phase2Started = await testState.client.waitForPhaseStart("phase-2", 20000);
   console.log(`${colors.green}✓ Phase 2 started automatically${colors.reset}`);
@@ -478,7 +485,7 @@ describe("Skip Phase and Continue E2E Test", () => {
     test("Phase 2 started after Phase 1 skip", () => {
       const phase1CompleteTime = new Date(testState.phase1Completed!.timestamp).getTime();
       const phase2StartTime = new Date(testState.phase2Started!.timestamp).getTime();
-      
+
       // Phase 2 should start within 5 seconds of Phase 1 completion
       expect(phase2StartTime - phase1CompleteTime).toBeLessThan(5000);
     });
@@ -517,39 +524,44 @@ describe("Skip Phase and Continue E2E Test", () => {
       const finalStateSnapshot = [...testState.events]
         .reverse()
         .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
-      
+
       // All 3 phases should be in completed phases (including skipped ones)
       expect(finalStateSnapshot?.data?.completedPhases?.length).toBe(3);
       // Check that phase 2 was successful
-      const phase2Completed = finalStateSnapshot?.data?.completedPhases?.find(p => p.phaseId === "phase-2");
+      const phase2Completed = finalStateSnapshot?.data?.completedPhases?.find(
+        (p) => p.phaseId === "phase-2",
+      );
       expect(phase2Completed?.success).toBe(true);
     });
   });
 
   describe("Assistant Actions", () => {
     test("Phase 1 had some assistant actions before skip", () => {
-      const phase1Actions = testState.client?.getEventsByType("assistant.action").filter(
-        (e) => (e as AssistantActionEvent).data?.phaseId === "phase-1",
-      ) || [];
-      
+      const phase1Actions =
+        testState.client
+          ?.getEventsByType("assistant.action")
+          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-1") || [];
+
       // Might not have actions if skipped very quickly
       expect(phase1Actions.length).toBeGreaterThanOrEqual(0);
     });
 
     test("Phase 2 had normal assistant actions", () => {
-      const phase2Actions = testState.client?.getEventsByType("assistant.action").filter(
-        (e) => (e as AssistantActionEvent).data?.phaseId === "phase-2",
-      ) || [];
-      
+      const phase2Actions =
+        testState.client
+          ?.getEventsByType("assistant.action")
+          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-2") || [];
+
       // Should have at least some actions for a complete phase
       expect(phase2Actions.length).toBeGreaterThan(0);
     });
 
     test("Phase 3 had some assistant actions before skip", () => {
-      const phase3Actions = testState.client?.getEventsByType("assistant.action").filter(
-        (e) => (e as AssistantActionEvent).data?.phaseId === "phase-3",
-      ) || [];
-      
+      const phase3Actions =
+        testState.client
+          ?.getEventsByType("assistant.action")
+          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-3") || [];
+
       expect(phase3Actions.length).toBeGreaterThanOrEqual(0);
     });
   });
@@ -557,14 +569,10 @@ describe("Skip Phase and Continue E2E Test", () => {
   describe("Token Usage", () => {
     test("Skipped phases have token usage events", () => {
       const tokenEvents = testState.client?.getEventsByType("token.usage") || [];
-      
-      const phase1Tokens = tokenEvents.filter(
-        (e) => (e as any).data?.phaseId === "phase-1",
-      );
-      const phase3Tokens = tokenEvents.filter(
-        (e) => (e as any).data?.phaseId === "phase-3",
-      );
-      
+
+      const phase1Tokens = tokenEvents.filter((e) => (e as any).data?.phaseId === "phase-1");
+      const phase3Tokens = tokenEvents.filter((e) => (e as any).data?.phaseId === "phase-3");
+
       // Skipped phases might not have token usage events if killed quickly
       expect(phase1Tokens.length).toBeGreaterThanOrEqual(0);
       expect(phase3Tokens.length).toBeGreaterThanOrEqual(0);
@@ -599,9 +607,13 @@ describe("Skip Phase and Continue E2E Test", () => {
   });
 
   describe("Timing", () => {
-    test("Test completed within timeout", () => {
-      expect(testState.events.length).toBeGreaterThan(0);
-    }, TEST_TIMEOUT);
+    test(
+      "Test completed within timeout",
+      () => {
+        expect(testState.events.length).toBeGreaterThan(0);
+      },
+      TEST_TIMEOUT,
+    );
   });
 });
 

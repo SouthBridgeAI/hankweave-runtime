@@ -1,5 +1,4 @@
 import type { ChildProcess } from "node:child_process";
-import type { FSWatcher } from "chokidar";
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
 
@@ -144,8 +143,6 @@ export interface PhaseState {
   phaseCost: number;
   /** Token usage breakdown for this phase */
   phaseTokens: TokenUsage;
-  /** File watcher for log file changes */
-  logWatcher?: FSWatcher;
   /** Timer for periodic log parsing */
   logTimer?: NodeJS.Timeout;
 }
@@ -180,6 +177,8 @@ export interface FileNode {
   path: string;
   /** Whether this is a directory */
   isDirectory: boolean;
+  /** Last modified time (ISO string) for files */
+  lastModified?: string;
   /** Child nodes if this is a directory */
   children?: FileNode[];
 }
@@ -232,6 +231,12 @@ export interface StateSnapshotEvent extends ServerEvent {
     totalCost: number;
     /** Total time since server start in milliseconds */
     totalTime: number;
+    /** Most recently accessed file information */
+    recentFileAccess?: {
+      path: string;
+      content: string;
+      timestamp: Date;
+    } | null;
   };
 }
 
