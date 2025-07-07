@@ -876,6 +876,23 @@ describe("Langton E2E Test", () => {
       }
     });
 
+    test("system prompt is observed - poems contain KOREAN tag", () => {
+      const poem1Path = path.join(TEST_DIR, "notes/favorite_poem.txt");
+      const poem2Path = path.join(TEST_DIR, "notes/second_favorite_poem.txt");
+      
+      // Check first poem
+      if (fs.existsSync(poem1Path)) {
+        const content = fs.readFileSync(poem1Path, "utf-8");
+        expect(content).toContain("<KOREAN>");
+      }
+      
+      // Check second poem
+      if (fs.existsSync(poem2Path)) {
+        const content = fs.readFileSync(poem2Path, "utf-8");
+        expect(content).toContain("<KOREAN>");
+      }
+    });
+
     test("poem1.ts contains exports", () => {
       const ts1Path = path.join(TEST_DIR, "typescript_code/src/poem1.ts");
       if (fs.existsSync(ts1Path)) {

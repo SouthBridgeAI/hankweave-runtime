@@ -191,3 +191,16 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
 
   return tree;
 }
+
+// ============================================================================
+// Shell Utilities
+// ============================================================================
+
+/**
+ * Escape a string for safe use in shell commands.
+ * Replaces single quotes with '\'' and wraps in single quotes.
+ */
+export function escapeShellArg(arg: string): string {
+  // Replace all single quotes with '\''
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}

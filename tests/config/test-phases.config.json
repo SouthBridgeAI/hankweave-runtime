@@ -7,6 +7,7 @@
     "continueFromPrevious": false,
     "preStart": "mkdir -p notes",
     "watch": "./notes/*.txt",
+    "appendSystemPromptFile": "./systemPrompt.md",
     "description": "Write three pick one"
   },
   {

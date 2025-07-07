@@ -37,6 +37,7 @@ import type {
 } from "./types.js";
 import {
   buildFileTree,
+  escapeShellArg,
   extractSessionIdFromLog,
   generateId,
   Logger,
@@ -477,6 +478,36 @@ export class LangtonServer extends EventEmitter {
 
     if (phase.continueFromPrevious && previousSessionId) {
       args.push("-c", "--resume", previousSessionId);
+    }
+
+    // Handle system prompt if provided
+    if (phase.appendSystemPromptFile || phase.appendSystemPromptText) {
+      let systemPromptContent: string;
+      
+      try {
+        if (phase.appendSystemPromptFile) {
+          systemPromptContent = fs.readFileSync(phase.appendSystemPromptFile, "utf-8");
+        } else if (phase.appendSystemPromptText) {
+          systemPromptContent = phase.appendSystemPromptText;
+        } else {
+          throw new Error("No system prompt file or text provided");
+        }
+        
+        // Replace PROJECT_DIR placeholders in system prompt
+        const processedSystemPrompt = systemPromptContent.replace(/<%PROJECT_DIR%>/g, this.config.projectPath);
+        
+        // Escape and add system prompt argument
+        args.push("--append-system-prompt", escapeShellArg(processedSystemPrompt));
+        
+        this.logger.log(`Added system prompt to Claude (${processedSystemPrompt.length} chars)`);
+      } catch (error) {
+        this.sendError(
+          `Failed to process system prompt: ${error instanceof Error ? error.message : String(error)}`,
+          true,
+        );
+        this.shutdown("system prompt error");
+        return;
+      }
     }
 
     // Set up environment variables for Claude process

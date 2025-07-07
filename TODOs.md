@@ -32,7 +32,7 @@ TODOs:
 TODOs for Schema thing:
 
 1. Tightening - see what can be converted to enums
-2. 2. Clean up the existing directory instead of making new loader
+2. Clean up the existing directory instead of making new loader
 3. Generating questions that can be used to validate the system at the end
 4. Warn about silent failures in schemas
 5. Check for default value injection

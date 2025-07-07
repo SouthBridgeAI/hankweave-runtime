@@ -25,6 +25,12 @@ export interface PhaseConfig {
   /** Inline prompt text (mutually exclusive with promptFile) */
   promptText?: string;
 
+  /** Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText) */
+  appendSystemPromptFile?: string;
+
+  /** Inline system prompt text to append (mutually exclusive with appendSystemPromptFile) */
+  appendSystemPromptText?: string;
+
   /** Claude model to use (e.g., "claude-3-opus-20240229", "sonnet") */
   model: string;
 
