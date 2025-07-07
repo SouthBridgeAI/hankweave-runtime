@@ -1,0 +1,255 @@
+# Langton Runner
+
+A WebSocket-based orchestration system for managing multi-phase Claude CLI workflows with real-time event streaming, file watching, and state persistence.
+
+## Overview
+
+Langton Runner provides a server that orchestrates Claude CLI sessions through configurable phases, allowing you to break complex AI tasks into manageable steps with features like:
+
+- **🔄 Phase-based execution**: Sequential or on-demand phase execution
+- **💾 State persistence**: Recover from crashes using Claude's logs
+- **📡 Real-time streaming**: WebSocket events for all Claude actions
+- **👁️ File watching**: Monitor project files during execution
+- **💰 Cost tracking**: Per-phase and total cost calculation
+- **🔗 Session continuity**: Phases can continue previous conversations
+
+## Quick Start
+
+```bash
+# Install dependencies
+bun install
+
+# Start the server
+bun run server
+
+# Run with terminal UI for testing
+bun run server:basic
+
+# Run tests
+bun run test
+```
+
+## Project Structure
+
+```
+langton-runner/
+├── server/              # WebSocket server implementation
+│   ├── index.ts         # CLI entry point
+│   ├── langton-server.ts # Core server logic
+│   ├── config.ts        # Configuration management
+│   ├── types.ts         # TypeScript definitions
+│   ├── utils.ts         # Utility functions
+│   ├── claude-log-parser.ts # Claude output parsing
+│   ├── basic-tui.ts     # Terminal UI
+│   └── README.md        # Detailed server documentation
+├── tests/               # Comprehensive test suite
+│   ├── e2e/            # End-to-end tests
+│   ├── utils/          # Test utilities
+│   ├── config/         # Test configurations
+│   └── README.md       # Test documentation
+├── types/              # Shared type definitions
+│   └── claude-session-schema.ts
+├── package.json        # Project configuration
+├── tsconfig.json       # TypeScript configuration
+├── biome.json         # Code formatting config
+└── README.md          # This file
+```
+
+## Core Concepts
+
+### Phases
+
+A phase represents a discrete task for Claude with its own:
+- Prompt (file or inline text)
+- Model selection
+- Optional pre-start commands
+- File watching patterns
+- Continuation settings
+
+### Phase Configuration
+
+Create a `phases.json` file:
+
+```json
+[
+  {
+    "id": "research",
+    "name": "Research Phase",
+    "promptFile": "./prompts/research.md",
+    "model": "claude-3-opus-20240229",
+    "preStart": "mkdir -p research",
+    "watch": "./research/**/*.md"
+  },
+  {
+    "id": "implement",
+    "name": "Implementation Phase",
+    "promptText": "Implement the solution based on the research...",
+    "model": "claude-3-sonnet-20240229",
+    "continueFromPrevious": true,
+    "watch": "./src/**/*.ts"
+  }
+]
+```
+
+### WebSocket Protocol
+
+The server uses WebSocket for bidirectional communication:
+
+**Server → Client Events**:
+- `server.ready`: Server initialized
+- `phase.started`: Phase execution began
+- `phase.completed`: Phase finished
+- `assistant.action`: Claude performed an action
+- `file.updated`: Watched file changed
+- `token.usage`: Token consumption update
+
+**Client → Server Commands**:
+- `phase.start`: Start specific phase
+- `phase.next`: Continue to next phase
+- `phase.skip`: Skip current phase
+- `server.shutdown`: Graceful shutdown
+
+## Usage
+
+### Command Line
+
+```bash
+# Basic usage
+bun run server
+
+# Custom configuration
+bun run server -- --config=my-phases.json
+
+# Different port
+bun run server -- --port=8080
+
+# With terminal UI
+bun run server:basic
+
+# Custom API endpoint
+bun run server -- --anthropic-base-url=https://proxy.example.com
+```
+
+### Available Scripts
+
+```bash
+# Development
+bun run server        # Start server
+bun run server:basic  # Start with terminal UI
+
+# Code quality
+bun run lint         # Check code style
+bun run lint:fix     # Fix code style
+bun run format       # Format code
+bun run type-check   # TypeScript validation
+bun run build        # Full build check
+
+# Testing
+bun run test         # Run all tests
+bun run test:happy   # Happy path test only
+bun run test:skip    # Skip tests only
+bun run test:check   # Pre-test environment check
+bun run test:cleanup # Clean up stuck tests
+```
+
+## Architecture
+
+### Server Components
+
+1. **WebSocket Server**: Single-client connection for security
+2. **Phase Executor**: Manages Claude process lifecycle
+3. **Log Parser**: Real-time parsing of Claude's output
+4. **File Watcher**: Monitors project files during execution
+5. **State Manager**: Persists state through Claude logs
+
+### Event Flow
+
+```
+Client ←→ WebSocket ←→ Server
+                         ↓
+                    Phase Executor
+                         ↓
+                    Claude CLI → Log Parser
+                         ↓
+                    File Watcher
+```
+
+### State Persistence
+
+State is persisted through Claude's JSONL log files:
+- `.logs/log-{phase-id}.jsonl`: Claude session logs
+- Server reads logs on startup to recover state
+- Completed phases tracked with costs and durations
+
+## Testing
+
+The project includes comprehensive end-to-end tests:
+
+```bash
+# Run all tests
+bun run test
+
+# Run specific test suite
+bun run test:happy          # Success scenarios
+bun run test:skip-continue  # Skip and continue
+bun run test:skip-quit      # Skip and shutdown
+```
+
+Tests validate:
+- Complete phase workflows
+- Event streaming accuracy
+- File watching functionality
+- Cost tracking precision
+- Error handling
+- State recovery
+
+## Security Considerations
+
+1. **Single Client**: Only one WebSocket connection allowed
+2. **File Access**: Server has full filesystem access
+3. **Command Execution**: Pre-start commands run directly
+4. **API Keys**: Managed by Claude CLI, not the server
+
+## Error Handling
+
+- **Fatal Errors**: Trigger graceful shutdown
+- **Phase Failures**: Stop execution, preserve state
+- **Connection Loss**: Server shuts down
+- **Process Crashes**: State recoverable from logs
+
+## Requirements
+
+- **Bun.js**: Runtime and package manager
+- **Claude CLI**: Installed and configured
+- **TypeScript**: For development
+- **Unix-like OS**: For shell commands
+
+## Philosophy
+
+Langton Runner is designed with these principles:
+
+1. **Simplicity**: Clear phase progression, minimal configuration
+2. **Transparency**: All actions logged and streamed
+3. **Recoverability**: Crash-resistant through log persistence
+4. **Testability**: Comprehensive test coverage
+5. **Extensibility**: Easy to add new events and features
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `bun run test`
+5. Run linting: `bun run lint`
+6. Submit a pull request
+
+## License
+
+[Add your license here]
+
+## Support
+
+For issues, questions, or contributions:
+- Check the server README for detailed documentation
+- Review the test README for testing guidance
+- Open an issue for bugs or feature requests

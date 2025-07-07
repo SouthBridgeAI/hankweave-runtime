@@ -1,211 +1,258 @@
 # Langton Server
 
-A WebSocket server for orchestrating Claude AI phases with real-time event streaming, file watching, and session management.
+A WebSocket-based orchestration server for managing Claude CLI sessions through configurable phases. The server provides real-time event streaming, file watching, state persistence, and cost tracking.
 
-## Architecture Overview
+## Overview
 
-The server is built around a WebSocket-based event system that manages Claude AI sessions in phases. Each phase represents a distinct task with its own prompt, configuration, and file watching requirements.
+Langton Server acts as a bridge between clients and the Claude CLI, managing multi-phase AI workflows with features like:
+- **Phase-based execution**: Break complex tasks into discrete phases
+- **Session continuity**: Phases can continue from previous sessions
+- **Real-time updates**: Stream Claude's actions and file changes to clients
+- **State persistence**: Recover from crashes using Claude's log files
+- **Cost tracking**: Monitor token usage and calculate costs per phase
+- **File watching**: Monitor project files for changes during execution
 
-## File Structure
+## Architecture
+
+```
+┌─────────────┐         WebSocket          ┌──────────────┐
+│   Client    │ ◄─────────────────────────► │    Server    │
+│ (Single)    │         Events/Commands     │   (Bun.js)   │
+└─────────────┘                             └──────┬───────┘
+                                                   │
+                                          ┌────────┴────────┐
+                                          │                 │
+                                     ┌────▼───┐      ┌─────▼─────┐
+                                     │ Claude │      │   File    │
+                                     │  CLI   │      │  Watcher  │
+                                     └────────┘      └───────────┘
+```
+
+## Directory Structure
 
 ```
 server/
-├── index.ts           # Entry point and CLI handling
-├── langton-server.ts  # Main server class and core logic
-├── config.ts          # Configuration loading and validation
-├── types.ts           # TypeScript type definitions
-├── utils.ts           # Utility functions (logging, file operations)
-├── claude-log-parser.ts # Claude log parsing and analysis
-└── basic-tui.ts       # Basic terminal UI for testing
+├── index.ts              # CLI entry point and argument parsing
+├── langton-server.ts     # Core server implementation
+├── config.ts            # Configuration management and validation
+├── types.ts             # TypeScript type definitions
+├── utils.ts             # Utility functions (logging, ID generation)
+├── claude-log-parser.ts # Real-time Claude output parsing
+└── basic-tui.ts         # Terminal UI for testing
 ```
 
-## Core Components
+## Components
 
-### 1. LangtonServer (langton-server.ts)
+### 1. **index.ts** - CLI Entry Point
+Handles command-line arguments and server initialization:
+- `--config=<path>`: Path to phases configuration (default: phases.json)
+- `--port=<port>`: WebSocket server port (default: 7777)
+- `--basic`: Run with terminal UI for testing
+- `--anthropic-base-url=<url>`: Custom API endpoint
+- `--help`: Show help message
 
-The main server class that handles:
-- WebSocket server lifecycle
-- Phase execution and management
-- Claude process spawning and monitoring
-- Event emission and state management
-- File watching and updates
+### 2. **langton-server.ts** - Core Server
+Main orchestration engine that:
+- Manages WebSocket connections (single client only)
+- Executes phases sequentially or on-demand
+- Spawns and monitors Claude processes
+- Handles state transitions and persistence
+- Emits real-time events to clients
+- Implements phase skipping and recovery
 
-**Key Methods:**
-- `start()` - Initializes the server, loads previous state, starts WebSocket server
-- `startPhase(phaseId, skipPreCommands?)` - Starts a specific phase
-- `startNextPhase()` - Advances to the next phase in sequence
-- `handleCommand(command)` - Processes client commands
-- `shutdown(reason)` - Graceful server shutdown
+### 3. **config.ts** - Configuration Management
+- Validates phase configurations using Zod schemas
+- Provides default server settings
+- Calculates token costs based on model pricing
+- Resolves file paths relative to config location
 
-**State Management:**
-- Tracks current phase, completed phases, and total costs
-- Persists state through Claude log files
-- Recovers state on server restart
+### 4. **types.ts** - Type Definitions
+Complete TypeScript interfaces for:
+- Server configuration (`ServerConfig`)
+- Phase configuration (`PhaseConfig`)
+- WebSocket events (server → client)
+- WebSocket commands (client → server)
+- Internal state management types
 
-### 2. Configuration (config.ts)
+### 5. **utils.ts** - Utilities
+Helper functions for:
+- Unique ID generation
+- Structured logging with timestamps
+- WebSocket traffic logging
+- File tree building
+- Session ID extraction from logs
 
-**PhaseConfig Schema:**
+### 6. **claude-log-parser.ts** - Log Parser
+Real-time parsing of Claude's JSONL output:
+- Watches log files for new entries
+- Validates and parses Claude messages
+- Extracts token usage information
+- Handles both streaming and batch parsing
+
+### 7. **basic-tui.ts** - Terminal UI
+Simple terminal interface for testing:
+- Connects as a WebSocket client
+- Displays events with color coding
+- Provides keyboard shortcuts for phase control
+- Shows real-time costs and token usage
+
+## Phase Configuration
+
+Phases are configured via JSON with the following schema:
+
 ```typescript
-{
-  id: string;                    // Unique phase identifier
-  name: string;                  // Human-readable name
+interface PhaseConfig {
+  id: string;                    // Unique identifier
+  name: string;                  // Display name
   promptFile?: string;           // Path to prompt file
   promptText?: string;           // Inline prompt text
   model: string;                 // Claude model to use
-  continueFromPrevious?: boolean; // Continue from previous session
+  continueFromPrevious?: boolean; // Continue from previous phase
   preStart?: string;             // Shell command to run before phase
   watch?: string;                // Glob pattern for file watching
   description?: string;          // Phase description
 }
 ```
 
-**ServerConfig:**
-- Port, version, file paths
-- Cost calculation parameters
-- Log parsing interval
-
-### 3. Event System (types.ts)
-
-**Server → Client Events:**
-- `server.ready` - Server initialized and ready
-- `state.snapshot` - Current server state
-- `phase.started` - Phase execution started
-- `phase.completed` - Phase finished (success/failure)
-- `assistant.action` - Claude actions (thinking, message, tool_use)
-- `token.usage` - Token usage and cost updates
-- `file.updated` - Watched file changes
-- `filetree.updated` - File tree structure changes
-- `error` - Error events (fatal/non-fatal)
-- `incomplete.phase` - Incomplete phase detected
-- `info` - Informational messages
-
-**Client → Server Commands:**
-- `connect` - Initial client connection
-- `phase.start` - Start specific phase
-- `phase.next` - Start next phase
-- `phase.skip` - Skip current phase
-- `phase.redo` - Redo last phase
-- `server.shutdown` - Shutdown server
-
-### 4. Claude Integration (claude-log-parser.ts)
-
-**Log Parsing:**
-- Real-time parsing of Claude's JSON log output
-- Extracts messages, token usage, and results
-- Uses Zod schemas from claude-session-schema
-
-**Process Management:**
-- Spawns Claude CLI with appropriate arguments
-- Handles stdin/stdout/stderr streams
-- Monitors process lifecycle
-
-### 5. File Watching
-
-- Uses Chokidar for efficient file watching
-- Supports glob patterns per phase
-- Emits events for file creates/updates/deletes
-- Maintains file tree structure
-
-## Process Flow
-
-### 1. Server Startup
-```
-1. Load configuration and validate
-2. Check for lock file (prevent multiple instances)
-3. Load previous state from logs
-4. Start WebSocket server
-5. Wait for client connection
-```
-
-### 2. Client Connection
-```
-1. Accept single client connection
-2. Send server.ready event
-3. Send state.snapshot with current state
-4. Check for incomplete phases
-5. Wait for commands
-```
-
-### 3. Phase Execution
-```
-1. Validate phase configuration
-2. Run pre-start command (if specified)
-3. Get previous session ID (if continuing)
-4. Start file watcher (if pattern specified)
-5. Spawn Claude process with arguments
-6. Feed prompt to Claude stdin
-7. Parse Claude logs in real-time
-8. Emit events for actions and updates
-9. Handle phase completion
-10. Clean up resources
-```
-
-### 4. State Persistence
-```
-1. Each phase has its own log file (.logs/log-{phaseId}.jsonl)
-2. Session IDs extracted from Claude init messages
-3. Token usage and costs calculated from assistant messages
-4. Success/failure determined from result messages
+Example configuration:
+```json
+[
+  {
+    "id": "phase-1",
+    "name": "Initial Setup",
+    "promptFile": "./prompts/setup.md",
+    "model": "claude-3-opus-20240229",
+    "preStart": "mkdir -p output",
+    "watch": "./output/**/*.ts"
+  },
+  {
+    "id": "phase-2",
+    "name": "Implementation",
+    "promptText": "Continue implementing the features...",
+    "model": "claude-3-sonnet-20240229",
+    "continueFromPrevious": true
+  }
+]
 ```
 
 ## WebSocket Protocol
 
-### Message Format
-All messages are JSON with this structure:
+### Server → Client Events
+
+All events follow this base structure:
 ```typescript
 {
-  id: string;        // Unique message ID
+  id: string;        // Unique event ID
   timestamp: string; // ISO 8601 timestamp
-  type: string;      // Event/command type
-  data?: any;        // Type-specific data
+  type: string;      // Event type
+  data?: any;        // Event-specific data
 }
 ```
 
-### Connection Flow
-1. Client connects to ws://localhost:7777
-2. Server sends `server.ready` event
-3. Server sends `state.snapshot` event
-4. Client sends commands as needed
-5. Server streams events in real-time
+#### Event Types:
+- **`server.ready`**: Server initialized and ready
+- **`state.snapshot`**: Complete current state
+- **`phase.started`**: Phase execution began
+- **`phase.completed`**: Phase finished (success/failure)
+- **`assistant.action`**: Claude performed an action
+- **`token.usage`**: Token consumption update
+- **`file.updated`**: Watched file changed
+- **`filetree.updated`**: File tree structure changed
+- **`error`**: Error occurred (fatal/non-fatal)
+- **`info`**: Informational message
+
+### Client → Server Commands
+
+Commands follow this structure:
+```typescript
+{
+  id: string;   // Client-generated ID
+  type: string; // Command type
+  data?: any;   // Command-specific data
+}
+```
+
+#### Command Types:
+- **`phase.start`**: Start specific phase by ID
+- **`phase.next`**: Start next phase in sequence
+- **`phase.skip`**: Skip current running phase
+- **`phase.redo`**: Re-run last completed phase
+- **`server.shutdown`**: Gracefully shutdown server
+
+## State Management
+
+### Persistence
+- State is persisted through Claude's JSONL log files
+- Server can recover from crashes by reading logs
+- Lock file prevents multiple server instances
+
+### Phase States
+1. **Idle**: No phase running
+2. **Running**: Phase actively executing
+3. **Completed**: Phase finished successfully
+4. **Failed**: Phase terminated with error
+5. **Skipped**: Phase was skipped by user
 
 ## Security Considerations
 
-- Single client connection only
-- Lock file prevents multiple servers
-- Process cleanup on shutdown
-- No authentication (local use only)
+1. **Single Client**: Only one client connection allowed
+2. **File Access**: Server runs with full file system access
+3. **Command Injection**: Pre-start commands are executed directly
+4. **API Keys**: Managed by Claude CLI, not the server
 
 ## Error Handling
 
-**Fatal Errors:**
-- Pre-start command failures
-- Missing previous session for continuation
-- Claude process errors
-- Phase failures
+- **Fatal errors**: Trigger server shutdown
+- **Phase failures**: Stop execution, maintain state
+- **Connection errors**: Client disconnection triggers shutdown
+- **Process crashes**: State recoverable from logs
 
-**Non-Fatal Errors:**
-- Unknown commands
-- File read errors
-- Invalid phase IDs
+## Usage Examples
 
-## Logging
+### Basic Usage
+```bash
+# Start with default configuration
+bun server/index.ts
 
-**Server Logs** (`.logs/server.log`):
-- Server lifecycle events
-- Command handling
-- Error messages
+# Use custom phases configuration
+bun server/index.ts --config=my-phases.json
 
-**WebSocket Logs** (`.logs/websocket.log`):
-- All WebSocket traffic (in/out)
-- Command and event details
+# Run on different port
+bun server/index.ts --port=8080
 
-**Claude Logs** (`.logs/log-{phaseId}.jsonl`):
-- Claude session logs per phase
-- Used for state recovery
+# Test with terminal UI
+bun server/index.ts --basic
+```
 
-## Basic TUI Mode
+### Programmatic Usage
+```typescript
+import { LangtonServer } from "./langton-server.js";
 
-Run with `--basic` flag for terminal interface:
-- Shows real-time events
-- Keyboard shortcuts: [n]ext, [s]kip, [q]uit
-- Useful for testing and debugging
+const server = new LangtonServer({
+  projectPath: process.cwd(),
+  phases: [/* phase configs */],
+  port: 7777
+});
+
+await server.start();
+```
+
+## Development
+
+### Running Tests
+See the tests folder README for comprehensive testing information.
+
+### Key Files to Modify
+- Add new events: Update `types.ts` and emit in `langton-server.ts`
+- Change protocol: Update both `types.ts` and client code
+- Add configuration: Update `config.ts` schema and defaults
+- Modify logging: Update `claude-log-parser.ts` parsing logic
+
+## Philosophy
+
+The server is designed with these principles:
+1. **Simplicity**: Single client, clear phase progression
+2. **Transparency**: All actions are logged and streamed
+3. **Recoverability**: State persists through crashes
+4. **Extensibility**: Easy to add new events and commands
+5. **Testability**: Comprehensive test suite with E2E tests
