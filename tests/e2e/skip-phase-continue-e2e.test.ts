@@ -432,7 +432,7 @@ async function cleanup(): Promise<void> {
     console.log(`${colors.green}✓ Server shut down${colors.reset}`);
   }
 
-  const lockFile = path.join(TEST_DIR, ".langton-server.lock");
+  const lockFile = path.join(TEST_DIR, ".langton/server.lock");
   if (fs.existsSync(lockFile)) {
     console.log(`${colors.gray}Cleaning up lock file...${colors.reset}`);
     fs.unlinkSync(lockFile);
@@ -443,7 +443,7 @@ async function cleanup(): Promise<void> {
   // Save test results
   console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
 
-  const logsDir = path.join(TEST_DIR, ".logs");
+  const logsDir = path.join(TEST_DIR, ".langton/logs");
   if (fs.existsSync(logsDir)) {
     const destLogsDir = path.join(TEST_RUN_DIR, "claude-logs");
     fs.mkdirSync(destLogsDir, { recursive: true });

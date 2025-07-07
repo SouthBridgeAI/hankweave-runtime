@@ -163,9 +163,10 @@ export class CheckpointGit {
     }
 
     // Commit (with --allow-empty if needed)
-    const result = status.staged.length === 0 
-      ? await this.git.commit(message, { "--allow-empty": null })
-      : await this.git.commit(message);
+    const result =
+      status.staged.length === 0
+        ? await this.git.commit(message, { "--allow-empty": null })
+        : await this.git.commit(message);
 
     // Switch back to main if we branched
     if (options?.branch) {

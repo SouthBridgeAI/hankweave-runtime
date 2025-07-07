@@ -61,9 +61,9 @@ const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one p
 export const DEFAULT_CONFIG: Omit<ServerConfig, "projectPath" | "phases"> = {
   port: 7777,
   version: "1.0.0",
-  lockFile: ".langton-server.lock",
-  socketLogFile: ".logs/websocket.log",
-  serverLogFile: ".logs/server.log",
+  lockFile: ".langton/server.lock",
+  socketLogFile: ".langton/logs/websocket.log",
+  serverLogFile: ".langton/logs/server.log",
   costsPerMTok: {
     input: 3.0, // $3 per million input tokens
     inputCache: 3.75, // $3.75 per million tokens when creating cache

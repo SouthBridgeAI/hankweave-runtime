@@ -538,7 +538,7 @@ async function cleanup(): Promise<void> {
   }
 
   // Clean up lock file if it still exists (race condition fix)
-  const lockFile = path.join(TEST_DIR, ".langton-server.lock");
+  const lockFile = path.join(TEST_DIR, ".langton/server.lock");
   if (fs.existsSync(lockFile)) {
     console.log(`${colors.gray}Cleaning up lock file...${colors.reset}`);
     fs.unlinkSync(lockFile);
@@ -550,7 +550,7 @@ async function cleanup(): Promise<void> {
   console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
 
   // Copy Claude logs
-  const logsDir = path.join(TEST_DIR, ".logs");
+  const logsDir = path.join(TEST_DIR, ".langton/logs");
   if (fs.existsSync(logsDir)) {
     const destLogsDir = path.join(TEST_RUN_DIR, "claude-logs");
     fs.mkdirSync(destLogsDir, { recursive: true });
@@ -658,7 +658,7 @@ describe("Langton E2E Test", () => {
   describe("Log Files", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
       describe(`${phaseId} logs`, () => {
-        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        const logPath = path.join(TEST_DIR, `.langton/logs/log-${phaseId}.jsonl`);
 
         test(`log file exists`, () => {
           expect(fs.existsSync(logPath)).toBe(true);
@@ -786,7 +786,7 @@ describe("Langton E2E Test", () => {
       const phaseLogCosts: Record<string, number> = {};
 
       for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        const logPath = path.join(TEST_DIR, `.langton/logs/log-${phaseId}.jsonl`);
         if (fs.existsSync(logPath)) {
           const logContent = fs.readFileSync(logPath, "utf-8");
           const logEntries = parseJSONL(logContent);
@@ -822,7 +822,7 @@ describe("Langton E2E Test", () => {
 
       // Calculate from logs using result messages
       for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        const logPath = path.join(TEST_DIR, `.langton/logs/log-${phaseId}.jsonl`);
         if (fs.existsSync(logPath)) {
           const logContent = fs.readFileSync(logPath, "utf-8");
           const logEntries = parseJSONL(logContent);
@@ -852,7 +852,7 @@ describe("Langton E2E Test", () => {
 
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
       test(`${phaseId} token usage events match log messages`, () => {
-        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        const logPath = path.join(TEST_DIR, `.langton/logs/log-${phaseId}.jsonl`);
         if (fs.existsSync(logPath)) {
           const logContent = fs.readFileSync(logPath, "utf-8");
           const logEntries = parseJSONL(logContent);
@@ -1091,8 +1091,8 @@ describe("Langton E2E Test", () => {
 
   describe("Session Continuity", () => {
     test("Phase 2 log shows continuation from Phase 1 session", () => {
-      const phase1Log = path.join(TEST_DIR, ".logs/log-phase-1.jsonl");
-      const phase2Log = path.join(TEST_DIR, ".logs/log-phase-2.jsonl");
+      const phase1Log = path.join(TEST_DIR, ".langton/logs/log-phase-1.jsonl");
+      const phase2Log = path.join(TEST_DIR, ".langton/logs/log-phase-2.jsonl");
 
       if (fs.existsSync(phase1Log) && fs.existsSync(phase2Log)) {
         const phase1Entries = parseJSONL(fs.readFileSync(phase1Log, "utf-8"));
@@ -1283,7 +1283,7 @@ describe("Langton E2E Test", () => {
 
     test("tool uses reported via WebSocket for each phase", () => {
       for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        const logPath = path.join(TEST_DIR, `.langton/logs/log-${phaseId}.jsonl`);
         if (fs.existsSync(logPath)) {
           const logContent = fs.readFileSync(logPath, "utf-8");
           const logEntries = parseJSONL(logContent);
@@ -1332,12 +1332,12 @@ describe("Langton E2E Test", () => {
 
   describe("Server State", () => {
     test("server lock file exists", () => {
-      const lockFilePath = path.join(TEST_DIR, ".langton-server.lock");
+      const lockFilePath = path.join(TEST_DIR, ".langton/server.lock");
       expect(fs.existsSync(lockFilePath)).toBe(true);
     });
 
     test("lock file contains valid PID", () => {
-      const lockFilePath = path.join(TEST_DIR, ".langton-server.lock");
+      const lockFilePath = path.join(TEST_DIR, ".langton/server.lock");
       if (fs.existsSync(lockFilePath)) {
         const lockPid = fs.readFileSync(lockFilePath, "utf-8").trim();
         expect(/^\d+$/.test(lockPid)).toBe(true);
@@ -1348,7 +1348,7 @@ describe("Langton E2E Test", () => {
   describe("JSONL Schema", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
       test(`${phaseId} JSONL has valid schema`, () => {
-        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        const logPath = path.join(TEST_DIR, `.langton/logs/log-${phaseId}.jsonl`);
         if (fs.existsSync(logPath)) {
           const logContent = fs.readFileSync(logPath, "utf-8");
           const lines = logContent.split("\n").filter((l) => l.trim());

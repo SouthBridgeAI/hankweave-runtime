@@ -93,7 +93,7 @@ export interface PhaseConfig {
 
 /**
  * Status types for checkpoint git commits.
- * 
+ *
  * - `workspace-setup`: Created after workspace operations (copy files, run commands)
  * - `completed`: Created when a phase finishes successfully
  * - `error`: Created when a phase fails with an error (creates error branch)
@@ -104,7 +104,7 @@ export type CheckpointStatus = "workspace-setup" | "completed" | "error" | "exit
 
 /**
  * Information for creating a checkpoint commit in the shadow git repository.
- * 
+ *
  * The checkpoint system creates a shadow git repo in `.langton/checkpoints/` that tracks
  * files matching the `checkpointAndWatch` patterns. Each checkpoint creates a commit
  * with detailed metadata about the phase state.
@@ -112,19 +112,19 @@ export type CheckpointStatus = "workspace-setup" | "completed" | "error" | "exit
 export interface CheckpointInfo {
   /** The type of checkpoint being created */
   status: CheckpointStatus;
-  
+
   /** Unique identifier of the phase (e.g., "phase-1") */
   phaseId: string;
-  
+
   /** Human-readable name of the phase */
   phaseName: string;
-  
+
   /** Unique identifier for this Langton server run */
   runId: string;
-  
+
   /** ISO timestamp when the checkpoint was created */
   timestamp: string;
-  
+
   /** Duration in milliseconds (only for completed/error/skipped phases) */
   duration?: number;
 }

@@ -55,7 +55,7 @@ checks.push({
 });
 
 // Check 5: No lock file (no server running)
-const lockFile = "tests/test-area/.langton-server.lock";
+const lockFile = "tests/test-area/.langton/server.lock";
 const noLockFile = !fs.existsSync(lockFile);
 checks.push({
   name: "Server lock file",

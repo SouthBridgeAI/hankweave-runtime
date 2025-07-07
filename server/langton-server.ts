@@ -128,6 +128,10 @@ export class LangtonServer extends EventEmitter {
     }
 
     // Create lock file
+    const lockDir = path.dirname(this.config.lockFile);
+    if (!fs.existsSync(lockDir)) {
+      fs.mkdirSync(lockDir, { recursive: true });
+    }
     fs.writeFileSync(this.config.lockFile, process.pid.toString());
 
     // Load previous state from logs
@@ -283,7 +287,7 @@ export class LangtonServer extends EventEmitter {
     this.logger.log("Loading previous state from logs");
 
     for (const phase of this.config.phases) {
-      const logPath = path.join(this.config.projectPath, `.logs/log-${phase.id}.jsonl`);
+      const logPath = path.join(this.config.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
 
       const { sessionId, success, cost } = loadPhaseStateFromLog(logPath, this.config.costsPerMTok);
 
@@ -499,7 +503,10 @@ export class LangtonServer extends EventEmitter {
     const completed = this.completedPhases.find((p) => p.phaseId === previousPhase.id);
     if (completed) return completed.sessionId;
 
-    const logPath = path.join(this.config.projectPath, `.logs/log-${previousPhase.id}.jsonl`);
+    const logPath = path.join(
+      this.config.projectPath,
+      `.langton/logs/log-${previousPhase.id}.jsonl`,
+    );
     return extractSessionIdFromLog(logPath);
   }
 
@@ -522,7 +529,7 @@ export class LangtonServer extends EventEmitter {
     _sessionId: string,
     previousSessionId: string | null,
   ): Promise<void> {
-    const logPath = path.join(this.config.projectPath, `.logs/log-${phase.id}.jsonl`);
+    const logPath = path.join(this.config.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
 
     const logsDir = path.dirname(logPath);
     if (!fs.existsSync(logsDir)) {
@@ -1051,7 +1058,7 @@ export class LangtonServer extends EventEmitter {
     }
 
     const nextPhase = this.config.phases[nextPhaseIndex];
-    const logPath = path.join(this.config.projectPath, `.logs/log-${nextPhase.id}.jsonl`);
+    const logPath = path.join(this.config.projectPath, `.langton/logs/log-${nextPhase.id}.jsonl`);
 
     if (fs.existsSync(logPath)) {
       const content = fs.readFileSync(logPath, "utf8");
@@ -1238,18 +1245,9 @@ export class LangtonServer extends EventEmitter {
   // ============================================================================
 
   /**
-   * Initialize checkpoint system - check git availability and .langton existence
+   * Initialize checkpoint system - check git availability
    */
   private async initializeCheckpoints(): Promise<void> {
-    // Check if .langton already exists
-    const langtonPath = path.join(this.config.projectPath, ".langton");
-    if (fs.existsSync(langtonPath)) {
-      throw new Error(
-        "Found existing .langton directory. Server cannot start. " +
-          "This may indicate a previous run. Please remove .langton directory to continue.",
-      );
-    }
-
     // Check if git is available
     if (!(await this.isGitAvailable())) {
       this.logger.log("Git is not available. Checkpointing disabled.", "info");

@@ -101,7 +101,7 @@ console.log(
 );
 
 // Check for existing server
-const lockFilePath = path.join(testAreaPath, ".langton-server.lock");
+const lockFilePath = path.join(testAreaPath, ".langton/server.lock");
 if (fs.existsSync(lockFilePath)) {
   console.log(`\n${colors.red}⚠ Lock file exists!${colors.reset} Server may be running`);
   console.log(`Lock file: ${lockFilePath}`);

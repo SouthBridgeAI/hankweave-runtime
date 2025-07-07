@@ -99,7 +99,7 @@ export async function scanWatchedFiles(
   try {
     const matches = await fg(pattern, {
       cwd: projectPath,
-      ignore: ["node_modules/**", ".logs/**", ".git/**"],
+      ignore: ["node_modules/**", ".langton/logs/**", ".git/**"],
       absolute: false,
     });
 
