@@ -19,14 +19,16 @@ While running:
 
 TODOs:
 
-1. Use full paths for folders and replace those in the prompts.
-2. safe_exec and that journey
-3. Implement actual workspace copying in and out instead of running commands which can be brittle
-4. Retry system and error handling?
-5. Use git commits to rollback changes?
-6. Actually tracking file edits to show what changed instead of chokidar
-7. Extracting data after phases or at completion?
-8. Adding description streaming with flash
+1. Use git commits!
+2. Move .logs into .langton
+3. Use full paths for folders and replace those in the prompts.
+4. safe_exec and that journey
+5. Implement actual workspace copying in and out instead of running commands which can be brittle
+6. Retry system and error handling?
+7. Use git commits to rollback changes?
+8. Actually tracking file edits to show what changed instead of chokidar
+9. Extracting data after phases or at completion?
+10. Adding description streaming with flash
 
 TODOs for Schema thing:
 

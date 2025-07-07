@@ -586,6 +586,12 @@ describe("Skip Phase and Continue E2E Test", () => {
   });
 
   describe("File System", () => {
+    test("Phase 1 preStart created notes directory", () => {
+      // Even though Phase 1 was skipped, preStart should have run
+      expect(fs.existsSync(path.join(TEST_DIR, "notes"))).toBe(true);
+      expect(fs.statSync(path.join(TEST_DIR, "notes")).isDirectory()).toBe(true);
+    });
+
     test("Phase 2 created test2.txt", () => {
       // Phase 2 should have completed successfully
       expect(fs.existsSync(path.join(TEST_DIR, "notes/test2.txt"))).toBe(true);

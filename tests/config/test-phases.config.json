@@ -5,7 +5,15 @@
     "promptFile": ["./phase1Prompt1.md", "./phase1Prompt2.md"],
     "model": "sonnet",
     "continueFromPrevious": false,
-    "preStart": "mkdir -p notes",
+    "workspaceSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p notes",
+          "workingDirectory": "project"
+        }
+      }
+    ],
     "watch": "./notes/*.txt",
     "appendSystemPromptFile": ["./systemPrompt1.md", "./systemPrompt2.md"],
     "description": "Write three pick one"
@@ -24,8 +32,23 @@
     "name": "Phase 2a: More Validation",
     "promptText": "Can you convert the poems in the notes folder into typescript code in the typescript_code/src folder? Call them poem1.ts and poem2.ts.",
     "model": "sonnet",
+    "workspaceSetup": [
+      {
+        "type": "copy",
+        "copy": {
+          "from": "./typescript_structure",
+          "to": "typescript_code"
+        }
+      },
+      {
+        "type": "command",
+        "command": {
+          "run": "bun install",
+          "workingDirectory": "lastCopied"
+        }
+      }
+    ],
     "continueFromPrevious": false,
-    "preStart": "mkdir -p typescript_code && mkdir -p typescript_code/src && cd typescript_code && bun init -y && bun add papaparse csv-parse exceljs xlsx ajv parquet-wasm apache-arrow date-fns mathjs lodash @turf/turf && bun add -d @types/papaparse @types/lodash @types/geojson && cd ..",
     "watch": "./typescript_code/src/**/*.ts",
     "description": "Convert poems to code"
   }

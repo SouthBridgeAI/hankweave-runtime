@@ -7,6 +7,38 @@ import type { logMessageSchema } from "../types/claude-session-schema.js";
 // ============================================================================
 
 /**
+ * Workspace setup operation - either copy files/directories or run commands.
+ */
+export interface WorkspaceSetupItem {
+  /** Type of setup operation */
+  type: "copy" | "command";
+
+  /** For copy operations */
+  copy?: {
+    /** Source path (relative to config file or absolute) */
+    from: string;
+    /**
+     * Target path relative to projectPath (parent directory must exist).
+     * Always specifies the full target path including name.
+     * Examples:
+     * - from: "../templates/foo", to: "src/foo" → copies directory foo to src/foo
+     * - from: "../templates/foo", to: "src/bar" → copies directory foo as src/bar
+     * - from: "../config.json", to: "src/config.json" → copies file
+     * - from: "../config.json", to: "src/settings.json" → copies file with rename
+     */
+    to: string;
+  };
+
+  /** For command operations */
+  command?: {
+    /** Shell command to execute */
+    run: string;
+    /** Working directory for command execution (default: "project") */
+    workingDirectory?: "project" | "lastCopied";
+  };
+}
+
+/**
  * Configuration for a single phase in the Langton workflow.
  * A phase represents a discrete task for Claude to perform, with its own
  * prompt, model settings, and optional file watching.
@@ -41,11 +73,10 @@ export interface PhaseConfig {
   continueFromPrevious?: boolean;
 
   /**
-   * Shell command to run before starting the phase.
-   * Useful for setup like creating directories or installing dependencies.
-   * If this fails, the phase will not start.
+   * Workspace setup operations to run before phase starts.
+   * Each operation must complete successfully for phase to start.
    */
-  preStart?: string;
+  workspaceSetup?: WorkspaceSetupItem[];
 
   /**
    * Glob pattern for files to watch during phase execution.

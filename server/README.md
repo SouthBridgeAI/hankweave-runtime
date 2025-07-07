@@ -110,9 +110,22 @@ interface PhaseConfig {
   appendSystemPromptText?: string; // Inline system prompt text
   model: string;                 // Claude model to use
   continueFromPrevious?: boolean; // Continue from previous phase
-  preStart?: string;             // Shell command to run before phase
+  preStart?: string;             // Shell command to run before phase (DEPRECATED)
+  workspaceSetup?: WorkspaceSetupItem[]; // Workspace setup operations
   watch?: string;                // Glob pattern for file watching
   description?: string;          // Phase description
+}
+
+interface WorkspaceSetupItem {
+  type: "copy" | "command";
+  copy?: {
+    from: string;  // Source path (relative to config or absolute)
+    to: string;    // Target path relative to projectPath
+  };
+  command?: {
+    run: string;   // Shell command to execute
+    workingDirectory?: "project" | "lastCopied"; // Where to run command
+  };
 }
 ```
 
@@ -130,14 +143,50 @@ Example configuration:
   },
   {
     "id": "phase-2",
-    "name": "Implementation",
-    "promptFile": ["./prompts/context.md", "./prompts/task.md"],
-    "appendSystemPromptFile": ["./prompts/coding-standards.md", "./prompts/security-rules.md"],
+    "name": "Setup from Template",
+    "promptFile": "./prompts/customize.md",
     "model": "claude-3-sonnet-20240229",
-    "continueFromPrevious": true
+    "workspaceSetup": [
+      {
+        "type": "copy",
+        "copy": {
+          "from": "../templates/typescript-starter",
+          "to": "src/app"
+        }
+      },
+      {
+        "type": "command",
+        "command": {
+          "run": "npm install",
+          "workingDirectory": "lastCopied"
+        }
+      },
+      {
+        "type": "copy",
+        "copy": {
+          "from": "./configs/tsconfig.json",
+          "to": "src/app/tsconfig.json"
+        }
+      }
+    ],
+    "watch": "./src/**/*.ts"
   }
 ]
 ```
+
+### Workspace Setup
+
+The `workspaceSetup` field allows you to prepare the workspace before a phase starts by copying files/directories and running commands:
+
+- **Copy operations**: Copy files or directories from templates or other locations
+  - `from`: Source path (relative to config file or absolute)
+  - `to`: Target path relative to project directory (parent must exist)
+  - Always specify the full target path including the name
+- **Command operations**: Run shell commands in specific directories
+  - `run`: Shell command to execute
+  - `workingDirectory`: Either `"project"` (default) or `"lastCopied"` (the last copied directory)
+
+Operations are executed in order, and all must succeed for the phase to start. If `preStart` is also specified, it runs before `workspaceSetup`.
 
 ### Multiple File Support
 

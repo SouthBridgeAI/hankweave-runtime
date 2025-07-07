@@ -1,0 +1,27 @@
+{
+  "name": "typescript_structure",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/geojson": "^7946.0.16",
+    "@types/lodash": "^4.17.20",
+    "@types/papaparse": "^5.3.16"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@turf/turf": "^7.2.0",
+    "ajv": "^8.17.1",
+    "apache-arrow": "^21.0.0",
+    "csv-parse": "^5.6.0",
+    "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
+    "lodash": "^4.17.21",
+    "mathjs": "^14.5.3",
+    "papaparse": "^5.5.3",
+    "parquet-wasm": "^0.6.1",
+    "xlsx": "^0.18.5"
+  }
+}

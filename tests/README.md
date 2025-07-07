@@ -45,9 +45,9 @@ tests/
 
 Tests the complete successful workflow:
 
-- **Phase 1**: Creates poems and saves favorite to `notes/favorite_poem.txt`
+- **Phase 1**: Uses workspace setup to create notes directory, creates poems and saves favorite to `notes/favorite_poem.txt`
 - **Phase 2**: Continues from Phase 1, saves second favorite poem
-- **Phase 3**: Converts poems to TypeScript code
+- **Phase 3**: Uses workspace setup to copy typescript_structure and run bun install, converts poems to TypeScript code
 
 Validates:
 
@@ -57,25 +57,32 @@ Validates:
 - Token usage is accurate
 - Session continuity works
 - File watching events fire correctly
+- Workspace setup operations work correctly:
+  - Directory creation via command
+  - Directory copying
+  - Command execution in copied directory (`lastCopied`)
 
 ### 2. Skip and Continue Test (`skip-phase-continue-e2e.test.ts`)
 
 Tests phase skipping with continuation:
 
-- Starts phase 1, skips it mid-execution
+- Starts phase 1 (using traditional `preStart`), skips it mid-execution
 - Verifies server continues to phase 2
 - Completes phase 2 normally
 - Skips phase 3
 - Verifies proper cleanup and state management
+- Validates that `preStart` still works for backward compatibility
 
 ### 3. Skip and Quit Test (`skip-phase-quit-e2e.test.ts`)
 
 Tests skipping the final phase:
 
-- Runs phase 1 to completion
+- Runs phase 1 to completion (using traditional `preStart`)
 - Starts phase 2 (last phase), skips it
 - Verifies server shuts down gracefully
 - Checks that resources are cleaned up properly
+- Validates that `preStart` creates directories as expected
+
 
 ## Test Architecture
 

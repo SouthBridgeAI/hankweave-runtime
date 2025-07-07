@@ -571,6 +571,11 @@ describe("Skip Last Phase and Quit E2E Test", () => {
   });
 
   describe("File System", () => {
+    test("Phase 1 preStart created notes directory", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "notes"))).toBe(true);
+      expect(fs.statSync(path.join(TEST_DIR, "notes")).isDirectory()).toBe(true);
+    });
+
     test("Phase 1 created test.txt", () => {
       expect(fs.existsSync(path.join(TEST_DIR, "notes/test.txt"))).toBe(true);
     });

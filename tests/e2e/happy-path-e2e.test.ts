@@ -614,6 +614,33 @@ describe("Langton E2E Test", () => {
   });
 
   describe("File System State", () => {
+    // Workspace setup tests
+    test("Phase 1 workspace setup created notes directory", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "notes"))).toBe(true);
+      expect(fs.statSync(path.join(TEST_DIR, "notes")).isDirectory()).toBe(true);
+    });
+
+    test("Phase 3 workspace setup copied typescript_structure", () => {
+      const typescriptCodeDir = path.join(TEST_DIR, "typescript_code");
+      expect(fs.existsSync(typescriptCodeDir)).toBe(true);
+      expect(fs.statSync(typescriptCodeDir).isDirectory()).toBe(true);
+
+      // Check that files from typescript_structure were copied
+      expect(fs.existsSync(path.join(typescriptCodeDir, "package.json"))).toBe(true);
+      expect(fs.existsSync(path.join(typescriptCodeDir, "tsconfig.json"))).toBe(true);
+      expect(fs.existsSync(path.join(typescriptCodeDir, "src"))).toBe(true);
+      expect(fs.statSync(path.join(typescriptCodeDir, "src")).isDirectory()).toBe(true);
+    });
+
+    test("Phase 3 workspace setup ran bun install", () => {
+      const typescriptCodeDir = path.join(TEST_DIR, "typescript_code");
+      // Check that bun install created node_modules or updated bun.lockb
+      const bunLockExists = fs.existsSync(path.join(typescriptCodeDir, "bun.lockb"));
+      const nodeModulesExists = fs.existsSync(path.join(typescriptCodeDir, "node_modules"));
+      expect(bunLockExists || nodeModulesExists).toBe(true);
+    });
+
+    // Original tests
     test("Phase 1 created favorite_poem.txt", () => {
       expect(fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"))).toBe(true);
     });
@@ -628,10 +655,6 @@ describe("Langton E2E Test", () => {
 
     test("Phase 3 created poem2.ts", () => {
       expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem2.ts"))).toBe(true);
-    });
-
-    test("Pre-start command created package.json", () => {
-      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/package.json"))).toBe(true);
     });
   });
 

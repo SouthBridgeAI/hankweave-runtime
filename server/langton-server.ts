@@ -346,6 +346,37 @@ export class LangtonServer extends EventEmitter {
       }
     }
 
+    // Run workspace setup operations
+    if (!skipPreCommands && phase.workspaceSetup) {
+      this.logger.log(`Running workspace setup for phase: ${phase.name}`);
+      let lastCopiedPath: string | null = null;
+
+      for (const [index, item] of phase.workspaceSetup.entries()) {
+        try {
+          if (item.type === "copy" && item.copy) {
+            const targetPath = path.join(this.config.projectPath, item.copy.to);
+            await this.copyPath(item.copy.from, targetPath);
+            lastCopiedPath = targetPath;
+            this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
+          } else if (item.type === "command" && item.command) {
+            const workingDir =
+              item.command.workingDirectory === "lastCopied" && lastCopiedPath
+                ? lastCopiedPath
+                : this.config.projectPath;
+            await this.runCommand(item.command.run, workingDir);
+            this.logger.log(`Ran command in ${workingDir}: ${item.command.run}`);
+          }
+        } catch (error) {
+          this.sendError(
+            `Workspace setup item ${index + 1} failed: ${error instanceof Error ? error.message : String(error)}`,
+            true,
+          );
+          await this.shutdown("workspace setup failure");
+          return;
+        }
+      }
+    }
+
     // Get previous session ID if needed
     const sessionId = generateId();
     let previousSessionId: string | null = null;
@@ -1122,11 +1153,11 @@ export class LangtonServer extends EventEmitter {
     this.currentPhase = null;
   }
 
-  private async runCommand(command: string): Promise<void> {
+  private async runCommand(command: string, workingDir?: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const proc = spawn(command, {
         shell: true,
-        cwd: this.config.projectPath,
+        cwd: workingDir || this.config.projectPath,
       });
 
       proc.on("exit", (code) => {
@@ -1139,6 +1170,31 @@ export class LangtonServer extends EventEmitter {
 
       proc.on("error", reject);
     });
+  }
+
+  private async copyPath(from: string, to: string): Promise<void> {
+    // Check if source exists
+    const sourceStats = await fs.promises.stat(from).catch(() => null);
+    if (!sourceStats) {
+      throw new Error(`Source path does not exist: ${from}`);
+    }
+
+    // Check if target parent directory exists
+    const targetParent = path.dirname(to);
+    const parentStats = await fs.promises.stat(targetParent).catch(() => null);
+    if (!parentStats || !parentStats.isDirectory()) {
+      throw new Error(`Target parent directory does not exist: ${targetParent}`);
+    }
+
+    // Check if target already exists
+    const targetStats = await fs.promises.stat(to).catch(() => null);
+    if (targetStats) {
+      throw new Error(`Target path already exists: ${to}`);
+    }
+
+    // Copy using cp command with recursive flag
+    const cpCommand = `cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`;
+    await this.runCommand(cpCommand);
   }
 
   async shutdown(reason: string): Promise<void> {

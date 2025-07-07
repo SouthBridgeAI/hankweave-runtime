@@ -7,6 +7,23 @@ import type { PhaseConfig, ServerConfig } from "./types.js";
 // Configuration Schema
 // ============================================================================
 
+const workspaceSetupItemSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("copy"),
+    copy: z.object({
+      from: z.string().min(1, "Source path cannot be empty"),
+      to: z.string().min(1, "Target path cannot be empty"),
+    }),
+  }),
+  z.object({
+    type: z.literal("command"),
+    command: z.object({
+      run: z.string().min(1, "Command cannot be empty"),
+      workingDirectory: z.enum(["project", "lastCopied"]).optional().default("project"),
+    }),
+  }),
+]);
+
 const phaseConfigSchema = z
   .object({
     id: z.string().min(1, "Phase ID cannot be empty"),
@@ -18,6 +35,7 @@ const phaseConfigSchema = z
     model: z.string().min(1, "Model name cannot be empty"),
     continueFromPrevious: z.boolean().optional(),
     preStart: z.string().optional(),
+    workspaceSetup: z.array(workspaceSetupItemSchema).optional(),
     watch: z.string().optional(),
     description: z.string().optional(),
   })
@@ -111,6 +129,24 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
         }
       }
 
+      // Handle workspaceSetup - resolve paths for copy operations
+      if (phase.workspaceSetup) {
+        resolved.workspaceSetup = phase.workspaceSetup.map((item) => {
+          if (item.type === "copy" && item.copy) {
+            return {
+              ...item,
+              copy: {
+                from: path.isAbsolute(item.copy.from)
+                  ? item.copy.from
+                  : path.resolve(configDir, item.copy.from),
+                to: item.copy.to, // Keep 'to' as relative to projectPath
+              },
+            };
+          }
+          return item;
+        });
+      }
+
       return resolved;
     });
 
@@ -162,6 +198,20 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
             } catch (error) {
               validationErrors.push(
                 `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${file}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+        }
+      }
+
+      // Validate workspaceSetup items
+      if (phase.workspaceSetup) {
+        for (const [itemIndex, item] of phase.workspaceSetup.entries()) {
+          if (item.type === "copy" && item.copy) {
+            // Check if source exists
+            if (!fs.existsSync(item.copy.from)) {
+              validationErrors.push(
+                `Phase ${index + 1} (${phase.id}), workspace setup item ${itemIndex + 1}: source path "${item.copy.from}" does not exist`,
               );
             }
           }
