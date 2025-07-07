@@ -67,6 +67,7 @@ export class LangtonServer extends EventEmitter {
   private totalCost = 0;
   private serverStartTime: Date;
   private isShuttingDown = false;
+  private isSkippingPhase = false;
   private logParser: ClaudeLogParser | null = null;
 
   constructor(
@@ -662,8 +663,8 @@ export class LangtonServer extends EventEmitter {
     const success = exitCode === 0;
     const phaseCost = this.currentPhase.phaseCost;
 
-    // Only add to completed phases if successful (to track costs accurately)
-    if (success) {
+    // Add to completed phases (even if skipped, to track progress)
+    if (success || this.isSkippingPhase) {
       this.completedPhases.push({
         phaseId: this.currentPhase.phase.id,
         sessionId: this.currentPhase.sessionId,
@@ -677,7 +678,7 @@ export class LangtonServer extends EventEmitter {
       this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
 
       this.logger.log(
-        `Phase ${this.currentPhase.phase.id} completed - Cost: $${phaseCost.toFixed(4)}, ` +
+        `Phase ${this.currentPhase.phase.id} ${success ? 'completed' : 'skipped'} - Cost: $${phaseCost.toFixed(4)}, ` +
           `Total project cost: $${this.totalCost.toFixed(4)}`,
       );
     }
@@ -701,8 +702,17 @@ export class LangtonServer extends EventEmitter {
     this.sendStateSnapshot();
 
     if (!success && !this.isShuttingDown) {
-      this.sendError(`Phase failed with exit code ${exitCode}`, true);
-      this.shutdown("phase failure");
+      if (this.isSkippingPhase) {
+        // Phase was skipped, not failed - continue to next phase
+        this.logger.log("Phase was skipped, continuing to next phase");
+        this.isSkippingPhase = false;
+        setTimeout(() => {
+          this.autoStartNextPhase();
+        }, 1000);
+      } else {
+        this.sendError(`Phase failed with exit code ${exitCode}`, true);
+        this.shutdown("phase failure");
+      }
     } else if (success && !this.isShuttingDown) {
       // Auto-continue to next phase after a short delay
       setTimeout(() => {
@@ -912,6 +922,7 @@ export class LangtonServer extends EventEmitter {
     }
 
     this.logger.log(`Skipping phase ${this.currentPhase.phase.id}`);
+    this.isSkippingPhase = true;
 
     if (this.claudeProcess) {
       this.claudeProcess.kill("SIGTERM");

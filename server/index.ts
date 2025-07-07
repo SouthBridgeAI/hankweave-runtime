@@ -15,6 +15,7 @@ async function main() {
   const anthropicBaseURL = args
     .find((arg) => arg.startsWith("--anthropic-base-url="))
     ?.split("=")[1];
+  const port = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
@@ -24,6 +25,7 @@ Usage: bun server/index.ts [options]
 
 Options:
   --config=<path>           Path to phases configuration file (default: phases.json)
+  --port=<port>             WebSocket server port (default: 7777)
   --basic, -b               Run in basic TUI mode (prints events to console)
   --anthropic-base-url=<url> Custom Anthropic API base URL (for proxies/gateways)
   --help, -h                Show this help message
@@ -39,11 +41,17 @@ Examples:
 
   try {
     const phases = loadPhaseConfig(configPath);
-    const server = new LangtonServer({
+    const serverConfig: any = {
       projectPath: process.cwd(),
       phases,
       anthropicBaseURL,
-    });
+    };
+    
+    if (port) {
+      serverConfig.port = parseInt(port, 10);
+    }
+    
+    const server = new LangtonServer(serverConfig);
 
     await server.start();
 
