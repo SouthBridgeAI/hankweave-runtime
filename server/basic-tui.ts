@@ -34,7 +34,7 @@ export class BasicTUI {
     private server: EventEmitter & {
       config?: { port?: number };
       shutdown: (reason: string) => Promise<void>;
-    },
+    }
   ) {
     this.connectToServer();
     this.setupKeyboardInput();
@@ -101,11 +101,13 @@ export class BasicTUI {
 
       case "phase.completed": {
         const completeData = (event as PhaseCompletedEvent).data;
-        console.log(`\n✅ [${timestamp}] Completed: Phase ${completeData.phaseId}`);
+        console.log(
+          `\n✅ [${timestamp}] Completed: Phase ${completeData.phaseId}`
+        );
         console.log(
           `   Cost: $${completeData.cost.toFixed(4)}, Duration: ${(
             completeData.duration / 1000
-          ).toFixed(1)}s`,
+          ).toFixed(1)}s`
         );
         break;
       }
@@ -113,9 +115,9 @@ export class BasicTUI {
       case "assistant.action": {
         const actionData = (event as AssistantActionEvent).data;
         if (actionData.action === "message") {
-          console.log(`\n💬 [${timestamp}] ${actionData.content.slice(0, 80)}...`);
+          console.log(`\n💬 [${timestamp}] ${actionData.content}...`);
         } else if (actionData.action === "thinking") {
-          console.log(`\n🤔 [${timestamp}] Thinking...`);
+          console.log(`\n🤔 [${timestamp}] Thinking: ${actionData.content}`);
         } else if (actionData.action === "tool_use") {
           console.log(`\n🔧 [${timestamp}] Using tool: ${actionData.toolName}`);
         }
@@ -124,7 +126,11 @@ export class BasicTUI {
 
       case "token.usage": {
         const usageData = (event as TokenUsageEvent).data;
-        console.log(`\n📊 [${timestamp}] Tokens used - Cost: $${usageData.totalCost.toFixed(4)}`);
+        console.log(
+          `\n📊 [${timestamp}] Tokens used - Cost: $${usageData.totalCost.toFixed(
+            4
+          )}`
+        );
         break;
       }
 
@@ -141,13 +147,17 @@ export class BasicTUI {
 
       case "incomplete.phase": {
         const incompleteData = (event as IncompletePhaseEvent).data;
-        console.log(`\n⚠️  [${timestamp}] Incomplete phase detected: ${incompleteData.phaseName}`);
+        console.log(
+          `\n⚠️  [${timestamp}] Incomplete phase detected: ${incompleteData.phaseName}`
+        );
         console.log(`   ${incompleteData.message}`);
         break;
       }
 
       case "info": {
-        console.log(`\nℹ️  [${timestamp}] ${(event as InfoEvent).data.message}`);
+        console.log(
+          `\nℹ️  [${timestamp}] ${(event as InfoEvent).data.message}`
+        );
         break;
       }
 
@@ -155,7 +165,7 @@ export class BasicTUI {
         // Show all unknown events for debugging
         console.log(
           `\n📨 [${timestamp}] ${event.type}:`,
-          JSON.stringify("data" in event ? event.data : {}, null, 2),
+          JSON.stringify("data" in event ? event.data : {}, null, 2)
         );
     }
   }
