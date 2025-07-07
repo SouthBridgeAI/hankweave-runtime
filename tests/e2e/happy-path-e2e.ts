@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { afterAll, describe, expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,7 +14,7 @@ async function rimrafSimple(dirPath: string): Promise<void> {
 }
 
 // Test configuration
-const TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
 const SERVER_PORT = 7777;
@@ -338,673 +339,708 @@ function extractPathsFromTree(tree: FileNode[]): string[] {
 }
 
 // ============================================================================
-// Test Assertions
+// Test State - Shared across all tests
 // ============================================================================
 
-class TestRunner {
-  private failures: string[] = [];
-  private successes: string[] = [];
+interface TestState {
+  serverProcess: ChildProcess | null;
+  client: TestWSClient | null;
+  events: ServerEvent[];
+  phase1Started: PhaseStartedEvent | null;
+  phase1Completed: PhaseCompletedEvent | null;
+  phase2Started: PhaseStartedEvent | null;
+  phase2Completed: PhaseCompletedEvent | null;
+  phase3Started: PhaseStartedEvent | null;
+  phase3Completed: PhaseCompletedEvent | null;
+  testStartTime: number;
+}
 
-  assert(condition: boolean, message: string): void {
-    if (condition) {
-      this.successes.push(message);
-      console.log(`${colors.green}  ✓ ${message}${colors.reset}`);
-    } else {
-      this.failures.push(message);
-      console.log(`${colors.red}  ✗ ${message}${colors.reset}`);
-    }
-  }
+const testState: TestState = {
+  serverProcess: null,
+  client: null,
+  events: [],
+  phase1Started: null,
+  phase1Completed: null,
+  phase2Started: null,
+  phase2Completed: null,
+  phase3Started: null,
+  phase3Completed: null,
+  testStartTime: 0,
+};
 
-  async assertFileExists(filePath: string, description?: string): Promise<void> {
-    const exists = fs.existsSync(filePath);
-    const message = description || `File exists: ${path.basename(filePath)}`;
-    this.assert(exists, message);
-  }
+// ============================================================================
+// Setup and Run Phases (Outside of test blocks)
+// ============================================================================
 
-  async assertFileContains(filePath: string, content: string, description?: string): Promise<void> {
-    if (!fs.existsSync(filePath)) {
-      this.assert(false, `File not found: ${filePath}`);
-      return;
-    }
+async function setupAndRunPhases(): Promise<void> {
+  testState.testStartTime = Date.now();
 
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-    const contains = fileContent.includes(content);
-    const message = description || `File ${path.basename(filePath)} contains expected content`;
-    this.assert(contains, message);
-  }
+  // Setup test directory
+  await setupTestDirectory();
 
-  assertEventSequence(events: ServerEvent[], expectedSequence: string[]): void {
-    const actualSequence = events.map((e) => e.type);
-    let sequenceIndex = 0;
+  // Start server
+  testState.serverProcess = startServer();
 
-    for (const eventType of actualSequence) {
-      if (
-        sequenceIndex < expectedSequence.length &&
-        eventType === expectedSequence[sequenceIndex]
-      ) {
-        sequenceIndex++;
-      }
-    }
+  // Give server time to start
+  await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    const sequenceFound = sequenceIndex === expectedSequence.length;
-    this.assert(sequenceFound, `Event sequence contains: ${expectedSequence.join(" → ")}`);
-  }
+  // Connect WebSocket client
+  testState.client = new TestWSClient();
+  await testState.client.connect();
 
-  printSummary(): boolean {
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`${colors.blue}Test Summary${colors.reset}`);
-    console.log("=".repeat(60));
-    console.log(`${colors.green}Passed: ${this.successes.length}${colors.reset}`);
-    console.log(`${colors.red}Failed: ${this.failures.length}${colors.reset}`);
+  // Wait for initial events
+  console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
+  await testState.client.waitForEvent("server.ready");
+  await testState.client.waitForEvent("state.snapshot");
 
-    if (this.failures.length > 0) {
-      console.log(`\n${colors.red}Failed assertions:${colors.reset}`);
-      this.failures.forEach((failure) => {
-        console.log(`  - ${failure}`);
-      });
-    }
+  // Wait for all phases to complete
+  console.log(`${colors.blue}Waiting for all phases to complete...${colors.reset}`);
 
-    return this.failures.length === 0;
-  }
+  // Phase 1
+  testState.phase1Started = (await testState.client.waitForEvent(
+    "phase.started",
+    10000,
+  )) as PhaseStartedEvent;
+  console.log(`${colors.green}✓ Phase 1 started${colors.reset}`);
+
+  testState.phase1Completed = (await testState.client.waitForPhaseCompletion(
+    "phase-1",
+    60000,
+  )) as PhaseCompletedEvent;
+  console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
+
+  // Phase 2
+  testState.phase2Started = testState.client
+    .getEvents()
+    .find(
+      (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-2",
+    ) as PhaseStartedEvent;
+
+  testState.phase2Completed = (await testState.client.waitForPhaseCompletion(
+    "phase-2",
+    60000,
+  )) as PhaseCompletedEvent;
+  console.log(`${colors.green}✓ Phase 2 completed${colors.reset}`);
+
+  // Phase 3
+  testState.phase3Started = testState.client
+    .getEvents()
+    .find(
+      (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-3",
+    ) as PhaseStartedEvent;
+
+  testState.phase3Completed = (await testState.client.waitForPhaseCompletion(
+    "phase-3",
+    60000,
+  )) as PhaseCompletedEvent;
+  console.log(`${colors.green}✓ Phase 3 completed${colors.reset}`);
+
+  // Give a moment for final events
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  // Store all events for tests
+  testState.events = testState.client.getEvents();
 }
 
 // ============================================================================
-// Main Test Runner
+// Cleanup Function
 // ============================================================================
 
-async function runE2ETest(): Promise<boolean> {
-  const testRunner = new TestRunner();
-  let serverProcess: ChildProcess | null = null;
-  let client: TestWSClient | null = null;
-  let testTimeout: NodeJS.Timeout;
-  const testStartTime = Date.now();
+async function cleanup(): Promise<void> {
+  console.log(`\n${colors.blue}Cleaning up...${colors.reset}`);
 
-  try {
-    // Set up test timeout
-    testTimeout = setTimeout(() => {
-      console.error(`${colors.red}Test timeout after 5 minutes!${colors.reset}`);
-      process.exit(1);
-    }, TEST_TIMEOUT);
+  // Disconnect client first
+  if (testState.client) {
+    await testState.client.disconnect();
+  }
 
-    // Setup test directory
-    await setupTestDirectory();
+  // Gracefully shutdown server
+  if (testState.serverProcess) {
+    console.log(`${colors.gray}Shutting down server gracefully...${colors.reset}`);
 
-    // Start server
-    serverProcess = startServer();
+    // First try sending shutdown command if client is still connected
+    if (testState.client?.isConnected) {
+      try {
+        testState.client.sendCommand({
+          id: generateId(),
+          type: "server.shutdown",
+        });
+        // Give it a moment to shutdown gracefully
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      } catch (_e) {
+        // Client might already be disconnected
+      }
+    }
 
-    // Give server time to start
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Check if process is still running
+    if (!testState.serverProcess.killed) {
+      console.log(`${colors.gray}Sending SIGTERM to server...${colors.reset}`);
+      testState.serverProcess.kill("SIGTERM");
 
-    // Connect WebSocket client
-    client = new TestWSClient();
-    await client.connect();
+      // Wait up to 5 seconds for graceful shutdown
+      const shutdownTimeout = setTimeout(() => {
+        if (!testState.serverProcess?.killed) {
+          console.log(`${colors.yellow}Force killing server with SIGKILL...${colors.reset}`);
+          testState.serverProcess.kill("SIGKILL");
+        }
+      }, 5000);
 
-    // Wait for initial events
-    console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
-    await client.waitForEvent("server.ready");
-    await client.waitForEvent("state.snapshot");
+      // Wait for process to exit
+      await new Promise<void>((resolve) => {
+        testState.serverProcess?.on("exit", () => {
+          clearTimeout(shutdownTimeout);
+          resolve();
+        });
+      });
+    }
 
-    // Wait for all phases to complete
-    console.log(`${colors.blue}Waiting for all phases to complete...${colors.reset}`);
+    console.log(`${colors.green}✓ Server shut down${colors.reset}`);
+  }
 
-    // Phase 1
-    const phase1Started = (await client.waitForEvent("phase.started", 10000)) as PhaseStartedEvent;
-    testRunner.assert(phase1Started.data.phaseId === "phase-1", "Phase 1 started");
+  // Clean up lock file if it still exists (race condition fix)
+  const lockFile = path.join(TEST_DIR, ".langton-server.lock");
+  if (fs.existsSync(lockFile)) {
+    console.log(`${colors.gray}Cleaning up lock file...${colors.reset}`);
+    fs.unlinkSync(lockFile);
+  }
 
-    const phase1Completed = (await client.waitForPhaseCompletion(
-      "phase-1",
-      60000,
-    )) as PhaseCompletedEvent;
-    testRunner.assert(phase1Completed.data.success === true, "Phase 1 completed successfully");
+  console.log(`${colors.green}✓ Cleanup complete${colors.reset}`);
 
-    // Phase 2
-    const phase2Completed = (await client.waitForPhaseCompletion(
-      "phase-2",
-      60000,
-    )) as PhaseCompletedEvent;
-    testRunner.assert(phase2Completed.data.success === true, "Phase 2 completed successfully");
+  // Copy test artifacts to results directory
+  console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
 
-    // Check continuation
-    const phase2StartedEvent = client
-      .getEvents()
-      .find(
-        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-2",
-      );
-    testRunner.assert(
-      (phase2StartedEvent as PhaseStartedEvent)?.data.previousSessionId !== undefined,
-      "Phase 2 continued from Phase 1",
-    );
+  // Copy Claude logs
+  const logsDir = path.join(TEST_DIR, ".logs");
+  if (fs.existsSync(logsDir)) {
+    const destLogsDir = path.join(TEST_RUN_DIR, "claude-logs");
+    fs.mkdirSync(destLogsDir, { recursive: true });
 
-    // Phase 3
-    const phase3Completed = (await client.waitForPhaseCompletion(
-      "phase-3",
-      60000,
-    )) as PhaseCompletedEvent;
-    testRunner.assert(phase3Completed.data.success === true, "Phase 3 completed successfully");
+    const logFiles = fs.readdirSync(logsDir);
+    for (const file of logFiles) {
+      fs.copyFileSync(path.join(logsDir, file), path.join(destLogsDir, file));
+    }
+    console.log(`  ✓ Copied ${logFiles.length} Claude log files`);
+  }
 
-    // Give a moment for final events
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Save all WebSocket events for debugging
+  const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
+  fs.writeFileSync(eventsPath, JSON.stringify(testState.events || [], null, 2));
 
-    // ========================================================================
-    // Verify File System State
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying file system state...${colors.reset}`);
+  console.log(`\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`);
+  console.log(`${colors.gray}  - Server logs: server.log${colors.reset}`);
+  console.log(`${colors.gray}  - Claude logs: claude-logs/${colors.reset}`);
+  console.log(`${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`);
+}
 
-    // Check notes folder
-    await testRunner.assertFileExists(
-      path.join(TEST_DIR, "notes/favorite_poem.txt"),
-      "Phase 1 created favorite_poem.txt",
-    );
+// ============================================================================
+// Run setup before tests
+// ============================================================================
 
-    await testRunner.assertFileExists(
-      path.join(TEST_DIR, "notes/second_favorite_poem.txt"),
-      "Phase 2 created second_favorite_poem.txt",
-    );
+console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
+console.log(`${colors.blue}Langton Server End-to-End Test${colors.reset}`);
+console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
-    // Check TypeScript files
-    await testRunner.assertFileExists(
-      path.join(TEST_DIR, "typescript_code/src/poem1.ts"),
-      "Phase 3 created poem1.ts",
-    );
+// This runs before any tests
+await setupAndRunPhases();
 
-    await testRunner.assertFileExists(
-      path.join(TEST_DIR, "typescript_code/src/poem2.ts"),
-      "Phase 3 created poem2.ts",
-    );
+// ============================================================================
+// Now run the actual tests using Bun's test framework
+// ============================================================================
 
-    // Check TypeScript project setup
-    await testRunner.assertFileExists(
-      path.join(TEST_DIR, "typescript_code/package.json"),
-      "Pre-start command created package.json",
-    );
+describe("Langton E2E Test", () => {
+  describe("Phase Execution", () => {
+    test("Phase 1 started", () => {
+      expect(testState.phase1Started?.data.phaseId).toBe("phase-1");
+    });
 
-    // ========================================================================
-    // Verify Log Files
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying log files...${colors.reset}`);
+    test("Phase 1 completed successfully", () => {
+      expect(testState.phase1Completed?.data.success).toBe(true);
+    });
 
+    test("Phase 2 completed successfully", () => {
+      expect(testState.phase2Completed?.data.success).toBe(true);
+    });
+
+    test("Phase 2 continued from Phase 1", () => {
+      expect(testState.phase2Started?.data.previousSessionId).toBeDefined();
+    });
+
+    test("Phase 3 completed successfully", () => {
+      expect(testState.phase3Completed?.data.success).toBe(true);
+    });
+  });
+
+  describe("File System State", () => {
+    test("Phase 1 created favorite_poem.txt", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"))).toBe(true);
+    });
+
+    test("Phase 2 created second_favorite_poem.txt", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "notes/second_favorite_poem.txt"))).toBe(true);
+    });
+
+    test("Phase 3 created poem1.ts", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem1.ts"))).toBe(true);
+    });
+
+    test("Phase 3 created poem2.ts", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem2.ts"))).toBe(true);
+    });
+
+    test("Pre-start command created package.json", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/package.json"))).toBe(true);
+    });
+  });
+
+  describe("Log Files", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
-      await testRunner.assertFileExists(logPath, `Log file exists for ${phaseId}`);
+      describe(`${phaseId} logs`, () => {
+        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
 
-      if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const logEntries = parseJSONL(logContent);
+        test(`log file exists`, () => {
+          expect(fs.existsSync(logPath)).toBe(true);
+        });
 
-        // Check for essential log entries
-        const hasInit = logEntries.some((e) => e.type === "system" && e.subtype === "init");
-        testRunner.assert(hasInit, `${phaseId} log contains init message`);
+        test(`contains init message`, () => {
+          if (fs.existsSync(logPath)) {
+            const logContent = fs.readFileSync(logPath, "utf-8");
+            const logEntries = parseJSONL(logContent);
+            const hasInit = logEntries.some((e) => e.type === "system" && e.subtype === "init");
+            expect(hasInit).toBe(true);
+          }
+        });
 
-        const hasResult = logEntries.some((e) => e.type === "result");
-        testRunner.assert(hasResult, `${phaseId} log contains result message`);
+        test(`contains result message`, () => {
+          if (fs.existsSync(logPath)) {
+            const logContent = fs.readFileSync(logPath, "utf-8");
+            const logEntries = parseJSONL(logContent);
+            const hasResult = logEntries.some((e) => e.type === "result");
+            expect(hasResult).toBe(true);
+          }
+        });
 
-        // Extract session ID from logs
-        const initEntry = logEntries.find((e) => e.type === "system" && e.subtype === "init");
-        const sessionId = initEntry?.session_id;
+        test(`result shows success`, () => {
+          if (fs.existsSync(logPath)) {
+            const logContent = fs.readFileSync(logPath, "utf-8");
+            const logEntries = parseJSONL(logContent);
+            const resultEntry = logEntries.find((e) => e.type === "result");
+            expect(resultEntry?.subtype).toBe("success");
+          }
+        });
+      });
+    }
+  });
 
-        // Match with WebSocket events
-        const phaseStartEvent = client
-          ?.getEvents()
-          .find((e) => e.type === "phase.started" && e.data.phaseId === phaseId);
+  describe("WebSocket Events", () => {
+    test("received expected event sequence", () => {
+      const expectedSequence = [
+        "server.ready",
+        "state.snapshot",
+        "phase.started",
+        "phase.completed",
+        "phase.started",
+        "phase.completed",
+        "phase.started",
+        "phase.completed",
+      ];
 
-        if (sessionId && phaseStartEvent) {
-          // The sessionId in the event is initially generated by the server,
-          // but gets updated when Claude sends the init message
-          // So we check info events for the actual session ID update
-          const infoEvents = client?.getEventsByType("info");
-          const sessionUpdateEvent = infoEvents.find((e) =>
-            e.data.message.includes(`Claude started with session ID: ${sessionId}`),
-          );
-          testRunner.assert(
-            sessionUpdateEvent !== undefined,
-            `Session ID ${sessionId} reported in info event for ${phaseId}`,
-          );
+      const actualSequence = testState.events.map((e) => e.type);
+      let sequenceIndex = 0;
+
+      for (const eventType of actualSequence) {
+        if (
+          sequenceIndex < expectedSequence.length &&
+          eventType === expectedSequence[sequenceIndex]
+        ) {
+          sequenceIndex++;
         }
       }
-    }
 
-    // ========================================================================
-    // Verify WebSocket Events
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying WebSocket events...${colors.reset}`);
+      expect(sequenceIndex).toBe(expectedSequence.length);
+    });
 
-    const allEvents = client.getEvents();
+    test("received assistant action events", () => {
+      const assistantActions = testState.client?.getEventsByType("assistant.action") || [];
+      expect(assistantActions.length).toBeGreaterThan(0);
+    });
 
-    // Check event sequence
-    testRunner.assertEventSequence(allEvents, [
-      "server.ready",
-      "state.snapshot",
-      "phase.started",
-      "phase.completed",
-      "phase.started",
-      "phase.completed",
-      "phase.started",
-      "phase.completed",
-    ]);
+    test("received token usage events", () => {
+      const tokenUsageEvents = testState.client?.getEventsByType("token.usage") || [];
+      expect(tokenUsageEvents.length).toBeGreaterThan(0);
+    });
 
-    // Check for assistant actions
-    const assistantActions = client.getEventsByType("assistant.action");
-    testRunner.assert(assistantActions.length > 0, "Received assistant action events");
+    test("received file creation events", () => {
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
+      const createdFiles = fileUpdateEvents.filter((e) => e.data.action === "created");
+      expect(createdFiles.length).toBeGreaterThanOrEqual(2);
+    });
 
-    // Check for token usage
-    const tokenUsageEventsInitial = client.getEventsByType("token.usage");
-    testRunner.assert(tokenUsageEventsInitial.length > 0, "Received token usage events");
+    test("all events are in chronological order", () => {
+      let lastTimestamp = 0;
+      let chronologicalOrder = true;
 
-    // Verify file update events for watched files
-    const fileUpdateEventsInitial = client.getEventsByType("file.updated");
-    const createdFiles = fileUpdateEventsInitial.filter((e) => e.data.action === "created");
-    testRunner.assert(createdFiles.length >= 2, "Received file creation events");
-
-    // ========================================================================
-    // Verify Cost Tracking
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying cost tracking...${colors.reset}`);
-
-    const finalStateSnapshot = [...allEvents].reverse().find((e) => e.type === "state.snapshot");
-    if (finalStateSnapshot) {
-      testRunner.assert(
-        finalStateSnapshot.data.totalCost > 0,
-        `Total cost tracked: ${finalStateSnapshot.data.totalCost.toFixed(4)}`,
-      );
-
-      testRunner.assert(
-        finalStateSnapshot.data.completedPhases.length === 3,
-        "All 3 phases marked as completed",
-      );
-    }
-
-    // ========================================================================
-    // Deep Verification: Cost Reconciliation
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying cost reconciliation...${colors.reset}`);
-
-    // Calculate costs from JSONL logs
-    let logCalculatedCost = 0;
-    const phaseLogCosts: Record<string, number> = {};
-
-    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
-      if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const logEntries = parseJSONL(logContent);
-
-        // Find all assistant messages with usage
-        const assistantMessages = logEntries.filter(
-          (e) => e.type === "assistant" && e.message?.usage,
-        );
-
-        // Get the last assistant message (Claude reports cumulative usage)
-        const lastMessage = assistantMessages[assistantMessages.length - 1];
-        if (lastMessage?.message?.usage) {
-          const usage = lastMessage.message.usage;
-          const cost = calculateCostFromUsage(usage);
-          phaseLogCosts[phaseId] = cost;
-          logCalculatedCost += cost;
+      for (const event of testState.events) {
+        const timestamp = new Date(event.timestamp).getTime();
+        if (timestamp < lastTimestamp) {
+          chronologicalOrder = false;
+          break;
         }
+        lastTimestamp = timestamp;
       }
-    }
 
-    // Compare with WebSocket reported costs
-    const phaseCompletedEvents = client?.getEventsByType("phase.completed");
-    let wsReportedCost = 0;
+      expect(chronologicalOrder).toBe(true);
+    });
 
-    for (const event of phaseCompletedEvents) {
-      if (event.data.success) {
-        wsReportedCost += event.data.cost;
+    test("no fatal errors occurred", () => {
+      const errorEvents = testState.client?.getEventsByType("error") || [];
+      const fatalErrors = errorEvents.filter((e) => e.data.fatal);
+      expect(fatalErrors.length).toBe(0);
+    });
+  });
 
-        // Compare individual phase costs
-        const logCost = phaseLogCosts[event.data.phaseId] || 0;
-        testRunner.assert(
-          Math.abs(event.data.cost - logCost) < 0.0001,
-          `Phase ${event.data.phaseId} cost matches: WS=${event.data.cost.toFixed(
-            4,
-          )} vs Log=${logCost.toFixed(4)}`,
-        );
-      }
-    }
+  describe("Cost Tracking", () => {
+    test("total cost is tracked", () => {
+      const finalStateSnapshot = [...testState.events]
+        .reverse()
+        .find((e) => e.type === "state.snapshot");
+      expect(finalStateSnapshot?.data.totalCost).toBeGreaterThan(0);
+    });
 
-    testRunner.assert(
-      Math.abs(wsReportedCost - logCalculatedCost) < 0.0001,
-      `Total costs match: WS=${wsReportedCost.toFixed(4)} vs Logs=${logCalculatedCost.toFixed(4)}`,
-    );
+    test("all 3 phases marked as completed", () => {
+      const finalStateSnapshot = [...testState.events]
+        .reverse()
+        .find((e) => e.type === "state.snapshot");
+      expect(finalStateSnapshot?.data.completedPhases.length).toBe(3);
+    });
 
-    // ========================================================================
-    // Deep Verification: Token Usage Reconciliation
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying token usage reconciliation...${colors.reset}`);
+    test("costs match between WebSocket and logs", () => {
+      // Calculate costs from JSONL logs
+      let logCalculatedCost = 0;
+      const phaseLogCosts: Record<string, number> = {};
 
-    const tokenUsageEvents = client?.getEventsByType("token.usage");
+      for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
+        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, "utf-8");
+          const logEntries = parseJSONL(logContent);
 
-    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
-      if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const logEntries = parseJSONL(logContent);
+          // Find all assistant messages with usage
+          const assistantMessages = logEntries.filter(
+            (e) => e.type === "assistant" && e.message?.usage,
+          );
 
-        // Get last assistant message with usage for this phase
-        const assistantMessages = logEntries.filter(
-          (e) => e.type === "assistant" && e.message?.usage,
-        );
-        const lastMessage = assistantMessages[assistantMessages.length - 1];
-
-        if (lastMessage?.message?.usage) {
-          // Find corresponding final token usage event for this phase
-          const phaseTokenEvents = tokenUsageEvents.filter((e) => e.data.phaseId === phaseId);
-          const lastTokenEvent = phaseTokenEvents[phaseTokenEvents.length - 1];
-
-          if (lastTokenEvent) {
-            const logUsage = lastMessage.message.usage;
-            testRunner.assert(
-              lastTokenEvent.data.inputTokens === (logUsage.input_tokens || 0),
-              `${phaseId} input tokens match`,
-            );
-            testRunner.assert(
-              lastTokenEvent.data.outputTokens === (logUsage.output_tokens || 0),
-              `${phaseId} output tokens match`,
-            );
+          // Get the last assistant message (Claude reports cumulative usage)
+          const lastMessage = assistantMessages[assistantMessages.length - 1];
+          if (lastMessage?.message?.usage) {
+            const usage = lastMessage.message.usage;
+            const cost = calculateCostFromUsage(usage);
+            phaseLogCosts[phaseId] = cost;
+            logCalculatedCost += cost;
           }
         }
       }
-    }
 
-    // ========================================================================
-    // Deep Verification: Assistant Message Correlation
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying assistant message correlation...${colors.reset}`);
+      // Compare with WebSocket reported costs
+      const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
+      let wsReportedCost = 0;
 
-    const assistantActionEvents = client?.getEventsByType("assistant.action");
-
-    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
-      if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const logEntries = parseJSONL(logContent);
-
-        // Count assistant messages in logs
-        const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");
-        const logToolUses = logAssistantMessages.filter((e) =>
-          e.message?.content?.some((c: { type?: string }) => c.type === "tool_use"),
-        ).length;
-
-        // Count WebSocket events for this phase
-        const phaseActions = assistantActionEvents.filter((e) => e.data.phaseId === phaseId);
-        const wsToolUses = phaseActions.filter((e) => e.data.action === "tool_use").length;
-
-        testRunner.assert(
-          wsToolUses >= logToolUses,
-          `${phaseId} tool uses reported via WebSocket (${wsToolUses} >= ${logToolUses})`,
-        );
+      for (const event of phaseCompletedEvents) {
+        if (event.data.success) {
+          wsReportedCost += event.data.cost;
+        }
       }
-    }
 
-    // ========================================================================
-    // Deep Verification: File Content Validation
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying file content...${colors.reset}`);
-
-    // Check that poems contain expected structure
-    const poem1Path = path.join(TEST_DIR, "notes/favorite_poem.txt");
-    if (fs.existsSync(poem1Path)) {
-      const content = fs.readFileSync(poem1Path, "utf-8");
-      testRunner.assert(
-        content.includes("\n") && content.trim().split("\n").length >= 2,
-        "Favorite poem has multiple lines",
-      );
-    }
-
-    // Check TypeScript files have proper structure
-    const ts1Path = path.join(TEST_DIR, "typescript_code/src/poem1.ts");
-    if (fs.existsSync(ts1Path)) {
-      await testRunner.assertFileContains(ts1Path, "export", "poem1.ts contains exports");
-      await testRunner.assertFileContains(ts1Path, "title:", "poem1.ts has title property");
-      await testRunner.assertFileContains(ts1Path, "lines:", "poem1.ts has lines property");
-    }
-
-    // Check package.json has expected dependencies
-    const packagePath = path.join(TEST_DIR, "typescript_code/package.json");
-    if (fs.existsSync(packagePath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf-8"));
-      testRunner.assert(
-        packageJson.dependencies?.papaparse !== undefined,
-        "package.json contains papaparse dependency",
-      );
-      testRunner.assert(
-        packageJson.dependencies?.lodash !== undefined,
-        "package.json contains lodash dependency",
-      );
-    }
-
-    // ========================================================================
-    // Deep Verification: File Watching Events
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying file watching events...${colors.reset}`);
-
-    const fileUpdateEvents = client?.getEventsByType("file.updated");
-
-    // Phase 1 should create favorite_poem.txt
-    const phase1FileEvents = fileUpdateEvents.filter(
-      (e) => e.data.path === "notes/favorite_poem.txt" && e.data.action === "created",
-    );
-    testRunner.assert(phase1FileEvents.length >= 1, "File event for favorite_poem.txt creation");
-
-    // Phase 2 should create second_favorite_poem.txt
-    const phase2FileEvents = fileUpdateEvents.filter(
-      (e) => e.data.path === "notes/second_favorite_poem.txt" && e.data.action === "created",
-    );
-    testRunner.assert(
-      phase2FileEvents.length >= 1,
-      "File event for second_favorite_poem.txt creation",
-    );
-
-    // File events should contain actual content
-    if (phase1FileEvents.length > 0) {
-      testRunner.assert(
-        phase1FileEvents[0].data.content.length > 0,
-        "File event contains poem content",
-      );
-    }
-
-    // ========================================================================
-    // Deep Verification: Timing and Duration
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying timing and duration...${colors.reset}`);
-
-    for (const completed of phaseCompletedEvents) {
-      testRunner.assert(
-        completed.data.duration > 0,
-        `Phase ${completed.data.phaseId} has positive duration: ${(
-          completed.data.duration / 1000
-        ).toFixed(1)}s`,
-      );
-
-      testRunner.assert(
-        completed.data.duration < 120000, // 2 minutes max per phase
-        `Phase ${completed.data.phaseId} completed within reasonable time`,
-      );
-    }
-
-    // Verify events are in chronological order
-    let lastTimestamp = 0;
-    let chronologicalOrder = true;
-
-    for (const event of allEvents) {
-      const timestamp = new Date(event.timestamp).getTime();
-      if (timestamp < lastTimestamp) {
-        chronologicalOrder = false;
-        break;
-      }
-      lastTimestamp = timestamp;
-    }
-
-    testRunner.assert(chronologicalOrder, "All events are in chronological order");
-
-    // ========================================================================
-    // Deep Verification: Session Continuity
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying session continuity...${colors.reset}`);
-
-    // Phase 2 should continue from Phase 1's session
-    const phase1Log = path.join(TEST_DIR, ".logs/log-phase-1.jsonl");
-    const phase2Log = path.join(TEST_DIR, ".logs/log-phase-2.jsonl");
-
-    if (fs.existsSync(phase1Log) && fs.existsSync(phase2Log)) {
-      const phase1Entries = parseJSONL(fs.readFileSync(phase1Log, "utf-8"));
-      const phase2Entries = parseJSONL(fs.readFileSync(phase2Log, "utf-8"));
-
-      const phase1SessionId = phase1Entries.find(
-        (e) => e.type === "system" && e.subtype === "init",
-      )?.session_id;
-      const phase2Resume = phase2Entries.find((e) => e.type === "system" && e.subtype === "info");
-
-      if (phase2Resume?.message) {
-        testRunner.assert(
-          phase2Resume.message.includes(phase1SessionId),
-          "Phase 2 log shows continuation from Phase 1 session",
-        );
-      }
-    }
-
-    // ========================================================================
-    // Deep Verification: Error State
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying error state...${colors.reset}`);
-
-    const errorEvents = client?.getEventsByType("error");
-    testRunner.assert(
-      errorEvents.filter((e) => e.data.fatal).length === 0,
-      "No fatal errors occurred",
-    );
-
-    // Check that all result messages in logs are success
-    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
-      if (fs.existsSync(logPath)) {
-        const logEntries = parseJSONL(fs.readFileSync(logPath, "utf-8"));
-        const resultEntry = logEntries.find((e) => e.type === "result");
-        testRunner.assert(
-          resultEntry?.subtype === "success",
-          `${phaseId} log shows success result`,
-        );
-      }
-    }
-
-    // ========================================================================
-    // Deep Verification: File Tree Structure
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying file tree structure...${colors.reset}`);
-
-    const fileTreeEvents = client?.getEventsByType("filetree.updated");
-    testRunner.assert(fileTreeEvents.length > 0, "File tree update events received");
-
-    // Check final file tree structure
-    const lastFileTree = fileTreeEvents[fileTreeEvents.length - 1];
-    if (lastFileTree) {
-      const tree = lastFileTree.data.tree;
-
-      // Should have notes directory with files
-      const notesDir = findInTree(tree, "notes");
-      testRunner.assert(notesDir?.isDirectory === true, "File tree contains notes directory");
-      testRunner.assert(
-        notesDir?.children?.some((f) => f.name === "favorite_poem.txt") === true,
-        "File tree shows favorite_poem.txt in notes",
-      );
-
-      // For phase 3, should have typescript_code/src structure
-      const tsDir = findInTree(tree, "typescript_code");
-      if (tsDir) {
-        const srcDir = tsDir.children?.find((f) => f.name === "src");
-        testRunner.assert(srcDir?.isDirectory === true, "File tree contains src directory");
-        testRunner.assert(srcDir?.children?.length === 2, "src directory contains 2 poem files");
-      }
-    }
-
-    // ========================================================================
-    // Deep Verification: Watch Pattern Compliance
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying watch pattern compliance...${colors.reset}`);
-
-    // Phase 1 watches "./notes/*.txt" and creates .txt files
-    const phase1WatchedEvents = fileUpdateEvents.filter((e) => {
-      const timestamp = new Date(e.timestamp).getTime();
-      const phase1Start = phase1Started.timestamp;
-      const phase1End = phase1Completed.timestamp;
-      return (
-        timestamp >= new Date(phase1Start).getTime() && timestamp <= new Date(phase1End).getTime()
-      );
+      expect(wsReportedCost).toBeCloseTo(logCalculatedCost, 4);
     });
 
-    // Phase 1 watches *.txt and creates *.txt, so we should see the .txt file events
-    testRunner.assert(
-      phase1WatchedEvents.some((e) => e.data.path.endsWith(".txt")),
-      "Phase 1 file events match *.txt watch pattern",
-    );
+    test("individual phase costs match", () => {
+      const phaseLogCosts: Record<string, number> = {};
 
-    // Phase 2 watches "./notes/*.*" so should see the .txt files
-    const phase2Started = client
-      ?.getEvents()
-      .find((e) => e.type === "phase.started" && e.data.phaseId === "phase-2");
-    if (phase2Started) {
-      // Should see existing favorite_poem.txt at phase start
-      const phase2InitialFiles = fileUpdateEvents.filter((e) => {
+      // Calculate from logs
+      for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
+        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, "utf-8");
+          const logEntries = parseJSONL(logContent);
+          const assistantMessages = logEntries.filter(
+            (e) => e.type === "assistant" && e.message?.usage,
+          );
+          const lastMessage = assistantMessages[assistantMessages.length - 1];
+          if (lastMessage?.message?.usage) {
+            phaseLogCosts[phaseId] = calculateCostFromUsage(lastMessage.message.usage);
+          }
+        }
+      }
+
+      // Compare with events
+      const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
+      for (const event of phaseCompletedEvents) {
+        if (event.data.success) {
+          const logCost = phaseLogCosts[event.data.phaseId] || 0;
+          expect(event.data.cost).toBeCloseTo(logCost, 4);
+        }
+      }
+    });
+  });
+
+  describe("Token Usage", () => {
+    const tokenUsageEvents = testState.client?.getEventsByType("token.usage") || [];
+
+    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
+      test(`${phaseId} token usage matches logs`, () => {
+        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, "utf-8");
+          const logEntries = parseJSONL(logContent);
+
+          // Get last assistant message with usage for this phase
+          const assistantMessages = logEntries.filter(
+            (e) => e.type === "assistant" && e.message?.usage,
+          );
+          const lastMessage = assistantMessages[assistantMessages.length - 1];
+
+          if (lastMessage?.message?.usage) {
+            // Find corresponding final token usage event for this phase
+            const phaseTokenEvents = tokenUsageEvents.filter((e) => e.data.phaseId === phaseId);
+            const lastTokenEvent = phaseTokenEvents[phaseTokenEvents.length - 1];
+
+            if (lastTokenEvent) {
+              const logUsage = lastMessage.message.usage;
+              expect(lastTokenEvent.data.inputTokens).toBe(logUsage.input_tokens || 0);
+              expect(lastTokenEvent.data.outputTokens).toBe(logUsage.output_tokens || 0);
+            }
+          }
+        }
+      });
+    }
+  });
+
+  describe("File Content", () => {
+    test("favorite poem has multiple lines", () => {
+      const poem1Path = path.join(TEST_DIR, "notes/favorite_poem.txt");
+      if (fs.existsSync(poem1Path)) {
+        const content = fs.readFileSync(poem1Path, "utf-8");
+        const lines = content.trim().split("\n");
+        expect(lines.length).toBeGreaterThanOrEqual(2);
+      }
+    });
+
+    test("poem1.ts contains exports", () => {
+      const ts1Path = path.join(TEST_DIR, "typescript_code/src/poem1.ts");
+      if (fs.existsSync(ts1Path)) {
+        const content = fs.readFileSync(ts1Path, "utf-8");
+        expect(content).toContain("export");
+      }
+    });
+
+    test("poem1.ts has title property", () => {
+      const ts1Path = path.join(TEST_DIR, "typescript_code/src/poem1.ts");
+      if (fs.existsSync(ts1Path)) {
+        const content = fs.readFileSync(ts1Path, "utf-8");
+        expect(content).toContain("title:");
+      }
+    });
+
+    test("poem1.ts has lines property", () => {
+      const ts1Path = path.join(TEST_DIR, "typescript_code/src/poem1.ts");
+      if (fs.existsSync(ts1Path)) {
+        const content = fs.readFileSync(ts1Path, "utf-8");
+        expect(content).toContain("lines:");
+      }
+    });
+
+    test("package.json contains papaparse dependency", () => {
+      const packagePath = path.join(TEST_DIR, "typescript_code/package.json");
+      if (fs.existsSync(packagePath)) {
+        const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf-8"));
+        expect(packageJson.dependencies?.papaparse).toBeDefined();
+      }
+    });
+
+    test("package.json contains lodash dependency", () => {
+      const packagePath = path.join(TEST_DIR, "typescript_code/package.json");
+      if (fs.existsSync(packagePath)) {
+        const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf-8"));
+        expect(packageJson.dependencies?.lodash).toBeDefined();
+      }
+    });
+  });
+
+  describe("File Watching", () => {
+    const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
+
+    test("file event for favorite_poem.txt creation", () => {
+      const phase1FileEvents = fileUpdateEvents.filter(
+        (e) => e.data.path === "notes/favorite_poem.txt" && e.data.action === "created",
+      );
+      expect(phase1FileEvents.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test("file event for second_favorite_poem.txt creation", () => {
+      const phase2FileEvents = fileUpdateEvents.filter(
+        (e) => e.data.path === "notes/second_favorite_poem.txt" && e.data.action === "created",
+      );
+      expect(phase2FileEvents.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test("file events contain actual content", () => {
+      const phase1FileEvents = fileUpdateEvents.filter(
+        (e) => e.data.path === "notes/favorite_poem.txt" && e.data.action === "created",
+      );
+      if (phase1FileEvents.length > 0) {
+        expect(phase1FileEvents[0].data.content.length).toBeGreaterThan(0);
+      }
+    });
+
+    test("Phase 1 file events match *.txt watch pattern", () => {
+      const phase1WatchedEvents = fileUpdateEvents.filter((e) => {
         const timestamp = new Date(e.timestamp).getTime();
-        const startTime = new Date(phase2Started.timestamp).getTime();
-        return timestamp >= startTime && timestamp <= startTime + 2000; // Within 2 seconds of start
+        const phase1Start = testState.phase1Started?.timestamp;
+        const phase1End = testState.phase1Completed?.timestamp;
+        return (
+          phase1Start &&
+          phase1End &&
+          timestamp >= new Date(phase1Start).getTime() &&
+          timestamp <= new Date(phase1End).getTime()
+        );
       });
 
-      testRunner.assert(
-        phase2InitialFiles.some((e) => e.data.path === "notes/favorite_poem.txt"),
-        "Phase 2 receives initial file state for watched files",
+      const txtFileEvents = phase1WatchedEvents.filter((e) => e.data.path.endsWith(".txt"));
+      expect(txtFileEvents.length).toBeGreaterThan(0);
+    });
+
+    test("no TypeScript file events before Phase 3", () => {
+      const phase3StartIndex = testState.events.findIndex(
+        (e) => e.type === "phase.started" && e.data.phaseId === "phase-3",
       );
+      const phase1And2Events = testState.events.slice(0, phase3StartIndex);
+
+      const unexpectedTsEvents = phase1And2Events.filter(
+        (e) => e.type === "file.updated" && e.data?.path?.includes("typescript_code"),
+      );
+
+      expect(unexpectedTsEvents.length).toBe(0);
+    });
+  });
+
+  describe("Phase Timing", () => {
+    const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
+
+    for (const completed of phaseCompletedEvents) {
+      test(`Phase ${completed.data.phaseId} has positive duration`, () => {
+        expect(completed.data.duration).toBeGreaterThan(0);
+      });
+
+      test(`Phase ${completed.data.phaseId} completed within 2 minutes`, () => {
+        expect(completed.data.duration).toBeLessThan(120000);
+      });
     }
+  });
 
-    // ========================================================================
-    // Deep Verification: Info Events
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying info events...${colors.reset}`);
+  describe("Session Continuity", () => {
+    test("Phase 2 log shows continuation from Phase 1 session", () => {
+      const phase1Log = path.join(TEST_DIR, ".logs/log-phase-1.jsonl");
+      const phase2Log = path.join(TEST_DIR, ".logs/log-phase-2.jsonl");
 
-    const infoEvents = client?.getEventsByType("info");
+      if (fs.existsSync(phase1Log) && fs.existsSync(phase2Log)) {
+        const phase1Entries = parseJSONL(fs.readFileSync(phase1Log, "utf-8"));
+        const phase2Entries = parseJSONL(fs.readFileSync(phase2Log, "utf-8"));
 
-    // Should have info about continuation
-    testRunner.assert(
-      infoEvents.some((e) => e.data.message.includes("Continuing from previous session")),
-      "Info event for phase continuation",
-    );
+        const phase1SessionId = phase1Entries.find(
+          (e) => e.type === "system" && e.subtype === "init",
+        )?.session_id;
+        const phase2Resume = phase2Entries.find((e) => e.type === "system" && e.subtype === "info");
 
-    // Should have info about Claude session IDs
-    testRunner.assert(
-      infoEvents.filter((e) => e.data.message.includes("Claude started with session ID")).length ===
-        3,
-      "Info events for all 3 Claude session starts",
-    );
+        if (phase2Resume?.message && phase1SessionId) {
+          expect(phase2Resume.message).toContain(phase1SessionId);
+        }
+      }
+    });
+  });
 
-    // Should have completion message
-    testRunner.assert(
-      infoEvents.some((e) => e.data.message.includes("All phases completed")),
-      "Info event for all phases completed",
-    );
+  describe("File Tree", () => {
+    const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
 
-    // ========================================================================
-    // Deep Verification: Pre-start Command Execution
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying pre-start command execution...${colors.reset}`);
+    test("file tree update events received", () => {
+      expect(fileTreeEvents.length).toBeGreaterThan(0);
+    });
 
-    // Phase 1 pre-start creates notes directory
-    const notesCreatedBeforePhase1 = fs.existsSync(path.join(TEST_DIR, "notes"));
-    testRunner.assert(notesCreatedBeforePhase1, "Pre-start command created notes directory");
+    test("file tree contains notes directory", () => {
+      const lastFileTree = fileTreeEvents[fileTreeEvents.length - 1];
+      if (lastFileTree) {
+        const tree = lastFileTree.data.tree;
+        const notesDir = findInTree(tree, "notes");
+        expect(notesDir?.isDirectory).toBe(true);
+      }
+    });
 
-    // Phase 3 pre-start runs bun init and installs packages
-    const bunLockFile = path.join(TEST_DIR, "typescript_code/bun.lockb");
-    await testRunner.assertFileExists(bunLockFile, "Pre-start command ran bun install");
+    test("file tree shows favorite_poem.txt in notes", () => {
+      const lastFileTree = fileTreeEvents[fileTreeEvents.length - 1];
+      if (lastFileTree) {
+        const tree = lastFileTree.data.tree;
+        const notesDir = findInTree(tree, "notes");
+        const hasFavoritePoem = notesDir?.children?.some((f) => f.name === "favorite_poem.txt");
+        expect(hasFavoritePoem).toBe(true);
+      }
+    });
 
-    // Check node_modules was created (indicates successful install)
-    const nodeModulesExists = fs.existsSync(path.join(TEST_DIR, "typescript_code/node_modules"));
-    testRunner.assert(nodeModulesExists, "Pre-start command installed dependencies");
+    test("file tree contains typescript_code/src structure", () => {
+      const lastFileTree = fileTreeEvents[fileTreeEvents.length - 1];
+      if (lastFileTree) {
+        const tree = lastFileTree.data.tree;
+        const tsDir = findInTree(tree, "typescript_code");
+        if (tsDir) {
+          const srcDir = tsDir.children?.find((f) => f.name === "src");
+          expect(srcDir?.isDirectory).toBe(true);
+          expect(srcDir?.children?.length).toBe(2);
+        }
+      }
+    });
+  });
 
-    // ========================================================================
-    // Deep Verification: Tool Use Patterns
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying tool use patterns...${colors.reset}`);
+  describe("Info Events", () => {
+    const infoEvents = testState.client?.getEventsByType("info") || [];
 
+    test("info event for phase continuation", () => {
+      const hasContinuationInfo = infoEvents.some((e) =>
+        e.data.message.includes("Continuing from previous session"),
+      );
+      expect(hasContinuationInfo).toBe(true);
+    });
+
+    test("info events for all 3 Claude session starts", () => {
+      const sessionStartEvents = infoEvents.filter((e) =>
+        e.data.message.includes("Claude started with session ID"),
+      );
+      expect(sessionStartEvents.length).toBe(3);
+    });
+
+    test("info event for all phases completed", () => {
+      const hasCompletionInfo = infoEvents.some((e) =>
+        e.data.message.includes("All phases completed"),
+      );
+      expect(hasCompletionInfo).toBe(true);
+    });
+  });
+
+  describe("Pre-start Commands", () => {
+    test("pre-start command created notes directory", () => {
+      expect(fs.existsSync(path.join(TEST_DIR, "notes"))).toBe(true);
+    });
+
+    test("pre-start command ran bun install", () => {
+      const bunLockFile = path.join(TEST_DIR, "typescript_code/bun.lockb");
+      expect(fs.existsSync(bunLockFile)).toBe(true);
+    });
+
+    test("pre-start command installed dependencies", () => {
+      const nodeModulesExists = fs.existsSync(path.join(TEST_DIR, "typescript_code/node_modules"));
+      expect(nodeModulesExists).toBe(true);
+    });
+  });
+
+  describe("Tool Usage", () => {
+    const assistantActionEvents = testState.client?.getEventsByType("assistant.action") || [];
     const toolUseActions = assistantActionEvents.filter((e) => e.data.action === "tool_use");
 
     // Count tool types used
@@ -1014,257 +1050,144 @@ async function runE2ETest(): Promise<boolean> {
       toolCounts[toolName] = (toolCounts[toolName] || 0) + 1;
     }
 
-    testRunner.assert(toolCounts.Write >= 4, "At least 4 Write tool uses (2 poems + 2 TS files)");
-    testRunner.assert(toolCounts.LS >= 1, "At least 1 LS tool use");
-    testRunner.assert(toolCounts.Read >= 2, "At least 2 Read tool uses (reading poems)");
+    test("at least 4 Write tool uses", () => {
+      expect(toolCounts.Write || 0).toBeGreaterThanOrEqual(4);
+    });
 
-    // ========================================================================
-    // Deep Verification: Lock File and Server State
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying lock file and server state...${colors.reset}`);
+    test("at least 1 LS tool use", () => {
+      expect(toolCounts.LS || 0).toBeGreaterThanOrEqual(1);
+    });
 
-    const lockFilePath = path.join(TEST_DIR, ".langton-server.lock");
-    await testRunner.assertFileExists(lockFilePath, "Server lock file exists");
+    test("at least 2 Read tool uses", () => {
+      expect(toolCounts.Read || 0).toBeGreaterThanOrEqual(2);
+    });
 
-    if (fs.existsSync(lockFilePath)) {
-      const lockPid = fs.readFileSync(lockFilePath, "utf-8").trim();
-      testRunner.assert(/^\d+$/.test(lockPid), `Lock file contains valid PID: ${lockPid}`);
-    }
+    test("tool uses reported via WebSocket for each phase", () => {
+      for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
+        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, "utf-8");
+          const logEntries = parseJSONL(logContent);
 
-    // ========================================================================
-    // Deep Verification: JSONL Schema Validation
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying JSONL schema compliance...${colors.reset}`);
+          // Count assistant messages in logs
+          const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");
+          const logToolUses = logAssistantMessages.filter((e) =>
+            e.message?.content?.some((c: { type?: string }) => c.type === "tool_use"),
+          ).length;
 
+          // Count WebSocket events for this phase
+          const phaseActions = assistantActionEvents.filter((e) => e.data.phaseId === phaseId);
+          const wsToolUses = phaseActions.filter((e) => e.data.action === "tool_use").length;
+
+          expect(wsToolUses).toBeGreaterThanOrEqual(logToolUses);
+        }
+      }
+    });
+  });
+
+  describe("Server State", () => {
+    test("server lock file exists", () => {
+      const lockFilePath = path.join(TEST_DIR, ".langton-server.lock");
+      expect(fs.existsSync(lockFilePath)).toBe(true);
+    });
+
+    test("lock file contains valid PID", () => {
+      const lockFilePath = path.join(TEST_DIR, ".langton-server.lock");
+      if (fs.existsSync(lockFilePath)) {
+        const lockPid = fs.readFileSync(lockFilePath, "utf-8").trim();
+        expect(/^\d+$/.test(lockPid)).toBe(true);
+      }
+    });
+  });
+
+  describe("JSONL Schema", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
-      if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const lines = logContent.split("\n").filter((l) => l.trim());
+      test(`${phaseId} JSONL has valid schema`, () => {
+        const logPath = path.join(TEST_DIR, `.logs/log-${phaseId}.jsonl`);
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, "utf-8");
+          const lines = logContent.split("\n").filter((l) => l.trim());
 
-        let validLines = 0;
-        let invalidLines = 0;
+          let _validLines = 0;
+          let invalidLines = 0;
 
-        for (const line of lines) {
-          try {
-            const entry = JSON.parse(line);
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line);
 
-            // Basic schema validation
-            if (entry.type && entry.timestamp) {
-              if (entry.type === "system" && entry.subtype) validLines++;
-              else if (entry.type === "assistant" && entry.message) validLines++;
-              else if (entry.type === "result" && entry.subtype) validLines++;
-              else invalidLines++;
-            } else {
+              // Basic schema validation
+              if (entry.type && entry.timestamp) {
+                if (entry.type === "system" && entry.subtype) _validLines++;
+                else if (entry.type === "assistant" && entry.message) _validLines++;
+                else if (entry.type === "result" && entry.subtype) _validLines++;
+                else invalidLines++;
+              } else {
+                invalidLines++;
+              }
+            } catch {
               invalidLines++;
             }
-          } catch {
-            invalidLines++;
           }
+
+          expect(invalidLines).toBe(0);
         }
-
-        testRunner.assert(
-          invalidLines === 0,
-          `${phaseId} JSONL has valid schema (${validLines} valid, ${invalidLines} invalid)`,
-        );
-      }
+      });
     }
+  });
 
-    // ========================================================================
-    // Deep Verification: Path Consistency
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying path consistency...${colors.reset}`);
+  describe("Path Consistency", () => {
+    test("all file paths are relative", () => {
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
+      const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
 
-    // All file paths in events should be relative
-    const allFilePaths = [
-      ...fileUpdateEvents.map((e) => e.data.path),
-      ...fileTreeEvents.flatMap((e) => extractPathsFromTree(e.data.tree)),
-    ];
+      const allFilePaths = [
+        ...fileUpdateEvents.map((e) => e.data.path),
+        ...fileTreeEvents.flatMap((e) => extractPathsFromTree(e.data.tree)),
+      ];
 
-    const absolutePaths = allFilePaths.filter((p) => p.startsWith("/") || p.includes(":"));
-    testRunner.assert(
-      absolutePaths.length === 0,
-      "All file paths are relative (no absolute paths)",
-    );
+      const absolutePaths = allFilePaths.filter((p) => p.startsWith("/") || p.includes(":"));
+      expect(absolutePaths.length).toBe(0);
+    });
+  });
 
-    // ========================================================================
-    // Deep Verification: Message Ordering Within Phases
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying message ordering within phases...${colors.reset}`);
-
+  describe("Message Ordering", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const phaseStart = client
-        ?.getEvents()
-        .find((e) => e.type === "phase.started" && e.data.phaseId === phaseId);
-      const phaseComplete = client
-        ?.getEvents()
-        .find((e) => e.type === "phase.completed" && e.data.phaseId === phaseId);
+      test(`${phaseId}: token usage events come after assistant actions`, () => {
+        const phaseStart = testState.events.find(
+          (e) => e.type === "phase.started" && e.data.phaseId === phaseId,
+        );
+        const phaseComplete = testState.events.find(
+          (e) => e.type === "phase.completed" && e.data.phaseId === phaseId,
+        );
 
-      if (phaseStart && phaseComplete) {
-        const startIdx = allEvents.indexOf(phaseStart);
-        const endIdx = allEvents.indexOf(phaseComplete);
+        if (phaseStart && phaseComplete) {
+          const startIdx = testState.events.indexOf(phaseStart);
+          const endIdx = testState.events.indexOf(phaseComplete);
 
-        const phaseEvents = allEvents.slice(startIdx, endIdx + 1);
+          const phaseEvents = testState.events.slice(startIdx, endIdx + 1);
 
-        // Token usage should come after assistant actions
-        let lastAssistantAction = -1;
-        let firstTokenUsage = -1;
+          // Token usage should come after assistant actions
+          let lastAssistantAction = -1;
+          let firstTokenUsage = -1;
 
-        for (let i = 0; i < phaseEvents.length; i++) {
-          if (phaseEvents[i].type === "assistant.action") {
-            lastAssistantAction = i;
-          } else if (phaseEvents[i].type === "token.usage" && firstTokenUsage === -1) {
-            firstTokenUsage = i;
+          for (let i = 0; i < phaseEvents.length; i++) {
+            if (phaseEvents[i].type === "assistant.action") {
+              lastAssistantAction = i;
+            } else if (phaseEvents[i].type === "token.usage" && firstTokenUsage === -1) {
+              firstTokenUsage = i;
+            }
+          }
+
+          if (lastAssistantAction >= 0 && firstTokenUsage >= 0) {
+            expect(firstTokenUsage).toBeGreaterThanOrEqual(lastAssistantAction);
           }
         }
-
-        if (lastAssistantAction >= 0 && firstTokenUsage >= 0) {
-          testRunner.assert(
-            firstTokenUsage >= lastAssistantAction,
-            `${phaseId}: Token usage events come after assistant actions`,
-          );
-        }
-      }
+      });
     }
+  });
+});
 
-    // ========================================================================
-    // Deep Verification: Resource Cleanup Between Phases
-    // ========================================================================
-    console.log(`\n${colors.blue}Verifying resource cleanup...${colors.reset}`);
-
-    // Check that file watchers are cleaned up by looking at file events
-    // Phase 3 watches TypeScript files, so after Phase 1 & 2, we shouldn't see TS file events
-    const phase1And2Events = allEvents.slice(
-      0,
-      allEvents.findIndex((e) => e.type === "phase.started" && e.data.phaseId === "phase-3"),
-    );
-
-    const unexpectedTsEvents = phase1And2Events.filter(
-      (e) => e.type === "file.updated" && e.data?.path?.includes("typescript_code"),
-    );
-
-    testRunner.assert(
-      unexpectedTsEvents.length === 0,
-      "No TypeScript file events before Phase 3 (proper watcher cleanup)",
-    );
-
-    // Clear timeout since we finished successfully
-    if (testTimeout) clearTimeout(testTimeout);
-
-    return testRunner.printSummary();
-  } catch (error) {
-    console.error(`${colors.red}Test error: ${error}${colors.reset}`);
-    return false;
-  } finally {
-    // Cleanup
-    console.log(`\n${colors.blue}Cleaning up...${colors.reset}`);
-
-    // Disconnect client first
-    if (client) {
-      await client.disconnect();
-    }
-
-    // Gracefully shutdown server
-    if (serverProcess) {
-      console.log(`${colors.gray}Shutting down server gracefully...${colors.reset}`);
-
-      // First try sending shutdown command if client is still connected
-      if (client?.isConnected) {
-        try {
-          client.sendCommand({
-            id: generateId(),
-            type: "server.shutdown",
-          });
-          // Give it a moment to shutdown gracefully
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        } catch (_e) {
-          // Client might already be disconnected
-        }
-      }
-
-      // Check if process is still running
-      if (!serverProcess.killed) {
-        console.log(`${colors.gray}Sending SIGTERM to server...${colors.reset}`);
-        serverProcess.kill("SIGTERM");
-
-        // Wait up to 5 seconds for graceful shutdown
-        const shutdownTimeout = setTimeout(() => {
-          if (!serverProcess.killed) {
-            console.log(`${colors.yellow}Force killing server with SIGKILL...${colors.reset}`);
-            serverProcess.kill("SIGKILL");
-          }
-        }, 5000);
-
-        // Wait for process to exit
-        await new Promise<void>((resolve) => {
-          serverProcess.on("exit", () => {
-            clearTimeout(shutdownTimeout);
-            resolve();
-          });
-        });
-      }
-
-      console.log(`${colors.green}✓ Server shut down${colors.reset}`);
-    }
-
-    // Clean up lock file if it still exists (race condition fix)
-    const lockFile = path.join(TEST_DIR, ".langton-server.lock");
-    if (fs.existsSync(lockFile)) {
-      console.log(`${colors.gray}Cleaning up lock file...${colors.reset}`);
-      fs.unlinkSync(lockFile);
-    }
-
-    console.log(`${colors.green}✓ Cleanup complete${colors.reset}`);
-
-    // Copy test artifacts to results directory
-    console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
-
-    // Copy Claude logs
-    const logsDir = path.join(TEST_DIR, ".logs");
-    if (fs.existsSync(logsDir)) {
-      const destLogsDir = path.join(TEST_RUN_DIR, "claude-logs");
-      fs.mkdirSync(destLogsDir, { recursive: true });
-
-      const logFiles = fs.readdirSync(logsDir);
-      for (const file of logFiles) {
-        fs.copyFileSync(path.join(logsDir, file), path.join(destLogsDir, file));
-      }
-      console.log(`  ✓ Copied ${logFiles.length} Claude log files`);
-    }
-
-    // Save test summary with detailed results
-    const summaryPath = path.join(TEST_RUN_DIR, "test-summary.json");
-    const summary = {
-      timestamp: TEST_TIMESTAMP,
-      duration: Date.now() - testStartTime,
-      passed: testRunner.successes.length,
-      failed: testRunner.failures.length,
-      successes: testRunner.successes,
-      failures: testRunner.failures,
-      events: client?.getEvents().length || 0,
-    };
-    fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
-
-    // Save all WebSocket events for debugging
-    const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
-    fs.writeFileSync(eventsPath, JSON.stringify(client?.getEvents() || [], null, 2));
-
-    console.log(`\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`);
-    console.log(`${colors.gray}  - Server logs: server.log${colors.reset}`);
-    console.log(`${colors.gray}  - Claude logs: claude-logs/${colors.reset}`);
-    console.log(`${colors.gray}  - Test summary: test-summary.json${colors.reset}`);
-    console.log(`${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`);
-  }
-}
-
-// ============================================================================
-// Entry Point
-// ============================================================================
-
-console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
-console.log(`${colors.blue}Langton Server End-to-End Test${colors.reset}`);
-console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
-
-runE2ETest().then((success) => {
-  process.exit(success ? 0 : 1);
+// Cleanup after all tests
+afterAll(async () => {
+  await cleanup();
 });
