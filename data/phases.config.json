@@ -7,7 +7,7 @@
     "continueFromPrevious": false,
     "preStart": "mkdir -p typescript_code && mkdir -p typescript_code/src && mkdir -p typescript_code/src/schema && mkdir -p typescript_code/src/loaders && mkdir -p typescript_code/src/validations && mkdir -p typescript_code/src/quick-and-dirty && cd typescript_code && bun init -y && bun add papaparse csv-parse exceljs xlsx ajv parquet-wasm apache-arrow date-fns mathjs lodash @turf/turf && bun add -d @types/papaparse @types/lodash @types/geojson && cd ..",
     "watch": "./notes/*.md",
-    "description": "Gather information and create a detailed plan for the project"
+    "description": "Build up observations and questions"
   },
   {
     "id": "phase-2",
@@ -16,7 +16,7 @@
     "model": "sonnet",
     "continueFromPrevious": true,
     "watch": "./typescript_code/src/**/*.ts",
-    "description": "Create detailed system architecture and design documents"
+    "description": "Initial schema design"
   },
   {
     "id": "phase-2a",
@@ -25,7 +25,7 @@
     "model": "sonnet",
     "continueFromPrevious": true,
     "watch": "./typescript_code/src/**/*.ts",
-    "description": "Validate the schema and make improvements"
+    "description": "Validation of schema and discovering edge cases"
   },
   {
     "id": "phase-2b",
@@ -34,7 +34,7 @@
     "model": "sonnet",
     "continueFromPrevious": true,
     "watch": "./typescript_code/src/**/*.ts",
-    "description": "Annotate the schema with additional details"
+    "description": "Annotate schema with additional information"
   },
   {
     "id": "phase-3",

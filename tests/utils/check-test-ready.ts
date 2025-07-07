@@ -31,7 +31,7 @@ checks.push({
 });
 
 // Check 2: Test config exists
-const testConfigExists = fs.existsSync("tests/test-phases.config.json");
+const testConfigExists = fs.existsSync("tests/config/test-phases.config.json");
 checks.push({
   name: "Test configuration",
   pass: testConfigExists,

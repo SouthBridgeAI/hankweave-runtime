@@ -39,7 +39,7 @@ console.log(`${colors.green}✓ In correct directory${colors.reset}`);
 
 // Check test configuration
 console.log(`\n${colors.blue}Test Configuration:${colors.reset}`);
-const testConfigPath = path.join(cwd, "tests/test-phases.config.json");
+const testConfigPath = path.join(cwd, "tests/config/test-phases.config.json");
 if (fs.existsSync(testConfigPath)) {
   console.log(`${colors.green}✓ Test config exists${colors.reset}: ${testConfigPath}`);
 

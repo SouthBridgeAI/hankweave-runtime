@@ -2,7 +2,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { generateId } from "../server/utils.js";
+import { generateId } from "../../server/utils.js";
 
 // Install rimraf if needed: bun add -d rimraf @types/rimraf
 // For now, use a simple recursive delete
@@ -12,36 +12,16 @@ async function rimrafSimple(dirPath: string): Promise<void> {
   }
 }
 
-// Helper function to copy directory recursively
-function copyDirectoryRecursive(src: string, dest: string): void {
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dest, { recursive: true });
-  }
-  
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    
-    if (entry.isDirectory()) {
-      copyDirectoryRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
-}
-
 // Test configuration
 const TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
 const SERVER_PORT = 7777;
-const PHASES_CONFIG = path.join(process.cwd(), "tests/test-phases.config.json");
+const PHASES_CONFIG = path.join(process.cwd(), "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5); // YYYY-MM-DDTHH-mm-ss
-const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}");
+const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
 // Colors for output
 const colors = {
@@ -63,7 +43,7 @@ import type {
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-} from "../server/types.js";
+} from "../../server/types.js";
 
 // Re-export for convenience
 // type AnyServerEvent = ServerEvent;
@@ -83,7 +63,7 @@ class TestWSClient {
         reject(new Error("WebSocket connection timeout"));
       }, 10000);
 
-      this.ws = new WebSocket("ws://localhost:" + port);
+      this.ws = new WebSocket(`ws://localhost:${port}`);
 
       this.ws.onopen = () => {
         clearTimeout(timeout);
@@ -241,7 +221,7 @@ function startServer(): ChildProcess {
   const serverProcess = spawn(
     "bun",
     [
-      "../../server/index.ts",
+      path.join(process.cwd(), "server/index.ts"),
       `--config=${PHASES_CONFIG}`,
       // Add a unique identifier for test processes
       "--test-mode=e2e-happy-path",
@@ -275,7 +255,9 @@ function startServer(): ChildProcess {
   });
 
   serverProcess.on("exit", (code, signal) => {
-    serverLogStream.write(`[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`);
+    serverLogStream.write(
+      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
+    );
     serverLogStream.end();
   });
 
@@ -1233,51 +1215,45 @@ async function runE2ETest(): Promise<boolean> {
     }
 
     console.log(`${colors.green}✓ Cleanup complete${colors.reset}`);
-    
+
     // Copy test artifacts to results directory
-    console.log(`\n${colors.blue}Preserving test artifacts...${colors.reset}`);
-    
-    // Copy logs
+    console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
+
+    // Copy Claude logs
     const logsDir = path.join(TEST_DIR, ".logs");
     if (fs.existsSync(logsDir)) {
       const destLogsDir = path.join(TEST_RUN_DIR, "claude-logs");
       fs.mkdirSync(destLogsDir, { recursive: true });
-      
+
       const logFiles = fs.readdirSync(logsDir);
       for (const file of logFiles) {
         fs.copyFileSync(path.join(logsDir, file), path.join(destLogsDir, file));
       }
       console.log(`  ✓ Copied ${logFiles.length} Claude log files`);
     }
-    
-    // Copy generated files
-    const artifactDirs = ["notes", "typescript_code"];
-    for (const dir of artifactDirs) {
-      const srcDir = path.join(TEST_DIR, dir);
-      if (fs.existsSync(srcDir)) {
-        const destDir = path.join(TEST_RUN_DIR, dir);
-        copyDirectoryRecursive(srcDir, destDir);
-        console.log(`  ✓ Copied ${dir} directory`);
-      }
-    }
-    
-    // Save test summary
+
+    // Save test summary with detailed results
     const summaryPath = path.join(TEST_RUN_DIR, "test-summary.json");
     const summary = {
       timestamp: TEST_TIMESTAMP,
       duration: Date.now() - testStartTime,
       passed: testRunner.successes.length,
       failed: testRunner.failures.length,
+      successes: testRunner.successes,
       failures: testRunner.failures,
       events: client?.getEvents().length || 0,
     };
     fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
-    
+
+    // Save all WebSocket events for debugging
+    const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
+    fs.writeFileSync(eventsPath, JSON.stringify(client?.getEvents() || [], null, 2));
+
     console.log(`\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`);
     console.log(`${colors.gray}  - Server logs: server.log${colors.reset}`);
     console.log(`${colors.gray}  - Claude logs: claude-logs/${colors.reset}`);
-    console.log(`${colors.gray}  - Generated files: notes/, typescript_code/${colors.reset}`);
     console.log(`${colors.gray}  - Test summary: test-summary.json${colors.reset}`);
+    console.log(`${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`);
   }
 }
 
