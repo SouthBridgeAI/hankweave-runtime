@@ -104,8 +104,10 @@ Phases are configured via JSON with the following schema:
 interface PhaseConfig {
   id: string;                    // Unique identifier
   name: string;                  // Display name
-  promptFile?: string;           // Path to prompt file
+  promptFile?: string | string[]; // Path(s) to prompt file(s)
   promptText?: string;           // Inline prompt text
+  appendSystemPromptFile?: string | string[]; // Path(s) to system prompt file(s)
+  appendSystemPromptText?: string; // Inline system prompt text
   model: string;                 // Claude model to use
   continueFromPrevious?: boolean; // Continue from previous phase
   preStart?: string;             // Shell command to run before phase
@@ -121,6 +123,7 @@ Example configuration:
     "id": "phase-1",
     "name": "Initial Setup",
     "promptFile": "./prompts/setup.md",
+    "appendSystemPromptFile": "./prompts/system-instructions.md",
     "model": "claude-3-opus-20240229",
     "preStart": "mkdir -p output",
     "watch": "./output/**/*.ts"
@@ -128,12 +131,21 @@ Example configuration:
   {
     "id": "phase-2",
     "name": "Implementation",
-    "promptText": "Continue implementing the features...",
+    "promptFile": ["./prompts/context.md", "./prompts/task.md"],
+    "appendSystemPromptFile": ["./prompts/coding-standards.md", "./prompts/security-rules.md"],
     "model": "claude-3-sonnet-20240229",
     "continueFromPrevious": true
   }
 ]
 ```
+
+### Multiple File Support
+
+Both `promptFile` and `appendSystemPromptFile` support arrays of file paths. When multiple files are provided:
+- Files are read in the order specified
+- Contents are concatenated with double newlines (`\n\n`) between them
+- All paths are resolved relative to the configuration file location
+- Template variables like `<%PROJECT_DIR%>` are replaced in all files
 
 ## WebSocket Protocol
 

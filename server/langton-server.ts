@@ -509,10 +509,10 @@ export class LangtonServer extends EventEmitter {
       try {
         if (phase.appendSystemPromptFile) {
           // Handle array of files
-          const systemPromptFiles = Array.isArray(phase.appendSystemPromptFile) 
-            ? phase.appendSystemPromptFile 
+          const systemPromptFiles = Array.isArray(phase.appendSystemPromptFile)
+            ? phase.appendSystemPromptFile
             : [phase.appendSystemPromptFile];
-          
+
           const systemPromptParts: string[] = [];
           for (const file of systemPromptFiles) {
             systemPromptParts.push(fs.readFileSync(file, "utf-8"));
@@ -580,10 +580,8 @@ export class LangtonServer extends EventEmitter {
 
       if (phase.promptFile) {
         // Handle array of files
-        const promptFiles = Array.isArray(phase.promptFile) 
-          ? phase.promptFile 
-          : [phase.promptFile];
-        
+        const promptFiles = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+
         const promptParts: string[] = [];
         for (const file of promptFiles) {
           promptParts.push(fs.readFileSync(file, "utf-8"));

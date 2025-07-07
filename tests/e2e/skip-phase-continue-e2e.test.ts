@@ -24,20 +24,11 @@ const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7778");
 
 // Generate timestamp for this test run
-const TEST_TIMESTAMP = new Date()
-  .toISOString()
-  .replace(/[:.]/g, "-")
-  .slice(0, -5);
-const TEST_RUN_DIR = path.join(
-  TEST_RESULTS_DIR,
-  `skip-continue-${TEST_TIMESTAMP}`
-);
+const TEST_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `skip-continue-${TEST_TIMESTAMP}`);
 
 // Create a custom phases config for this test
-const PHASES_CONFIG = path.join(
-  TEST_DIR,
-  "test-phases-skip-continue.config.json"
-);
+const PHASES_CONFIG = path.join(TEST_DIR, "test-phases-skip-continue.config.json");
 const TEST_PHASES = [
   {
     id: "phase-1",
@@ -102,9 +93,7 @@ class TestWSClient {
       this.ws.onopen = () => {
         clearTimeout(timeout);
         this.connected = true;
-        console.log(
-          `${colors.green}✓ Connected to WebSocket server${colors.reset}`
-        );
+        console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
         resolve();
       };
 
@@ -136,10 +125,7 @@ class TestWSClient {
     });
   }
 
-  async waitForEvent(
-    type: string,
-    timeout: number = 30000
-  ): Promise<ServerEvent> {
+  async waitForEvent(type: string, timeout: number = 30000): Promise<ServerEvent> {
     // Check if we already have this event
     const existing = this.events.find((e) => e.type === type);
     if (existing) return existing;
@@ -162,17 +148,12 @@ class TestWSClient {
     });
   }
 
-  async waitForPhaseStart(
-    phaseId: string,
-    timeout: number = 10000
-  ): Promise<PhaseStartedEvent> {
+  async waitForPhaseStart(phaseId: string, timeout: number = 10000): Promise<PhaseStartedEvent> {
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeout) {
       const started = this.events.find(
-        (e) =>
-          e.type === "phase.started" &&
-          (e as PhaseStartedEvent).data?.phaseId === phaseId
+        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === phaseId,
       ) as PhaseStartedEvent | undefined;
       if (started) return started;
 
@@ -184,15 +165,13 @@ class TestWSClient {
 
   async waitForPhaseCompletion(
     phaseId: string,
-    timeout: number = 10000
+    timeout: number = 10000,
   ): Promise<PhaseCompletedEvent> {
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeout) {
       const completed = this.events.find(
-        (e) =>
-          e.type === "phase.completed" &&
-          (e as PhaseCompletedEvent).data?.phaseId === phaseId
+        (e) => e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
       ) as PhaseCompletedEvent | undefined;
       if (completed) return completed;
 
@@ -232,9 +211,7 @@ async function rimrafSimple(dirPath: string): Promise<void> {
 }
 
 async function setupTestDirectory(): Promise<void> {
-  console.log(
-    `${colors.blue}Setting up test directory: ${TEST_DIR}${colors.reset}`
-  );
+  console.log(`${colors.blue}Setting up test directory: ${TEST_DIR}${colors.reset}`);
 
   if (!fs.existsSync(TEST_DIR)) {
     fs.mkdirSync(TEST_DIR, { recursive: true });
@@ -248,9 +225,7 @@ async function setupTestDirectory(): Promise<void> {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
   }
 
-  console.log(
-    `${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`
-  );
+  console.log(`${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`);
 
   // Clean up previous test artifacts
   const artifactsToClean = [
@@ -278,9 +253,7 @@ async function setupTestDirectory(): Promise<void> {
 
   // Write custom phases config
   fs.writeFileSync(PHASES_CONFIG, JSON.stringify(TEST_PHASES, null, 2));
-  console.log(
-    `${colors.yellow}Created custom phases config in test dir${colors.reset}`
-  );
+  console.log(`${colors.yellow}Created custom phases config in test dir${colors.reset}`);
 }
 
 function startServer(): ChildProcess {
@@ -304,7 +277,7 @@ function startServer(): ChildProcess {
         ...process.env,
         LANGTON_TEST_RUN: "true",
       },
-    }
+    },
   );
 
   serverProcess.stdout?.on("data", (data) => {
@@ -314,9 +287,7 @@ function startServer(): ChildProcess {
 
   serverProcess.stderr?.on("data", (data) => {
     const message = data.toString();
-    console.error(
-      `${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`
-    );
+    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
   });
 
@@ -328,7 +299,7 @@ function startServer(): ChildProcess {
 
   serverProcess.on("exit", (code, signal) => {
     serverLogStream.write(
-      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`
+      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
     );
     serverLogStream.end();
   });
@@ -377,21 +348,14 @@ async function runSkipContinueTest(): Promise<void> {
   await testState.client.connect();
 
   // Wait for initial events
-  console.log(
-    `${colors.blue}Waiting for server initialization...${colors.reset}`
-  );
+  console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
   await testState.client.waitForEvent("server.ready");
   await testState.client.waitForEvent("state.snapshot");
 
-  console.log(
-    `${colors.blue}Testing phase skip and continue...${colors.reset}`
-  );
+  console.log(`${colors.blue}Testing phase skip and continue...${colors.reset}`);
 
   // Phase 1 should auto-start
-  testState.phase1Started = await testState.client.waitForPhaseStart(
-    "phase-1",
-    10000
-  );
+  testState.phase1Started = await testState.client.waitForPhaseStart("phase-1", 10000);
   console.log(`${colors.green}✓ Phase 1 started${colors.reset}`);
 
   // Wait for some assistant actions to ensure phase is running
@@ -405,37 +369,23 @@ async function runSkipContinueTest(): Promise<void> {
   } as SkipPhaseCommand);
 
   // Wait for phase 1 to complete (should be marked as failed)
-  testState.phase1Completed = await testState.client.waitForPhaseCompletion(
-    "phase-1",
-    10000
-  );
+  testState.phase1Completed = await testState.client.waitForPhaseCompletion("phase-1", 10000);
   console.log(`${colors.green}✓ Phase 1 completed (skipped)${colors.reset}`);
 
   // Wait a bit for the server to process the skip
-  console.log(
-    `${colors.gray}Waiting for server to process skip...${colors.reset}`
-  );
+  console.log(`${colors.gray}Waiting for server to process skip...${colors.reset}`);
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
   // Phase 2 should auto-start after skip
-  testState.phase2Started = await testState.client.waitForPhaseStart(
-    "phase-2",
-    20000
-  );
+  testState.phase2Started = await testState.client.waitForPhaseStart("phase-2", 20000);
   console.log(`${colors.green}✓ Phase 2 started automatically${colors.reset}`);
 
   // Let phase 2 complete normally
-  testState.phase2Completed = await testState.client.waitForPhaseCompletion(
-    "phase-2",
-    60000
-  );
+  testState.phase2Completed = await testState.client.waitForPhaseCompletion("phase-2", 60000);
   console.log(`${colors.green}✓ Phase 2 completed${colors.reset}`);
 
   // Phase 3 should auto-start
-  testState.phase3Started = await testState.client.waitForPhaseStart(
-    "phase-3",
-    10000
-  );
+  testState.phase3Started = await testState.client.waitForPhaseStart("phase-3", 10000);
   console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
 
   // Skip phase 3 as well to test multiple skips
@@ -446,10 +396,7 @@ async function runSkipContinueTest(): Promise<void> {
     type: "phase.skip",
   } as SkipPhaseCommand);
 
-  testState.phase3Completed = await testState.client.waitForPhaseCompletion(
-    "phase-3",
-    10000
-  );
+  testState.phase3Completed = await testState.client.waitForPhaseCompletion("phase-3", 10000);
   console.log(`${colors.green}✓ Phase 3 completed (skipped)${colors.reset}`);
 
   // Give a moment for final events
@@ -517,16 +464,12 @@ async function cleanup(): Promise<void> {
   const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
   fs.writeFileSync(eventsPath, JSON.stringify(testState.events || [], null, 2));
 
-  console.log(
-    `\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`
-  );
+  console.log(`\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`);
 }
 
 // Run setup before tests
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
-console.log(
-  `${colors.blue}Langton Server Skip Phase and Continue Test${colors.reset}`
-);
+console.log(`${colors.blue}Langton Server Skip Phase and Continue Test${colors.reset}`);
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
 await runSkipContinueTest();
@@ -540,12 +483,8 @@ describe("Skip Phase and Continue E2E Test", () => {
     });
 
     test("Phase 2 started after Phase 1 skip", () => {
-      const phase1CompleteTime = new Date(
-        testState.phase1Completed!.timestamp
-      ).getTime();
-      const phase2StartTime = new Date(
-        testState.phase2Started!.timestamp
-      ).getTime();
+      const phase1CompleteTime = new Date(testState.phase1Completed?.timestamp || 0).getTime();
+      const phase2StartTime = new Date(testState.phase2Started?.timestamp || 0).getTime();
 
       // Phase 2 should start within 5 seconds of Phase 1 completion
       expect(phase2StartTime - phase1CompleteTime).toBeLessThan(5000);
@@ -569,17 +508,14 @@ describe("Skip Phase and Continue E2E Test", () => {
 
   describe("Server State", () => {
     test("All phases were attempted", () => {
-      const phaseStartEvents =
-        testState.client?.getEventsByType("phase.started") || [];
+      const phaseStartEvents = testState.client?.getEventsByType("phase.started") || [];
       expect(phaseStartEvents.length).toBe(3);
     });
 
     test("Server shutdown after all phases", () => {
       const infoEvents = testState.client?.getEventsByType("info") || [];
       const shutdownInfo = infoEvents.find(
-        (e) =>
-          (e as InfoEvent).data?.message?.includes("All phases completed") ||
-          false
+        (e) => (e as InfoEvent).data?.message?.includes("All phases completed") || false,
       );
       expect(shutdownInfo).toBeDefined();
     });
@@ -587,15 +523,13 @@ describe("Skip Phase and Continue E2E Test", () => {
     test("Completed phases list shows only successful phase", () => {
       const finalStateSnapshot = [...testState.events]
         .reverse()
-        .find((e) => e.type === "state.snapshot") as
-        | StateSnapshotEvent
-        | undefined;
+        .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
 
       // All 3 phases should be in completed phases (including skipped ones)
       expect(finalStateSnapshot?.data?.completedPhases?.length).toBe(3);
       // Check that phase 2 was successful
       const phase2Completed = finalStateSnapshot?.data?.completedPhases?.find(
-        (p) => p.phaseId === "phase-2"
+        (p) => p.phaseId === "phase-2",
       );
       expect(phase2Completed?.success).toBe(true);
     });
@@ -606,9 +540,7 @@ describe("Skip Phase and Continue E2E Test", () => {
       const phase1Actions =
         testState.client
           ?.getEventsByType("assistant.action")
-          .filter(
-            (e) => (e as AssistantActionEvent).data?.phaseId === "phase-1"
-          ) || [];
+          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-1") || [];
 
       // Might not have actions if skipped very quickly
       expect(phase1Actions.length).toBeGreaterThanOrEqual(0);
@@ -618,9 +550,7 @@ describe("Skip Phase and Continue E2E Test", () => {
       const phase2Actions =
         testState.client
           ?.getEventsByType("assistant.action")
-          .filter(
-            (e) => (e as AssistantActionEvent).data?.phaseId === "phase-2"
-          ) || [];
+          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-2") || [];
 
       // Should have at least some actions for a complete phase
       expect(phase2Actions.length).toBeGreaterThan(0);
@@ -630,9 +560,7 @@ describe("Skip Phase and Continue E2E Test", () => {
       const phase3Actions =
         testState.client
           ?.getEventsByType("assistant.action")
-          .filter(
-            (e) => (e as AssistantActionEvent).data?.phaseId === "phase-3"
-          ) || [];
+          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-3") || [];
 
       expect(phase3Actions.length).toBeGreaterThanOrEqual(0);
     });
@@ -640,15 +568,16 @@ describe("Skip Phase and Continue E2E Test", () => {
 
   describe("Token Usage", () => {
     test("Skipped phases have token usage events", () => {
-      const tokenEvents =
-        testState.client?.getEventsByType("token.usage") || [];
+      const tokenEvents = testState.client?.getEventsByType("token.usage") || [];
 
-      const phase1Tokens = tokenEvents.filter(
-        (e) => (e as any).data?.phaseId === "phase-1"
-      );
-      const phase3Tokens = tokenEvents.filter(
-        (e) => (e as any).data?.phaseId === "phase-3"
-      );
+      const phase1Tokens = tokenEvents.filter((e) => {
+        const tokenEvent = e as TokenUsageEvent;
+        return tokenEvent.data?.phaseId === "phase-1";
+      });
+      const phase3Tokens = tokenEvents.filter((e) => {
+        const tokenEvent = e as TokenUsageEvent;
+        return tokenEvent.data?.phaseId === "phase-3";
+      });
 
       // Skipped phases might not have token usage events if killed quickly
       expect(phase1Tokens.length).toBeGreaterThanOrEqual(0);
@@ -664,9 +593,7 @@ describe("Skip Phase and Continue E2E Test", () => {
 
     test("Phase 1 may not have created favorite_poem.txt", () => {
       // Phase 1 was skipped, so file may or may not exist depending on timing
-      const exists = fs.existsSync(
-        path.join(TEST_DIR, "notes/favorite_poem.txt")
-      );
+      const exists = fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"));
       // File should not exist since we skip quickly
       expect(exists).toBe(false);
     });
@@ -680,9 +607,7 @@ describe("Skip Phase and Continue E2E Test", () => {
   describe("Error Handling", () => {
     test("No fatal errors occurred", () => {
       const errorEvents = testState.client?.getEventsByType("error") || [];
-      const fatalErrors = errorEvents.filter(
-        (e) => (e as ErrorEvent).data?.fatal
-      );
+      const fatalErrors = errorEvents.filter((e) => (e as ErrorEvent).data?.fatal);
       expect(fatalErrors.length).toBe(0);
     });
   });
@@ -693,7 +618,7 @@ describe("Skip Phase and Continue E2E Test", () => {
       () => {
         expect(testState.events.length).toBeGreaterThan(0);
       },
-      TEST_TIMEOUT
+      TEST_TIMEOUT,
     );
   });
 });

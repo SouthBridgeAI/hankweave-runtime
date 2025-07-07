@@ -2,6 +2,7 @@
 import { BasicTUI } from "./basic-tui.js";
 import { loadPhaseConfig } from "./config.js";
 import { LangtonServer } from "./langton-server.js";
+import type { ServerConfig } from "./types.js";
 
 // ============================================================================
 // Main Entry Point
@@ -41,7 +42,7 @@ Examples:
 
   try {
     const phases = loadPhaseConfig(configPath);
-    const serverConfig: any = {
+    const serverConfig: Partial<ServerConfig> = {
       projectPath: process.cwd(),
       phases,
       anthropicBaseURL,

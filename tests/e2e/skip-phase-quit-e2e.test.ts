@@ -11,7 +11,6 @@ import type {
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-  ShutdownCommand,
   SkipPhaseCommand,
   StateSnapshotEvent,
 } from "../../server/types.js";
@@ -124,7 +123,9 @@ class TestWSClient {
         // Resolve any pending connection close waiters
         const closeWaiters = this.eventPromises.get("__connection_closed__");
         if (closeWaiters) {
-          closeWaiters.forEach(({ resolve }) => resolve({ type: "__connection_closed__" } as any));
+          closeWaiters.forEach(({ resolve }) =>
+            resolve({ type: "__connection_closed__" } as ServerEvent),
+          );
           this.eventPromises.delete("__connection_closed__");
         }
       };
@@ -416,7 +417,7 @@ async function runSkipQuitTest(): Promise<void> {
     console.log(
       `${colors.green}✓ Received info event: ${(infoEvent as InfoEvent).data?.message}${colors.reset}`,
     );
-  } catch (e) {
+  } catch (_e) {
     console.log(
       `${colors.yellow}No info event received (server may have shut down quickly)${colors.reset}`,
     );
@@ -426,7 +427,7 @@ async function runSkipQuitTest(): Promise<void> {
   try {
     await testState.client.waitForConnectionClose(10000);
     console.log(`${colors.green}✓ WebSocket connection closed${colors.reset}`);
-  } catch (e) {
+  } catch (_e) {
     console.log(`${colors.red}WebSocket connection did not close as expected${colors.reset}`);
   }
 

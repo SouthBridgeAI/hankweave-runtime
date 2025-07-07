@@ -44,11 +44,13 @@ tests/
 ### 1. Happy Path Test (`happy-path-e2e.test.ts`)
 
 Tests the complete successful workflow:
+
 - **Phase 1**: Creates poems and saves favorite to `notes/favorite_poem.txt`
 - **Phase 2**: Continues from Phase 1, saves second favorite poem
 - **Phase 3**: Converts poems to TypeScript code
 
 Validates:
+
 - All expected files are created
 - WebSocket events are properly sequenced
 - Cost tracking matches log files
@@ -59,6 +61,7 @@ Validates:
 ### 2. Skip and Continue Test (`skip-phase-continue-e2e.test.ts`)
 
 Tests phase skipping with continuation:
+
 - Starts phase 1, skips it mid-execution
 - Verifies server continues to phase 2
 - Completes phase 2 normally
@@ -68,6 +71,7 @@ Tests phase skipping with continuation:
 ### 3. Skip and Quit Test (`skip-phase-quit-e2e.test.ts`)
 
 Tests skipping the final phase:
+
 - Runs phase 1 to completion
 - Starts phase 2 (last phase), skips it
 - Verifies server shuts down gracefully
@@ -78,6 +82,7 @@ Tests skipping the final phase:
 ### WebSocket Test Client
 
 Each test creates a minimal WebSocket client that:
+
 - Connects to the server on a unique port
 - Collects all server events
 - Provides helper methods for waiting on specific events
@@ -86,18 +91,21 @@ Each test creates a minimal WebSocket client that:
 ### Test Utilities
 
 **`check-test-ready.ts`**: Verifies environment before tests:
+
 - Working directory is project root
 - Test directories exist
 - Server is not already running
 - Claude CLI is available
 
 **`sanity-check.ts`**: Detailed environment validation:
+
 - All dependencies installed
 - Configuration files valid
 - File permissions correct
 - API keys configured
 
 **`cleanup-test.sh`**: Manual cleanup for stuck tests:
+
 - Finds and kills orphaned server processes
 - Removes lock files
 - Cleans test directories
@@ -111,14 +119,17 @@ Tests can use custom phase configurations or the default `test-phases.config.jso
   {
     "id": "phase-1",
     "name": "Phase 1: TestPhase1",
-    "promptFile": "./phase1Prompt.md",
+    "promptFile": ["./phase1Prompt1.md", "./phase1Prompt2.md"],
+    "appendSystemPromptFile": ["./systemPrompt1.md", "./systemPrompt2.md"],
     "model": "sonnet",
     "preStart": "mkdir -p notes",
     "watch": "./notes/*.txt"
-  },
+  }
   // ... more phases
 ]
 ```
+
+The test configuration demonstrates the multiple file support feature, where both prompt files and system prompt files can be specified as arrays.
 
 ## Running Tests
 
@@ -156,12 +167,14 @@ bun run test:cleanup  # Clean up stuck tests
 ## Test Artifacts
 
 ### During Execution
+
 - **`test-area/`**: Working directory for Claude
   - `.logs/`: Claude session logs (JSONL format)
   - `notes/`: Test file outputs
   - Configuration files
 
 ### After Execution
+
 - **`test-results/`**: Timestamped test runs
   - `server.log`: Server output
   - `claude-logs/`: Copied Claude logs
@@ -171,12 +184,13 @@ bun run test:cleanup  # Clean up stuck tests
 
 1. **Working Directory**: Tests MUST run from project root
 2. **Port Usage**: Each test uses a different port:
-   - Happy path: 7777
+   - Happy path: 7777 (or `LANGTON_TEST_PORT`)
    - Skip continue: 7778
    - Skip quit: 7779
 3. **API Usage**: Tests consume real Claude API credits
 4. **Cleanup**: Always runs between tests automatically
 5. **Timeouts**: Tests have 2-5 minute timeouts
+6. **Environment Variables**: Set `LANGTON_TEST_PORT` to use custom port
 
 ## Debugging Failed Tests
 
@@ -192,23 +206,24 @@ bun run test:cleanup  # Clean up stuck tests
 2. Import test client from existing tests
 3. Use unique port number (avoid 7777-7779)
 4. Follow existing test structure:
+
    ```typescript
    // Setup
    await setupTestDirectory();
    const server = startServer();
    const client = new TestWSClient();
-   
+
    // Execute test scenario
    await client.connect();
    // ... test logic
-   
+
    // Assertions
    describe("Test Suite", () => {
      test("assertion", () => {
        expect(result).toBe(expected);
      });
    });
-   
+
    // Cleanup
    afterAll(async () => {
      await cleanup();
@@ -218,6 +233,7 @@ bun run test:cleanup  # Clean up stuck tests
 ## Philosophy
 
 The test suite follows these principles:
+
 1. **Real-world testing**: Uses actual Claude CLI, not mocks
 2. **Isolation**: Each test runs independently
 3. **Observability**: All actions logged and preserved

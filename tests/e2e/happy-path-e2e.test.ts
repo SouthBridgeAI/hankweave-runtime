@@ -310,7 +310,7 @@ interface UsageData {
   output_tokens?: number;
 }
 
-function calculateCostFromUsage(usage: UsageData): number {
+function _calculateCostFromUsage(usage: UsageData): number {
   // Default costs per million tokens (matching server defaults)
   const costs = {
     input: 3.0,
@@ -909,7 +909,8 @@ describe("Langton E2E Test", () => {
       if (fs.existsSync(ts1Path)) {
         const content = fs.readFileSync(ts1Path, "utf-8");
         // Check for either 'title:' or 'english:' since Claude may generate different structures
-        const hasExpectedStructure = content.includes("title:") || content.includes("english:") || content.includes("poem1");
+        const hasExpectedStructure =
+          content.includes("title:") || content.includes("english:") || content.includes("poem1");
         expect(hasExpectedStructure).toBe(true);
       }
     });

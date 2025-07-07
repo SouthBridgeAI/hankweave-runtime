@@ -60,6 +60,7 @@ langton-runner/
 ### Phases
 
 A phase represents a discrete task for Claude with its own:
+
 - Prompt (file or inline text)
 - Model selection
 - Optional pre-start commands
@@ -76,6 +77,7 @@ Create a `phases.json` file:
     "id": "research",
     "name": "Research Phase",
     "promptFile": "./prompts/research.md",
+    "appendSystemPromptFile": "./prompts/research-guidelines.md",
     "model": "claude-3-opus-20240229",
     "preStart": "mkdir -p research",
     "watch": "./research/**/*.md"
@@ -83,7 +85,11 @@ Create a `phases.json` file:
   {
     "id": "implement",
     "name": "Implementation Phase",
-    "promptText": "Implement the solution based on the research...",
+    "promptFile": ["./prompts/context.md", "./prompts/implementation-task.md"],
+    "appendSystemPromptFile": [
+      "./prompts/coding-standards.md",
+      "./prompts/best-practices.md"
+    ],
     "model": "claude-3-sonnet-20240229",
     "continueFromPrevious": true,
     "watch": "./src/**/*.ts"
@@ -91,11 +97,14 @@ Create a `phases.json` file:
 ]
 ```
 
+**Multiple File Support**: Both `promptFile` and `appendSystemPromptFile` can accept arrays of file paths. Files are concatenated with double newlines between them.
+
 ### WebSocket Protocol
 
 The server uses WebSocket for bidirectional communication:
 
 **Server → Client Events**:
+
 - `server.ready`: Server initialized
 - `phase.started`: Phase execution began
 - `phase.completed`: Phase finished
@@ -104,6 +113,7 @@ The server uses WebSocket for bidirectional communication:
 - `token.usage`: Token consumption update
 
 **Client → Server Commands**:
+
 - `phase.start`: Start specific phase
 - `phase.next`: Continue to next phase
 - `phase.skip`: Skip current phase
@@ -177,6 +187,7 @@ Client ←→ WebSocket ←→ Server
 ### State Persistence
 
 State is persisted through Claude's JSONL log files:
+
 - `.logs/log-{phase-id}.jsonl`: Claude session logs
 - Server reads logs on startup to recover state
 - Completed phases tracked with costs and durations
@@ -196,6 +207,7 @@ bun run test:skip-quit      # Skip and shutdown
 ```
 
 Tests validate:
+
 - Complete phase workflows
 - Event streaming accuracy
 - File watching functionality
@@ -250,6 +262,7 @@ Langton Runner is designed with these principles:
 ## Support
 
 For issues, questions, or contributions:
+
 - Check the server README for detailed documentation
 - Review the test README for testing guidance
 - Open an issue for bugs or feature requests

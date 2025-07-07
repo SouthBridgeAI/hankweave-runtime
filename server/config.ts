@@ -92,8 +92,8 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       // Handle promptFile - can be string or array
       if (phase.promptFile) {
         if (Array.isArray(phase.promptFile)) {
-          resolved.promptFile = phase.promptFile.map(file => 
-            path.isAbsolute(file) ? file : path.resolve(configDir, file)
+          resolved.promptFile = phase.promptFile.map((file) =>
+            path.isAbsolute(file) ? file : path.resolve(configDir, file),
           );
         } else if (!path.isAbsolute(phase.promptFile)) {
           resolved.promptFile = path.resolve(configDir, phase.promptFile);
@@ -103,8 +103,8 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       // Handle appendSystemPromptFile - can be string or array
       if (phase.appendSystemPromptFile) {
         if (Array.isArray(phase.appendSystemPromptFile)) {
-          resolved.appendSystemPromptFile = phase.appendSystemPromptFile.map(file => 
-            path.isAbsolute(file) ? file : path.resolve(configDir, file)
+          resolved.appendSystemPromptFile = phase.appendSystemPromptFile.map((file) =>
+            path.isAbsolute(file) ? file : path.resolve(configDir, file),
           );
         } else if (!path.isAbsolute(phase.appendSystemPromptFile)) {
           resolved.appendSystemPromptFile = path.resolve(configDir, phase.appendSystemPromptFile);
@@ -148,7 +148,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
 
       // Validate appendSystemPromptFile existence and readability
       if (phase.appendSystemPromptFile) {
-        const systemPromptFiles = Array.isArray(phase.appendSystemPromptFile) ? phase.appendSystemPromptFile : [phase.appendSystemPromptFile];
+        const systemPromptFiles = Array.isArray(phase.appendSystemPromptFile)
+          ? phase.appendSystemPromptFile
+          : [phase.appendSystemPromptFile];
         for (const file of systemPromptFiles) {
           if (!fs.existsSync(file)) {
             validationErrors.push(

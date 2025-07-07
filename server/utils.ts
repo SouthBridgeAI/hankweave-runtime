@@ -209,5 +209,5 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
  */
 export function escapeShellArg(arg: string): string {
   // Replace all single quotes with '\''
-  return "'" + arg.replace(/'/g, "'\\''") + "'";
+  return `'${arg.replace(/'/g, "'\\''")}'`;
 }
