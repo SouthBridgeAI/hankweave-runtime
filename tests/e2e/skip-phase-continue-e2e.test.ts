@@ -20,7 +20,7 @@ import type {
 
 // Test configuration
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
-const TEST_DIR = path.join(process.cwd(), "tests/test-area-skip-continue");
+const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
 const SERVER_PORT = 7778;
 
@@ -274,13 +274,12 @@ function startServer(): ChildProcess {
 
   serverProcess.stdout?.on("data", (data) => {
     const message = data.toString();
-    console.log(`${colors.gray}[SERVER STDOUT] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDOUT] ${message}`);
   });
 
   serverProcess.stderr?.on("data", (data) => {
     const message = data.toString();
-    console.error(`${colors.red}[SERVER STDERR] ${message.trim()}${colors.reset}`);
+    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
   });
 
@@ -369,11 +368,6 @@ async function runSkipContinueTest(): Promise<void> {
   console.log(`${colors.gray}Waiting for server to process skip...${colors.reset}`);
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  // Debug: print all events so far
-  console.log(`${colors.gray}Events received so far:${colors.reset}`);
-  testState.client.getEvents().forEach(e => {
-    console.log(`  ${e.type}: ${JSON.stringify((e as any).data || {})}`);
-  });
 
   // Phase 2 should auto-start after skip
   testState.phase2Started = await testState.client.waitForPhaseStart("phase-2", 20000);
@@ -586,7 +580,8 @@ describe("Skip Phase and Continue E2E Test", () => {
     test("Phase 1 may not have created favorite_poem.txt", () => {
       // Phase 1 was skipped, so file may or may not exist depending on timing
       const exists = fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"));
-      console.log(`  Phase 1 file exists: ${exists}`);
+      // File should not exist since we skip quickly
+      expect(exists).toBe(false);
     });
 
     test("Phase 3 did not create test3.txt", () => {

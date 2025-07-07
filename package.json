@@ -10,18 +10,17 @@
     "format": "biome format --write .",
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
-    "test": "bun run test:run",
-    "test:run": "bun run test:e2e",
-    "test:sanity": "bun tests/utils/sanity-check.ts",
-    "test:check": "bun tests/utils/check-test-ready.ts",
-    "test:e2e": "bun run pre-test && bun tests/e2e/happy-path-e2e.ts",
-    "test:skip-continue": "bun run test:check && bun test tests/e2e/skip-phase-continue-e2e.test.ts",
-    "test:skip-quit": "bun run test:check && bun test tests/e2e/skip-phase-quit-e2e.test.ts",
+    "test": "bun run test:all",
+    "test:all": "bun run pre-test && bun run test:happy && bun run test:skip",
+    "test:happy": "bun test tests/e2e/happy-path-e2e.test.ts",
     "test:skip": "bun run test:skip-continue && bun run test:skip-quit",
+    "test:skip-continue": "bun test tests/e2e/skip-phase-continue-e2e.test.ts",
+    "test:skip-quit": "bun test tests/e2e/skip-phase-quit-e2e.test.ts",
+    "test:check": "bun tests/utils/check-test-ready.ts",
+    "test:sanity": "bun tests/utils/sanity-check.ts",
     "test:cleanup": "./tests/utils/cleanup-test.sh",
     "pre-test": "bun run test:check && bun run pre-test:cleanup",
-    "pre-test:check-dir": "test -f package.json || (echo '❌ Error: Must run from project root' && exit 1)",
-    "pre-test:cleanup": "rm -rf tests/test-area && mkdir -p tests/test-area && echo '✅ Test area cleaned and recreated'"
+    "pre-test:cleanup": "rm -rf tests/test-area && mkdir -p tests/test-area && rm -rf tests/test-results && mkdir -p tests/test-results && echo '✅ Test area and results cleaned'"
   },
   "devDependencies": {
     "@types/bun": "latest"

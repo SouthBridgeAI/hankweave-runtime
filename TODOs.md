@@ -34,8 +34,13 @@ TODOs for Schema thing:
 1. Tightening - see what can be converted to enums
 2. 2. Clean up the existing directory instead of making new loader
 3. Generating questions that can be used to validate the system at the end
+4. Warn about silent failures in schemas
+5. Check for default value injection
+6. Does phase 2b forget about timeouts?
+7. Some of the phases don't put things in the src directory but instead directly in the typescript directory
 
 Experimental:
 
 1. Watching the agent log and adding comments?
-2.
+2. Can a langton workflow be a gauntlet - something that cleans and validates data to push it somewhere else?
+3.

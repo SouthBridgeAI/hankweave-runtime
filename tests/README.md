@@ -15,7 +15,7 @@ tests/
 ├── config/           # Test configuration files
 │   └── test-phases.config.json
 ├── e2e/             # End-to-end tests
-│   ├── happy-path-e2e.ts              # Full workflow test
+│   ├── happy-path-e2e.test.ts          # Full workflow test
 │   ├── skip-phase-continue-e2e.test.ts # Skip phase and continue test
 │   └── skip-phase-quit-e2e.test.ts     # Skip last phase and quit test
 ├── utils/           # Test utilities
@@ -63,30 +63,36 @@ Two additional tests verify phase skipping functionality:
 
 ### Test Scripts
 
-- `bun run test` - Run the full E2E test suite
+- `bun run test` - Run all E2E tests (happy path + skip tests)
+- `bun run test:all` - Same as above
+- `bun run test:happy` - Run only the happy path test
+- `bun run test:skip` - Run both skip tests
+- `bun run test:skip-continue` - Run skip and continue test only
+- `bun run test:skip-quit` - Run skip and quit test only
 - `bun run test:check` - Check if environment is ready for testing
 - `bun run test:sanity` - Detailed environment and configuration check
-- `bun run test:e2e` - Run E2E test directly (includes pre-test)
-- `bun run test:cleanup` - Manually clean up test server and optionally test area
-- `bun run pre-test` - Just run the pre-test cleanup
+- `bun run test:cleanup` - Manually clean up test server and test area
+- `bun run pre-test` - Run pre-test checks and cleanup
 
-#### Running Skip Phase Tests
+#### Examples
 ```bash
-# Run all skip tests
+# Run all tests
+bun run test
+
+# Run only skip tests
 bun run test:skip
 
-# Or run individually
-bun run test:skip-continue
-bun run test:skip-quit
+# Run a specific test
+bun run test:happy
 ```
 
 ### Important Notes
 
 1. **Working Directory**: Tests MUST be run from the project root (where package.json is)
-2. **Test Area**: All test artifacts are created in `tests/test-area/` (skip tests use separate directories)
-3. **Auto-cleanup**: The server is gracefully shut down after tests complete
-4. **Cost**: Running the full test will use Claude API credits (3 phases with Sonnet)
-5. **Artifacts**: Test outputs are preserved in `tests/test-area/` for inspection
+2. **Test Area**: All test artifacts are created in `tests/test-area/`
+3. **Test Results**: Test logs and artifacts are saved in `tests/test-results/` with timestamps
+4. **Auto-cleanup**: The server is gracefully shut down after tests complete
+5. **Cost**: Running the full test suite will use Claude API credits (multiple phases with Sonnet)
 6. **Ports**: Different tests use different ports to avoid conflicts:
    - Happy path test: 7777
    - Skip and continue test: 7778

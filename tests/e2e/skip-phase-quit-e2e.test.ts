@@ -20,7 +20,7 @@ import type {
 
 // Test configuration - using a simple two-phase config for this test
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
-const TEST_DIR = path.join(process.cwd(), "tests/test-area-skip-quit");
+const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
 const SERVER_PORT = 7779;
 
@@ -299,7 +299,6 @@ function startServer(): ChildProcess {
 
   serverProcess.stdout?.on("data", (data) => {
     const message = data.toString();
-    console.log(`${colors.gray}[SERVER] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDOUT] ${message}`);
   });
 
