@@ -212,16 +212,16 @@ export function loadPhaseStateFromLog(
     }
 
     // Use the total cost from result message if available, otherwise calculate
-    // @ts-ignore - temporary property
+    const tokensWithCost = tokens as TokenUsage & { _totalCost?: number };
     const cost =
-      tokens._totalCost !== undefined
-        ? // @ts-ignore - temporary property
-          tokens._totalCost
+      tokensWithCost._totalCost !== undefined
+        ? tokensWithCost._totalCost
         : calculateCost(tokens, costsPerMTok);
 
     // Clean up temporary property
-    // @ts-ignore - temporary property
-    delete tokens._totalCost;
+    if (tokensWithCost._totalCost !== undefined) {
+      delete tokensWithCost._totalCost;
+    }
 
     return { sessionId, success, cost, tokens };
   } catch (error) {

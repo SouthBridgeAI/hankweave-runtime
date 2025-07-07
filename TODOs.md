@@ -30,6 +30,11 @@ TODOs:
 9. Extracting data after phases or at completion?
 10. Adding description streaming with flash
 
+Cleanup TODOs:
+
+1. Change the model names from claude-opus-3
+2. Claude log parser has that tokenswithcost thing that needs fixing
+
 TODOs for Schema thing:
 
 1. Clean up the existing directory instead of making new loader

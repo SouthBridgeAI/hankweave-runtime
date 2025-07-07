@@ -32,6 +32,7 @@
     "@biomejs/biome": "^2.0.6",
     "fast-glob": "^3.3.3",
     "minimatch": "^10.0.1",
+    "simple-git": "^3.28.0",
     "zod": "^3.25.74"
   }
 }

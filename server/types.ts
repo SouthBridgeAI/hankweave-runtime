@@ -86,6 +86,9 @@ export interface PhaseConfig {
 
   /** Optional description shown to users about what this phase does */
   description?: string;
+
+  /** Glob patterns to track for checkpointing and watching (files and directories) */
+  checkpointAndWatch?: string[];
 }
 
 /**

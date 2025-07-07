@@ -34,10 +34,10 @@ const phaseConfigSchema = z
     appendSystemPromptText: z.string().optional(),
     model: z.string().min(1, "Model name cannot be empty"),
     continueFromPrevious: z.boolean().optional(),
-    preStart: z.string().optional(),
     workspaceSetup: z.array(workspaceSetupItemSchema).optional(),
     watch: z.string().optional(),
     description: z.string().optional(),
+    checkpointAndWatch: z.array(z.string()).optional(),
   })
   .refine((data) => data.promptFile || data.promptText, {
     message: "Either promptFile or promptText must be provided",

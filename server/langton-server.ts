@@ -12,6 +12,7 @@ import type {
   ThinkingContent,
   ToolUseContent,
 } from "../types/claude-session-schema.js";
+import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { calculateCost, DEFAULT_CONFIG } from "./config.js";
 import type {
@@ -75,6 +76,11 @@ export class LangtonServer extends EventEmitter {
   private isShuttingDown = false;
   private isSkippingPhase = false;
   private logParser: ClaudeLogParser | null = null;
+  private runId: string;
+
+  // Checkpoint-related properties
+  private checkpointGit: CheckpointGit | null = null;
+  private checkpointingEnabled = true;
 
   constructor(
     config: Partial<ServerConfig> & {
@@ -89,6 +95,7 @@ export class LangtonServer extends EventEmitter {
     };
     this.logger = new Logger(this.config.serverLogFile);
     this.serverStartTime = new Date();
+    this.runId = generateId();
   }
 
   /**
@@ -107,6 +114,9 @@ export class LangtonServer extends EventEmitter {
     this.logger.log(
       `Starting Langton Server v${this.config.version} in ${this.config.projectPath}`,
     );
+
+    // Initialize checkpoint system (checks for existing .langton)
+    await this.initializeCheckpoints();
 
     // Check for existing lock file
     if (fs.existsSync(this.config.lockFile)) {
@@ -331,21 +341,6 @@ export class LangtonServer extends EventEmitter {
 
     this.logger.log(`Starting phase: ${phase.name}`);
 
-    // Run pre-start command
-    if (!skipPreCommands && phase.preStart) {
-      this.logger.log(`Running pre-start command: ${phase.preStart}`);
-      try {
-        await this.runCommand(phase.preStart);
-      } catch (error) {
-        this.sendError(
-          `Pre-start command failed: ${error instanceof Error ? error.message : String(error)}`,
-          true,
-        );
-        await this.shutdown("pre-start command failure");
-        return;
-      }
-    }
-
     // Run workspace setup operations
     if (!skipPreCommands && phase.workspaceSetup) {
       this.logger.log(`Running workspace setup for phase: ${phase.name}`);
@@ -374,6 +369,22 @@ export class LangtonServer extends EventEmitter {
           await this.shutdown("workspace setup failure");
           return;
         }
+      }
+    }
+
+    // Add checkpoint patterns for this phase
+    if (phase.checkpointAndWatch && phase.checkpointAndWatch.length > 0) {
+      await this.addCheckpointPatterns(phase.checkpointAndWatch);
+
+      // Create checkpoint after workspace setup if we have workspace setup
+      if (!skipPreCommands && phase.workspaceSetup && this.checkpointingEnabled) {
+        await this.createCheckpoint({
+          status: "workspace-setup",
+          phaseId: phase.id,
+          phaseName: phase.name,
+          runId: this.runId,
+          timestamp: new Date().toISOString(),
+        });
       }
     }
 
@@ -806,11 +817,11 @@ export class LangtonServer extends EventEmitter {
     }
   }
 
-  private handlePhaseComplete(exitCode: number): void {
+  private async handlePhaseComplete(exitCode: number): Promise<void> {
     if (!this.currentPhase) return;
 
     // Give the log parser a moment to catch up with the result message
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!this.currentPhase) return;
 
       const duration = Date.now() - this.currentPhase.startTime.getTime();
@@ -827,6 +838,19 @@ export class LangtonServer extends EventEmitter {
           duration,
           completedAt: new Date(),
         });
+
+        // Create checkpoint for phase completion
+        if (this.checkpointingEnabled) {
+          const status = this.isSkippingPhase ? "skipped" : "completed";
+          await this.createCheckpoint({
+            status,
+            phaseId: this.currentPhase.phase.id,
+            phaseName: this.currentPhase.phase.name,
+            runId: this.runId,
+            timestamp: new Date().toISOString(),
+            duration,
+          });
+        }
 
         // Recalculate total cost from all completed phases
         this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
@@ -866,6 +890,17 @@ export class LangtonServer extends EventEmitter {
             this.autoStartNextPhase();
           }, 1000);
         } else {
+          // Create error checkpoint before shutdown
+          if (this.checkpointingEnabled) {
+            await this.createCheckpoint({
+              status: "error",
+              phaseId: this.currentPhase.phase.id,
+              phaseName: this.currentPhase.phase.name,
+              runId: this.runId,
+              timestamp: new Date().toISOString(),
+              duration,
+            });
+          }
           this.sendError(`Phase failed with exit code ${exitCode}`, true);
           this.shutdown("phase failure");
         }
@@ -1197,11 +1232,134 @@ export class LangtonServer extends EventEmitter {
     await this.runCommand(cpCommand);
   }
 
+  // ============================================================================
+  // Checkpoint Methods
+  // ============================================================================
+
+  /**
+   * Initialize checkpoint system - check git availability and .langton existence
+   */
+  private async initializeCheckpoints(): Promise<void> {
+    // Check if .langton already exists
+    const langtonPath = path.join(this.config.projectPath, ".langton");
+    if (fs.existsSync(langtonPath)) {
+      throw new Error(
+        "Found existing .langton directory. Server cannot start. " +
+          "This may indicate a previous run. Please remove .langton directory to continue.",
+      );
+    }
+
+    // Check if git is available
+    if (!(await this.isGitAvailable())) {
+      this.logger.log("Git is not available. Checkpointing disabled.", "info");
+      this.checkpointingEnabled = false;
+      return;
+    }
+
+    this.logger.log("Checkpoint system initialized");
+  }
+
+  /**
+   * Check if git command is available using spawn for consistency
+   */
+  private async isGitAvailable(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const proc = spawn("git", ["--version"], {
+        stdio: "ignore",
+      });
+
+      proc.on("error", () => resolve(false));
+      proc.on("exit", (code) => resolve(code === 0));
+    });
+  }
+
+  /**
+   * Add checkpoint patterns for a phase (cumulative)
+   */
+  private async addCheckpointPatterns(patterns: string[]): Promise<void> {
+    if (!this.checkpointingEnabled || patterns.length === 0) return;
+
+    // Initialize repository on first tracked patterns
+    if (!this.checkpointGit) {
+      this.checkpointGit = new CheckpointGit(this.config.projectPath, this.logger);
+      await this.checkpointGit.initialize();
+    }
+
+    // Add new patterns
+    await this.checkpointGit.addPatterns(patterns);
+    this.logger.log(`Added checkpoint patterns: ${patterns.join(", ")}`);
+  }
+
+  /**
+   * Create a checkpoint commit
+   */
+  private async createCheckpoint(info: {
+    status: "workspace-setup" | "completed" | "error" | "exit" | "skipped";
+    phaseId: string;
+    phaseName: string;
+    runId: string;
+    timestamp: string;
+    duration?: number;
+  }): Promise<void> {
+    if (!this.checkpointingEnabled || !this.checkpointGit) return;
+
+    try {
+      // Format commit message
+      const firstLine = `${info.status}:${info.phaseId} [run:${info.runId}] ${info.phaseName}`;
+      const body = [
+        "",
+        `Phase: ${info.phaseName}`,
+        `Status: ${info.status}`,
+        `Timestamp: ${info.timestamp}`,
+      ];
+
+      if (info.duration !== undefined) {
+        body.push(`Duration: ${info.duration}ms`);
+      }
+
+      const commitMessage = `${firstLine}\n${body.join("\n")}`;
+
+      // Determine if we need to create a branch
+      const shouldBranch = info.status === "error" || info.status === "exit";
+      const branchName = shouldBranch
+        ? info.status === "error"
+          ? `error/${info.phaseId}/${Date.now()}`
+          : `exit/${Date.now()}`
+        : undefined;
+
+      // Create checkpoint
+      const commitHash = await this.checkpointGit.commit(commitMessage, { branch: branchName });
+
+      if (commitHash) {
+        this.logger.log(`Created checkpoint: ${commitHash} (${info.status})`);
+      }
+    } catch (error) {
+      // Handle disk full or other git errors
+      this.logger.log(
+        `Checkpoint failed: ${error instanceof Error ? error.message : String(error)}. ` +
+          "Disabling checkpointing for this session.",
+        "error",
+      );
+      this.checkpointingEnabled = false;
+    }
+  }
+
   async shutdown(reason: string): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
 
     this.logger.log(`Shutting down server: ${reason}`);
+
+    // Create exit checkpoint if not shutting down normally (all phases completed)
+    if (reason !== "all phases completed" && this.checkpointingEnabled && this.currentPhase) {
+      await this.createCheckpoint({
+        status: "exit",
+        phaseId: this.currentPhase.phase.id,
+        phaseName: this.currentPhase.phase.name,
+        runId: this.runId,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     this.cleanupCurrentPhase();
 

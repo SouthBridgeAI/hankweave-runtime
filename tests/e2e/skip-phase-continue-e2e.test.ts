@@ -14,6 +14,7 @@ import type {
   ServerEvent,
   SkipPhaseCommand,
   StateSnapshotEvent,
+  TokenUsageEvent,
 } from "../../server/types.js";
 import { generateId } from "../../server/utils.js";
 
