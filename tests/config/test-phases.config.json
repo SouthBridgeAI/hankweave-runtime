@@ -16,7 +16,8 @@
     ],
     "watch": "./notes/*.txt",
     "appendSystemPromptFile": ["./systemPrompt1.md", "./systemPrompt2.md"],
-    "description": "Write three pick one"
+    "description": "Write three pick one",
+    "checkpointAndWatch": ["notes/**/*", "*.md"]
   },
   {
     "id": "phase-2",
@@ -25,7 +26,8 @@
     "model": "sonnet",
     "continueFromPrevious": true,
     "watch": "./notes/*.*",
-    "description": "Write one more"
+    "description": "Write one more",
+    "checkpointAndWatch": ["notes/**/*"]
   },
   {
     "id": "phase-3",
@@ -50,6 +52,7 @@
     ],
     "continueFromPrevious": false,
     "watch": "./typescript_code/src/**/*.ts",
-    "description": "Convert poems to code"
+    "description": "Convert poems to code",
+    "checkpointAndWatch": ["typescript_code/src/**/*.ts", "typescript_code/package.json"]
   }
 ]

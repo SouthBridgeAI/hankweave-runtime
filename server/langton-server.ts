@@ -17,6 +17,7 @@ import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { calculateCost, DEFAULT_CONFIG } from "./config.js";
 import type {
   AssistantActionEvent,
+  CheckpointInfo,
   ClientCommand,
   CompletedPhase,
   ErrorEvent,
@@ -1293,14 +1294,7 @@ export class LangtonServer extends EventEmitter {
   /**
    * Create a checkpoint commit
    */
-  private async createCheckpoint(info: {
-    status: "workspace-setup" | "completed" | "error" | "exit" | "skipped";
-    phaseId: string;
-    phaseName: string;
-    runId: string;
-    timestamp: string;
-    duration?: number;
-  }): Promise<void> {
+  private async createCheckpoint(info: CheckpointInfo): Promise<void> {
     if (!this.checkpointingEnabled || !this.checkpointGit) return;
 
     try {
@@ -1327,8 +1321,12 @@ export class LangtonServer extends EventEmitter {
           : `exit/${Date.now()}`
         : undefined;
 
-      // Create checkpoint
-      const commitHash = await this.checkpointGit.commit(commitMessage, { branch: branchName });
+      // Create checkpoint (allow empty commits for skipped phases)
+      const allowEmpty = info.status === "skipped";
+      const commitHash = await this.checkpointGit.commit(commitMessage, {
+        branch: branchName,
+        allowEmpty,
+      });
 
       if (commitHash) {
         this.logger.log(`Created checkpoint: ${commitHash} (${info.status})`);

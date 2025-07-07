@@ -56,11 +56,7 @@ export class CheckpointGit {
     await this.git.addConfig("user.email", "froggie@southbridge.ai");
     await this.git.addConfig("commit.gpgsign", "false");
 
-    // Create initial .gitignore
-    await this.updateGitignore();
-
-    // Initial commit
-    await this.git.add(".gitignore");
+    // Initial empty commit (don't add .gitignore to avoid conflicts with user's project)
     await this.git.commit("Initial checkpoint setup", { "--allow-empty": null });
 
     this.logger.log("Shadow git repository initialized");
@@ -84,29 +80,66 @@ export class CheckpointGit {
   }
 
   /**
-   * Update .gitignore to track only specified patterns
+   * Update git exclude file to track only specified patterns
+   * Using info/exclude instead of .gitignore to avoid interfering with user's project
    */
   private async updateGitignore(): Promise<void> {
-    const gitignorePath = path.join(this.checkpointPath, ".gitignore");
+    const excludePath = path.join(this.checkpointPath, ".git", "info", "exclude");
 
-    // Start with ignoring everything
-    let gitignoreContent = "# Ignore everything by default\n*\n\n";
+    // Ensure the info directory exists
+    const infoDir = path.join(this.checkpointPath, ".git", "info");
+    await fs.promises.mkdir(infoDir, { recursive: true });
 
-    // Add exceptions for tracked patterns
-    if (this.trackedPatterns.size > 0) {
-      gitignoreContent += "# Tracked patterns\n";
-      for (const pattern of this.trackedPatterns) {
-        gitignoreContent += `!${pattern}\n`;
+    if (this.trackedPatterns.size === 0) {
+      // If no patterns, just ignore everything
+      const excludeContent = "# Langton checkpoint exclude rules\n# Ignore everything\n*\n";
+      await fs.promises.writeFile(excludePath, excludeContent);
+      return;
+    }
+
+    // Build exclude content properly for git
+    let excludeContent = "# Langton checkpoint exclude rules\n";
+    excludeContent += "# Ignore everything by default\n*\n\n";
+
+    // For each pattern, we need to unignore the path and parent directories
+    const allPaths = new Set<string>();
+
+    for (const pattern of this.trackedPatterns) {
+      // Remove leading ./ if present
+      const cleanPattern = pattern.replace(/^\.\//, "");
+
+      // Add the pattern itself
+      allPaths.add(`!${cleanPattern}`);
+
+      // For patterns with directories, also unignore parent directories
+      if (cleanPattern.includes("/")) {
+        const parts = cleanPattern.split("/");
+        let currentPath = "";
+
+        // Unignore each parent directory
+        for (let i = 0; i < parts.length - 1; i++) {
+          currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
+          allPaths.add(`!${currentPath}/`);
+        }
       }
     }
 
-    await fs.promises.writeFile(gitignorePath, gitignoreContent);
+    // Add all the unignore rules
+    excludeContent += "# Unignore tracked patterns and their parent directories\n";
+    for (const path of Array.from(allPaths).sort()) {
+      excludeContent += `${path}\n`;
+    }
+
+    await fs.promises.writeFile(excludePath, excludeContent);
   }
 
   /**
    * Create a checkpoint commit
    */
-  async commit(message: string, options?: { branch?: string }): Promise<string | null> {
+  async commit(
+    message: string,
+    options?: { branch?: string; allowEmpty?: boolean },
+  ): Promise<string | null> {
     if (!this.git) return null;
 
     // Create branch if specified
@@ -115,11 +148,24 @@ export class CheckpointGit {
       this.logger.log(`Created branch: ${options.branch}`);
     }
 
-    // Stage all tracked files
+    // Stage all files (exclude file will filter what gets included)
     await this.git.add(".");
 
-    // Commit
-    const result = await this.git.commit(message);
+    // Check if we have any staged changes
+    const status = await this.git.status();
+    if (status.staged.length === 0 && !options?.allowEmpty) {
+      this.logger.log("No changes to commit for checkpoint");
+      // Switch back to main if we branched
+      if (options?.branch) {
+        await this.git.checkout("main");
+      }
+      return null;
+    }
+
+    // Commit (with --allow-empty if needed)
+    const result = status.staged.length === 0 
+      ? await this.git.commit(message, { "--allow-empty": null })
+      : await this.git.commit(message);
 
     // Switch back to main if we branched
     if (options?.branch) {

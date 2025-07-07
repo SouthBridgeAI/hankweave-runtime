@@ -148,7 +148,7 @@ export function loadPhaseStateFromLog(
 } {
   let sessionId: string | null = null;
   let success = false;
-  const tokens: TokenUsage = {
+  const tokens: TokenUsage & { _totalCost?: number } = {
     inputTokens: 0,
     outputTokens: 0,
     cacheCreationTokens: 0,
@@ -191,13 +191,11 @@ export function loadPhaseStateFromLog(
           // If total_cost_usd is provided, we'll use it directly in cost calculation
           if (entry.total_cost_usd !== undefined) {
             // Store it temporarily - we'll return it directly
-            // @ts-ignore - temporary property
             tokens._totalCost = entry.total_cost_usd;
           }
         }
 
         // Only use assistant message usage if we haven't found result usage yet
-        // @ts-ignore - temporary property
         if (entry.type === "assistant" && entry.message.usage && !tokens._totalCost) {
           // Claude reports cumulative usage, so we take the last one
           const usage = entry.message.usage;

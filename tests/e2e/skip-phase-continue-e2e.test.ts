@@ -40,6 +40,7 @@ const TEST_PHASES = [
     preStart: "mkdir -p notes",
     watch: "./notes/*.txt",
     description: "Write three pick one",
+    checkpointAndWatch: ["notes/**/*"],
   },
   {
     id: "phase-2",
@@ -50,6 +51,7 @@ const TEST_PHASES = [
     continueFromPrevious: false, // Don't continue from skipped phase
     watch: "./notes/*.*",
     description: "Write another file",
+    checkpointAndWatch: ["notes/**/*"],
   },
   {
     id: "phase-3",
@@ -60,6 +62,7 @@ const TEST_PHASES = [
     continueFromPrevious: false,
     watch: "./notes/*.*",
     description: "Write final file",
+    checkpointAndWatch: ["notes/**/*"],
   },
 ];
 
@@ -228,23 +231,13 @@ async function setupTestDirectory(): Promise<void> {
 
   console.log(`${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`);
 
-  // Clean up previous test artifacts
-  const artifactsToClean = [
-    ".logs",
-    ".langton-server.lock",
-    "notes",
-    "typescript_code",
-    "test-phases-skip-continue.config.json",
-    "phase1Prompt.md",
-  ];
+  // Clean up the entire test directory for a fresh start
+  console.log(`  Cleaning entire test directory...`);
+  await rimrafSimple(TEST_DIR);
 
-  for (const artifact of artifactsToClean) {
-    const artifactPath = path.join(TEST_DIR, artifact);
-    if (fs.existsSync(artifactPath)) {
-      console.log(`  Cleaning: ${artifact}`);
-      await rimrafSimple(artifactPath);
-    }
-  }
+  // Recreate the test directory
+  fs.mkdirSync(TEST_DIR, { recursive: true });
+  console.log(`  ✓ Test directory recreated`);
 
   // Create the prompt file needed by phase 1
   const promptFilePath = path.join(TEST_DIR, "phase1Prompt.md");
@@ -627,6 +620,105 @@ describe("Skip Phase and Continue E2E Test", () => {
       },
       TEST_TIMEOUT,
     );
+  });
+
+  describe("Checkpoint System - Skip Handling", () => {
+    const checkpointDir = path.join(TEST_DIR, ".langton/checkpoints");
+    const gitDir = path.join(checkpointDir, ".git");
+
+    test("checkpoint directory created", () => {
+      expect(fs.existsSync(checkpointDir)).toBe(true);
+      expect(fs.existsSync(gitDir)).toBe(true);
+    });
+
+    test("skipped phases have correct commit status", async () => {
+      const { execSync } = await import("node:child_process");
+      try {
+        const gitLog = execSync("git log --pretty=format:%s", {
+          cwd: TEST_DIR,
+          env: {
+            ...process.env,
+            GIT_DIR: gitDir,
+            GIT_WORK_TREE: TEST_DIR,
+          },
+          encoding: "utf-8",
+        });
+
+        const commitMessages = gitLog.trim().split("\n");
+
+        // Check for skipped commits
+        const skippedCommits = commitMessages.filter((msg) => msg.startsWith("skipped:"));
+
+        // Phase 1 and 3 were skipped
+        expect(skippedCommits.length).toBe(2);
+        expect(skippedCommits.some((msg) => msg.includes("phase-1"))).toBe(true);
+        expect(skippedCommits.some((msg) => msg.includes("phase-3"))).toBe(true);
+
+        // Phase 2 should be completed
+        const completedCommits = commitMessages.filter(
+          (msg) => msg.startsWith("completed:") && msg.includes("phase-2"),
+        );
+        expect(completedCommits.length).toBe(1);
+      } catch (error) {
+        console.error(`Git log failed: ${error}`);
+      }
+    });
+
+    test("all commits on main branch (no error/exit branches)", async () => {
+      const { execSync } = await import("node:child_process");
+      try {
+        const gitBranches = execSync("git branch", {
+          cwd: TEST_DIR,
+          env: {
+            ...process.env,
+            GIT_DIR: gitDir,
+            GIT_WORK_TREE: TEST_DIR,
+          },
+          encoding: "utf-8",
+        });
+
+        const branches = gitBranches
+          .trim()
+          .split("\n")
+          .map((b) => b.trim());
+
+        // Should only have main branch (no error branches for skipped phases)
+        expect(branches).toEqual(["* main"]);
+      } catch (error) {
+        console.error(`Git branch failed: ${error}`);
+      }
+    });
+
+    test("only phase 2 files are tracked", async () => {
+      const { execSync } = await import("node:child_process");
+      try {
+        const gitFiles = execSync("git ls-files", {
+          cwd: TEST_DIR,
+          env: {
+            ...process.env,
+            GIT_DIR: gitDir,
+            GIT_WORK_TREE: TEST_DIR,
+          },
+          encoding: "utf-8",
+        });
+
+        const trackedFiles = gitFiles.trim()
+          ? gitFiles
+              .trim()
+              .split("\n")
+              .filter((f) => f)
+          : [];
+
+        // Should only have phase 2's file since phases 1 and 3 were skipped early
+        expect(trackedFiles).toContain("notes/test2.txt");
+
+        // Should not have files from skipped phases
+        expect(trackedFiles.some((f) => f.includes("favorite_poem.txt"))).toBe(false);
+        expect(trackedFiles.some((f) => f.includes("test3.txt"))).toBe(false);
+      } catch (error) {
+        console.error(`Git ls-files failed: ${error}`);
+      }
+    });
   });
 });
 
