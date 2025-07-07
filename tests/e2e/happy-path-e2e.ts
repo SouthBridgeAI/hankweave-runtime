@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { afterAll, describe, expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { generateId } from "../../server/utils.js";
 
 // Install rimraf if needed: bun add -d rimraf @types/rimraf
@@ -40,11 +40,34 @@ const colors = {
 
 // Import types from the server
 import type {
+  AssistantActionEvent,
   ClientCommand,
+  ErrorEvent,
+  FileTreeUpdatedEvent,
+  FileUpdatedEvent,
+  InfoEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
+  StateSnapshotEvent,
+  TokenUsageEvent,
 } from "../../server/types.js";
+
+// Types for Claude JSONL log entries
+interface ClaudeLogEntry {
+  type: string;
+  subtype?: string;
+  session_id?: string;
+  message?: {
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
+    content?: Array<{ type?: string }>;
+  };
+}
 
 // Re-export for convenience
 // type AnyServerEvent = ServerEvent;
@@ -73,9 +96,9 @@ class TestWSClient {
         resolve();
       };
 
-      this.ws.onmessage = (event) => {
+      this.ws.onmessage = (event: MessageEvent) => {
         try {
-          const serverEvent = JSON.parse(event.data) as ServerEvent;
+          const serverEvent: ServerEvent = JSON.parse(event.data);
           this.events.push(serverEvent);
 
           // Resolve any waiting promises for this event type
@@ -96,7 +119,7 @@ class TestWSClient {
         }
       };
 
-      this.ws.onerror = (error) => {
+      this.ws.onerror = (error: Event) => {
         clearTimeout(timeout);
         reject(error);
       };
@@ -121,7 +144,7 @@ class TestWSClient {
 
       const waiters = this.eventPromises.get(type) || [];
       waiters.push({
-        resolve: (event) => {
+        resolve: (event: ServerEvent) => {
           clearTimeout(timer);
           resolve(event);
         },
@@ -140,8 +163,8 @@ class TestWSClient {
     while (Date.now() - startTime < timeout) {
       const completed = this.events.find(
         (e) => e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
-      );
-      if (completed) return completed as PhaseCompletedEvent;
+      ) as PhaseCompletedEvent | undefined;
+      if (completed) return completed;
 
       // Wait a bit before checking again
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -265,18 +288,18 @@ function startServer(): ChildProcess {
   return serverProcess;
 }
 
-function parseJSONL(content: string): Record<string, unknown>[] {
+function parseJSONL(content: string): ClaudeLogEntry[] {
   return content
     .split("\n")
     .filter((line) => line.trim())
     .map((line) => {
       try {
-        return JSON.parse(line) as Record<string, unknown>;
+        return JSON.parse(line) as ClaudeLogEntry;
       } catch {
         return null;
       }
     })
-    .filter((item): item is Record<string, unknown> => item !== null);
+    .filter((item): item is ClaudeLogEntry => item !== null);
 }
 
 interface UsageData {
@@ -403,10 +426,7 @@ async function setupAndRunPhases(): Promise<void> {
   )) as PhaseStartedEvent;
   console.log(`${colors.green}✓ Phase 1 started${colors.reset}`);
 
-  testState.phase1Completed = (await testState.client.waitForPhaseCompletion(
-    "phase-1",
-    60000,
-  )) as PhaseCompletedEvent;
+  testState.phase1Completed = await testState.client.waitForPhaseCompletion("phase-1", 60000);
   console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
 
   // Phase 2
@@ -417,7 +437,7 @@ async function setupAndRunPhases(): Promise<void> {
     .getEvents()
     .find(
       (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-2",
-    ) as PhaseStartedEvent;
+    ) as PhaseStartedEvent | undefined;
 
   if (!testState.phase2Started) {
     console.log(`${colors.red}✗ Phase 2 did not start${colors.reset}`);
@@ -425,10 +445,7 @@ async function setupAndRunPhases(): Promise<void> {
     console.log(`${colors.green}✓ Phase 2 started${colors.reset}`);
   }
 
-  testState.phase2Completed = (await testState.client.waitForPhaseCompletion(
-    "phase-2",
-    60000,
-  )) as PhaseCompletedEvent;
+  testState.phase2Completed = await testState.client.waitForPhaseCompletion("phase-2", 60000);
   console.log(`${colors.green}✓ Phase 2 completed${colors.reset}`);
 
   // Phase 3
@@ -442,7 +459,7 @@ async function setupAndRunPhases(): Promise<void> {
       .getEvents()
       .find(
         (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-3",
-      ) as PhaseStartedEvent;
+      ) as PhaseStartedEvent | undefined;
 
     if (testState.phase3Started) {
       console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
@@ -457,10 +474,7 @@ async function setupAndRunPhases(): Promise<void> {
     console.log(`${colors.red}✗ Phase 3 did not start${colors.reset}`);
   }
 
-  testState.phase3Completed = (await testState.client.waitForPhaseCompletion(
-    "phase-3",
-    60000,
-  )) as PhaseCompletedEvent;
+  testState.phase3Completed = await testState.client.waitForPhaseCompletion("phase-3", 60000);
   console.log(`${colors.green}✓ Phase 3 completed${colors.reset}`);
 
   // Give a moment for final events
@@ -699,7 +713,9 @@ describe("Langton E2E Test", () => {
 
     test("received file creation events", () => {
       const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
-      const createdFiles = fileUpdateEvents.filter((e) => e.data.action === "created");
+      const createdFiles = fileUpdateEvents.filter(
+        (e) => (e as FileUpdatedEvent).data?.action === "created",
+      );
 
       // We should receive at least 1 file creation event (files are only sent if they match watch patterns)
       expect(createdFiles.length).toBeGreaterThanOrEqual(1);
@@ -723,7 +739,7 @@ describe("Langton E2E Test", () => {
 
     test("no fatal errors occurred", () => {
       const errorEvents = testState.client?.getEventsByType("error") || [];
-      const fatalErrors = errorEvents.filter((e) => e.data.fatal);
+      const fatalErrors = errorEvents.filter((e) => (e as ErrorEvent).data?.fatal);
       expect(fatalErrors.length).toBe(0);
     });
   });
@@ -733,14 +749,14 @@ describe("Langton E2E Test", () => {
       const finalStateSnapshot = [...testState.events]
         .reverse()
         .find((e) => e.type === "state.snapshot");
-      expect(finalStateSnapshot?.data.totalCost).toBeGreaterThan(0);
+      expect((finalStateSnapshot as StateSnapshotEvent)?.data?.totalCost).toBeGreaterThan(0);
     });
 
     test("all 3 phases marked as completed", () => {
       const finalStateSnapshot = [...testState.events]
         .reverse()
         .find((e) => e.type === "state.snapshot");
-      expect(finalStateSnapshot?.data.completedPhases.length).toBe(3);
+      expect((finalStateSnapshot as StateSnapshotEvent)?.data?.completedPhases?.length).toBe(3);
     });
 
     test("costs match between WebSocket and logs", () => {
@@ -775,8 +791,9 @@ describe("Langton E2E Test", () => {
       let wsReportedCost = 0;
 
       for (const event of phaseCompletedEvents) {
-        if (event.data.success) {
-          wsReportedCost += event.data.cost;
+        const completedEvent = event as PhaseCompletedEvent;
+        if (completedEvent.data?.success) {
+          wsReportedCost += completedEvent.data?.cost || 0;
         }
       }
 
@@ -805,9 +822,10 @@ describe("Langton E2E Test", () => {
       // Compare with events
       const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
       for (const event of phaseCompletedEvents) {
-        if (event.data.success) {
-          const logCost = phaseLogCosts[event.data.phaseId] || 0;
-          expect(event.data.cost).toBeCloseTo(logCost, 4);
+        const completedEvent = event as PhaseCompletedEvent;
+        if (completedEvent.data?.success) {
+          const logCost = phaseLogCosts[completedEvent.data?.phaseId || ""] || 0;
+          expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 4);
         }
       }
     });
@@ -831,13 +849,16 @@ describe("Langton E2E Test", () => {
 
           if (lastMessage?.message?.usage) {
             // Find corresponding final token usage event for this phase
-            const phaseTokenEvents = tokenUsageEvents.filter((e) => e.data.phaseId === phaseId);
+            const phaseTokenEvents = tokenUsageEvents.filter(
+              (e) => (e as TokenUsageEvent).data?.phaseId === phaseId,
+            );
             const lastTokenEvent = phaseTokenEvents[phaseTokenEvents.length - 1];
 
             if (lastTokenEvent) {
               const logUsage = lastMessage.message.usage;
-              expect(lastTokenEvent.data.inputTokens).toBe(logUsage.input_tokens || 0);
-              expect(lastTokenEvent.data.outputTokens).toBe(logUsage.output_tokens || 0);
+              const tokenEvent = lastTokenEvent as TokenUsageEvent;
+              expect(tokenEvent.data?.inputTokens || 0).toBe(logUsage.input_tokens || 0);
+              expect(tokenEvent.data?.outputTokens || 0).toBe(logUsage.output_tokens || 0);
             }
           }
         }
@@ -893,17 +914,22 @@ describe("Langton E2E Test", () => {
   describe("File Watching", () => {
     test("file event for favorite_poem.txt creation", () => {
       const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
-      const phase1FileEvents = fileUpdateEvents.filter(
-        (e) =>
-          (e.data.path === "notes/favorite_poem.txt" ||
-            e.data.path === "./notes/favorite_poem.txt") &&
-          e.data.action === "created",
-      );
+      const phase1FileEvents = fileUpdateEvents.filter((e) => {
+        const fileEvent = e as FileUpdatedEvent;
+        return (
+          (fileEvent.data?.path === "notes/favorite_poem.txt" ||
+            fileEvent.data?.path === "./notes/favorite_poem.txt") &&
+          fileEvent.data?.action === "created"
+        );
+      });
 
       // Debug: log all file events if test fails
       if (phase1FileEvents.length === 0) {
         console.log(`${colors.yellow}All file events (${fileUpdateEvents.length}):${colors.reset}`);
-        fileUpdateEvents.forEach((e) => console.log(`  - ${e.data.action}: ${e.data.path}`));
+        fileUpdateEvents.forEach((e) => {
+          const fileEvent = e as FileUpdatedEvent;
+          console.log(`  - ${fileEvent.data?.action}: ${fileEvent.data?.path}`);
+        });
       }
 
       expect(phase1FileEvents.length).toBeGreaterThanOrEqual(1);
@@ -911,12 +937,14 @@ describe("Langton E2E Test", () => {
 
     test("file event for second_favorite_poem.txt creation", () => {
       const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
-      const phase2FileEvents = fileUpdateEvents.filter(
-        (e) =>
-          (e.data.path === "notes/second_favorite_poem.txt" ||
-            e.data.path === "./notes/second_favorite_poem.txt") &&
-          e.data.action === "created",
-      );
+      const phase2FileEvents = fileUpdateEvents.filter((e) => {
+        const fileEvent = e as FileUpdatedEvent;
+        return (
+          (fileEvent.data?.path === "notes/second_favorite_poem.txt" ||
+            fileEvent.data?.path === "./notes/second_favorite_poem.txt") &&
+          fileEvent.data?.action === "created"
+        );
+      });
 
       // For now, make this test more lenient - Phase 2 might not send file events
       // depending on timing of when the file is created vs when the watcher is active
@@ -925,14 +953,17 @@ describe("Langton E2E Test", () => {
 
     test("file events contain actual content", () => {
       const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
-      const phase1FileEvents = fileUpdateEvents.filter(
-        (e) =>
-          (e.data.path === "notes/favorite_poem.txt" ||
-            e.data.path === "./notes/favorite_poem.txt") &&
-          e.data.action === "created",
-      );
+      const phase1FileEvents = fileUpdateEvents.filter((e) => {
+        const fileEvent = e as FileUpdatedEvent;
+        return (
+          (fileEvent.data?.path === "notes/favorite_poem.txt" ||
+            fileEvent.data?.path === "./notes/favorite_poem.txt") &&
+          fileEvent.data?.action === "created"
+        );
+      });
       if (phase1FileEvents.length > 0) {
-        expect(phase1FileEvents[0].data.content.length).toBeGreaterThan(0);
+        const firstEvent = phase1FileEvents[0] as FileUpdatedEvent;
+        expect(firstEvent.data?.content?.length || 0).toBeGreaterThan(0);
       }
     });
 
@@ -946,7 +977,8 @@ describe("Langton E2E Test", () => {
       const bufferTime = 30000; // 30 seconds buffer for file watcher delays
 
       const phase1RelatedEvents = fileUpdateEvents.filter((e) => {
-        if (!e.data.path.endsWith(".txt")) return false;
+        const fileEvent = e as FileUpdatedEvent;
+        if (!fileEvent.data?.path?.endsWith(".txt")) return false;
         if (!phase1Start || !phase1End) return false;
 
         const timestamp = new Date(e.timestamp).getTime();
@@ -962,12 +994,14 @@ describe("Langton E2E Test", () => {
 
     test("no TypeScript file events before Phase 3", () => {
       const phase3StartIndex = testState.events.findIndex(
-        (e) => e.type === "phase.started" && e.data.phaseId === "phase-3",
+        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === "phase-3",
       );
       const phase1And2Events = testState.events.slice(0, phase3StartIndex);
 
       const unexpectedTsEvents = phase1And2Events.filter(
-        (e) => e.type === "file.updated" && e.data?.path?.includes("typescript_code"),
+        (e) =>
+          e.type === "file.updated" &&
+          (e as FileUpdatedEvent).data?.path?.includes("typescript_code"),
       );
 
       expect(unexpectedTsEvents.length).toBe(0);
@@ -978,12 +1012,13 @@ describe("Langton E2E Test", () => {
     const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
 
     for (const completed of phaseCompletedEvents) {
-      test(`Phase ${completed.data.phaseId} has positive duration`, () => {
-        expect(completed.data.duration).toBeGreaterThan(0);
+      const completedEvent = completed as PhaseCompletedEvent;
+      test(`Phase ${completedEvent.data?.phaseId} has positive duration`, () => {
+        expect(completedEvent.data?.duration || 0).toBeGreaterThan(0);
       });
 
-      test(`Phase ${completed.data.phaseId} completed within 2 minutes`, () => {
-        expect(completed.data.duration).toBeLessThan(120000);
+      test(`Phase ${completedEvent.data?.phaseId} completed within 2 minutes`, () => {
+        expect(completedEvent.data?.duration || 0).toBeLessThan(120000);
       });
     }
   });
@@ -1015,7 +1050,7 @@ describe("Langton E2E Test", () => {
 
       if (fileTreeEvents.length === 0) {
         console.log(`${colors.yellow}No file tree events received${colors.reset}`);
-        const allEventTypes = [...new Set(testState.events.map((e) => e.type))];
+        const allEventTypes = Array.from(new Set(testState.events.map((e) => e.type)));
         console.log(
           `${colors.yellow}Available event types: ${allEventTypes.join(", ")}${colors.reset}`,
         );
@@ -1040,8 +1075,9 @@ describe("Langton E2E Test", () => {
       const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
       const lastFileTree = fileTreeEvents[fileTreeEvents.length - 1];
       if (lastFileTree) {
-        const tree = lastFileTree.data.tree;
-        const tsDir = findInTree(tree, "typescript_code");
+        const treeEvent = lastFileTree as FileTreeUpdatedEvent;
+        const tree = treeEvent.data?.tree;
+        const tsDir = findInTree(tree || [], "typescript_code");
         if (tsDir) {
           const srcDir = tsDir.children?.find((f) => f.name === "src");
           expect(srcDir?.isDirectory).toBe(true);
@@ -1055,22 +1091,23 @@ describe("Langton E2E Test", () => {
     const infoEvents = testState.client?.getEventsByType("info") || [];
 
     test("info event for phase continuation", () => {
-      const hasContinuationInfo = infoEvents.some((e) =>
-        e.data.message.includes("Continuing from previous session"),
+      const hasContinuationInfo = infoEvents.some(
+        (e) =>
+          (e as InfoEvent).data?.message?.includes("Continuing from previous session") || false,
       );
       expect(hasContinuationInfo).toBe(true);
     });
 
     test("info events for all 3 Claude session starts", () => {
-      const sessionStartEvents = infoEvents.filter((e) =>
-        e.data.message.includes("Claude started with session ID"),
+      const sessionStartEvents = infoEvents.filter(
+        (e) => (e as InfoEvent).data?.message?.includes("Claude started with session ID") || false,
       );
       expect(sessionStartEvents.length).toBe(3);
     });
 
     test("info event for all phases completed", () => {
-      const hasCompletionInfo = infoEvents.some((e) =>
-        e.data.message.includes("All phases completed"),
+      const hasCompletionInfo = infoEvents.some(
+        (e) => (e as InfoEvent).data?.message?.includes("All phases completed") || false,
       );
       expect(hasCompletionInfo).toBe(true);
     });
@@ -1094,12 +1131,15 @@ describe("Langton E2E Test", () => {
 
   describe("Tool Usage", () => {
     const assistantActionEvents = testState.client?.getEventsByType("assistant.action") || [];
-    const toolUseActions = assistantActionEvents.filter((e) => e.data.action === "tool_use");
+    const toolUseActions = assistantActionEvents.filter(
+      (e) => (e as AssistantActionEvent).data?.action === "tool_use",
+    );
 
     // Count tool types used
     const toolCounts: Record<string, number> = {};
     for (const action of toolUseActions) {
-      const toolName = action.data.toolName || "unknown";
+      const actionEvent = action as AssistantActionEvent;
+      const toolName = actionEvent.data?.toolName || "unknown";
       toolCounts[toolName] = (toolCounts[toolName] || 0) + 1;
     }
 
@@ -1125,12 +1165,16 @@ describe("Langton E2E Test", () => {
           // Count assistant messages in logs
           const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");
           const logToolUses = logAssistantMessages.filter((e) =>
-            e.message?.content?.some((c: { type?: string }) => c.type === "tool_use"),
+            e.message?.content?.some((c) => c.type === "tool_use"),
           ).length;
 
           // Count WebSocket events for this phase
-          const phaseActions = assistantActionEvents.filter((e) => e.data.phaseId === phaseId);
-          const wsToolUses = phaseActions.filter((e) => e.data.action === "tool_use").length;
+          const phaseActions = assistantActionEvents.filter(
+            (e) => (e as AssistantActionEvent).data?.phaseId === phaseId,
+          );
+          const wsToolUses = phaseActions.filter(
+            (e) => (e as AssistantActionEvent).data?.action === "tool_use",
+          ).length;
 
           expect(wsToolUses).toBeGreaterThanOrEqual(logToolUses);
         }
@@ -1214,8 +1258,10 @@ describe("Langton E2E Test", () => {
       const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
 
       const allFilePaths = [
-        ...fileUpdateEvents.map((e) => e.data.path),
-        ...fileTreeEvents.flatMap((e) => extractPathsFromTree(e.data.tree)),
+        ...fileUpdateEvents.map((e) => (e as FileUpdatedEvent).data?.path || ""),
+        ...fileTreeEvents.flatMap((e) =>
+          extractPathsFromTree((e as FileTreeUpdatedEvent).data?.tree || []),
+        ),
       ];
 
       const absolutePaths = allFilePaths.filter((p) => p.startsWith("/") || p.includes(":"));
@@ -1227,10 +1273,11 @@ describe("Langton E2E Test", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
       test(`${phaseId}: events are properly ordered`, () => {
         const phaseStart = testState.events.find(
-          (e) => e.type === "phase.started" && e.data.phaseId === phaseId,
+          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === phaseId,
         );
         const phaseComplete = testState.events.find(
-          (e) => e.type === "phase.completed" && e.data.phaseId === phaseId,
+          (e) =>
+            e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
         );
 
         if (phaseStart && phaseComplete) {

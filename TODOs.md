@@ -22,3 +22,5 @@ TODOs:
 1. Use full paths for folders and replace those in the prompts.
 2. safe_exec and that journey
 3. Make use of system prompts
+4. Implement actual workspace copying in and out instead of running commands which can be brittle
+5. Retry system and error handling?

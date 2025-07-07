@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import type { PhaseConfig, ServerConfig } from "./types.js";
 
@@ -78,7 +79,53 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       throw new Error(`Invalid phase configuration:\n${errors}`);
     }
 
-    return result.data;
+    // Resolve relative paths for promptFile
+    const configDir = path.dirname(configPath);
+    const resolvedConfig = result.data.map((phase) => {
+      if (phase.promptFile && !path.isAbsolute(phase.promptFile)) {
+        return {
+          ...phase,
+          promptFile: path.resolve(configDir, phase.promptFile),
+        };
+      }
+      return phase;
+    });
+
+    // Validate file existence, readability, and model names
+    const validationErrors: string[] = [];
+    const validModels = ["sonnet", "opus"];
+
+    for (const [index, phase] of resolvedConfig.entries()) {
+      // Validate model name
+      if (!validModels.includes(phase.model)) {
+        validationErrors.push(
+          `Phase ${index + 1} (${phase.id}): model "${phase.model}" is not valid. Must be one of: ${validModels.join(", ")}`,
+        );
+      }
+
+      // Validate promptFile existence and readability
+      if (phase.promptFile) {
+        if (!fs.existsSync(phase.promptFile)) {
+          validationErrors.push(
+            `Phase ${index + 1} (${phase.id}): promptFile "${phase.promptFile}" does not exist`,
+          );
+        } else {
+          try {
+            fs.readFileSync(phase.promptFile, "utf-8");
+          } catch (error) {
+            validationErrors.push(
+              `Phase ${index + 1} (${phase.id}): promptFile "${phase.promptFile}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      throw new Error(`Phase configuration validation failed:\n${validationErrors.join("\n")}`);
+    }
+
+    return resolvedConfig;
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to load phase config from ${configPath}: ${error.message}`);
