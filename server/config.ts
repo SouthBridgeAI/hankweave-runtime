@@ -39,6 +39,7 @@ const phaseConfigSchema = z
     description: z.string().optional(),
     checkpointAndWatch: z.array(z.string()).optional(),
   })
+  .strict()
   .refine((data) => data.promptFile || data.promptText, {
     message: "Either promptFile or promptText must be provided",
   })
