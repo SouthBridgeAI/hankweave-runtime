@@ -697,6 +697,9 @@ export class LangtonServer extends EventEmitter {
 
     this.cleanupCurrentPhase();
 
+    // Send updated state snapshot after phase completion
+    this.sendStateSnapshot();
+
     if (!success && !this.isShuttingDown) {
       this.sendError(`Phase failed with exit code ${exitCode}`, true);
       this.shutdown("phase failure");
