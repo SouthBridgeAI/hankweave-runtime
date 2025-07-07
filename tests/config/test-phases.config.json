@@ -2,12 +2,12 @@
   {
     "id": "phase-1",
     "name": "Phase 1: TestPhase1",
-    "promptFile": "./phase1Prompt.md",
+    "promptFile": ["./phase1Prompt1.md", "./phase1Prompt2.md"],
     "model": "sonnet",
     "continueFromPrevious": false,
     "preStart": "mkdir -p notes",
     "watch": "./notes/*.txt",
-    "appendSystemPromptFile": "./systemPrompt.md",
+    "appendSystemPromptFile": ["./systemPrompt1.md", "./systemPrompt2.md"],
     "description": "Write three pick one"
   },
   {

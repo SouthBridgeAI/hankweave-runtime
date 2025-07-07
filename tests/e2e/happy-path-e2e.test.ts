@@ -17,7 +17,7 @@ async function rimrafSimple(dirPath: string): Promise<void> {
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
-const SERVER_PORT = 7777;
+const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7777");
 const PHASES_CONFIG = path.join(process.cwd(), "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
@@ -247,6 +247,7 @@ function startServer(): ChildProcess {
     [
       path.join(process.cwd(), "server/index.ts"),
       `--config=${PHASES_CONFIG}`,
+      `--port=${SERVER_PORT}`,
       // Add a unique identifier for test processes
       "--test-mode=e2e-happy-path",
     ],

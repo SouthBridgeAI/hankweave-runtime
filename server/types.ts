@@ -19,13 +19,13 @@ export interface PhaseConfig {
   name: string;
 
   /** Path to a file containing the prompt (mutually exclusive with promptText) */
-  promptFile?: string;
+  promptFile?: string | string[];
 
   /** Inline prompt text (mutually exclusive with promptFile) */
   promptText?: string;
 
   /** Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText) */
-  appendSystemPromptFile?: string;
+  appendSystemPromptFile?: string | string[];
 
   /** Inline system prompt text to append (mutually exclusive with appendSystemPromptFile) */
   appendSystemPromptText?: string;

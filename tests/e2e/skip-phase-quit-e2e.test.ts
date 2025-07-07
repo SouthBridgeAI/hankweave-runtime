@@ -21,7 +21,7 @@ import { generateId } from "../../server/utils.js";
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
 const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
-const SERVER_PORT = 7779;
+const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7779");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);

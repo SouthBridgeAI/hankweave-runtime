@@ -11,9 +11,9 @@ const phaseConfigSchema = z
   .object({
     id: z.string().min(1, "Phase ID cannot be empty"),
     name: z.string().min(1, "Phase name cannot be empty"),
-    promptFile: z.string().optional(),
+    promptFile: z.union([z.string(), z.array(z.string())]).optional(),
     promptText: z.string().optional(),
-    appendSystemPromptFile: z.string().optional(),
+    appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
     appendSystemPromptText: z.string().optional(),
     model: z.string().min(1, "Model name cannot be empty"),
     continueFromPrevious: z.boolean().optional(),
@@ -89,12 +89,26 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
     const resolvedConfig = result.data.map((phase) => {
       const resolved = { ...phase };
 
-      if (phase.promptFile && !path.isAbsolute(phase.promptFile)) {
-        resolved.promptFile = path.resolve(configDir, phase.promptFile);
+      // Handle promptFile - can be string or array
+      if (phase.promptFile) {
+        if (Array.isArray(phase.promptFile)) {
+          resolved.promptFile = phase.promptFile.map(file => 
+            path.isAbsolute(file) ? file : path.resolve(configDir, file)
+          );
+        } else if (!path.isAbsolute(phase.promptFile)) {
+          resolved.promptFile = path.resolve(configDir, phase.promptFile);
+        }
       }
 
-      if (phase.appendSystemPromptFile && !path.isAbsolute(phase.appendSystemPromptFile)) {
-        resolved.appendSystemPromptFile = path.resolve(configDir, phase.appendSystemPromptFile);
+      // Handle appendSystemPromptFile - can be string or array
+      if (phase.appendSystemPromptFile) {
+        if (Array.isArray(phase.appendSystemPromptFile)) {
+          resolved.appendSystemPromptFile = phase.appendSystemPromptFile.map(file => 
+            path.isAbsolute(file) ? file : path.resolve(configDir, file)
+          );
+        } else if (!path.isAbsolute(phase.appendSystemPromptFile)) {
+          resolved.appendSystemPromptFile = path.resolve(configDir, phase.appendSystemPromptFile);
+        }
       }
 
       return resolved;
@@ -114,34 +128,40 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
 
       // Validate promptFile existence and readability
       if (phase.promptFile) {
-        if (!fs.existsSync(phase.promptFile)) {
-          validationErrors.push(
-            `Phase ${index + 1} (${phase.id}): promptFile "${phase.promptFile}" does not exist`,
-          );
-        } else {
-          try {
-            fs.readFileSync(phase.promptFile, "utf-8");
-          } catch (error) {
+        const promptFiles = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+        for (const file of promptFiles) {
+          if (!fs.existsSync(file)) {
             validationErrors.push(
-              `Phase ${index + 1} (${phase.id}): promptFile "${phase.promptFile}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+              `Phase ${index + 1} (${phase.id}): promptFile "${file}" does not exist`,
             );
+          } else {
+            try {
+              fs.readFileSync(file, "utf-8");
+            } catch (error) {
+              validationErrors.push(
+                `Phase ${index + 1} (${phase.id}): promptFile "${file}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
           }
         }
       }
 
       // Validate appendSystemPromptFile existence and readability
       if (phase.appendSystemPromptFile) {
-        if (!fs.existsSync(phase.appendSystemPromptFile)) {
-          validationErrors.push(
-            `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${phase.appendSystemPromptFile}" does not exist`,
-          );
-        } else {
-          try {
-            fs.readFileSync(phase.appendSystemPromptFile, "utf-8");
-          } catch (error) {
+        const systemPromptFiles = Array.isArray(phase.appendSystemPromptFile) ? phase.appendSystemPromptFile : [phase.appendSystemPromptFile];
+        for (const file of systemPromptFiles) {
+          if (!fs.existsSync(file)) {
             validationErrors.push(
-              `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${phase.appendSystemPromptFile}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+              `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${file}" does not exist`,
             );
+          } else {
+            try {
+              fs.readFileSync(file, "utf-8");
+            } catch (error) {
+              validationErrors.push(
+                `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${file}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
           }
         }
       }

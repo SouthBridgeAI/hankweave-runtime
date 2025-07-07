@@ -1,0 +1,5 @@
+<POEM_WRITING_INSTRUCTIONS>
+
+2. Make sure the poems are happy.
+
+</POEM_WRITING_INSTRUCTIONS>
