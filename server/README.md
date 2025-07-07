@@ -11,6 +11,8 @@ Langton Server acts as a bridge between clients and the Claude CLI, managing mul
 - **State persistence**: Recover from crashes using Claude's log files
 - **Cost tracking**: Monitor token usage and calculate costs per phase
 - **File watching**: Monitor project files for changes during execution
+- **Workspace setup**: Copy files and run commands before phases start
+- **Checkpoint system**: Git-based snapshots of work progress with selective file tracking
 
 ## Architecture
 
@@ -38,6 +40,7 @@ server/
 ├── types.ts             # TypeScript type definitions
 ├── utils.ts             # Utility functions (logging, ID generation)
 ├── claude-log-parser.ts # Real-time Claude output parsing
+├── checkpoint-git.ts    # Git-based checkpoint system
 └── basic-tui.ts         # Terminal UI for testing
 ```
 
@@ -89,7 +92,15 @@ Real-time parsing of Claude's JSONL output:
 - Extracts token usage information
 - Handles both streaming and batch parsing
 
-### 7. **basic-tui.ts** - Terminal UI
+### 7. **checkpoint-git.ts** - Checkpoint System
+Git-based checkpoint and snapshot system:
+- Creates shadow git repository in `.langton/checkpoints/`
+- Tracks files matching `checkpointAndWatch` patterns
+- Creates commits at phase milestones (setup, completion, errors)
+- Supports branching for error and exit scenarios
+- Uses git exclude patterns for selective file tracking
+
+### 8. **basic-tui.ts** - Terminal UI
 Simple terminal interface for testing:
 - Connects as a WebSocket client
 - Displays events with color coding
@@ -113,6 +124,7 @@ interface PhaseConfig {
   preStart?: string;             // Shell command to run before phase (DEPRECATED)
   workspaceSetup?: WorkspaceSetupItem[]; // Workspace setup operations
   watch?: string;                // Glob pattern for file watching
+  checkpointAndWatch?: string[]; // Glob patterns for checkpoint tracking
   description?: string;          // Phase description
 }
 
@@ -138,8 +150,14 @@ Example configuration:
     "promptFile": "./prompts/setup.md",
     "appendSystemPromptFile": "./prompts/system-instructions.md",
     "model": "claude-3-opus-20240229",
-    "preStart": "mkdir -p output",
-    "watch": "./output/**/*.ts"
+    "workspaceSetup": [
+      {
+        "type": "command",
+        "command": { "run": "mkdir -p output" }
+      }
+    ],
+    "watch": "./output/**/*.ts",
+    "checkpointAndWatch": ["output/**/*.ts", "*.md"]
   },
   {
     "id": "phase-2",
@@ -169,7 +187,8 @@ Example configuration:
         }
       }
     ],
-    "watch": "./src/**/*.ts"
+    "watch": "./src/**/*.ts",
+    "checkpointAndWatch": ["src/**/*.ts", "package.json"]
   }
 ]
 ```
@@ -187,6 +206,21 @@ The `workspaceSetup` field allows you to prepare the workspace before a phase st
   - `workingDirectory`: Either `"project"` (default) or `"lastCopied"` (the last copied directory)
 
 Operations are executed in order, and all must succeed for the phase to start. If `preStart` is also specified, it runs before `workspaceSetup`.
+
+### Checkpoint System
+
+The `checkpointAndWatch` field specifies which files should be tracked in the git-based checkpoint system:
+
+- **Shadow Repository**: Creates a git repo in `.langton/checkpoints/` 
+- **Selective Tracking**: Only files matching the glob patterns are tracked
+- **Automatic Commits**: Creates commits at phase milestones:
+  - `workspace-setup`: After workspace operations complete
+  - `completed`: When phase finishes successfully  
+  - `skipped`: When phase is manually skipped
+  - `error`: When phase fails (creates error branch)
+  - `exit`: When server is force-shutdown (creates exit branch)
+- **Branch Management**: Error and exit scenarios create separate branches to preserve main timeline
+- **Commit Messages**: Machine-parseable format with phase info, timestamps, and durations
 
 ### Multiple File Support
 
@@ -243,9 +277,11 @@ Commands follow this structure:
 ## State Management
 
 ### Persistence
-- State is persisted through Claude's JSONL log files
-- Server can recover from crashes by reading logs
-- Lock file prevents multiple server instances
+- **Claude Logs**: State persisted through JSONL log files in `.langton/logs/`
+- **Server Logs**: Operations logged to `.langton/logs/server.log`
+- **Lock File**: `.langton/server.lock` prevents multiple server instances
+- **Checkpoints**: Git-based snapshots in `.langton/checkpoints/` for tracked files
+- Server can recover from crashes by reading logs and checkpoint history
 
 ### Phase States
 1. **Idle**: No phase running

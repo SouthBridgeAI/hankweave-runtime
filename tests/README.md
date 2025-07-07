@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Langton Server, including happy path
 
 ## Overview
 
-The test suite validates the complete server functionality through realistic multi-phase workflows. All tests use the actual Claude CLI to ensure real-world compatibility.
+The test suite validates the complete server functionality through realistic multi-phase workflows. All tests use the actual Claude CLI to ensure real-world compatibility and include validation of the checkpoint system, workspace setup, and file organization.
 
 ## Quick Start
 
@@ -61,6 +61,11 @@ Validates:
   - Directory creation via command
   - Directory copying
   - Command execution in copied directory (`lastCopied`)
+- Checkpoint system creates proper git commits:
+  - Workspace setup commits
+  - Phase completion commits
+  - File tracking matches `checkpointAndWatch` patterns
+  - Commit messages follow expected format
 
 ### 2. Skip and Continue Test (`skip-phase-continue-e2e.test.ts`)
 
@@ -72,6 +77,10 @@ Tests phase skipping with continuation:
 - Skips phase 3
 - Verifies proper cleanup and state management
 - Validates that `preStart` still works for backward compatibility
+- Tests checkpoint system with skipped phases:
+  - Skipped phases create `skipped` commits (even if empty)
+  - Only successful phases have tracked files
+  - No error branches created for normal skips
 
 ### 3. Skip and Quit Test (`skip-phase-quit-e2e.test.ts`)
 
@@ -79,9 +88,13 @@ Tests skipping the final phase:
 
 - Runs phase 1 to completion (using traditional `preStart`)
 - Starts phase 2 (last phase), skips it
-- Verifies server shuts down gracefully
+- Verifies server shuts down gracefully  
 - Checks that resources are cleaned up properly
 - Validates that `preStart` creates directories as expected
+- Tests normal completion checkpoints:
+  - No exit branch created (normal completion)
+  - Phase completion commits for successful phases
+  - Skipped commit for final phase
 
 
 ## Test Architecture
@@ -129,14 +142,23 @@ Tests can use custom phase configurations or the default `test-phases.config.jso
     "promptFile": ["./phase1Prompt1.md", "./phase1Prompt2.md"],
     "appendSystemPromptFile": ["./systemPrompt1.md", "./systemPrompt2.md"],
     "model": "sonnet",
-    "preStart": "mkdir -p notes",
-    "watch": "./notes/*.txt"
+    "workspaceSetup": [
+      {
+        "type": "command", 
+        "command": { "run": "mkdir -p notes" }
+      }
+    ],
+    "watch": "./notes/*.txt",
+    "checkpointAndWatch": ["notes/**/*"]
   }
   // ... more phases
 ]
 ```
 
-The test configuration demonstrates the multiple file support feature, where both prompt files and system prompt files can be specified as arrays.
+The test configuration demonstrates several key features:
+- **Multiple file support**: Both prompt files and system prompt files can be specified as arrays
+- **Workspace setup**: Modern `workspaceSetup` approach alongside legacy `preStart` for compatibility testing  
+- **Checkpoint tracking**: `checkpointAndWatch` patterns for git-based snapshots
 
 ## Running Tests
 
@@ -176,7 +198,9 @@ bun run test:cleanup  # Clean up stuck tests
 ### During Execution
 
 - **`test-area/`**: Working directory for Claude
-  - `.logs/`: Claude session logs (JSONL format)
+  - `.langton/logs/`: Claude session logs (JSONL format)
+  - `.langton/checkpoints/`: Git repository with tracked files
+  - `.langton/server.lock`: Server lock file
   - `notes/`: Test file outputs
   - Configuration files
 

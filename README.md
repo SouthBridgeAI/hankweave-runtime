@@ -12,6 +12,8 @@ Langton Runner provides a server that orchestrates Claude CLI sessions through c
 - **👁️ File watching**: Monitor project files during execution
 - **💰 Cost tracking**: Per-phase and total cost calculation
 - **🔗 Session continuity**: Phases can continue previous conversations
+- **📦 Workspace setup**: Copy files and run commands before phases
+- **📸 Checkpoint system**: Git-based snapshots of your work progress
 
 ## Quick Start
 
@@ -40,6 +42,7 @@ langton-runner/
 │   ├── types.ts         # TypeScript definitions
 │   ├── utils.ts         # Utility functions
 │   ├── claude-log-parser.ts # Claude output parsing
+│   ├── checkpoint-git.ts # Git-based checkpoint system
 │   ├── basic-tui.ts     # Terminal UI
 │   └── README.md        # Detailed server documentation
 ├── tests/               # Comprehensive test suite
@@ -63,8 +66,8 @@ A phase represents a discrete task for Claude with its own:
 
 - Prompt (file or inline text)
 - Model selection
-- Optional pre-start commands
-- File watching patterns
+- Workspace setup operations (copy files, run commands)
+- File watching and checkpoint patterns
 - Continuation settings
 
 ### Phase Configuration
@@ -79,8 +82,14 @@ Create a `phases.json` file:
     "promptFile": "./prompts/research.md",
     "appendSystemPromptFile": "./prompts/research-guidelines.md",
     "model": "claude-3-opus-20240229",
-    "preStart": "mkdir -p research",
-    "watch": "./research/**/*.md"
+    "workspaceSetup": [
+      {
+        "type": "command",
+        "command": { "run": "mkdir -p research" }
+      }
+    ],
+    "watch": "./research/**/*.md",
+    "checkpointAndWatch": ["research/**/*"]
   },
   {
     "id": "implement",
@@ -92,12 +101,26 @@ Create a `phases.json` file:
     ],
     "model": "claude-3-sonnet-20240229",
     "continueFromPrevious": true,
-    "watch": "./src/**/*.ts"
+    "workspaceSetup": [
+      {
+        "type": "copy",
+        "copy": { "from": "../templates/project", "to": "src" }
+      },
+      {
+        "type": "command",
+        "command": { "run": "npm install", "workingDirectory": "lastCopied" }
+      }
+    ],
+    "watch": "./src/**/*.ts",
+    "checkpointAndWatch": ["src/**/*.ts", "package.json"]
   }
 ]
 ```
 
-**Multiple File Support**: Both `promptFile` and `appendSystemPromptFile` can accept arrays of file paths. Files are concatenated with double newlines between them.
+**Key Features**:
+- **Multiple File Support**: Both `promptFile` and `appendSystemPromptFile` can accept arrays of file paths. Files are concatenated with double newlines between them.
+- **Workspace Setup**: Use `workspaceSetup` to copy files and run commands before a phase starts. Supports both file operations and shell commands.
+- **Checkpoint System**: Use `checkpointAndWatch` to specify which files should be tracked in git-based snapshots of your work progress.
 
 ### WebSocket Protocol
 
@@ -186,11 +209,13 @@ Client ←→ WebSocket ←→ Server
 
 ### State Persistence
 
-State is persisted through Claude's JSONL log files:
+State is persisted through multiple mechanisms:
 
-- `.logs/log-{phase-id}.jsonl`: Claude session logs
-- Server reads logs on startup to recover state
-- Completed phases tracked with costs and durations
+- **Claude Logs**: `.langton/logs/log-{phase-id}.jsonl` - Claude session logs
+- **Server Logs**: `.langton/logs/server.log` - Server operation logs  
+- **Lock File**: `.langton/server.lock` - Prevents multiple server instances
+- **Checkpoints**: `.langton/checkpoints/` - Git-based snapshots of tracked files
+- Server reads logs on startup to recover state and track completed phases with costs and durations
 
 ## Testing
 
