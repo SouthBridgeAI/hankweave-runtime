@@ -18,16 +18,10 @@ const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
 const SERVER_PORT = 7777;
-const PHASES_CONFIG = path.join(
-  process.cwd(),
-  "tests/config/test-phases.config.json"
-);
+const PHASES_CONFIG = path.join(process.cwd(), "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
-const TEST_TIMESTAMP = new Date()
-  .toISOString()
-  .replace(/[:.]/g, "-")
-  .slice(0, -5); // YYYY-MM-DDTHH-mm-ss
+const TEST_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5); // YYYY-MM-DDTHH-mm-ss
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
 // Colors for output
@@ -75,9 +69,7 @@ class TestWSClient {
       this.ws.onopen = () => {
         clearTimeout(timeout);
         this.connected = true;
-        console.log(
-          `${colors.green}✓ Connected to WebSocket server${colors.reset}`
-        );
+        console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
         resolve();
       };
 
@@ -116,10 +108,7 @@ class TestWSClient {
     });
   }
 
-  async waitForEvent(
-    type: string,
-    timeout: number = 30000
-  ): Promise<ServerEvent> {
+  async waitForEvent(type: string, timeout: number = 30000): Promise<ServerEvent> {
     // Check if we already have this event
     const existing = this.events.find((e) => type === "*" || e.type === type);
     if (existing) return existing;
@@ -144,15 +133,13 @@ class TestWSClient {
 
   async waitForPhaseCompletion(
     phaseId: string,
-    timeout: number = 120000
+    timeout: number = 120000,
   ): Promise<PhaseCompletedEvent> {
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeout) {
       const completed = this.events.find(
-        (e) =>
-          e.type === "phase.completed" &&
-          (e as PhaseCompletedEvent).data?.phaseId === phaseId
+        (e) => e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
       );
       if (completed) return completed as PhaseCompletedEvent;
 
@@ -194,9 +181,7 @@ class TestWSClient {
 // ============================================================================
 
 async function setupTestDirectory(): Promise<void> {
-  console.log(
-    `${colors.blue}Setting up test directory: ${TEST_DIR}${colors.reset}`
-  );
+  console.log(`${colors.blue}Setting up test directory: ${TEST_DIR}${colors.reset}`);
 
   // Create test directory if it doesn't exist
   if (!fs.existsSync(TEST_DIR)) {
@@ -213,17 +198,10 @@ async function setupTestDirectory(): Promise<void> {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
   }
 
-  console.log(
-    `${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`
-  );
+  console.log(`${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`);
 
   // Clean up previous test artifacts (but not the entire directory)
-  const artifactsToClean = [
-    ".logs",
-    ".langton-server.lock",
-    "notes",
-    "typescript_code",
-  ];
+  const artifactsToClean = [".logs", ".langton-server.lock", "notes", "typescript_code"];
 
   for (const artifact of artifactsToClean) {
     const artifactPath = path.join(TEST_DIR, artifact);
@@ -256,7 +234,7 @@ function startServer(): ChildProcess {
         ...process.env,
         LANGTON_TEST_RUN: "true", // Another way to identify test processes
       },
-    }
+    },
   );
 
   serverProcess.stdout?.on("data", (data) => {
@@ -267,9 +245,7 @@ function startServer(): ChildProcess {
 
   serverProcess.stderr?.on("data", (data) => {
     const message = data.toString();
-    console.error(
-      `${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`
-    );
+    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
   });
 
@@ -281,7 +257,7 @@ function startServer(): ChildProcess {
 
   serverProcess.on("exit", (code, signal) => {
     serverLogStream.write(
-      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`
+      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
     );
     serverLogStream.end();
   });
@@ -322,8 +298,7 @@ function calculateCostFromUsage(usage: UsageData): number {
   const inputCost = ((usage.input_tokens || 0) / 1_000_000) * costs.input;
   const cacheCreationCost =
     ((usage.cache_creation_input_tokens || 0) / 1_000_000) * costs.inputCache;
-  const cacheReadCost =
-    ((usage.cache_read_input_tokens || 0) / 1_000_000) * costs.cacheRead;
+  const cacheReadCost = ((usage.cache_read_input_tokens || 0) / 1_000_000) * costs.cacheRead;
   const outputCost = ((usage.output_tokens || 0) / 1_000_000) * costs.output;
 
   return inputCost + cacheCreationCost + cacheReadCost + outputCost;
@@ -414,27 +389,23 @@ async function setupAndRunPhases(): Promise<void> {
   await testState.client.connect();
 
   // Wait for initial events
-  console.log(
-    `${colors.blue}Waiting for server initialization...${colors.reset}`
-  );
+  console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
   await testState.client.waitForEvent("server.ready");
   await testState.client.waitForEvent("state.snapshot");
 
   // Wait for all phases to complete
-  console.log(
-    `${colors.blue}Waiting for all phases to complete...${colors.reset}`
-  );
+  console.log(`${colors.blue}Waiting for all phases to complete...${colors.reset}`);
 
   // Phase 1
   testState.phase1Started = (await testState.client.waitForEvent(
     "phase.started",
-    10000
+    10000,
   )) as PhaseStartedEvent;
   console.log(`${colors.green}✓ Phase 1 started${colors.reset}`);
 
   testState.phase1Completed = (await testState.client.waitForPhaseCompletion(
     "phase-1",
-    60000
+    60000,
   )) as PhaseCompletedEvent;
   console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
 
@@ -445,9 +416,7 @@ async function setupAndRunPhases(): Promise<void> {
   testState.phase2Started = testState.client
     .getEvents()
     .find(
-      (e) =>
-        e.type === "phase.started" &&
-        (e as PhaseStartedEvent).data.phaseId === "phase-2"
+      (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-2",
     ) as PhaseStartedEvent;
 
   if (!testState.phase2Started) {
@@ -458,7 +427,7 @@ async function setupAndRunPhases(): Promise<void> {
 
   testState.phase2Completed = (await testState.client.waitForPhaseCompletion(
     "phase-2",
-    60000
+    60000,
   )) as PhaseCompletedEvent;
   console.log(`${colors.green}✓ Phase 2 completed${colors.reset}`);
 
@@ -467,32 +436,30 @@ async function setupAndRunPhases(): Promise<void> {
   // We'll poll for the event with a timeout
   const phase3StartTime = Date.now();
   const phase3Timeout = 10000; // 10 seconds
-  
+
   while (Date.now() - phase3StartTime < phase3Timeout) {
     testState.phase3Started = testState.client
       .getEvents()
       .find(
-        (e) =>
-          e.type === "phase.started" &&
-          (e as PhaseStartedEvent).data.phaseId === "phase-3"
+        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-3",
       ) as PhaseStartedEvent;
-    
+
     if (testState.phase3Started) {
       console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
       break;
     }
-    
+
     // Wait 100ms before checking again
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  
+
   if (!testState.phase3Started) {
     console.log(`${colors.red}✗ Phase 3 did not start${colors.reset}`);
   }
 
   testState.phase3Completed = (await testState.client.waitForPhaseCompletion(
     "phase-3",
-    60000
+    60000,
   )) as PhaseCompletedEvent;
   console.log(`${colors.green}✓ Phase 3 completed${colors.reset}`);
 
@@ -517,9 +484,7 @@ async function cleanup(): Promise<void> {
 
   // Gracefully shutdown server
   if (testState.serverProcess) {
-    console.log(
-      `${colors.gray}Shutting down server gracefully...${colors.reset}`
-    );
+    console.log(`${colors.gray}Shutting down server gracefully...${colors.reset}`);
 
     // First try sending shutdown command if client is still connected
     if (testState.client?.isConnected) {
@@ -543,9 +508,7 @@ async function cleanup(): Promise<void> {
       // Wait up to 5 seconds for graceful shutdown
       const shutdownTimeout = setTimeout(() => {
         if (!testState.serverProcess?.killed) {
-          console.log(
-            `${colors.yellow}Force killing server with SIGKILL...${colors.reset}`
-          );
+          console.log(`${colors.yellow}Force killing server with SIGKILL...${colors.reset}`);
           testState.serverProcess.kill("SIGKILL");
         }
       }, 5000);
@@ -591,14 +554,10 @@ async function cleanup(): Promise<void> {
   const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
   fs.writeFileSync(eventsPath, JSON.stringify(testState.events || [], null, 2));
 
-  console.log(
-    `\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`
-  );
+  console.log(`\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`);
   console.log(`${colors.gray}  - Server logs: server.log${colors.reset}`);
   console.log(`${colors.gray}  - Claude logs: claude-logs/${colors.reset}`);
-  console.log(
-    `${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`
-  );
+  console.log(`${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`);
 }
 
 // ============================================================================
@@ -641,33 +600,23 @@ describe("Langton E2E Test", () => {
 
   describe("File System State", () => {
     test("Phase 1 created favorite_poem.txt", () => {
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"))
-      ).toBe(true);
+      expect(fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"))).toBe(true);
     });
 
     test("Phase 2 created second_favorite_poem.txt", () => {
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "notes/second_favorite_poem.txt"))
-      ).toBe(true);
+      expect(fs.existsSync(path.join(TEST_DIR, "notes/second_favorite_poem.txt"))).toBe(true);
     });
 
     test("Phase 3 created poem1.ts", () => {
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem1.ts"))
-      ).toBe(true);
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem1.ts"))).toBe(true);
     });
 
     test("Phase 3 created poem2.ts", () => {
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem2.ts"))
-      ).toBe(true);
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem2.ts"))).toBe(true);
     });
 
     test("Pre-start command created package.json", () => {
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "typescript_code/package.json"))
-      ).toBe(true);
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/package.json"))).toBe(true);
     });
   });
 
@@ -684,9 +633,7 @@ describe("Langton E2E Test", () => {
           if (fs.existsSync(logPath)) {
             const logContent = fs.readFileSync(logPath, "utf-8");
             const logEntries = parseJSONL(logContent);
-            const hasInit = logEntries.some(
-              (e) => e.type === "system" && e.subtype === "init"
-            );
+            const hasInit = logEntries.some((e) => e.type === "system" && e.subtype === "init");
             expect(hasInit).toBe(true);
           }
         });
@@ -741,23 +688,18 @@ describe("Langton E2E Test", () => {
     });
 
     test("received assistant action events", () => {
-      const assistantActions =
-        testState.client?.getEventsByType("assistant.action") || [];
+      const assistantActions = testState.client?.getEventsByType("assistant.action") || [];
       expect(assistantActions.length).toBeGreaterThan(0);
     });
 
     test("received token usage events", () => {
-      const tokenUsageEvents =
-        testState.client?.getEventsByType("token.usage") || [];
+      const tokenUsageEvents = testState.client?.getEventsByType("token.usage") || [];
       expect(tokenUsageEvents.length).toBeGreaterThan(0);
     });
 
     test("received file creation events", () => {
-      const fileUpdateEvents =
-        testState.client?.getEventsByType("file.updated") || [];
-      const createdFiles = fileUpdateEvents.filter(
-        (e) => e.data.action === "created"
-      );
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
+      const createdFiles = fileUpdateEvents.filter((e) => e.data.action === "created");
 
       // We should receive at least 1 file creation event (files are only sent if they match watch patterns)
       expect(createdFiles.length).toBeGreaterThanOrEqual(1);
@@ -814,7 +756,7 @@ describe("Langton E2E Test", () => {
 
           // Find all assistant messages with usage
           const assistantMessages = logEntries.filter(
-            (e) => e.type === "assistant" && e.message?.usage
+            (e) => e.type === "assistant" && e.message?.usage,
           );
 
           // Get the last assistant message (Claude reports cumulative usage)
@@ -829,8 +771,7 @@ describe("Langton E2E Test", () => {
       }
 
       // Compare with WebSocket reported costs
-      const phaseCompletedEvents =
-        testState.client?.getEventsByType("phase.completed") || [];
+      const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
       let wsReportedCost = 0;
 
       for (const event of phaseCompletedEvents) {
@@ -852,20 +793,17 @@ describe("Langton E2E Test", () => {
           const logContent = fs.readFileSync(logPath, "utf-8");
           const logEntries = parseJSONL(logContent);
           const assistantMessages = logEntries.filter(
-            (e) => e.type === "assistant" && e.message?.usage
+            (e) => e.type === "assistant" && e.message?.usage,
           );
           const lastMessage = assistantMessages[assistantMessages.length - 1];
           if (lastMessage?.message?.usage) {
-            phaseLogCosts[phaseId] = calculateCostFromUsage(
-              lastMessage.message.usage
-            );
+            phaseLogCosts[phaseId] = calculateCostFromUsage(lastMessage.message.usage);
           }
         }
       }
 
       // Compare with events
-      const phaseCompletedEvents =
-        testState.client?.getEventsByType("phase.completed") || [];
+      const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
       for (const event of phaseCompletedEvents) {
         if (event.data.success) {
           const logCost = phaseLogCosts[event.data.phaseId] || 0;
@@ -876,8 +814,7 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Token Usage", () => {
-    const tokenUsageEvents =
-      testState.client?.getEventsByType("token.usage") || [];
+    const tokenUsageEvents = testState.client?.getEventsByType("token.usage") || [];
 
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
       test(`${phaseId} token usage matches logs`, () => {
@@ -888,26 +825,19 @@ describe("Langton E2E Test", () => {
 
           // Get last assistant message with usage for this phase
           const assistantMessages = logEntries.filter(
-            (e) => e.type === "assistant" && e.message?.usage
+            (e) => e.type === "assistant" && e.message?.usage,
           );
           const lastMessage = assistantMessages[assistantMessages.length - 1];
 
           if (lastMessage?.message?.usage) {
             // Find corresponding final token usage event for this phase
-            const phaseTokenEvents = tokenUsageEvents.filter(
-              (e) => e.data.phaseId === phaseId
-            );
-            const lastTokenEvent =
-              phaseTokenEvents[phaseTokenEvents.length - 1];
+            const phaseTokenEvents = tokenUsageEvents.filter((e) => e.data.phaseId === phaseId);
+            const lastTokenEvent = phaseTokenEvents[phaseTokenEvents.length - 1];
 
             if (lastTokenEvent) {
               const logUsage = lastMessage.message.usage;
-              expect(lastTokenEvent.data.inputTokens).toBe(
-                logUsage.input_tokens || 0
-              );
-              expect(lastTokenEvent.data.outputTokens).toBe(
-                logUsage.output_tokens || 0
-              );
+              expect(lastTokenEvent.data.inputTokens).toBe(logUsage.input_tokens || 0);
+              expect(lastTokenEvent.data.outputTokens).toBe(logUsage.output_tokens || 0);
             }
           }
         }
@@ -962,36 +892,30 @@ describe("Langton E2E Test", () => {
 
   describe("File Watching", () => {
     test("file event for favorite_poem.txt creation", () => {
-      const fileUpdateEvents =
-        testState.client?.getEventsByType("file.updated") || [];
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
       const phase1FileEvents = fileUpdateEvents.filter(
         (e) =>
           (e.data.path === "notes/favorite_poem.txt" ||
             e.data.path === "./notes/favorite_poem.txt") &&
-          e.data.action === "created"
+          e.data.action === "created",
       );
 
       // Debug: log all file events if test fails
       if (phase1FileEvents.length === 0) {
-        console.log(
-          `${colors.yellow}All file events (${fileUpdateEvents.length}):${colors.reset}`
-        );
-        fileUpdateEvents.forEach((e) =>
-          console.log(`  - ${e.data.action}: ${e.data.path}`)
-        );
+        console.log(`${colors.yellow}All file events (${fileUpdateEvents.length}):${colors.reset}`);
+        fileUpdateEvents.forEach((e) => console.log(`  - ${e.data.action}: ${e.data.path}`));
       }
 
       expect(phase1FileEvents.length).toBeGreaterThanOrEqual(1);
     });
 
     test("file event for second_favorite_poem.txt creation", () => {
-      const fileUpdateEvents =
-        testState.client?.getEventsByType("file.updated") || [];
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
       const phase2FileEvents = fileUpdateEvents.filter(
         (e) =>
           (e.data.path === "notes/second_favorite_poem.txt" ||
             e.data.path === "./notes/second_favorite_poem.txt") &&
-          e.data.action === "created"
+          e.data.action === "created",
       );
 
       // For now, make this test more lenient - Phase 2 might not send file events
@@ -1000,13 +924,12 @@ describe("Langton E2E Test", () => {
     });
 
     test("file events contain actual content", () => {
-      const fileUpdateEvents =
-        testState.client?.getEventsByType("file.updated") || [];
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
       const phase1FileEvents = fileUpdateEvents.filter(
         (e) =>
           (e.data.path === "notes/favorite_poem.txt" ||
             e.data.path === "./notes/favorite_poem.txt") &&
-          e.data.action === "created"
+          e.data.action === "created",
       );
       if (phase1FileEvents.length > 0) {
         expect(phase1FileEvents[0].data.content.length).toBeGreaterThan(0);
@@ -1014,8 +937,7 @@ describe("Langton E2E Test", () => {
     });
 
     test("Phase 1 file events match *.txt watch pattern", () => {
-      const fileUpdateEvents =
-        testState.client?.getEventsByType("file.updated") || [];
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
 
       // Look for .txt file events that could be from Phase 1
       // Allow some time buffer after phase completion for file watcher delays
@@ -1040,13 +962,12 @@ describe("Langton E2E Test", () => {
 
     test("no TypeScript file events before Phase 3", () => {
       const phase3StartIndex = testState.events.findIndex(
-        (e) => e.type === "phase.started" && e.data.phaseId === "phase-3"
+        (e) => e.type === "phase.started" && e.data.phaseId === "phase-3",
       );
       const phase1And2Events = testState.events.slice(0, phase3StartIndex);
 
       const unexpectedTsEvents = phase1And2Events.filter(
-        (e) =>
-          e.type === "file.updated" && e.data?.path?.includes("typescript_code")
+        (e) => e.type === "file.updated" && e.data?.path?.includes("typescript_code"),
       );
 
       expect(unexpectedTsEvents.length).toBe(0);
@@ -1054,8 +975,7 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Phase Timing", () => {
-    const phaseCompletedEvents =
-      testState.client?.getEventsByType("phase.completed") || [];
+    const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
 
     for (const completed of phaseCompletedEvents) {
       test(`Phase ${completed.data.phaseId} has positive duration`, () => {
@@ -1078,11 +998,9 @@ describe("Langton E2E Test", () => {
         const phase2Entries = parseJSONL(fs.readFileSync(phase2Log, "utf-8"));
 
         const phase1SessionId = phase1Entries.find(
-          (e) => e.type === "system" && e.subtype === "init"
+          (e) => e.type === "system" && e.subtype === "init",
         )?.session_id;
-        const phase2Resume = phase2Entries.find(
-          (e) => e.type === "system" && e.subtype === "info"
-        );
+        const phase2Resume = phase2Entries.find((e) => e.type === "system" && e.subtype === "info");
 
         if (phase2Resume?.message && phase1SessionId) {
           expect(phase2Resume.message).toContain(phase1SessionId);
@@ -1093,18 +1011,13 @@ describe("Langton E2E Test", () => {
 
   describe("File Tree", () => {
     test("file tree update events received", () => {
-      const fileTreeEvents =
-        testState.client?.getEventsByType("filetree.updated") || [];
+      const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
 
       if (fileTreeEvents.length === 0) {
-        console.log(
-          `${colors.yellow}No file tree events received${colors.reset}`
-        );
+        console.log(`${colors.yellow}No file tree events received${colors.reset}`);
         const allEventTypes = [...new Set(testState.events.map((e) => e.type))];
         console.log(
-          `${colors.yellow}Available event types: ${allEventTypes.join(", ")}${
-            colors.reset
-          }`
+          `${colors.yellow}Available event types: ${allEventTypes.join(", ")}${colors.reset}`,
         );
       }
 
@@ -1124,8 +1037,7 @@ describe("Langton E2E Test", () => {
     });
 
     test("file tree contains typescript_code/src structure", () => {
-      const fileTreeEvents =
-        testState.client?.getEventsByType("filetree.updated") || [];
+      const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
       const lastFileTree = fileTreeEvents[fileTreeEvents.length - 1];
       if (lastFileTree) {
         const tree = lastFileTree.data.tree;
@@ -1144,21 +1056,21 @@ describe("Langton E2E Test", () => {
 
     test("info event for phase continuation", () => {
       const hasContinuationInfo = infoEvents.some((e) =>
-        e.data.message.includes("Continuing from previous session")
+        e.data.message.includes("Continuing from previous session"),
       );
       expect(hasContinuationInfo).toBe(true);
     });
 
     test("info events for all 3 Claude session starts", () => {
       const sessionStartEvents = infoEvents.filter((e) =>
-        e.data.message.includes("Claude started with session ID")
+        e.data.message.includes("Claude started with session ID"),
       );
       expect(sessionStartEvents.length).toBe(3);
     });
 
     test("info event for all phases completed", () => {
       const hasCompletionInfo = infoEvents.some((e) =>
-        e.data.message.includes("All phases completed")
+        e.data.message.includes("All phases completed"),
       );
       expect(hasCompletionInfo).toBe(true);
     });
@@ -1175,19 +1087,14 @@ describe("Langton E2E Test", () => {
     });
 
     test("pre-start command installed dependencies", () => {
-      const nodeModulesExists = fs.existsSync(
-        path.join(TEST_DIR, "typescript_code/node_modules")
-      );
+      const nodeModulesExists = fs.existsSync(path.join(TEST_DIR, "typescript_code/node_modules"));
       expect(nodeModulesExists).toBe(true);
     });
   });
 
   describe("Tool Usage", () => {
-    const assistantActionEvents =
-      testState.client?.getEventsByType("assistant.action") || [];
-    const toolUseActions = assistantActionEvents.filter(
-      (e) => e.data.action === "tool_use"
-    );
+    const assistantActionEvents = testState.client?.getEventsByType("assistant.action") || [];
+    const toolUseActions = assistantActionEvents.filter((e) => e.data.action === "tool_use");
 
     // Count tool types used
     const toolCounts: Record<string, number> = {};
@@ -1216,22 +1123,14 @@ describe("Langton E2E Test", () => {
           const logEntries = parseJSONL(logContent);
 
           // Count assistant messages in logs
-          const logAssistantMessages = logEntries.filter(
-            (e) => e.type === "assistant"
-          );
+          const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");
           const logToolUses = logAssistantMessages.filter((e) =>
-            e.message?.content?.some(
-              (c: { type?: string }) => c.type === "tool_use"
-            )
+            e.message?.content?.some((c: { type?: string }) => c.type === "tool_use"),
           ).length;
 
           // Count WebSocket events for this phase
-          const phaseActions = assistantActionEvents.filter(
-            (e) => e.data.phaseId === phaseId
-          );
-          const wsToolUses = phaseActions.filter(
-            (e) => e.data.action === "tool_use"
-          ).length;
+          const phaseActions = assistantActionEvents.filter((e) => e.data.phaseId === phaseId);
+          const wsToolUses = phaseActions.filter((e) => e.data.action === "tool_use").length;
 
           expect(wsToolUses).toBeGreaterThanOrEqual(logToolUses);
         }
@@ -1272,35 +1171,18 @@ describe("Langton E2E Test", () => {
               // Basic schema validation for Claude's JSONL format
               // Claude logs don't have timestamp at top level, they have session_id
               if (entry.type) {
-                if (
-                  entry.type === "system" &&
-                  entry.subtype &&
-                  entry.session_id
-                )
+                if (entry.type === "system" && entry.subtype && entry.session_id) _validLines++;
+                else if (entry.type === "assistant" && entry.message && entry.session_id)
                   _validLines++;
-                else if (
-                  entry.type === "assistant" &&
-                  entry.message &&
-                  entry.session_id
-                )
-                  _validLines++;
-                else if (
-                  entry.type === "user" &&
-                  entry.message &&
-                  entry.session_id
-                )
-                  _validLines++;
-                else if (entry.type === "result" && entry.subtype)
-                  _validLines++;
+                else if (entry.type === "user" && entry.message && entry.session_id) _validLines++;
+                else if (entry.type === "result" && entry.subtype) _validLines++;
                 else {
                   invalidLines++;
                   if (invalidLines === 1) {
                     console.log(
-                      `${
-                        colors.yellow
-                      }Invalid entry in ${phaseId}: ${JSON.stringify(
-                        entry
-                      ).substring(0, 200)}${colors.reset}`
+                      `${colors.yellow}Invalid entry in ${phaseId}: ${JSON.stringify(
+                        entry,
+                      ).substring(0, 200)}${colors.reset}`,
                     );
                   }
                 }
@@ -1308,11 +1190,10 @@ describe("Langton E2E Test", () => {
                 invalidLines++;
                 if (invalidLines === 1) {
                   console.log(
-                    `${
-                      colors.yellow
-                    }Missing type in ${phaseId}: ${JSON.stringify(
-                      entry
-                    ).substring(0, 200)}${colors.reset}`
+                    `${colors.yellow}Missing type in ${phaseId}: ${JSON.stringify(entry).substring(
+                      0,
+                      200,
+                    )}${colors.reset}`,
                   );
                 }
               }
@@ -1329,19 +1210,15 @@ describe("Langton E2E Test", () => {
 
   describe("Path Consistency", () => {
     test("all file paths are relative", () => {
-      const fileUpdateEvents =
-        testState.client?.getEventsByType("file.updated") || [];
-      const fileTreeEvents =
-        testState.client?.getEventsByType("filetree.updated") || [];
+      const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
+      const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
 
       const allFilePaths = [
         ...fileUpdateEvents.map((e) => e.data.path),
         ...fileTreeEvents.flatMap((e) => extractPathsFromTree(e.data.tree)),
       ];
 
-      const absolutePaths = allFilePaths.filter(
-        (p) => p.startsWith("/") || p.includes(":")
-      );
+      const absolutePaths = allFilePaths.filter((p) => p.startsWith("/") || p.includes(":"));
       expect(absolutePaths.length).toBe(0);
     });
   });
@@ -1350,10 +1227,10 @@ describe("Langton E2E Test", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
       test(`${phaseId}: events are properly ordered`, () => {
         const phaseStart = testState.events.find(
-          (e) => e.type === "phase.started" && e.data.phaseId === phaseId
+          (e) => e.type === "phase.started" && e.data.phaseId === phaseId,
         );
         const phaseComplete = testState.events.find(
-          (e) => e.type === "phase.completed" && e.data.phaseId === phaseId
+          (e) => e.type === "phase.completed" && e.data.phaseId === phaseId,
         );
 
         if (phaseStart && phaseComplete) {
@@ -1363,12 +1240,8 @@ describe("Langton E2E Test", () => {
           const phaseEvents = testState.events.slice(startIdx, endIdx + 1);
 
           // Just verify we have both types of events
-          const hasAssistantActions = phaseEvents.some(
-            (e) => e.type === "assistant.action"
-          );
-          const hasTokenUsage = phaseEvents.some(
-            (e) => e.type === "token.usage"
-          );
+          const hasAssistantActions = phaseEvents.some((e) => e.type === "assistant.action");
+          const hasTokenUsage = phaseEvents.some((e) => e.type === "token.usage");
 
           expect(hasAssistantActions).toBe(true);
           expect(hasTokenUsage).toBe(true);
