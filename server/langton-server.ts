@@ -51,6 +51,15 @@ import {
 } from "./utils.js";
 
 /**
+ * Client metadata stored with each WebSocket connection.
+ * Provides connection tracking and activity monitoring.
+ */
+interface ClientData {
+  connectionTime: Date;
+  lastActivity: Date;
+}
+
+/**
  * Main server class that orchestrates Claude phases.
  *
  * Responsibilities:
@@ -64,7 +73,7 @@ import {
  */
 export class LangtonServer extends EventEmitter {
   private server: Server | null = null;
-  private client: ServerWebSocket<unknown> | null = null;
+  private client: ServerWebSocket<ClientData> | null = null;
   public readonly config: ServerConfig;
   private logger: Logger;
   private currentPhase: PhaseState | null = null;
@@ -164,7 +173,7 @@ export class LangtonServer extends EventEmitter {
     await this.loadPreviousState();
 
     // Start Bun WebSocket server
-    this.server = Bun.serve({
+    this.server = Bun.serve<ClientData, undefined>({
       port: this.config.port,
       websocket: {
         open: (ws) => this.handleConnection(ws),
@@ -195,7 +204,7 @@ export class LangtonServer extends EventEmitter {
     });
   }
 
-  private handleConnection(ws: ServerWebSocket<unknown>): void {
+  private handleConnection(ws: ServerWebSocket<ClientData>): void {
     if (this.client) {
       this.logger.log("Rejecting connection - already have a client");
       ws.close(1008, "Server already has a client");
@@ -203,6 +212,11 @@ export class LangtonServer extends EventEmitter {
     }
 
     this.logger.log("Client connected");
+    const now = new Date();
+    ws.data = {
+      connectionTime: now,
+      lastActivity: now,
+    };
     this.client = ws;
 
     // Send initial state
@@ -225,8 +239,10 @@ export class LangtonServer extends EventEmitter {
     this.autoStartNextPhase();
   }
 
-  private handleMessage(_ws: ServerWebSocket<unknown>, message: string | Buffer): void {
+  private handleMessage(ws: ServerWebSocket<ClientData>, message: string | Buffer): void {
     try {
+      ws.data.lastActivity = new Date();
+
       const parsed = JSON.parse(message.toString());
       if (!isValidClientCommand(parsed)) {
         this.logger.log("Invalid client command received", "error");
@@ -240,7 +256,7 @@ export class LangtonServer extends EventEmitter {
     }
   }
 
-  private handleClose(_ws: ServerWebSocket<unknown>): void {
+  private handleClose(_ws: ServerWebSocket<ClientData>): void {
     this.logger.log("Client disconnected - shutting down server");
     this.shutdown("client disconnect");
   }
