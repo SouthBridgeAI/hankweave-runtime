@@ -1,0 +1,260 @@
+import { type ChildProcess, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import path from "node:path";
+import type { PhaseConfig } from "./types.js";
+import { escapeShellArg, type Logger } from "./utils.js";
+
+export interface ProcessEvents {
+  exit: (code: number) => void;
+  error: (error: Error) => void;
+  stdout: (data: string) => void;
+  stderr: (data: string) => void;
+}
+
+/**
+ * Manages Claude subprocess lifecycle, including spawning, monitoring, and cleanup.
+ * Handles log stream creation and process argument building.
+ */
+export class ClaudeProcessManager extends EventEmitter {
+  private process: ChildProcess | null = null;
+  private logStream: fs.WriteStream | null = null;
+  private killed = false;
+
+  constructor(
+    private projectPath: string,
+    private logger: Logger,
+    private anthropicBaseURL?: string,
+  ) {
+    super();
+  }
+
+  /**
+   * Spawn a Claude process for the given phase configuration.
+   * Sets up logging, environment, and process monitoring.
+   */
+  async spawn(phase: PhaseConfig, previousSessionId: string | null): Promise<string> {
+    if (this.process) {
+      throw new Error("Process already running");
+    }
+
+    const logPath = path.join(this.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
+
+    // Ensure log directory exists
+    const logsDir = path.dirname(logPath);
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+
+    // Create log stream
+    this.logStream = fs.createWriteStream(logPath);
+
+    // Build Claude arguments
+    const args = this.buildClaudeArgs(phase, previousSessionId);
+
+    // Set up environment
+    const env = { ...process.env };
+    if (this.anthropicBaseURL) {
+      env.ANTHROPIC_BASE_URL = this.anthropicBaseURL;
+      this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseURL}`);
+    }
+
+    // Spawn process
+    this.process = spawn("claude", args, {
+      cwd: this.projectPath,
+      stdio: ["pipe", "pipe", "pipe"],
+      env,
+    });
+
+    this.killed = false;
+
+    // Pipe stdout to log file
+    this.process.stdout?.pipe(this.logStream);
+
+    // Set up event handlers
+    this.setupProcessHandlers();
+
+    // Feed prompt to stdin
+    await this.feedPrompt(phase);
+
+    this.logger.log(`Claude process started for phase ${phase.id} (PID: ${this.process.pid})`);
+
+    return logPath;
+  }
+
+  /**
+   * Build command line arguments for Claude CLI.
+   */
+  private buildClaudeArgs(phase: PhaseConfig, previousSessionId: string | null): string[] {
+    const args = [
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--model",
+      phase.model,
+      "--permission-mode",
+      "bypassPermissions",
+      "-p",
+      "--output-format",
+      "stream-json",
+    ];
+
+    if (phase.continueFromPrevious && previousSessionId) {
+      args.push("-c", "--resume", previousSessionId);
+    }
+
+    // Handle system prompt if provided
+    const systemPrompt = this.buildSystemPrompt(phase);
+    if (systemPrompt) {
+      args.push("--append-system-prompt", escapeShellArg(systemPrompt));
+      this.logger.log(`Added system prompt to Claude: \n\n${systemPrompt}\n\n`);
+    }
+
+    return args;
+  }
+
+  /**
+   * Build system prompt from file or text.
+   */
+  private buildSystemPrompt(phase: PhaseConfig): string | null {
+    let content: string | null = null;
+
+    if (phase.appendSystemPromptFile) {
+      const files = Array.isArray(phase.appendSystemPromptFile)
+        ? phase.appendSystemPromptFile
+        : [phase.appendSystemPromptFile];
+
+      const parts: string[] = [];
+      for (const file of files) {
+        parts.push(fs.readFileSync(file, "utf-8"));
+      }
+      content = parts.join("\n\n");
+    } else if (phase.appendSystemPromptText) {
+      content = phase.appendSystemPromptText;
+    }
+
+    if (content) {
+      // Replace template variables
+      return content.replace(/<%PROJECT_DIR%>/g, this.projectPath);
+    }
+
+    return null;
+  }
+
+  /**
+   * Feed prompt content to Claude's stdin.
+   */
+  private async feedPrompt(phase: PhaseConfig): Promise<void> {
+    if (!this.process?.stdin) {
+      throw new Error("Process stdin not available");
+    }
+
+    let promptContent: string;
+
+    if (phase.promptFile) {
+      const files = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+      const parts: string[] = [];
+      for (const file of files) {
+        parts.push(fs.readFileSync(file, "utf-8"));
+      }
+      promptContent = parts.join("\n\n");
+    } else if (phase.promptText) {
+      promptContent = phase.promptText;
+    } else {
+      throw new Error("No prompt file or text provided");
+    }
+
+    const processedContent = promptContent.replace(/<%PROJECT_DIR%>/g, this.projectPath);
+
+    this.process.stdin.write(processedContent);
+    this.process.stdin.end();
+
+    this.logger.log(`Fed prompt to Claude (${processedContent.length} chars)`);
+  }
+
+  /**
+   * Set up process event handlers.
+   */
+  private setupProcessHandlers(): void {
+    if (!this.process) return;
+
+    this.process.on("exit", (code, signal) => {
+      this.logger.log(`Claude process exited with code: ${code}, signal: ${signal}`);
+      this.cleanup();
+      this.emit("exit", code || 0);
+    });
+
+    this.process.on("error", (error) => {
+      this.logger.log(`Claude process error: ${error.message}`, "error");
+      this.cleanup();
+      this.emit("error", error);
+    });
+
+    this.process.stdout?.on("data", (data) => {
+      this.emit("stdout", data.toString());
+    });
+
+    this.process.stderr?.on("data", (data) => {
+      this.emit("stderr", data.toString());
+    });
+  }
+
+  /**
+   * Kill the Claude process.
+   */
+  async kill(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+    if (!this.process || this.killed) return;
+
+    this.killed = true;
+    this.logger.log(`Killing Claude process with ${signal}`);
+
+    this.process.kill(signal);
+
+    // Give it 5 seconds to die gracefully
+    await new Promise<void>((resolve) => {
+      const checkInterval = setInterval(() => {
+        if (!this.process || this.process.killed) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 100);
+
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        if (this.process && !this.process.killed) {
+          this.logger.log("Force killing Claude process with SIGKILL");
+          this.process.kill("SIGKILL");
+        }
+        resolve();
+      }, 5000);
+    });
+  }
+
+  /**
+   * Clean up resources.
+   */
+  private cleanup(): void {
+    if (this.logStream && !this.logStream.destroyed) {
+      this.logStream.end();
+      this.logStream = null;
+    }
+
+    if (this.process) {
+      this.process.removeAllListeners();
+      this.process = null;
+    }
+  }
+
+  /**
+   * Check if process is running.
+   */
+  isRunning(): boolean {
+    return this.process !== null && !this.process.killed;
+  }
+
+  /**
+   * Get process PID.
+   */
+  getPid(): number | undefined {
+    return this.process?.pid;
+  }
+}

@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
+import type { ErrorSeverity } from "./error-types.js";
 
 // ============================================================================
 // Server Configuration
@@ -439,6 +440,10 @@ export interface ErrorEvent extends ServerEvent {
     phase?: string;
     /** If true, server will shutdown after this error */
     fatal: boolean;
+    /** Error severity level */
+    severity?: ErrorSeverity;
+    /** Additional error context */
+    context?: string;
   };
 }
 

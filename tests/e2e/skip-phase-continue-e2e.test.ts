@@ -1,12 +1,11 @@
 #!/usr/bin/env bun
 import { afterAll, describe, expect, test } from "bun:test";
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 // Import test utilities and types from happy path test
 import type {
   AssistantActionEvent,
-  ClientCommand,
   ErrorEvent,
   InfoEvent,
   PhaseCompletedEvent,
@@ -17,289 +16,43 @@ import type {
   TokenUsageEvent,
 } from "../../server/types.js";
 import { generateId } from "../../server/utils.js";
+import {
+  cleanupTest,
+  colors,
+  generateTestTimestamp,
+  type ServerConfig,
+  setupTestDirectory,
+  startServer,
+  type TestDirectoryConfig,
+  TestWSClient,
+} from "../utils/test-helpers.js";
 
 // Test configuration
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
 const TEST_DIR = path.join(process.cwd(), "tests/test-area");
 const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7778");
+const PHASES_CONFIG = path.join(process.cwd(), "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
-const TEST_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `skip-continue-${TEST_TIMESTAMP}`);
 
-// Create a custom phases config for this test
-const PHASES_CONFIG = path.join(TEST_DIR, "test-phases-skip-continue.config.json");
-const TEST_PHASES = [
-  {
-    id: "phase-1",
-    name: "Phase 1: TestPhase1",
-    promptFile: "./phase1Prompt.md",
-    model: "sonnet",
-    continueFromPrevious: false,
-    preStart: "mkdir -p notes",
-    watch: "./notes/*.txt",
-    description: "Write three pick one",
-    checkpointAndWatch: ["notes/**/*"],
-  },
-  {
-    id: "phase-2",
-    name: "Phase 2: Second Phase",
-    promptText:
-      "Create a file called 'test2.txt' in the notes folder with the text 'Phase 2 was here'",
-    model: "sonnet",
-    continueFromPrevious: false, // Don't continue from skipped phase
-    watch: "./notes/*.*",
-    description: "Write another file",
-    checkpointAndWatch: ["notes/**/*"],
-  },
-  {
-    id: "phase-3",
-    name: "Phase 3: Third Phase",
-    promptText:
-      "Create a file called 'test3.txt' in the notes folder with the text 'Phase 3 completed'",
-    model: "sonnet",
-    continueFromPrevious: false,
-    watch: "./notes/*.*",
-    description: "Write final file",
-    checkpointAndWatch: ["notes/**/*"],
-  },
-];
-
-// Colors for output
-const colors = {
-  reset: "\x1b[0m",
-  green: "\x1b[32m",
-  red: "\x1b[31m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  gray: "\x1b[90m",
+// Test directory configuration
+const testDirConfig: TestDirectoryConfig = {
+  testDir: TEST_DIR,
+  testResultsDir: TEST_RESULTS_DIR,
+  testRunDir: TEST_RUN_DIR,
 };
 
-// Simple WebSocket client
-class TestWSClient {
-  private ws: WebSocket | null = null;
-  private events: ServerEvent[] = [];
-  private eventPromises = new Map<
-    string,
-    { resolve: (event: ServerEvent) => void; reject: (error: Error) => void }[]
-  >();
-  private connected = false;
-
-  async connect(port: number = SERVER_PORT): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("WebSocket connection timeout"));
-      }, 10000);
-
-      this.ws = new WebSocket(`ws://localhost:${port}`);
-
-      this.ws.onopen = () => {
-        clearTimeout(timeout);
-        this.connected = true;
-        console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
-        resolve();
-      };
-
-      this.ws.onmessage = (event: MessageEvent) => {
-        try {
-          const serverEvent: ServerEvent = JSON.parse(event.data);
-          this.events.push(serverEvent);
-
-          // Resolve any waiting promises for this event type
-          const waiters = this.eventPromises.get(serverEvent.type);
-          if (waiters) {
-            waiters.forEach(({ resolve }) => resolve(serverEvent));
-            this.eventPromises.delete(serverEvent.type);
-          }
-        } catch (error) {
-          console.error("Failed to parse server event:", error);
-        }
-      };
-
-      this.ws.onerror = (error: Event) => {
-        clearTimeout(timeout);
-        reject(error);
-      };
-
-      this.ws.onclose = () => {
-        this.connected = false;
-        console.log(`${colors.gray}WebSocket connection closed${colors.reset}`);
-      };
-    });
-  }
-
-  async waitForEvent(type: string, timeout: number = 30000): Promise<ServerEvent> {
-    // Check if we already have this event
-    const existing = this.events.find((e) => e.type === type);
-    if (existing) return existing;
-
-    // Wait for future event
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`Timeout waiting for event: ${type}`));
-      }, timeout);
-
-      const waiters = this.eventPromises.get(type) || [];
-      waiters.push({
-        resolve: (event: ServerEvent) => {
-          clearTimeout(timer);
-          resolve(event);
-        },
-        reject,
-      });
-      this.eventPromises.set(type, waiters);
-    });
-  }
-
-  async waitForPhaseStart(phaseId: string, timeout: number = 10000): Promise<PhaseStartedEvent> {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeout) {
-      const started = this.events.find(
-        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === phaseId,
-      ) as PhaseStartedEvent | undefined;
-      if (started) return started;
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    throw new Error(`Timeout waiting for phase ${phaseId} to start`);
-  }
-
-  async waitForPhaseCompletion(
-    phaseId: string,
-    timeout: number = 10000,
-  ): Promise<PhaseCompletedEvent> {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeout) {
-      const completed = this.events.find(
-        (e) => e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
-      ) as PhaseCompletedEvent | undefined;
-      if (completed) return completed;
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    throw new Error(`Timeout waiting for phase ${phaseId} to complete`);
-  }
-
-  getEvents(): ServerEvent[] {
-    return [...this.events];
-  }
-
-  getEventsByType(type: string): ServerEvent[] {
-    return this.events.filter((e) => e.type === type);
-  }
-
-  sendCommand(command: ClientCommand): void {
-    if (this.ws && this.connected) {
-      this.ws.send(JSON.stringify(command));
-    }
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-}
-
-// Test utilities
-async function rimrafSimple(dirPath: string): Promise<void> {
-  if (fs.existsSync(dirPath)) {
-    fs.rmSync(dirPath, { recursive: true, force: true });
-  }
-}
-
-async function setupTestDirectory(): Promise<void> {
-  console.log(`${colors.blue}Setting up test directory: ${TEST_DIR}${colors.reset}`);
-
-  if (!fs.existsSync(TEST_DIR)) {
-    fs.mkdirSync(TEST_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(TEST_RESULTS_DIR)) {
-    fs.mkdirSync(TEST_RESULTS_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(TEST_RUN_DIR)) {
-    fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
-  }
-
-  console.log(`${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`);
-
-  // Clean up the entire test directory for a fresh start
-  console.log(`  Cleaning entire test directory...`);
-  await rimrafSimple(TEST_DIR);
-
-  // Recreate the test directory
-  fs.mkdirSync(TEST_DIR, { recursive: true });
-  console.log(`  ✓ Test directory recreated`);
-
-  // Create the prompt file needed by phase 1
-  const promptFilePath = path.join(TEST_DIR, "phase1Prompt.md");
-  const promptContent = `Can you write three short poems about nature - one about the sun, one about the rain, and one about the wind? Then pick your favorite and save it to a file called "favorite_poem.txt" in the notes folder.`;
-  fs.writeFileSync(promptFilePath, promptContent);
-  console.log(`  Created prompt file: phase1Prompt.md`);
-
-  // Write custom phases config
-  fs.writeFileSync(PHASES_CONFIG, JSON.stringify(TEST_PHASES, null, 2));
-  console.log(`${colors.yellow}Created custom phases config in test dir${colors.reset}`);
-}
-
-function startServer(): ChildProcess {
-  console.log(`${colors.blue}Starting Langton server...${colors.reset}`);
-
-  const serverLogPath = path.join(TEST_RUN_DIR, "server.log");
-  const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
-
-  const serverProcess = spawn(
-    "bun",
-    [
-      path.join(process.cwd(), "server/index.ts"),
-      `--config=${PHASES_CONFIG}`,
-      `--port=${SERVER_PORT}`,
-      "--test-mode=e2e-skip-continue",
-    ],
-    {
-      cwd: TEST_DIR,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        LANGTON_TEST_RUN: "true",
-      },
-    },
-  );
-
-  serverProcess.stdout?.on("data", (data) => {
-    const message = data.toString();
-    serverLogStream.write(`[${new Date().toISOString()}] [STDOUT] ${message}`);
-  });
-
-  serverProcess.stderr?.on("data", (data) => {
-    const message = data.toString();
-    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
-    serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
-  });
-
-  serverProcess.on("error", (error) => {
-    const message = `Failed to start server: ${error.message}`;
-    console.error(`${colors.red}${message}${colors.reset}`);
-    serverLogStream.write(`[${new Date().toISOString()}] [ERROR] ${message}\n`);
-  });
-
-  serverProcess.on("exit", (code, signal) => {
-    serverLogStream.write(
-      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
-    );
-    serverLogStream.end();
-  });
-
-  return serverProcess;
-}
+// Server configuration
+const serverConfig: ServerConfig = {
+  testRunDir: TEST_RUN_DIR,
+  phasesConfig: PHASES_CONFIG,
+  port: SERVER_PORT,
+  testMode: "e2e-skip-continue",
+  cwd: TEST_DIR,
+};
 
 // Test state
 interface TestState {
@@ -329,17 +82,17 @@ const testState: TestState = {
 // Main test execution
 async function runSkipContinueTest(): Promise<void> {
   // Setup test directory
-  await setupTestDirectory();
+  await setupTestDirectory(testDirConfig);
 
   // Start server
-  testState.serverProcess = startServer();
+  testState.serverProcess = startServer(serverConfig);
 
   // Give server time to start
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // Connect WebSocket client
   testState.client = new TestWSClient();
-  await testState.client.connect();
+  await testState.client.connect(SERVER_PORT);
 
   // Wait for initial events
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
@@ -402,63 +155,14 @@ async function runSkipContinueTest(): Promise<void> {
 
 // Cleanup function
 async function cleanup(): Promise<void> {
-  console.log(`\n${colors.blue}Cleaning up...${colors.reset}`);
-
-  if (testState.client) {
-    await testState.client.disconnect();
-  }
-
-  if (testState.serverProcess) {
-    console.log(`${colors.gray}Shutting down server...${colors.reset}`);
-
-    if (!testState.serverProcess.killed) {
-      testState.serverProcess.kill("SIGTERM");
-
-      const shutdownTimeout = setTimeout(() => {
-        if (!testState.serverProcess?.killed) {
-          console.log(`${colors.yellow}Force killing server...${colors.reset}`);
-          testState.serverProcess?.kill("SIGKILL");
-        }
-      }, 5000);
-
-      await new Promise<void>((resolve) => {
-        testState.serverProcess?.on("exit", () => {
-          clearTimeout(shutdownTimeout);
-          resolve();
-        });
-      });
-    }
-
-    console.log(`${colors.green}✓ Server shut down${colors.reset}`);
-  }
-
-  const lockFile = path.join(TEST_DIR, ".langton/server.lock");
-  if (fs.existsSync(lockFile)) {
-    console.log(`${colors.gray}Cleaning up lock file...${colors.reset}`);
-    fs.unlinkSync(lockFile);
-  }
-
-  console.log(`${colors.green}✓ Cleanup complete${colors.reset}`);
-
-  // Save test results
-  console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
-
-  const logsDir = path.join(TEST_DIR, ".langton/logs");
-  if (fs.existsSync(logsDir)) {
-    const destLogsDir = path.join(TEST_RUN_DIR, "claude-logs");
-    fs.mkdirSync(destLogsDir, { recursive: true });
-
-    const logFiles = fs.readdirSync(logsDir);
-    for (const file of logFiles) {
-      fs.copyFileSync(path.join(logsDir, file), path.join(destLogsDir, file));
-    }
-    console.log(`  ✓ Copied ${logFiles.length} Claude log files`);
-  }
-
-  const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
-  fs.writeFileSync(eventsPath, JSON.stringify(testState.events || [], null, 2));
-
-  console.log(`\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`);
+  await cleanupTest({
+    testDir: TEST_DIR,
+    testRunDir: TEST_RUN_DIR,
+    serverProcess: testState.serverProcess,
+    client: testState.client,
+    events: testState.events,
+    gracefulShutdown: true,
+  });
 }
 
 // Run setup before tests
@@ -580,27 +284,28 @@ describe("Skip Phase and Continue E2E Test", () => {
   });
 
   describe("File System", () => {
-    test("Phase 1 preStart created notes directory", () => {
-      // Even though Phase 1 was skipped, preStart should have run
+    test("Phase 1 workspaceSetup created notes directory", () => {
+      // Even though Phase 1 was skipped, workspaceSetup should have run
       expect(fs.existsSync(path.join(TEST_DIR, "notes"))).toBe(true);
       expect(fs.statSync(path.join(TEST_DIR, "notes")).isDirectory()).toBe(true);
     });
 
-    test("Phase 2 created test2.txt", () => {
-      // Phase 2 should have completed successfully
-      expect(fs.existsSync(path.join(TEST_DIR, "notes/test2.txt"))).toBe(true);
+    test("Phase 2 did not create second_favorite_poem.txt", () => {
+      // Phase 2 completed but couldn't create the file because Phase 1 was skipped
+      // and it had no poems to reference (started fresh without context)
+      expect(fs.existsSync(path.join(TEST_DIR, "notes/second_favorite_poem.txt"))).toBe(false);
     });
 
-    test("Phase 1 may not have created favorite_poem.txt", () => {
-      // Phase 1 was skipped, so file may or may not exist depending on timing
+    test("Phase 1 did not create favorite_poem.txt", () => {
+      // Phase 1 was skipped early, so file should not exist
       const exists = fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"));
-      // File should not exist since we skip quickly
       expect(exists).toBe(false);
     });
 
-    test("Phase 3 did not create test3.txt", () => {
-      // Phase 3 was skipped, so test3.txt should not exist
-      expect(fs.existsSync(path.join(TEST_DIR, "notes/test3.txt"))).toBe(false);
+    test("Phase 3 did not create TypeScript files", () => {
+      // Phase 3 was skipped, so TypeScript files should not exist
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem1.ts"))).toBe(false);
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem2.ts"))).toBe(false);
     });
   });
 
@@ -644,7 +349,10 @@ describe("Skip Phase and Continue E2E Test", () => {
           encoding: "utf-8",
         });
 
-        const commitMessages = gitLog.trim().split("\n");
+        const commitMessages = gitLog
+          .trim()
+          .split("\n")
+          .filter((msg) => msg);
 
         // Check for skipped commits
         const skippedCommits = commitMessages.filter((msg) => msg.startsWith("skipped:"));
@@ -654,13 +362,15 @@ describe("Skip Phase and Continue E2E Test", () => {
         expect(skippedCommits.some((msg) => msg.includes("phase-1"))).toBe(true);
         expect(skippedCommits.some((msg) => msg.includes("phase-3"))).toBe(true);
 
-        // Phase 2 should be completed
-        const completedCommits = commitMessages.filter(
-          (msg) => msg.startsWith("completed:") && msg.includes("phase-2"),
+        // Phase 2 completed but didn't create files, so no completed commit
+        // Phase 3 had workspace setup, so check for that
+        const workspaceSetupCommits = commitMessages.filter(
+          (msg) => msg.startsWith("workspace-setup:") && msg.includes("phase-3"),
         );
-        expect(completedCommits.length).toBe(1);
+        expect(workspaceSetupCommits.length).toBe(1);
       } catch (error) {
         console.error(`Git log failed: ${error}`);
+        throw error; // Re-throw to properly fail the test
       }
     });
 
@@ -709,12 +419,18 @@ describe("Skip Phase and Continue E2E Test", () => {
               .filter((f) => f)
           : [];
 
-        // Should only have phase 2's file since phases 1 and 3 were skipped early
-        expect(trackedFiles).toContain("notes/test2.txt");
+        // Since Phase 1 was skipped and Phase 2 couldn't create its file without context,
+        // only the typescript_code/package.json from Phase 3's workspace setup should be tracked
+        expect(trackedFiles.some((f) => f.includes("typescript_code/package.json"))).toBe(true);
 
-        // Should not have files from skipped phases
+        // Should not have any poem files since:
+        // - Phase 1 was skipped (no favorite_poem.txt)
+        // - Phase 2 had no context to create second_favorite_poem.txt
+        // - Phase 3 was skipped (no poem1.ts, poem2.ts)
         expect(trackedFiles.some((f) => f.includes("favorite_poem.txt"))).toBe(false);
-        expect(trackedFiles.some((f) => f.includes("test3.txt"))).toBe(false);
+        expect(trackedFiles.some((f) => f.includes("second_favorite_poem.txt"))).toBe(false);
+        expect(trackedFiles.some((f) => f.includes("poem1.ts"))).toBe(false);
+        expect(trackedFiles.some((f) => f.includes("poem2.ts"))).toBe(false);
       } catch (error) {
         console.error(`Git ls-files failed: ${error}`);
       }

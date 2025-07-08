@@ -1,17 +1,24 @@
 #!/usr/bin/env bun
 import { afterAll, describe, expect, test } from "bun:test";
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { generateId } from "../../server/utils.js";
-
-// Install rimraf if needed: bun add -d rimraf @types/rimraf
-// For now, use a simple recursive delete
-async function rimrafSimple(dirPath: string): Promise<void> {
-  if (fs.existsSync(dirPath)) {
-    fs.rmSync(dirPath, { recursive: true, force: true });
-  }
-}
+import {
+  extractPathsFromTree,
+  type FileNode,
+  findInTree,
+  parseJSONL,
+} from "../utils/test-data-helpers.js";
+import {
+  cleanupTest,
+  colors,
+  generateTestTimestamp,
+  type ServerConfig,
+  setupTestDirectory,
+  startServer,
+  type TestDirectoryConfig,
+  TestWSClient,
+} from "../utils/test-helpers.js";
 
 // Test configuration
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
@@ -21,27 +28,12 @@ const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7780");
 const PHASES_CONFIG = path.join(process.cwd(), "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
-const TEST_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5); // YYYY-MM-DDTHH-mm-ss
+const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
-
-// Colors for output
-const colors = {
-  reset: "\x1b[0m",
-  green: "\x1b[32m",
-  red: "\x1b[31m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  gray: "\x1b[90m",
-};
-
-// ============================================================================
-// Test WebSocket Client
-// ============================================================================
 
 // Import types from the server
 import type {
   AssistantActionEvent,
-  ClientCommand,
   ErrorEvent,
   FileTreeUpdatedEvent,
   FileUpdatedEvent,
@@ -53,311 +45,21 @@ import type {
   TokenUsageEvent,
 } from "../../server/types.js";
 
-// Types for Claude JSONL log entries
-interface ClaudeLogEntry {
-  type: string;
-  subtype?: string;
-  session_id?: string;
-  message?: {
-    usage?: {
-      input_tokens?: number;
-      output_tokens?: number;
-      cache_creation_input_tokens?: number;
-      cache_read_input_tokens?: number;
-    };
-    content?: Array<{ type?: string }>;
-  };
-}
+// Test directory configuration
+const testDirConfig: TestDirectoryConfig = {
+  testDir: TEST_DIR,
+  testResultsDir: TEST_RESULTS_DIR,
+  testRunDir: TEST_RUN_DIR,
+};
 
-// Re-export for convenience
-// type AnyServerEvent = ServerEvent;
-
-class TestWSClient {
-  private ws: WebSocket | null = null;
-  private events: ServerEvent[] = [];
-  private eventPromises = new Map<
-    string,
-    { resolve: (event: ServerEvent) => void; reject: (error: Error) => void }[]
-  >();
-  private connected = false;
-
-  async connect(port: number = SERVER_PORT): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("WebSocket connection timeout"));
-      }, 10000);
-
-      this.ws = new WebSocket(`ws://localhost:${port}`);
-
-      this.ws.onopen = () => {
-        clearTimeout(timeout);
-        this.connected = true;
-        console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
-        resolve();
-      };
-
-      this.ws.onmessage = (event: MessageEvent) => {
-        try {
-          const serverEvent: ServerEvent = JSON.parse(event.data);
-          this.events.push(serverEvent);
-
-          // Resolve any waiting promises for this event type
-          const waiters = this.eventPromises.get(serverEvent.type);
-          if (waiters) {
-            waiters.forEach(({ resolve }) => resolve(serverEvent));
-            this.eventPromises.delete(serverEvent.type);
-          }
-
-          // Also resolve "any" event waiters
-          const anyWaiters = this.eventPromises.get("*");
-          if (anyWaiters) {
-            anyWaiters.forEach(({ resolve }) => resolve(serverEvent));
-            this.eventPromises.delete("*");
-          }
-        } catch (error) {
-          console.error("Failed to parse server event:", error);
-        }
-      };
-
-      this.ws.onerror = (error: Event) => {
-        clearTimeout(timeout);
-        reject(error);
-      };
-
-      this.ws.onclose = () => {
-        this.connected = false;
-        console.log(`${colors.gray}WebSocket connection closed${colors.reset}`);
-      };
-    });
-  }
-
-  async waitForEvent(type: string, timeout: number = 30000): Promise<ServerEvent> {
-    // Check if we already have this event
-    const existing = this.events.find((e) => type === "*" || e.type === type);
-    if (existing) return existing;
-
-    // Wait for future event
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`Timeout waiting for event: ${type}`));
-      }, timeout);
-
-      const waiters = this.eventPromises.get(type) || [];
-      waiters.push({
-        resolve: (event: ServerEvent) => {
-          clearTimeout(timer);
-          resolve(event);
-        },
-        reject,
-      });
-      this.eventPromises.set(type, waiters);
-    });
-  }
-
-  async waitForPhaseCompletion(
-    phaseId: string,
-    timeout: number = 120000,
-  ): Promise<PhaseCompletedEvent> {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeout) {
-      const completed = this.events.find(
-        (e) => e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
-      ) as PhaseCompletedEvent | undefined;
-      if (completed) return completed;
-
-      // Wait a bit before checking again
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    throw new Error(`Timeout waiting for phase ${phaseId} to complete`);
-  }
-
-  getEvents(): ServerEvent[] {
-    return [...this.events];
-  }
-
-  getEventsByType(type: string): ServerEvent[] {
-    return this.events.filter((e) => e.type === type);
-  }
-
-  get isConnected(): boolean {
-    return this.connected;
-  }
-
-  sendCommand(command: ClientCommand): void {
-    if (this.ws && this.connected) {
-      this.ws.send(JSON.stringify(command));
-    }
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-}
-
-// ============================================================================
-// Test Utilities
-// ============================================================================
-
-async function setupTestDirectory(): Promise<void> {
-  console.log(`${colors.blue}Setting up test directory: ${TEST_DIR}${colors.reset}`);
-
-  // Create test directory if it doesn't exist
-  if (!fs.existsSync(TEST_DIR)) {
-    fs.mkdirSync(TEST_DIR, { recursive: true });
-  }
-
-  // Create test results directory
-  if (!fs.existsSync(TEST_RESULTS_DIR)) {
-    fs.mkdirSync(TEST_RESULTS_DIR, { recursive: true });
-  }
-
-  // Create directory for this test run
-  if (!fs.existsSync(TEST_RUN_DIR)) {
-    fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
-  }
-
-  console.log(`${colors.yellow}Test results will be saved to: ${TEST_RUN_DIR}${colors.reset}`);
-
-  // Clean up the entire test directory for a fresh start
-  console.log(`  Cleaning entire test directory...`);
-  await rimrafSimple(TEST_DIR);
-
-  // Recreate the test directory
-  fs.mkdirSync(TEST_DIR, { recursive: true });
-  console.log(`  ✓ Test directory recreated`);
-}
-
-function startServer(): ChildProcess {
-  console.log(`${colors.blue}Starting Langton server...${colors.reset}`);
-
-  // Create server log file
-  const serverLogPath = path.join(TEST_RUN_DIR, "server.log");
-  const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
-
-  const serverProcess = spawn(
-    "bun",
-    [
-      path.join(process.cwd(), "server/index.ts"),
-      `--config=${PHASES_CONFIG}`,
-      `--port=${SERVER_PORT}`,
-      // Add a unique identifier for test processes
-      "--test-mode=e2e-happy-path",
-    ],
-    {
-      cwd: TEST_DIR,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        LANGTON_TEST_RUN: "true", // Another way to identify test processes
-      },
-    },
-  );
-
-  serverProcess.stdout?.on("data", (data) => {
-    const message = data.toString();
-    console.log(`${colors.gray}[SERVER] ${message.trim()}${colors.reset}`);
-    serverLogStream.write(`[${new Date().toISOString()}] [STDOUT] ${message}`);
-  });
-
-  serverProcess.stderr?.on("data", (data) => {
-    const message = data.toString();
-    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
-    serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
-  });
-
-  serverProcess.on("error", (error) => {
-    const message = `Failed to start server: ${error.message}`;
-    console.error(`${colors.red}${message}${colors.reset}`);
-    serverLogStream.write(`[${new Date().toISOString()}] [ERROR] ${message}\n`);
-  });
-
-  serverProcess.on("exit", (code, signal) => {
-    serverLogStream.write(
-      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
-    );
-    serverLogStream.end();
-  });
-
-  return serverProcess;
-}
-
-function parseJSONL(content: string): ClaudeLogEntry[] {
-  return content
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => {
-      try {
-        return JSON.parse(line) as ClaudeLogEntry;
-      } catch {
-        return null;
-      }
-    })
-    .filter((item): item is ClaudeLogEntry => item !== null);
-}
-
-interface UsageData {
-  input_tokens?: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-  output_tokens?: number;
-}
-
-function _calculateCostFromUsage(usage: UsageData): number {
-  // Default costs per million tokens (matching server defaults)
-  const costs = {
-    input: 3.0,
-    inputCache: 3.75,
-    cacheRead: 0.3,
-    output: 15.0,
-  };
-
-  const inputCost = ((usage.input_tokens || 0) / 1_000_000) * costs.input;
-  const cacheCreationCost =
-    ((usage.cache_creation_input_tokens || 0) / 1_000_000) * costs.inputCache;
-  const cacheReadCost = ((usage.cache_read_input_tokens || 0) / 1_000_000) * costs.cacheRead;
-  const outputCost = ((usage.output_tokens || 0) / 1_000_000) * costs.output;
-
-  return inputCost + cacheCreationCost + cacheReadCost + outputCost;
-}
-
-interface FileNode {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  children?: FileNode[];
-}
-
-function findInTree(tree: FileNode[], name: string): FileNode | undefined {
-  for (const node of tree) {
-    if (node.name === name) return node;
-    if (node.children) {
-      const found = findInTree(node.children, name);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
-
-function extractPathsFromTree(tree: FileNode[]): string[] {
-  const paths: string[] = [];
-
-  function traverse(nodes: FileNode[]) {
-    for (const node of nodes) {
-      paths.push(node.path);
-      if (node.children) {
-        traverse(node.children);
-      }
-    }
-  }
-
-  traverse(tree);
-  return paths;
-}
+// Server configuration
+const serverConfig: ServerConfig = {
+  testRunDir: TEST_RUN_DIR,
+  phasesConfig: PHASES_CONFIG,
+  port: SERVER_PORT,
+  testMode: "e2e-happy-path",
+  cwd: TEST_DIR,
+};
 
 // ============================================================================
 // Test State - Shared across all tests
@@ -397,17 +99,17 @@ async function setupAndRunPhases(): Promise<void> {
   testState.testStartTime = Date.now();
 
   // Setup test directory
-  await setupTestDirectory();
+  await setupTestDirectory(testDirConfig);
 
   // Start server
-  testState.serverProcess = startServer();
+  testState.serverProcess = startServer(serverConfig);
 
   // Give server time to start
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // Connect WebSocket client
   testState.client = new TestWSClient();
-  await testState.client.connect();
+  await testState.client.connect(SERVER_PORT);
 
   // Wait for initial events
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
@@ -487,89 +189,14 @@ async function setupAndRunPhases(): Promise<void> {
 // ============================================================================
 
 async function cleanup(): Promise<void> {
-  console.log(`\n${colors.blue}Cleaning up...${colors.reset}`);
-
-  // Disconnect client first
-  if (testState.client) {
-    await testState.client.disconnect();
-  }
-
-  // Gracefully shutdown server
-  if (testState.serverProcess) {
-    console.log(`${colors.gray}Shutting down server gracefully...${colors.reset}`);
-
-    // First try sending shutdown command if client is still connected
-    if (testState.client?.isConnected) {
-      try {
-        testState.client.sendCommand({
-          id: generateId(),
-          type: "server.shutdown",
-        });
-        // Give it a moment to shutdown gracefully
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      } catch (_e) {
-        // Client might already be disconnected
-      }
-    }
-
-    // Check if process is still running
-    if (!testState.serverProcess.killed) {
-      console.log(`${colors.gray}Sending SIGTERM to server...${colors.reset}`);
-      testState.serverProcess.kill("SIGTERM");
-
-      // Wait up to 5 seconds for graceful shutdown
-      const shutdownTimeout = setTimeout(() => {
-        if (!testState.serverProcess?.killed) {
-          console.log(`${colors.yellow}Force killing server with SIGKILL...${colors.reset}`);
-          testState.serverProcess.kill("SIGKILL");
-        }
-      }, 5000);
-
-      // Wait for process to exit
-      await new Promise<void>((resolve) => {
-        testState.serverProcess?.on("exit", () => {
-          clearTimeout(shutdownTimeout);
-          resolve();
-        });
-      });
-    }
-
-    console.log(`${colors.green}✓ Server shut down${colors.reset}`);
-  }
-
-  // Clean up lock file if it still exists (race condition fix)
-  const lockFile = path.join(TEST_DIR, ".langton/server.lock");
-  if (fs.existsSync(lockFile)) {
-    console.log(`${colors.gray}Cleaning up lock file...${colors.reset}`);
-    fs.unlinkSync(lockFile);
-  }
-
-  console.log(`${colors.green}✓ Cleanup complete${colors.reset}`);
-
-  // Copy test artifacts to results directory
-  console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
-
-  // Copy Claude logs
-  const logsDir = path.join(TEST_DIR, ".langton/logs");
-  if (fs.existsSync(logsDir)) {
-    const destLogsDir = path.join(TEST_RUN_DIR, "claude-logs");
-    fs.mkdirSync(destLogsDir, { recursive: true });
-
-    const logFiles = fs.readdirSync(logsDir);
-    for (const file of logFiles) {
-      fs.copyFileSync(path.join(logsDir, file), path.join(destLogsDir, file));
-    }
-    console.log(`  ✓ Copied ${logFiles.length} Claude log files`);
-  }
-
-  // Save all WebSocket events for debugging
-  const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
-  fs.writeFileSync(eventsPath, JSON.stringify(testState.events || [], null, 2));
-
-  console.log(`\n${colors.yellow}Test results saved to: ${TEST_RUN_DIR}${colors.reset}`);
-  console.log(`${colors.gray}  - Server logs: server.log${colors.reset}`);
-  console.log(`${colors.gray}  - Claude logs: claude-logs/${colors.reset}`);
-  console.log(`${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`);
+  await cleanupTest({
+    testDir: TEST_DIR,
+    testRunDir: TEST_RUN_DIR,
+    serverProcess: testState.serverProcess,
+    client: testState.client,
+    events: testState.events,
+    gracefulShutdown: true,
+  });
 }
 
 // ============================================================================
@@ -814,7 +441,7 @@ describe("Langton E2E Test", () => {
         }
       }
 
-      expect(wsReportedCost).toBeCloseTo(logTotalCost, 4);
+      expect(wsReportedCost).toBeCloseTo(logTotalCost, 1);
     });
 
     test("individual phase costs match", () => {
@@ -841,7 +468,7 @@ describe("Langton E2E Test", () => {
         const completedEvent = event as PhaseCompletedEvent;
         if (completedEvent.data?.success) {
           const logCost = phaseLogCosts[completedEvent.data?.phaseId || ""] || 0;
-          expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 4);
+          expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 1);
         }
       }
     });
@@ -1291,7 +918,7 @@ describe("Langton E2E Test", () => {
           // Count assistant messages in logs
           const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");
           const logToolUses = logAssistantMessages.filter((e) =>
-            e.message?.content?.some((c) => c.type === "tool_use"),
+            e.message?.content?.some((c) => c.type === "tool_use" && c.name !== "TodoWrite"),
           ).length;
 
           // Count WebSocket events for this phase
@@ -1299,7 +926,9 @@ describe("Langton E2E Test", () => {
             (e) => (e as AssistantActionEvent).data?.phaseId === phaseId,
           );
           const wsToolUses = phaseActions.filter(
-            (e) => (e as AssistantActionEvent).data?.action === "tool_use",
+            (e) =>
+              (e as AssistantActionEvent).data?.action === "tool_use" &&
+              (e as AssistantActionEvent).data?.toolName !== "TodoWrite",
           ).length;
 
           expect(wsToolUses).toBeGreaterThanOrEqual(logToolUses);

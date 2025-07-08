@@ -19,17 +19,23 @@ While running:
 
 TODOs:
 
-1. Use input stream json and implement and test
-1. Use git commits! (done)
-1. Move .logs into .langton (done)
-1. Use full paths for folders and replace those in the prompts. (done)
-1. safe_exec and that journey
-1. Implement actual workspace copying in and out instead of running commands which can be brittle
-1. Retry system and error handling?
-1. Use git commits to rollback changes?
-1. Actually tracking file edits to show what changed instead of chokidar
-1. Extracting data after phases or at completion?
-1. Adding description streaming with flash
+1. Actually implement rollbacks on checkpoints, failed resumes
+2. Abstract out claude code so we can sub in other things
+3. Implement a langtonflow for making changelogs
+4. Check for more tests to add
+   1. Are we pulling files we don't want into the shadow git?
+5. Use input stream json and implement and test
+6. Use git commits! (done)
+7. Move .logs into .langton (done)
+8. Consider using bind mounts to make the actual data inputs completely read-only
+9. Use full paths for folders and replace those in the prompts. (done)
+10. safe_exec and that journey
+11. Implement actual workspace copying in and out instead of running commands which can be brittle
+12. Retry system and error handling?
+13. Use git commits to rollback changes?
+14. Actually tracking file edits to show what changed instead of chokidar
+15. Extracting data after phases or at completion?
+16. Adding description streaming with flash
 
 Cleanup TODOs:
 

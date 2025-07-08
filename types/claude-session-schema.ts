@@ -33,6 +33,8 @@ const toolNames = [
   "NotebookRead",
   "NotebookEdit",
   "WebFetch",
+  "TodoRead",
+  "TodoWrite",
   "WebSearch",
 ] as const;
 

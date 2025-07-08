@@ -7,10 +7,10 @@ LOCK_FILE="tests/test-area/.langton-server.lock"
 if [ -f "$LOCK_FILE" ]; then
     echo "Found lock file: $LOCK_FILE"
     SERVER_PID=$(cat "$LOCK_FILE" 2>/dev/null)
-    
+
     if [ ! -z "$SERVER_PID" ]; then
         echo "Lock file contains PID: $SERVER_PID"
-        
+
         # Verify this PID is actually our server by checking the command
         if ps -p "$SERVER_PID" -o args= 2>/dev/null | grep -q "test-phases.config.json"; then
             echo "✅ Found our test server process (PID: $SERVER_PID)"
@@ -27,7 +27,7 @@ if [ -f "$LOCK_FILE" ]; then
             echo "⚠️  PID $SERVER_PID doesn't appear to be our test server"
         fi
     fi
-    
+
     echo "Removing lock file..."
     rm -f "$LOCK_FILE"
     echo "✅ Lock file removed"
@@ -64,5 +64,3 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     mkdir -p tests/test-area
     echo "✅ Test area cleaned"
 fi
-
-echo "🎉 Cleanup complete!"

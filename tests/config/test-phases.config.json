@@ -15,7 +15,11 @@
       }
     ],
     "watch": "./notes/*.txt",
-    "appendSystemPromptFile": ["./systemPrompt1.md", "./systemPrompt2.md"],
+    "appendSystemPromptFile": [
+      "./systemPrompt1.md",
+      "./systemPrompt2.md",
+      "./noTodosPrompt.md"
+    ],
     "description": "Write three pick one",
     "checkpointAndWatch": ["notes/**/*", "*.md"]
   },
@@ -26,6 +30,7 @@
     "model": "sonnet",
     "continueFromPrevious": true,
     "watch": "./notes/*.*",
+    "appendSystemPromptFile": ["./noTodosPrompt.md"],
     "description": "Write one more",
     "checkpointAndWatch": ["notes/**/*"]
   },
@@ -53,6 +58,10 @@
     "continueFromPrevious": false,
     "watch": "./typescript_code/src/**/*.ts",
     "description": "Convert poems to code",
-    "checkpointAndWatch": ["typescript_code/src/**/*.ts", "typescript_code/package.json"]
+    "appendSystemPromptFile": ["./noTodosPrompt.md"],
+    "checkpointAndWatch": [
+      "typescript_code/src/**/*.ts",
+      "typescript_code/package.json"
+    ]
   }
 ]

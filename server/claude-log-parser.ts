@@ -40,6 +40,7 @@ export class ClaudeLogParser {
   private buffer = ""; // Incomplete line buffer
   private lastPosition = 0; // Last read position in file
   private logTimer?: NodeJS.Timeout;
+  private isFirstParse = true; // Track if this is the first parse
 
   constructor(private options: ClaudeLogParserOptions) {}
 
@@ -58,6 +59,9 @@ export class ClaudeLogParser {
       clearInterval(this.logTimer);
       this.logTimer = undefined;
     }
+    // NEW: Clear buffer to free memory
+    this.buffer = "";
+    this.lastPosition = 0;
   }
 
   private parseLogFile(): void {
@@ -66,7 +70,9 @@ export class ClaudeLogParser {
 
     try {
       const content = fs.readFileSync(logPath, "utf-8");
-      const newContent = content.slice(this.lastPosition);
+
+      // On first parse, read from beginning to catch any messages written before we started
+      const newContent = this.isFirstParse ? content : content.slice(this.lastPosition);
       if (!newContent) return;
 
       this.buffer += newContent;
@@ -80,6 +86,7 @@ export class ClaudeLogParser {
       }
 
       this.lastPosition = content.length - this.buffer.length;
+      this.isFirstParse = false; // Mark that we've done our first parse
     } catch (error) {
       console.error(`Error parsing log: ${error}`);
     }
