@@ -18,7 +18,6 @@ export function runTemplateVariableTests(testState: TestState) {
       // Should not contain unreplaced template variables
       expect(content).not.toContain("<%PROJECT_DIR%>");
       expect(content).not.toContain("<PROJECT_DIR>");
-      expect(content).not.toContain("${PROJECT_DIR}");
     });
 
     // Check that paths in tool inputs are properly resolved

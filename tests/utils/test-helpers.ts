@@ -366,10 +366,13 @@ export function startServer(config: ServerConfig): ChildProcess {
   const serverLogPath = path.join(config.testRunDir, "server.log");
   const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
 
+  // Use absolute path to server to ensure it's found regardless of where test is run from
+  const serverPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../server/index.ts");
+  
   const serverProcess = spawn(
     "bun",
     [
-      path.join(process.cwd(), "server/index.ts"),
+      serverPath,
       `--config=${config.phasesConfig}`,
       `--port=${config.port}`,
       `--test-mode=${config.testMode}`,

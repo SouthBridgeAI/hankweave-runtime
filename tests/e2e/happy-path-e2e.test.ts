@@ -1,14 +1,7 @@
 #!/usr/bin/env bun
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-  extractPathsFromTree,
-  type FileNode,
-  findInTree,
-  parseJSONL,
-} from "../utils/test-data-helpers.js";
 import {
   cleanupTest,
   colors,
@@ -24,6 +17,8 @@ import { runCheckpointExclusionTests } from "./test-groups/checkpoint-exclusion-
 import { runCheckpointSystemTests } from "./test-groups/checkpoint-system-tests.js";
 import { runCostPrecisionTests } from "./test-groups/cost-precision-tests.js";
 import { runCostTrackingTests } from "./test-groups/cost-tracking-tests.js";
+import { runDualIdSystemTests } from "./test-groups/dual-id-system-tests.js";
+import { runEarlyPhaseFailureTests } from "./test-groups/early-phase-failure-tests.js";
 import { runErrorEventTests } from "./test-groups/error-event-tests.js";
 import { runEventIntegrityTests } from "./test-groups/event-integrity-tests.js";
 import { runFileContentTests } from "./test-groups/file-content-tests.js";
@@ -59,10 +54,12 @@ import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js
 
 // Test configuration
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-const TEST_DIR = path.join(process.cwd(), "tests/test-area");
-const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
+// Use __dirname to ensure we're always relative to this test file
+const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const TEST_DIR = path.join(TEST_ROOT, "tests/test-area");
+const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7780");
-const PHASES_CONFIG = path.join(process.cwd(), "tests/config/test-phases.config.json");
+const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = generateTestTimestamp();
@@ -70,16 +67,10 @@ const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
 // Import types from the server
 import type {
-  AssistantActionEvent,
   ErrorEvent,
-  FileTreeUpdatedEvent,
-  FileUpdatedEvent,
-  InfoEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-  StateSnapshotEvent,
-  TokenUsageEvent,
 } from "../../server/types.js";
 
 // Test directory configuration
@@ -112,6 +103,7 @@ interface TestState {
   phase2Completed: PhaseCompletedEvent | null;
   phase3Started: PhaseStartedEvent | null;
   phase3Completed: PhaseCompletedEvent | null;
+  errorEvents: ErrorEvent[];
   testStartTime: number;
 }
 
@@ -125,6 +117,7 @@ const testState: TestState = {
   phase2Completed: null,
   phase3Started: null,
   phase3Completed: null,
+  errorEvents: [],
   testStartTime: 0,
 };
 
@@ -221,6 +214,9 @@ async function setupAndRunPhases(): Promise<void> {
 
   // Store all events for tests
   testState.events = testState.client.getEvents();
+
+  // Extract error events for specific error testing
+  testState.errorEvents = testState.events.filter((e) => e.type === "error") as ErrorEvent[];
 }
 
 // ============================================================================
@@ -353,6 +349,14 @@ describe("Langton E2E Test", () => {
 
   describe("State Consistency", () => {
     runStateConsistencyTests(testState);
+  });
+
+  describe("Dual ID System", () => {
+    runDualIdSystemTests(testState);
+  });
+
+  describe("Early Phase Failures", () => {
+    runEarlyPhaseFailureTests(testState);
   });
 
   describe("Log Ordering", () => {

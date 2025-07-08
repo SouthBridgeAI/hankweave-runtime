@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import type { PhaseCompletedEvent, PhaseStartedEvent } from "../../../server/types.js";
+import type { PhaseCompletedEvent, PhaseStartedEvent, ServerEvent } from "../../../server/types.js";
 
 interface TestState {
-  events: any[];
+  events: ServerEvent[];
 }
 
 export function runMessageOrderingTests(testState: TestState) {

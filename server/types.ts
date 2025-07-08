@@ -203,8 +203,12 @@ export interface TokenUsage {
 export interface PhaseState {
   /** The phase configuration being executed */
   phase: PhaseConfig;
-  /** Claude session ID for this phase instance */
-  sessionId: string;
+  /** Internal execution ID for tracking (timestamp-random format) */
+  phaseExecutionId: string;
+  /** Claude session ID for this phase instance (starts as null, set on init) */
+  sessionId: string | null;
+  /** Previous claude session ID if continuing from another phase */
+  previousSessionId: string | null;
   /** Whether the phase is currently executing */
   isRunning: boolean;
   /** When this phase started */

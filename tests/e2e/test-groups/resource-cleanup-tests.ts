@@ -35,7 +35,7 @@ export async function runResourceCleanupTests(testDir: string) {
       lines.forEach((line, idx) => {
         try {
           JSON.parse(line);
-        } catch (error) {
+        } catch (_error) {
           throw new Error(`Invalid JSON in ${logFile} line ${idx + 1}: ${line}`);
         }
       });

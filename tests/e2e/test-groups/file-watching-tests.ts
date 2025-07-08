@@ -2,16 +2,18 @@ import { expect, test } from "bun:test";
 import type {
   AssistantActionEvent,
   FileUpdatedEvent,
+  PhaseCompletedEvent,
   PhaseStartedEvent,
+  ServerEvent,
 } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 import { colors } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
-  events: any[];
-  phase1Started: any;
-  phase1Completed: any;
+  events: ServerEvent[];
+  phase1Started: PhaseStartedEvent | null;
+  phase1Completed: PhaseCompletedEvent | null;
 }
 
 export function runFileWatchingTests(testState: TestState) {

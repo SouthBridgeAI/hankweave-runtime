@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
-import type { PhaseStartedEvent, StateSnapshotEvent } from "../../../server/types.js";
+import type { PhaseStartedEvent, ServerEvent, StateSnapshotEvent } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
-  events: any[];
-  phase1Started: any;
-  phase2Started: any;
-  phase3Started: any;
+  events: ServerEvent[];
+  phase1Started: PhaseStartedEvent | null;
+  phase2Started: PhaseStartedEvent | null;
+  phase3Started: PhaseStartedEvent | null;
 }
 
 export function runStateConsistencyTests(testState: TestState) {
@@ -23,7 +23,7 @@ export function runStateConsistencyTests(testState: TestState) {
         const sessionId = e.data?.sessionId;
         if (phaseId && sessionId) {
           if (!sessionIdMap.has(phaseId)) sessionIdMap.set(phaseId, new Set());
-          sessionIdMap.get(phaseId)!.add(sessionId);
+          sessionIdMap.get(phaseId)?.add(sessionId);
         }
       }
     });
@@ -34,24 +34,28 @@ export function runStateConsistencyTests(testState: TestState) {
       const snapshot = event as StateSnapshotEvent;
       snapshot.data?.completedPhases?.forEach((phase) => {
         if (!sessionIdMap.has(phase.phaseId)) sessionIdMap.set(phase.phaseId, new Set());
-        sessionIdMap.get(phase.phaseId)!.add(phase.sessionId);
+        sessionIdMap.get(phase.phaseId)?.add(phase.sessionId);
       });
     });
 
     // Each phase should have exactly one session ID
-    sessionIdMap.forEach((sessionIds, phaseId) => {
+    sessionIdMap.forEach((sessionIds, _phaseId) => {
       expect(sessionIds.size).toBe(1);
     });
   });
 
   test("previousSessionId correctly chains phases", () => {
     // Phase 2 should reference Phase 1's session ID
-    expect(testState.phase2Started?.data?.previousSessionId).toBe(
-      testState.phase1Started?.data?.sessionId,
-    );
+    if (testState.phase2Started && testState.phase1Started) {
+      expect(testState.phase2Started.data?.previousSessionId).toBe(
+        testState.phase1Started.data?.sessionId,
+      );
+    }
 
     // Phase 3 should NOT reference Phase 2 (no continueFromPrevious)
-    expect(testState.phase3Started?.data?.previousSessionId).toBeUndefined();
+    if (testState.phase3Started) {
+      expect(testState.phase3Started.data?.previousSessionId).toBeUndefined();
+    }
   });
 
   test("cumulative costs are properly tracked", () => {

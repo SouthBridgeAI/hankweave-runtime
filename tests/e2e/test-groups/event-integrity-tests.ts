@@ -1,10 +1,15 @@
 import { expect, test } from "bun:test";
-import type { AssistantActionEvent, StateSnapshotEvent } from "../../../server/types.js";
+import type {
+  AssistantActionEvent,
+  ServerEvent,
+  StateSnapshotEvent,
+  TokenUsageEvent,
+} from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
-  events: any[];
+  events: ServerEvent[];
 }
 
 export function runEventIntegrityTests(testState: TestState) {
@@ -27,32 +32,37 @@ export function runEventIntegrityTests(testState: TestState) {
     const tokenEvents = testState.client?.getEventsByType("token.usage") || [];
 
     // Group token events by timestamp to understand Claude's streaming pattern
-    const eventsByTimestamp = new Map<string, any[]>();
+    const eventsByTimestamp = new Map<string, ServerEvent[]>();
     tokenEvents.forEach((event) => {
       const timestamp = event.timestamp;
       if (!eventsByTimestamp.has(timestamp)) {
         eventsByTimestamp.set(timestamp, []);
       }
-      eventsByTimestamp.get(timestamp)!.push(event);
+      eventsByTimestamp.get(timestamp)?.push(event);
     });
 
     // Claude sends multiple complete packets with the same message ID
     // This is expected behavior - not duplicates
     // Each packet represents a different aspect (text content vs tool use)
-    
+
     // Check that events with the same timestamp have different token counts
     // (indicating they're different stages of the same message)
-    eventsByTimestamp.forEach((events, timestamp) => {
+    eventsByTimestamp.forEach((events, _timestamp) => {
       if (events.length > 1) {
         // Multiple events at same timestamp should have different token counts
-        const tokenCounts = events.map(e => e.data?.outputTokens || 0);
+        const tokenCounts = events.map((e) => {
+          if (e.type === "token.usage") {
+            return (e as TokenUsageEvent).data?.outputTokens || 0;
+          }
+          return 0;
+        });
         const uniqueTokenCounts = new Set(tokenCounts);
-        
+
         // If all token counts are identical, that would be a true duplicate
         if (uniqueTokenCounts.size === 1 && events.length > 1) {
           // Check if they're truly identical events
           const firstEventStr = JSON.stringify(events[0]);
-          const allIdentical = events.every(e => JSON.stringify(e) === firstEventStr);
+          const allIdentical = events.every((e) => JSON.stringify(e) === firstEventStr);
           expect(allIdentical).toBe(false);
         }
       }
@@ -61,9 +71,10 @@ export function runEventIntegrityTests(testState: TestState) {
     // Also check assistant actions for true duplicates
     const assistantActions = testState.client?.getEventsByType("assistant.action") || [];
     const actionSignatures = new Map<string, number>();
-    
+
     assistantActions.forEach((action) => {
-      const signature = `${action.data?.phaseId}_${action.data?.action}_${action.data?.content}`;
+      const a = action as AssistantActionEvent;
+      const signature = `${a.data?.phaseId}_${a.data?.action}_${a.data?.content}`;
       actionSignatures.set(signature, (actionSignatures.get(signature) || 0) + 1);
     });
 

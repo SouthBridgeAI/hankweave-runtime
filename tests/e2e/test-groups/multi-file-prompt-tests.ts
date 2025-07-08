@@ -1,12 +1,16 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
-import * as path from "node:path";
-import type { AssistantActionEvent } from "../../../server/types.js";
+import type {
+  AssistantActionEvent,
+  PhaseCompletedEvent,
+  PhaseStartedEvent,
+  ServerEvent,
+} from "../../../server/types.js";
 
 interface TestState {
-  events: any[];
-  phase3Started: any;
-  phase3Completed: any;
+  events: ServerEvent[];
+  phase3Started: PhaseStartedEvent | null;
+  phase3Completed: PhaseCompletedEvent | null;
 }
 
 export function runMultiFilePromptTests(testState: TestState, phasesConfig: string) {
@@ -14,7 +18,7 @@ export function runMultiFilePromptTests(testState: TestState, phasesConfig: stri
     // Phase 3 uses array of prompt files
     const configContent = fs.readFileSync(phasesConfig, "utf-8");
     const phases = JSON.parse(configContent);
-    const phase3Config = phases.find((p: any) => p.id === "phase-3");
+    const phase3Config = phases.find((p: { id: string }) => p.id === "phase-3");
 
     if (Array.isArray(phase3Config?.promptFile)) {
       // Check that all files were read

@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { FileUpdatedEvent } from "../../../server/types.js";
+import type { ServerEvent } from "../../../server/types.js";
 
 interface TestState {
-  events: any[];
+  events: ServerEvent[];
 }
 
-export function runSecurityValidationTests(testState: TestState, testDir: string) {
+export function runSecurityValidationTests(_testState: TestState, testDir: string) {
   // Test removed: "no absolute paths leaked in events" - absolute paths are useful and should be kept
-  
+
   test("no sensitive environment variables in logs", () => {
     const sensitivePatterns = [/ANTHROPIC_API_KEY/, /api_key.*=.*sk-/, /authorization.*bearer/i];
 

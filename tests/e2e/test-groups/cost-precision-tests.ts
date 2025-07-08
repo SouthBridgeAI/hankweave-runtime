@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import type { PhaseCompletedEvent, TokenUsageEvent } from "../../../server/types.js";
+import type {
+  PhaseCompletedEvent,
+  StateSnapshotEvent,
+  TokenUsageEvent,
+} from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
@@ -42,7 +46,7 @@ export function runCostPrecisionTests(testState: TestState) {
     // Get final state snapshot
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
     const finalSnapshot = snapshots[snapshots.length - 1];
-    const finalTotalCost = (finalSnapshot as any)?.data?.totalCost || 0;
+    const finalTotalCost = (finalSnapshot as StateSnapshotEvent)?.data?.totalCost || 0;
 
     // Calculate sum of phase costs
     const phaseCompletions = testState.client?.getEventsByType("phase.completed") || [];

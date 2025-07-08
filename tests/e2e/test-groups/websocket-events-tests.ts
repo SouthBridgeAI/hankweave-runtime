@@ -1,15 +1,10 @@
 import { expect, test } from "bun:test";
-import type {
-  AssistantActionEvent,
-  ErrorEvent,
-  FileUpdatedEvent,
-  StateSnapshotEvent,
-} from "../../../server/types.js";
+import type { ErrorEvent, FileUpdatedEvent, ServerEvent } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
-  events: any[];
+  events: ServerEvent[];
 }
 
 export function runWebSocketEventsTests(testState: TestState) {

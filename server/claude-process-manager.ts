@@ -64,6 +64,12 @@ export class ClaudeProcessManager extends EventEmitter {
     const fullCommand = `claude ${args.join(" ")}`;
     this.logger.log(`Executing Claude command: ${fullCommand}`);
     this.logger.log(`Working directory: ${this.projectPath}`);
+    
+    // Additional debugging
+    this.logger.log(`Current process.cwd(): ${process.cwd()}`);
+    this.logger.log(`Absolute projectPath: ${path.resolve(this.projectPath)}`);
+    this.logger.log(`Project path exists: ${fs.existsSync(this.projectPath)}`);
+    this.logger.log(`Project path is directory: ${fs.existsSync(this.projectPath) && fs.statSync(this.projectPath).isDirectory()}`);
 
     // Spawn process
     this.process = spawn("claude", args, {

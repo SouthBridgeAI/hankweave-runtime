@@ -1,13 +1,17 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { PhaseCompletedEvent, StateSnapshotEvent } from "../../../server/types.js";
+import type {
+  PhaseCompletedEvent,
+  ServerEvent,
+  StateSnapshotEvent,
+} from "../../../server/types.js";
 import { parseJSONL } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
-  events: any[];
+  events: ServerEvent[];
 }
 
 export function runCostTrackingTests(testState: TestState, testDir: string) {

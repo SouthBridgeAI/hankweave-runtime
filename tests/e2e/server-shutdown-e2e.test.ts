@@ -31,10 +31,12 @@ import {
 
 // Test configuration - using the shared three-phase config
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
-const TEST_DIR = path.join(process.cwd(), "tests/test-area");
-const TEST_RESULTS_DIR = path.join(process.cwd(), "tests/test-results");
+// Use __dirname to ensure we're always relative to this test file
+const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const TEST_DIR = path.join(TEST_ROOT, "tests/test-area");
+const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7779");
-const PHASES_CONFIG = path.join(process.cwd(), "tests/config/test-phases.config.json");
+const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = generateTestTimestamp();

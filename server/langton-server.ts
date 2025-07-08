@@ -130,16 +130,21 @@ export class LangtonServer extends EventEmitter {
   // ============================================================================
 
   /**
-   * Wait for result message from a specific session.
+   * Wait for result message from a specific phase execution.
    */
-  private waitForResultMessage(sessionId: string, timeoutMs = 60000): Promise<ResultMessage> {
+  private waitForResultMessage(
+    phaseExecutionId: string,
+    timeoutMs = 60000,
+  ): Promise<ResultMessage> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        this.resultMessagePromises.delete(sessionId);
-        reject(new Error(`Timeout waiting for result message from session ${sessionId}`));
+        this.resultMessagePromises.delete(phaseExecutionId);
+        reject(
+          new Error(`Timeout waiting for result message from phase execution ${phaseExecutionId}`),
+        );
       }, timeoutMs);
 
-      this.resultMessagePromises.set(sessionId, { resolve, reject, timeout });
+      this.resultMessagePromises.set(phaseExecutionId, { resolve, reject, timeout });
     });
   }
 
@@ -478,7 +483,6 @@ export class LangtonServer extends EventEmitter {
     }
 
     // Get previous session ID if needed
-    const sessionId = generateId();
     let previousSessionId: string | null = null;
 
     if (phase.continueFromPrevious) {
@@ -514,10 +518,12 @@ export class LangtonServer extends EventEmitter {
       }
     }
 
-    // Create phase state
+    // Create phase state with dual ID system
     this.currentPhase = {
       phase,
-      sessionId,
+      phaseExecutionId: generateId(), // Internal tracking ID
+      sessionId: null, // Claude's UUID (will be set on init)
+      previousSessionId, // Store for phase.started event
       isRunning: true,
       startTime: new Date(),
       phaseCost: 0,
@@ -535,20 +541,8 @@ export class LangtonServer extends EventEmitter {
       this.logger.log(`Watching pattern: ${phase.watch}`);
     }
 
-    // Send phase started event
-    this.sendEvent({
-      id: generateId(),
-      timestamp: new Date().toISOString(),
-      type: "phase.started",
-      data: {
-        phaseId: phase.id,
-        phaseName: phase.name,
-        phaseDescription: phase.description,
-        sessionId: this.currentPhase.sessionId,
-        previousSessionId: previousSessionId || undefined,
-        startTime: this.currentPhase.startTime.toISOString(),
-      },
-    } as PhaseStartedEvent);
+    // NOTE: phase.started event is now sent when Claude sends init message
+    // This ensures we have the actual session ID before notifying clients
 
     // Send initial file states if any exist
     if (phase.watch) {
@@ -670,16 +664,28 @@ export class LangtonServer extends EventEmitter {
 
   private handleSystemMessage(msg: SystemMessage, phaseId: string): void {
     if (msg.subtype === "init" && msg.session_id && this.currentPhase) {
-      const oldSessionId = this.currentPhase.sessionId;
+      // Set the Claude session ID
       this.currentPhase.sessionId = msg.session_id;
 
-      // Log the session ID update with clear context
+      // Log the session ID update
       this.logger.log(`Claude started phase ${phaseId} with session ID: ${msg.session_id}`);
-      this.logger.log(
-        `Updated phase ${phaseId} session ID from ${oldSessionId} to ${msg.session_id}`,
-      );
 
-      // Send info event about actual session ID
+      // NOW send the phase.started event with the real session ID
+      this.sendEvent({
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        type: "phase.started",
+        data: {
+          phaseId: this.currentPhase.phase.id,
+          phaseName: this.currentPhase.phase.name,
+          phaseDescription: this.currentPhase.phase.description,
+          sessionId: msg.session_id, // Use Claude's real ID
+          previousSessionId: this.currentPhase.previousSessionId || undefined,
+          startTime: this.currentPhase.startTime.toISOString(),
+        },
+      } as PhaseStartedEvent);
+
+      // Send existing info event
       this.sendEvent({
         id: generateId(),
         timestamp: new Date().toISOString(),
@@ -798,13 +804,13 @@ export class LangtonServer extends EventEmitter {
   private handleResultMessage(msg: ResultMessage, phaseId: string): void {
     this.logger.log(`Phase ${phaseId} result message received: ${msg.subtype}`);
 
-    // Resolve any waiting promise
-    const sessionId = msg.session_id || this.currentPhase?.sessionId;
-    if (sessionId) {
-      const promise = this.resultMessagePromises.get(sessionId);
+    // Resolve any waiting promise using phaseExecutionId
+    const executionId = this.currentPhase?.phaseExecutionId;
+    if (executionId) {
+      const promise = this.resultMessagePromises.get(executionId);
       if (promise) {
         clearTimeout(promise.timeout);
-        this.resultMessagePromises.delete(sessionId);
+        this.resultMessagePromises.delete(executionId);
         promise.resolve(msg);
       }
     }
@@ -864,7 +870,9 @@ export class LangtonServer extends EventEmitter {
     // Capture all phase information immediately to avoid race conditions
     const phaseSnapshot = {
       phase: { ...this.currentPhase.phase },
-      sessionId: this.currentPhase.sessionId,
+      phaseExecutionId: this.currentPhase.phaseExecutionId, // Internal tracking
+      sessionId: this.currentPhase.sessionId, // Claude's UUID (may be null if failed early)
+      previousSessionId: this.currentPhase.previousSessionId,
       startTime: this.currentPhase.startTime,
       phaseCost: this.currentPhase.phaseCost,
       phaseTokens: { ...this.currentPhase.phaseTokens },
@@ -876,7 +884,7 @@ export class LangtonServer extends EventEmitter {
       try {
         // Wait for result message with 30 second timeout
         const resultMsg = await this.waitForResultMessage(
-          phaseSnapshot.sessionId,
+          phaseSnapshot.phaseExecutionId,
           TIMEOUTS.RESULT_MESSAGE_MS,
         );
 
@@ -908,7 +916,7 @@ export class LangtonServer extends EventEmitter {
     const phaseCost = phaseSnapshot.phaseCost;
 
     // Add to completed phases (even if skipped, to track progress)
-    if (success || phaseSnapshot.isSkipping) {
+    if ((success || phaseSnapshot.isSkipping) && phaseSnapshot.sessionId) {
       this.completedPhases.push({
         phaseId: phaseSnapshot.phase.id,
         sessionId: phaseSnapshot.sessionId,
@@ -1331,13 +1339,13 @@ export class LangtonServer extends EventEmitter {
     }
 
     // Clean up any pending result message promises
-    const sessionId = this.currentPhase?.sessionId;
-    if (sessionId && this.resultMessagePromises.has(sessionId)) {
-      const promise = this.resultMessagePromises.get(sessionId);
+    const executionId = this.currentPhase?.phaseExecutionId;
+    if (executionId && this.resultMessagePromises.has(executionId)) {
+      const promise = this.resultMessagePromises.get(executionId);
       if (promise) {
         clearTimeout(promise.timeout);
         promise.reject(new Error("Phase cleanup - result message promise cancelled"));
-        this.resultMessagePromises.delete(sessionId);
+        this.resultMessagePromises.delete(executionId);
       }
     }
 

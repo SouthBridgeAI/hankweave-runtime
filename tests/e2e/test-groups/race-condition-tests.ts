@@ -1,12 +1,17 @@
 import { expect, test } from "bun:test";
-import type { PhaseCompletedEvent, StateSnapshotEvent } from "../../../server/types.js";
+import type {
+  PhaseCompletedEvent,
+  PhaseStartedEvent,
+  ServerEvent,
+  StateSnapshotEvent,
+} from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
-  events: any[];
-  phase1Started: any;
-  phase1Completed: any;
+  events: ServerEvent[];
+  phase1Started: PhaseStartedEvent | null;
+  phase1Completed: PhaseCompletedEvent | null;
 }
 
 export function runRaceConditionTests(testState: TestState) {

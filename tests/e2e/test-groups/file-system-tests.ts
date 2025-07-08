@@ -1,17 +1,18 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { PhaseCompletedEvent, PhaseStartedEvent } from "../../../server/types.js";
 
 interface TestState {
-  phase1Started: any;
-  phase1Completed: any;
-  phase2Started: any;
-  phase2Completed: any;
-  phase3Started: any;
-  phase3Completed: any;
+  phase1Started: PhaseStartedEvent | null;
+  phase1Completed: PhaseCompletedEvent | null;
+  phase2Started: PhaseStartedEvent | null;
+  phase2Completed: PhaseCompletedEvent | null;
+  phase3Started: PhaseStartedEvent | null;
+  phase3Completed: PhaseCompletedEvent | null;
 }
 
-export function runFileSystemTests(testState: TestState, testDir: string) {
+export function runFileSystemTests(_testState: TestState, testDir: string) {
   // Workspace setup tests
   test("Phase 1 workspace setup created notes directory", () => {
     expect(fs.existsSync(path.join(testDir, "notes"))).toBe(true);
