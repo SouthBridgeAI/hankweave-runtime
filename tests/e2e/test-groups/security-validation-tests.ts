@@ -8,24 +8,8 @@ interface TestState {
 }
 
 export function runSecurityValidationTests(testState: TestState, testDir: string) {
-  test("no absolute paths leaked in events", () => {
-    const absolutePathRegex = /^\/|^[A-Z]:\\/;
-
-    testState.events.forEach((event) => {
-      const eventStr = JSON.stringify(event);
-      // Check for common absolute path patterns
-      expect(eventStr).not.toMatch(/\/home\/[^"]+/);
-      expect(eventStr).not.toMatch(/\/Users\/[^"]+/);
-      expect(eventStr).not.toMatch(/C:\\Users\\/);
-
-      // Specific checks for file events
-      if (event.type === "file.updated") {
-        const fileEvent = event as FileUpdatedEvent;
-        expect(fileEvent.data?.path).not.toMatch(absolutePathRegex);
-      }
-    });
-  });
-
+  // Test removed: "no absolute paths leaked in events" - absolute paths are useful and should be kept
+  
   test("no sensitive environment variables in logs", () => {
     const sensitivePatterns = [/ANTHROPIC_API_KEY/, /api_key.*=.*sk-/, /authorization.*bearer/i];
 

@@ -26,8 +26,9 @@ export async function runCheckpointExclusionTests(testDir: string) {
       encoding: "utf-8",
     });
 
-    // These files should appear as untracked (starting with ??)
-    expect(gitStatus).toContain("?? untracked.txt");
+    // Only files not covered by exclude rules show as untracked
+    // untracked.txt is excluded by default "*" rule, so won't show
+    // notes/untracked.log is UN-excluded by "!notes/**/*" but not added to git yet
     expect(gitStatus).toContain("?? notes/untracked.log");
 
     // .langton directory should never be tracked
@@ -76,7 +77,7 @@ export async function runCheckpointExclusionTests(testDir: string) {
     const { execSync } = await import("node:child_process");
 
     // Get commit times
-    const gitLog = execSync("git log --pretty=format:%H|%ct|%s", {
+    const gitLog = execSync("git log --pretty=format:'%H|%ct|%s'", {
       cwd: testDir,
       env: {
         ...process.env,
