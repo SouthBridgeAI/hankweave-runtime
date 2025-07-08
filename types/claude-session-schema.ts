@@ -118,8 +118,6 @@ export const textContentSchema = z.object({
 export const thinkingContentSchema = z.object({
   type: z.literal("thinking"),
   thinking: z.string(),
-  // Signature field for thinking content verification
-  signature: z.string().optional(),
 });
 
 /**

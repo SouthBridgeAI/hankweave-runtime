@@ -586,7 +586,7 @@ export class LangtonServer extends EventEmitter {
     }
 
     // Start Claude process
-    await this.startClaudeProcess(phase, this.currentPhase.sessionId, previousSessionId);
+    await this.startClaudeProcess(phase, previousSessionId);
   }
 
   private getPreviousSessionId(currentPhaseId: string): string | null {
@@ -619,12 +619,10 @@ export class LangtonServer extends EventEmitter {
    * Spawn Claude CLI process for a phase using ClaudeProcessManager.
    *
    * @param phase - Phase configuration
-   * @param _sessionId - Current session ID (unused but kept for API)
    * @param previousSessionId - Session to continue from (if any)
    */
   private async startClaudeProcess(
     phase: PhaseConfig,
-    _sessionId: string,
     previousSessionId: string | null,
   ): Promise<void> {
     // Create process manager
@@ -1525,7 +1523,7 @@ export class LangtonServer extends EventEmitter {
     this.cleanupCurrentPhase();
 
     // Clean up all pending result message promises
-    for (const [_sessionId, promise] of this.resultMessagePromises) {
+    for (const promise of this.resultMessagePromises.values()) {
       clearTimeout(promise.timeout);
       promise.reject(new Error("Server shutdown - result message promise cancelled"));
     }

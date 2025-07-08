@@ -213,8 +213,6 @@ export interface PhaseState {
   phaseCost: number;
   /** Token usage breakdown for this phase */
   phaseTokens: TokenUsage;
-  /** Timer for periodic log parsing */
-  logTimer?: NodeJS.Timeout;
 }
 
 /**
@@ -485,18 +483,6 @@ export interface ClientCommand {
   id: string;
   /** Command type identifier for server-side routing */
   type: string;
-}
-
-/**
- * Initial connection command (optional).
- * Can be used for client version compatibility checks.
- */
-export interface ConnectCommand extends ClientCommand {
-  type: "connect";
-  data?: {
-    /** Client version for compatibility checking */
-    clientVersion?: string;
-  };
 }
 
 /**
