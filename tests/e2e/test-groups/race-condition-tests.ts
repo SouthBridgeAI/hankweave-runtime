@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import type {
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
-  ServerEvent,
-  StateSnapshotEvent,
-} from "../../../server/types.js";
+import {
+  isPhaseCompletedEvent,
+  isPhaseStartedEvent,
+  isStateSnapshotEvent,
+} from "../../../server/type-guards.js";
+import type { PhaseCompletedEvent, PhaseStartedEvent, ServerEvent } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
@@ -26,11 +26,11 @@ export function runRaceConditionTests(testState: TestState) {
       // Find the next state snapshot
       const nextSnapshot = stateSnapshots.find(
         (s) => new Date(s.timestamp).getTime() > completionTime,
-      ) as StateSnapshotEvent;
+      );
 
-      if (nextSnapshot) {
+      if (nextSnapshot && isStateSnapshotEvent(nextSnapshot) && isPhaseCompletedEvent(completion)) {
         // The completed phase should be in the snapshot
-        const phaseId = (completion as PhaseCompletedEvent).data?.phaseId;
+        const phaseId = completion.data?.phaseId;
         const inSnapshot = nextSnapshot.data?.completedPhases?.some((p) => p.phaseId === phaseId);
         expect(inSnapshot).toBe(true);
 
@@ -55,10 +55,11 @@ export function runRaceConditionTests(testState: TestState) {
       // Should not have conflicting state events
       const stateEvents = eventsInBetween.filter((e) => e.type === "state.snapshot");
       stateEvents.forEach((e) => {
-        const snapshot = e as StateSnapshotEvent;
-        // Current phase should still be phase-1 until completion
-        if (snapshot.data?.currentPhase) {
-          expect(snapshot.data.currentPhase.phase.id).toBe("phase-1");
+        if (isStateSnapshotEvent(e)) {
+          // Current phase should still be phase-1 until completion
+          if (e.data?.currentPhase) {
+            expect(e.data.currentPhase.phase.id).toBe("phase-1");
+          }
         }
       });
     }
@@ -68,9 +69,7 @@ export function runRaceConditionTests(testState: TestState) {
     // Since state snapshots are only sent after phase completion (when currentPhase is null),
     // we need to look at phase.started events which contain the session IDs that prove
     // separate phase executions occurred
-    const phaseStartedEvents = testState.events.filter(
-      (e) => e.type === "phase.started",
-    ) as PhaseStartedEvent[];
+    const phaseStartedEvents = testState.events.filter((e) => isPhaseStartedEvent(e));
 
     const sessionIds = new Set<string>();
 
@@ -86,9 +85,7 @@ export function runRaceConditionTests(testState: TestState) {
     expect(sessionIds.size).toBeGreaterThanOrEqual(3);
 
     // Additionally verify that completed phases each have unique session IDs
-    const finalSnapshot = [...testState.events]
-      .reverse()
-      .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
+    const finalSnapshot = [...testState.events].reverse().find((e) => isStateSnapshotEvent(e));
 
     if (finalSnapshot?.data?.completedPhases) {
       const completedSessionIds = new Set<string>();

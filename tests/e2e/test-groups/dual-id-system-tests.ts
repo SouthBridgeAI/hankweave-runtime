@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import type {
-  InfoEvent,
-  PhaseStartedEvent,
-  ServerEvent,
-  StateSnapshotEvent,
-} from "../../../server/types.js";
+import {
+  isInfoEvent,
+  isPhaseStartedEvent,
+  isStateSnapshotEvent,
+} from "../../../server/type-guards.js";
+import type { PhaseStartedEvent, ServerEvent } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
@@ -22,18 +22,18 @@ export function runDualIdSystemTests(testState: TestState) {
 
     phases.forEach((phaseId) => {
       const phaseEvents = testState.events.filter((e) => {
-        if (e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === phaseId) {
+        if (isPhaseStartedEvent(e) && e.data?.phaseId === phaseId) {
           return true;
         }
-        if (e.type === "info") {
-          const msg = (e as InfoEvent).data?.message || "";
+        if (isInfoEvent(e)) {
+          const msg = e.data?.message || "";
           return (
             msg.includes("Claude started with session ID:") &&
             testState.events.some(
               (pe) =>
-                pe.type === "phase.started" &&
-                (pe as PhaseStartedEvent).data?.phaseId === phaseId &&
-                msg.includes((pe as PhaseStartedEvent).data?.sessionId || ""),
+                isPhaseStartedEvent(pe) &&
+                pe.data?.phaseId === phaseId &&
+                msg.includes(pe.data?.sessionId || ""),
             )
           );
         }
@@ -43,11 +43,9 @@ export function runDualIdSystemTests(testState: TestState) {
       if (phaseEvents.length >= 2) {
         // Find the Claude started info event and phase.started event
         const claudeStartedEvent = phaseEvents.find(
-          (e) =>
-            e.type === "info" &&
-            (e as InfoEvent).data?.message?.includes("Claude started with session ID:"),
+          (e) => isInfoEvent(e) && e.data?.message?.includes("Claude started with session ID:"),
         );
-        const phaseStartedEvent = phaseEvents.find((e) => e.type === "phase.started");
+        const phaseStartedEvent = phaseEvents.find((e) => isPhaseStartedEvent(e));
 
         if (claudeStartedEvent && phaseStartedEvent) {
           // Claude init should come before or at the same time as phase.started
@@ -66,27 +64,32 @@ export function runDualIdSystemTests(testState: TestState) {
     const phaseStartedEvents = testState.events.filter((e) => e.type === "phase.started");
 
     phaseStartedEvents.forEach((event) => {
-      const sessionId = (event as PhaseStartedEvent).data?.sessionId;
-      if (sessionId) {
-        // UUID v4 format: 8-4-4-4-12 characters
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        expect(sessionId).toMatch(uuidRegex);
+      if (isPhaseStartedEvent(event)) {
+        const sessionId = event.data?.sessionId;
+        if (sessionId) {
+          // UUID v4 format: 8-4-4-4-12 characters
+          const uuidRegex =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          expect(sessionId).toMatch(uuidRegex);
 
-        // Should NOT match timestamp-random format (e.g., "1234567890123-abc123def")
-        const timestampRandomRegex = /^\d{13}-[a-z0-9]{9}$/;
-        expect(sessionId).not.toMatch(timestampRandomRegex);
+          // Should NOT match timestamp-random format (e.g., "1234567890123-abc123def")
+          const timestampRandomRegex = /^\d{13}-[a-z0-9]{9}$/;
+          expect(sessionId).not.toMatch(timestampRandomRegex);
+        }
       }
     });
 
     // Check completed phases in state snapshots
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
     snapshots.forEach((snapshot) => {
-      const s = snapshot as StateSnapshotEvent;
-      s.data?.completedPhases?.forEach((phase) => {
-        // UUID format check
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        expect(phase.sessionId).toMatch(uuidRegex);
-      });
+      if (isStateSnapshotEvent(snapshot)) {
+        snapshot.data?.completedPhases?.forEach((phase) => {
+          // UUID format check
+          const uuidRegex =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          expect(phase.sessionId).toMatch(uuidRegex);
+        });
+      }
     });
   });
 
@@ -96,10 +99,9 @@ export function runDualIdSystemTests(testState: TestState) {
 
     // Collect from phase.started events
     testState.events.forEach((event) => {
-      if (event.type === "phase.started") {
-        const e = event as PhaseStartedEvent;
-        const phaseId = e.data?.phaseId;
-        const sessionId = e.data?.sessionId;
+      if (isPhaseStartedEvent(event)) {
+        const phaseId = event.data?.phaseId;
+        const sessionId = event.data?.sessionId;
 
         if (phaseId && sessionId) {
           if (!phaseSessionIds.has(phaseId)) {
@@ -112,8 +114,8 @@ export function runDualIdSystemTests(testState: TestState) {
 
     // Collect from info events (Claude started messages)
     testState.events.forEach((event) => {
-      if (event.type === "info") {
-        const msg = (event as InfoEvent).data?.message || "";
+      if (isInfoEvent(event)) {
+        const msg = event.data?.message || "";
         const match = msg.match(/Claude started with session ID: ([0-9a-f-]+)/i);
         if (match) {
           const sessionId = match[1];
@@ -126,8 +128,8 @@ export function runDualIdSystemTests(testState: TestState) {
             i++
           ) {
             const nearbyEvent = testState.events[i];
-            if (nearbyEvent.type === "phase.started") {
-              const phaseId = (nearbyEvent as PhaseStartedEvent).data?.phaseId;
+            if (isPhaseStartedEvent(nearbyEvent)) {
+              const phaseId = nearbyEvent.data?.phaseId;
               if (phaseId) {
                 if (!phaseSessionIds.has(phaseId)) {
                   phaseSessionIds.set(phaseId, new Set());
@@ -166,7 +168,7 @@ export function runDualIdSystemTests(testState: TestState) {
       testState.phase1Started,
       testState.phase2Started,
       testState.phase3Started,
-    ].filter(Boolean) as PhaseStartedEvent[];
+    ].filter((e): e is PhaseStartedEvent => e !== null);
 
     phaseStartedEvents.forEach((event) => {
       // Required fields
@@ -186,9 +188,7 @@ export function runDualIdSystemTests(testState: TestState) {
 
   test("completed phases only include phases that received Claude session IDs", () => {
     // In the happy path, all phases should complete with session IDs
-    const finalSnapshot = [...testState.events]
-      .reverse()
-      .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
+    const finalSnapshot = [...testState.events].reverse().find((e) => isStateSnapshotEvent(e));
 
     if (finalSnapshot?.data?.completedPhases) {
       // All completed phases should have valid UUID session IDs
@@ -206,17 +206,16 @@ export function runDualIdSystemTests(testState: TestState) {
     // For each phase, find the pair of events
     ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
       const phaseStarted = testState.events.find(
-        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === phaseId,
-      ) as PhaseStartedEvent | undefined;
+        (e) => isPhaseStartedEvent(e) && e.data?.phaseId === phaseId,
+      );
 
-      if (phaseStarted) {
+      if (phaseStarted && isPhaseStartedEvent(phaseStarted)) {
         const sessionId = phaseStarted.data.sessionId;
 
         // Find the corresponding info event
         const infoEvent = testState.events.find(
           (e) =>
-            e.type === "info" &&
-            (e as InfoEvent).data?.message === `Claude started with session ID: ${sessionId}`,
+            isInfoEvent(e) && e.data?.message === `Claude started with session ID: ${sessionId}`,
         );
 
         expect(infoEvent).toBeDefined();
@@ -237,22 +236,20 @@ export function runDualIdSystemTests(testState: TestState) {
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
 
     snapshots.forEach((snapshot) => {
-      const s = snapshot as StateSnapshotEvent;
-
-      if (s.data?.currentPhase) {
+      if (isStateSnapshotEvent(snapshot) && snapshot.data?.currentPhase) {
         // Should always have phaseExecutionId (internal tracking)
-        expect(s.data.currentPhase).toHaveProperty("phaseExecutionId");
+        expect(snapshot.data.currentPhase).toHaveProperty("phaseExecutionId");
 
         // phaseExecutionId should be timestamp-random format
         const timestampRandomRegex = /^\d{13}-[a-z0-9]{9}$/;
-        expect(s.data.currentPhase.phaseExecutionId).toMatch(timestampRandomRegex);
+        expect(snapshot.data.currentPhase.phaseExecutionId).toMatch(timestampRandomRegex);
 
         // sessionId might be null during execution
-        if (s.data.currentPhase.sessionId !== null) {
+        if (snapshot.data.currentPhase.sessionId !== null) {
           // But if present, should be UUID
           const uuidRegex =
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-          expect(s.data.currentPhase.sessionId).toMatch(uuidRegex);
+          expect(snapshot.data.currentPhase.sessionId).toMatch(uuidRegex);
         }
       }
     });

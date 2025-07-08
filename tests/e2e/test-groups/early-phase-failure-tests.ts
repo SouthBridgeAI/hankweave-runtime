@@ -1,11 +1,10 @@
 import { expect, test } from "bun:test";
-import type {
-  ErrorEvent,
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
-  ServerEvent,
-  StateSnapshotEvent,
-} from "../../../server/types.js";
+import {
+  isPhaseCompletedEvent,
+  isPhaseStartedEvent,
+  isStateSnapshotEvent,
+} from "../../../server/type-guards.js";
+import type { ErrorEvent, ServerEvent } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
@@ -24,17 +23,13 @@ export function runEarlyPhaseFailureTests(testState: TestState) {
     // For now, we document the expected behavior
 
     // If we detect a phase that failed very quickly (< 1 second)
-    const phaseCompletedEvents = testState.events.filter(
-      (e) => e.type === "phase.completed",
-    ) as PhaseCompletedEvent[];
+    const phaseCompletedEvents = testState.events.filter((e) => isPhaseCompletedEvent(e));
 
     phaseCompletedEvents.forEach((completed) => {
       if (!completed.data.success && completed.data.duration < 1000) {
         // For very quick failures, check if there was a phase.started event
         const phaseStarted = testState.events.find(
-          (e) =>
-            e.type === "phase.started" &&
-            (e as PhaseStartedEvent).data?.phaseId === completed.data.phaseId,
+          (e) => isPhaseStartedEvent(e) && e.data?.phaseId === completed.data.phaseId,
         );
 
         // If the phase failed very quickly, it might not have a phase.started event
@@ -66,42 +61,38 @@ export function runEarlyPhaseFailureTests(testState: TestState) {
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
 
     snapshots.forEach((snapshot) => {
-      const s = snapshot as StateSnapshotEvent;
+      if (isStateSnapshotEvent(snapshot)) {
+        // Current phase might have null sessionId if Claude hasn't initialized yet
+        if (snapshot.data?.currentPhase) {
+          // sessionId can be null during execution
+          expect(snapshot.data.currentPhase).toHaveProperty("sessionId");
+          // But phaseExecutionId should always be present
+          expect(snapshot.data.currentPhase).toHaveProperty("phaseExecutionId");
 
-      // Current phase might have null sessionId if Claude hasn't initialized yet
-      if (s.data?.currentPhase) {
-        // sessionId can be null during execution
-        expect(s.data.currentPhase).toHaveProperty("sessionId");
-        // But phaseExecutionId should always be present
-        expect(s.data.currentPhase).toHaveProperty("phaseExecutionId");
-
-        if (s.data.currentPhase.sessionId === null) {
-          // If sessionId is null, phase should still have other required fields
-          expect(s.data.currentPhase.phase).toBeDefined();
-          expect(s.data.currentPhase.startTime).toBeDefined();
-          expect(s.data.currentPhase.isRunning).toBeDefined();
+          if (snapshot.data.currentPhase.sessionId === null) {
+            // If sessionId is null, phase should still have other required fields
+            expect(snapshot.data.currentPhase.phase).toBeDefined();
+            expect(snapshot.data.currentPhase.startTime).toBeDefined();
+            expect(snapshot.data.currentPhase.isRunning).toBeDefined();
+          }
         }
-      }
 
-      // Completed phases should always have session IDs (they wouldn't be in completed list otherwise)
-      s.data?.completedPhases?.forEach((phase) => {
-        expect(phase.sessionId).toBeDefined();
-        expect(phase.sessionId).not.toBeNull();
-      });
+        // Completed phases should always have session IDs (they wouldn't be in completed list otherwise)
+        snapshot.data?.completedPhases?.forEach((phase) => {
+          expect(phase.sessionId).toBeDefined();
+          expect(phase.sessionId).not.toBeNull();
+        });
+      }
     });
   });
 
   test("phase completion can occur without phase.started if Claude fails early", () => {
     // Look for any phase.completed events without corresponding phase.started
-    const completedPhases = testState.events.filter(
-      (e) => e.type === "phase.completed",
-    ) as PhaseCompletedEvent[];
+    const completedPhases = testState.events.filter((e) => isPhaseCompletedEvent(e));
 
     completedPhases.forEach((completed) => {
       const phaseStarted = testState.events.find(
-        (e) =>
-          e.type === "phase.started" &&
-          (e as PhaseStartedEvent).data?.phaseId === completed.data.phaseId,
+        (e) => isPhaseStartedEvent(e) && e.data?.phaseId === completed.data.phaseId,
       );
 
       // If phase failed, it's acceptable to not have phase.started

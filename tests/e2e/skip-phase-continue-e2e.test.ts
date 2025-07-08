@@ -8,17 +8,20 @@ import { afterAll, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  isAssistantActionEvent,
+  isErrorEvent,
+  isInfoEvent,
+  isPhaseStartedEvent,
+  isStateSnapshotEvent,
+  isTokenUsageEvent,
+} from "../../server/type-guards.js";
 // Import test utilities and types from happy path test
 import type {
-  AssistantActionEvent,
-  ErrorEvent,
-  InfoEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
   SkipPhaseCommand,
-  StateSnapshotEvent,
-  TokenUsageEvent,
 } from "../../server/types.js";
 import { generateId } from "../../server/utils.js";
 import {
@@ -217,18 +220,18 @@ describe("Skip Phase and Continue E2E Test", () => {
       if (phase1Completed && !phase1Completed.data.success) {
         // Check if phase.started was emitted
         const phase1Started = testState.events.find(
-          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === "phase-1",
+          (e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-1",
         );
 
         // If Claude was killed very quickly, might not have phase.started
         if (!phase1Started) {
           // This is OK - phase was skipped before Claude init
           expect(phase1Started).toBeUndefined();
-        } else {
+        } else if (isPhaseStartedEvent(phase1Started)) {
           // But if we got phase.started, it should have valid UUID
           const uuidRegex =
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-          expect((phase1Started as PhaseStartedEvent).data.sessionId).toMatch(uuidRegex);
+          expect(phase1Started.data.sessionId).toMatch(uuidRegex);
         }
       }
 
@@ -237,15 +240,15 @@ describe("Skip Phase and Continue E2E Test", () => {
 
       if (phase3Completed && !phase3Completed.data.success) {
         const phase3Started = testState.events.find(
-          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === "phase-3",
+          (e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-3",
         );
 
         if (!phase3Started) {
           expect(phase3Started).toBeUndefined();
-        } else {
+        } else if (isPhaseStartedEvent(phase3Started)) {
           const uuidRegex =
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-          expect((phase3Started as PhaseStartedEvent).data.sessionId).toMatch(uuidRegex);
+          expect(phase3Started.data.sessionId).toMatch(uuidRegex);
         }
       }
     });
@@ -260,7 +263,7 @@ describe("Skip Phase and Continue E2E Test", () => {
     test("Server shutdown after all phases", () => {
       const infoEvents = testState.client?.getEventsByType("info") || [];
       const shutdownInfo = infoEvents.find(
-        (e) => (e as InfoEvent).data?.message?.includes("All phases completed") || false,
+        (e) => isInfoEvent(e) && (e.data?.message?.includes("All phases completed") || false),
       );
       expect(shutdownInfo).toBeDefined();
     });
@@ -268,7 +271,7 @@ describe("Skip Phase and Continue E2E Test", () => {
     test("Completed phases list shows only successful phase", () => {
       const finalStateSnapshot = [...testState.events]
         .reverse()
-        .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
+        .find((e) => isStateSnapshotEvent(e));
 
       // All 3 phases should be in completed phases (including skipped ones)
       expect(finalStateSnapshot?.data?.completedPhases?.length).toBe(3);
@@ -285,7 +288,7 @@ describe("Skip Phase and Continue E2E Test", () => {
       const phase1Actions =
         testState.client
           ?.getEventsByType("assistant.action")
-          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-1") || [];
+          .filter((e) => isAssistantActionEvent(e) && e.data?.phaseId === "phase-1") || [];
 
       // Might not have actions if skipped very quickly
       expect(phase1Actions.length).toBeGreaterThanOrEqual(0);
@@ -295,7 +298,7 @@ describe("Skip Phase and Continue E2E Test", () => {
       const phase2Actions =
         testState.client
           ?.getEventsByType("assistant.action")
-          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-2") || [];
+          .filter((e) => isAssistantActionEvent(e) && e.data?.phaseId === "phase-2") || [];
 
       // Should have at least some actions for a complete phase
       expect(phase2Actions.length).toBeGreaterThan(0);
@@ -305,7 +308,7 @@ describe("Skip Phase and Continue E2E Test", () => {
       const phase3Actions =
         testState.client
           ?.getEventsByType("assistant.action")
-          .filter((e) => (e as AssistantActionEvent).data?.phaseId === "phase-3") || [];
+          .filter((e) => isAssistantActionEvent(e) && e.data?.phaseId === "phase-3") || [];
 
       expect(phase3Actions.length).toBeGreaterThanOrEqual(0);
     });
@@ -316,12 +319,10 @@ describe("Skip Phase and Continue E2E Test", () => {
       const tokenEvents = testState.client?.getEventsByType("token.usage") || [];
 
       const phase1Tokens = tokenEvents.filter((e) => {
-        const tokenEvent = e as TokenUsageEvent;
-        return tokenEvent.data?.phaseId === "phase-1";
+        return isTokenUsageEvent(e) && e.data?.phaseId === "phase-1";
       });
       const phase3Tokens = tokenEvents.filter((e) => {
-        const tokenEvent = e as TokenUsageEvent;
-        return tokenEvent.data?.phaseId === "phase-3";
+        return isTokenUsageEvent(e) && e.data?.phaseId === "phase-3";
       });
 
       // Skipped phases might not have token usage events if killed quickly
@@ -359,7 +360,7 @@ describe("Skip Phase and Continue E2E Test", () => {
   describe("Error Handling", () => {
     test("No fatal errors occurred", () => {
       const errorEvents = testState.client?.getEventsByType("error") || [];
-      const fatalErrors = errorEvents.filter((e) => (e as ErrorEvent).data?.fatal);
+      const fatalErrors = errorEvents.filter((e) => isErrorEvent(e) && e.data?.fatal);
       expect(fatalErrors.length).toBe(0);
     });
   });

@@ -2,6 +2,7 @@
 import { afterAll, describe } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
+import { isErrorEvent, isPhaseStartedEvent } from "../../server/type-guards.js";
 import {
   cleanupTest,
   colors,
@@ -150,10 +151,11 @@ async function setupAndRunPhases(): Promise<void> {
   console.log(`${colors.blue}Waiting for all phases to complete...${colors.reset}`);
 
   // Phase 1
-  testState.phase1Started = (await testState.client.waitForEvent(
-    "phase.started",
-    10000,
-  )) as PhaseStartedEvent;
+  const phase1StartEvent = await testState.client.waitForEvent("phase.started", 10000);
+  if (!isPhaseStartedEvent(phase1StartEvent)) {
+    throw new Error("Expected phase.started event for phase 1");
+  }
+  testState.phase1Started = phase1StartEvent;
   console.log(`${colors.green}✓ Phase 1 started${colors.reset}`);
 
   testState.phase1Completed = await testState.client.waitForPhaseCompletion("phase-1", 60000);
@@ -163,16 +165,15 @@ async function setupAndRunPhases(): Promise<void> {
   // Wait a moment for phase 2 to auto-start
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  testState.phase2Started =
-    (testState.client
-      .getEvents()
-      .find(
-        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-2",
-      ) as PhaseStartedEvent | undefined) || null;
+  const phase2StartEvent = testState.client
+    .getEvents()
+    .find((e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-2");
 
-  if (!testState.phase2Started) {
+  if (!phase2StartEvent || !isPhaseStartedEvent(phase2StartEvent)) {
     console.log(`${colors.red}✗ Phase 2 did not start${colors.reset}`);
+    testState.phase2Started = null;
   } else {
+    testState.phase2Started = phase2StartEvent;
     console.log(`${colors.green}✓ Phase 2 started${colors.reset}`);
   }
 
@@ -186,14 +187,12 @@ async function setupAndRunPhases(): Promise<void> {
   const phase3Timeout = 10000; // 10 seconds
 
   while (Date.now() - phase3StartTime < phase3Timeout) {
-    testState.phase3Started =
-      (testState.client
-        .getEvents()
-        .find(
-          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-3",
-        ) as PhaseStartedEvent | undefined) || null;
+    const phase3StartEvent = testState.client
+      .getEvents()
+      .find((e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-3");
 
-    if (testState.phase3Started) {
+    if (phase3StartEvent && isPhaseStartedEvent(phase3StartEvent)) {
+      testState.phase3Started = phase3StartEvent;
       console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
       break;
     }
@@ -216,7 +215,7 @@ async function setupAndRunPhases(): Promise<void> {
   testState.events = testState.client.getEvents();
 
   // Extract error events for specific error testing
-  testState.errorEvents = testState.events.filter((e) => e.type === "error") as ErrorEvent[];
+  testState.errorEvents = testState.events.filter((e) => isErrorEvent(e));
 }
 
 // ============================================================================

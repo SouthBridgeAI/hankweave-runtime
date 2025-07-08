@@ -8,9 +8,14 @@ import { afterAll, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  isErrorEvent,
+  isInfoEvent,
+  isPhaseCompletedEvent,
+  isPhaseStartedEvent,
+  isStateSnapshotEvent,
+} from "../../server/type-guards.js";
 import type {
-  ErrorEvent,
-  InfoEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
@@ -168,11 +173,11 @@ async function runSkipQuitTest(): Promise<void> {
   // Wait for info event about all phases completed
   try {
     const infoEvent = await testState.client.waitForEvent("info", 5000);
-    console.log(
-      `${colors.green}✓ Received info event: ${
-        (infoEvent as InfoEvent).data?.message
-      }${colors.reset}`,
-    );
+    if (isInfoEvent(infoEvent)) {
+      console.log(
+        `${colors.green}✓ Received info event: ${infoEvent.data?.message}${colors.reset}`,
+      );
+    }
   } catch (_e) {
     console.log(
       `${colors.yellow}No info event received (server may have shut down quickly)${colors.reset}`,
@@ -272,7 +277,7 @@ describe("Server Shutdown Command E2E Test", () => {
 
     test("Phase 3 events exist (but was interrupted)", () => {
       const phase3Events = testState.events.filter(
-        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === "phase-3",
+        (e) => isPhaseStartedEvent(e) && e.data?.phaseId === "phase-3",
       );
       expect(phase3Events.length).toBe(1);
     });
@@ -303,13 +308,12 @@ describe("Server Shutdown Command E2E Test", () => {
       // This is implicitly tested by server exit, but we can verify
       // by looking for phase 2 completion event
       const phase3Completion = testState.events.find(
-        (e) =>
-          e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === "phase-3",
+        (e) => isPhaseCompletedEvent(e) && e.data?.phaseId === "phase-3",
       );
 
-      if (phase3Completion) {
+      if (phase3Completion && isPhaseCompletedEvent(phase3Completion)) {
         // If we got a completion event, it should show failure
-        expect((phase3Completion as PhaseCompletedEvent).data.success).toBe(false);
+        expect(phase3Completion.data.success).toBe(false);
       }
       // Otherwise, Claude was killed before it could send completion
     });
@@ -375,7 +379,7 @@ describe("Server Shutdown Command E2E Test", () => {
     test("Total cost reflects phases 1 and 2", () => {
       const finalStateSnapshot = [...testState.events]
         .reverse()
-        .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
+        .find((e) => isStateSnapshotEvent(e));
 
       // Cost should be greater than 0 from phases 1 and 2
       expect(finalStateSnapshot?.data?.totalCost || 0).toBeGreaterThan(0);
@@ -410,7 +414,7 @@ describe("Server Shutdown Command E2E Test", () => {
     test("Server should not send 'all phases completed' info", () => {
       const infoEvents = testState.client?.getEventsByType("info") || [];
       const completionInfo = infoEvents.find(
-        (e) => (e as InfoEvent).data?.message?.includes("All phases completed") || false,
+        (e) => isInfoEvent(e) && (e.data?.message?.includes("All phases completed") || false),
       );
 
       // Server should NOT announce all phases completed since we shut down mid-phase 2
@@ -421,7 +425,7 @@ describe("Server Shutdown Command E2E Test", () => {
   describe("Error Handling", () => {
     test("No fatal errors occurred", () => {
       const errorEvents = testState.client?.getEventsByType("error") || [];
-      const fatalErrors = errorEvents.filter((e) => (e as ErrorEvent).data?.fatal);
+      const fatalErrors = errorEvents.filter((e) => isErrorEvent(e) && e.data?.fatal);
       expect(fatalErrors.length).toBe(0);
     });
   });
