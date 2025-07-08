@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Langton Server, including happy path
 
 ## Overview
 
-The test suite validates the complete server functionality through realistic multi-phase workflows. All tests use the actual Claude CLI to ensure real-world compatibility and include validation of the checkpoint system, workspace setup, and file organization.
+The test suite validates the complete server functionality through realistic multi-phase workflows. All tests use the actual Claude CLI to ensure real-world compatibility and include validation of the checkpoint system, workspace setup, file organization, and the refactored architecture with ClaudeProcessManager integration.
 
 ## Quick Start
 
@@ -53,8 +53,8 @@ Validates:
 
 - All expected files are created
 - WebSocket events are properly sequenced
-- Cost tracking matches log files
-- Token usage is accurate
+- Cost tracking matches log files with result message integration
+- Token usage is accurate from both streaming and result messages
 - Session continuity works
 - File watching events fire correctly
 - Workspace setup operations work correctly:
@@ -66,6 +66,8 @@ Validates:
   - Phase completion commits
   - File tracking matches `checkpointAndWatch` patterns
   - Commit messages follow expected format
+- Tool usage validation including TodoWrite tool support
+- Type safety maintained across server and test boundaries
 
 ### 2. Skip and Continue Test (`skip-phase-continue-e2e.test.ts`)
 
@@ -81,6 +83,9 @@ Tests phase skipping with continuation:
   - Skipped phases create `skipped` commits (even if empty)
   - Only successful phases have tracked files
   - No error branches created for normal skips
+- Validates result message handling for skipped phases:
+  - No result message wait for skipped phases
+  - Proper timeout handling for completed phases
 
 ### 3. Skip and Quit Test (`skip-phase-quit-e2e.test.ts`)
 
@@ -89,7 +94,11 @@ Tests skipping the final phase:
 - Runs phase 1 to completion (using traditional `preStart`)
 - Starts phase 2 (last phase), skips it
 - Verifies server shuts down gracefully  
-- Checks that resources are cleaned up properly
+- Checks that resources are cleaned up properly including:
+  - Lock file removal
+  - Process termination
+  - Log stream closure
+  - Result message promise cleanup
 - Validates that `preStart` creates directories as expected
 - Tests normal completion checkpoints:
   - No exit branch created (normal completion)
@@ -104,9 +113,10 @@ Tests skipping the final phase:
 Each test creates a minimal WebSocket client that:
 
 - Connects to the server on a unique port
-- Collects all server events
+- Collects all server events with type-safe event handling
 - Provides helper methods for waiting on specific events
 - Sends commands to control phase execution
+- Validates events using type guards from the server
 
 ### Test Utilities
 
@@ -222,6 +232,8 @@ bun run test:cleanup  # Clean up stuck tests
 4. **Cleanup**: Always runs between tests automatically
 5. **Timeouts**: Tests have 2-5 minute timeouts
 6. **Environment Variables**: Set `LANGTON_TEST_PORT` to use custom port
+7. **Type Checking**: Tests are included in TypeScript compilation for full type safety
+8. **Process Management**: Tests validate proper cleanup of ClaudeProcessManager resources
 
 ## Debugging Failed Tests
 

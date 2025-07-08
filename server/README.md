@@ -36,8 +36,12 @@ Langton Server acts as a bridge between clients and the Claude CLI, managing mul
 server/
 ├── index.ts              # CLI entry point and argument parsing
 ├── langton-server.ts     # Core server implementation
+├── claude-process-manager.ts # Claude subprocess lifecycle management
 ├── config.ts            # Configuration management and validation
 ├── types.ts             # TypeScript type definitions
+├── type-guards.ts       # Runtime type validation guards
+├── tool-types.ts        # Claude tool input type definitions
+├── error-types.ts       # Error severity levels and custom errors
 ├── utils.ts             # Utility functions (logging, ID generation)
 ├── claude-log-parser.ts # Real-time Claude output parsing
 ├── checkpoint-git.ts    # Git-based checkpoint system
@@ -58,10 +62,12 @@ Handles command-line arguments and server initialization:
 Main orchestration engine that:
 - Manages WebSocket connections (single client only)
 - Executes phases sequentially or on-demand
-- Spawns and monitors Claude processes
+- Delegates process management to ClaudeProcessManager
 - Handles state transitions and persistence
 - Emits real-time events to clients
 - Implements phase skipping and recovery
+- Manages result message promises with timeout handling
+- Coordinates error handling with severity levels
 
 ### 3. **config.ts** - Configuration Management
 - Validates phase configurations using Zod schemas
@@ -91,6 +97,7 @@ Real-time parsing of Claude's JSONL output:
 - Validates and parses Claude messages
 - Extracts token usage information
 - Handles both streaming and batch parsing
+- Processes result messages for accurate cost tracking
 
 ### 7. **checkpoint-git.ts** - Checkpoint System
 Git-based checkpoint and snapshot system:
@@ -100,7 +107,37 @@ Git-based checkpoint and snapshot system:
 - Supports branching for error and exit scenarios
 - Uses git exclude patterns for selective file tracking
 
-### 8. **basic-tui.ts** - Terminal UI
+### 8. **claude-process-manager.ts** - Process Manager
+Dedicated Claude subprocess lifecycle management:
+- Spawns Claude processes with proper arguments
+- Manages stdin/stdout/stderr streams
+- Handles log stream creation and cleanup
+- Provides process monitoring and termination
+- Emits process events (exit, error, stdout, stderr)
+- Supports custom Anthropic base URLs
+
+### 9. **type-guards.ts** - Type Guards
+Runtime type validation for:
+- Server events (phase.started, assistant.action, etc.)
+- Client commands (phase.start, phase.skip, etc.)
+- Ensures type safety at WebSocket boundaries
+- Provides compile-time type narrowing
+
+### 10. **tool-types.ts** - Tool Types
+Strongly typed tool input definitions:
+- Defines input schemas for all Claude tools
+- Includes standard tools (Write, Read, Edit, etc.)
+- Supports special tools (TodoWrite, exit_plan_mode)
+- Provides ToolName type and validation
+
+### 11. **error-types.ts** - Error Types
+Hierarchical error handling system:
+- ErrorSeverity enum (FATAL, PHASE, OPERATION, WARNING)
+- Custom error classes for different severity levels
+- Contextual error information
+- Guides server behavior based on error severity
+
+### 12. **basic-tui.ts** - Terminal UI
 Simple terminal interface for testing:
 - Connects as a WebSocket client
 - Displays events with color coding
@@ -281,7 +318,15 @@ Commands follow this structure:
 - **Server Logs**: Operations logged to `.langton/logs/server.log`
 - **Lock File**: `.langton/server.lock` prevents multiple server instances
 - **Checkpoints**: Git-based snapshots in `.langton/checkpoints/` for tracked files
+- **Result Messages**: Phase completion costs tracked via result message promises
 - Server can recover from crashes by reading logs and checkpoint history
+
+### Result Message Handling
+The server implements a promise-based system for tracking Claude's result messages:
+- Creates promises when phases complete to wait for final cost data
+- 30-second timeout for result messages (continues if timeout occurs)
+- Updates phase costs and token usage from result messages
+- Cleans up promises on server shutdown
 
 ### Phase States
 1. **Idle**: No phase running
@@ -299,10 +344,26 @@ Commands follow this structure:
 
 ## Error Handling
 
-- **Fatal errors**: Trigger server shutdown
-- **Phase failures**: Stop execution, maintain state
-- **Connection errors**: Client disconnection triggers shutdown
-- **Process crashes**: State recoverable from logs
+The server uses a severity-based error handling system:
+
+### Error Severities
+- **FATAL**: Triggers immediate server shutdown
+- **PHASE**: Current phase fails, server remains operational
+- **OPERATION**: Single operation fails, phase continues
+- **WARNING**: Logged but no action taken
+
+### Error Flow
+- All errors logged with appropriate severity level
+- Fatal errors emit error event and trigger shutdown
+- Phase errors stop current phase execution
+- Operation errors allow continuation
+- Custom error classes provide context
+
+### Common Error Scenarios
+- **Connection errors**: Client disconnection (FATAL)
+- **Process crashes**: Claude process failure (PHASE)
+- **File operations**: Workspace setup failures (OPERATION)
+- **State recovery**: Log parsing issues (WARNING)
 
 ## Usage Examples
 
@@ -344,6 +405,9 @@ See the tests folder README for comprehensive testing information.
 - Change protocol: Update both `types.ts` and client code
 - Add configuration: Update `config.ts` schema and defaults
 - Modify logging: Update `claude-log-parser.ts` parsing logic
+- Add tool support: Update `tool-types.ts` with new tool schemas
+- Add type guards: Update `type-guards.ts` for new event/command types
+- Change error handling: Update `error-types.ts` and error flow
 
 ## Philosophy
 

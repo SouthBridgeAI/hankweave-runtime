@@ -38,8 +38,12 @@ langton-runner/
 ├── server/              # WebSocket server implementation
 │   ├── index.ts         # CLI entry point
 │   ├── langton-server.ts # Core server logic
+│   ├── claude-process-manager.ts # Claude subprocess lifecycle management
 │   ├── config.ts        # Configuration management
 │   ├── types.ts         # TypeScript definitions
+│   ├── type-guards.ts   # Runtime type validation
+│   ├── tool-types.ts    # Claude tool type definitions
+│   ├── error-types.ts   # Error severity and handling
 │   ├── utils.ts         # Utility functions
 │   ├── claude-log-parser.ts # Claude output parsing
 │   ├── checkpoint-git.ts # Git-based checkpoint system
@@ -53,6 +57,8 @@ langton-runner/
 ├── types/              # Shared type definitions
 │   └── claude-session-schema.ts
 ├── package.json        # Project configuration
+├── TODOs.md            # Human-only development notes
+├── REFACTOR_PLAN.md    # Detailed refactoring implementation plan
 ├── tsconfig.json       # TypeScript configuration
 ├── biome.json         # Code formatting config
 └── README.md          # This file
@@ -190,10 +196,13 @@ bun run test:cleanup # Clean up stuck tests
 ### Server Components
 
 1. **WebSocket Server**: Single-client connection for security
-2. **Phase Executor**: Manages Claude process lifecycle
-3. **Log Parser**: Real-time parsing of Claude's output
-4. **File Watcher**: Monitors project files during execution
-5. **State Manager**: Persists state through Claude logs
+2. **Phase Executor**: Manages Claude process lifecycle via ClaudeProcessManager
+3. **Process Manager**: Dedicated subprocess lifecycle management with logging
+4. **Log Parser**: Real-time parsing of Claude's output with result message handling
+5. **File Watcher**: Monitors project files during execution
+6. **State Manager**: Persists state through Claude logs
+7. **Error Handler**: Severity-based error handling (Fatal, Phase, Operation, Warning)
+8. **Type Guards**: Runtime validation for WebSocket messages and tool inputs
 
 ### Event Flow
 
@@ -202,9 +211,11 @@ Client ←→ WebSocket ←→ Server
                          ↓
                     Phase Executor
                          ↓
-                    Claude CLI → Log Parser
+                 ClaudeProcessManager
                          ↓
-                    File Watcher
+                    Claude CLI → Log Parser
+                         ↓              ↓
+                    File Watcher    Result Messages
 ```
 
 ### State Persistence
@@ -236,9 +247,12 @@ Tests validate:
 - Complete phase workflows
 - Event streaming accuracy
 - File watching functionality
-- Cost tracking precision
-- Error handling
-- State recovery
+- Cost tracking precision with result message integration
+- Error handling with severity levels
+- State recovery from logs and checkpoints
+- Type safety across server and test code
+- Process lifecycle management
+- Workspace setup operations
 
 ## Security Considerations
 
@@ -257,9 +271,10 @@ Tests validate:
 ## Requirements
 
 - **Bun.js**: Runtime and package manager
-- **Claude CLI**: Installed and configured
-- **TypeScript**: For development
-- **Unix-like OS**: For shell commands
+- **Claude CLI**: Installed and configured with API access
+- **TypeScript**: For development (strict type checking enabled)
+- **Unix-like OS**: For shell commands and process management
+- **Git**: For checkpoint system functionality
 
 ## Philosophy
 
