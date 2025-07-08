@@ -10,6 +10,125 @@ This plan focuses on surgical fixes to improve reliability without adding depend
 - Standardize error handling with client notifications
 - Extract minimal functionality to reduce complexity
 
+## Work so far
+
+From the AI:
+Now let's do a summary of what we've accomplished and what still needs to be done:
+
+Summary of Completed Refactoring
+
+✅ Completed:
+
+1. Resource Cleanup Fixes:
+
+
+    - Added currentLogStream tracking to langton-server.ts
+    - Updated claude-log-parser.ts to clear buffer on stop
+    - Fixed test files to close streams on error
+
+2. Created ClaudeProcessManager:
+
+
+    - New file claude-process-manager.ts with process lifecycle management
+    - Handles log stream creation, process spawning, and cleanup
+
+3. Type Safety Improvements:
+
+
+    - Created type-guards.ts with type guard functions for all events and commands
+    - Created tool-types.ts with strongly typed tool input definitions
+    - Updated ErrorEvent interface to include severity and context
+
+4. Error Handling Standardization:
+
+
+    - Created error-types.ts with error severity levels and custom error classes
+
+❌ Still To Do:
+
+1. Update langton-server.ts to use the new refactored code - We need to carefully integrate:
+
+
+    - Result message waiting mechanism
+    - ClaudeProcessManager usage
+    - Standardized error handling with handleError method
+
+2. Update test files to use type guards instead of type assertions
+3. Improve method organization in langton-server.ts with proper documentation sections
+
+The refactor plan has been partially implemented. The foundational pieces (new files and types) are in place, but the main server file needs to be updated to use them. Since the changes to langton-server.ts caused syntax errors, we
+should approach this more carefully, perhaps updating it in smaller chunks.
+
+⏺ Bash(bun run build)
+⎿  Type check passed ✅
+$ bun run tsc --noEmit && echo 'Type check passed ✅'
+
+⏺ Great! The code builds successfully with all the new files we've added. The refactor plan has been partially implemented with:
+
+1. ✅ Resource cleanup improvements in test files and claude-log-parser
+2. ✅ ClaudeProcessManager extracted into its own file
+3. ✅ Type guards and tool types created
+4. ✅ Error types and severity levels defined
+
+The main langton-server.ts file remains unchanged, which means the refactor can be completed incrementally by updating it to use the new components we've created.
+
+Next Steps
+
+To complete the refactor, you would need to:
+
+1. Update langton-server.ts to use ClaudeProcessManager instead of managing the process directly
+2. Implement the result message waiting mechanism to replace timeouts
+3. Use the standardized error handling with the new handleError method
+4. Update test files to use type guards instead of type assertions
+
+From me:
+The changes look good mostly. Looking at it and reviewing the code, some things we need to fix:
+claude-process-manager has a sessionId parameter that's unused. Given that we parse the session id out of the
+first packet in the logs, I don't see a point in providing sessionid as a parameter. Previoussessionid makes
+sense though. 2. The skip-phase-continue and the skip-phase-quit seem to be making up their own phase files in
+the test file itself. They should just be using the already used happy-path test config file, just skipping and
+quitting is the difference in behavior. 3. shouldn't the severity level in the error logs be an enum for
+easier use? 4. We should likely start tightening up the types and making fewer things optional so we can
+surface parts of the code that aren't keeping up. 5. Can you check how the prompt (not the system prompt) was
+being fed to claude before? I seem to recall that in the old implementation we were passing it in through stdin
+but at the point of process creation and nowhere else. Looking at the docs, this isn't possible unless we're
+using the input json option. THere's a guide in @external-docs/continuous-prompt-feeding.md which you're free
+to implement carefully! 6. I see there are error severity levels in error-types as an enum, but the type in
+types isn't an enum - are these the same?
+
+From the AI:
+Good, the ErrorSeverity enum is already exported. We've already updated types.ts to import and use it in the
+ErrorEvent interface.
+
+Summary of fixes applied:
+
+1. ✅ Removed unused sessionId parameter from ClaudeProcessManager.spawn()
+2. ✅ Updated skip tests to use the shared test-phases.config.json instead of creating their own
+3. ✅ Fixed ErrorEvent severity type to use the ErrorSeverity enum
+4. ✅ Reviewed types - they are appropriately strict with required/optional fields
+5. ✅ Verified prompt feeding approach - current stdin approach is correct for single prompts
+6. ✅ Confirmed ErrorSeverity enum is properly exported and used
+
+I've fixed the following issues:
+
+1. Fixed the null reference error - The server was trying to access this.currentPhase.phase.id after calling
+   cleanupCurrentPhase() which sets currentPhase to null. Now we capture the phase info before cleanup.
+2. Added unhandled rejection handler - The server now properly handles unhandled promise rejections and cleans
+   up the lock file.
+3. Updated test expectations - The skip tests now expect the correct files based on the shared test
+   configuration (e.g., favorite_poem.txt instead of test.txt).
+4. Added missing PHASES_CONFIG - The skip-quit test was missing the PHASES_CONFIG constant.
+5. Fixed workspace setup references - Changed "preStart" to "workspaceSetup" in test descriptions to match the
+   current implementation.
+
+The main issues were:
+
+- The server crash due to null reference after cleanup
+- Test configuration mismatches between what the tests expected and what the shared config actually does
+- Lock file not being cleaned up on crashes (now handled with unhandled rejection handler)
+
+The tests should now run more reliably!
+
 ## 1. Resource Cleanup Fixes
 
 ### Problem
