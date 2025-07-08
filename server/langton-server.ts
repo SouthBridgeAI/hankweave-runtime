@@ -51,6 +51,11 @@ import {
 } from "./utils.js";
 
 /**
+ * This file is organized into logical sections for easier navigation.
+ * Use `grep -A1 "// ====" langton-server.ts | grep "//"` to see all sections.
+ */
+
+/**
  * Client metadata stored with each WebSocket connection.
  * Provides connection tracking and activity monitoring.
  */
@@ -119,6 +124,10 @@ export class LangtonServer extends EventEmitter {
     this.serverStartTime = new Date();
     this.runId = generateId();
   }
+
+  // ============================================================================
+  // Initialization & Server Management
+  // ============================================================================
 
   /**
    * Wait for result message from a specific session.
@@ -204,6 +213,10 @@ export class LangtonServer extends EventEmitter {
     });
   }
 
+  // ============================================================================
+  // WebSocket Connection Management
+  // ============================================================================
+
   private handleConnection(ws: ServerWebSocket<ClientData>): void {
     if (this.client) {
       this.logger.log("Rejecting connection - already have a client");
@@ -261,6 +274,10 @@ export class LangtonServer extends EventEmitter {
     this.shutdown("client disconnect");
   }
 
+  // ============================================================================
+  // Command Processing
+  // ============================================================================
+
   async handleCommand(command: ClientCommand): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
 
@@ -294,6 +311,10 @@ export class LangtonServer extends EventEmitter {
         this.logger.log(`Unknown command type: ${command.type}`, "error");
     }
   }
+
+  // ============================================================================
+  // Event & State Management
+  // ============================================================================
 
   private sendEvent(event: ServerEvent): void {
     if (!this.client) return;
@@ -367,6 +388,10 @@ export class LangtonServer extends EventEmitter {
       } completed phases, total cost: $${this.totalCost.toFixed(4)}`,
     );
   }
+
+  // ============================================================================
+  // Phase Execution & Management
+  // ============================================================================
 
   /**
    * Start execution of a specific phase.
@@ -585,6 +610,10 @@ export class LangtonServer extends EventEmitter {
 
     return null;
   }
+
+  // ============================================================================
+  // Claude Process Management
+  // ============================================================================
 
   /**
    * Spawn Claude CLI process for a phase using ClaudeProcessManager.
@@ -966,6 +995,10 @@ export class LangtonServer extends EventEmitter {
     }
   }
 
+  // ============================================================================
+  // File Operations & Watching
+  // ============================================================================
+
   private async handleFileToolCall<T extends ToolName>(
     toolName: T,
     toolInput: Record<string, unknown> | undefined,
@@ -1074,6 +1107,10 @@ export class LangtonServer extends EventEmitter {
     } as FileTreeUpdatedEvent);
   }
 
+  // ============================================================================
+  // Error Handling
+  // ============================================================================
+
   /**
    * Handle errors with appropriate severity and client notification.
    */
@@ -1113,6 +1150,10 @@ export class LangtonServer extends EventEmitter {
       // OPERATION and WARNING just log and notify
     }
   }
+
+  // ============================================================================
+  // Phase Status & Control
+  // ============================================================================
 
   private async checkIncompletePhases(): Promise<void> {
     let nextPhaseIndex = 0;
@@ -1271,6 +1312,10 @@ export class LangtonServer extends EventEmitter {
       await this.startPhase(lastPhase.phaseId);
     }
   }
+
+  // ============================================================================
+  // Utility & Helper Methods
+  // ============================================================================
 
   private cleanupCurrentPhase(): void {
     if (this.logParser) {
@@ -1446,6 +1491,10 @@ export class LangtonServer extends EventEmitter {
       this.checkpointingEnabled = false;
     }
   }
+
+  // ============================================================================
+  // Shutdown & Cleanup
+  // ============================================================================
 
   async shutdown(reason: string): Promise<void> {
     if (this.isShuttingDown) {

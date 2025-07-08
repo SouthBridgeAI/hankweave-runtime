@@ -40,6 +40,7 @@ TODOs:
 18. Mark test-results as successful or not :)
 19. Add some interactive check to e2e tests so claude can't run it
 20. Add a message about the cost tracking that's human so claude won't keep changing it back
+21. Rename the actual runner to tadpole?
 
 Cleanup TODOs:
 
