@@ -4,6 +4,17 @@ import { z } from "zod";
 import type { PhaseConfig, ServerConfig } from "./types.js";
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+export const TIMEOUTS = {
+  RESULT_MESSAGE_MS: 30000, // 30 seconds to wait for result message
+  PROCESS_KILL_GRACE_MS: 5000, // 5 seconds grace period before SIGKILL
+  LOG_PARSER_DELAY_MS: 100, // 100ms delay for log parsing
+  PHASE_CLEANUP_DELAY_MS: 100, // 100ms delay for phase cleanup
+} as const;
+
+// ============================================================================
 // Configuration Schema
 // ============================================================================
 

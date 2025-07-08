@@ -1,7 +1,6 @@
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
 import type { ErrorSeverity } from "./error-types.js";
-import type { ToolName } from "./tool-types.js";
 
 // ============================================================================
 // Server Configuration
@@ -367,7 +366,7 @@ export interface AssistantActionEvent extends ServerEvent {
     /** Content of the action (text for messages, empty for tool use) */
     content: string;
     /** Name of tool being used (only for tool_use actions) */
-    toolName?: ToolName;
+    toolName?: string; // Allow any tool name, not just known ones
     /** Tool parameters (only for tool_use actions) */
     toolInput?: Record<string, unknown>;
   };

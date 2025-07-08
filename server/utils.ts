@@ -217,3 +217,25 @@ export function escapeShellArg(arg: string): string {
   // Replace all single quotes with '\''
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
+
+// ============================================================================
+// Error Utilities
+// ============================================================================
+
+/**
+ * Type guard to check if a value is an Error instance.
+ */
+export function isError(error: unknown): error is Error {
+  return error instanceof Error;
+}
+
+/**
+ * Convert any value to an Error instance.
+ * If already an Error, returns it unchanged.
+ * Otherwise creates a new Error with string representation.
+ */
+export function toError(error: unknown): Error {
+  if (isError(error)) return error;
+  if (typeof error === "string") return new Error(error);
+  return new Error(String(error));
+}

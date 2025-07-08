@@ -1,6 +1,10 @@
 /**
  * Strongly typed tool input definitions for Claude tools.
  * These match the expected input schemas for each tool.
+ *
+ * NOTE: This is not an exhaustive list. Claude may use additional tools
+ * that are not defined here. The server handles unknown tools gracefully
+ * by passing them through in events without type validation.
  */
 
 export interface WriteToolInput {

@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
+import { TIMEOUTS } from "./config.js";
 import type { PhaseConfig } from "./types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
 
@@ -73,8 +74,19 @@ export class ClaudeProcessManager extends EventEmitter {
 
     this.killed = false;
 
-    // Pipe stdout to log file
-    this.process.stdout?.pipe(this.logStream);
+    // Pipe stdout to log file with error handling
+    if (this.process.stdout) {
+      this.process.stdout.pipe(this.logStream);
+
+      // Handle pipe errors
+      this.process.stdout.on("error", (error) => {
+        this.logger.log(`Stdout pipe error: ${error.message}`, "error");
+      });
+
+      this.logStream.on("error", (error) => {
+        this.logger.log(`Log stream error: ${error.message}`, "error");
+      });
+    }
 
     // Set up event handlers
     this.setupProcessHandlers();
@@ -233,7 +245,7 @@ export class ClaudeProcessManager extends EventEmitter {
           clearInterval(checkInterval);
           resolve();
         }
-      }, 100);
+      }, TIMEOUTS.LOG_PARSER_DELAY_MS);
 
       setTimeout(() => {
         clearInterval(checkInterval);
@@ -242,7 +254,7 @@ export class ClaudeProcessManager extends EventEmitter {
           this.process.kill("SIGKILL");
         }
         resolve();
-      }, 5000);
+      }, TIMEOUTS.PROCESS_KILL_GRACE_MS);
     });
   }
 

@@ -20,6 +20,16 @@ import type {
 } from "./types.js";
 
 // ============================================================================
+// Client Command Guards
+// ============================================================================
+
+export function isValidClientCommand(data: unknown): data is ClientCommand {
+  if (!data || typeof data !== "object") return false;
+  const obj = data as Record<string, unknown>;
+  return typeof obj.id === "string" && typeof obj.type === "string";
+}
+
+// ============================================================================
 // Server Event Guards
 // ============================================================================
 

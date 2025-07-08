@@ -15,10 +15,10 @@ import type {
 import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
-import { calculateCost, DEFAULT_CONFIG } from "./config.js";
+import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { ErrorSeverity } from "./error-types.js";
 import type { ToolInputMap, ToolName } from "./tool-types.js";
-import { isStartPhaseCommand } from "./type-guards.js";
+import { isStartPhaseCommand, isValidClientCommand } from "./type-guards.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
@@ -47,6 +47,7 @@ import {
   generateId,
   Logger,
   scanWatchedFiles,
+  toError,
 } from "./utils.js";
 
 /**
@@ -226,14 +227,16 @@ export class LangtonServer extends EventEmitter {
 
   private handleMessage(_ws: ServerWebSocket<unknown>, message: string | Buffer): void {
     try {
-      const command = JSON.parse(message.toString()) as ClientCommand;
-      this.logger.logSocketTraffic(this.config.socketLogFile, "in", command);
-      this.handleCommand(command);
+      const parsed = JSON.parse(message.toString());
+      if (!isValidClientCommand(parsed)) {
+        this.logger.log("Invalid client command received", "error");
+        return;
+      }
+
+      this.logger.logSocketTraffic(this.config.socketLogFile, "in", parsed);
+      this.handleCommand(parsed);
     } catch (error) {
-      this.logger.log(
-        `Error parsing command: ${error instanceof Error ? error.message : String(error)}`,
-        "error",
-      );
+      this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
     }
   }
 
@@ -408,7 +411,7 @@ export class LangtonServer extends EventEmitter {
           }
         } catch (error) {
           await this.handleError(
-            error instanceof Error ? error : new Error(String(error)),
+            toError(error),
             `Workspace setup item ${index + 1}`,
             ErrorSeverity.FATAL,
           );
@@ -602,7 +605,7 @@ export class LangtonServer extends EventEmitter {
       // Set up log parsing with delay
       setTimeout(() => {
         this.setupLogParsing(logPath, phase.id);
-      }, 100);
+      }, TIMEOUTS.LOG_PARSER_DELAY_MS);
     } catch (error) {
       this.cleanupCurrentPhase();
       throw error;
@@ -724,13 +727,15 @@ export class LangtonServer extends EventEmitter {
           // Call async function without awaiting to avoid blocking
           this.handleFileToolCall(toolItem.name as ToolName, toolItem.input).catch((err) => {
             this.handleError(
-              err instanceof Error ? err : new Error(String(err)),
+              toError(err),
               `handleFileToolCall(${toolItem.name})`,
               ErrorSeverity.OPERATION,
             );
           });
         }
 
+        // Send event for all tools, including unknown ones
+        // toolName is typed as string to allow unknown tools
         this.sendEvent({
           id: generateId(),
           timestamp: new Date().toISOString(),
@@ -739,7 +744,7 @@ export class LangtonServer extends EventEmitter {
             phaseId,
             action: "tool_use",
             content: "",
-            toolName: toolItem.name as ToolName,
+            toolName: toolItem.name,
             toolInput: toolItem.input,
           },
         } as AssistantActionEvent);
@@ -823,11 +828,14 @@ export class LangtonServer extends EventEmitter {
       isSkipping: this.isSkippingPhase,
     };
 
-    // Only wait for result message if phase wasn't skipped
-    if (!phaseSnapshot.isSkipping && exitCode === 0) {
+    // Only wait for result message if phase wasn't skipped and we're not shutting down
+    if (!phaseSnapshot.isSkipping && exitCode === 0 && !this.isShuttingDown) {
       try {
         // Wait for result message with 30 second timeout
-        const resultMsg = await this.waitForResultMessage(phaseSnapshot.sessionId, 30000);
+        const resultMsg = await this.waitForResultMessage(
+          phaseSnapshot.sessionId,
+          TIMEOUTS.RESULT_MESSAGE_MS,
+        );
 
         // Update costs from result message
         if (resultMsg.usage) {
@@ -852,7 +860,8 @@ export class LangtonServer extends EventEmitter {
 
     // Process completion with the captured snapshot
     const duration = Date.now() - phaseSnapshot.startTime.getTime();
-    const success = exitCode === 0;
+    // Phase is only successful if it exited cleanly AND we're not shutting down
+    const success = exitCode === 0 && !this.isShuttingDown;
     const phaseCost = phaseSnapshot.phaseCost;
 
     // Add to completed phases (even if skipped, to track progress)
@@ -913,7 +922,7 @@ export class LangtonServer extends EventEmitter {
         this.logger.log("Phase was skipped, continuing to next phase");
         this.isSkippingPhase = false;
         // Small delay to ensure cleanup completes
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS));
         await this.autoStartNextPhase();
       } else {
         // Create error checkpoint before shutdown
@@ -936,7 +945,7 @@ export class LangtonServer extends EventEmitter {
     } else if (success && !this.isShuttingDown) {
       // Auto-continue to next phase after a short delay
       // Small delay to ensure cleanup completes
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS));
       await this.autoStartNextPhase();
     }
   }
@@ -1006,12 +1015,7 @@ export class LangtonServer extends EventEmitter {
         try {
           content = fs.readFileSync(fullPath, "utf-8");
         } catch (error) {
-          this.logger.log(
-            `Error reading file ${filePath}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-            "error",
-          );
+          this.logger.log(`Error reading file ${filePath}: ${toError(error).message}`, "error");
           return;
         }
       }
@@ -1052,22 +1056,6 @@ export class LangtonServer extends EventEmitter {
       type: "filetree.updated",
       data: { tree },
     } as FileTreeUpdatedEvent);
-  }
-
-  /**
-   * @deprecated Use handleError() instead for standardized error handling
-   */
-  private sendError(message: string, fatal: boolean): void {
-    this.sendEvent({
-      id: generateId(),
-      timestamp: new Date().toISOString(),
-      type: "error",
-      data: {
-        message,
-        phase: this.currentPhase?.phase.id,
-        fatal,
-      },
-    } as ErrorEvent);
   }
 
   /**
@@ -1435,7 +1423,7 @@ export class LangtonServer extends EventEmitter {
     } catch (error) {
       // Handle disk full or other git errors
       this.logger.log(
-        `Checkpoint failed: ${error instanceof Error ? error.message : String(error)}. ` +
+        `Checkpoint failed: ${toError(error).message}. ` +
           "Disabling checkpointing for this session.",
         "error",
       );
@@ -1448,9 +1436,15 @@ export class LangtonServer extends EventEmitter {
       this.logger.log(`Shutdown already in progress, ignoring: ${reason}`);
       return;
     }
-    this.isShuttingDown = true;
-
     this.logger.log(`Shutting down server: ${reason}`);
+
+    // Kill any running process immediately before setting shutdown flag
+    if (this.processManager && this.currentPhase) {
+      this.logger.log("Killing current Claude process for shutdown");
+      await this.processManager.kill("SIGTERM");
+    }
+
+    this.isShuttingDown = true;
 
     // Create exit checkpoint if not shutting down normally (all phases completed)
     if (reason !== "all phases completed" && this.checkpointingEnabled && this.currentPhase) {
@@ -1505,6 +1499,6 @@ export class LangtonServer extends EventEmitter {
     // Small delay to ensure log is written
     setTimeout(() => {
       process.exit(0);
-    }, 100);
+    }, TIMEOUTS.PHASE_CLEANUP_DELAY_MS);
   }
 }

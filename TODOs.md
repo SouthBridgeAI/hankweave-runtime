@@ -37,6 +37,9 @@ TODOs:
 15. Actually tracking file edits to show what changed instead of chokidar
 16. Extracting data after phases or at completion?
 17. Adding description streaming with flash
+18. Mark test-results as successful or not :)
+19. Add some interactive check to e2e tests so claude can't run it
+20. Add a message about the cost tracking that's human so claude won't keep changing it back
 
 Cleanup TODOs:
 
@@ -56,3 +59,8 @@ Experimental:
 1. Watching the agent log and adding comments?
 2. Can a langton workflow be a gauntlet - something that cleans and validates data to push it somewhere else?
 3.
+
+Claude code weirdness noticed:
+
+1. Using the LS command injects this message about whether files are malicious.
+2. CC will sometimes generate malformed toolcalls.
