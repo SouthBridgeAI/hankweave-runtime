@@ -59,6 +59,11 @@ export class ClaudeProcessManager extends EventEmitter {
       this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseURL}`);
     }
 
+    // Log the exact command being run
+    const fullCommand = `claude ${args.join(" ")}`;
+    this.logger.log(`Executing Claude command: ${fullCommand}`);
+    this.logger.log(`Working directory: ${this.projectPath}`);
+
     // Spawn process
     this.process = spawn("claude", args, {
       cwd: this.projectPath,
@@ -106,7 +111,8 @@ export class ClaudeProcessManager extends EventEmitter {
     const systemPrompt = this.buildSystemPrompt(phase);
     if (systemPrompt) {
       args.push("--append-system-prompt", escapeShellArg(systemPrompt));
-      this.logger.log(`Added system prompt to Claude: \n\n${systemPrompt}\n\n`);
+      this.logger.log(`Added system prompt to Claude (${systemPrompt.length} chars)`);
+      this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
 
     return args;
@@ -169,6 +175,7 @@ export class ClaudeProcessManager extends EventEmitter {
     this.process.stdin.end();
 
     this.logger.log(`Fed prompt to Claude (${processedContent.length} chars)`);
+    this.logger.log(`Prompt content:\n${processedContent}`);
   }
 
   /**
@@ -194,7 +201,17 @@ export class ClaudeProcessManager extends EventEmitter {
     });
 
     this.process.stderr?.on("data", (data) => {
-      this.emit("stderr", data.toString());
+      const errorMessage = data.toString().trim();
+      this.logger.log(`Claude stderr: ${errorMessage}`, "error");
+
+      // Write to log file as JSON entry (matching server behavior)
+      if (this.logStream && !this.logStream.destroyed) {
+        this.logStream.write(
+          `{"type":"stderr","timestamp":"${new Date().toISOString()}","message":${JSON.stringify(errorMessage)}}\n`,
+        );
+      }
+
+      this.emit("stderr", errorMessage);
     });
   }
 
@@ -256,5 +273,17 @@ export class ClaudeProcessManager extends EventEmitter {
    */
   getPid(): number | undefined {
     return this.process?.pid;
+  }
+
+  /**
+   * Close log stream explicitly (for external cleanup).
+   */
+  async closeLogStream(): Promise<void> {
+    if (this.logStream && !this.logStream.destroyed) {
+      await new Promise<void>((resolve) => {
+        this.logStream!.end(() => resolve());
+      });
+      this.logStream = null;
+    }
   }
 }

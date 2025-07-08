@@ -22,12 +22,18 @@ export class Logger {
     const timestamp = new Date().toISOString();
     const logLine = `[${timestamp}] [${level.toUpperCase()}] ${message}\n`;
 
-    const logsDir = path.dirname(this.logFile);
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
+    try {
+      const logsDir = path.dirname(this.logFile);
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+
+      fs.appendFileSync(this.logFile, logLine);
+    } catch (error) {
+      // If we can't write to file (e.g., during shutdown), just log to console
+      console.error(`Failed to write to log file: ${error}`);
     }
 
-    fs.appendFileSync(this.logFile, logLine);
     if (level === "error") {
       console.error(logLine.trim());
     }

@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,7 +14,9 @@ import type {
 } from "../types/claude-session-schema.js";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
+import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { calculateCost, DEFAULT_CONFIG } from "./config.js";
+import { ErrorSeverity } from "./error-types.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
@@ -71,13 +73,21 @@ export class LangtonServer extends EventEmitter {
     content: string;
     timestamp: Date;
   } | null = null;
-  private claudeProcess: ChildProcess | null = null;
+  private processManager: ClaudeProcessManager | null = null;
   private totalCost = 0;
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingPhase = false;
   private logParser: ClaudeLogParser | null = null;
   private runId: string;
+  private resultMessagePromises = new Map<
+    string,
+    {
+      resolve: (msg: ResultMessage) => void;
+      reject: (error: Error) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
 
   // Checkpoint-related properties
   private checkpointGit: CheckpointGit | null = null;
@@ -97,6 +107,20 @@ export class LangtonServer extends EventEmitter {
     this.logger = new Logger(this.config.serverLogFile);
     this.serverStartTime = new Date();
     this.runId = generateId();
+  }
+
+  /**
+   * Wait for result message from a specific session.
+   */
+  private waitForResultMessage(sessionId: string, timeoutMs = 60000): Promise<ResultMessage> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.resultMessagePromises.delete(sessionId);
+        reject(new Error(`Timeout waiting for result message from session ${sessionId}`));
+      }, timeoutMs);
+
+      this.resultMessagePromises.set(sessionId, { resolve, reject, timeout });
+    });
   }
 
   /**
@@ -371,11 +395,11 @@ export class LangtonServer extends EventEmitter {
             this.logger.log(`Ran command in ${workingDir}: ${item.command.run}`);
           }
         } catch (error) {
-          this.sendError(
-            `Workspace setup item ${index + 1} failed: ${error instanceof Error ? error.message : String(error)}`,
-            true,
+          await this.handleError(
+            error as Error,
+            `Workspace setup item ${index + 1}`,
+            ErrorSeverity.FATAL,
           );
-          await this.shutdown("workspace setup failure");
           return;
         }
       }
@@ -532,172 +556,44 @@ export class LangtonServer extends EventEmitter {
   }
 
   /**
-   * Spawn Claude CLI process for a phase.
+   * Spawn Claude CLI process for a phase using ClaudeProcessManager.
    *
    * @param phase - Phase configuration
    * @param _sessionId - Current session ID (unused but kept for API)
    * @param previousSessionId - Session to continue from (if any)
-   *
-   * Handles:
-   * - Creating log directory and streams
-   * - Building Claude CLI arguments
-   * - Setting up log parsing
-   * - Feeding prompt to stdin
-   * - Monitoring process lifecycle
    */
   private async startClaudeProcess(
     phase: PhaseConfig,
     _sessionId: string,
     previousSessionId: string | null,
   ): Promise<void> {
-    const logPath = path.join(this.config.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
+    // Create process manager
+    this.processManager = new ClaudeProcessManager(
+      this.config.projectPath,
+      this.logger,
+      this.config.anthropicBaseURL,
+    );
 
-    const logsDir = path.dirname(logPath);
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
-    }
-
-    const args = [
-      "--verbose",
-      "--dangerously-skip-permissions",
-      "--model",
-      phase.model,
-      "--permission-mode",
-      "bypassPermissions",
-      "-p",
-      "--output-format",
-      "stream-json",
-    ];
-
-    if (phase.continueFromPrevious && previousSessionId) {
-      args.push("-c", "--resume", previousSessionId);
-    }
-
-    // Handle system prompt if provided
-    if (phase.appendSystemPromptFile || phase.appendSystemPromptText) {
-      let systemPromptContent: string;
-
-      try {
-        if (phase.appendSystemPromptFile) {
-          // Handle array of files
-          const systemPromptFiles = Array.isArray(phase.appendSystemPromptFile)
-            ? phase.appendSystemPromptFile
-            : [phase.appendSystemPromptFile];
-
-          const systemPromptParts: string[] = [];
-          for (const file of systemPromptFiles) {
-            systemPromptParts.push(fs.readFileSync(file, "utf-8"));
-          }
-          systemPromptContent = systemPromptParts.join("\n\n");
-        } else if (phase.appendSystemPromptText) {
-          systemPromptContent = phase.appendSystemPromptText;
-        } else {
-          throw new Error("No system prompt file or text provided");
-        }
-
-        // Replace PROJECT_DIR placeholders in system prompt
-        const processedSystemPrompt = systemPromptContent.replace(
-          /<%PROJECT_DIR%>/g,
-          this.config.projectPath,
-        );
-
-        // Escape and add system prompt argument
-        args.push("--append-system-prompt", escapeShellArg(processedSystemPrompt));
-
-        this.logger.log(`Added system prompt to Claude (${processedSystemPrompt.length} chars)`);
-        this.logger.log(`System prompt content:\n${processedSystemPrompt}`);
-      } catch (error) {
-        this.sendError(
-          `Failed to process system prompt: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          true,
-        );
-        this.shutdown("system prompt error");
-        return;
-      }
-    }
-
-    // Set up environment variables for Claude process
-    const env = { ...process.env };
-    if (this.config.anthropicBaseURL) {
-      env.ANTHROPIC_BASE_URL = this.config.anthropicBaseURL;
-      this.logger.log(`Using custom Anthropic base URL: ${this.config.anthropicBaseURL}`);
-    }
-
-    // Create the log file stream first
-    const logStream = fs.createWriteStream(logPath);
-
-    // Log the exact command being run
-    const fullCommand = `claude ${args.join(" ")}`;
-    this.logger.log(`Executing Claude command: ${fullCommand}`);
-    this.logger.log(`Working directory: ${this.config.projectPath}`);
-
-    this.claudeProcess = spawn("claude", args, {
-      cwd: this.config.projectPath,
-      stdio: ["pipe", "pipe", "pipe"],
-      env,
+    // Set up event handlers
+    this.processManager.on("exit", (code) => {
+      this.handlePhaseComplete(code);
     });
 
-    this.claudeProcess.stdout?.pipe(logStream);
-
-    // Set up log parsing AFTER piping stdout to ensure log file exists
-    // Add a small delay to ensure initial messages are written
-    setTimeout(() => {
-      this.setupLogParsing(logPath, phase.id);
-    }, 100);
-
-    // Also capture stderr for error diagnosis
-    this.claudeProcess.stderr?.on("data", (data) => {
-      const errorMessage = data.toString();
-      this.logger.log(`Claude stderr: ${errorMessage.trim()}`, "error");
-      logStream.write(
-        `{"type":"stderr","timestamp":"${new Date().toISOString()}","message":${JSON.stringify(errorMessage.trim())}}\n`,
-      );
-    });
-
-    this.claudeProcess.on("exit", (code) => {
-      this.logger.log(`Claude process exited with code: ${code}`);
-      this.handlePhaseComplete(code || 0);
-    });
-
-    this.claudeProcess.on("error", (error) => {
-      this.logger.log(`Claude process error: ${error.message}`, "error");
-      this.sendError(`Claude process error: ${error.message}`, true);
-      this.shutdown("claude process error");
+    this.processManager.on("error", (error) => {
+      this.handleError(error, `Claude process for phase ${phase.id}`, ErrorSeverity.FATAL);
     });
 
     try {
-      let promptContent: string;
+      // Spawn process and get log path
+      const logPath = await this.processManager.spawn(phase, previousSessionId);
 
-      if (phase.promptFile) {
-        // Handle array of files
-        const promptFiles = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
-
-        const promptParts: string[] = [];
-        for (const file of promptFiles) {
-          promptParts.push(fs.readFileSync(file, "utf-8"));
-        }
-        promptContent = promptParts.join("\n\n");
-      } else if (phase.promptText) {
-        promptContent = phase.promptText;
-      } else {
-        throw new Error("No prompt file or text provided");
-      }
-
-      const processedContent = promptContent.replace(/<%PROJECT_DIR%>/g, this.config.projectPath);
-
-      this.claudeProcess.stdin?.write(processedContent);
-      this.claudeProcess.stdin?.end();
-
-      this.logger.log(`Fed prompt to Claude (${processedContent.length} chars)`);
-      this.logger.log(`Prompt content:\n${processedContent}`);
+      // Set up log parsing with delay
+      setTimeout(() => {
+        this.setupLogParsing(logPath, phase.id);
+      }, 100);
     } catch (error) {
-      this.sendError(
-        `Failed to process prompt: ${error instanceof Error ? error.message : String(error)}`,
-        true,
-      );
-      this.shutdown("prompt error");
+      this.cleanupCurrentPhase();
+      throw error;
     }
   }
 
@@ -815,7 +711,11 @@ export class LangtonServer extends EventEmitter {
         if (fileTools.includes(toolItem.name)) {
           // Call async function without awaiting to avoid blocking
           this.handleFileToolCall(toolItem.name, toolItem.input).catch((err) => {
-            this.logger.log(`Error handling file tool call: ${err}`, "error");
+            this.handleError(
+              err as Error,
+              `handleFileToolCall(${toolItem.name})`,
+              ErrorSeverity.OPERATION,
+            );
           });
         }
 
@@ -837,6 +737,18 @@ export class LangtonServer extends EventEmitter {
 
   private handleResultMessage(msg: ResultMessage, phaseId: string): void {
     this.logger.log(`Phase ${phaseId} result message received: ${msg.subtype}`);
+
+    // Resolve any waiting promise
+    const sessionId = msg.session_id || this.currentPhase?.sessionId;
+    if (sessionId) {
+      const promise = this.resultMessagePromises.get(sessionId);
+      if (promise) {
+        clearTimeout(promise.timeout);
+        this.resultMessagePromises.delete(sessionId);
+        promise.resolve(msg);
+      }
+    }
+
     if (msg.subtype === "success") {
       this.logger.log(`Phase ${phaseId} completed successfully`);
 
@@ -899,28 +811,103 @@ export class LangtonServer extends EventEmitter {
       isSkipping: this.isSkippingPhase,
     };
 
-    // Give the log parser a moment to catch up with the result message
-    setTimeout(async () => {
-      const duration = Date.now() - phaseSnapshot.startTime.getTime();
-      const success = exitCode === 0;
-      const phaseCost = phaseSnapshot.phaseCost;
+    // Only wait for result message if phase wasn't skipped
+    if (!phaseSnapshot.isSkipping && exitCode === 0) {
+      try {
+        // Wait for result message with 30 second timeout
+        const resultMsg = await this.waitForResultMessage(phaseSnapshot.sessionId, 30000);
 
-      // Add to completed phases (even if skipped, to track progress)
-      if (success || phaseSnapshot.isSkipping) {
-        this.completedPhases.push({
+        // Update costs from result message
+        if (resultMsg.usage) {
+          phaseSnapshot.phaseTokens = {
+            inputTokens: resultMsg.usage.input_tokens || 0,
+            outputTokens: resultMsg.usage.output_tokens || 0,
+            cacheCreationTokens: resultMsg.usage.cache_creation_input_tokens || 0,
+            cacheReadTokens: resultMsg.usage.cache_read_input_tokens || 0,
+          };
+          phaseSnapshot.phaseCost =
+            resultMsg.total_cost_usd ||
+            calculateCost(phaseSnapshot.phaseTokens, this.config.costsPerMTok);
+        }
+      } catch (error) {
+        // Log timeout but continue
+        this.logger.log(
+          `Result message timeout for phase ${phaseSnapshot.phase.id}: ${error}`,
+          "info",
+        );
+      }
+    }
+
+    // Process completion with the captured snapshot
+    const duration = Date.now() - phaseSnapshot.startTime.getTime();
+    const success = exitCode === 0;
+    const phaseCost = phaseSnapshot.phaseCost;
+
+    // Add to completed phases (even if skipped, to track progress)
+    if (success || phaseSnapshot.isSkipping) {
+      this.completedPhases.push({
+        phaseId: phaseSnapshot.phase.id,
+        sessionId: phaseSnapshot.sessionId,
+        success,
+        cost: phaseCost,
+        duration,
+        completedAt: new Date(),
+      });
+
+      // Create checkpoint for phase completion
+      if (this.checkpointingEnabled) {
+        const status = phaseSnapshot.isSkipping ? "skipped" : "completed";
+        await this.createCheckpoint({
+          status,
           phaseId: phaseSnapshot.phase.id,
-          sessionId: phaseSnapshot.sessionId,
-          success,
-          cost: phaseCost,
+          phaseName: phaseSnapshot.phase.name,
+          runId: this.runId,
+          timestamp: new Date().toISOString(),
           duration,
-          completedAt: new Date(),
         });
+      }
 
-        // Create checkpoint for phase completion
+      // Recalculate total cost from all completed phases
+      this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
+
+      this.logger.log(
+        `Phase ${phaseSnapshot.phase.id} ${
+          success ? "completed" : "skipped"
+        } - Cost: $${phaseCost.toFixed(4)}, ` + `Total project cost: $${this.totalCost.toFixed(4)}`,
+      );
+    }
+
+    this.sendEvent({
+      id: generateId(),
+      timestamp: new Date().toISOString(),
+      type: "phase.completed",
+      data: {
+        phaseId: phaseSnapshot.phase.id,
+        success,
+        cost: phaseCost,
+        duration,
+        exitCode,
+      },
+    } as PhaseCompletedEvent);
+
+    this.cleanupCurrentPhase();
+
+    // Send updated state snapshot after phase completion
+    this.sendStateSnapshot();
+
+    if (!success && !this.isShuttingDown) {
+      if (phaseSnapshot.isSkipping) {
+        // Phase was skipped, not failed - continue to next phase
+        this.logger.log("Phase was skipped, continuing to next phase");
+        this.isSkippingPhase = false;
+        // Small delay to ensure cleanup completes
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await this.autoStartNextPhase();
+      } else {
+        // Create error checkpoint before shutdown
         if (this.checkpointingEnabled) {
-          const status = phaseSnapshot.isSkipping ? "skipped" : "completed";
           await this.createCheckpoint({
-            status,
+            status: "error",
             phaseId: phaseSnapshot.phase.id,
             phaseName: phaseSnapshot.phase.name,
             runId: this.runId,
@@ -928,66 +915,18 @@ export class LangtonServer extends EventEmitter {
             duration,
           });
         }
-
-        // Recalculate total cost from all completed phases
-        this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
-
-        this.logger.log(
-          `Phase ${phaseSnapshot.phase.id} ${
-            success ? "completed" : "skipped"
-          } - Cost: $${phaseCost.toFixed(4)}, ` +
-            `Total project cost: $${this.totalCost.toFixed(4)}`,
+        await this.handleError(
+          new Error(`Phase failed with exit code ${exitCode}`),
+          `phase ${phaseSnapshot.phase.id}`,
+          ErrorSeverity.FATAL,
         );
       }
-
-      this.sendEvent({
-        id: generateId(),
-        timestamp: new Date().toISOString(),
-        type: "phase.completed",
-        data: {
-          phaseId: phaseSnapshot.phase.id,
-          success,
-          cost: phaseCost,
-          duration,
-          exitCode,
-        },
-      } as PhaseCompletedEvent);
-
-      this.cleanupCurrentPhase();
-
-      // Send updated state snapshot after phase completion
-      this.sendStateSnapshot();
-
-      if (!success && !this.isShuttingDown) {
-        if (phaseSnapshot.isSkipping) {
-          // Phase was skipped, not failed - continue to next phase
-          this.logger.log("Phase was skipped, continuing to next phase");
-          this.isSkippingPhase = false;
-          setTimeout(() => {
-            this.autoStartNextPhase();
-          }, 1000);
-        } else {
-          // Create error checkpoint before shutdown
-          if (this.checkpointingEnabled) {
-            await this.createCheckpoint({
-              status: "error",
-              phaseId: phaseSnapshot.phase.id,
-              phaseName: phaseSnapshot.phase.name,
-              runId: this.runId,
-              timestamp: new Date().toISOString(),
-              duration,
-            });
-          }
-          this.sendError(`Phase failed with exit code ${exitCode}`, true);
-          this.shutdown("phase failure");
-        }
-      } else if (success && !this.isShuttingDown) {
-        // Auto-continue to next phase after a short delay
-        setTimeout(() => {
-          this.autoStartNextPhase();
-        }, 1000);
-      }
-    }, 1000); // Give 1s for result message to be parsed
+    } else if (success && !this.isShuttingDown) {
+      // Auto-continue to next phase after a short delay
+      // Small delay to ensure cleanup completes
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await this.autoStartNextPhase();
+    }
   }
 
   private async handleFileToolCall(
@@ -1101,6 +1040,46 @@ export class LangtonServer extends EventEmitter {
         fatal,
       },
     } as ErrorEvent);
+  }
+
+  /**
+   * Handle errors with appropriate severity and client notification.
+   */
+  private async handleError(
+    error: Error,
+    context: string,
+    severity: ErrorSeverity = ErrorSeverity.OPERATION,
+  ): Promise<void> {
+    // Always log
+    this.logger.log(
+      `[${severity}] ${context}: ${error.message}`,
+      severity === ErrorSeverity.FATAL ? "error" : "info",
+    );
+
+    // Always send to client
+    this.sendEvent({
+      id: generateId(),
+      timestamp: new Date().toISOString(),
+      type: "error",
+      data: {
+        message: error.message,
+        context,
+        severity,
+        phase: this.currentPhase?.phase.id,
+        fatal: severity === ErrorSeverity.FATAL,
+      },
+    } as ErrorEvent);
+
+    // Handle based on severity
+    switch (severity) {
+      case ErrorSeverity.FATAL:
+        await this.shutdown(`Fatal error: ${context}`);
+        break;
+      case ErrorSeverity.PHASE:
+        this.cleanupCurrentPhase();
+        break;
+      // OPERATION and WARNING just log and notify
+    }
   }
 
   private async checkIncompletePhases(): Promise<void> {
@@ -1228,8 +1207,8 @@ export class LangtonServer extends EventEmitter {
     this.logger.log(`Skipping phase ${this.currentPhase.phase.id}`);
     this.isSkippingPhase = true;
 
-    if (this.claudeProcess) {
-      this.claudeProcess.kill("SIGTERM");
+    if (this.processManager) {
+      await this.processManager.kill("SIGTERM");
     }
   }
 
@@ -1246,22 +1225,22 @@ export class LangtonServer extends EventEmitter {
   }
 
   private cleanupCurrentPhase(): void {
-    if (this.claudeProcess) {
-      this.claudeProcess.removeAllListeners();
-      if (!this.claudeProcess.killed) {
-        this.claudeProcess.kill("SIGTERM");
-      }
-      this.claudeProcess = null;
-    }
-
-    this.watchedPattern = null;
-    this.recentFileAccess = null;
-
     if (this.logParser) {
       this.logParser.stop();
       this.logParser = null;
     }
 
+    if (this.processManager) {
+      this.processManager.removeAllListeners();
+      // Ensure log stream is closed
+      this.processManager
+        .closeLogStream()
+        .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
+      this.processManager = null;
+    }
+
+    this.watchedPattern = null;
+    this.recentFileAccess = null;
     this.currentPhase = null;
   }
 
@@ -1452,7 +1431,16 @@ export class LangtonServer extends EventEmitter {
 
     this.logger.log("Server shutdown complete");
 
-    // Small delay to ensure log is written and lock file removal completes
+    // Ensure lock file is really gone before delay
+    try {
+      if (fs.existsSync(this.config.lockFile)) {
+        fs.unlinkSync(this.config.lockFile);
+      }
+    } catch {
+      // Ignore errors on second attempt
+    }
+
+    // Small delay to ensure log is written
     setTimeout(() => {
       process.exit(0);
     }, 100);
