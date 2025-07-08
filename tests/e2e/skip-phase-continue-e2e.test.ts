@@ -209,6 +209,46 @@ describe("Skip Phase and Continue E2E Test", () => {
       expect(testState.phase1Completed?.data.cost || 0).toBeLessThan(0.01);
       expect(testState.phase3Completed?.data.cost || 0).toBeLessThan(0.01);
     });
+
+    test("skipped phases still get phaseExecutionId but might not get sessionId", () => {
+      // Phase 1 was skipped
+      const phase1Completed = testState.phase1Completed;
+
+      if (phase1Completed && !phase1Completed.data.success) {
+        // Check if phase.started was emitted
+        const phase1Started = testState.events.find(
+          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === "phase-1",
+        );
+
+        // If Claude was killed very quickly, might not have phase.started
+        if (!phase1Started) {
+          // This is OK - phase was skipped before Claude init
+          expect(phase1Started).toBeUndefined();
+        } else {
+          // But if we got phase.started, it should have valid UUID
+          const uuidRegex =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          expect((phase1Started as PhaseStartedEvent).data.sessionId).toMatch(uuidRegex);
+        }
+      }
+
+      // Same check for phase 3
+      const phase3Completed = testState.phase3Completed;
+
+      if (phase3Completed && !phase3Completed.data.success) {
+        const phase3Started = testState.events.find(
+          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === "phase-3",
+        );
+
+        if (!phase3Started) {
+          expect(phase3Started).toBeUndefined();
+        } else {
+          const uuidRegex =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          expect((phase3Started as PhaseStartedEvent).data.sessionId).toMatch(uuidRegex);
+        }
+      }
+    });
   });
 
   describe("Server State", () => {

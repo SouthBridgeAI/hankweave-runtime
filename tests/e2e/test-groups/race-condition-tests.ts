@@ -63,4 +63,23 @@ export function runRaceConditionTests(testState: TestState) {
       });
     }
   });
+
+  test("rapid phase transitions maintain separate phaseExecutionIds", () => {
+    // When phases complete and start quickly, each should have unique phaseExecutionId
+    const snapshots = testState.events.filter(
+      (e) => e.type === "state.snapshot",
+    ) as StateSnapshotEvent[];
+    const executionIds = new Set<string>();
+
+    snapshots.forEach((snapshot) => {
+      if (snapshot.data?.currentPhase?.phaseExecutionId) {
+        // Each execution ID should be unique
+        expect(executionIds.has(snapshot.data.currentPhase.phaseExecutionId)).toBe(false);
+        executionIds.add(snapshot.data.currentPhase.phaseExecutionId);
+      }
+    });
+
+    // Should have seen at least 3 different execution IDs (one per phase)
+    expect(executionIds.size).toBeGreaterThanOrEqual(3);
+  });
 }

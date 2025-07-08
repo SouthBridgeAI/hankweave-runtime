@@ -232,4 +232,29 @@ export function runDualIdSystemTests(testState: TestState) {
       }
     });
   });
+
+  test("state snapshots include phaseExecutionId for internal tracking", () => {
+    const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
+
+    snapshots.forEach((snapshot) => {
+      const s = snapshot as StateSnapshotEvent;
+
+      if (s.data?.currentPhase) {
+        // Should always have phaseExecutionId (internal tracking)
+        expect(s.data.currentPhase).toHaveProperty("phaseExecutionId");
+
+        // phaseExecutionId should be timestamp-random format
+        const timestampRandomRegex = /^\d{13}-[a-z0-9]{9}$/;
+        expect(s.data.currentPhase.phaseExecutionId).toMatch(timestampRandomRegex);
+
+        // sessionId might be null during execution
+        if (s.data.currentPhase.sessionId !== null) {
+          // But if present, should be UUID
+          const uuidRegex =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          expect(s.data.currentPhase.sessionId).toMatch(uuidRegex);
+        }
+      }
+    });
+  });
 }
