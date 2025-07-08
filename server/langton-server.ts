@@ -17,6 +17,8 @@ import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { calculateCost, DEFAULT_CONFIG } from "./config.js";
 import { ErrorSeverity } from "./error-types.js";
+import type { ToolInputMap, ToolName } from "./tool-types.js";
+import { isStartPhaseCommand } from "./type-guards.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
@@ -34,7 +36,6 @@ import type {
   ServerConfig,
   ServerEvent,
   ServerReadyEvent,
-  StartPhaseCommand,
   StateSnapshotEvent,
   TokenUsage,
   TokenUsageEvent,
@@ -246,8 +247,11 @@ export class LangtonServer extends EventEmitter {
 
     switch (command.type) {
       case "phase.start": {
-        const startCmd = command as StartPhaseCommand;
-        await this.startPhase(startCmd.data.phaseId, startCmd.data.skipPreCommands);
+        if (isStartPhaseCommand(command)) {
+          await this.startPhase(command.data.phaseId, command.data.skipPreCommands);
+        } else {
+          this.logger.log("Invalid phase.start command structure", "error");
+        }
         break;
       }
 
@@ -363,12 +367,20 @@ export class LangtonServer extends EventEmitter {
   private async startPhase(phaseId: string, skipPreCommands?: boolean): Promise<void> {
     const phase = this.config.phases.find((p) => p.id === phaseId);
     if (!phase) {
-      this.sendError(`Unknown phase: ${phaseId}`, false);
+      await this.handleError(
+        new Error(`Unknown phase: ${phaseId}`),
+        "startPhase",
+        ErrorSeverity.OPERATION,
+      );
       return;
     }
 
     if (this.currentPhase) {
-      this.sendError(`Phase already running: ${this.currentPhase.phase.id}`, false);
+      await this.handleError(
+        new Error(`Phase already running: ${this.currentPhase.phase.id}`),
+        "startPhase",
+        ErrorSeverity.OPERATION,
+      );
       return;
     }
 
@@ -396,7 +408,7 @@ export class LangtonServer extends EventEmitter {
           }
         } catch (error) {
           await this.handleError(
-            error as Error,
+            error instanceof Error ? error : new Error(String(error)),
             `Workspace setup item ${index + 1}`,
             ErrorSeverity.FATAL,
           );
@@ -707,12 +719,12 @@ export class LangtonServer extends EventEmitter {
         const toolItem = item as ToolUseContent;
 
         // Handle file-related tool calls
-        const fileTools = ["Read", "Write", "Edit", "MultiEdit"];
-        if (fileTools.includes(toolItem.name)) {
+        const fileTools: ToolName[] = ["Read", "Write", "Edit", "MultiEdit"];
+        if (fileTools.includes(toolItem.name as ToolName)) {
           // Call async function without awaiting to avoid blocking
-          this.handleFileToolCall(toolItem.name, toolItem.input).catch((err) => {
+          this.handleFileToolCall(toolItem.name as ToolName, toolItem.input).catch((err) => {
             this.handleError(
-              err as Error,
+              err instanceof Error ? err : new Error(String(err)),
               `handleFileToolCall(${toolItem.name})`,
               ErrorSeverity.OPERATION,
             );
@@ -727,7 +739,7 @@ export class LangtonServer extends EventEmitter {
             phaseId,
             action: "tool_use",
             content: "",
-            toolName: toolItem.name,
+            toolName: toolItem.name as ToolName,
             toolInput: toolItem.input,
           },
         } as AssistantActionEvent);
@@ -929,8 +941,8 @@ export class LangtonServer extends EventEmitter {
     }
   }
 
-  private async handleFileToolCall(
-    toolName: string,
+  private async handleFileToolCall<T extends ToolName>(
+    toolName: T,
     toolInput: Record<string, unknown> | undefined,
   ): Promise<void> {
     if (!this.watchedPattern) return;
@@ -939,24 +951,37 @@ export class LangtonServer extends EventEmitter {
     let action: "created" | "modified" | "deleted" = "modified";
     let content = "";
 
-    // Extract file path based on tool type
+    // Type-safe tool input handling
     switch (toolName) {
-      case "Read":
-        filePath = toolInput?.file_path as string;
+      case "Read": {
+        const input = toolInput as ToolInputMap["Read"] | undefined;
+        filePath = input?.file_path || null;
         action = "modified"; // Read doesn't change the file
         break;
-      case "Write":
-        filePath = toolInput?.file_path as string;
-        content = (toolInput?.content as string) || "";
-        action = fs.existsSync(path.join(this.config.projectPath, filePath))
-          ? "modified"
-          : "created";
+      }
+      case "Write": {
+        const input = toolInput as ToolInputMap["Write"] | undefined;
+        filePath = input?.file_path || null;
+        content = input?.content || "";
+        if (filePath) {
+          action = fs.existsSync(path.join(this.config.projectPath, filePath))
+            ? "modified"
+            : "created";
+        }
         break;
-      case "Edit":
-      case "MultiEdit":
-        filePath = toolInput?.file_path as string;
+      }
+      case "Edit": {
+        const input = toolInput as ToolInputMap["Edit"] | undefined;
+        filePath = input?.file_path || null;
         action = "modified";
         break;
+      }
+      case "MultiEdit": {
+        const input = toolInput as ToolInputMap["MultiEdit"] | undefined;
+        filePath = input?.file_path || null;
+        action = "modified";
+        break;
+      }
     }
 
     if (!filePath) return;
@@ -1029,6 +1054,9 @@ export class LangtonServer extends EventEmitter {
     } as FileTreeUpdatedEvent);
   }
 
+  /**
+   * @deprecated Use handleError() instead for standardized error handling
+   */
   private sendError(message: string, fatal: boolean): void {
     this.sendEvent({
       id: generateId(),
@@ -1178,7 +1206,11 @@ export class LangtonServer extends EventEmitter {
 
   private async startNextPhase(): Promise<void> {
     if (this.currentPhase) {
-      this.sendError("Cannot start next phase while current phase is running", false);
+      await this.handleError(
+        new Error("Cannot start next phase while current phase is running"),
+        "startNextPhase",
+        ErrorSeverity.OPERATION,
+      );
       return;
     }
 
@@ -1194,13 +1226,21 @@ export class LangtonServer extends EventEmitter {
     if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
       await this.startPhase(this.config.phases[lastIndex + 1].id);
     } else {
-      this.sendError("No more phases to run", false);
+      await this.handleError(
+        new Error("No more phases to run"),
+        "startNextPhase",
+        ErrorSeverity.OPERATION,
+      );
     }
   }
 
   private async skipCurrentPhase(): Promise<void> {
     if (!this.currentPhase) {
-      this.sendError("No phase is currently running", false);
+      await this.handleError(
+        new Error("No phase is currently running"),
+        "skipCurrentPhase",
+        ErrorSeverity.OPERATION,
+      );
       return;
     }
 
@@ -1214,7 +1254,11 @@ export class LangtonServer extends EventEmitter {
 
   private async redoCurrentPhase(): Promise<void> {
     if (this.currentPhase) {
-      this.sendError("Cannot redo while phase is running", false);
+      await this.handleError(
+        new Error("Cannot redo while phase is running"),
+        "redoCurrentPhase",
+        ErrorSeverity.OPERATION,
+      );
       return;
     }
 
@@ -1237,6 +1281,17 @@ export class LangtonServer extends EventEmitter {
         .closeLogStream()
         .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
       this.processManager = null;
+    }
+
+    // Clean up any pending result message promises
+    const sessionId = this.currentPhase?.sessionId;
+    if (sessionId && this.resultMessagePromises.has(sessionId)) {
+      const promise = this.resultMessagePromises.get(sessionId);
+      if (promise) {
+        clearTimeout(promise.timeout);
+        promise.reject(new Error("Phase cleanup - result message promise cancelled"));
+        this.resultMessagePromises.delete(sessionId);
+      }
     }
 
     this.watchedPattern = null;
@@ -1409,6 +1464,13 @@ export class LangtonServer extends EventEmitter {
     }
 
     this.cleanupCurrentPhase();
+
+    // Clean up all pending result message promises
+    for (const [_sessionId, promise] of this.resultMessagePromises) {
+      clearTimeout(promise.timeout);
+      promise.reject(new Error("Server shutdown - result message promise cancelled"));
+    }
+    this.resultMessagePromises.clear();
 
     if (this.client) {
       this.client.close();

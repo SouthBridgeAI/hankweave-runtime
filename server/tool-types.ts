@@ -69,6 +69,10 @@ export interface WebSearchToolInput {
   query: string;
 }
 
+export interface TodoWriteToolInput {
+  content: string;
+}
+
 export type ToolInputMap = {
   Write: WriteToolInput;
   Read: ReadToolInput;
@@ -83,6 +87,7 @@ export type ToolInputMap = {
   NotebookEdit: NotebookEditToolInput;
   WebFetch: WebFetchToolInput;
   WebSearch: WebSearchToolInput;
+  TodoWrite: TodoWriteToolInput;
   exit_plan_mode: Record<string, never>; // No input
 };
 
@@ -108,6 +113,7 @@ export function isValidToolName(name: string): name is ToolName {
       NotebookEdit: true,
       WebFetch: true,
       WebSearch: true,
+      TodoWrite: true,
       exit_plan_mode: true,
     } as Record<ToolName, true>)
   );

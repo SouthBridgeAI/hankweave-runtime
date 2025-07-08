@@ -281,7 +281,7 @@ export class ClaudeProcessManager extends EventEmitter {
   async closeLogStream(): Promise<void> {
     if (this.logStream && !this.logStream.destroyed) {
       await new Promise<void>((resolve) => {
-        this.logStream!.end(() => resolve());
+        this.logStream?.end(() => resolve());
       });
       this.logStream = null;
     }

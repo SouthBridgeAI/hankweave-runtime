@@ -133,11 +133,12 @@ async function setupAndRunPhases(): Promise<void> {
   // Wait a moment for phase 2 to auto-start
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  testState.phase2Started = testState.client
-    .getEvents()
-    .find(
-      (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-2",
-    ) as PhaseStartedEvent | undefined;
+  testState.phase2Started =
+    (testState.client
+      .getEvents()
+      .find(
+        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-2",
+      ) as PhaseStartedEvent | undefined) || null;
 
   if (!testState.phase2Started) {
     console.log(`${colors.red}✗ Phase 2 did not start${colors.reset}`);
@@ -155,11 +156,12 @@ async function setupAndRunPhases(): Promise<void> {
   const phase3Timeout = 10000; // 10 seconds
 
   while (Date.now() - phase3StartTime < phase3Timeout) {
-    testState.phase3Started = testState.client
-      .getEvents()
-      .find(
-        (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-3",
-      ) as PhaseStartedEvent | undefined;
+    testState.phase3Started =
+      (testState.client
+        .getEvents()
+        .find(
+          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === "phase-3",
+        ) as PhaseStartedEvent | undefined) || null;
 
     if (testState.phase3Started) {
       console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
@@ -918,7 +920,10 @@ describe("Langton E2E Test", () => {
           // Count assistant messages in logs
           const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");
           const logToolUses = logAssistantMessages.filter((e) =>
-            e.message?.content?.some((c) => c.type === "tool_use" && c.name !== "TodoWrite"),
+            e.message?.content?.some(
+              (c: { type?: string; name?: string }) =>
+                c.type === "tool_use" && c.name !== "TodoWrite",
+            ),
           ).length;
 
           // Count WebSocket events for this phase
