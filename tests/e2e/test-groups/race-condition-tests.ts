@@ -65,21 +65,40 @@ export function runRaceConditionTests(testState: TestState) {
   });
 
   test("rapid phase transitions maintain separate phaseExecutionIds", () => {
-    // When phases complete and start quickly, each should have unique phaseExecutionId
-    const snapshots = testState.events.filter(
-      (e) => e.type === "state.snapshot",
-    ) as StateSnapshotEvent[];
-    const executionIds = new Set<string>();
+    // Since state snapshots are only sent after phase completion (when currentPhase is null),
+    // we need to look at phase.started events which contain the session IDs that prove
+    // separate phase executions occurred
+    const phaseStartedEvents = testState.events.filter(
+      (e) => e.type === "phase.started",
+    ) as PhaseStartedEvent[];
 
-    snapshots.forEach((snapshot) => {
-      if (snapshot.data?.currentPhase?.phaseExecutionId) {
-        // Each execution ID should be unique
-        expect(executionIds.has(snapshot.data.currentPhase.phaseExecutionId)).toBe(false);
-        executionIds.add(snapshot.data.currentPhase.phaseExecutionId);
+    const sessionIds = new Set<string>();
+
+    phaseStartedEvents.forEach((event) => {
+      if (event.data?.sessionId) {
+        // Each session ID should be unique (proves separate phase executions)
+        expect(sessionIds.has(event.data.sessionId)).toBe(false);
+        sessionIds.add(event.data.sessionId);
       }
     });
 
-    // Should have seen at least 3 different execution IDs (one per phase)
-    expect(executionIds.size).toBeGreaterThanOrEqual(3);
+    // Should have seen at least 3 different session IDs (one per phase)
+    expect(sessionIds.size).toBeGreaterThanOrEqual(3);
+
+    // Additionally verify that completed phases each have unique session IDs
+    const finalSnapshot = [...testState.events]
+      .reverse()
+      .find((e) => e.type === "state.snapshot") as StateSnapshotEvent | undefined;
+
+    if (finalSnapshot?.data?.completedPhases) {
+      const completedSessionIds = new Set<string>();
+      finalSnapshot.data.completedPhases.forEach((phase) => {
+        expect(completedSessionIds.has(phase.sessionId)).toBe(false);
+        completedSessionIds.add(phase.sessionId);
+      });
+
+      // Completed phases should also have unique session IDs
+      expect(completedSessionIds.size).toBe(finalSnapshot.data.completedPhases.length);
+    }
   });
 }
