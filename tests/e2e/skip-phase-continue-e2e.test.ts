@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
+// NOTE: Unlike happy-path-e2e.test.ts, this file's tests are intentionally not split into separate modules.
+// Most tests here are specific to the skip/continue scenario and verify different outcomes than the happy path.
+// For example: checking that files were NOT created, phases were marked as failed, costs are minimal, etc.
+// Keeping tests inline makes it clearer what this specific scenario is validating.
+
 import { afterAll, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
