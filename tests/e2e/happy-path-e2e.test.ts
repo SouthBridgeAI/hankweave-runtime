@@ -19,26 +19,43 @@ import {
   type TestDirectoryConfig,
   TestWSClient,
 } from "../utils/test-helpers.js";
-import { runFileSystemTests } from "./test-groups/file-system-tests.js";
-import { runPhaseExecutionTests } from "./test-groups/phase-execution-tests.js";
-import { runLogFilesTests } from "./test-groups/log-files-tests.js";
-import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js";
-import { runCostTrackingTests } from "./test-groups/cost-tracking-tests.js";
-import { runTokenUsageTests } from "./test-groups/token-usage-tests.js";
-import { runFileContentTests } from "./test-groups/file-content-tests.js";
-import { runFileWatchingTests } from "./test-groups/file-watching-tests.js";
-import { runPhaseTimingTests } from "./test-groups/phase-timing-tests.js";
-import { runSessionContinuityTests } from "./test-groups/session-continuity-tests.js";
-import { runFileTreeTests } from "./test-groups/file-tree-tests.js";
-import { runInfoEventsTests } from "./test-groups/info-events-tests.js";
-import { runPreStartCommandsTests } from "./test-groups/pre-start-commands-tests.js";
-import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
-import { runStateSnapshotTests } from "./test-groups/state-snapshot-tests.js";
-import { runServerStateTests } from "./test-groups/server-state-tests.js";
-import { runJSONLSchemaTests } from "./test-groups/jsonl-schema-tests.js";
-import { runPathConsistencyTests } from "./test-groups/path-consistency-tests.js";
+// New test groups
+import { runCheckpointExclusionTests } from "./test-groups/checkpoint-exclusion-tests.js";
 import { runCheckpointSystemTests } from "./test-groups/checkpoint-system-tests.js";
+import { runCostPrecisionTests } from "./test-groups/cost-precision-tests.js";
+import { runCostTrackingTests } from "./test-groups/cost-tracking-tests.js";
+import { runErrorEventTests } from "./test-groups/error-event-tests.js";
+import { runEventIntegrityTests } from "./test-groups/event-integrity-tests.js";
+import { runFileContentTests } from "./test-groups/file-content-tests.js";
+import { runFileSystemEdgeCasesTests } from "./test-groups/file-system-edge-cases-tests.js";
+import { runFileSystemTests } from "./test-groups/file-system-tests.js";
+import { runFileTreeTests } from "./test-groups/file-tree-tests.js";
+import { runFileWatchingNegativeTests } from "./test-groups/file-watching-negative-tests.js";
+import { runFileWatchingTests } from "./test-groups/file-watching-tests.js";
+import { runInfoEventsTests } from "./test-groups/info-events-tests.js";
+import { runJSONLSchemaTests } from "./test-groups/jsonl-schema-tests.js";
+import { runLockFileTests } from "./test-groups/lock-file-tests.js";
+import { runLogFilesTests } from "./test-groups/log-files-tests.js";
+import { runLogOrderingTests } from "./test-groups/log-ordering-tests.js";
 import { runMessageOrderingTests } from "./test-groups/message-ordering-tests.js";
+import { runMultiFilePromptTests } from "./test-groups/multi-file-prompt-tests.js";
+import { runPathConsistencyTests } from "./test-groups/path-consistency-tests.js";
+import { runPerformanceTests } from "./test-groups/performance-tests.js";
+import { runPhaseExecutionTests } from "./test-groups/phase-execution-tests.js";
+import { runPhaseTimingTests } from "./test-groups/phase-timing-tests.js";
+import { runPreStartCommandsTests } from "./test-groups/pre-start-commands-tests.js";
+import { runProcessLifecycleTests } from "./test-groups/process-lifecycle-tests.js";
+import { runRaceConditionTests } from "./test-groups/race-condition-tests.js";
+import { runResourceCleanupTests } from "./test-groups/resource-cleanup-tests.js";
+import { runSecurityValidationTests } from "./test-groups/security-validation-tests.js";
+import { runServerStateTests } from "./test-groups/server-state-tests.js";
+import { runSessionContinuityTests } from "./test-groups/session-continuity-tests.js";
+import { runStateConsistencyTests } from "./test-groups/state-consistency-tests.js";
+import { runStateSnapshotTests } from "./test-groups/state-snapshot-tests.js";
+import { runTemplateVariableTests } from "./test-groups/template-variable-tests.js";
+import { runTokenUsageTests } from "./test-groups/token-usage-tests.js";
+import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
+import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js";
 
 // Test configuration
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
@@ -315,6 +332,71 @@ describe("Langton E2E Test", () => {
 
   describe("Message Ordering", () => {
     runMessageOrderingTests(testState);
+  });
+
+  // New test groups
+  describe("Checkpoint Exclusion", () => {
+    runCheckpointExclusionTests(TEST_DIR);
+  });
+
+  describe("File Watching - Negative Cases", () => {
+    runFileWatchingNegativeTests(testState);
+  });
+
+  describe("Resource Cleanup", () => {
+    runResourceCleanupTests(TEST_DIR);
+  });
+
+  describe("Event Integrity", () => {
+    runEventIntegrityTests(testState);
+  });
+
+  describe("State Consistency", () => {
+    runStateConsistencyTests(testState);
+  });
+
+  describe("Log Ordering", () => {
+    runLogOrderingTests(TEST_DIR);
+  });
+
+  describe("Security Validation", () => {
+    runSecurityValidationTests(testState, TEST_DIR);
+  });
+
+  describe("Performance", () => {
+    runPerformanceTests(testState);
+  });
+
+  describe("Cost Precision", () => {
+    runCostPrecisionTests(testState);
+  });
+
+  describe("File System Edge Cases", () => {
+    runFileSystemEdgeCasesTests(testState, TEST_DIR);
+  });
+
+  describe("Template Variables", () => {
+    runTemplateVariableTests(testState);
+  });
+
+  describe("Race Condition Detection", () => {
+    runRaceConditionTests(testState);
+  });
+
+  describe("Process Lifecycle", () => {
+    runProcessLifecycleTests(testState);
+  });
+
+  describe("Multi-file Prompts", () => {
+    runMultiFilePromptTests(testState, PHASES_CONFIG);
+  });
+
+  describe("Lock File Integrity", () => {
+    runLockFileTests(testState, TEST_DIR);
+  });
+
+  describe("Error Event Metadata", () => {
+    runErrorEventTests(testState);
   });
 });
 

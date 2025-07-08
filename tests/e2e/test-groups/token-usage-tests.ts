@@ -41,9 +41,7 @@ export function runTokenUsageTests(testState: TestState, testDir: string) {
         // The last token event should match the result message usage if available
         if (resultMessage?.usage && phaseTokenEvents.length > 0) {
           const lastTokenEvent = phaseTokenEvents[phaseTokenEvents.length - 1] as TokenUsageEvent;
-          expect(lastTokenEvent.data?.inputTokens || 0).toBe(
-            resultMessage.usage.input_tokens || 0,
-          );
+          expect(lastTokenEvent.data?.inputTokens || 0).toBe(resultMessage.usage.input_tokens || 0);
           expect(lastTokenEvent.data?.outputTokens || 0).toBe(
             resultMessage.usage.output_tokens || 0,
           );

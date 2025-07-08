@@ -4,8 +4,8 @@ import type {
   FileUpdatedEvent,
   PhaseStartedEvent,
 } from "../../../server/types.js";
-import { colors } from "../../utils/test-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
+import { colors } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;

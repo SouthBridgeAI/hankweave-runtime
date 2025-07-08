@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { FileTreeUpdatedEvent } from "../../../server/types.js";
-import { findInTree, type FileNode } from "../../utils/test-data-helpers.js";
-import { colors } from "../../utils/test-helpers.js";
+import { type FileNode, findInTree } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
+import { colors } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;

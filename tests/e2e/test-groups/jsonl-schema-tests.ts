@@ -30,9 +30,10 @@ export function runJSONLSchemaTests(testDir: string) {
                 invalidLines++;
                 if (invalidLines === 1) {
                   console.log(
-                    `${colors.yellow}Invalid entry in ${phaseId}: ${JSON.stringify(
-                      entry,
-                    ).substring(0, 200)}${colors.reset}`,
+                    `${colors.yellow}Invalid entry in ${phaseId}: ${JSON.stringify(entry).substring(
+                      0,
+                      200,
+                    )}${colors.reset}`,
                   );
                 }
               }

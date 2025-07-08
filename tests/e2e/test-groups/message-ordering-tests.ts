@@ -12,8 +12,7 @@ export function runMessageOrderingTests(testState: TestState) {
         (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === phaseId,
       );
       const phaseComplete = testState.events.find(
-        (e) =>
-          e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
+        (e) => e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === phaseId,
       );
 
       if (phaseStart && phaseComplete) {

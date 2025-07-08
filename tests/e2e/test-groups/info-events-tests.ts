@@ -11,8 +11,7 @@ export function runInfoEventsTests(testState: TestState) {
 
   test("info event for phase continuation", () => {
     const hasContinuationInfo = infoEvents.some(
-      (e) =>
-        (e as InfoEvent).data?.message?.includes("Continuing from previous session") || false,
+      (e) => (e as InfoEvent).data?.message?.includes("Continuing from previous session") || false,
     );
     expect(hasContinuationInfo).toBe(true);
   });
