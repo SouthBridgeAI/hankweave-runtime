@@ -24,33 +24,56 @@ export function runEventIntegrityTests(testState: TestState) {
 
   test("no events are dropped or duplicated", () => {
     // Check for suspicious patterns
-    const assistantActions = testState.client?.getEventsByType("assistant.action") || [];
+    const tokenEvents = testState.client?.getEventsByType("token.usage") || [];
 
-    // Group by phase and check for duplicates
-    const phaseActions = new Map<string, AssistantActionEvent[]>();
-    assistantActions.forEach((event) => {
-      const action = event as AssistantActionEvent;
-      const phaseId = action.data?.phaseId || "unknown";
-      if (!phaseActions.has(phaseId)) {
-        phaseActions.set(phaseId, []);
+    // Group token events by timestamp to understand Claude's streaming pattern
+    const eventsByTimestamp = new Map<string, any[]>();
+    tokenEvents.forEach((event) => {
+      const timestamp = event.timestamp;
+      if (!eventsByTimestamp.has(timestamp)) {
+        eventsByTimestamp.set(timestamp, []);
       }
-      phaseActions.get(phaseId)!.push(action);
+      eventsByTimestamp.get(timestamp)!.push(event);
     });
 
-    // Check for exact duplicate events (same content and close timestamps)
-    phaseActions.forEach((actions, phaseId) => {
-      for (let i = 0; i < actions.length - 1; i++) {
-        for (let j = i + 1; j < actions.length; j++) {
-          if (
-            actions[i].data?.content === actions[j].data?.content &&
-            actions[i].data?.action === actions[j].data?.action
-          ) {
-            const timeDiff = Math.abs(
-              new Date(actions[i].timestamp).getTime() - new Date(actions[j].timestamp).getTime(),
-            );
-            // If same content within 100ms, likely a duplicate
-            expect(timeDiff).toBeGreaterThan(100);
-          }
+    // Claude sends multiple complete packets with the same message ID
+    // This is expected behavior - not duplicates
+    // Each packet represents a different aspect (text content vs tool use)
+    
+    // Check that events with the same timestamp have different token counts
+    // (indicating they're different stages of the same message)
+    eventsByTimestamp.forEach((events, timestamp) => {
+      if (events.length > 1) {
+        // Multiple events at same timestamp should have different token counts
+        const tokenCounts = events.map(e => e.data?.outputTokens || 0);
+        const uniqueTokenCounts = new Set(tokenCounts);
+        
+        // If all token counts are identical, that would be a true duplicate
+        if (uniqueTokenCounts.size === 1 && events.length > 1) {
+          // Check if they're truly identical events
+          const firstEventStr = JSON.stringify(events[0]);
+          const allIdentical = events.every(e => JSON.stringify(e) === firstEventStr);
+          expect(allIdentical).toBe(false);
+        }
+      }
+    });
+
+    // Also check assistant actions for true duplicates
+    const assistantActions = testState.client?.getEventsByType("assistant.action") || [];
+    const actionSignatures = new Map<string, number>();
+    
+    assistantActions.forEach((action) => {
+      const signature = `${action.data?.phaseId}_${action.data?.action}_${action.data?.content}`;
+      actionSignatures.set(signature, (actionSignatures.get(signature) || 0) + 1);
+    });
+
+    // No action should appear more than once with identical content
+    actionSignatures.forEach((count, signature) => {
+      if (count > 1) {
+        // Tool use actions can legitimately appear multiple times (e.g., multiple LS calls)
+        const isToolUse = signature.includes("_tool_use_");
+        if (!isToolUse) {
+          expect(count).toBe(1);
         }
       }
     });

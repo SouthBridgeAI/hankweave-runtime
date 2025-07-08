@@ -25,8 +25,6 @@ TODOs:
 1. Add a universal system prompt that gets appended to the top of all phases
 1. Abstract out claude code so we can sub in other things
 1. Implement a langtonflow for making changelogs
-1. Check for more tests to add
-   1. Are we pulling files we don't want into the shadow git?
 1. Use input stream json and implement and test
 1. Use git commits! (done)
 1. Move .logs into .langton (done)
@@ -35,14 +33,12 @@ TODOs:
 1. safe_exec and that journey
 1. Implement actual workspace copying in and out instead of running commands which can be brittle
 1. Retry system and error handling?
-1. Use git commits to rollback changes?
-1. Actually tracking file edits to show what changed instead of chokidar
 1. Extracting data after phases or at completion?
 1. Adding description streaming with flash
-1. Mark test-results as successful or not :)
 1. Add some interactive check to e2e tests so claude can't run it
 1. Add a message about the cost tracking that's human so claude won't keep changing it back
 1. Rename the actual runner to tadpole?
+1. Investigate whether we need our own internal messageid since Claude reuses messageids
 
 Cleanup TODOs:
 
