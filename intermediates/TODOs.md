@@ -39,6 +39,7 @@ TODOs:
 1. Add a message about the cost tracking that's human so claude won't keep changing it back
 1. Rename the actual runner to tadpole?
 1. Investigate whether we need our own internal messageid since Claude reuses messageids
+1. Are we respecting gitignores in subfolders for our checkpointing?
 
 Cleanup TODOs:
 
