@@ -43,7 +43,7 @@ const phaseConfigSchema = z
     promptText: z.string().optional(),
     appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
     appendSystemPromptText: z.string().optional(),
-    model: z.string().min(1, "Model name cannot be empty"),
+    model: z.enum(["sonnet", "opus"]),
     continueFromPrevious: z.boolean().optional(),
     workspaceSetup: z.array(workspaceSetupItemSchema).optional(),
     watch: z.string().optional(),
@@ -170,7 +170,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       // Validate model name
       if (!validModels.includes(phase.model)) {
         validationErrors.push(
-          `Phase ${index + 1} (${phase.id}): model "${phase.model}" is not valid. Must be one of: ${validModels.join(", ")}`,
+          `Phase ${index + 1} (${phase.id}): model "${
+            phase.model
+          }" is not valid. Must be one of: ${validModels.join(", ")}`,
         );
       }
 
@@ -187,7 +189,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
               fs.readFileSync(file, "utf-8");
             } catch (error) {
               validationErrors.push(
-                `Phase ${index + 1} (${phase.id}): promptFile "${file}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+                `Phase ${index + 1} (${phase.id}): promptFile "${file}" is not readable: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
               );
             }
           }
@@ -209,7 +213,11 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
               fs.readFileSync(file, "utf-8");
             } catch (error) {
               validationErrors.push(
-                `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${file}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
+                `Phase ${index + 1} (${
+                  phase.id
+                }): appendSystemPromptFile "${file}" is not readable: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
               );
             }
           }
@@ -223,7 +231,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
             // Check if source exists
             if (!fs.existsSync(item.copy.from)) {
               validationErrors.push(
-                `Phase ${index + 1} (${phase.id}), workspace setup item ${itemIndex + 1}: source path "${item.copy.from}" does not exist`,
+                `Phase ${index + 1} (${phase.id}), workspace setup item ${
+                  itemIndex + 1
+                }: source path "${item.copy.from}" does not exist`,
               );
             }
           }

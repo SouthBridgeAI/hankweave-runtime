@@ -105,7 +105,7 @@ export interface PhaseConfig {
   appendSystemPromptText?: string;
 
   /** Claude model to use (e.g., "claude-3-opus-20240229", "sonnet") */
-  model: string;
+  model: ModelName;
 
   /**
    * If true, this phase will continue from the previous phase's session,
@@ -236,10 +236,10 @@ export interface PhaseState {
   phase: PhaseConfig;
   /** Internal execution ID for tracking (timestamp-random format) */
   phaseExecutionId: string;
-  /** Claude session ID for this phase instance (starts as null, set on init) */
-  sessionId: string | null;
+  /** Claude session ID for this phase instance (starts as undefined, set on init) */
+  sessionId: string | undefined;
   /** Previous claude session ID if continuing from another phase */
-  previousSessionId: string | null;
+  previousSessionId: string | undefined;
   /** Whether the phase is currently executing */
   isRunning: boolean;
   /** When this phase started */
@@ -324,8 +324,8 @@ export interface ServerReadyEvent extends ServerEvent {
 export interface StateSnapshotEvent extends ServerEvent {
   type: "state.snapshot";
   data: {
-    /** Currently executing phase, null if idle */
-    currentPhase: PhaseState | null;
+    /** Currently executing phase, undefined if idle */
+    currentPhase: PhaseState | undefined;
     /** List of all completed phases in this session */
     completedPhases: CompletedPhase[];
     /** Current file tree structure (if watching files) */
@@ -335,11 +335,13 @@ export interface StateSnapshotEvent extends ServerEvent {
     /** Total time since server start in milliseconds */
     totalTime: number;
     /** Most recently accessed file information */
-    recentFileAccess?: {
-      path: string;
-      content: string;
-      timestamp: Date;
-    } | null;
+    recentFileAccess?:
+      | {
+          path: string;
+          content: string;
+          timestamp: Date;
+        }
+      | undefined;
   };
 }
 
@@ -380,8 +382,8 @@ export interface PhaseCompletedEvent extends ServerEvent {
     cost: number;
     /** Execution time in milliseconds */
     duration: number;
-    /** Process exit code (0 = success, null = killed) */
-    exitCode: number | null;
+    /** Process exit code (0 = success, undefined = killed) */
+    exitCode: number | undefined;
   };
 }
 

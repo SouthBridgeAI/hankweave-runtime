@@ -144,7 +144,11 @@ export class LangtonServer extends EventEmitter {
         );
       }, timeoutMs);
 
-      this.resultMessagePromises.set(phaseExecutionId, { resolve, reject, timeout });
+      this.resultMessagePromises.set(phaseExecutionId, {
+        resolve,
+        reject,
+        timeout,
+      });
     });
   }
 
@@ -522,8 +526,8 @@ export class LangtonServer extends EventEmitter {
     this.currentPhase = {
       phase,
       phaseExecutionId: generateId(), // Internal tracking ID
-      sessionId: null, // Claude's UUID (will be set on init)
-      previousSessionId, // Store for phase.started event
+      sessionId: undefined, // Claude's UUID (will be set on init)
+      previousSessionId: previousSessionId || undefined, // Store for phase.started event
       isRunning: true,
       startTime: new Date(),
       phaseCost: 0,
@@ -758,7 +762,9 @@ export class LangtonServer extends EventEmitter {
         this.currentPhase.phaseTokens.cacheReadTokens += usage.cacheReadTokens;
 
         this.logger.log(
-          `Phase ${phaseId} token update - Call cost: $${messageCost.toFixed(4)}, Running total: $${this.currentPhase.phaseCost.toFixed(4)} ` +
+          `Phase ${phaseId} token update - Call cost: $${messageCost.toFixed(
+            4,
+          )}, Running total: $${this.currentPhase.phaseCost.toFixed(4)} ` +
             `(${usage.inputTokens} in, ${usage.outputTokens} out, ` +
             `${usage.cacheCreationTokens} cache create, ${usage.cacheReadTokens} cache read)`,
         );
