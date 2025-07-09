@@ -10,44 +10,34 @@ import { z } from "zod";
  * including system initialization, assistant responses, user inputs, and tool results.
  */
 
-// UUID v4 format validation
+// Session ID validation - accept UUID v4 or any string for forward compatibility
+const sessionIdSchema = z.string();
+
+// UUID v4 format validation (kept for backward compatibility in metadata)
 const uuidSchema = z
   .string()
   .regex(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    "Must be a valid UUID v4",
+    "Must be a valid UUID v4"
   );
 
-// Tool names available in Claude Code
-const toolNames = [
-  "Task",
-  "Bash",
-  "Glob",
-  "Grep",
-  "LS",
-  "exit_plan_mode",
-  "Read",
-  "Edit",
-  "MultiEdit",
-  "Write",
-  "NotebookRead",
-  "NotebookEdit",
-  "WebFetch",
-  "TodoRead",
-  "TodoWrite",
-  "WebSearch",
-] as const;
-
-export const toolNameSchema = z.enum(toolNames);
+// Tool names - accept any string for forward compatibility
+export const toolNameSchema = z.string();
 
 // Claude model identifier - accepting the full model name from logs
 // Also accepts <synthetic> for timeout messages
 const modelSchema = z
   .string()
-  .regex(/^(claude-.*|<synthetic>)$/, "Must be a Claude model identifier or <synthetic>");
+  .regex(
+    /^(claude-.*|<synthetic>)$/,
+    "Must be a Claude model identifier or <synthetic>"
+  );
 
 // Permission mode for Claude Code
-const permissionModeSchema = z.enum(["bypassPermissions", "requestPermissions"]);
+const permissionModeSchema = z.enum([
+  "bypassPermissions",
+  "requestPermissions",
+]);
 
 // API key source
 const apiKeySourceSchema = z.enum(["ANTHROPIC_API_KEY", "env"]);
@@ -58,31 +48,33 @@ const apiKeySourceSchema = z.enum(["ANTHROPIC_API_KEY", "env"]);
  * Appears at the beginning of each session to initialize the Claude Code environment.
  * Contains session metadata, tool configuration, and working directory information.
  */
-export const systemMessageSchema = z.object({
-  type: z.literal("system"),
-  subtype: z.literal("init"),
+export const systemMessageSchema = z
+  .object({
+    type: z.literal("system"),
+    subtype: z.literal("init"),
 
-  // Working directory where Claude Code is operating
-  cwd: z.string().min(1, "Working directory cannot be empty"),
+    // Working directory where Claude Code is operating
+    cwd: z.string().min(1, "Working directory cannot be empty"),
 
-  // Unique session identifier for this conversation
-  session_id: uuidSchema,
+    // Unique session identifier for this conversation
+    session_id: sessionIdSchema,
 
-  // Available tools for this session (standard Claude Code toolset)
-  tools: z.array(toolNameSchema).min(1, "Must have at least one tool"),
+    // Available tools for this session (standard Claude Code toolset)
+    tools: z.array(toolNameSchema).min(1, "Must have at least one tool"),
 
-  // MCP (Model Context Protocol) servers - typically empty array
-  mcp_servers: z.array(z.unknown()).default([]),
+    // MCP (Model Context Protocol) servers - typically empty array
+    mcp_servers: z.array(z.unknown()).default([]),
 
-  // Claude model being used
-  model: modelSchema,
+    // Claude model being used
+    model: modelSchema,
 
-  // Permission mode for tool execution
-  permissionMode: permissionModeSchema,
+    // Permission mode for tool execution
+    permissionMode: permissionModeSchema,
 
-  // Source of API key configuration
-  apiKeySource: apiKeySourceSchema,
-});
+    // Source of API key configuration
+    apiKeySource: apiKeySourceSchema,
+  })
+  .passthrough();
 
 /**
  * Tool Use Content Schema
@@ -132,7 +124,9 @@ export const toolResultContentSchema = z.object({
   type: z.literal("tool_result"),
 
   // ID of the tool use this result corresponds to
-  tool_use_id: z.string().regex(/^toolu_[a-zA-Z0-9]+$/, "Invalid tool use ID format"),
+  tool_use_id: z
+    .string()
+    .regex(/^toolu_[a-zA-Z0-9]+$/, "Invalid tool use ID format"),
 
   // Result content from tool execution (can be string, object, or array of content items)
   content: z.union([
@@ -142,7 +136,7 @@ export const toolResultContentSchema = z.object({
       z.object({
         type: z.literal("text"),
         text: z.string(),
-      }),
+      })
     ),
   ]),
 });
@@ -173,7 +167,7 @@ export const assistantMessageSchema = z.object({
       .string()
       .regex(
         /^(msg_[a-zA-Z0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
-        "Invalid message ID format",
+        "Invalid message ID format"
       ),
 
     type: z.literal("message"),
@@ -196,10 +190,13 @@ export const assistantMessageSchema = z.object({
         cache_creation_input_tokens: z.number().int().nonnegative().optional(),
         cache_read_input_tokens: z.number().int().nonnegative().optional(),
       })
+      .passthrough()
       .optional(),
 
     // Stop reason for the response (can be null)
-    stop_reason: z.enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"]).nullable(),
+    stop_reason: z
+      .enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"])
+      .nullable(),
 
     // Stop sequence used (if applicable, can be null)
     stop_sequence: z.string().nullable(),
@@ -230,46 +227,50 @@ export const userMessageSchema = z.object({
  *
  * Appears at the end of each session to summarize the conversation outcome.
  */
-export const resultMessageSchema = z.object({
-  type: z.literal("result"),
-  subtype: z.enum(["success", "error"]),
+export const resultMessageSchema = z
+  .object({
+    type: z.literal("result"),
+    subtype: z.enum(["success", "error"]),
 
-  // Whether the session ended in error
-  is_error: z.boolean(),
+    // Whether the session ended in error
+    is_error: z.boolean(),
 
-  // Total duration of the session in milliseconds
-  duration_ms: z.number().int().nonnegative(),
+    // Total duration of the session in milliseconds
+    duration_ms: z.number().int().nonnegative(),
 
-  // Total API time in milliseconds
-  duration_api_ms: z.number().int().nonnegative(),
+    // Total API time in milliseconds
+    duration_api_ms: z.number().int().nonnegative(),
 
-  // Number of conversation turns
-  num_turns: z.number().int().nonnegative(),
+    // Number of conversation turns
+    num_turns: z.number().int().nonnegative(),
 
-  // Final result or summary of the session
-  result: z.string(),
+    // Final result or summary of the session
+    result: z.string(),
 
-  // Session ID
-  session_id: z.string().optional(),
+    // Session ID
+    session_id: z.string().optional(),
 
-  // Total cost in USD
-  total_cost_usd: z.number().optional(),
+    // Total cost in USD
+    total_cost_usd: z.number().optional(),
 
-  // Token usage summary
-  usage: z
-    .object({
-      input_tokens: z.number().int().nonnegative().optional(),
-      output_tokens: z.number().int().nonnegative().optional(),
-      cache_creation_input_tokens: z.number().int().nonnegative().optional(),
-      cache_read_input_tokens: z.number().int().nonnegative().optional(),
-      server_tool_use: z
-        .object({
-          web_search_requests: z.number().int().nonnegative().optional(),
-        })
-        .optional(),
-    })
-    .optional(),
-});
+    // Token usage summary
+    usage: z
+      .object({
+        input_tokens: z.number().int().nonnegative().optional(),
+        output_tokens: z.number().int().nonnegative().optional(),
+        cache_creation_input_tokens: z.number().int().nonnegative().optional(),
+        cache_read_input_tokens: z.number().int().nonnegative().optional(),
+        server_tool_use: z
+          .object({
+            web_search_requests: z.number().int().nonnegative().optional(),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
 
 /**
  * Log Message Schema
