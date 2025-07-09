@@ -16,10 +16,10 @@ import { PhaseExecutionId, SessionId } from "./branded-types.js";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
+import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { APITimeoutError, ErrorSeverity } from "./error-types.js";
 import type { ToolInputMap, ToolName } from "./tool-types.js";
-import { clientCommandSchema, type ClientCommand } from "./command-schemas.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
@@ -41,6 +41,7 @@ import type {
   TokenUsageEvent,
 } from "./types.js";
 import {
+  assertNever,
   buildFileTree,
   escapeShellArg,
   extractSessionIdFromLog,
@@ -113,7 +114,7 @@ export class LangtonServer extends EventEmitter {
     config: Partial<ServerConfig> & {
       projectPath: string;
       phases: PhaseConfig[];
-    }
+    },
   ) {
     super();
     this.config = {
@@ -134,15 +135,13 @@ export class LangtonServer extends EventEmitter {
    */
   private waitForResultMessage(
     phaseExecutionId: string,
-    timeoutMs = 60000
+    timeoutMs = 60000,
   ): Promise<ResultMessage> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.resultMessagePromises.delete(phaseExecutionId);
         reject(
-          new Error(
-            `Timeout waiting for result message from phase execution ${phaseExecutionId}`
-          )
+          new Error(`Timeout waiting for result message from phase execution ${phaseExecutionId}`),
         );
       }, timeoutMs);
 
@@ -168,7 +167,7 @@ export class LangtonServer extends EventEmitter {
    */
   async start(): Promise<void> {
     this.logger.log(
-      `Starting Langton Server v${this.config.version} in ${this.config.projectPath}`
+      `Starting Langton Server v${this.config.version} in ${this.config.projectPath}`,
     );
 
     // Initialize checkpoint system (checks for existing .langton)
@@ -178,7 +177,7 @@ export class LangtonServer extends EventEmitter {
     if (fs.existsSync(this.config.lockFile)) {
       const lockData = fs.readFileSync(this.config.lockFile, "utf-8");
       throw new Error(
-        `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`
+        `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`,
       );
     }
 
@@ -219,10 +218,7 @@ export class LangtonServer extends EventEmitter {
       this.shutdown("uncaughtException");
     });
     process.on("unhandledRejection", (reason, promise) => {
-      this.logger.log(
-        `Unhandled rejection at: ${promise}, reason: ${reason}`,
-        "error"
-      );
+      this.logger.log(`Unhandled rejection at: ${promise}, reason: ${reason}`, "error");
       this.shutdown("unhandledRejection");
     });
   }
@@ -266,10 +262,7 @@ export class LangtonServer extends EventEmitter {
     this.autoStartNextPhase();
   }
 
-  private handleMessage(
-    ws: ServerWebSocket<ClientData>,
-    message: string | Buffer
-  ): void {
+  private handleMessage(ws: ServerWebSocket<ClientData>, message: string | Buffer): void {
     try {
       ws.data.lastActivity = new Date();
 
@@ -277,10 +270,7 @@ export class LangtonServer extends EventEmitter {
       const result = clientCommandSchema.safeParse(parsed);
 
       if (!result.success) {
-        this.logger.log(
-          `Invalid client command: ${result.error.message}`,
-          "error"
-        );
+        this.logger.log(`Invalid client command: ${result.error.message}`, "error");
         this.sendEvent({
           id: generateId(),
           timestamp: new Date().toISOString(),
@@ -293,17 +283,10 @@ export class LangtonServer extends EventEmitter {
         return;
       }
 
-      this.logger.logSocketTraffic(
-        this.config.socketLogFile,
-        "in",
-        result.data
-      );
+      this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
       this.handleCommand(result.data);
     } catch (error) {
-      this.logger.log(
-        `Error parsing command: ${toError(error).message}`,
-        "error"
-      );
+      this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
     }
   }
 
@@ -321,10 +304,7 @@ export class LangtonServer extends EventEmitter {
 
     switch (command.type) {
       case "phase.start": {
-        await this.startPhase(
-          command.data.phaseId,
-          command.data.skipPreCommands
-        );
+        await this.startPhase(command.data.phaseId, command.data.skipPreCommands);
         break;
       }
 
@@ -346,10 +326,7 @@ export class LangtonServer extends EventEmitter {
 
       default:
         // This should never happen due to Zod validation
-        this.logger.log(
-          `Unknown command type: ${(command as any).type}`,
-          "error"
-        );
+        assertNever(command);
     }
   }
 
@@ -400,15 +377,9 @@ export class LangtonServer extends EventEmitter {
     this.logger.log("Loading previous state from logs");
 
     for (const phase of this.config.phases) {
-      const logPath = path.join(
-        this.config.projectPath,
-        `.langton/logs/log-${phase.id}.jsonl`
-      );
+      const logPath = path.join(this.config.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
 
-      const { sessionId, success, cost } = loadPhaseStateFromLog(
-        logPath,
-        this.config.costsPerMTok
-      );
+      const { sessionId, success, cost } = loadPhaseStateFromLog(logPath, this.config.costsPerMTok);
 
       if (sessionId && success) {
         this.completedPhases.push({
@@ -421,23 +392,18 @@ export class LangtonServer extends EventEmitter {
         });
 
         this.logger.log(
-          `Loaded completed phase ${phase.id}: cost=$${cost.toFixed(
-            4
-          )}, session=${sessionId}`
+          `Loaded completed phase ${phase.id}: cost=$${cost.toFixed(4)}, session=${sessionId}`,
         );
       }
     }
 
     // Calculate total cost from loaded phases
-    this.totalCost = this.completedPhases.reduce(
-      (sum, phase) => sum + phase.cost,
-      0
-    );
+    this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
 
     this.logger.log(
       `Loaded ${
         this.completedPhases.length
-      } completed phases, total cost: $${this.totalCost.toFixed(4)}`
+      } completed phases, total cost: $${this.totalCost.toFixed(4)}`,
     );
   }
 
@@ -460,16 +426,13 @@ export class LangtonServer extends EventEmitter {
    * 6. Send phase.started event
    * 7. Spawn Claude process with prompt
    */
-  private async startPhase(
-    phaseId: string,
-    skipPreCommands?: boolean
-  ): Promise<void> {
+  private async startPhase(phaseId: string, skipPreCommands?: boolean): Promise<void> {
     const phase = this.config.phases.find((p) => p.id === phaseId);
     if (!phase) {
       await this.handleError(
         new Error(`Unknown phase: ${phaseId}`),
         "startPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -478,7 +441,7 @@ export class LangtonServer extends EventEmitter {
       await this.handleError(
         new Error(`Phase already running: ${this.currentPhase.phase.id}`),
         "startPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -503,15 +466,13 @@ export class LangtonServer extends EventEmitter {
                 ? lastCopiedPath
                 : this.config.projectPath;
             await this.runCommand(item.command.run, workingDir);
-            this.logger.log(
-              `Ran command in ${workingDir}: ${item.command.run}`
-            );
+            this.logger.log(`Ran command in ${workingDir}: ${item.command.run}`);
           }
         } catch (error) {
           await this.handleError(
             toError(error),
             `Workspace setup item ${index + 1}`,
-            ErrorSeverity.FATAL
+            ErrorSeverity.FATAL,
           );
           return;
         }
@@ -523,11 +484,7 @@ export class LangtonServer extends EventEmitter {
       await this.addCheckpointPatterns(phase.checkpointAndWatch);
 
       // Create checkpoint after workspace setup if we have workspace setup
-      if (
-        !skipPreCommands &&
-        phase.workspaceSetup &&
-        this.checkpointingEnabled
-      ) {
+      if (!skipPreCommands && phase.workspaceSetup && this.checkpointingEnabled) {
         await this.createCheckpoint({
           status: "workspace-setup",
           phaseId: phase.id,
@@ -545,7 +502,7 @@ export class LangtonServer extends EventEmitter {
       previousSessionId = this.getPreviousSessionId(phase.id);
       if (previousSessionId) {
         this.logger.log(
-          `Phase ${phase.id} will continue from previous session: ${previousSessionId}`
+          `Phase ${phase.id} will continue from previous session: ${previousSessionId}`,
         );
 
         // Send info event about continuation
@@ -559,7 +516,7 @@ export class LangtonServer extends EventEmitter {
         } as InfoEvent);
       } else {
         this.logger.log(
-          `Phase ${phase.id} requested continuation but no valid previous session found - starting fresh`
+          `Phase ${phase.id} requested continuation but no valid previous session found - starting fresh`,
         );
 
         // Send info event about starting fresh
@@ -579,9 +536,7 @@ export class LangtonServer extends EventEmitter {
       status: "initializing",
       phase,
       phaseExecutionId: PhaseExecutionId(generateId()), // Internal tracking ID
-      previousSessionId: previousSessionId
-        ? SessionId(previousSessionId)
-        : undefined, // Store for phase.started event
+      previousSessionId: previousSessionId ? SessionId(previousSessionId) : undefined, // Store for phase.started event
       startTime: new Date(),
     };
 
@@ -596,10 +551,7 @@ export class LangtonServer extends EventEmitter {
 
     // Send initial file states if any exist
     if (phase.watch) {
-      const files = await scanWatchedFiles(
-        this.config.projectPath,
-        phase.watch
-      );
+      const files = await scanWatchedFiles(this.config.projectPath, phase.watch);
 
       // Only send events if we have files
       if (files.length > 0) {
@@ -619,9 +571,7 @@ export class LangtonServer extends EventEmitter {
 
         // Store most recent file
         const mostRecent = files.reduce((latest, file) =>
-          new Date(file.lastModified) > new Date(latest.lastModified)
-            ? file
-            : latest
+          new Date(file.lastModified) > new Date(latest.lastModified) ? file : latest,
         );
         this.recentFileAccess = {
           path: mostRecent.path,
@@ -639,9 +589,7 @@ export class LangtonServer extends EventEmitter {
   }
 
   private getPreviousSessionId(currentPhaseId: string): string | null {
-    const currentIndex = this.config.phases.findIndex(
-      (p) => p.id === currentPhaseId
-    );
+    const currentIndex = this.config.phases.findIndex((p) => p.id === currentPhaseId);
     if (currentIndex <= 0) return null;
 
     const previousPhase = this.config.phases[currentIndex - 1];
@@ -649,14 +597,11 @@ export class LangtonServer extends EventEmitter {
     // Check log file for successful completion and extract Claude's actual session ID
     const logPath = path.join(
       this.config.projectPath,
-      `.langton/logs/log-${previousPhase.id}.jsonl`
+      `.langton/logs/log-${previousPhase.id}.jsonl`,
     );
 
     // Only return Claude's session ID if the phase was successful
-    const { success } = loadPhaseStateFromLog(
-      logPath,
-      this.config.costsPerMTok
-    );
+    const { success } = loadPhaseStateFromLog(logPath, this.config.costsPerMTok);
     if (success) {
       // Extract Claude's actual UUID session ID from the log
       return extractSessionIdFromLog(logPath);
@@ -677,13 +622,13 @@ export class LangtonServer extends EventEmitter {
    */
   private async startClaudeProcess(
     phase: PhaseConfig,
-    previousSessionId: string | null
+    previousSessionId: string | null,
   ): Promise<void> {
     // Create process manager
     this.processManager = new ClaudeProcessManager(
       this.config.projectPath,
       this.logger,
-      this.config.anthropicBaseURL
+      this.config.anthropicBaseURL,
     );
 
     // Set up event handlers
@@ -692,11 +637,7 @@ export class LangtonServer extends EventEmitter {
     });
 
     this.processManager.on("error", (error) => {
-      this.handleError(
-        error,
-        `Claude process for phase ${phase.id}`,
-        ErrorSeverity.FATAL
-      );
+      this.handleError(error, `Claude process for phase ${phase.id}`, ErrorSeverity.FATAL);
     });
 
     try {
@@ -751,9 +692,7 @@ export class LangtonServer extends EventEmitter {
       };
 
       // Log the session ID update
-      this.logger.log(
-        `Claude started phase ${phaseId} with session ID: ${msg.session_id}`
-      );
+      this.logger.log(`Claude started phase ${phaseId} with session ID: ${msg.session_id}`);
 
       // NOW send the phase.started event with the real session ID
       this.sendEvent({
@@ -791,10 +730,7 @@ export class LangtonServer extends EventEmitter {
         : content;
 
       if (textContent === "API Error: Request timed out.") {
-        this.logger.log(
-          `API timeout detected in synthetic message for phase ${phaseId}`,
-          "error"
-        );
+        this.logger.log(`API timeout detected in synthetic message for phase ${phaseId}`, "error");
 
         const timeoutError = new APITimeoutError(phaseId, {
           message: textContent,
@@ -842,16 +778,15 @@ export class LangtonServer extends EventEmitter {
         // Update token counts (these are cumulative per message)
         this.currentPhase.phaseTokens.inputTokens += usage.inputTokens;
         this.currentPhase.phaseTokens.outputTokens += usage.outputTokens;
-        this.currentPhase.phaseTokens.cacheCreationTokens +=
-          usage.cacheCreationTokens;
+        this.currentPhase.phaseTokens.cacheCreationTokens += usage.cacheCreationTokens;
         this.currentPhase.phaseTokens.cacheReadTokens += usage.cacheReadTokens;
 
         this.logger.log(
           `Phase ${phaseId} token update - Call cost: $${messageCost.toFixed(
-            4
+            4,
           )}, Running total: $${this.currentPhase.phaseCost.toFixed(4)} ` +
             `(${usage.inputTokens} in, ${usage.outputTokens} out, ` +
-            `${usage.cacheCreationTokens} cache create, ${usage.cacheReadTokens} cache read)`
+            `${usage.cacheCreationTokens} cache create, ${usage.cacheReadTokens} cache read)`,
         );
       }
 
@@ -937,14 +872,11 @@ export class LangtonServer extends EventEmitter {
         const fileTools: ToolName[] = ["Read", "Write", "Edit", "MultiEdit"];
         if (fileTools.includes(toolItem.name as ToolName)) {
           // Call async function without awaiting to avoid blocking
-          this.handleFileToolCall(
-            toolItem.name as ToolName,
-            toolItem.input
-          ).catch((err) => {
+          this.handleFileToolCall(toolItem.name as ToolName, toolItem.input).catch((err) => {
             this.handleError(
               toError(err),
               `handleFileToolCall(${toolItem.name})`,
-              ErrorSeverity.OPERATION
+              ErrorSeverity.OPERATION,
             );
           });
         }
@@ -983,10 +915,7 @@ export class LangtonServer extends EventEmitter {
 
     // Check for API timeout in result (can be error subtype OR success with is_error=true)
     if (msg.result === "API Error: Request timed out." && msg.is_error) {
-      this.logger.log(
-        `API timeout detected in result message for phase ${phaseId}`,
-        "error"
-      );
+      this.logger.log(`API timeout detected in result message for phase ${phaseId}`, "error");
 
       const timeoutError = new APITimeoutError(phaseId, {
         message: msg.result,
@@ -1015,11 +944,7 @@ export class LangtonServer extends EventEmitter {
       this.logger.log(`Phase ${phaseId} completed successfully`);
 
       // Update final token usage and cost from result message
-      if (
-        msg.usage &&
-        this.currentPhase &&
-        this.currentPhase.status === "running"
-      ) {
+      if (msg.usage && this.currentPhase && this.currentPhase.status === "running") {
         const finalUsage: TokenUsage = {
           inputTokens: msg.usage.input_tokens || 0,
           outputTokens: msg.usage.output_tokens || 0,
@@ -1028,17 +953,14 @@ export class LangtonServer extends EventEmitter {
         };
 
         // The result message contains the final cumulative cost for the entire phase
-        const finalCost =
-          msg.total_cost_usd ||
-          calculateCost(finalUsage, this.config.costsPerMTok);
+        const finalCost = msg.total_cost_usd || calculateCost(finalUsage, this.config.costsPerMTok);
 
         // Log if there's a discrepancy between our accumulated cost and Claude's final cost
         const accumulatedCost = this.currentPhase.phaseCost;
         if (Math.abs(accumulatedCost - finalCost) > 0.0001) {
           this.logger.log(
-            `Phase ${phaseId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(
-              4
-            )}, ` + `Final: $${finalCost.toFixed(4)} (using final)`
+            `Phase ${phaseId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(4)}, ` +
+              `Final: $${finalCost.toFixed(4)} (using final)`,
           );
         }
 
@@ -1049,7 +971,7 @@ export class LangtonServer extends EventEmitter {
         this.logger.log(
           `Phase ${phaseId} final cost from result: $${finalCost.toFixed(4)} ` +
             `(${finalUsage.inputTokens} in, ${finalUsage.outputTokens} out, ` +
-            `${finalUsage.cacheCreationTokens} cache create, ${finalUsage.cacheReadTokens} cache read)`
+            `${finalUsage.cacheCreationTokens} cache create, ${finalUsage.cacheReadTokens} cache read)`,
         );
 
         // Send a final token usage event with the correct values
@@ -1074,16 +996,10 @@ export class LangtonServer extends EventEmitter {
     const phaseSnapshot = {
       phase: { ...this.currentPhase.phase },
       phaseExecutionId: this.currentPhase.phaseExecutionId, // Internal tracking
-      sessionId:
-        this.currentPhase.status === "running"
-          ? this.currentPhase.sessionId
-          : undefined, // Claude's UUID (may be undefined if failed early)
+      sessionId: this.currentPhase.status === "running" ? this.currentPhase.sessionId : undefined, // Claude's UUID (may be undefined if failed early)
       previousSessionId: this.currentPhase.previousSessionId,
       startTime: this.currentPhase.startTime,
-      phaseCost:
-        this.currentPhase.status === "running"
-          ? this.currentPhase.phaseCost
-          : 0,
+      phaseCost: this.currentPhase.status === "running" ? this.currentPhase.phaseCost : 0,
       phaseTokens:
         this.currentPhase.status === "running"
           ? { ...this.currentPhase.phaseTokens }
@@ -1102,7 +1018,7 @@ export class LangtonServer extends EventEmitter {
         // Wait for result message with 30 second timeout
         const resultMsg = await this.waitForResultMessage(
           phaseSnapshot.phaseExecutionId,
-          TIMEOUTS.RESULT_MESSAGE_MS
+          TIMEOUTS.RESULT_MESSAGE_MS,
         );
 
         // Update costs from result message
@@ -1110,8 +1026,7 @@ export class LangtonServer extends EventEmitter {
           phaseSnapshot.phaseTokens = {
             inputTokens: resultMsg.usage.input_tokens || 0,
             outputTokens: resultMsg.usage.output_tokens || 0,
-            cacheCreationTokens:
-              resultMsg.usage.cache_creation_input_tokens || 0,
+            cacheCreationTokens: resultMsg.usage.cache_creation_input_tokens || 0,
             cacheReadTokens: resultMsg.usage.cache_read_input_tokens || 0,
           };
           phaseSnapshot.phaseCost =
@@ -1122,7 +1037,7 @@ export class LangtonServer extends EventEmitter {
         // Log timeout but continue
         this.logger.log(
           `Result message timeout for phase ${phaseSnapshot.phase.id}: ${error}`,
-          "info"
+          "info",
         );
       }
     }
@@ -1158,16 +1073,12 @@ export class LangtonServer extends EventEmitter {
       }
 
       // Recalculate total cost from all completed phases
-      this.totalCost = this.completedPhases.reduce(
-        (sum, phase) => sum + phase.cost,
-        0
-      );
+      this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
 
       this.logger.log(
         `Phase ${phaseSnapshot.phase.id} ${
           success ? "completed" : "skipped"
-        } - Cost: $${phaseCost.toFixed(4)}, ` +
-          `Total project cost: $${this.totalCost.toFixed(4)}`
+        } - Cost: $${phaseCost.toFixed(4)}, ` + `Total project cost: $${this.totalCost.toFixed(4)}`,
       );
     }
 
@@ -1195,9 +1106,7 @@ export class LangtonServer extends EventEmitter {
         this.logger.log("Phase was skipped, continuing to next phase");
         this.isSkippingPhase = false;
         // Small delay to ensure cleanup completes
-        await new Promise((resolve) =>
-          setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS)
-        );
+        await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS));
         await this.autoStartNextPhase();
       } else {
         // Create error checkpoint before shutdown
@@ -1214,15 +1123,13 @@ export class LangtonServer extends EventEmitter {
         await this.handleError(
           new Error(`Phase failed with exit code ${exitCode}`),
           `phase ${phaseSnapshot.phase.id}`,
-          ErrorSeverity.FATAL
+          ErrorSeverity.FATAL,
         );
       }
     } else if (success && !this.isShuttingDown) {
       // Auto-continue to next phase after a short delay
       // Small delay to ensure cleanup completes
-      await new Promise((resolve) =>
-        setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS)
-      );
+      await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS));
       await this.autoStartNextPhase();
     }
   }
@@ -1233,7 +1140,7 @@ export class LangtonServer extends EventEmitter {
 
   private async handleFileToolCall<T extends ToolName>(
     toolName: T,
-    toolInput: Record<string, unknown> | undefined
+    toolInput: Record<string, unknown> | undefined,
   ): Promise<void> {
     if (!this.watchedPattern) return;
 
@@ -1296,10 +1203,7 @@ export class LangtonServer extends EventEmitter {
         try {
           content = fs.readFileSync(fullPath, "utf-8");
         } catch (error) {
-          this.logger.log(
-            `Error reading file ${filePath}: ${toError(error).message}`,
-            "error"
-          );
+          this.logger.log(`Error reading file ${filePath}: ${toError(error).message}`, "error");
           return;
         }
       }
@@ -1332,10 +1236,7 @@ export class LangtonServer extends EventEmitter {
   private async sendFileTreeUpdate(): Promise<void> {
     if (!this.watchedPattern) return;
 
-    const tree = await buildFileTree(
-      this.config.projectPath,
-      this.watchedPattern
-    );
+    const tree = await buildFileTree(this.config.projectPath, this.watchedPattern);
 
     this.sendEvent({
       id: generateId(),
@@ -1355,12 +1256,12 @@ export class LangtonServer extends EventEmitter {
   private async handleError(
     error: Error,
     context: string,
-    severity: ErrorSeverity = ErrorSeverity.OPERATION
+    severity: ErrorSeverity = ErrorSeverity.OPERATION,
   ): Promise<void> {
     // Always log
     this.logger.log(
       `[${severity}] ${context}: ${error.message}`,
-      severity === ErrorSeverity.FATAL ? "error" : "info"
+      severity === ErrorSeverity.FATAL ? "error" : "info",
     );
 
     // Always send to client
@@ -1397,11 +1298,8 @@ export class LangtonServer extends EventEmitter {
     let nextPhaseIndex = 0;
 
     if (this.completedPhases.length > 0) {
-      const lastCompleted =
-        this.completedPhases[this.completedPhases.length - 1];
-      const lastIndex = this.config.phases.findIndex(
-        (p) => p.id === lastCompleted.phaseId
-      );
+      const lastCompleted = this.completedPhases[this.completedPhases.length - 1];
+      const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
 
       if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
         nextPhaseIndex = lastIndex + 1;
@@ -1412,8 +1310,7 @@ export class LangtonServer extends EventEmitter {
           timestamp: new Date().toISOString(),
           type: "info",
           data: {
-            message:
-              "All phases have been completed. Use phase.redo to re-run the last phase.",
+            message: "All phases have been completed. Use phase.redo to re-run the last phase.",
           },
         } as InfoEvent);
         return;
@@ -1421,10 +1318,7 @@ export class LangtonServer extends EventEmitter {
     }
 
     const nextPhase = this.config.phases[nextPhaseIndex];
-    const logPath = path.join(
-      this.config.projectPath,
-      `.langton/logs/log-${nextPhase.id}.jsonl`
-    );
+    const logPath = path.join(this.config.projectPath, `.langton/logs/log-${nextPhase.id}.jsonl`);
 
     if (fs.existsSync(logPath)) {
       const content = fs.readFileSync(logPath, "utf8");
@@ -1485,9 +1379,7 @@ export class LangtonServer extends EventEmitter {
     }
 
     const lastCompleted = this.completedPhases[this.completedPhases.length - 1];
-    const lastIndex = this.config.phases.findIndex(
-      (p) => p.id === lastCompleted.phaseId
-    );
+    const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
 
     if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
       return lastIndex + 1;
@@ -1501,7 +1393,7 @@ export class LangtonServer extends EventEmitter {
       await this.handleError(
         new Error("Cannot start next phase while current phase is running"),
         "startNextPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -1514,16 +1406,14 @@ export class LangtonServer extends EventEmitter {
       return;
     }
 
-    const lastIndex = this.config.phases.findIndex(
-      (p) => p.id === lastCompleted.phaseId
-    );
+    const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
     if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
       await this.startPhase(this.config.phases[lastIndex + 1].id);
     } else {
       await this.handleError(
         new Error("No more phases to run"),
         "startNextPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
     }
   }
@@ -1533,7 +1423,7 @@ export class LangtonServer extends EventEmitter {
       await this.handleError(
         new Error("No phase is currently running"),
         "skipCurrentPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -1551,7 +1441,7 @@ export class LangtonServer extends EventEmitter {
       await this.handleError(
         new Error("Cannot redo while phase is running"),
         "redoCurrentPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -1577,9 +1467,7 @@ export class LangtonServer extends EventEmitter {
       // Ensure log stream is closed
       this.processManager
         .closeLogStream()
-        .catch((err) =>
-          this.logger.log(`Error closing log stream: ${err}`, "error")
-        );
+        .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
       this.processManager = null;
     }
 
@@ -1589,9 +1477,7 @@ export class LangtonServer extends EventEmitter {
       const promise = this.resultMessagePromises.get(executionId);
       if (promise) {
         clearTimeout(promise.timeout);
-        promise.reject(
-          new Error("Phase cleanup - result message promise cancelled")
-        );
+        promise.reject(new Error("Phase cleanup - result message promise cancelled"));
         this.resultMessagePromises.delete(executionId);
       }
     }
@@ -1601,10 +1487,7 @@ export class LangtonServer extends EventEmitter {
     this.currentPhase = null;
   }
 
-  private async runCommand(
-    command: string,
-    workingDir?: string
-  ): Promise<void> {
+  private async runCommand(command: string, workingDir?: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const proc = spawn(command, {
         shell: true,
@@ -1634,9 +1517,7 @@ export class LangtonServer extends EventEmitter {
     const targetParent = path.dirname(to);
     const parentStats = await fs.promises.stat(targetParent).catch(() => null);
     if (!parentStats || !parentStats.isDirectory()) {
-      throw new Error(
-        `Target parent directory does not exist: ${targetParent}`
-      );
+      throw new Error(`Target parent directory does not exist: ${targetParent}`);
     }
 
     // Check if target already exists
@@ -1690,10 +1571,7 @@ export class LangtonServer extends EventEmitter {
 
     // Initialize repository on first tracked patterns
     if (!this.checkpointGit) {
-      this.checkpointGit = new CheckpointGit(
-        this.config.projectPath,
-        this.logger
-      );
+      this.checkpointGit = new CheckpointGit(this.config.projectPath, this.logger);
       await this.checkpointGit.initialize();
     }
 
@@ -1747,7 +1625,7 @@ export class LangtonServer extends EventEmitter {
       this.logger.log(
         `Checkpoint failed: ${toError(error).message}. ` +
           "Disabling checkpointing for this session.",
-        "error"
+        "error",
       );
       this.checkpointingEnabled = false;
     }
@@ -1773,11 +1651,7 @@ export class LangtonServer extends EventEmitter {
     this.isShuttingDown = true;
 
     // Create exit checkpoint if not shutting down normally (all phases completed)
-    if (
-      reason !== "all phases completed" &&
-      this.checkpointingEnabled &&
-      this.currentPhase
-    ) {
+    if (reason !== "all phases completed" && this.checkpointingEnabled && this.currentPhase) {
       await this.createCheckpoint({
         status: "exit",
         phaseId: this.currentPhase.phase.id,
@@ -1792,9 +1666,7 @@ export class LangtonServer extends EventEmitter {
     // Clean up all pending result message promises
     for (const promise of this.resultMessagePromises.values()) {
       clearTimeout(promise.timeout);
-      promise.reject(
-        new Error("Server shutdown - result message promise cancelled")
-      );
+      promise.reject(new Error("Server shutdown - result message promise cancelled"));
     }
     this.resultMessagePromises.clear();
 
