@@ -10,6 +10,8 @@
     "format": "biome format --write .",
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
+    "validate": "bun server/index.ts --validate",
+    "validate:custom": "bun server/index.ts --validate --config=",
     "test": "bun test tests/unit && bun test tests/e2e",
     "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",
     "test:e2e": "bun run pre-test && bun test tests/e2e",

@@ -1,5 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { calculateCost, loadPhaseConfig } from "../../server/config";
+import {
+  calculateCost,
+  loadPhaseConfig,
+  validatePhaseConfig,
+} from "../../server/config";
 import { DEFAULT_CONFIG } from "../../server/config";
 import type { PhaseConfig } from "../../server/types";
 import { PhaseId } from "../../server/branded-types";
@@ -104,6 +108,386 @@ describe("calculateCost", () => {
     const expected =
       (costs.input + costs.output + 0.5 * costs.inputCache) / 1000;
     expect(result).toBe(expected);
+  });
+});
+
+describe("validatePhaseConfig", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-validation-test");
+  const configPath = path.join(tempDir, "validate-config.json");
+  const projectPath = path.join(tempDir, "project");
+
+  // Helper to create test files
+  const createTestFile = (filePath: string, content: string) => {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(filePath, content);
+  };
+
+  // Clean up temp files
+  const cleanup = () => {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true });
+    }
+  };
+
+  // Set up before each test
+  beforeEach(() => {
+    cleanup();
+    fs.mkdirSync(tempDir, { recursive: true });
+    fs.mkdirSync(projectPath, { recursive: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  test("validates basic configuration successfully", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt content");
+
+    const config = [
+      {
+        id: "test-phase",
+        name: "Test Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.phaseCount).toBe(1);
+    expect(result.promptFileCount).toBe(1);
+    expect(result.systemPromptFileCount).toBe(0);
+    expect(result.workspaceSetupCount).toBe(0);
+    expect(result.watchingPhaseCount).toBe(0);
+    expect(result.checkpointPhaseCount).toBe(0);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  test("counts multiple phases correctly", async () => {
+    createTestFile(path.join(tempDir, "prompt1.md"), "Prompt 1");
+    createTestFile(path.join(tempDir, "prompt2.md"), "Prompt 2");
+    createTestFile(path.join(tempDir, "system.md"), "System prompt");
+
+    const config = [
+      {
+        id: "phase-1",
+        name: "First Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt1.md",
+        watch: "*.md",
+      },
+      {
+        id: "phase-2",
+        name: "Second Phase",
+        model: "sonnet",
+        continuationMode: "continue-previous",
+        promptFile: "./prompt2.md",
+        appendSystemPromptFile: "./system.md",
+        checkpointAndWatch: ["*.js"],
+        workspaceSetup: [
+          {
+            type: "copy",
+            copy: {
+              from: "./prompt1.md",
+              to: "copied-file.md",
+            },
+          },
+        ],
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.phaseCount).toBe(2);
+    expect(result.promptFileCount).toBe(2);
+    expect(result.systemPromptFileCount).toBe(1);
+    expect(result.workspaceSetupCount).toBe(1);
+    expect(result.watchingPhaseCount).toBe(1);
+    expect(result.checkpointPhaseCount).toBe(1);
+  });
+
+  test("detects duplicate phase IDs", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "duplicate-id",
+        name: "First Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "duplicate-id",
+        name: "Second Phase",
+        model: "sonnet",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    await expect(validatePhaseConfig(configPath, projectPath)).rejects.toThrow(
+      "Duplicate phase ID"
+    );
+  });
+
+  test("warns about duplicate phase names", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "phase-1",
+        name: "Duplicate Name",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "phase-2",
+        name: "Duplicate Name",
+        model: "sonnet",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain(
+      'Duplicate phase name "Duplicate Name"'
+    );
+  });
+
+  test("warns about empty prompt files", async () => {
+    createTestFile(path.join(tempDir, "empty.md"), ""); // Empty file
+
+    const config = [
+      {
+        id: "test-phase",
+        name: "Test Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./empty.md",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("is empty");
+  });
+
+  test("warns about large prompt files", async () => {
+    const largeContent = "x".repeat(2 * 1024 * 1024); // 2MB file
+    createTestFile(path.join(tempDir, "large.md"), largeContent);
+
+    const config = [
+      {
+        id: "test-phase",
+        name: "Test Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./large.md",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("is large");
+  });
+
+  test("validates workspace setup copy operations", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+    createTestFile(path.join(tempDir, "source.txt"), "Source content");
+
+    const config = [
+      {
+        id: "test-phase",
+        name: "Test Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+        workspaceSetup: [
+          {
+            type: "copy",
+            copy: {
+              from: "./source.txt",
+              to: "target.txt",
+            },
+          },
+        ],
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.workspaceSetupCount).toBe(1);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  test("throws on invalid target paths", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+    createTestFile(path.join(tempDir, "source.txt"), "Source content");
+
+    const config = [
+      {
+        id: "test-phase",
+        name: "Test Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+        workspaceSetup: [
+          {
+            type: "copy",
+            copy: {
+              from: "./source.txt",
+              to: "../outside-project.txt", // Would write outside project
+            },
+          },
+        ],
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    await expect(validatePhaseConfig(configPath, projectPath)).rejects.toThrow(
+      "Invalid target path"
+    );
+  });
+
+  test("warns about potentially dangerous commands", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "test-phase",
+        name: "Test Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+        workspaceSetup: [
+          {
+            type: "command",
+            command: {
+              run: "rm -rf /", // Dangerous command
+            },
+          },
+        ],
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain(
+      "Potentially dangerous command detected"
+    );
+  });
+
+  test("validates continuation mode dependencies", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    // First phase with continue-previous mode
+    const config = [
+      {
+        id: "first-phase",
+        name: "First Phase",
+        model: "opus",
+        continuationMode: "continue-previous", // Invalid for first phase
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("but there's no previous phase");
+  });
+
+  test("warns when continuing from phase without output", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "phase-1",
+        name: "First Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+        // No watch or checkpointAndWatch
+      },
+      {
+        id: "phase-2",
+        name: "Second Phase",
+        model: "sonnet",
+        continuationMode: "continue-previous",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const result = await validatePhaseConfig(configPath, projectPath);
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain(
+      "which doesn't watch or checkpoint any files"
+    );
+  });
+
+  test("throws on empty command", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "test-phase",
+        name: "Test Phase",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+        workspaceSetup: [
+          {
+            type: "command",
+            command: {
+              run: "", // Empty command
+            },
+          },
+        ],
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    await expect(validatePhaseConfig(configPath, projectPath)).rejects.toThrow(
+      "Command cannot be empty"
+    );
+  });
+
+  test("delegates to loadPhaseConfig for basic validation", async () => {
+    const invalidConfig = [
+      {
+        // Missing required fields
+        promptText: "Test prompt",
+      },
+    ];
+
+    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    await expect(
+      validatePhaseConfig(configPath, projectPath)
+    ).rejects.toThrow();
   });
 });
 

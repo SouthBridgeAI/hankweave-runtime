@@ -372,3 +372,200 @@ export function calculateCost(
 
   return inputCost + cacheCreationCost + cacheReadCost + outputCost;
 }
+
+// ============================================================================
+// Enhanced Validation
+// ============================================================================
+
+export interface ValidationResult {
+  phaseCount: number;
+  promptFileCount: number;
+  systemPromptFileCount: number;
+  workspaceSetupCount: number;
+  watchingPhaseCount: number;
+  checkpointPhaseCount: number;
+  warnings: string[];
+}
+
+/**
+ * Validate phase configuration with enhanced checks.
+ *
+ * This performs all the validation of loadPhaseConfig plus additional
+ * checks that are useful for pre-flight validation but not strictly
+ * required for running.
+ *
+ * @param configPath - Path to configuration file
+ * @param projectPath - Project root directory for relative path resolution
+ * @returns Validation result with statistics and warnings
+ * @throws Error with detailed messages if validation fails
+ */
+export async function validatePhaseConfig(
+  configPath: string,
+  projectPath: string,
+): Promise<ValidationResult> {
+  // First, use loadPhaseConfig to do basic validation
+  // This will throw if there are any structural issues
+  const phases = loadPhaseConfig(configPath);
+
+  const result: ValidationResult = {
+    phaseCount: phases.length,
+    promptFileCount: 0,
+    systemPromptFileCount: 0,
+    workspaceSetupCount: 0,
+    watchingPhaseCount: 0,
+    checkpointPhaseCount: 0,
+    warnings: [],
+  };
+
+  // Additional validation checks
+  const phaseIds = new Set<string>();
+  const phaseNames = new Set<string>();
+
+  for (const [index, phase] of phases.entries()) {
+    const phaseLabel = `Phase ${index + 1} (${phase.id})`;
+
+    // Check for duplicate IDs
+    if (phaseIds.has(phase.id)) {
+      throw new Error(`${phaseLabel}: Duplicate phase ID "${phase.id}"`);
+    }
+    phaseIds.add(phase.id);
+
+    // Warn about duplicate names (not fatal)
+    if (phaseNames.has(phase.name)) {
+      result.warnings.push(`${phaseLabel}: Duplicate phase name "${phase.name}"`);
+    }
+    phaseNames.add(phase.name);
+
+    // Count prompt files
+    if (phase.promptFile) {
+      const files = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+      result.promptFileCount += files.length;
+
+      // Verify files are readable (loadPhaseConfig checks existence)
+      for (const file of files) {
+        try {
+          const stats = await fs.promises.stat(file);
+          if (stats.size === 0) {
+            result.warnings.push(`${phaseLabel}: Prompt file "${file}" is empty`);
+          }
+          if (stats.size > 1024 * 1024) {
+            // 1MB
+            result.warnings.push(
+              `${phaseLabel}: Prompt file "${file}" is large (${(stats.size / 1024 / 1024).toFixed(
+                2,
+              )}MB)`,
+            );
+          }
+        } catch (error) {
+          // Should not happen as loadPhaseConfig already checked
+          throw new Error(`${phaseLabel}: Cannot stat prompt file "${file}": ${error}`);
+        }
+      }
+    }
+
+    // Count system prompt files
+    if (phase.appendSystemPromptFile) {
+      const files = Array.isArray(phase.appendSystemPromptFile)
+        ? phase.appendSystemPromptFile
+        : [phase.appendSystemPromptFile];
+      result.systemPromptFileCount += files.length;
+    }
+
+    // Validate workspace setup
+    if (phase.workspaceSetup) {
+      result.workspaceSetupCount += phase.workspaceSetup.length;
+
+      for (const [itemIndex, item] of phase.workspaceSetup.entries()) {
+        if (item.type === "copy" && item.copy) {
+          // Check source exists (already done by loadPhaseConfig)
+          // Check target parent directory
+          const targetPath = path.join(projectPath, item.copy.to);
+          const targetParent = path.dirname(targetPath);
+
+          try {
+            const relativeParent = path.relative(projectPath, targetParent);
+            if (relativeParent.startsWith("..")) {
+              throw new Error(
+                `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
+                  `Target path "${item.copy.to}" would write outside project directory`,
+              );
+            }
+          } catch (_error) {
+            // Path resolution error
+            throw new Error(
+              `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
+                `Invalid target path "${item.copy.to}"`,
+            );
+          }
+
+          // Warn if target already exists
+          if (fs.existsSync(targetPath)) {
+            result.warnings.push(
+              `${phaseLabel}: Copy target "${item.copy.to}" already exists and will be overwritten`,
+            );
+          }
+        } else if (item.type === "command" && item.command) {
+          // Basic command validation
+          const command = item.command.run.trim();
+          if (!command) {
+            throw new Error(`${phaseLabel}, workspace setup item ${itemIndex + 1}: Empty command`);
+          }
+
+          // Warn about potentially dangerous commands
+          const dangerousPatterns = [
+            /rm\s+-rf\s+\//, // rm -rf /
+            /rm\s+-rf\s+~/, // rm -rf ~
+            />\s*\/dev\/sda/, // Writing to disk devices
+            /format\s+/i, // Format commands
+            /del\s+\/s\s+\/q\s+c:/i, // Windows delete
+          ];
+
+          for (const pattern of dangerousPatterns) {
+            if (pattern.test(command)) {
+              result.warnings.push(
+                `${phaseLabel}: Potentially dangerous command detected: "${command}"`,
+              );
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Count phases with watching
+    if (phase.watch) {
+      result.watchingPhaseCount++;
+    }
+
+    // Count phases with checkpoints
+    if (phase.checkpointAndWatch && phase.checkpointAndWatch.length > 0) {
+      result.checkpointPhaseCount++;
+    }
+
+    // Validate continuation mode
+    if (phase.continuationMode === "continue-previous" && index === 0) {
+      result.warnings.push(
+        `${phaseLabel}: First phase has continuationMode "continue-previous" but there's no previous phase`,
+      );
+    }
+
+    // Check phase dependencies
+    if (phase.continuationMode === "continue-previous" && index > 0) {
+      const previousPhase = phases[index - 1];
+      // Warn if previous phase doesn't produce output that might be needed
+      if (!previousPhase.watch && !previousPhase.checkpointAndWatch) {
+        result.warnings.push(
+          `${phaseLabel}: Continues from previous phase "${previousPhase.id}" ` +
+            `which doesn't watch or checkpoint any files`,
+        );
+      }
+    }
+  }
+
+  // Global warnings
+  if (result.phaseCount === 0) {
+    throw new Error("Configuration must contain at least one phase");
+  }
+
+  return result;
+}
