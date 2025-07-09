@@ -16,7 +16,7 @@ import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
-import { ErrorSeverity } from "./error-types.js";
+import { APITimeoutError, ErrorSeverity } from "./error-types.js";
 import type { ToolInputMap, ToolName } from "./tool-types.js";
 import { isStartPhaseCommand, isValidClientCommand } from "./type-guards.js";
 import type {
@@ -698,6 +698,45 @@ export class LangtonServer extends EventEmitter {
   }
 
   private handleAssistantMessage(msg: AssistantMessage, phaseId: string): void {
+    // Check for synthetic timeout messages first
+    if (msg.message.model === "<synthetic>") {
+      const content = msg.message.content;
+      const textContent = Array.isArray(content)
+        ? content.find((item) => item.type === "text")?.text
+        : content;
+
+      if (textContent === "API Error: Request timed out.") {
+        this.logger.log(`API timeout detected in synthetic message for phase ${phaseId}`, "error");
+
+        const timeoutError = new APITimeoutError(phaseId, {
+          message: textContent,
+          timestamp: new Date().toISOString(),
+          synthetic: true,
+        });
+
+        // Send error event
+        this.sendEvent({
+          id: generateId(),
+          timestamp: new Date().toISOString(),
+          type: "error",
+          data: {
+            message: timeoutError.message,
+            phase: phaseId,
+            fatal: false,
+            severity: timeoutError.severity,
+            context: JSON.stringify(timeoutError.context),
+          },
+        } as ErrorEvent);
+
+        // Process manager will handle the cleanup
+        if (this.processManager) {
+          this.processManager.kill();
+        }
+
+        return; // Stop processing
+      }
+    }
+
     if (msg.message.usage) {
       const usage: TokenUsage = {
         inputTokens: msg.message.usage.input_tokens || 0,
@@ -745,6 +784,39 @@ export class LangtonServer extends EventEmitter {
     for (const item of contentArray) {
       if ("text" in item && item.type === "text") {
         const textItem = item as TextContent;
+
+        // Check for API timeout error
+        if (textItem.text === "API Error: Request timed out.") {
+          this.logger.log(`API timeout detected in phase ${phaseId}`, "error");
+
+          // Immediately handle the timeout error
+          const timeoutError = new APITimeoutError(phaseId, {
+            message: textItem.text,
+            timestamp: new Date().toISOString(),
+          });
+
+          // Send error event
+          this.sendEvent({
+            id: generateId(),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            data: {
+              message: timeoutError.message,
+              phase: phaseId,
+              fatal: false,
+              severity: timeoutError.severity,
+              context: JSON.stringify(timeoutError.context),
+            },
+          } as ErrorEvent);
+
+          // Process manager will handle the cleanup
+          if (this.processManager) {
+            this.processManager.kill();
+          }
+
+          return; // Stop processing further messages
+        }
+
         this.sendEvent({
           id: generateId(),
           timestamp: new Date().toISOString(),
@@ -813,6 +885,33 @@ export class LangtonServer extends EventEmitter {
         this.resultMessagePromises.delete(executionId);
         promise.resolve(msg);
       }
+    }
+
+    // Check for API timeout in result (can be error subtype OR success with is_error=true)
+    if (msg.result === "API Error: Request timed out." && msg.is_error) {
+      this.logger.log(`API timeout detected in result message for phase ${phaseId}`, "error");
+
+      const timeoutError = new APITimeoutError(phaseId, {
+        message: msg.result,
+        timestamp: new Date().toISOString(),
+        is_error: msg.is_error,
+        duration_ms: msg.duration_ms,
+        duration_api_ms: msg.duration_api_ms,
+      });
+
+      // Send error event
+      this.sendEvent({
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: timeoutError.message,
+          phase: phaseId,
+          fatal: false,
+          severity: timeoutError.severity,
+          context: JSON.stringify(timeoutError.context),
+        },
+      } as ErrorEvent);
     }
 
     if (msg.subtype === "success") {

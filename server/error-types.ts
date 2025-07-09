@@ -50,3 +50,13 @@ export class OperationError extends LangtonError {
     this.name = "OperationError";
   }
 }
+
+export class APITimeoutError extends LangtonError {
+  constructor(phaseId: string, context?: Record<string, unknown>) {
+    super("Claude API request timed out", ErrorSeverity.PHASE, "API_TIMEOUT_ERROR", {
+      ...context,
+      phaseId,
+    });
+    this.name = "APITimeoutError";
+  }
+}

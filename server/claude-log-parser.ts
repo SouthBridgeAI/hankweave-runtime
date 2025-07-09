@@ -184,10 +184,13 @@ export function loadPhaseStateFromLog(
           sessionId = entry.session_id;
         }
 
-        if (entry.type === "result" && entry.subtype === "success") {
-          success = true;
+        if (entry.type === "result") {
+          // Mark success only if subtype is "success" AND is_error is false
+          if (entry.subtype === "success" && !entry.is_error) {
+            success = true;
+          }
 
-          // Use final usage from result message if available
+          // Use final usage from result message if available (for both success and error)
           if (entry.usage) {
             tokens.inputTokens = entry.usage.input_tokens || 0;
             tokens.outputTokens = entry.usage.output_tokens || 0;

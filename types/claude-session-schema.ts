@@ -41,7 +41,10 @@ const toolNames = [
 export const toolNameSchema = z.enum(toolNames);
 
 // Claude model identifier - accepting the full model name from logs
-const modelSchema = z.string().regex(/^claude-.*$/, "Must be a Claude model identifier");
+// Also accepts <synthetic> for timeout messages
+const modelSchema = z
+  .string()
+  .regex(/^(claude-.*|<synthetic>)$/, "Must be a Claude model identifier or <synthetic>");
 
 // Permission mode for Claude Code
 const permissionModeSchema = z.enum(["bypassPermissions", "requestPermissions"]);
@@ -156,8 +159,13 @@ export const assistantMessageSchema = z.object({
   type: z.literal("assistant"),
 
   message: z.object({
-    // Message identifier
-    id: z.string().regex(/^msg_[a-zA-Z0-9]+$/, "Invalid message ID format"),
+    // Message identifier - normal messages use msg_ prefix, synthetic messages may use UUID
+    id: z
+      .string()
+      .regex(
+        /^(msg_[a-zA-Z0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
+        "Invalid message ID format",
+      ),
 
     type: z.literal("message"),
     role: z.literal("assistant"),
