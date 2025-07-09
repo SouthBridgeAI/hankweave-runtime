@@ -53,8 +53,12 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
       const keys = (issue as z.ZodIssue & { keys?: string[] }).keys?.join(", ");
       const phaseIndex = typeof path[0] === "number" ? path[0] : undefined;
       const phaseData =
-        phaseIndex !== undefined && Array.isArray(rawConfig) ? rawConfig[phaseIndex] : null;
-      const phaseId = phaseData?.id || (phaseIndex !== undefined ? `index ${phaseIndex}` : "");
+        phaseIndex !== undefined && Array.isArray(rawConfig)
+          ? rawConfig[phaseIndex]
+          : null;
+      const phaseId =
+        phaseData?.id ||
+        (phaseIndex !== undefined ? `index ${phaseIndex}` : "");
       const phaseName = phaseData?.name || "unnamed";
 
       if (phaseIndex !== undefined) {
@@ -90,7 +94,10 @@ const workspaceSetupItemSchema = z.discriminatedUnion("type", [
     type: z.literal("command"),
     command: z.object({
       run: z.string().min(1, "Command cannot be empty"),
-      workingDirectory: z.enum(["project", "lastCopied"]).optional().default("project"),
+      workingDirectory: z
+        .enum(["project", "lastCopied"])
+        .optional()
+        .default("project"),
     }),
   }),
 ]);
@@ -101,17 +108,19 @@ const phaseConfigSchema = z
       .string()
       .min(
         1,
-        "Phase ID cannot be empty. This uniquely identifies your phase (e.g., 'phase-1', 'analysis'). Fix: Add a unique id field.",
+        "Phase ID cannot be empty. This uniquely identifies your phase (e.g., 'phase-1', 'analysis'). Fix: Add a unique id field."
       ),
     name: z
       .string()
       .min(
         1,
-        "Phase name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
+        "Phase name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field."
       ),
     promptFile: z.union([z.string(), z.array(z.string())]).optional(),
     promptText: z.string().optional(),
-    appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
+    appendSystemPromptFile: z
+      .union([z.string(), z.array(z.string())])
+      .optional(),
     appendSystemPromptText: z.string().optional(),
     model: z.enum(["sonnet", "opus"], {
       errorMap: () => ({
@@ -135,12 +144,17 @@ const phaseConfigSchema = z
     message:
       "Either promptFile or promptText must be provided. The prompt tells Claude what to do in this phase. Fix: Add either promptFile (path to .md file) or promptText (inline prompt string).",
   })
-  .refine((data) => !(data.appendSystemPromptFile && data.appendSystemPromptText), {
-    message:
-      "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
-  });
+  .refine(
+    (data) => !(data.appendSystemPromptFile && data.appendSystemPromptText),
+    {
+      message:
+        "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
+    }
+  );
 
-const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one phase required");
+const phaseConfigArraySchema = z
+  .array(phaseConfigSchema)
+  .min(1, "At least one phase required");
 
 // ============================================================================
 // Default Configuration
@@ -203,7 +217,7 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       if (phase.promptFile) {
         if (Array.isArray(phase.promptFile)) {
           resolved.promptFile = phase.promptFile.map((file) =>
-            path.isAbsolute(file) ? file : path.resolve(configDir, file),
+            path.isAbsolute(file) ? file : path.resolve(configDir, file)
           );
         } else if (!path.isAbsolute(phase.promptFile)) {
           resolved.promptFile = path.resolve(configDir, phase.promptFile);
@@ -213,11 +227,15 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       // Handle appendSystemPromptFile - can be string or array
       if (phase.appendSystemPromptFile) {
         if (Array.isArray(phase.appendSystemPromptFile)) {
-          resolved.appendSystemPromptFile = phase.appendSystemPromptFile.map((file) =>
-            path.isAbsolute(file) ? file : path.resolve(configDir, file),
+          resolved.appendSystemPromptFile = phase.appendSystemPromptFile.map(
+            (file) =>
+              path.isAbsolute(file) ? file : path.resolve(configDir, file)
           );
         } else if (!path.isAbsolute(phase.appendSystemPromptFile)) {
-          resolved.appendSystemPromptFile = path.resolve(configDir, phase.appendSystemPromptFile);
+          resolved.appendSystemPromptFile = path.resolve(
+            configDir,
+            phase.appendSystemPromptFile
+          );
         }
       }
 
@@ -252,26 +270,32 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
         validationErrors.push(
           `Phase ${index + 1} (${phase.id}): model "${
             phase.model
-          }" is not valid. Must be one of: ${validModels.join(", ")}`,
+          }" is not valid. Must be one of: ${validModels.join(", ")}`
         );
       }
 
       // Validate promptFile existence and readability
       if (phase.promptFile) {
-        const promptFiles = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+        const promptFiles = Array.isArray(phase.promptFile)
+          ? phase.promptFile
+          : [phase.promptFile];
         for (const file of promptFiles) {
           if (!fs.existsSync(file)) {
             validationErrors.push(
-              `Phase ${index + 1} (${phase.id}): promptFile "${file}" does not exist`,
+              `Phase ${index + 1} (${
+                phase.id
+              }): promptFile "${file}" does not exist`
             );
           } else {
             try {
               fs.readFileSync(file, "utf-8");
             } catch (error) {
               validationErrors.push(
-                `Phase ${index + 1} (${phase.id}): promptFile "${file}" is not readable: ${
+                `Phase ${index + 1} (${
+                  phase.id
+                }): promptFile "${file}" is not readable: ${
                   error instanceof Error ? error.message : String(error)
-                }`,
+                }`
               );
             }
           }
@@ -286,7 +310,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
         for (const file of systemPromptFiles) {
           if (!fs.existsSync(file)) {
             validationErrors.push(
-              `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${file}" does not exist`,
+              `Phase ${index + 1} (${
+                phase.id
+              }): appendSystemPromptFile "${file}" does not exist`
             );
           } else {
             try {
@@ -297,7 +323,7 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
                   phase.id
                 }): appendSystemPromptFile "${file}" is not readable: ${
                   error instanceof Error ? error.message : String(error)
-                }`,
+                }`
               );
             }
           }
@@ -313,7 +339,7 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
               validationErrors.push(
                 `Phase ${index + 1} (${phase.id}), workspace setup item ${
                   itemIndex + 1
-                }: source path "${item.copy.from}" does not exist`,
+                }: source path "${item.copy.from}" does not exist`
               );
             }
           }
@@ -322,7 +348,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
     }
 
     if (validationErrors.length > 0) {
-      throw new Error(`Phase configuration validation failed:\n${validationErrors.join("\n")}`);
+      throw new Error(
+        `Phase configuration validation failed:\n${validationErrors.join("\n")}`
+      );
     }
 
     // Transform string IDs to PhaseId branded types
@@ -332,7 +360,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
     }));
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`Failed to load phase config from ${configPath}: ${error.message}`);
+      throw new Error(
+        `Failed to load phase config from ${configPath}: ${error.message}`
+      );
     }
     throw error;
   }
@@ -363,10 +393,11 @@ export function calculateCost(
     cacheCreationTokens: number;
     cacheReadTokens: number;
   },
-  costs: ServerConfig["costsPerMTok"],
+  costs: ServerConfig["costsPerMTok"]
 ): number {
   const inputCost = (usage.inputTokens / 1_000_000) * costs.input;
-  const cacheCreationCost = (usage.cacheCreationTokens / 1_000_000) * costs.inputCache;
+  const cacheCreationCost =
+    (usage.cacheCreationTokens / 1_000_000) * costs.inputCache;
   const cacheReadCost = (usage.cacheReadTokens / 1_000_000) * costs.cacheRead;
   const outputCost = (usage.outputTokens / 1_000_000) * costs.output;
 
@@ -401,7 +432,7 @@ export interface ValidationResult {
  */
 export async function validatePhaseConfig(
   configPath: string,
-  projectPath: string,
+  projectPath: string
 ): Promise<ValidationResult> {
   // First, use loadPhaseConfig to do basic validation
   // This will throw if there are any structural issues
@@ -432,13 +463,17 @@ export async function validatePhaseConfig(
 
     // Warn about duplicate names (not fatal)
     if (phaseNames.has(phase.name)) {
-      result.warnings.push(`${phaseLabel}: Duplicate phase name "${phase.name}"`);
+      result.warnings.push(
+        `${phaseLabel}: Duplicate phase name "${phase.name}"`
+      );
     }
     phaseNames.add(phase.name);
 
     // Count prompt files
     if (phase.promptFile) {
-      const files = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+      const files = Array.isArray(phase.promptFile)
+        ? phase.promptFile
+        : [phase.promptFile];
       result.promptFileCount += files.length;
 
       // Verify files are readable (loadPhaseConfig checks existence)
@@ -446,19 +481,25 @@ export async function validatePhaseConfig(
         try {
           const stats = await fs.promises.stat(file);
           if (stats.size === 0) {
-            result.warnings.push(`${phaseLabel}: Prompt file "${file}" is empty`);
+            result.warnings.push(
+              `${phaseLabel}: Prompt file "${file}" is empty`
+            );
           }
           if (stats.size > 1024 * 1024) {
             // 1MB
             result.warnings.push(
-              `${phaseLabel}: Prompt file "${file}" is large (${(stats.size / 1024 / 1024).toFixed(
-                2,
-              )}MB)`,
+              `${phaseLabel}: Prompt file "${file}" is large (${(
+                stats.size /
+                1024 /
+                1024
+              ).toFixed(2)}MB)`
             );
           }
         } catch (error) {
           // Should not happen as loadPhaseConfig already checked
-          throw new Error(`${phaseLabel}: Cannot stat prompt file "${file}": ${error}`);
+          throw new Error(
+            `${phaseLabel}: Cannot stat prompt file "${file}": ${error}`
+          );
         }
       }
     }
@@ -487,28 +528,32 @@ export async function validatePhaseConfig(
             if (relativeParent.startsWith("..")) {
               throw new Error(
                 `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
-                  `Target path "${item.copy.to}" would write outside project directory`,
+                  `Target path "${item.copy.to}" would write outside project directory`
               );
             }
           } catch (_error) {
             // Path resolution error
             throw new Error(
               `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
-                `Invalid target path "${item.copy.to}"`,
+                `Invalid target path "${item.copy.to}"`
             );
           }
 
           // Warn if target already exists
           if (fs.existsSync(targetPath)) {
             result.warnings.push(
-              `${phaseLabel}: Copy target "${item.copy.to}" already exists and will be overwritten`,
+              `${phaseLabel}: Copy target "${item.copy.to}" already exists and will be overwritten`
             );
           }
         } else if (item.type === "command" && item.command) {
           // Basic command validation
           const command = item.command.run.trim();
           if (!command) {
-            throw new Error(`${phaseLabel}, workspace setup item ${itemIndex + 1}: Empty command`);
+            throw new Error(
+              `${phaseLabel}, workspace setup item ${
+                itemIndex + 1
+              }: Empty command`
+            );
           }
 
           // Warn about potentially dangerous commands
@@ -523,7 +568,7 @@ export async function validatePhaseConfig(
           for (const pattern of dangerousPatterns) {
             if (pattern.test(command)) {
               result.warnings.push(
-                `${phaseLabel}: Potentially dangerous command detected: "${command}"`,
+                `${phaseLabel}: Potentially dangerous command detected: "${command}"`
               );
               break;
             }
@@ -545,7 +590,7 @@ export async function validatePhaseConfig(
     // Validate continuation mode
     if (phase.continuationMode === "continue-previous" && index === 0) {
       result.warnings.push(
-        `${phaseLabel}: First phase has continuationMode "continue-previous" but there's no previous phase`,
+        `${phaseLabel}: First phase has continuationMode "continue-previous" but there's no previous phase`
       );
     }
 
@@ -556,7 +601,7 @@ export async function validatePhaseConfig(
       if (!previousPhase.watch && !previousPhase.checkpointAndWatch) {
         result.warnings.push(
           `${phaseLabel}: Continues from previous phase "${previousPhase.id}" ` +
-            `which doesn't watch or checkpoint any files`,
+            `which doesn't watch or checkpoint any files`
         );
       }
     }
