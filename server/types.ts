@@ -3,6 +3,48 @@ import type { logMessageSchema } from "../types/claude-session-schema.js";
 import type { ErrorSeverity } from "./error-types.js";
 
 // ============================================================================
+// Model Types
+// ============================================================================
+
+export type ModelName = "sonnet" | "opus";
+
+// ============================================================================
+// Process Exit Types
+// ============================================================================
+
+export type ProcessExit =
+  | { type: "success" }
+  | { type: "error"; code: number }
+  | { type: "killed"; signal: NodeJS.Signals };
+
+// ============================================================================
+// Continuation Mode Types
+// ============================================================================
+
+export type ContinuationMode = "fresh" | "continue-previous";
+
+// ============================================================================
+// Message ID Types
+// ============================================================================
+
+export type ClaudeMessageId = `msg_${string}`;
+export type UUIDMessageId = string; // Keep flexible for UUIDs
+
+// ============================================================================
+// Checkpoint Status Types
+// ============================================================================
+
+export const CHECKPOINT_STATUS = {
+  WORKSPACE_SETUP: "workspace-setup",
+  COMPLETED: "completed",
+  ERROR: "error",
+  EXIT: "exit",
+  SKIPPED: "skipped",
+} as const;
+
+export type CheckpointStatus = (typeof CHECKPOINT_STATUS)[keyof typeof CHECKPOINT_STATUS];
+
+// ============================================================================
 // Server Configuration
 // ============================================================================
 
@@ -90,17 +132,6 @@ export interface PhaseConfig {
   /** Glob patterns to track for checkpointing and watching (files and directories) */
   checkpointAndWatch?: string[];
 }
-
-/**
- * Status types for checkpoint git commits.
- *
- * - `workspace-setup`: Created after workspace operations (copy files, run commands)
- * - `completed`: Created when a phase finishes successfully
- * - `error`: Created when a phase fails with an error (creates error branch)
- * - `exit`: Created when server is force-shutdown during a phase (creates exit branch)
- * - `skipped`: Created when a phase is manually skipped by user
- */
-export type CheckpointStatus = "workspace-setup" | "completed" | "error" | "exit" | "skipped";
 
 /**
  * Information for creating a checkpoint commit in the shadow git repository.

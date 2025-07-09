@@ -239,3 +239,16 @@ export function toError(error: unknown): Error {
   if (typeof error === "string") return new Error(error);
   return new Error(String(error));
 }
+
+// ============================================================================
+// Exhaustive Checking
+// ============================================================================
+
+/**
+ * Exhaustive checking helper for switch statements.
+ * Use this in the default case to ensure all union cases are handled.
+ * TypeScript will error if a case is missing.
+ */
+export function assertNever(x: never): never {
+  throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+}

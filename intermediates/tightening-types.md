@@ -1307,8 +1307,6 @@ if (isKnownTool(toolName)) {
 }
 ```
 
-
-
 ---
 
 ## Implementation Order
@@ -1378,8 +1376,6 @@ These change the client-server contract:
 - Update synthetic message handling
 - Add generic types to ServerEvent
 
-
-
 ### Group 6: Configuration Format Changes (User-Facing)
 
 These affect how users write config files:
@@ -1395,8 +1391,6 @@ These affect how users write config files:
 - Whether to continue from previous phases
 - Phase names and IDs
 
-
-
 ### Group 7: Claude Log Validation Updates
 
 Loosening validation for forward compatibility:
@@ -1404,4 +1398,3 @@ Loosening validation for forward compatibility:
 - Make tool validation more permissive
 - Allow unknown fields with passthrough
 - Keep only critical validations
-
