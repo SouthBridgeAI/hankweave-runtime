@@ -244,7 +244,7 @@ describe("Server Shutdown Command E2E Test", () => {
       // Phase 3 should either not have a completion event or be marked as failed
       if (testState.phase3Completed) {
         expect(testState.phase3Completed.data.success).toBe(false);
-        expect(testState.phase3Completed.data.exitCode).not.toBe(0);
+        expect(testState.phase3Completed.data.exitStatus.type).toBe("error");
       }
     });
 

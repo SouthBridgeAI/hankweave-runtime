@@ -107,7 +107,7 @@ export function runEarlyPhaseFailureTests(testState: TestState) {
             e.data.message.includes(completed.data.phaseId),
         );
 
-        if (!completed.data.success && completed.data.exitCode !== 0) {
+        if (!completed.data.success && completed.data.exitStatus.type === "error") {
           expect(errorEvent).toBeDefined();
         }
       }

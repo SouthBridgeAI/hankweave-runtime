@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
-import type { PhaseExecutionId, PhaseId, SessionId } from "./branded-types.js";
+import type { EventId, PhaseExecutionId, PhaseId, SessionId } from "./branded-types.js";
 import type { ErrorSeverity } from "./error-types.js";
 
 // ============================================================================
@@ -323,7 +323,7 @@ export type FileNode =
  */
 export interface ServerEvent<T extends string = string, D = unknown> {
   /** Unique ID for this event instance */
-  id: string;
+  id: EventId;
   /** ISO 8601 timestamp of when the event was created */
   timestamp: string;
   /** Event type identifier for client-side routing */
@@ -411,8 +411,8 @@ export interface PhaseCompletedEvent extends ServerEvent {
     cost: number;
     /** Execution time in milliseconds */
     duration: number;
-    /** Process exit code (0 = success, undefined = killed) */
-    exitCode: number | undefined;
+    /** Process exit status */
+    exitStatus: ProcessExit;
   };
 }
 

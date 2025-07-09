@@ -19,24 +19,27 @@ While running:
 
 TODOs:
 
-1. Actually implement rollbacks on checkpoints, failed resumes
-2. Add a universal system prompt that gets appended to the top of all phases
-3. Abstract out claude code so we can sub in other things
-4. Implement a langtonflow for making changelogs
-5. Use input stream json and implement and test
-6. Use git commits! (done)
-7. Move .logs into .langton (done)
-8. Consider using bind mounts to make the actual data inputs completely read-only
-9. Use full paths for folders and replace those in the prompts. (done)
-10. safe_exec and that journey
-11. Implement actual workspace copying in and out instead of running commands which can be brittle
-12. Retry system and error handling?
-13. Extracting data after phases or at completion?
-14. Adding description streaming with flash
-15. Add some interactive check to e2e tests so claude can't run it
-16. Add a message about the cost tracking that's human so claude won't keep changing it back
-17. Rename the actual runner to tadpole?
-18. Investigate whether we need our own internal messageid since Claude reuses messageids
+1. Validate command for phases
+2. Cleanup command to rollback to checkpoint
+3. dry run to validate phases, skip all without starting claude, and rollback
+4. Actually implement rollbacks on checkpoints, failed resumes
+5. Add a universal system prompt that gets appended to the top of all phases
+6. Abstract out claude code so we can sub in other things
+7. Implement a langtonflow for making changelogs
+8. Use input stream json and implement and test
+9. Use git commits! (done)
+10. Move .logs into .langton (done)
+11. Consider using bind mounts to make the actual data inputs completely read-only
+12. Use full paths for folders and replace those in the prompts. (done)
+13. safe_exec and that journey
+14. Implement actual workspace copying in and out instead of running commands which can be brittle
+15. Retry system and error handling?
+16. Extracting data after phases or at completion?
+17. Adding description streaming with flash
+18. Add some interactive check to e2e tests so claude can't run it
+19. Add a message about the cost tracking that's human so claude won't keep changing it back
+20. Rename the actual runner to tadpole?
+21. Investigate whether we need our own internal messageid since Claude reuses messageids
 
 Cleanup TODOs:
 

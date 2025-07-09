@@ -187,7 +187,7 @@ describe("Skip Phase and Continue E2E Test", () => {
   describe("Phase Skipping", () => {
     test("Phase 1 was skipped", () => {
       expect(testState.phase1Completed?.data.success).toBe(false);
-      expect(testState.phase1Completed?.data.exitCode).not.toBe(0);
+      expect(testState.phase1Completed?.data.exitStatus.type).toBe("error");
     });
 
     test("Phase 2 started after Phase 1 skip", () => {
@@ -204,7 +204,7 @@ describe("Skip Phase and Continue E2E Test", () => {
 
     test("Phase 3 was skipped", () => {
       expect(testState.phase3Completed?.data.success).toBe(false);
-      expect(testState.phase3Completed?.data.exitCode).not.toBe(0);
+      expect(testState.phase3Completed?.data.exitStatus.type).toBe("error");
     });
 
     test("Skipped phases have zero or minimal cost", () => {

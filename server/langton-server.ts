@@ -11,7 +11,7 @@ import type {
   ThinkingContent,
   ToolUseContent,
 } from "../types/claude-session-schema.js";
-import { PhaseExecutionId, type PhaseId, SessionId } from "./branded-types.js";
+import { EventId, PhaseExecutionId, type PhaseId, SessionId } from "./branded-types.js";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
@@ -34,6 +34,7 @@ import type {
   PhaseConfig,
   PhaseStartedEvent,
   PhaseState,
+  ProcessExit,
   ServerConfig,
   ServerEvent,
   ServerReadyEvent,
@@ -248,7 +249,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Send initial state
     this.sendEvent({
-      id: generateId(),
+      id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "server.ready",
       data: {
@@ -276,7 +277,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       if (!result.success) {
         this.logger.log(`Invalid client command: ${result.error.message}`, "error");
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "error",
           data: {
@@ -352,7 +353,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const totalTime = Date.now() - this.serverStartTime.getTime();
 
     this.sendEvent({
-      id: generateId(),
+      id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "state.snapshot",
       data: {
@@ -511,7 +512,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
         // Send info event about continuation
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "info",
           data: {
@@ -525,7 +526,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
         // Send info event about starting fresh
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "info",
           data: {
@@ -561,7 +562,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       if (files.length > 0) {
         for (const file of files) {
           this.sendEvent({
-            id: generateId(),
+            id: EventId(generateId()),
             timestamp: new Date().toISOString(),
             type: "file.updated",
             data: {
@@ -700,7 +701,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // NOW send the phase.started event with the real session ID
       this.sendEvent({
-        id: generateId(),
+        id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "phase.started",
         data: {
@@ -715,7 +716,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // Send existing info event
       this.sendEvent({
-        id: generateId(),
+        id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "info",
         data: {
@@ -738,7 +739,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // Send error event
       this.sendEvent({
-        id: generateId(),
+        id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
@@ -788,7 +789,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       this.sendEvent({
-        id: generateId(),
+        id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "token.usage",
         data: {
@@ -820,7 +821,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
           // Send error event
           this.sendEvent({
-            id: generateId(),
+            id: EventId(generateId()),
             timestamp: new Date().toISOString(),
             type: "error",
             data: {
@@ -841,7 +842,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         }
 
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "assistant.action",
           data: {
@@ -853,7 +854,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       } else if ("thinking" in item && item.type === "thinking") {
         const thinkingItem = item as ThinkingContent;
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "assistant.action",
           data: {
@@ -881,7 +882,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         // Send event for all tools, including unknown ones
         // toolName is typed as string to allow unknown tools
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "assistant.action",
           data: {
@@ -924,7 +925,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // Send error event
       this.sendEvent({
-        id: generateId(),
+        id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
@@ -973,7 +974,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
         // Send a final token usage event with the correct values
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "token.usage",
           data: {
@@ -1079,8 +1080,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       );
     }
 
+    const exitStatus: ProcessExit =
+      exitCode === 0 ? { type: "success" } : { type: "error", code: exitCode };
+
     this.sendEvent({
-      id: generateId(),
+      id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "phase.completed",
       data: {
@@ -1088,7 +1092,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         success,
         cost: phaseCost,
         duration,
-        exitCode,
+        exitStatus,
       },
     } as PhaseCompletedEvent);
 
@@ -1215,7 +1219,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Send file update event
     this.sendEvent({
-      id: generateId(),
+      id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "file.updated",
       data: {
@@ -1236,7 +1240,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const tree = await buildFileTree(this.config.projectPath, this.watchedPattern);
 
     this.sendEvent({
-      id: generateId(),
+      id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "filetree.updated",
       data: { tree },
@@ -1263,7 +1267,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Always send to client
     this.sendEvent({
-      id: generateId(),
+      id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "error",
       data: {
@@ -1303,7 +1307,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       } else if (lastIndex === this.config.phases.length - 1) {
         this.logger.log("All phases have been completed");
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "info",
           data: {
@@ -1324,7 +1328,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       if (!hasResult) {
         this.logger.log(`Found incomplete phase: ${nextPhase.id}`);
         this.sendEvent({
-          id: generateId(),
+          id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "incomplete.phase",
           data: {
@@ -1351,7 +1355,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     if (nextPhaseIndex === -1) {
       this.logger.log("All phases completed - shutting down");
       this.sendEvent({
-        id: generateId(),
+        id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "info",
         data: {
