@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { PhaseId } from "./branded-types.js";
 import type { PhaseConfig, ServerConfig } from "./types.js";
 
 // ============================================================================
@@ -245,7 +246,11 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       throw new Error(`Phase configuration validation failed:\n${validationErrors.join("\n")}`);
     }
 
-    return resolvedConfig;
+    // Transform string IDs to PhaseId branded types
+    return resolvedConfig.map((phase) => ({
+      ...phase,
+      id: PhaseId(phase.id),
+    }));
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to load phase config from ${configPath}: ${error.message}`);

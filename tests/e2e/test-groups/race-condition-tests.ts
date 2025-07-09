@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { PhaseId } from "../../../server/branded-types.js";
 import {
   isPhaseCompletedEvent,
   isPhaseStartedEvent,
@@ -58,7 +59,7 @@ export function runRaceConditionTests(testState: TestState) {
         if (isStateSnapshotEvent(e)) {
           // Current phase should still be phase-1 until completion
           if (e.data?.currentPhase) {
-            expect(e.data.currentPhase.phase.id).toBe("phase-1");
+            expect(e.data.currentPhase.phase.id).toBe(PhaseId("phase-1"));
           }
         }
       });

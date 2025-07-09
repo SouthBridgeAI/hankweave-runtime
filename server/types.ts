@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
+import type { PhaseId } from "./branded-types.js";
 import type { ErrorSeverity } from "./error-types.js";
 
 // ============================================================================
@@ -87,7 +88,7 @@ export interface WorkspaceSetupItem {
  */
 export interface PhaseConfig {
   /** Unique identifier for this phase (e.g., "phase-1", "data-analysis") */
-  id: string;
+  id: PhaseId;
 
   /** Human-readable name displayed in UI and logs */
   name: string;

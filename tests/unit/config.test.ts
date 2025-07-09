@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { calculateCost, loadPhaseConfig } from "../../server/config";
 import { DEFAULT_CONFIG } from "../../server/config";
 import type { PhaseConfig } from "../../server/types";
+import { PhaseId } from "../../server/branded-types";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -139,7 +140,7 @@ describe("loadPhaseConfig", () => {
   test("loads valid configuration", () => {
     const validConfig: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
         promptText: "Test prompt",
@@ -169,7 +170,7 @@ describe("loadPhaseConfig", () => {
   test("throws on invalid model names", () => {
     const invalidConfig: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "invalid-model-name" as any, // Intentionally invalid for testing
         promptText: "Test prompt",
@@ -197,7 +198,7 @@ describe("loadPhaseConfig", () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
     const bothConfig: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
         promptFile: "./prompt.md",
@@ -217,7 +218,7 @@ describe("loadPhaseConfig", () => {
     createTestFile(path.join(tempDir, "system.md"), "System prompt");
     const bothConfig: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
         promptText: "Test prompt",
@@ -234,7 +235,7 @@ describe("loadPhaseConfig", () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
     const config: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
         promptFile: "./prompt.md",
@@ -253,7 +254,7 @@ describe("loadPhaseConfig", () => {
 
     const config: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
         promptFile: ["./prompt1.md", "./prompt2.md"],
@@ -272,7 +273,7 @@ describe("loadPhaseConfig", () => {
   test("validates workspace setup items", () => {
     const invalidWorkspaceConfig: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
         promptText: "Test prompt",
@@ -291,7 +292,7 @@ describe("loadPhaseConfig", () => {
   test("throws on non-existent prompt files", () => {
     const config: PhaseConfig[] = [
       {
-        id: "test-phase",
+        id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
         promptFile: "./non-existent.md",
@@ -312,7 +313,7 @@ describe("loadPhaseConfig", () => {
 
       const config: PhaseConfig[] = [
         {
-          id: "test-phase",
+          id: PhaseId("test-phase"),
           name: "Test Phase",
           model: "opus",
           promptFile: "./unreadable.md",
