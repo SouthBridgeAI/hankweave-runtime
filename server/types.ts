@@ -9,6 +9,8 @@ import type { ErrorSeverity } from "./error-types.js";
 
 export type ModelName = "sonnet" | "opus";
 
+export type ContinuationMode = "fresh" | "continue-previous";
+
 // ============================================================================
 // Process Exit Types
 // ============================================================================
@@ -17,12 +19,6 @@ export type ProcessExit =
   | { type: "success" }
   | { type: "error"; code: number }
   | { type: "killed"; signal: NodeJS.Signals };
-
-// ============================================================================
-// Continuation Mode Types
-// ============================================================================
-
-export type ContinuationMode = "fresh" | "continue-previous";
 
 // ============================================================================
 // Message ID Types
@@ -109,11 +105,13 @@ export interface PhaseConfig {
   model: ModelName;
 
   /**
-   * If true, this phase will continue from the previous phase's session,
-   * maintaining context and conversation history. The previous phase must
-   * have completed successfully.
+   * How this phase should handle continuation from previous phases.
+   * - "fresh": Start a new session (default for most cases)
+   * - "continue-previous": Continue from the previous phase's session,
+   *   maintaining context and conversation history. The previous phase must
+   *   have completed successfully.
    */
-  continueFromPrevious?: boolean;
+  continuationMode: ContinuationMode;
 
   /**
    * Workspace setup operations to run before phase starts.

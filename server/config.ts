@@ -45,7 +45,7 @@ const phaseConfigSchema = z
     appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
     appendSystemPromptText: z.string().optional(),
     model: z.enum(["sonnet", "opus"]),
-    continueFromPrevious: z.boolean().optional(),
+    continuationMode: z.enum(["fresh", "continue-previous"]),
     workspaceSetup: z.array(workspaceSetupItemSchema).optional(),
     watch: z.string().optional(),
     description: z.string().optional(),

@@ -70,7 +70,9 @@ export class ClaudeProcessManager extends EventEmitter {
     this.logger.log(`Absolute projectPath: ${path.resolve(this.projectPath)}`);
     this.logger.log(`Project path exists: ${fs.existsSync(this.projectPath)}`);
     this.logger.log(
-      `Project path is directory: ${fs.existsSync(this.projectPath) && fs.statSync(this.projectPath).isDirectory()}`,
+      `Project path is directory: ${
+        fs.existsSync(this.projectPath) && fs.statSync(this.projectPath).isDirectory()
+      }`,
     );
 
     // Spawn process
@@ -123,7 +125,7 @@ export class ClaudeProcessManager extends EventEmitter {
       "stream-json",
     ];
 
-    if (phase.continueFromPrevious && previousSessionId) {
+    if (phase.continuationMode === "continue-previous" && previousSessionId) {
       args.push("-c", "--resume", previousSessionId);
     }
 
@@ -227,7 +229,9 @@ export class ClaudeProcessManager extends EventEmitter {
       // Write to log file as JSON entry (matching server behavior)
       if (this.logStream && !this.logStream.destroyed) {
         this.logStream.write(
-          `{"type":"stderr","timestamp":"${new Date().toISOString()}","message":${JSON.stringify(errorMessage)}}\n`,
+          `{"type":"stderr","timestamp":"${new Date().toISOString()}","message":${JSON.stringify(
+            errorMessage,
+          )}}\n`,
         );
       }
 

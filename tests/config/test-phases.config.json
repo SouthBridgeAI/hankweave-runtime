@@ -2,9 +2,12 @@
   {
     "id": "phase-1",
     "name": "Phase 1: TestPhase1",
-    "promptFile": ["./phase1Prompt1.md", "./phase1Prompt2.md"],
+    "promptFile": [
+      "./phase1Prompt1.md",
+      "./phase1Prompt2.md"
+    ],
     "model": "sonnet",
-    "continueFromPrevious": false,
+    "continuationMode": "fresh",
     "workspaceSetup": [
       {
         "type": "command",
@@ -21,18 +24,25 @@
       "./noTodosPrompt.md"
     ],
     "description": "Write three pick one",
-    "checkpointAndWatch": ["notes/**/*", "*.md"]
+    "checkpointAndWatch": [
+      "notes/**/*",
+      "*.md"
+    ]
   },
   {
     "id": "phase-2",
     "name": "Phase 2: Schema Generation",
     "promptText": "Can you put your second favorite of the poems you just made into the notes folder as '<%PROJECT_DIR%>/notes/second_favorite_poem.txt'?",
     "model": "sonnet",
-    "continueFromPrevious": true,
+    "continuationMode": "continue-previous",
     "watch": "./notes/*.*",
-    "appendSystemPromptFile": ["./noTodosPrompt.md"],
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
     "description": "Write one more",
-    "checkpointAndWatch": ["notes/**/*"]
+    "checkpointAndWatch": [
+      "notes/**/*"
+    ]
   },
   {
     "id": "phase-3",
@@ -55,10 +65,12 @@
         }
       }
     ],
-    "continueFromPrevious": false,
+    "continuationMode": "fresh",
     "watch": "./typescript_code/src/**/*.ts",
     "description": "Convert poems to code",
-    "appendSystemPromptFile": ["./noTodosPrompt.md"],
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
     "checkpointAndWatch": [
       "typescript_code/src/**/*.ts",
       "typescript_code/package.json"

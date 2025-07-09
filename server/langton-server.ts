@@ -498,7 +498,7 @@ export class LangtonServer extends EventEmitter {
     // Get previous session ID if needed
     let previousSessionId: string | null = null;
 
-    if (phase.continueFromPrevious) {
+    if (phase.continuationMode === "continue-previous") {
       previousSessionId = this.getPreviousSessionId(phase.id);
       if (previousSessionId) {
         this.logger.log(

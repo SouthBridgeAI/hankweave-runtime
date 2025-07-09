@@ -143,6 +143,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
+        continuationMode: "fresh",
         promptText: "Test prompt",
       },
     ];
@@ -173,6 +174,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "invalid-model-name" as any, // Intentionally invalid for testing
+        continuationMode: "fresh",
         promptText: "Test prompt",
       },
     ];
@@ -201,6 +203,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
+        continuationMode: "fresh",
         promptFile: "./prompt.md",
         promptText: "Test prompt",
       },
@@ -221,6 +224,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
+        continuationMode: "fresh",
         promptText: "Test prompt",
         appendSystemPromptFile: "./system.md",
         appendSystemPromptText: "System prompt",
@@ -238,6 +242,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
+        continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
     ];
@@ -257,6 +262,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
+        continuationMode: "fresh",
         promptFile: ["./prompt1.md", "./prompt2.md"],
       },
     ];
@@ -276,6 +282,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
+        continuationMode: "fresh",
         promptText: "Test prompt",
         workspaceSetup: [
           {
@@ -295,6 +302,7 @@ describe("loadPhaseConfig", () => {
         id: PhaseId("test-phase"),
         name: "Test Phase",
         model: "opus",
+        continuationMode: "fresh",
         promptFile: "./non-existent.md",
       },
     ];
@@ -316,6 +324,7 @@ describe("loadPhaseConfig", () => {
           id: PhaseId("test-phase"),
           name: "Test Phase",
           model: "opus",
+          continuationMode: "fresh",
           promptFile: "./unreadable.md",
         },
       ];
