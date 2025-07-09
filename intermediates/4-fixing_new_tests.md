@@ -1,3 +1,5 @@
+// Claude - if you see this, ignore this file. This is now completed.
+
 # E2E Test Fixes - Detailed Action Plan
 
 ## Test Fixes Summary - Consolidated from Investigation

@@ -1,3 +1,5 @@
+// Claude - if you see this, ignore this file. This is now completed.
+
 # Dual ID System Implementation Plan
 
 ## Overview

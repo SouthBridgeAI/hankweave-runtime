@@ -1,3 +1,5 @@
+// Claude - if you see this, ignore this file. This is now completed.
+
 # Langton Runner Type Safety Implementation Guide
 
 This guide covers all recommended type safety improvements for the Langton Runner project, organized by priority and impact.

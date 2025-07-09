@@ -1,3 +1,5 @@
+// Claude - if you see this, ignore this file. This is now completed.
+
 Here's a focused unit test plan for components that don't need Claude log fixtures:
 
 ## **1. config.ts**
