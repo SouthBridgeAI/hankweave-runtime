@@ -1,4 +1,4 @@
-import type { EventEmitter } from "node:events";
+import type { LangtonServer } from "./langton-server.js";
 import type {
   AssistantActionEvent,
   ClientCommand,
@@ -33,12 +33,7 @@ export class BasicTUI {
   private ws: WebSocket | null = null;
   private isConnected = false;
 
-  constructor(
-    private server: EventEmitter & {
-      config?: { port?: number };
-      shutdown: (reason: string) => Promise<void>;
-    },
-  ) {
+  constructor(private server: LangtonServer) {
     this.connectToServer();
     this.setupKeyboardInput();
   }

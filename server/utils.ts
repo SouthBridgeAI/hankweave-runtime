@@ -167,6 +167,7 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
             path: currentPath,
             isDirectory: false,
             lastModified: file.lastModified,
+            children: [], // Empty array for files
           };
 
           if (parent) {

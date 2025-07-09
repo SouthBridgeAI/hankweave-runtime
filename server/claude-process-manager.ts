@@ -1,25 +1,18 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { TIMEOUTS } from "./config.js";
+import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { PhaseConfig } from "./types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
-
-export interface ProcessEvents {
-  exit: (code: number) => void;
-  error: (error: Error) => void;
-  stdout: (data: string) => void;
-  stderr: (data: string) => void;
-}
 
 /**
  * Manages Claude subprocess lifecycle, including spawning, monitoring, and cleanup.
  * Handles log stream creation and process argument building.
  */
-export class ClaudeProcessManager extends EventEmitter {
-  private process: ChildProcess | null = null;
-  private logStream: fs.WriteStream | null = null;
+export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
+  private process: ChildProcess | undefined;
+  private logStream: fs.WriteStream | undefined;
   private killed = false;
 
   constructor(
@@ -276,12 +269,12 @@ export class ClaudeProcessManager extends EventEmitter {
   private cleanup(): void {
     if (this.logStream && !this.logStream.destroyed) {
       this.logStream.end();
-      this.logStream = null;
+      this.logStream = undefined;
     }
 
     if (this.process) {
       this.process.removeAllListeners();
-      this.process = null;
+      this.process = undefined;
     }
   }
 
@@ -289,7 +282,7 @@ export class ClaudeProcessManager extends EventEmitter {
    * Check if process is running.
    */
   isRunning(): boolean {
-    return this.process !== null && !this.process.killed;
+    return this.process !== undefined && !this.process.killed;
   }
 
   /**
@@ -307,7 +300,7 @@ export class ClaudeProcessManager extends EventEmitter {
       await new Promise<void>((resolve) => {
         this.logStream?.end(() => resolve());
       });
-      this.logStream = null;
+      this.logStream = undefined;
     }
   }
 }

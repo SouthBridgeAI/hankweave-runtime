@@ -277,16 +277,16 @@ describe("loadPhaseConfig", () => {
   });
 
   test("validates workspace setup items", () => {
-    const invalidWorkspaceConfig: PhaseConfig[] = [
+    const invalidWorkspaceConfig = [
       {
-        id: PhaseId("test-phase"),
+        id: "test-phase",
         name: "Test Phase",
         model: "opus",
         continuationMode: "fresh",
         promptText: "Test prompt",
         workspaceSetup: [
           {
-            type: "invalid" as any, // Invalid type
+            type: "invalid", // Invalid type - not "copy" or "command"
           },
         ],
       },

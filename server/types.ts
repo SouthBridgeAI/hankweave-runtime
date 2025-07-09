@@ -26,6 +26,7 @@ export type ProcessExit =
 
 export type ClaudeMessageId = `msg_${string}`;
 export type UUIDMessageId = string; // Keep flexible for UUIDs
+export type MessageId = ClaudeMessageId | UUIDMessageId;
 
 // ============================================================================
 // Checkpoint Status Types
@@ -48,34 +49,37 @@ export type CheckpointStatus = (typeof CHECKPOINT_STATUS)[keyof typeof CHECKPOIN
 /**
  * Workspace setup operation - either copy files/directories or run commands.
  */
-export interface WorkspaceSetupItem {
-  /** Type of setup operation */
-  type: "copy" | "command";
-
-  /** For copy operations */
-  copy?: {
-    /** Source path (relative to config file or absolute) */
-    from: string;
-    /**
-     * Target path relative to projectPath (parent directory must exist).
-     * Always specifies the full target path including name.
-     * Examples:
-     * - from: "../templates/foo", to: "src/foo" → copies directory foo to src/foo
-     * - from: "../templates/foo", to: "src/bar" → copies directory foo as src/bar
-     * - from: "../config.json", to: "src/config.json" → copies file
-     * - from: "../config.json", to: "src/settings.json" → copies file with rename
-     */
-    to: string;
-  };
-
-  /** For command operations */
-  command?: {
-    /** Shell command to execute */
-    run: string;
-    /** Working directory for command execution (default: "project") */
-    workingDirectory?: "project" | "lastCopied";
-  };
-}
+export type WorkspaceSetupItem =
+  | {
+      /** Type of setup operation */
+      type: "copy";
+      /** For copy operations */
+      copy: {
+        /** Source path (relative to config file or absolute) */
+        from: string;
+        /**
+         * Target path relative to projectPath (parent directory must exist).
+         * Always specifies the full target path including name.
+         * Examples:
+         * - from: "../templates/foo", to: "src/foo" → copies directory foo to src/foo
+         * - from: "../templates/foo", to: "src/bar" → copies directory foo as src/bar
+         * - from: "../config.json", to: "src/config.json" → copies file
+         * - from: "../config.json", to: "src/settings.json" → copies file with rename
+         */
+        to: string;
+      };
+    }
+  | {
+      /** Type of setup operation */
+      type: "command";
+      /** For command operations */
+      command: {
+        /** Shell command to execute */
+        run: string;
+        /** Working directory for command execution (default: "project") */
+        workingDirectory: "project" | "lastCopied";
+      };
+    };
 
 /**
  * Configuration for a single phase in the Langton workflow.
@@ -285,18 +289,29 @@ export interface CompletedPhase {
  * Represents a file or directory in the watched file tree.
  * Used to send file structure updates to clients.
  */
-export interface FileNode {
-  /** File or directory name */
-  name: string;
-  /** Relative path from project root */
-  path: string;
-  /** Whether this is a directory */
-  isDirectory: boolean;
-  /** Last modified time (ISO string) for files */
-  lastModified?: string;
-  /** Child nodes if this is a directory */
-  children?: FileNode[];
-}
+export type FileNode =
+  | {
+      /** File or directory name */
+      name: string;
+      /** Relative path from project root */
+      path: string;
+      /** This is a directory */
+      isDirectory: true;
+      /** Child nodes (always present for directories) */
+      children: FileNode[];
+    }
+  | {
+      /** File or directory name */
+      name: string;
+      /** Relative path from project root */
+      path: string;
+      /** This is a file */
+      isDirectory: false;
+      /** Last modified time (ISO string) - always present for files */
+      lastModified: string;
+      /** Empty array for files */
+      children: FileNode[];
+    };
 
 // ============================================================================
 // Server -> Client Events
@@ -306,28 +321,30 @@ export interface FileNode {
  * Base interface for all server-to-client events.
  * Events are sent over WebSocket to inform clients of server state changes.
  */
-export interface ServerEvent {
+export interface ServerEvent<T extends string = string, D = unknown> {
   /** Unique ID for this event instance */
   id: string;
   /** ISO 8601 timestamp of when the event was created */
   timestamp: string;
   /** Event type identifier for client-side routing */
-  type: string;
+  type: T;
+  data?: D;
 }
 
 /**
  * Sent immediately after client connection to indicate server is ready.
  * Contains basic server information for client compatibility checks.
  */
-export interface ServerReadyEvent extends ServerEvent {
-  type: "server.ready";
-  data: {
-    /** Server version for compatibility checking */
-    serverVersion: string;
-    /** Absolute path where Claude will execute */
-    projectPath: string;
-  };
-}
+export interface ServerReadyEvent
+  extends ServerEvent<
+    "server.ready",
+    {
+      /** Server version for compatibility checking */
+      serverVersion: string;
+      /** Absolute path where Claude will execute */
+      projectPath: string;
+    }
+  > {}
 
 /**
  * Comprehensive state snapshot sent after connection and on major state changes.
@@ -578,6 +595,41 @@ export interface RedoPhaseCommand extends ClientCommand {
  */
 export interface ShutdownCommand extends ClientCommand {
   type: "server.shutdown";
+}
+
+// ============================================================================
+// Synthetic Message Types
+// ============================================================================
+
+/**
+ * Synthetic timeout message structure.
+ * Claude sends these special messages when API requests time out.
+ * They have a specific structure that needs special handling.
+ */
+export interface SyntheticTimeoutMessage {
+  type: "assistant";
+  message: {
+    id: string;
+    type: "message";
+    role: "assistant";
+    model: "<synthetic>";
+    content: "API Error: Request timed out.";
+    usage?: never;
+    stop_reason: null;
+    stop_sequence: null;
+  };
+}
+
+/**
+ * Type guard to check if an assistant message is a synthetic timeout.
+ * These messages need special handling as they indicate API failures.
+ */
+export function isSyntheticTimeout(msg: ClaudeLogMessage): msg is SyntheticTimeoutMessage {
+  return (
+    msg.type === "assistant" &&
+    msg.message.model === "<synthetic>" &&
+    msg.message.content === "API Error: Request timed out."
+  );
 }
 
 // ============================================================================

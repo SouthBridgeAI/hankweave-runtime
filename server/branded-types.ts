@@ -8,7 +8,7 @@ export type Branded<T, B> = T & Brand<B>;
 
 export type PhaseId = Branded<string, "PhaseId">;
 export type SessionId = Branded<string, "SessionId">;
-export type PhaseExecutionId = Branded<string, "PhaseExecutionId">;
+export type PhaseExecutionId = Branded<`${number}-${string}`, "PhaseExecutionId">;
 export type EventId = Branded<string, "EventId">;
 export type MessageId = Branded<string, "MessageId">;
 export type ToolUseId = Branded<string, "ToolUseId">;

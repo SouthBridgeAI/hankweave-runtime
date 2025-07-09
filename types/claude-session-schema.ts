@@ -18,7 +18,7 @@ const uuidSchema = z
   .string()
   .regex(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    "Must be a valid UUID v4"
+    "Must be a valid UUID v4",
   );
 
 // Tool names - accept any string for forward compatibility
@@ -28,16 +28,10 @@ export const toolNameSchema = z.string();
 // Also accepts <synthetic> for timeout messages
 const modelSchema = z
   .string()
-  .regex(
-    /^(claude-.*|<synthetic>)$/,
-    "Must be a Claude model identifier or <synthetic>"
-  );
+  .regex(/^(claude-.*|<synthetic>)$/, "Must be a Claude model identifier or <synthetic>");
 
 // Permission mode for Claude Code
-const permissionModeSchema = z.enum([
-  "bypassPermissions",
-  "requestPermissions",
-]);
+const permissionModeSchema = z.enum(["bypassPermissions", "requestPermissions"]);
 
 // API key source
 const apiKeySourceSchema = z.enum(["ANTHROPIC_API_KEY", "env"]);
@@ -124,9 +118,7 @@ export const toolResultContentSchema = z.object({
   type: z.literal("tool_result"),
 
   // ID of the tool use this result corresponds to
-  tool_use_id: z
-    .string()
-    .regex(/^toolu_[a-zA-Z0-9]+$/, "Invalid tool use ID format"),
+  tool_use_id: z.string().regex(/^toolu_[a-zA-Z0-9]+$/, "Invalid tool use ID format"),
 
   // Result content from tool execution (can be string, object, or array of content items)
   content: z.union([
@@ -136,7 +128,7 @@ export const toolResultContentSchema = z.object({
       z.object({
         type: z.literal("text"),
         text: z.string(),
-      })
+      }),
     ),
   ]),
 });
@@ -167,7 +159,7 @@ export const assistantMessageSchema = z.object({
       .string()
       .regex(
         /^(msg_[a-zA-Z0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
-        "Invalid message ID format"
+        "Invalid message ID format",
       ),
 
     type: z.literal("message"),
@@ -194,9 +186,7 @@ export const assistantMessageSchema = z.object({
       .optional(),
 
     // Stop reason for the response (can be null)
-    stop_reason: z
-      .enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"])
-      .nullable(),
+    stop_reason: z.enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"]).nullable(),
 
     // Stop sequence used (if applicable, can be null)
     stop_sequence: z.string().nullable(),

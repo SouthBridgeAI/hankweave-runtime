@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
@@ -20,9 +19,11 @@ import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { APITimeoutError, ErrorSeverity } from "./error-types.js";
 import type { ToolInputMap, ToolName } from "./tool-types.js";
+import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
+  ClaudeLogMessage,
   CompletedPhase,
   ErrorEvent,
   FileTreeUpdatedEvent,
@@ -40,6 +41,7 @@ import type {
   TokenUsage,
   TokenUsageEvent,
 } from "./types.js";
+import { isSyntheticTimeout } from "./types.js";
 import {
   assertNever,
   buildFileTree,
@@ -77,20 +79,22 @@ interface ClientData {
  * - Cost tracking and reporting
  * - Event streaming to clients
  */
-export class LangtonServer extends EventEmitter {
+export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private server: Server | null = null;
   private client: ServerWebSocket<ClientData> | null = null;
   public readonly config: ServerConfig;
   private logger: Logger;
-  private currentPhase: PhaseState | null = null;
+  private currentPhase: PhaseState | undefined;
   private completedPhases: CompletedPhase[] = [];
-  private watchedPattern: string | null = null;
-  private recentFileAccess: {
-    path: string;
-    content: string;
-    timestamp: Date;
-  } | null = null;
-  private processManager: ClaudeProcessManager | null = null;
+  private watchedPattern: string | undefined;
+  private recentFileAccess:
+    | {
+        path: string;
+        content: string;
+        timestamp: Date;
+      }
+    | undefined;
+  private processManager: ClaudeProcessManager | undefined;
   private totalCost = 0;
   private serverStartTime: Date;
   private isShuttingDown = false;
@@ -632,11 +636,11 @@ export class LangtonServer extends EventEmitter {
     );
 
     // Set up event handlers
-    this.processManager.on("exit", (code) => {
+    this.processManager.on("exit", (code: number) => {
       this.handlePhaseComplete(code);
     });
 
-    this.processManager.on("error", (error) => {
+    this.processManager.on("error", (error: Error) => {
       this.handleError(error, `Claude process for phase ${phase.id}`, ErrorSeverity.FATAL);
     });
 
@@ -722,43 +726,36 @@ export class LangtonServer extends EventEmitter {
   }
 
   private handleAssistantMessage(msg: AssistantMessage, phaseId: string): void {
-    // Check for synthetic timeout messages first
-    if (msg.message.model === "<synthetic>") {
-      const content = msg.message.content;
-      const textContent = Array.isArray(content)
-        ? content.find((item) => item.type === "text")?.text
-        : content;
+    // Use type guard to check for synthetic timeout messages
+    if (isSyntheticTimeout(msg as ClaudeLogMessage)) {
+      this.logger.log(`API timeout detected in synthetic message for phase ${phaseId}`, "error");
 
-      if (textContent === "API Error: Request timed out.") {
-        this.logger.log(`API timeout detected in synthetic message for phase ${phaseId}`, "error");
+      const timeoutError = new APITimeoutError(phaseId, {
+        message: "API Error: Request timed out.",
+        timestamp: new Date().toISOString(),
+        synthetic: true,
+      });
 
-        const timeoutError = new APITimeoutError(phaseId, {
-          message: textContent,
-          timestamp: new Date().toISOString(),
-          synthetic: true,
-        });
+      // Send error event
+      this.sendEvent({
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: timeoutError.message,
+          phase: phaseId,
+          fatal: false,
+          severity: timeoutError.severity,
+          context: JSON.stringify(timeoutError.context),
+        },
+      } as ErrorEvent);
 
-        // Send error event
-        this.sendEvent({
-          id: generateId(),
-          timestamp: new Date().toISOString(),
-          type: "error",
-          data: {
-            message: timeoutError.message,
-            phase: phaseId,
-            fatal: false,
-            severity: timeoutError.severity,
-            context: JSON.stringify(timeoutError.context),
-          },
-        } as ErrorEvent);
-
-        // Process manager will handle the cleanup
-        if (this.processManager) {
-          this.processManager.kill();
-        }
-
-        return; // Stop processing
+      // Process manager will handle the cleanup
+      if (this.processManager) {
+        this.processManager.kill();
       }
+
+      return; // Stop processing
     }
 
     if (msg.message.usage) {
@@ -1468,7 +1465,7 @@ export class LangtonServer extends EventEmitter {
       this.processManager
         .closeLogStream()
         .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
-      this.processManager = null;
+      this.processManager = undefined;
     }
 
     // Clean up any pending result message promises
@@ -1482,9 +1479,9 @@ export class LangtonServer extends EventEmitter {
       }
     }
 
-    this.watchedPattern = null;
-    this.recentFileAccess = null;
-    this.currentPhase = null;
+    this.watchedPattern = undefined;
+    this.recentFileAccess = undefined;
+    this.currentPhase = undefined;
   }
 
   private async runCommand(command: string, workingDir?: string): Promise<void> {
