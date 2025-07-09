@@ -134,8 +134,17 @@ export const toolResultContentSchema = z.object({
   // ID of the tool use this result corresponds to
   tool_use_id: z.string().regex(/^toolu_[a-zA-Z0-9]+$/, "Invalid tool use ID format"),
 
-  // Result content from tool execution (can be string or complex object)
-  content: z.union([z.string(), z.record(z.unknown())]),
+  // Result content from tool execution (can be string, object, or array of content items)
+  content: z.union([
+    z.string(),
+    z.record(z.unknown()),
+    z.array(
+      z.object({
+        type: z.literal("text"),
+        text: z.string(),
+      }),
+    ),
+  ]),
 });
 
 /**
