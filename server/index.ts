@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { BasicTUI } from "./basic-tui.js";
+import { CleanupCommand } from "./cleanup-command.js";
 import { loadPhaseConfig, validatePhaseConfig } from "./config.js";
 import { LangtonServer } from "./langton-server.js";
 import type { PhaseConfig, ServerConfig } from "./types.js";
@@ -12,6 +13,8 @@ async function main() {
   const args = process.argv.slice(2);
   const basicMode = args.includes("--basic") || args.includes("-b");
   const validateMode = args.includes("--validate") || args.includes("-v");
+  const cleanupMode = args.includes("--cleanup");
+  const skipConfirmation = args.includes("-y");
   const configPath =
     args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "phases.json";
   const anthropicBaseURL = args
@@ -30,6 +33,8 @@ Options:
   --port=<port>             WebSocket server port (default: 7777)
   --basic, -b               Run in basic TUI mode (prints events to console)
   --validate, -v            Validate configuration without running server
+  --cleanup                 Clean up all Langton artifacts (requires --config)
+  -y                        Skip confirmation prompts (for scripts/tests)
   --anthropic-base-url=<url> Custom Anthropic API base URL (for proxies/gateways)
   --help, -h                Show this help message
 
@@ -38,6 +43,8 @@ Examples:
   bun server/index.ts --basic                  # Basic TUI mode
   bun server/index.ts --config=my-phases.json  # Custom config file
   bun server/index.ts --validate               # Validate configuration only
+  bun server/index.ts --cleanup --config=phases.json     # Clean up project
+  bun server/index.ts --cleanup --config=phases.json -y  # Clean up without prompts
   bun server/index.ts --anthropic-base-url=https://proxy.example.com
 `);
     process.exit(0);
@@ -72,6 +79,31 @@ Examples:
       } catch (error) {
         console.error(`\n❌ Validation failed:\n`);
         console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    }
+
+    // Add cleanup mode handling
+    if (cleanupMode) {
+      if (!configPath || configPath === "phases.json") {
+        console.error("❌ Error: --cleanup requires explicit --config=<path>");
+        console.error("   This ensures you're cleaning up the right project.");
+        process.exit(1);
+      }
+
+      try {
+        const cleanup = new CleanupCommand({
+          configPath,
+          projectPath: process.cwd(),
+          skipConfirmation,
+        });
+
+        const result = await cleanup.execute();
+        process.exit(result.success ? 0 : 1);
+      } catch (error) {
+        console.error(
+          `\n❌ Cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
         process.exit(1);
       }
     }
