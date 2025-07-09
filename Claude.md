@@ -1,3 +1,5 @@
+This is a project I'm working on. Read the readme files to get a good idea on the project, and follow these rules when working in it.
+
 1. Ignore the tests/test-area and tests/test-results folder when using grep unless you're specifically looking for those files.
 2. Prefer not to use subtasks. If you use them, make sure to provide enough context to the task to execute without you, and provide clear instructions on what information to pass back.
 3. Don't commit without asking.

@@ -19,27 +19,24 @@ While running:
 
 TODOs:
 
-1. This guy in `types.ts`: /\*_ Working directory for command execution (default: "project") _/
-   workingDirectory?: "project" | "lastCopied"; - shoudln't be optional.
 1. Actually implement rollbacks on checkpoints, failed resumes
-1. Add a universal system prompt that gets appended to the top of all phases
-1. Abstract out claude code so we can sub in other things
-1. Implement a langtonflow for making changelogs
-1. Use input stream json and implement and test
-1. Use git commits! (done)
-1. Move .logs into .langton (done)
-1. Consider using bind mounts to make the actual data inputs completely read-only
-1. Use full paths for folders and replace those in the prompts. (done)
-1. safe_exec and that journey
-1. Implement actual workspace copying in and out instead of running commands which can be brittle
-1. Retry system and error handling?
-1. Extracting data after phases or at completion?
-1. Adding description streaming with flash
-1. Add some interactive check to e2e tests so claude can't run it
-1. Add a message about the cost tracking that's human so claude won't keep changing it back
-1. Rename the actual runner to tadpole?
-1. Investigate whether we need our own internal messageid since Claude reuses messageids
-1. Are we respecting gitignores in subfolders for our checkpointing?
+2. Add a universal system prompt that gets appended to the top of all phases
+3. Abstract out claude code so we can sub in other things
+4. Implement a langtonflow for making changelogs
+5. Use input stream json and implement and test
+6. Use git commits! (done)
+7. Move .logs into .langton (done)
+8. Consider using bind mounts to make the actual data inputs completely read-only
+9. Use full paths for folders and replace those in the prompts. (done)
+10. safe_exec and that journey
+11. Implement actual workspace copying in and out instead of running commands which can be brittle
+12. Retry system and error handling?
+13. Extracting data after phases or at completion?
+14. Adding description streaming with flash
+15. Add some interactive check to e2e tests so claude can't run it
+16. Add a message about the cost tracking that's human so claude won't keep changing it back
+17. Rename the actual runner to tadpole?
+18. Investigate whether we need our own internal messageid since Claude reuses messageids
 
 Cleanup TODOs:
 
@@ -64,3 +61,13 @@ Claude code weirdness noticed:
 
 1. Using the LS command injects this message about whether files are malicious.
 2. CC will sometimes generate malformed toolcalls.
+
+Big features:
+
+1. Checkpoints
+   1. Rollback
+   2. Resume
+   3. Maintain branches
+   4. Include claude.jsonls?
+   5. Cost tracking
+   6. checkpointgit initialization when things have already started

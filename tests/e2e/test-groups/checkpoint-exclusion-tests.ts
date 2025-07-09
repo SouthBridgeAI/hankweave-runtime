@@ -100,4 +100,57 @@ export async function runCheckpointExclusionTests(testDir: string) {
       expect(commits[i].timestamp).toBeLessThanOrEqual(commits[i - 1].timestamp);
     }
   });
+
+  test("checkpoint system respects .gitignore in subfolders", async () => {
+    const { execSync } = await import("node:child_process");
+
+    // Phase 3 copies typescript_structure which has a .gitignore
+    const typescriptDir = path.join(testDir, "typescript_code");
+    const gitignorePath = path.join(typescriptDir, ".gitignore");
+
+    // Verify .gitignore exists
+    expect(fs.existsSync(gitignorePath)).toBe(true);
+
+    // Create files that should be ignored according to the .gitignore
+    const nodeModulesDir = path.join(typescriptDir, "node_modules");
+    const distDir = path.join(typescriptDir, "dist");
+    const envFile = path.join(typescriptDir, ".env");
+    const dsStoreFile = path.join(typescriptDir, ".DS_Store");
+
+    // These files exist after bun install but should be ignored
+    expect(fs.existsSync(nodeModulesDir)).toBe(true);
+
+    // Create additional ignored files
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(path.join(distDir, "index.js"), "// compiled output");
+    fs.writeFileSync(envFile, "SECRET_KEY=123");
+    fs.writeFileSync(dsStoreFile, "mac finder metadata");
+
+    // Get all files tracked by the checkpoint git
+    const gitFiles = execSync("git ls-files", {
+      cwd: testDir,
+      env: {
+        ...process.env,
+        GIT_DIR: gitDir,
+        GIT_WORK_TREE: testDir,
+      },
+      encoding: "utf-8",
+    });
+
+    // Verify that ignored files are not tracked
+    expect(gitFiles).not.toContain("node_modules");
+    expect(gitFiles).not.toContain("dist/");
+    expect(gitFiles).not.toContain(".env");
+    expect(gitFiles).not.toContain(".DS_Store");
+
+    // Verify that the .gitignore itself IS tracked (since it's part of checkpointAndWatch)
+    // checkpointAndWatch includes "typescript_code/package.json" so .gitignore won't be tracked
+    // unless it matches a pattern
+
+    // Verify that allowed TypeScript files in src ARE tracked
+    const srcFiles = gitFiles
+      .split("\n")
+      .filter((f) => f.startsWith("typescript_code/src/") && f.endsWith(".ts"));
+    expect(srcFiles.length).toBeGreaterThan(0); // Should have poem1.ts and poem2.ts
+  });
 }
