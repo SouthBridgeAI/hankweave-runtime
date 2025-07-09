@@ -69,11 +69,11 @@ export function runEarlyPhaseFailureTests(testState: TestState) {
           // But phaseExecutionId should always be present
           expect(snapshot.data.currentPhase).toHaveProperty("phaseExecutionId");
 
-          if (snapshot.data.currentPhase.sessionId === null) {
-            // If sessionId is null, phase should still have other required fields
+          if (snapshot.data.currentPhase.status === "initializing") {
+            // If status is initializing, phase should still have other required fields
             expect(snapshot.data.currentPhase.phase).toBeDefined();
             expect(snapshot.data.currentPhase.startTime).toBeDefined();
-            expect(snapshot.data.currentPhase.isRunning).toBeDefined();
+            // No sessionId or cost/token fields in initializing state
           }
         }
 

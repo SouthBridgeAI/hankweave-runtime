@@ -12,6 +12,7 @@ import type {
   ThinkingContent,
   ToolUseContent,
 } from "../types/claude-session-schema.js";
+import { PhaseExecutionId, SessionId } from "./branded-types.js";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
@@ -522,21 +523,13 @@ export class LangtonServer extends EventEmitter {
       }
     }
 
-    // Create phase state with dual ID system
+    // Create phase state - start in initializing state
     this.currentPhase = {
+      status: "initializing",
       phase,
-      phaseExecutionId: generateId(), // Internal tracking ID
-      sessionId: undefined, // Claude's UUID (will be set on init)
-      previousSessionId: previousSessionId || undefined, // Store for phase.started event
-      isRunning: true,
+      phaseExecutionId: PhaseExecutionId(generateId()), // Internal tracking ID
+      previousSessionId: previousSessionId ? SessionId(previousSessionId) : undefined, // Store for phase.started event
       startTime: new Date(),
-      phaseCost: 0,
-      phaseTokens: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
     };
 
     // Store watch pattern for tool-based tracking
@@ -667,9 +660,28 @@ export class LangtonServer extends EventEmitter {
   }
 
   private handleSystemMessage(msg: SystemMessage, phaseId: string): void {
-    if (msg.subtype === "init" && msg.session_id && this.currentPhase) {
-      // Set the Claude session ID
-      this.currentPhase.sessionId = msg.session_id;
+    if (
+      msg.subtype === "init" &&
+      msg.session_id &&
+      this.currentPhase &&
+      this.currentPhase.status === "initializing"
+    ) {
+      // Transition from initializing to running state
+      this.currentPhase = {
+        status: "running",
+        phase: this.currentPhase.phase,
+        phaseExecutionId: this.currentPhase.phaseExecutionId,
+        sessionId: SessionId(msg.session_id),
+        previousSessionId: this.currentPhase.previousSessionId,
+        startTime: this.currentPhase.startTime,
+        phaseCost: 0,
+        phaseTokens: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+      };
 
       // Log the session ID update
       this.logger.log(`Claude started phase ${phaseId} with session ID: ${msg.session_id}`);
@@ -751,7 +763,7 @@ export class LangtonServer extends EventEmitter {
 
       const messageCost = calculateCost(usage, this.config.costsPerMTok);
 
-      if (this.currentPhase) {
+      if (this.currentPhase && this.currentPhase.status === "running") {
         // Claude reports per-call costs, so we accumulate them
         this.currentPhase.phaseCost += messageCost;
 
@@ -924,7 +936,7 @@ export class LangtonServer extends EventEmitter {
       this.logger.log(`Phase ${phaseId} completed successfully`);
 
       // Update final token usage and cost from result message
-      if (msg.usage && this.currentPhase) {
+      if (msg.usage && this.currentPhase && this.currentPhase.status === "running") {
         const finalUsage: TokenUsage = {
           inputTokens: msg.usage.input_tokens || 0,
           outputTokens: msg.usage.output_tokens || 0,
@@ -976,11 +988,19 @@ export class LangtonServer extends EventEmitter {
     const phaseSnapshot = {
       phase: { ...this.currentPhase.phase },
       phaseExecutionId: this.currentPhase.phaseExecutionId, // Internal tracking
-      sessionId: this.currentPhase.sessionId, // Claude's UUID (may be null if failed early)
+      sessionId: this.currentPhase.status === "running" ? this.currentPhase.sessionId : undefined, // Claude's UUID (may be undefined if failed early)
       previousSessionId: this.currentPhase.previousSessionId,
       startTime: this.currentPhase.startTime,
-      phaseCost: this.currentPhase.phaseCost,
-      phaseTokens: { ...this.currentPhase.phaseTokens },
+      phaseCost: this.currentPhase.status === "running" ? this.currentPhase.phaseCost : 0,
+      phaseTokens:
+        this.currentPhase.status === "running"
+          ? { ...this.currentPhase.phaseTokens }
+          : {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+            },
       isSkipping: this.isSkippingPhase,
     };
 

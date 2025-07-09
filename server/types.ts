@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
-import type { PhaseId } from "./branded-types.js";
+import type { PhaseExecutionId, PhaseId, SessionId } from "./branded-types.js";
 import type { ErrorSeverity } from "./error-types.js";
 
 // ============================================================================
@@ -229,27 +229,40 @@ export interface TokenUsage {
 }
 
 /**
- * Runtime state of an active phase.
- * Tracks the Claude process, costs, and monitoring infrastructure.
+ * Runtime state of an active phase - discriminated union based on execution status.
+ * Makes impossible states unrepresentable (e.g., having sessionId without being running).
  */
-export interface PhaseState {
-  /** The phase configuration being executed */
-  phase: PhaseConfig;
-  /** Internal execution ID for tracking (timestamp-random format) */
-  phaseExecutionId: string;
-  /** Claude session ID for this phase instance (starts as undefined, set on init) */
-  sessionId: string | undefined;
-  /** Previous claude session ID if continuing from another phase */
-  previousSessionId: string | undefined;
-  /** Whether the phase is currently executing */
-  isRunning: boolean;
-  /** When this phase started */
-  startTime: Date;
-  /** Accumulated cost for this phase in dollars */
-  phaseCost: number;
-  /** Token usage breakdown for this phase */
-  phaseTokens: TokenUsage;
-}
+export type PhaseState =
+  | {
+      /** Phase is initializing - Claude process started but no session ID yet */
+      status: "initializing";
+      /** The phase configuration being executed */
+      phase: PhaseConfig;
+      /** Internal execution ID for tracking (timestamp-random format) */
+      phaseExecutionId: PhaseExecutionId;
+      /** Previous claude session ID if continuing from another phase */
+      previousSessionId: SessionId | undefined;
+      /** When this phase started */
+      startTime: Date;
+    }
+  | {
+      /** Phase is running - Claude has sent init message with session ID */
+      status: "running";
+      /** The phase configuration being executed */
+      phase: PhaseConfig;
+      /** Internal execution ID for tracking (timestamp-random format) */
+      phaseExecutionId: PhaseExecutionId;
+      /** Claude session ID for this execution (always present when running) */
+      sessionId: SessionId;
+      /** Previous claude session ID if continuing from another phase */
+      previousSessionId: SessionId | undefined;
+      /** When this phase started */
+      startTime: Date;
+      /** Accumulated cost for this phase in dollars */
+      phaseCost: number;
+      /** Token usage breakdown for this phase */
+      phaseTokens: TokenUsage;
+    };
 
 /**
  * Record of a phase that has finished execution.

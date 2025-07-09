@@ -244,9 +244,9 @@ export function runDualIdSystemTests(testState: TestState) {
         const timestampRandomRegex = /^\d{13}-[a-z0-9]{9}$/;
         expect(snapshot.data.currentPhase.phaseExecutionId).toMatch(timestampRandomRegex);
 
-        // sessionId might be null during execution
-        if (snapshot.data.currentPhase.sessionId !== null) {
-          // But if present, should be UUID
+        // sessionId only exists when status is "running"
+        if (snapshot.data.currentPhase.status === "running") {
+          // Should be UUID format
           const uuidRegex =
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
           expect(snapshot.data.currentPhase.sessionId).toMatch(uuidRegex);
