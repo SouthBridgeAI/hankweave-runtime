@@ -37,17 +37,11 @@ import {
 // Test configuration - using the shared three-phase config
 const TEST_TIMEOUT = 2 * 60 * 1000; // 2 minutes
 // Use __dirname to ensure we're always relative to this test file
-const TEST_ROOT = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "../.."
-);
+const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const TEST_DIR = path.join(TEST_ROOT, "tests/test-area");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7779");
-const PHASES_CONFIG = path.join(
-  TEST_ROOT,
-  "tests/config/test-phases.config.json"
-);
+const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = generateTestTimestamp();
@@ -112,9 +106,7 @@ async function runSkipQuitTest(): Promise<void> {
   testState.serverProcess.on("exit", (code) => {
     testState.serverExited = true;
     testState.serverExitCode = code;
-    console.log(
-      `${colors.yellow}Server process exited with code: ${code}${colors.reset}`
-    );
+    console.log(`${colors.yellow}Server process exited with code: ${code}${colors.reset}`);
   });
 
   // Give server time to start
@@ -125,49 +117,32 @@ async function runSkipQuitTest(): Promise<void> {
   await testState.client.connect(SERVER_PORT);
 
   // Wait for initial events
-  console.log(
-    `${colors.blue}Waiting for server initialization...${colors.reset}`
-  );
+  console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
   await testState.client.waitForEvent("server.ready");
   await testState.client.waitForEvent("state.snapshot");
 
   console.log(
-    `${colors.blue}Testing immediate server shutdown command during phase execution...${colors.reset}`
+    `${colors.blue}Testing immediate server shutdown command during phase execution...${colors.reset}`,
   );
 
   // Phase 1 should auto-start
-  testState.phase1Started = await testState.client.waitForPhaseStart(
-    "phase-1",
-    10000
-  );
+  testState.phase1Started = await testState.client.waitForPhaseStart("phase-1", 10000);
   console.log(`${colors.green}✓ Phase 1 started${colors.reset}`);
 
   // Let phase 1 complete normally
-  testState.phase1Completed = await testState.client.waitForPhaseCompletion(
-    "phase-1",
-    60000
-  );
+  testState.phase1Completed = await testState.client.waitForPhaseCompletion("phase-1", 60000);
   console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
 
   // Phase 2 should auto-start
-  testState.phase2Started = await testState.client.waitForPhaseStart(
-    "phase-2",
-    10000
-  );
+  testState.phase2Started = await testState.client.waitForPhaseStart("phase-2", 10000);
   console.log(`${colors.green}✓ Phase 2 started${colors.reset}`);
 
   // Let phase 2 complete normally
-  testState.phase2Completed = await testState.client.waitForPhaseCompletion(
-    "phase-2",
-    60000
-  );
+  testState.phase2Completed = await testState.client.waitForPhaseCompletion("phase-2", 60000);
   console.log(`${colors.green}✓ Phase 2 completed${colors.reset}`);
 
   // Phase 3 should auto-start
-  testState.phase3Started = await testState.client.waitForPhaseStart(
-    "phase-3",
-    10000
-  );
+  testState.phase3Started = await testState.client.waitForPhaseStart("phase-3", 10000);
   console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
 
   // Wait for workspace setup and some processing to ensure phase is running
@@ -175,9 +150,7 @@ async function runSkipQuitTest(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 5000));
 
   // Send shutdown command in the middle of phase 3
-  console.log(
-    `${colors.yellow}Sending shutdown command during Phase 3...${colors.reset}`
-  );
+  console.log(`${colors.yellow}Sending shutdown command during Phase 3...${colors.reset}`);
   testState.shutdownTime = new Date();
   testState.client.sendCommand({
     id: generateId(),
@@ -186,16 +159,11 @@ async function runSkipQuitTest(): Promise<void> {
 
   // Wait for phase 3 to complete (should be marked as failed due to shutdown)
   try {
-    testState.phase3Completed = await testState.client.waitForPhaseCompletion(
-      "phase-3",
-      10000
-    );
-    console.log(
-      `${colors.green}✓ Phase 3 completed (interrupted by shutdown)${colors.reset}`
-    );
+    testState.phase3Completed = await testState.client.waitForPhaseCompletion("phase-3", 10000);
+    console.log(`${colors.green}✓ Phase 3 completed (interrupted by shutdown)${colors.reset}`);
   } catch (_error) {
     console.log(
-      `${colors.yellow}Phase 3 completion event not received (server may have shut down)${colors.reset}`
+      `${colors.yellow}Phase 3 completion event not received (server may have shut down)${colors.reset}`,
     );
   }
 
@@ -207,12 +175,12 @@ async function runSkipQuitTest(): Promise<void> {
     const infoEvent = await testState.client.waitForEvent("info", 5000);
     if (isInfoEvent(infoEvent)) {
       console.log(
-        `${colors.green}✓ Received info event: ${infoEvent.data?.message}${colors.reset}`
+        `${colors.green}✓ Received info event: ${infoEvent.data?.message}${colors.reset}`,
       );
     }
   } catch (_e) {
     console.log(
-      `${colors.yellow}No info event received (server may have shut down quickly)${colors.reset}`
+      `${colors.yellow}No info event received (server may have shut down quickly)${colors.reset}`,
     );
   }
 
@@ -221,9 +189,7 @@ async function runSkipQuitTest(): Promise<void> {
     await testState.client.waitForConnectionClose(10000);
     console.log(`${colors.green}✓ WebSocket connection closed${colors.reset}`);
   } catch (_e) {
-    console.log(
-      `${colors.red}WebSocket connection did not close as expected${colors.reset}`
-    );
+    console.log(`${colors.red}WebSocket connection did not close as expected${colors.reset}`);
   }
 
   // Wait for server process to exit
@@ -262,9 +228,7 @@ async function cleanup(): Promise<void> {
 
 // Run setup before tests
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
-console.log(
-  `${colors.blue}Langton Server Shutdown Command Test${colors.reset}`
-);
+console.log(`${colors.blue}Langton Server Shutdown Command Test${colors.reset}`);
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
 await runSkipQuitTest();
@@ -292,9 +256,7 @@ describe("Server Shutdown Command E2E Test", () => {
       // If we have phase 3 completion, it should be after shutdown was sent
       if (testState.phase3Completed && testState.shutdownTime) {
         const shutdownTime = testState.shutdownTime.getTime();
-        const completionTime = new Date(
-          testState.phase3Completed.timestamp
-        ).getTime();
+        const completionTime = new Date(testState.phase3Completed.timestamp).getTime();
         expect(completionTime).toBeGreaterThanOrEqual(shutdownTime);
       }
 
@@ -303,23 +265,19 @@ describe("Server Shutdown Command E2E Test", () => {
         (e) =>
           e.type === "assistant.action" &&
           e.timestamp > (testState.phase3Started?.timestamp || 0) &&
-          (!testState.phase3Completed ||
-            e.timestamp < testState.phase3Completed.timestamp)
+          (!testState.phase3Completed || e.timestamp < testState.phase3Completed.timestamp),
       );
-      console.log(
-        `Assistant actions captured in phase 3: ${phase3Actions.length}`
-      );
+      console.log(`Assistant actions captured in phase 3: ${phase3Actions.length}`);
     });
 
     test("All 3 phases were started", () => {
-      const phaseStartEvents =
-        testState.client?.getEventsByType("phase.started") || [];
+      const phaseStartEvents = testState.client?.getEventsByType("phase.started") || [];
       expect(phaseStartEvents.length).toBe(3);
     });
 
     test("Phase 3 events exist (but was interrupted)", () => {
       const phase3Events = testState.events.filter(
-        (e) => isPhaseStartedEvent(e) && e.data?.phaseId === "phase-3"
+        (e) => isPhaseStartedEvent(e) && e.data?.phaseId === "phase-3",
       );
       expect(phase3Events.length).toBe(1);
     });
@@ -350,7 +308,7 @@ describe("Server Shutdown Command E2E Test", () => {
       // This is implicitly tested by server exit, but we can verify
       // by looking for phase 2 completion event
       const phase3Completion = testState.events.find(
-        (e) => isPhaseCompletedEvent(e) && e.data?.phaseId === "phase-3"
+        (e) => isPhaseCompletedEvent(e) && e.data?.phaseId === "phase-3",
       );
 
       if (phase3Completion && isPhaseCompletedEvent(phase3Completion)) {
@@ -364,9 +322,7 @@ describe("Server Shutdown Command E2E Test", () => {
       // Verify that log files can be read/written after shutdown
       const logsDir = path.join(TEST_DIR, ".langton/logs");
       if (fs.existsSync(logsDir)) {
-        const logFiles = fs
-          .readdirSync(logsDir)
-          .filter((f) => f.endsWith(".jsonl"));
+        const logFiles = fs.readdirSync(logsDir).filter((f) => f.endsWith(".jsonl"));
         for (const logFile of logFiles) {
           const logPath = path.join(logsDir, logFile);
           // Try to append to the file to verify it's not locked
@@ -387,12 +343,9 @@ describe("Server Shutdown Command E2E Test", () => {
       const { execSync } = await import("node:child_process");
       try {
         // This works on Unix-like systems
-        const processes = execSync(
-          "pgrep -f 'claude.*--output-format.*stream-json' || true",
-          {
-            encoding: "utf-8",
-          }
-        ).trim();
+        const processes = execSync("pgrep -f 'claude.*--output-format.*stream-json' || true", {
+          encoding: "utf-8",
+        }).trim();
 
         // Should be empty (no Claude processes)
         expect(processes).toBe("");
@@ -405,8 +358,7 @@ describe("Server Shutdown Command E2E Test", () => {
 
   describe("Final State", () => {
     test("Final state shows only phase 1 completed", () => {
-      const stateSnapshots =
-        testState.client?.getEventsByType("state.snapshot") || [];
+      const stateSnapshots = testState.client?.getEventsByType("state.snapshot") || [];
       const finalSnapshot = stateSnapshots[stateSnapshots.length - 1] as
         | StateSnapshotEvent
         | undefined;
@@ -414,13 +366,9 @@ describe("Server Shutdown Command E2E Test", () => {
       if (finalSnapshot) {
         // Phases 1 and 2 should be in completed phases (phase 3 was interrupted)
         expect(finalSnapshot.data?.completedPhases?.length).toBe(2);
-        const phase1 = finalSnapshot.data?.completedPhases?.find(
-          (p) => p.phaseId === "phase-1"
-        );
+        const phase1 = finalSnapshot.data?.completedPhases?.find((p) => p.phaseId === "phase-1");
         expect(phase1?.success).toBe(true);
-        const phase2 = finalSnapshot.data?.completedPhases?.find(
-          (p) => p.phaseId === "phase-2"
-        );
+        const phase2 = finalSnapshot.data?.completedPhases?.find((p) => p.phaseId === "phase-2");
         expect(phase2?.success).toBe(true);
 
         // Current phase should be undefined after shutdown
@@ -442,33 +390,23 @@ describe("Server Shutdown Command E2E Test", () => {
   describe("File System", () => {
     test("Phase 1 workspaceSetup created notes directory", () => {
       expect(fs.existsSync(path.join(TEST_DIR, "notes"))).toBe(true);
-      expect(fs.statSync(path.join(TEST_DIR, "notes")).isDirectory()).toBe(
-        true
-      );
+      expect(fs.statSync(path.join(TEST_DIR, "notes")).isDirectory()).toBe(true);
     });
 
     test("Phase 1 created favorite_poem.txt", () => {
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"))
-      ).toBe(true);
+      expect(fs.existsSync(path.join(TEST_DIR, "notes/favorite_poem.txt"))).toBe(true);
     });
 
     test("Phase 2 completed - created second_favorite_poem.txt", () => {
       // Phase 2 completed before phase 3 was interrupted
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "notes/second_favorite_poem.txt"))
-      ).toBe(true);
+      expect(fs.existsSync(path.join(TEST_DIR, "notes/second_favorite_poem.txt"))).toBe(true);
     });
 
     test("Phase 3 was interrupted - typescript_code directory exists but no poem files", () => {
       // Phase 3 workspace setup completed (creating directory) but was interrupted before creating poem files
       expect(fs.existsSync(path.join(TEST_DIR, "typescript_code"))).toBe(true);
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem1.ts"))
-      ).toBe(false);
-      expect(
-        fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem2.ts"))
-      ).toBe(false);
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem1.ts"))).toBe(false);
+      expect(fs.existsSync(path.join(TEST_DIR, "typescript_code/src/poem2.ts"))).toBe(false);
     });
   });
 
@@ -476,9 +414,7 @@ describe("Server Shutdown Command E2E Test", () => {
     test("Server should not send 'all phases completed' info", () => {
       const infoEvents = testState.client?.getEventsByType("info") || [];
       const completionInfo = infoEvents.find(
-        (e) =>
-          isInfoEvent(e) &&
-          (e.data?.message?.includes("All phases completed") || false)
+        (e) => isInfoEvent(e) && (e.data?.message?.includes("All phases completed") || false),
       );
 
       // Server should NOT announce all phases completed since we shut down mid-phase 2
@@ -489,9 +425,7 @@ describe("Server Shutdown Command E2E Test", () => {
   describe("Error Handling", () => {
     test("No fatal errors occurred", () => {
       const errorEvents = testState.client?.getEventsByType("error") || [];
-      const fatalErrors = errorEvents.filter(
-        (e) => isErrorEvent(e) && e.data?.fatal
-      );
+      const fatalErrors = errorEvents.filter((e) => isErrorEvent(e) && e.data?.fatal);
       expect(fatalErrors.length).toBe(0);
     });
   });
@@ -502,16 +436,14 @@ describe("Server Shutdown Command E2E Test", () => {
       () => {
         expect(testState.events.length).toBeGreaterThan(0);
       },
-      TEST_TIMEOUT
+      TEST_TIMEOUT,
     );
 
     test("Server shutdown was timely", () => {
       // Server should shut down quickly after receiving shutdown command
       if (testState.shutdownTime && testState.serverExited) {
         const shutdownDuration =
-          testState.serverExitCode !== null
-            ? Date.now() - testState.shutdownTime.getTime()
-            : 0;
+          testState.serverExitCode !== null ? Date.now() - testState.shutdownTime.getTime() : 0;
         // Should shut down within 15 seconds (allowing some buffer)
         expect(shutdownDuration).toBeLessThan(15000);
       }
@@ -526,14 +458,14 @@ describe("Server Shutdown Command E2E Test", () => {
       // Shutdown should have been sent after phase 3 started
       if (testState.shutdownTime && testState.phase3Started) {
         expect(testState.shutdownTime.getTime()).toBeGreaterThan(
-          new Date(testState.phase3Started.timestamp).getTime()
+          new Date(testState.phase3Started.timestamp).getTime(),
         );
       }
 
       // If phase 3 completed, shutdown should have been sent before completion
       if (testState.phase3Completed && testState.shutdownTime) {
         expect(testState.shutdownTime.getTime()).toBeLessThan(
-          new Date(testState.phase3Completed.timestamp).getTime()
+          new Date(testState.phase3Completed.timestamp).getTime(),
         );
       }
     });
@@ -627,17 +559,13 @@ describe("Server Shutdown Command E2E Test", () => {
         const commitMessages = gitLog.trim().split("\n");
 
         // Exit commit might not be created if shutdown is too quick
-        const exitCommit = commitMessages.find((msg) =>
-          msg.startsWith("exit:")
-        );
+        const exitCommit = commitMessages.find((msg) => msg.startsWith("exit:"));
 
         // If exit commit exists, it should reference phase 3
         if (exitCommit) {
           expect(exitCommit).toContain("phase-3");
         } else {
-          console.log(
-            "No exit commit found - shutdown may have been too quick"
-          );
+          console.log("No exit commit found - shutdown may have been too quick");
         }
       } catch (error) {
         console.error(`Git log failed: ${error}`);
@@ -661,19 +589,19 @@ describe("Server Shutdown Command E2E Test", () => {
 
         // Should have phase 1 completed
         const phase1Completed = commitMessages.find(
-          (msg) => msg.startsWith("completed:") && msg.includes("phase-1")
+          (msg) => msg.startsWith("completed:") && msg.includes("phase-1"),
         );
         expect(phase1Completed).toBeDefined();
 
         // Should have phase 2 completed (it finished before shutdown)
         const phase2Completed = commitMessages.find(
-          (msg) => msg.startsWith("completed:") && msg.includes("phase-2")
+          (msg) => msg.startsWith("completed:") && msg.includes("phase-2"),
         );
         expect(phase2Completed).toBeDefined();
 
         // Should NOT have phase 3 completed (it was interrupted)
         const phase3Completed = commitMessages.find(
-          (msg) => msg.startsWith("completed:") && msg.includes("phase-3")
+          (msg) => msg.startsWith("completed:") && msg.includes("phase-3"),
         );
         expect(phase3Completed).toBeUndefined();
       } catch (error) {
@@ -708,12 +636,8 @@ describe("Server Shutdown Command E2E Test", () => {
         expect(trackedFiles).toContain("notes/second_favorite_poem.txt");
 
         // Should have phase 3's workspace files but not TypeScript files (interrupted)
-        expect(
-          trackedFiles.some((f) => f.includes("typescript_code/package.json"))
-        ).toBe(true);
-        expect(
-          trackedFiles.some((f) => f.includes("typescript_code/src/poem"))
-        ).toBe(false);
+        expect(trackedFiles.some((f) => f.includes("typescript_code/package.json"))).toBe(true);
+        expect(trackedFiles.some((f) => f.includes("typescript_code/src/poem"))).toBe(false);
       } catch (error) {
         console.error(`Git ls-files failed: ${error}`);
       }

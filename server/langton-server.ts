@@ -11,7 +11,7 @@ import type {
   ThinkingContent,
   ToolUseContent,
 } from "../types/claude-session-schema.js";
-import { PhaseExecutionId, SessionId } from "./branded-types.js";
+import { PhaseExecutionId, type PhaseId, SessionId } from "./branded-types.js";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
@@ -388,7 +388,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       if (sessionId && success) {
         this.completedPhases.push({
           phaseId: phase.id,
-          sessionId,
+          sessionId: SessionId(sessionId),
           success: true,
           cost,
           duration: 0,
@@ -430,7 +430,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    * 6. Send phase.started event
    * 7. Spawn Claude process with prompt
    */
-  private async startPhase(phaseId: string, skipPreCommands?: boolean): Promise<void> {
+  private async startPhase(phaseId: PhaseId, skipPreCommands?: boolean): Promise<void> {
     const phase = this.config.phases.find((p) => p.id === phaseId);
     if (!phase) {
       await this.handleError(

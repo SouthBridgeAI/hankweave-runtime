@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { PhaseId } from "./branded-types.js";
 
-const phaseIdSchema = z.string().transform(PhaseId);
+const phaseIdSchema = z.string().transform((id) => PhaseId(id));
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({

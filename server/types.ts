@@ -148,7 +148,7 @@ export interface CheckpointInfo {
   status: CheckpointStatus;
 
   /** Unique identifier of the phase (e.g., "phase-1") */
-  phaseId: string;
+  phaseId: PhaseId;
 
   /** Human-readable name of the phase */
   phaseName: string;
@@ -272,9 +272,9 @@ export type PhaseState =
  */
 export interface CompletedPhase {
   /** ID of the phase that was completed */
-  phaseId: string;
+  phaseId: PhaseId;
   /** Claude session ID used */
-  sessionId: string;
+  sessionId: SessionId;
   /** Whether the phase completed successfully */
   success: boolean;
   /** Total cost in dollars */
