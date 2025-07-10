@@ -28,7 +28,9 @@ export class GitOperations {
 
   async getCurrentCommit(): Promise<string | undefined> {
     try {
-      return await this.git.revparse(["HEAD"]);
+      const fullHash = await this.git.revparse(["HEAD"]);
+      // Return just the short hash (first 7 characters) for consistency
+      return fullHash?.substring(0, 7);
     } catch {
       return undefined;
     }
@@ -36,8 +38,23 @@ export class GitOperations {
 
   async getInitialCommit(): Promise<string | undefined> {
     try {
-      const log = await this.git.log(["--reverse", "--oneline"]);
-      return log.all[0]?.hash;
+      // IMPORTANT: We use git.raw() instead of git.log() because simple-git's
+      // log() method doesn't properly handle our complex git setup with separate
+      // GIT_DIR and GIT_WORK_TREE paths. This was causing it to return the
+      // entire log output as a single string instead of parsed commits.
+      const logOutput = await this.git.raw(["log", "--reverse", "--oneline"]);
+
+      if (!logOutput || !logOutput.trim()) {
+        return undefined;
+      }
+
+      // Extract just the hash from the first line (which is the oldest commit)
+      // Note: --oneline already gives us short hashes (7 chars) which matches
+      // what getCurrentCommit() returns for consistency
+      const firstLine = logOutput.trim().split("\n")[0];
+      const hash = firstLine.split(" ")[0];
+
+      return hash;
     } catch {
       return undefined;
     }
@@ -103,6 +120,7 @@ export class GitOperations {
       throw new Error("No initial commit found");
     }
 
+    // Reset to initial commit without paths
     await this.git.reset(["--hard", initialCommit]);
   }
 

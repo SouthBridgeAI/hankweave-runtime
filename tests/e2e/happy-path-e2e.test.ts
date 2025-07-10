@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
-import { afterAll, describe } from "bun:test";
+import { afterAll, describe, expect } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { isErrorEvent, isPhaseStartedEvent } from "../../server/type-guards.js";
+import {
+  type CleanupIntegrationResult,
+  executeTestCleanup,
+  logCleanupResults,
+} from "../utils/cleanup-integration.js";
 import {
   cleanupTest,
   colors,
@@ -57,7 +63,7 @@ import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 // Use __dirname to ensure we're always relative to this test file
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const TEST_DIR = path.join(TEST_ROOT, "tests/test-area");
+const TEST_DIR = path.join(TEST_ROOT, "tests/test-area/happy-path");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7780");
 const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
@@ -106,6 +112,14 @@ interface TestState {
   phase3Completed: PhaseCompletedEvent | null;
   errorEvents: ErrorEvent[];
   testStartTime: number;
+  cleanupResult?: CleanupIntegrationResult;
+  checkpointValidation?: {
+    checkpointDirExists: boolean;
+    gitDirExists: boolean;
+    commitMessages: string[];
+    branches: string[];
+    trackedFiles: string[];
+  };
 }
 
 const testState: TestState = {
@@ -216,21 +230,166 @@ async function setupAndRunPhases(): Promise<void> {
 
   // Extract error events for specific error testing
   testState.errorEvents = testState.events.filter((e) => isErrorEvent(e));
+
+  // Run checkpoint validation BEFORE cleanup can happen
+  console.log(`\n${colors.blue}Validating checkpoint system...${colors.reset}`);
+  await validateCheckpointSystem();
+}
+
+// Validate checkpoint system while it still exists
+// IMPORTANT: This function captures git repository data before cleanup runs.
+//
+// ## Why this pattern exists:
+//
+// We discovered that Bun's test execution order isn't guaranteed between describe
+// blocks, so the cleanup in afterAll() could run before the checkpoint tests,
+// causing failures. By capturing the data here and storing it in testState, we
+// ensure tests can validate the git repository state even after cleanup has
+// removed the actual .langton directory.
+//
+// ## Pattern for other tests:
+//
+// 1. Create a validation function that captures state into testState
+// 2. Call it at the end of test execution (before afterAll)
+// 3. Tests can then safely use testState.validationData
+// 4. This works because describe() blocks run after the main test code
+async function validateCheckpointSystem(): Promise<void> {
+  const checkpointDir = path.join(TEST_DIR, ".langton/checkpoints");
+  const gitDir = path.join(checkpointDir, ".git");
+
+  // Store validation results for tests
+  testState.checkpointValidation = {
+    checkpointDirExists: fs.existsSync(checkpointDir),
+    gitDirExists: fs.existsSync(gitDir),
+    commitMessages: [],
+    branches: [],
+    trackedFiles: [],
+  };
+
+  if (testState.checkpointValidation.gitDirExists) {
+    const { execSync } = await import("node:child_process");
+
+    try {
+      // Get commit messages
+      const gitLog = execSync("git log --pretty=format:%s", {
+        cwd: TEST_DIR,
+        env: {
+          ...process.env,
+          GIT_DIR: gitDir,
+          GIT_WORK_TREE: TEST_DIR,
+        },
+        encoding: "utf-8",
+      });
+      testState.checkpointValidation.commitMessages = gitLog
+        .trim()
+        .split("\n")
+        .filter((msg) => msg);
+    } catch (error) {
+      console.error(`Git log failed: ${error}`);
+    }
+
+    try {
+      // Get branches
+      const gitBranches = execSync("git branch", {
+        cwd: TEST_DIR,
+        env: {
+          ...process.env,
+          GIT_DIR: gitDir,
+          GIT_WORK_TREE: TEST_DIR,
+        },
+        encoding: "utf-8",
+      });
+      testState.checkpointValidation.branches = gitBranches
+        .trim()
+        .split("\n")
+        .map((b) => b.trim());
+    } catch (error) {
+      console.error(`Git branch failed: ${error}`);
+    }
+
+    try {
+      // Get tracked files
+      const gitFiles = execSync("git ls-files", {
+        cwd: TEST_DIR,
+        env: {
+          ...process.env,
+          GIT_DIR: gitDir,
+          GIT_WORK_TREE: TEST_DIR,
+        },
+        encoding: "utf-8",
+      });
+      testState.checkpointValidation.trackedFiles = gitFiles.trim()
+        ? gitFiles
+            .trim()
+            .split("\n")
+            .filter((f) => f)
+        : [];
+    } catch (error) {
+      console.error(`Git ls-files failed: ${error}`);
+    }
+  }
+
+  console.log(`${colors.green}✓ Checkpoint validation complete${colors.reset}`);
 }
 
 // ============================================================================
-// Cleanup Function
+// Cleanup Functions - Separated for proper test execution order
+// ============================================================================
+//
+// IMPORTANT: Test cleanup follows a specific pattern to avoid race conditions:
+//
+// 1. Server shutdown and file cleanup are SEPARATED
+//    - shutdownServer() only stops the server process
+//    - runFullCleanup() removes files and directories
+//    - This prevents "file not found" errors during test assertions
+//
+// 2. Cleanup runs in afterAll(), not in the main test flow
+//    - Ensures tests can verify files before they're deleted
+//    - Guarantees cleanup even if tests fail
+//
+// 3. Force mode is used for e2e tests
+//    - If CleanupCommand fails (e.g., git issues), falls back to manual cleanup
+//    - Ensures test isolation even in error scenarios
+//
+// 4. Test directories are isolated
+//    - Each test uses its own subdirectory (e.g., test-area/happy-path)
+//    - Prevents conflicts when tests run in parallel
 // ============================================================================
 
-async function cleanup(): Promise<void> {
-  await cleanupTest({
+// This function only shuts down the server and saves results
+async function shutdownServer(): Promise<void> {
+  // Only shutdown if not already done
+  if (testState.serverProcess || testState.client?.isConnected) {
+    await cleanupTest({
+      testDir: TEST_DIR,
+      testRunDir: TEST_RUN_DIR,
+      serverProcess: testState.serverProcess,
+      client: testState.client,
+      events: testState.events,
+      gracefulShutdown: true,
+    });
+  }
+}
+
+// This function runs the full cleanup (removes files)
+async function runFullCleanup(): Promise<void> {
+  // First ensure server is shut down
+  await shutdownServer();
+
+  // Use the cleanup integration to clean test artifacts
+  console.log(`\n${colors.blue}Running cleanup integration...${colors.reset}`);
+
+  const cleanupResult = await executeTestCleanup({
     testDir: TEST_DIR,
-    testRunDir: TEST_RUN_DIR,
-    serverProcess: testState.serverProcess,
-    client: testState.client,
-    events: testState.events,
-    gracefulShutdown: true,
+    phasesConfig: PHASES_CONFIG,
+    skipConfirmation: true,
+    force: true, // Force cleanup even if there are errors
   });
+
+  logCleanupResults(cleanupResult, true); // Verbose output for tests
+
+  // Store cleanup result for verification
+  testState.cleanupResult = cleanupResult;
 }
 
 // ============================================================================
@@ -404,6 +563,73 @@ describe("Langton E2E Test", () => {
 });
 
 // Cleanup after all tests
+//
+// ## Cleanup Integration Pattern
+//
+// This afterAll() block demonstrates the standard cleanup pattern for e2e tests:
+//
+// 1. **Conditional execution**: Only runs if not already done
+// 2. **Two-phase cleanup**: Server shutdown, then file removal
+// 3. **Force mode**: Uses force=true to handle git failures
+// 4. **Verification**: Tests that cleanup actually worked
+//
+// ## What gets verified:
+//
+// - Cleanup success (allowing for git errors with force mode)
+// - Expected directories were removed (typescript_code, .langton)
+// - Only expected files remain (notes/, maybe untracked.txt)
+// - No .langton directory remains
+//
+// ## Edge cases handled:
+//
+// - untracked.txt: Created by checkpoint exclusion tests
+// - notes/: Created by command, not workspace setup, so preserved
+// - Git failures: Force mode ensures cleanup continues
 afterAll(async () => {
-  await cleanup();
+  // First shutdown the server if needed
+  if (!testState.cleanupResult) {
+    await shutdownServer();
+  }
+
+  // Now run the full cleanup and verify it worked
+  console.log(`\n${colors.blue}Running final cleanup...${colors.reset}`);
+
+  if (!testState.cleanupResult) {
+    await runFullCleanup();
+  }
+
+  // Verify cleanup worked correctly
+  if (testState.cleanupResult) {
+    console.log(`\n${colors.blue}Verifying cleanup results...${colors.reset}`);
+
+    // Check if cleanup was successful
+    if (testState.cleanupResult.errors.length === 0) {
+      expect(testState.cleanupResult.success).toBe(true);
+    }
+
+    // Verify directories were removed
+    expect(testState.cleanupResult.directoriesRemoved.length).toBeGreaterThan(0);
+    const removedDirs = testState.cleanupResult.directoriesRemoved;
+    expect(removedDirs.some((d) => d === "typescript_code" || d.includes("typescript_code"))).toBe(
+      true,
+    );
+    expect(removedDirs.some((d) => d === ".langton" || d.includes(".langton"))).toBe(true);
+
+    // Verify test directory state
+    const testDirContents = fs.readdirSync(TEST_DIR);
+    const visibleFiles = testDirContents.filter((f) => !f.startsWith("."));
+    // Should only have 'notes' directory (created by command, not workspace setup)
+    // and possibly 'untracked.txt' from checkpoint exclusion tests
+    const expectedFiles = ["notes"];
+    if (visibleFiles.includes("untracked.txt")) {
+      expectedFiles.push("untracked.txt");
+    }
+    expect(visibleFiles.sort()).toEqual(expectedFiles.sort());
+
+    // Verify .langton directory is gone
+    const langtonDir = path.join(TEST_DIR, ".langton");
+    expect(fs.existsSync(langtonDir)).toBe(false);
+
+    console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
+  }
 });

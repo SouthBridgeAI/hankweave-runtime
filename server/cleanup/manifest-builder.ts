@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadPhaseConfig } from "../config.js";
 import type { PhaseConfig } from "../types.js";
-import { CommandAnalyzer } from "./command-analyzer.js";
-import { FileOperations } from "./file-operations.js";
+import { analyzeCommand } from "./command-analyzer.js";
+import { getDirectorySize } from "./file-operations.js";
 import { GitOperations } from "./git-operations.js";
 import type {
   CleanupManifest,
@@ -14,18 +14,20 @@ import type {
 } from "./types.js";
 
 export class ManifestBuilder {
-  constructor(private configPath: string, private projectPath: string) {}
+  constructor(
+    private configPath: string,
+    private projectPath: string,
+  ) {}
 
   async build(): Promise<CleanupManifest> {
     const phases = loadPhaseConfig(this.configPath);
 
-    const [copiedItems, executedCommands, langtonDir, gitInfo] =
-      await Promise.all([
-        this.findCopiedItems(phases),
-        this.findExecutedCommands(phases),
-        this.analyzeLangtonDir(),
-        this.analyzeGitState(),
-      ]);
+    const [copiedItems, executedCommands, langtonDir, gitInfo] = await Promise.all([
+      this.findCopiedItems(phases),
+      this.findExecutedCommands(phases),
+      this.analyzeLangtonDir(),
+      this.analyzeGitState(),
+    ]);
 
     return {
       gitTrackedFiles: gitInfo.trackedFiles,
@@ -59,12 +61,10 @@ export class ManifestBuilder {
 
             if (type === "directory") {
               try {
-                sizeBytes = await FileOperations.getDirectorySize(destPath);
+                sizeBytes = await getDirectorySize(destPath);
               } catch (error) {
                 // Size calculation timed out or failed
-                console.warn(
-                  `Failed to calculate size for ${destPath}: ${error}`
-                );
+                console.warn(`Failed to calculate size for ${destPath}: ${error}`);
               }
             } else {
               sizeBytes = stats.size;
@@ -86,9 +86,7 @@ export class ManifestBuilder {
     return items;
   }
 
-  private async findExecutedCommands(
-    phases: PhaseConfig[]
-  ): Promise<ExecutedCommand[]> {
+  private async findExecutedCommands(phases: PhaseConfig[]): Promise<ExecutedCommand[]> {
     const commands: ExecutedCommand[] = [];
 
     for (const phase of phases) {
@@ -111,10 +109,9 @@ export class ManifestBuilder {
 
           commands.push({
             command: setup.command.run,
-            workingDirectory:
-              path.relative(this.projectPath, workingDir) || ".",
+            workingDirectory: path.relative(this.projectPath, workingDir) || ".",
             phaseId: phase.id,
-            possibleSideEffects: CommandAnalyzer.analyze(setup.command.run),
+            possibleSideEffects: analyzeCommand(setup.command.run),
           });
         }
       }
@@ -148,9 +145,7 @@ export class ManifestBuilder {
 
     for (const entry of entries) {
       if (entry.name === "logs" && entry.isDirectory()) {
-        const logFiles = await fs.promises.readdir(
-          path.join(langtonPath, "logs")
-        );
+        const logFiles = await fs.promises.readdir(path.join(langtonPath, "logs"));
         contents.logs = logFiles;
       } else if (entry.name === "checkpoints" && entry.isDirectory()) {
         contents.checkpoints = true;
@@ -161,7 +156,7 @@ export class ManifestBuilder {
 
     let sizeBytes = 0;
     try {
-      sizeBytes = await FileOperations.getDirectorySize(langtonPath);
+      sizeBytes = await getDirectorySize(langtonPath);
     } catch (error) {
       console.warn(`Failed to calculate .langton size: ${error}`);
     }
@@ -181,11 +176,7 @@ export class ManifestBuilder {
     initialCommit?: string;
     isAtInitial: boolean;
   }> {
-    const checkpointPath = path.join(
-      this.projectPath,
-      ".langton",
-      "checkpoints"
-    );
+    const checkpointPath = path.join(this.projectPath, ".langton", "checkpoints");
 
     if (!fs.existsSync(checkpointPath)) {
       return {
@@ -198,13 +189,12 @@ export class ManifestBuilder {
     const gitOps = new GitOperations(this.projectPath, checkpointPath);
 
     try {
-      const [isRepo, currentCommit, initialCommit, trackedFiles] =
-        await Promise.all([
-          gitOps.isGitRepository(),
-          gitOps.getCurrentCommit(),
-          gitOps.getInitialCommit(),
-          gitOps.getTrackedFiles(),
-        ]);
+      const [isRepo, currentCommit, initialCommit, trackedFiles] = await Promise.all([
+        gitOps.isGitRepository(),
+        gitOps.getCurrentCommit(),
+        gitOps.getInitialCommit(),
+        gitOps.getTrackedFiles(),
+      ]);
 
       return {
         repoExists: isRepo,

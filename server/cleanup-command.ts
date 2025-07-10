@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { FileOperations } from "./cleanup/file-operations.js";
+import { formatSize, removeDirectory, removeFile } from "./cleanup/file-operations.js";
 import { GitOperations } from "./cleanup/git-operations.js";
 import { ManifestBuilder } from "./cleanup/manifest-builder.js";
 import type { CleanupManifest, CleanupOptions, CleanupResult } from "./cleanup/types.js";
@@ -80,7 +80,7 @@ export class CleanupCommand {
       console.log("📁 Directories (from workspace setup):");
       for (const item of manifest.copiedItems) {
         if (item.exists) {
-          const size = item.sizeBytes ? ` (${FileOperations.formatSize(item.sizeBytes)})` : "";
+          const size = item.sizeBytes ? ` (${formatSize(item.sizeBytes)})` : "";
           console.log(`  ✗ ${item.destination}${size} (copied from ${item.source})`);
         }
       }
@@ -108,9 +108,7 @@ export class CleanupCommand {
     if (manifest.langtonDir.exists) {
       console.log("📁 Langton data:");
       console.log(
-        `  ✗ ${manifest.langtonDir.path}/ (${FileOperations.formatSize(
-          manifest.langtonDir.sizeBytes,
-        )})`,
+        `  ✗ ${manifest.langtonDir.path}/ (${formatSize(manifest.langtonDir.sizeBytes)})`,
       );
 
       if (manifest.langtonDir.contents.logs.length > 0) {
@@ -195,11 +193,11 @@ export class CleanupCommand {
       try {
         if (item.type === "directory") {
           console.log(`🗑️  Removing directory: ${item.destination}`);
-          await FileOperations.removeDirectory(fullPath, this.options.projectPath);
+          await removeDirectory(fullPath, this.options.projectPath);
           result.directoriesRemoved.push(item.destination);
         } else {
           console.log(`🗑️  Removing file: ${item.destination}`);
-          await FileOperations.removeFile(fullPath, this.options.projectPath);
+          await removeFile(fullPath, this.options.projectPath);
           result.filesRemoved.push(item.destination);
         }
       } catch (error) {
@@ -228,7 +226,7 @@ export class CleanupCommand {
   }
 
   private displayResults(result: CleanupResult): void {
-    console.log("\n" + "=".repeat(50) + "\n");
+    console.log(`\n${"=".repeat(50)}\n`);
 
     if (result.success) {
       console.log("✅ Cleanup completed successfully!\n");

@@ -28,12 +28,19 @@ tests/
 ├── e2e/                         # End-to-end tests
 │   ├── happy-path-e2e.test.ts          # Full workflow test
 │   ├── skip-phase-continue-e2e.test.ts # Skip and continue test
-│   └── skip-phase-quit-e2e.test.ts     # Skip and quit test
+│   └── server-shutdown-e2e.test.ts     # Server shutdown test
 ├── utils/                       # Test utilities
 │   ├── check-test-ready.ts      # Pre-test environment verification
 │   ├── cleanup-test.sh          # Manual cleanup script
-│   └── sanity-check.ts          # Detailed environment check
+│   ├── sanity-check.ts          # Detailed environment check
+│   └── cleanup-integration.ts   # Test cleanup integration helper
+├── unit/                        # Unit tests
+│   ├── cleanup-integration.test.ts # Tests for cleanup integration
+│   └── ...                      # Other unit tests
 ├── test-area/                   # Test execution directory (gitignored)
+│   ├── happy-path/              # Isolated directory for happy-path test
+│   ├── skip-continue/           # Isolated directory for skip-continue test
+│   └── server-shutdown/         # Isolated directory for server-shutdown test
 ├── test-results/                # Test logs and artifacts (gitignored)
 ├── test-summary.md              # Test implementation summary
 └── README.md                    # This file
@@ -87,13 +94,13 @@ Tests phase skipping with continuation:
   - No result message wait for skipped phases
   - Proper timeout handling for completed phases
 
-### 3. Skip and Quit Test (`skip-phase-quit-e2e.test.ts`)
+### 3. Server Shutdown Test (`server-shutdown-e2e.test.ts`)
 
 Tests skipping the final phase:
 
 - Runs phase 1 to completion (using traditional `preStart`)
 - Starts phase 2 (last phase), skips it
-- Verifies server shuts down gracefully  
+- Verifies server shuts down gracefully
 - Checks that resources are cleaned up properly including:
   - Lock file removal
   - Process termination
@@ -104,7 +111,6 @@ Tests skipping the final phase:
   - No exit branch created (normal completion)
   - Phase completion commits for successful phases
   - Skipped commit for final phase
-
 
 ## Test Architecture
 
@@ -154,7 +160,7 @@ Tests can use custom phase configurations or the default `test-phases.config.jso
     "model": "sonnet",
     "workspaceSetup": [
       {
-        "type": "command", 
+        "type": "command",
         "command": { "run": "mkdir -p notes" }
       }
     ],
@@ -166,8 +172,9 @@ Tests can use custom phase configurations or the default `test-phases.config.jso
 ```
 
 The test configuration demonstrates several key features:
+
 - **Multiple file support**: Both prompt files and system prompt files can be specified as arrays
-- **Workspace setup**: Modern `workspaceSetup` approach alongside legacy `preStart` for compatibility testing  
+- **Workspace setup**: Modern `workspaceSetup` approach alongside legacy `preStart` for compatibility testing
 - **Checkpoint tracking**: `checkpointAndWatch` patterns for git-based snapshots
 
 ## Running Tests
@@ -224,16 +231,20 @@ bun run test:cleanup  # Clean up stuck tests
 ## Important Notes
 
 1. **Working Directory**: Tests MUST run from project root
-2. **Port Usage**: Each test uses a different port:
-   - Happy path: 7777 (or `LANGTON_TEST_PORT`)
+2. **Test Isolation**: Each test uses its own subdirectory in `test-area/`:
+   - `happy-path/`: Used by happy-path-e2e.test.ts
+   - `skip-continue/`: Used by skip-phase-continue-e2e.test.ts
+   - `server-shutdown/`: Used by server-shutdown-e2e.test.ts
+3. **Port Usage**: Each test uses a different port:
+   - Happy path: 7780 (or `LANGTON_TEST_PORT`)
    - Skip continue: 7778
-   - Skip quit: 7779
-3. **API Usage**: Tests consume real Claude API credits
-4. **Cleanup**: Always runs between tests automatically
-5. **Timeouts**: Tests have 2-5 minute timeouts
-6. **Environment Variables**: Set `LANGTON_TEST_PORT` to use custom port
-7. **Type Checking**: Tests are included in TypeScript compilation for full type safety
-8. **Process Management**: Tests validate proper cleanup of ClaudeProcessManager resources
+   - Server shutdown: 7779
+4. **API Usage**: Tests consume real Claude API credits
+5. **Cleanup**: Always runs in `afterAll()` using the cleanup integration
+6. **Timeouts**: Tests have 2-5 minute timeouts
+7. **Environment Variables**: Set `LANGTON_TEST_PORT` to use custom port
+8. **Type Checking**: Tests are included in TypeScript compilation for full type safety
+9. **Process Management**: Tests validate proper cleanup of ClaudeProcessManager resources
 
 ## Debugging Failed Tests
 
@@ -243,22 +254,114 @@ bun run test:cleanup  # Clean up stuck tests
 4. Inspect `websocket-events.json` for event sequence
 5. Run `bun run test:cleanup` if processes are stuck
 
+## Test Patterns and Best Practices
+
+### Test Directory Isolation
+
+Each e2e test uses its own subdirectory to prevent conflicts:
+
+```typescript
+const TEST_DIR = path.join(TEST_ROOT, "tests/test-area/my-test-name");
+```
+
+This ensures:
+
+- Tests can run in parallel without interference
+- File conflicts are avoided (e.g., "Target path already exists")
+- Each test has a clean workspace
+
+### Cleanup Integration Pattern
+
+All e2e tests use a consistent cleanup pattern:
+
+```typescript
+import { executeTestCleanup } from "../utils/cleanup-integration.js";
+
+// Run test setup and execution first
+await runMyTest();
+
+// Cleanup always runs in afterAll
+afterAll(async () => {
+  // First shutdown server
+  await shutdownServer();
+
+  // Then run full cleanup
+  const cleanupResult = await executeTestCleanup({
+    testDir: TEST_DIR,
+    phasesConfig: PHASES_CONFIG,
+    skipConfirmation: true,
+    force: true, // Force cleanup even if git operations fail
+  });
+
+  // Verify cleanup succeeded
+  logCleanupResults(cleanupResult, true);
+});
+```
+
+Key points:
+
+- **Always use `afterAll()`**: Ensures cleanup runs even if tests fail
+- **Use `force: true`** for e2e tests: Falls back to manual cleanup if needed
+- **Separate server shutdown from file cleanup**: Prevents timing issues
+
+### Checkpoint Data Capture Pattern
+
+For tests that need to verify git state:
+
+```typescript
+// Capture checkpoint data BEFORE cleanup runs
+async function validateCheckpointSystem(): Promise<void> {
+  const checkpointDir = path.join(TEST_DIR, ".langton/checkpoints");
+  const gitDir = path.join(checkpointDir, ".git");
+
+  // Store validation results in test state
+  testState.checkpointValidation = {
+    checkpointDirExists: fs.existsSync(checkpointDir),
+    gitDirExists: fs.existsSync(gitDir),
+    commitMessages: [], // Populate with git log
+    branches: [], // Populate with git branch
+    trackedFiles: [], // Populate with git ls-files
+  };
+}
+
+// Call this BEFORE cleanup
+await validateCheckpointSystem();
+
+// Tests can then use the captured data
+test("checkpoint tests", () => {
+  expect(testState.checkpointValidation.branches).toContain("* main");
+});
+```
+
 ## Writing New Tests
 
 1. Create new test file with `.test.ts` extension
-2. Import test client from existing tests
-3. Use unique port number (avoid 7777-7779)
-4. Follow existing test structure:
+2. Import test utilities and cleanup integration
+3. Use unique port number (avoid 7778-7780)
+4. Use isolated test directory
+5. Follow the established patterns:
 
    ```typescript
-   // Setup
-   await setupTestDirectory();
-   const server = startServer();
-   const client = new TestWSClient();
+   import { executeTestCleanup } from "../utils/cleanup-integration.js";
 
-   // Execute test scenario
-   await client.connect();
-   // ... test logic
+   // Use isolated directory
+   const TEST_DIR = path.join(TEST_ROOT, "tests/test-area/my-new-test");
+
+   // Setup and run test
+   async function runMyTest(): Promise<void> {
+     await setupTestDirectory();
+     const server = startServer();
+     const client = new TestWSClient();
+
+     await client.connect();
+     // ... test logic
+
+     // Store events for assertions
+     testState.events = client.getEvents();
+   }
+
+   // Run test before assertions
+   await runMyTest();
 
    // Assertions
    describe("Test Suite", () => {
@@ -267,9 +370,13 @@ bun run test:cleanup  # Clean up stuck tests
      });
    });
 
-   // Cleanup
+   // Cleanup in afterAll
    afterAll(async () => {
-     await cleanup();
+     await executeTestCleanup({
+       testDir: TEST_DIR,
+       phasesConfig: PHASES_CONFIG,
+       force: true,
+     });
    });
    ```
 
