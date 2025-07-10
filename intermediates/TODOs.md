@@ -20,7 +20,7 @@ While running:
 TODOs:
 
 1. Check why we're using branded-types.js
-
+1. Check checkpoint and watch and see if needs renaming or merging with watch?
 1. Validate command for phases
 1. Cleanup command to rollback to checkpoint
 1. dry run to validate phases, skip all without starting claude, and rollback
