@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import simpleGit, { type SimpleGit } from "simple-git";
+import { fileResolver } from "./file-resolver.js";
 import type { Logger } from "./utils.js";
 
 /**
@@ -57,7 +58,9 @@ export class CheckpointGit {
     await this.git.addConfig("commit.gpgsign", "false");
 
     // Initial empty commit (don't add .gitignore to avoid conflicts with user's project)
-    await this.git.commit("Initial checkpoint setup", { "--allow-empty": null });
+    await this.git.commit("Initial checkpoint setup", {
+      "--allow-empty": null,
+    });
 
     this.logger.log("Shadow git repository initialized");
   }
@@ -76,61 +79,32 @@ export class CheckpointGit {
     for (const pattern of patterns) {
       this.trackedPatterns.add(pattern);
     }
-    await this.updateGitignore();
+    // No need to update gitignore - we'll use explicit file adds
   }
 
   /**
-   * Update git exclude file to track only specified patterns
-   * Using info/exclude instead of .gitignore to avoid interfering with user's project
+   * Clear all tracked patterns
    */
-  private async updateGitignore(): Promise<void> {
-    const excludePath = path.join(this.checkpointPath, ".git", "info", "exclude");
+  clearPatterns(): void {
+    this.trackedPatterns.clear();
+    this.logger.log("Cleared all tracked patterns");
+  }
 
-    // Ensure the info directory exists
-    const infoDir = path.join(this.checkpointPath, ".git", "info");
-    await fs.promises.mkdir(infoDir, { recursive: true });
-
+  /**
+   * Get resolved files for all tracked patterns
+   */
+  private async getTrackedFiles(): Promise<string[]> {
     if (this.trackedPatterns.size === 0) {
-      // If no patterns, just ignore everything
-      const excludeContent = "# Langton checkpoint exclude rules\n# Ignore everything\n*\n";
-      await fs.promises.writeFile(excludePath, excludeContent);
-      return;
+      return [];
     }
 
-    // Build exclude content properly for git
-    let excludeContent = "# Langton checkpoint exclude rules\n";
-    excludeContent += "# Ignore everything by default\n*\n\n";
+    // Use the unified file resolver to get files respecting gitignore
+    const files = await fileResolver.resolveFiles(
+      this.projectPath,
+      Array.from(this.trackedPatterns),
+    );
 
-    // For each pattern, we need to unignore the path and parent directories
-    const allPaths = new Set<string>();
-
-    for (const pattern of this.trackedPatterns) {
-      // Remove leading ./ if present
-      const cleanPattern = pattern.replace(/^\.\//, "");
-
-      // Add the pattern itself
-      allPaths.add(`!${cleanPattern}`);
-
-      // For patterns with directories, also unignore parent directories
-      if (cleanPattern.includes("/")) {
-        const parts = cleanPattern.split("/");
-        let currentPath = "";
-
-        // Unignore each parent directory
-        for (let i = 0; i < parts.length - 1; i++) {
-          currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
-          allPaths.add(`!${currentPath}/`);
-        }
-      }
-    }
-
-    // Add all the unignore rules
-    excludeContent += "# Unignore tracked patterns and their parent directories\n";
-    for (const path of Array.from(allPaths).sort()) {
-      excludeContent += `${path}\n`;
-    }
-
-    await fs.promises.writeFile(excludePath, excludeContent);
+    return files;
   }
 
   /**
@@ -148,8 +122,23 @@ export class CheckpointGit {
       this.logger.log(`Created branch: ${options.branch}`);
     }
 
-    // Stage all files (exclude file will filter what gets included)
-    await this.git.add(".");
+    // Get resolved files to add
+    const files = await this.getTrackedFiles();
+
+    // First, reset the index to ensure we start clean
+    await this.git.reset(["HEAD"]);
+
+    // Explicitly add each resolved file
+    if (files.length > 0) {
+      // Add files in batches to avoid command line length limits
+      const batchSize = 100;
+      for (let i = 0; i < files.length; i += batchSize) {
+        const batch = files.slice(i, i + batchSize);
+        // Use force add to override any gitignore rules
+        await this.git.raw(["add", "-f", ...batch]);
+      }
+      this.logger.log(`Added ${files.length} files to checkpoint`);
+    }
 
     // Check if we have any staged changes
     const status = await this.git.status();

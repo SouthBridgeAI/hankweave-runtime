@@ -58,7 +58,7 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
       const phaseName = phaseData?.name || "unnamed";
 
       if (phaseIndex !== undefined) {
-        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, watch, description, checkpointAndWatch.`;
+        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles.`;
       } else {
         errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
       }
@@ -126,9 +126,8 @@ const phaseConfigSchema = z
       }),
     }),
     workspaceSetup: z.array(workspaceSetupItemSchema).optional(),
-    watch: z.string().optional(),
     description: z.string().optional(),
-    checkpointAndWatch: z.array(z.string()).optional(),
+    trackedFiles: z.array(z.string()).optional(),
   })
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
@@ -532,13 +531,9 @@ export async function validatePhaseConfig(
       }
     }
 
-    // Count phases with watching
-    if (phase.watch) {
+    // Count phases with file tracking
+    if (phase.trackedFiles && phase.trackedFiles.length > 0) {
       result.watchingPhaseCount++;
-    }
-
-    // Count phases with checkpoints
-    if (phase.checkpointAndWatch && phase.checkpointAndWatch.length > 0) {
       result.checkpointPhaseCount++;
     }
 
@@ -553,10 +548,10 @@ export async function validatePhaseConfig(
     if (phase.continuationMode === "continue-previous" && index > 0) {
       const previousPhase = phases[index - 1];
       // Warn if previous phase doesn't produce output that might be needed
-      if (!previousPhase.watch && !previousPhase.checkpointAndWatch) {
+      if (!previousPhase.trackedFiles || previousPhase.trackedFiles.length === 0) {
         result.warnings.push(
           `${phaseLabel}: Continues from previous phase "${previousPhase.id}" ` +
-            `which doesn't watch or checkpoint any files`,
+            `which doesn't track any files`,
         );
       }
     }

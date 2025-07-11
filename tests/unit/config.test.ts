@@ -180,7 +180,7 @@ describe("validatePhaseConfig", () => {
         model: "opus",
         continuationMode: "fresh",
         promptFile: "./prompt1.md",
-        watch: "*.md",
+        trackedFiles: ["*.md"],
       },
       {
         id: "phase-2",
@@ -189,7 +189,7 @@ describe("validatePhaseConfig", () => {
         continuationMode: "continue-previous",
         promptFile: "./prompt2.md",
         appendSystemPromptFile: "./system.md",
-        checkpointAndWatch: ["*.js"],
+        trackedFiles: ["*.js"],
         workspaceSetup: [
           {
             type: "copy",
@@ -209,8 +209,8 @@ describe("validatePhaseConfig", () => {
     expect(result.promptFileCount).toBe(2);
     expect(result.systemPromptFileCount).toBe(1);
     expect(result.workspaceSetupCount).toBe(1);
-    expect(result.watchingPhaseCount).toBe(1);
-    expect(result.checkpointPhaseCount).toBe(1);
+    expect(result.watchingPhaseCount).toBe(2);
+    expect(result.checkpointPhaseCount).toBe(2);
   });
 
   test("detects duplicate phase IDs", async () => {
@@ -429,7 +429,7 @@ describe("validatePhaseConfig", () => {
         model: "opus",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
-        // No watch or checkpointAndWatch
+        // No trackedFiles
       },
       {
         id: "phase-2",
@@ -444,9 +444,7 @@ describe("validatePhaseConfig", () => {
     const result = await validatePhaseConfig(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toContain(
-      "which doesn't watch or checkpoint any files"
-    );
+    expect(result.warnings[0]).toContain("which doesn't track any files");
   });
 
   test("throws on empty command", async () => {

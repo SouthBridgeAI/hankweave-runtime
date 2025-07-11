@@ -17,14 +17,13 @@
         }
       }
     ],
-    "watch": "./notes/*.txt",
     "appendSystemPromptFile": [
       "./systemPrompt1.md",
       "./systemPrompt2.md",
       "./noTodosPrompt.md"
     ],
     "description": "Write three pick one",
-    "checkpointAndWatch": [
+    "trackedFiles": [
       "notes/**/*",
       "*.md"
     ]
@@ -35,12 +34,11 @@
     "promptText": "Can you put your second favorite of the poems you just made into the notes folder as '<%PROJECT_DIR%>/notes/second_favorite_poem.txt'?",
     "model": "sonnet",
     "continuationMode": "continue-previous",
-    "watch": "./notes/*.*",
     "appendSystemPromptFile": [
       "./noTodosPrompt.md"
     ],
     "description": "Write one more",
-    "checkpointAndWatch": [
+    "trackedFiles": [
       "notes/**/*"
     ]
   },
@@ -66,12 +64,11 @@
       }
     ],
     "continuationMode": "fresh",
-    "watch": "./typescript_code/src/**/*.ts",
     "description": "Convert poems to code",
     "appendSystemPromptFile": [
       "./noTodosPrompt.md"
     ],
-    "checkpointAndWatch": [
+    "trackedFiles": [
       "typescript_code/src/**/*.ts",
       "typescript_code/package.json"
     ]

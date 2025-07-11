@@ -121,16 +121,33 @@ export function runFileWatchingTests(testState: TestState) {
   });
 
   test("no TypeScript file events before Phase 3", () => {
-    const phase3StartIndex = testState.events.findIndex(
-      (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data?.phaseId === "phase-3",
+    // Find the index where Phase 3's execution begins (not just when it starts with Claude)
+    // We need to look for when Phase 2 completes, as Phase 3's workspace setup
+    // happens after Phase 2 completion but before Phase 3's Claude session starts
+    const phase2CompletedIndex = testState.events.findIndex(
+      (e) => e.type === "phase.completed" && (e as PhaseCompletedEvent).data?.phaseId === "phase-2",
     );
-    const phase1And2Events = testState.events.slice(0, phase3StartIndex);
+
+    // Get events only from phases 1 and 2
+    const phase1And2Events =
+      phase2CompletedIndex >= 0
+        ? testState.events.slice(0, phase2CompletedIndex + 1)
+        : testState.events;
 
     const unexpectedTsEvents = phase1And2Events.filter(
       (e) =>
         e.type === "file.updated" &&
         (e as FileUpdatedEvent).data?.path?.includes("typescript_code"),
     );
+
+    // Debug if test fails
+    if (unexpectedTsEvents.length > 0) {
+      console.log(`Found ${unexpectedTsEvents.length} TypeScript file events before Phase 3:`);
+      unexpectedTsEvents.forEach((e) => {
+        const fileEvent = e as FileUpdatedEvent;
+        console.log(`  - ${fileEvent.data?.action}: ${fileEvent.data?.path} at ${e.timestamp}`);
+      });
+    }
 
     expect(unexpectedTsEvents.length).toBe(0);
   });

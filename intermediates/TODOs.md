@@ -4,7 +4,7 @@
 
 ## Minor
 
-1. Check and merge checkpointAndWatch with Watch?
+1. Checkpoint on quit?
 2. Universal system prompt
 3. Add an interactive prompt to e2e tests (maybe a password?) so that Claude can't run it
 4. Add in API key on start

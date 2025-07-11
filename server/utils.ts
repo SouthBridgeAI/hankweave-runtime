@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
+import { fileResolver } from "./file-resolver.js";
 import type { FileNode } from "./types.js";
 
 // ============================================================================
@@ -145,14 +146,32 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
   const tree: FileNode[] = [];
 
   try {
-    const files = await scanWatchedFiles(projectPath, pattern);
+    // Use unified file resolver to respect gitignore
+    const resolvedFiles = await fileResolver.resolveFiles(projectPath, [pattern]);
+
+    // Get file metadata for each resolved file
+    const files = await Promise.all(
+      resolvedFiles.map(async (filePath) => {
+        const fullPath = path.join(projectPath, filePath);
+        const stats = await fs.promises.stat(fullPath);
+        const content = await fs.promises.readFile(fullPath, "utf-8");
+        return {
+          path: filePath,
+          content,
+          lastModified: stats.mtime.toISOString(),
+        };
+      }),
+    );
+
     const dirMap = new Map<string, FileNode>();
 
     // Sort files to ensure directories are created before their children
     files.sort((a, b) => a.path.localeCompare(b.path));
 
     for (const file of files) {
-      const parts = file.path.split(path.sep);
+      // Normalize path to remove leading "./"
+      const normalizedPath = file.path.startsWith("./") ? file.path.slice(2) : file.path;
+      const parts = normalizedPath.split(path.sep);
       let currentPath = "";
       let parent: FileNode | null = null;
 

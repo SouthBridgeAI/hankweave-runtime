@@ -140,17 +140,17 @@ export interface PhaseConfig {
    */
   workspaceSetup?: WorkspaceSetupItem[];
 
-  /**
-   * Glob pattern for files to watch during phase execution.
-   * Changes to matching files will be streamed to the client.
-   */
-  watch?: string;
-
   /** Optional description shown to users about what this phase does */
   description?: string;
 
-  /** Glob patterns to track for checkpointing and watching (files and directories) */
-  checkpointAndWatch?: string[];
+  /**
+   * Glob patterns for files to track during phase execution.
+   * These files will be:
+   * - Watched for changes and streamed to the client
+   * - Tracked in the git-based checkpoint system
+   * - Resolved using gitignore rules for consistency
+   */
+  trackedFiles?: string[];
 }
 
 /**

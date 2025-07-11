@@ -18,6 +18,7 @@ import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { APITimeoutError, ErrorSeverity } from "./error-types.js";
+import { fileResolver } from "./file-resolver.js";
 import type { ToolInputMap, ToolName } from "./tool-types.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type {
@@ -51,7 +52,6 @@ import {
   extractSessionIdFromLog,
   generateId,
   Logger,
-  scanWatchedFiles,
   toError,
 } from "./utils.js";
 
@@ -88,7 +88,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private logger: Logger;
   private currentPhase: PhaseState | undefined;
   private completedPhases: CompletedPhase[] = [];
-  private watchedPattern: string | undefined;
+  private watchedPatterns: string[] = [];
   private recentFileAccess:
     | {
         path: string;
@@ -488,9 +488,17 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // Add checkpoint patterns for this phase
-    if (phase.checkpointAndWatch && phase.checkpointAndWatch.length > 0) {
-      await this.addCheckpointPatterns(phase.checkpointAndWatch);
+    // Add checkpoint patterns - accumulate from all phases up to current
+    // This ensures resume functionality works correctly
+    const currentPhaseIndex = this.config.phases.findIndex((p) => p.id === phase.id);
+    if (currentPhaseIndex >= 0) {
+      // Accumulate patterns from all phases up to and including current
+      for (let i = 0; i <= currentPhaseIndex; i++) {
+        const phaseConfig = this.config.phases[i];
+        if (phaseConfig.trackedFiles && phaseConfig.trackedFiles.length > 0) {
+          await this.addCheckpointPatterns(phaseConfig.trackedFiles);
+        }
+      }
 
       // Create checkpoint after workspace setup if we have workspace setup
       if (!skipPreCommands && phase.workspaceSetup && this.checkpointingEnabled) {
@@ -549,18 +557,36 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       startTime: new Date(),
     };
 
-    // Store watch pattern for tool-based tracking
-    if (phase.watch) {
-      this.watchedPattern = phase.watch;
-      this.logger.log(`Watching pattern: ${phase.watch}`);
+    // Store watch patterns for tool-based tracking
+    if (phase.trackedFiles && phase.trackedFiles.length > 0) {
+      this.watchedPatterns = phase.trackedFiles;
+      this.logger.log(`Watching patterns: ${this.watchedPatterns.join(", ")}`);
     }
 
     // NOTE: phase.started event is now sent when Claude sends init message
     // This ensures we have the actual session ID before notifying clients
 
     // Send initial file states if any exist
-    if (phase.watch) {
-      const files = await scanWatchedFiles(this.config.projectPath, phase.watch);
+    if (phase.trackedFiles && phase.trackedFiles.length > 0) {
+      // Use the unified file resolver to get files respecting gitignore
+      const resolvedFiles = await fileResolver.resolveFiles(
+        this.config.projectPath,
+        phase.trackedFiles,
+      );
+
+      // Get file contents for each resolved file
+      const files = await Promise.all(
+        resolvedFiles.map(async (filePath) => {
+          const fullPath = path.join(this.config.projectPath, filePath);
+          const stats = await fs.promises.stat(fullPath);
+          const content = await fs.promises.readFile(fullPath, "utf-8");
+          return {
+            path: filePath,
+            content,
+            lastModified: stats.mtime.toISOString(),
+          };
+        }),
+      );
 
       // Only send events if we have files
       if (files.length > 0) {
@@ -1190,7 +1216,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     toolName: T,
     toolInput: Record<string, unknown> | undefined,
   ): Promise<void> {
-    if (!this.watchedPattern) return;
+    if (this.watchedPatterns.length === 0) return;
 
     let filePath: string | null = null;
     let action: "created" | "modified" | "deleted" = "modified";
@@ -1236,11 +1262,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       filePath = path.relative(this.config.projectPath, filePath);
     }
 
-    // Check if file matches watch pattern
-    const normalizedPattern = this.watchedPattern.replace(/^\.\//g, "");
+    // Check if file matches any watch pattern
     const normalizedPath = filePath.replace(/^\.\//g, "");
+    const matchesPattern = this.watchedPatterns.some((pattern) => {
+      const normalizedPattern = pattern.replace(/^\.\//g, "");
+      return minimatch(normalizedPath, normalizedPattern, { matchBase: true });
+    });
 
-    if (!minimatch(normalizedPath, normalizedPattern, { matchBase: true })) {
+    if (!matchesPattern) {
       return;
     }
 
@@ -1282,15 +1311,21 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private async sendFileTreeUpdate(): Promise<void> {
-    if (!this.watchedPattern) return;
+    if (this.watchedPatterns.length === 0) return;
 
-    const tree = await buildFileTree(this.config.projectPath, this.watchedPattern);
+    // Build file tree for all watched patterns
+    const allTrees = await Promise.all(
+      this.watchedPatterns.map((pattern) => buildFileTree(this.config.projectPath, pattern)),
+    );
+
+    // Merge all trees into one
+    const mergedTree = allTrees.flat();
 
     this.sendEvent({
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "filetree.updated",
-      data: { tree },
+      data: { tree: mergedTree },
     } as FileTreeUpdatedEvent);
   }
 
@@ -1530,7 +1565,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    this.watchedPattern = undefined;
+    this.watchedPatterns = [];
     this.recentFileAccess = undefined;
     this.currentPhase = undefined;
     this.phaseFailureReason = undefined;
