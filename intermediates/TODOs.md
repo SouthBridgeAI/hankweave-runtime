@@ -12,6 +12,7 @@
 2. Check and merge checkpointAndWatch with Watch?
 3. Universal system prompt
 4. Add an interactive prompt to e2e tests (maybe a password?) so that Claude can't run it
+5. Add in API key on start
 
 ## Improvements
 
@@ -28,6 +29,8 @@
 5. Abstract out claude code
 6. Explainers - prompt calls that explain and stream active processes
 7. Validators - phases concurrent or otherwise that provide feedback
+8. Dockerization
+9. Automated proxy
 
 ## Applications
 
