@@ -2,17 +2,12 @@
 
 ## TODOs - tasks to pick and solve
 
-## Cleanups
-
-1. Remove the langton phases from repo
-
 ## Minor
 
-1. Verify why the timeout errors aren't being recognized properly - now with more logs
-2. Check and merge checkpointAndWatch with Watch?
-3. Universal system prompt
-4. Add an interactive prompt to e2e tests (maybe a password?) so that Claude can't run it
-5. Add in API key on start
+1. Check and merge checkpointAndWatch with Watch?
+2. Universal system prompt
+3. Add an interactive prompt to e2e tests (maybe a password?) so that Claude can't run it
+4. Add in API key on start
 
 ## Improvements
 
