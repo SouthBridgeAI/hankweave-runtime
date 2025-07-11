@@ -26,6 +26,7 @@ import type {
   ClaudeLogMessage,
   CompletedPhase,
   ErrorEvent,
+  FailureReason,
   FileTreeUpdatedEvent,
   FileUpdatedEvent,
   IncompletePhaseEvent,
@@ -114,6 +115,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   // Checkpoint-related properties
   private checkpointGit: CheckpointGit | null = null;
   private checkpointingEnabled = true;
+
+  // Failure tracking
+  private phaseFailureReason?: FailureReason;
 
   constructor(
     config: Partial<ServerConfig> & {
@@ -737,6 +741,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         synthetic: true,
       });
 
+      // Set failure reason
+      this.phaseFailureReason = {
+        type: "timeout",
+        retriable: true,
+        message: "API Error: Request timed out.",
+      };
+
       // Send error event
       this.sendEvent({
         id: EventId(generateId()),
@@ -818,6 +829,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
             message: textItem.text,
             timestamp: new Date().toISOString(),
           });
+
+          // Set failure reason
+          this.phaseFailureReason = {
+            type: "timeout",
+            retriable: true,
+            message: "API Error: Request timed out.",
+          };
 
           // Send error event
           this.sendEvent({
@@ -922,6 +940,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         duration_ms: msg.duration_ms,
         duration_api_ms: msg.duration_api_ms,
       });
+
+      // Set failure reason
+      this.phaseFailureReason = {
+        type: "timeout",
+        retriable: true,
+        message: "API Error: Request timed out.",
+      };
 
       // Send error event
       this.sendEvent({
@@ -1093,8 +1118,12 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         cost: phaseCost,
         duration,
         exitStatus,
+        failureReason: !success ? this.phaseFailureReason : undefined,
       },
     } as PhaseCompletedEvent);
+
+    // Capture failure reason before cleanup
+    const failureReason = this.phaseFailureReason;
 
     this.cleanupCurrentPhase();
 
@@ -1109,7 +1138,25 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         // Small delay to ensure cleanup completes
         await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS));
         await this.autoStartNextPhase();
+      } else if (failureReason?.retriable) {
+        // Retriable error - don't shutdown
+        this.logger.log(
+          `Phase failed with retriable error: ${failureReason.type}. Server remains active for retry.`,
+        );
+        // Create error checkpoint
+        if (this.checkpointingEnabled) {
+          await this.createCheckpoint({
+            status: "error",
+            phaseId: phaseSnapshot.phase.id,
+            phaseName: phaseSnapshot.phase.name,
+            runId: this.runId,
+            timestamp: new Date().toISOString(),
+            duration,
+          });
+        }
+        // Don't shutdown - let client decide what to do
       } else {
+        // Non-retriable error - treat as fatal
         // Create error checkpoint before shutdown
         if (this.checkpointingEnabled) {
           await this.createCheckpoint({
@@ -1486,6 +1533,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     this.watchedPattern = undefined;
     this.recentFileAccess = undefined;
     this.currentPhase = undefined;
+    this.phaseFailureReason = undefined;
   }
 
   private async runCommand(command: string, workingDir?: string): Promise<void> {

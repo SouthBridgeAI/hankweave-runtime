@@ -104,12 +104,22 @@ export class BasicTUI {
 
       case "phase.completed": {
         const completeData = (event as PhaseCompletedEvent).data;
-        console.log(`\n✅ [${timestamp}] Completed: Phase ${completeData.phaseId}`);
+        const status = completeData.success ? "✅" : "❌";
+        console.log(`\n${status} [${timestamp}] Completed: Phase ${completeData.phaseId}`);
         console.log(
           `   Cost: $${completeData.cost.toFixed(4)}, Duration: ${(
             completeData.duration / 1000
           ).toFixed(1)}s`,
         );
+
+        if (!completeData.success && completeData.failureReason) {
+          console.log(
+            `   Failure: ${completeData.failureReason.type} (retriable: ${completeData.failureReason.retriable})`,
+          );
+          if (completeData.failureReason.message) {
+            console.log(`   Message: ${completeData.failureReason.message}`);
+          }
+        }
         break;
       }
 

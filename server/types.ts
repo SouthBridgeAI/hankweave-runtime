@@ -21,6 +21,23 @@ export type ProcessExit =
   | { type: "killed"; signal: NodeJS.Signals };
 
 // ============================================================================
+// Failure Reason Types
+// ============================================================================
+
+/**
+ * Represents the reason for a phase failure with retry eligibility information.
+ * Used to communicate to clients whether they should consider retrying a failed phase.
+ */
+export interface FailureReason {
+  /** The type of failure that occurred */
+  type: "timeout" | "rate-limit" | "api-error" | "unknown";
+  /** Whether this failure is considered retriable */
+  retriable: boolean;
+  /** Optional human-readable message about the failure */
+  message?: string;
+}
+
+// ============================================================================
 // Message ID Types
 // ============================================================================
 
@@ -413,6 +430,8 @@ export interface PhaseCompletedEvent extends ServerEvent {
     duration: number;
     /** Process exit status */
     exitStatus: ProcessExit;
+    /** Optional failure reason for unsuccessful phases */
+    failureReason?: FailureReason;
   };
 }
 
