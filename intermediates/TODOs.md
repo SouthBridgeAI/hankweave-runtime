@@ -22,15 +22,16 @@
 
 ## Major features
 
-1. Rollback functionality to a particular checkpoint
-2. Restart a phase
-3. Resume functionality
-4. Accept real-time prompts using input-stream json from claude
-5. Abstract out claude code
-6. Explainers - prompt calls that explain and stream active processes
-7. Validators - phases concurrent or otherwise that provide feedback
-8. Dockerization
-9. Automated proxy
+1. State management
+2. Rollback functionality to a particular checkpoint
+3. Restart a phase
+4. Resume functionality
+5. Accept real-time prompts using input-stream json from claude
+6. Abstract out claude code
+7. Explainers - prompt calls that explain and stream active processes
+8. Validators - phases concurrent or otherwise that provide feedback
+9. Dockerization
+10. Automated proxy
 
 ## Applications
 
