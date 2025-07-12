@@ -1,0 +1,13 @@
+- TODO: I feel like this is a bit much.
+- We may not need to figure out a WAL and also have a hybrid state on top.
+- We want something that works, makes the code simpler, strongly suggests and types what actions are possible, and reads and writes to disk this state well.
+- Things we want to support:
+- 1.  Regular phases being run in the forward order. They here can succeed, fail or be skipped partially through an execution or before they even start. This should be supported. In all cases, we have commits happening indicating what's going on. This should be a linear git history in the history as well.
+- 2.  A failed phase being retried. In this case, the failed phase is rolled back in disk state, and a new claude process is started with the parameters that the phase started from. We want to keep around the old failed state in case we want to inspect it, but we can (way in the future) also make an option to clean it up and prune.
+- 3.  A successful phases (or phases) being rolled back to run a different run. This is also very possible.
+- 4.  The user asking us to continue. Currently, phases are atomic so this might be a rollback and a restart of the current phase - in the long long future we might do some kind of continue on the current phase.
+- 5.  So we need to support operations on phases, and we also need to support phase updates. Let's think through what we actually need to implement and what's over-engineering. Every field of state should have a reason to exist (either now or for future development), and where and when it gets updated. We don't need to denormalize everything unless it's needed for regular operation.
+- 6.  We might need to reorganize how we deal with the claude logs, and maybe even the server processes. Maybe they sit inside run folders?
+- 7.  During cleanup we might make it a speific user-decided action to delete teh .langton folder.
+- 8.  We eventually need cost tracking that respects the nature of these runs. So if the user needs a cost for the current run, there's a cost of the current run but there's also the cost of the run that this run started from (of the successful phases). There's also a total cost of all runs and phases ever
+- IMPORTANT: It occurs to me that maintaining denormalized state will make debugging and a lot of things easier, but state transitions should now be a lot more formalized - almost like reducers or state to state transitions. We should have an interface class that holds on to the state, is responsible for loading it back up from disk, and only allows well known transitions and activities, and updates synced state accordingly.

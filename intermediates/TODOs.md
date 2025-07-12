@@ -8,6 +8,7 @@
 2. Universal system prompt
 3. Add an interactive prompt to e2e tests (maybe a password?) so that Claude can't run it
 4. Add in API key on start
+5. Happy path test-notes isn't cleaned up?
 
 ## Improvements
 
