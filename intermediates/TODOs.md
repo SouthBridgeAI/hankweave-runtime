@@ -14,17 +14,16 @@
 
 1. Implement a scaffold to replay existing claude logs for tests
 2. Allow starting persistent commands (like servers) that are only cleaned up when server fully exits - with interactive prompts
-3. Rename runner to tadpole?
 
 ## Major features
 
-1. State management
-2. Rollback functionality to a particular checkpoint
-3. Restart a phase
-4. Resume functionality
-5. Accept real-time prompts using input-stream json from claude
-6. Abstract out claude code
-7. Explainers - prompt calls that explain and stream active processes
+1. State management (IN PROGRESS)
+2. Rollback functionality to a particular checkpoint (IN PROGRESS 2)
+3. Restart a phase (IN PROGRESS 3)
+4. Resume functionality (IN PROGRESS 4)
+5. Explainers - prompt calls that explain and stream active processes
+6. Accept real-time prompts using input-stream json from claude
+7. Abstract out claude code
 8. Validators - phases concurrent or otherwise that provide feedback
 9. Dockerization
 10. Automated proxy
