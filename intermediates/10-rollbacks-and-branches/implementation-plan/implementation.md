@@ -181,8 +181,14 @@ async start(): Promise<void> {
     // Check if it's our current run
     const state = this.stateManager.getState();
     if (state.currentRunId && state.currentRunId === lockData.runId) {
-      // We're recovering from a crash
+      // We're recovering from a crash - continue the same run
       this.currentRunId = RunId(lockData.runId);
+
+      // Create new log files for this server session
+      const currentRun = this.stateManager.getCurrentRun();
+      if (currentRun) {
+        await this.createSessionLogs(currentRun.runFolder, true);
+      }
     } else {
       throw new Error(`Server already running (PID: ${lockData.pid}, Run: ${lockData.runId})`);
     }
@@ -202,6 +208,12 @@ async start(): Promise<void> {
 private async startNewRun(): Promise<void> {
   const runId = RunId(`${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
   const runFolder = path.join(this.config.projectPath, '.langton', 'runs', runId);
+
+  // Create run folder
+  await fs.promises.mkdir(runFolder, { recursive: true });
+
+  // Create session logs for new run
+  await this.createSessionLogs(runFolder, false);
 
   await this.stateManager.transition({
     type: "RunStarted",
@@ -224,9 +236,73 @@ private async startNewRun(): Promise<void> {
   };
   fs.writeFileSync(this.config.lockFile, JSON.stringify(lockData));
 }
+
+private async createSessionLogs(runFolder: string, isRecovery: boolean): Promise<void> {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  // Create unique log names for this server session
+  const serverLogPath = path.join(runFolder, `server-${timestamp}.log`);
+  const socketLogPath = path.join(runFolder, `websocket-${timestamp}.log`);
+
+  // Update logger
+  this.logger = new Logger(serverLogPath);
+
+  // Update config paths
+  this.config.serverLogFile = serverLogPath;
+  this.config.socketLogFile = socketLogPath;
+
+  // Log header information
+  this.logger.log("===========================================");
+  this.logger.log(`Langton Server v${this.config.version}`);
+  this.logger.log(`Run ID: ${this.currentRunId || 'determining...'}`);
+  this.logger.log(`Session Start: ${new Date().toISOString()}`);
+  this.logger.log(`Server PID: ${process.pid}`);
+
+  if (isRecovery) {
+    this.logger.log("Type: RECOVERY FROM CRASH");
+
+    // List previous log files in this run
+    const files = await fs.promises.readdir(runFolder);
+    const previousLogs = files.filter(f => f.startsWith('server-') || f.startsWith('websocket-'));
+
+    if (previousLogs.length > 0) {
+      this.logger.log("Previous session logs:");
+      for (const log of previousLogs.sort()) {
+        this.logger.log(`  - ${log}`);
+      }
+    }
+  } else {
+    this.logger.log("Type: NEW RUN");
+  }
+
+  this.logger.log("===========================================");
+}
 ```
 
-### Step 2.3: Remove loadPreviousState Method
+### Step 2.3: Update Logger Class
+
+In `server/utils.ts`, the Logger class remains unchanged since we'll create new instances:
+
+```typescript
+export class Logger {
+  constructor(private logFile: string) {}
+
+  log(message: string, level: "info" | "error" | "debug" = "info"): void {
+    // ... existing implementation unchanged
+  }
+
+  logSocketTraffic(
+    socketLogFile: string,
+    direction: "in" | "out",
+    data: unknown
+  ): void {
+    // ... existing implementation unchanged
+    // Note: This already takes the log file as a parameter, so it works with our new approach
+  }
+}
+```
+
+### Step 2.4: Remove loadPreviousState Method
 
 Delete the entire `loadPreviousState()` method from `langton-server.ts` - we don't need it anymore.
 
@@ -856,7 +932,17 @@ expect(completedPhases).toHaveLength(3);
 2. `claude-process-manager.ts`: Accept log path parameter
 3. `checkpoint-git.ts`: Branch per run
 4. `cleanup-command.ts`: Handle run folders
-5. Delete: `loadPhaseStateFromLog` from `claude-log-parser.ts`
+5. `utils.ts`: Update Logger class to support changing paths
+6. Delete: `loadPhaseStateFromLog` from `claude-log-parser.ts`
+
+### Configuration Notes
+
+The `serverLogFile` and `socketLogFile` in ServerConfig will now be dynamically updated per run:
+
+- Initial values are used for startup logs
+- Once a run starts, paths are updated to `runs/{runId}/server.log` and `runs/{runId}/websocket.log`
+- Logger instance is updated to write to new location
+- This keeps all run-related files together
 
 ### State File Location
 
@@ -867,10 +953,28 @@ The state file will be at `.langton/state.json` with this structure:
 ├── state.json          # All run state
 ├── state.json.bak      # Backup
 ├── server.lock         # Enhanced with runId
-└── runs/               # New directory
+├── logs/               # Global logs (if any)
+│   └── (might be empty or contain pre-migration logs)
+├── checkpoints/        # Git repository for checkpoints
+│   └── .git/
+└── runs/               # New directory - one folder per run
     ├── 1234567890-abc/
-    │   ├── phase-research-claude.log
+    │   ├── server-2024-01-15T10-30-00-000Z.log      # First server session
+    │   ├── websocket-2024-01-15T10-30-00-000Z.log   # First session websocket
+    │   ├── server-2024-01-15T14-45-30-000Z.log      # After crash recovery
+    │   ├── websocket-2024-01-15T14-45-30-000Z.log   # After crash recovery
+    │   ├── phase-research-claude.log                 # Claude logs
     │   └── phase-implement-claude.log
     └── 1234567891-def/
+        ├── server-2024-01-16T09-00-00-000Z.log
+        ├── websocket-2024-01-16T09-00-00-000Z.log
         └── phase-research-claude.log
 ```
+
+This organization ensures:
+
+- Each run is completely self-contained
+- Each server session has distinct logs with timestamps
+- Recovery sessions reference previous logs in their headers
+- Claude logs remain per-phase (not per-session) since they're cumulative
+- Easy to trace the history of a run through multiple server sessions
