@@ -33,11 +33,38 @@ import type { StateManagerEvents } from "./typed-event-emitter.js";
 import { Logger } from "./utils.js";
 import type * as ST from "./state-types.js";
 
+// Error types for state management
+export class InvalidTransitionError extends Error {
+  constructor(from: ST.PhaseStatus, to: ST.PhaseStatus) {
+    super(`Invalid transition from ${from} to ${to}`);
+    this.name = "InvalidTransitionError";
+  }
+}
+
+export class PersistenceError extends Error {
+  constructor(operation: string, cause: Error) {
+    super(`State persistence failed during ${operation}: ${cause.message}`);
+    this.name = "PersistenceError";
+    this.cause = cause;
+  }
+}
+
 export class StateManager extends TypedEventEmitter<StateManagerEvents> {
   private state: ST.LangtonState;
   private readonly statePath: string;
   private readonly stateBackupPath: string;
   private readonly logger: Logger;
+
+  // Enhanced transition queue system
+  private transitionQueue: ST.StateTransition[] = [];
+  private isProcessing = false;
+
+  // Running cost tallies for performance
+  private costCache = {
+    total: 0,
+    currentRun: 0,
+    lastUpdated: null as string | null,
+  };
 
   constructor(private readonly langtonDir: string, logger: Logger) {
     super();
@@ -56,7 +83,28 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> {
     try {
       if (fs.existsSync(this.statePath)) {
         const content = await fs.promises.readFile(this.statePath, "utf-8");
-        this.state = JSON.parse(content);
+        const parsedState = JSON.parse(content);
+
+        // Validate before using
+        const validation = this.validate(parsedState);
+        if (!validation.valid) {
+          this.logger.log("State validation errors found:", "error");
+          validation.errors.forEach((e) =>
+            this.logger.log(`  - ${e.type}: ${e.message}`, "error")
+          );
+
+          if (validation.errors.some((e) => e.type === "corrupted_data")) {
+            throw new Error("State file corrupted");
+          }
+        }
+
+        // Log warnings but continue
+        validation.warnings.forEach((w) =>
+          this.logger.log(`Warning - ${w.type}: ${w.message}`, "info")
+        );
+
+        this.state = parsedState;
+        this.rebuildCostCache();
         this.logger.log("Loaded existing state file");
       } else {
         this.logger.log("No state file found, starting fresh");
@@ -74,8 +122,17 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> {
             this.stateBackupPath,
             "utf-8"
           );
-          this.state = JSON.parse(content);
-          this.logger.log("Recovered from backup state file");
+          const parsedState = JSON.parse(content);
+
+          // Validate backup too
+          const validation = this.validate(parsedState);
+          if (validation.valid) {
+            this.state = parsedState;
+            this.rebuildCostCache();
+            this.logger.log("Recovered from backup state file");
+          } else {
+            this.logger.log("Backup also invalid, starting fresh", "error");
+          }
         } catch {
           this.logger.log("Backup also corrupted, starting fresh", "error");
         }
@@ -87,26 +144,225 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> {
     return this.state;
   }
 
-  async transition(event: ST.StateTransition): Promise<void> {
-    // Validate transition
-    this.validateTransition(event);
-
-    // Apply transition
-    const newState = this.applyTransition(this.state, event);
-
-    // Update state
-    this.state = newState;
-
-    // Persist immediately
-    await this.save();
-
-    // Emit event
-    this.emit("stateChanged", event);
-
-    this.logger.log(`State transition: ${event.type}`);
+  // Public API - fire and forget!
+  transition(event: ST.StateTransition): void {
+    this.transitionQueue.push(event);
+    this.processQueue(); // Don't await - let it run
   }
 
-  // ... implement all other methods from interface
+  private async processQueue(): Promise<void> {
+    if (this.isProcessing) return;
+
+    this.isProcessing = true;
+
+    while (this.transitionQueue.length > 0) {
+      const event = this.transitionQueue.shift()!;
+
+      try {
+        this.validateTransition(event);
+        const oldState = this.state;
+        const newState = this.applyTransition(this.state, event);
+        this.state = newState;
+
+        // Update cost cache if needed
+        this.updateCostCache(event);
+
+        await this.save();
+
+        // Log transition for debugging
+        await this.logTransitionEvent(event);
+
+        // Emit event AFTER state is persisted
+        this.emit("stateChanged", event);
+        this.logger.log(`State transition: ${event.type}`);
+
+        // Emit specific events for important transitions
+        if (event.type === "PhaseTransitioned" && event.data.to === "running") {
+          this.emit("phaseRunning", event.data);
+        }
+      } catch (error) {
+        this.logger.log(`State transition failed: ${error}`, "error");
+        this.emit("transitionError", { event, error });
+
+        if (error instanceof InvalidTransitionError) {
+          continue; // Skip this transition
+        } else {
+          break; // Fatal error
+        }
+      }
+    }
+
+    this.isProcessing = false;
+  }
+
+  // Cost cache management
+  private updateCostCache(event: ST.StateTransition): void {
+    if (event.type === "CostsUpdated") {
+      // Update running tallies
+      const phase = this.getPhaseInCurrentRun(event.data.phaseId);
+      if (phase && "currentCost" in phase) {
+        const delta = event.data.cost - phase.currentCost;
+        this.costCache.currentRun += delta;
+        this.costCache.total += delta;
+      }
+    } else if (event.type === "RunStarted") {
+      this.costCache.currentRun = 0;
+    } else if (event.type === "RunCompleted" || event.type === "RunFailed") {
+      // Current run cost already in total, just reset current
+      this.costCache.currentRun = 0;
+    }
+  }
+
+  private rebuildCostCache(): void {
+    this.costCache.total = this.state.runs.reduce((total, run) => {
+      return (
+        total +
+        run.phases.reduce((runTotal, phase) => {
+          if (phase.status === "completed") return runTotal + phase.finalCost;
+          if (phase.status === "failed") return runTotal + phase.partialCost;
+          return runTotal;
+        }, 0)
+      );
+    }, 0);
+
+    const currentRun = this.getCurrentRun();
+    if (currentRun) {
+      this.costCache.currentRun = currentRun.phases.reduce((total, phase) => {
+        if ("currentCost" in phase) return total + phase.currentCost;
+        if ("finalCost" in phase) return total + phase.finalCost;
+        if ("partialCost" in phase) return total + phase.partialCost;
+        return total;
+      }, 0);
+    }
+  }
+
+  // Event logging for debugging
+  private async logTransitionEvent(event: ST.StateTransition): Promise<void> {
+    const eventLog = path.join(this.langtonDir, "events.jsonl");
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      serverPid: process.pid,
+      event,
+      resultingState: {
+        currentRunId: this.state.currentRunId,
+        runCount: this.state.runs.length,
+        totalCost: this.costCache.total,
+        currentRunCost: this.costCache.currentRun,
+      },
+    };
+
+    try {
+      await fs.promises.appendFile(eventLog, JSON.stringify(logEntry) + "\n");
+    } catch (error) {
+      // Don't fail transitions due to logging errors
+      this.logger.log(`Failed to log event: ${error}`, "debug");
+    }
+  }
+
+  // State validation implementation
+  private validate(state: unknown): ST.StateValidation {
+    const errors: ST.ValidationError[] = [];
+    const warnings: ST.ValidationWarning[] = [];
+
+    // Type structure validation
+    if (!this.isValidStateStructure(state)) {
+      errors.push({
+        type: "corrupted_data",
+        message: "State file has invalid structure",
+      });
+      return { valid: false, errors, warnings };
+    }
+
+    // Referential integrity
+    const typedState = state as ST.LangtonState;
+    if (
+      typedState.currentRunId &&
+      !typedState.runs.find((r) => r.runId === typedState.currentRunId)
+    ) {
+      errors.push({
+        type: "missing_run",
+        message: `Current run ${typedState.currentRunId} not found`,
+      });
+    }
+
+    // Check for orphaned run folders
+    const runsDir = path.join(this.langtonDir, "runs");
+    if (fs.existsSync(runsDir)) {
+      const runFolders = fs.readdirSync(runsDir);
+      const stateRunIds = new Set(typedState.runs.map((r) => r.runId));
+
+      for (const folder of runFolders) {
+        if (!stateRunIds.has(folder as ST.RunId)) {
+          warnings.push({
+            type: "orphaned_folder",
+            message: `Found run folder without state entry: ${folder}`,
+          });
+        }
+      }
+    }
+
+    return { valid: errors.length === 0, errors, warnings };
+  }
+
+  private isValidStateStructure(state: unknown): state is ST.LangtonState {
+    // Basic type checking - can be expanded
+    if (!state || typeof state !== "object") return false;
+    const s = state as any;
+    return (
+      Array.isArray(s.runs) &&
+      (s.currentRunId === null || typeof s.currentRunId === "string")
+    );
+  }
+
+  // Query methods with cached costs
+  getCurrentRunCost(): number {
+    return this.costCache.currentRun;
+  }
+
+  getTotalCost(): number {
+    return this.costCache.total;
+  }
+
+  // Implement all methods from the StateManager interface in state.md:
+  //
+  // Query methods (needed by Phase 2):
+  // - getCurrentRun(): Run | null
+  // - getCurrentPhase(): PhaseExecution | null
+  // - getPhaseInCurrentRun(phaseId): PhaseExecution | null
+  // - getNextPhaseToExecute(): PhaseId | null
+  // - getLastSuccessfulPhase(phaseId): { run, phase } | null
+  // - getCostSince(runId): number
+  // - getRun(runId): Run | null
+  // - getPhaseHistory(phaseId): Array<{ run, phase }>
+  // - canContinueFrom(runId, afterPhase): boolean
+  // - getCheckpointForContinuation(runId, afterPhase): string | null
+  //
+  // State modification internals:
+  // - validateTransition(event): void - Use PhaseTransitions map from state.md
+  // - applyTransition(state, event): LangtonState - Pure function, deep clone state
+  // - save(): Promise<void> - Atomic write with backup
+  // - detectCrashedRuns(): Promise<void> - Check for orphaned "running" status
+  // - recover(): Promise<RecoveryResult>
+  //
+  // See state.md for full interface specification and method documentation
+
+  // Wait for all pending transitions during shutdown
+  async waitForPendingTransitions(): Promise<void> {
+    while (this.isProcessing || this.transitionQueue.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+```
+
+### Step 1.4: Add Helper Functions
+
+Add to `server/state-types.ts` or `server/utils.ts`:
+
+```typescript
+// Helper to check if a phase status is terminal (no further transitions possible)
+export function isTerminalPhaseStatus(status: PhaseStatus): boolean {
+  return status === "completed" || status === "failed" || status === "skipped";
 }
 ```
 
@@ -124,7 +380,16 @@ export interface ServerInternalEvents {
 // Add new interface for StateManager:
 export interface StateManagerEvents {
   stateChanged: [ST.StateTransition];
-  [key: string]: unknown[];
+  phaseRunning: [
+    {
+      runId: RunId;
+      phaseId: PhaseId;
+      from: PhaseStatus;
+      to: "running";
+      metadata?: any;
+    }
+  ];
+  transitionError: [{ event: ST.StateTransition; error: Error }];
 }
 ```
 
@@ -147,15 +412,56 @@ export class LangtonServer {
   // - private runId: string;
 
   // Add state manager:
-  private stateManager: StateManager;
+  private _stateManager: StateManager;
   private currentRunId: RunId | null = null;
+  private heartbeatInterval?: NodeJS.Timeout;
+
+  // Public getter for tests and external access
+  public get stateManager(): Readonly<StateManager> {
+    return this._stateManager;
+  }
 
   constructor(config: ...) {
     // ... existing code
 
     // Initialize state manager
     const langtonDir = path.join(this.config.projectPath, '.langton');
-    this.stateManager = new StateManager(langtonDir, this.logger);
+    this._stateManager = new StateManager(langtonDir, this.logger);
+
+    // Set up state manager listeners
+    this.setupStateManagerListeners();
+  }
+
+  private setupStateManagerListeners(): void {
+    this.stateManager.on('phaseRunning', (data) => {
+      // State is already saved when we get here
+      const phase = this.stateManager.getCurrentPhase();
+      if (phase && 'claudeSessionId' in phase) {
+        const phaseConfig = this.config.phases.find(p => p.id === data.phaseId);
+        if (phaseConfig) {
+          this.sendEvent({
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "phase.started",
+            data: {
+              phaseId: data.phaseId,
+              phaseName: phaseConfig.name,
+              phaseDescription: phaseConfig.description,
+              sessionId: phase.claudeSessionId,
+              previousSessionId: phase.previousSessionId,
+              startTime: phase.startTime,
+            }
+          });
+        }
+      }
+    });
+
+    this.stateManager.on('transitionError', ({ event, error }) => {
+      if (error instanceof PersistenceError) {
+        // Can't save state - this is fatal
+        this.handleError(error, 'state-persistence', ErrorSeverity.FATAL);
+      }
+    });
   }
 }
 ```
@@ -176,21 +482,40 @@ async start(): Promise<void> {
 
   // Check for existing lock file (modify to include runId)
   if (fs.existsSync(this.config.lockFile)) {
-    const lockData = JSON.parse(fs.readFileSync(this.config.lockFile, 'utf-8'));
+    const lockData: LockFile = JSON.parse(fs.readFileSync(this.config.lockFile, 'utf-8'));
 
-    // Check if it's our current run
-    const state = this.stateManager.getState();
-    if (state.currentRunId && state.currentRunId === lockData.runId) {
-      // We're recovering from a crash - continue the same run
-      this.currentRunId = RunId(lockData.runId);
+    // Check heartbeat age
+    const heartbeatAge = Date.now() - new Date(lockData.lastHeartbeat).getTime();
+    if (heartbeatAge > 120000) { // 2 minutes
+      this.logger.log(`Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`);
+      fs.unlinkSync(this.config.lockFile);
 
-      // Create new log files for this server session
-      const currentRun = this.stateManager.getCurrentRun();
-      if (currentRun) {
-        await this.createSessionLogs(currentRun.runFolder, true);
+      // Mark the run as crashed (fire-and-forget)
+      if (lockData.runId) {
+        this.stateManager.transition({
+          type: "RunCrashed",
+          data: {
+            runId: RunId(lockData.runId),
+            detectedAt: new Date().toISOString(),
+            lastPhaseStatus: "unknown" as PhaseStatus
+          }
+        });
       }
     } else {
-      throw new Error(`Server already running (PID: ${lockData.pid}, Run: ${lockData.runId})`);
+      // Check if it's our current run
+      const state = this.stateManager.getState();
+      if (state.currentRunId && state.currentRunId === lockData.runId) {
+        // We're recovering from a crash - continue the same run
+        this.currentRunId = RunId(lockData.runId);
+
+        // Create new log files for this server session
+        const currentRun = this.stateManager.getCurrentRun();
+        if (currentRun) {
+          await this.createSessionLogs(currentRun.runFolder, true);
+        }
+      } else {
+        throw new Error(`Server already running (PID: ${lockData.pid}, Run: ${lockData.runId})`);
+      }
     }
   }
 
@@ -206,7 +531,7 @@ async start(): Promise<void> {
 }
 
 private async startNewRun(): Promise<void> {
-  const runId = RunId(`${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
+  const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
   const runFolder = path.join(this.config.projectPath, '.langton', 'runs', runId);
 
   // Create run folder
@@ -215,7 +540,7 @@ private async startNewRun(): Promise<void> {
   // Create session logs for new run
   await this.createSessionLogs(runFolder, false);
 
-  await this.stateManager.transition({
+  this.stateManager.transition({
     type: "RunStarted",
     data: {
       runId,
@@ -228,13 +553,31 @@ private async startNewRun(): Promise<void> {
 
   this.currentRunId = runId;
 
-  // Update lock file with runId
-  const lockData = {
+  // Update lock file with runId and heartbeat
+  const lockData: LockFile = {
     pid: process.pid,
     runId: runId,
-    startTime: new Date().toISOString()
+    startTime: new Date().toISOString(),
+    lastHeartbeat: new Date().toISOString()
   };
   fs.writeFileSync(this.config.lockFile, JSON.stringify(lockData));
+
+  // Start heartbeat
+  this.heartbeatInterval = setInterval(() => {
+    this.updateHeartbeat();
+  }, 30000); // Every 30 seconds
+}
+
+private updateHeartbeat(): void {
+  try {
+    if (fs.existsSync(this.config.lockFile)) {
+      const lock: LockFile = JSON.parse(fs.readFileSync(this.config.lockFile, 'utf-8'));
+      lock.lastHeartbeat = new Date().toISOString();
+      fs.writeFileSync(this.config.lockFile, JSON.stringify(lock));
+    }
+  } catch (error) {
+    this.logger.log(`Failed to update heartbeat: ${error}`, 'error');
+  }
 }
 
 private async createSessionLogs(runFolder: string, isRecovery: boolean): Promise<void> {
@@ -356,8 +699,8 @@ private async startPhase(phaseId: PhaseId, skipPreCommands?: boolean): Promise<v
 
   this.logger.log(`Starting phase: ${phase.name}`);
 
-  // Create phase started transition
-  await this.stateManager.transition({
+  // Create phase started transition (fire-and-forget)
+  this.stateManager.transition({
     type: "PhaseStarted",
     data: {
       runId: this.currentRunId!,
@@ -368,7 +711,7 @@ private async startPhase(phaseId: PhaseId, skipPreCommands?: boolean): Promise<v
 
   // Run workspace setup if needed
   if (!skipPreCommands && phase.workspaceSetup) {
-    await this.stateManager.transition({
+    this.stateManager.transition({
       type: "PhaseTransitioned",
       data: {
         runId: this.currentRunId!,
@@ -390,7 +733,7 @@ private async startPhase(phaseId: PhaseId, skipPreCommands?: boolean): Promise<v
         timestamp: new Date().toISOString(),
       });
 
-      await this.stateManager.transition({
+      this.stateManager.transition({
         type: "CheckpointCreated",
         data: {
           runId: this.currentRunId!,
@@ -440,8 +783,8 @@ private async startClaudeProcess(
     // Spawn process (modify ClaudeProcessManager to accept logPath)
     await this.processManager.spawn(phase, previousSessionId, logPath);
 
-    // Transition to initializing
-    await this.stateManager.transition({
+    // Transition to initializing (fire-and-forget)
+    this.stateManager.transition({
       type: "PhaseTransitioned",
       data: {
         runId: this.currentRunId!,
@@ -460,8 +803,8 @@ private async startClaudeProcess(
       this.setupLogParsing(logPath, phase.id);
     }, TIMEOUTS.LOG_PARSER_DELAY_MS);
   } catch (error) {
-    // Transition to failed
-    await this.stateManager.transition({
+    // Transition to failed (fire-and-forget)
+    this.stateManager.transition({
       type: "PhaseTransitioned",
       data: {
         runId: this.currentRunId!,
@@ -491,6 +834,9 @@ Update all message handlers to use state transitions:
 private handleSystemMessage(msg: SystemMessage, phaseId: string): void {
   if (msg.subtype === "init" && msg.session_id) {
     // Transition to running
+    // Note: No await here because this is a synchronous callback handler
+    // The state manager's mutex ensures transitions are processed sequentially
+    // even when called without await from multiple callbacks
     this.stateManager.transition({
       type: "PhaseTransitioned",
       data: {
@@ -545,7 +891,8 @@ private handleAssistantMessage(msg: AssistantMessage, phaseId: string): void {
       };
 
       // Update state
-      await this.stateManager.transition({
+      // Note: No await here because this is a synchronous callback handler
+      this.stateManager.transition({
         type: "CostsUpdated",
         data: {
           runId: this.currentRunId!,
@@ -577,7 +924,7 @@ private async handlePhaseComplete(exitCode: number): Promise<void> {
 
   // Transition to completing (unless skipped)
   if (!wasSkipped && exitCode === 0 && !this.isShuttingDown) {
-    await this.stateManager.transition({
+    this.stateManager.transition({
       type: "PhaseTransitioned",
       data: {
         runId: this.currentRunId!,
@@ -594,9 +941,9 @@ private async handlePhaseComplete(exitCode: number): Promise<void> {
         TIMEOUTS.RESULT_MESSAGE_MS
       );
 
-      // Update with final costs
+      // Update with final costs (fire-and-forget)
       if (resultMsg.usage) {
-        await this.stateManager.transition({
+        this.stateManager.transition({
           type: "CostsUpdated",
           data: {
             runId: this.currentRunId!,
@@ -621,25 +968,39 @@ private async handlePhaseComplete(exitCode: number): Promise<void> {
                      exitCode === 0 ? "completed" :
                      "failed";
 
-  // Create checkpoint if needed
+  // Create checkpoint BEFORE state transition
   let checkpointSha: string | undefined;
-  if (this.checkpointingEnabled) {
-    const checkpointType = finalStatus === "completed" ? "completed" :
-                          finalStatus === "skipped" ? "skipped" :
-                          "error";
+  if (this.checkpointingEnabled && shouldCreateCheckpoint) {
+    try {
+      const checkpointType = finalStatus === "completed" ? "completed" :
+                            finalStatus === "skipped" ? "skipped" :
+                            "error";
 
-    checkpointSha = await this.createCheckpoint({
-      status: checkpointType,
-      phaseId,
-      phaseName: phase.name,
-      runId: this.currentRunId!,
-      timestamp: new Date().toISOString(),
-      duration: Date.now() - new Date(currentPhase.startTime).getTime()
-    });
+      checkpointSha = await this.createCheckpoint({
+        status: checkpointType,
+        phaseId,
+        phaseName: phase.name,
+        runId: this.currentRunId!,
+        timestamp: new Date().toISOString(),
+        duration: Date.now() - new Date(currentPhase.startTime).getTime()
+      });
+    } catch (error) {
+      this.logger.log(`Checkpoint creation failed: ${error}`, 'error');
+      // Decide: fail the phase or continue without checkpoint?
+      if (finalStatus === 'completed') {
+        // For completed phases, checkpoint failure is critical
+        finalStatus = 'failed';
+        this.phaseFailureReason = {
+          type: 'unknown',
+          retriable: false,
+          message: `Checkpoint creation failed: ${error.message}`
+        };
+      }
+    }
   }
 
-  // Final transition
-  await this.stateManager.transition({
+  // Final transition (fire-and-forget)
+  this.stateManager.transition({
     type: "PhaseTransitioned",
     data: {
       runId: this.currentRunId!,
@@ -695,8 +1056,8 @@ private async handlePhaseComplete(exitCode: number): Promise<void> {
     if (this.phaseFailureReason?.retriable) {
       this.logger.log(`Phase failed with retriable error. Server remains active.`);
     } else {
-      // Non-retriable failure - shut down run
-      await this.stateManager.transition({
+      // Non-retriable failure - shut down run (fire-and-forget)
+      this.stateManager.transition({
         type: "RunFailed",
         data: { runId: this.currentRunId! }
       });
@@ -826,6 +1187,27 @@ async commit(
   }
 
   // ... rest of method unchanged
+}
+```
+
+### Step 2.5: Update Shutdown Method
+
+Add waiting for pending transitions during shutdown:
+
+```typescript
+private async shutdown(reason: string): Promise<void> {
+  // ... existing cleanup ...
+
+  // Wait for any pending state transitions
+  await this.stateManager.waitForPendingTransitions();
+
+  // Clear heartbeat interval
+  if (this.heartbeatInterval) {
+    clearInterval(this.heartbeatInterval);
+    this.heartbeatInterval = undefined;
+  }
+
+  // ... rest of shutdown
 }
 ```
 

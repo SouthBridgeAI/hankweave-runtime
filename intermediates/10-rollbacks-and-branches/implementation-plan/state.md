@@ -68,7 +68,7 @@ Following these principles from our discussions:
 3. **Log organization**: Claude logs in `runs/{runId}/phase-{phaseId}-claude.log`
 4. **Git branching**: One branch per run (e.g., `run-1234-abc`) instead of complex attempt branches
 5. **Cost tracking**: Calculate from state on demand instead of maintaining running totals
-6. **Session continuity**: Track parent runs and phases for rollback/retry operations
+6. **Session continuity**: Track parent runs and continuation points for rollback/retry operations
 7. **Cleanup becomes reset**: The cleanup command will change to "reset" - it deletes everything and leaves just the data behind (no rollback functionality)
 8. **Lock file enhancement**: Lock file will contain current `runId` for validation
 
@@ -93,7 +93,7 @@ This document defines the state management system for Langton Runner. The key de
  * Unique identifier for a server run.
  * Format: "{timestamp}-{random}" (e.g., "1734567890123-x7b2q")
  *
- * Generation: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+ * Generation: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
  * Timestamp provides ordering, random suffix prevents collisions.
  *
  * Used by:

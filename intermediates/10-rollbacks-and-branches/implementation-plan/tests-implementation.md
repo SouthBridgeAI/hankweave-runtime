@@ -242,7 +242,36 @@ describe("Cost Computation", () => {
 
 ### Stage 1: Unit Tests First (Safe to run anytime)
 
-1. Create new state manager unit tests
+1. Create new state manager unit tests with isolated state files:
+
+```typescript
+// tests/utils/state-test-helpers.ts
+export function createIsolatedStateManager(
+  testDir: string,
+  logger: Logger
+): StateManager {
+  // Each test gets its own state file
+  const testLangtonDir = path.join(testDir, ".langton");
+  return new StateManager(testLangtonDir, logger);
+}
+
+// In test setup
+beforeEach(async () => {
+  const testDir = path.join(TEST_ROOT, "test-isolation", generateId());
+  await fs.promises.mkdir(testDir, { recursive: true });
+
+  const stateManager = createIsolatedStateManager(testDir, logger);
+  await stateManager.initialize();
+
+  // Pass custom state manager to server
+  const server = new LangtonServer({
+    projectPath: testDir,
+    stateManager, // Allow injection for tests
+    // ... other config
+  });
+});
+```
+
 2. Create state transition unit tests
 3. Create cost computation unit tests
 4. Update existing unit tests that don't spawn servers
