@@ -1,20 +1,30 @@
 # Langton Runner
 
-A WebSocket-based orchestration system for managing multi-phase Claude CLI workflows with real-time event streaming, file watching, and state persistence.
+A production-grade orchestration system for managing multi-phase Claude CLI workflows with comprehensive state management, crash recovery, and real-time event streaming.
+
+## 🌟 Why Langton?
+
+Langton transforms Claude CLI from a single-session tool into a powerful workflow engine:
+
+- **🔄 Stateful Execution**: Every phase tracks 8 granular states from `preparing` to `completed`
+- **💾 Crash Recovery**: Server crashes? No problem. Full state reconstruction on restart
+- **📊 Multi-Level Cost Tracking**: Per-phase, per-run, and all-time cost analytics
+- **🌳 Run History**: Every execution preserved with ability to continue from any point
+- **⚡ Fire-and-Forget**: Async state transitions that never block your workflow
+- **🔍 Type-Safe Everything**: Branded types, discriminated unions, compile-time validation
 
 ## Overview
 
-Langton Runner provides a server that orchestrates Claude CLI sessions through configurable phases, allowing you to break complex AI tasks into manageable steps with features like:
+Langton Runner provides a WebSocket server that orchestrates Claude CLI sessions through configurable phases, with enterprise-grade features:
 
-- **🔄 Phase-based execution**: Sequential or on-demand phase execution
-- **💾 State persistence**: Recover from crashes using Claude's logs
-- **📡 Real-time streaming**: WebSocket events for all Claude actions
-- **👁️ File watching**: Monitor project files during execution
-- **💰 Cost tracking**: Per-phase and total cost calculation
-- **🔗 Session continuity**: Phases can continue previous conversations
-- **📦 Workspace setup**: Copy files and run commands before phases
-- **📸 Checkpoint system**: Git-based snapshots of your work progress
-- **🧹 Cleanup system**: Remove all Langton artifacts and restore to initial state
+- **State Management**: Centralized state with atomic persistence and recovery
+- **Phase Lifecycle**: 8-state progression tracking (`preparing` → `starting` → `initializing` → `running` → `completing` → `completed`/`failed`/`skipped`)
+- **Run Isolation**: Each run gets its own folder and git branch
+- **Real-time Events**: WebSocket streaming of all state changes
+- **Checkpoint System**: Git-based snapshots with per-run branches
+- **Cost Analytics**: Automatic tracking with caching for performance
+- **Workspace Setup**: Copy files and run commands before phases
+- **File Watching**: Monitor and stream file changes during execution
 
 ## Quick Start
 
@@ -28,66 +38,89 @@ bun run server
 # Run with terminal UI for testing
 bun run server:basic
 
-# Run tests
-bun run test
-
-# Clean up project (requires --config)
+# Clean up project
 bun run server -- --cleanup --config=phases.json
 ```
 
-## Project Structure
+## The State System
+
+Langton's state management is its superpower. Here's what makes it special:
+
+### 📁 Run Organization
+
+Each server run creates:
 
 ```
-langton-runner/
-├── server/              # WebSocket server implementation
-│   ├── index.ts         # CLI entry point
-│   ├── langton-server.ts # Core server logic
-│   ├── claude-process-manager.ts # Claude subprocess lifecycle management
-│   ├── config.ts        # Configuration management
-│   ├── types.ts         # TypeScript definitions
-│   ├── type-guards.ts   # Runtime type validation
-│   ├── tool-types.ts    # Claude tool type definitions
-│   ├── error-types.ts   # Error severity and handling
-│   ├── utils.ts         # Utility functions
-│   ├── claude-log-parser.ts # Claude output parsing
-│   ├── checkpoint-git.ts # Git-based checkpoint system
-│   ├── cleanup-command.ts # Cleanup orchestration
-│   ├── cleanup/         # Cleanup modules
-│   │   ├── manifest-builder.ts # Analyzes what to clean
-│   │   ├── git-operations.ts   # Git reset functionality
-│   │   ├── file-operations.ts  # Safe file removal
-│   │   ├── command-analyzer.ts # Command side effects
-│   │   └── types.ts           # Cleanup types
-│   ├── basic-tui.ts     # Terminal UI
-│   └── README.md        # Detailed server documentation
-├── tests/               # Comprehensive test suite
-│   ├── e2e/            # End-to-end tests
-│   ├── utils/          # Test utilities
-│   ├── config/         # Test configurations
-│   └── README.md       # Test documentation
-├── types/              # Shared type definitions
-│   └── claude-session-schema.ts
-├── package.json        # Project configuration
-├── TODOs.md            # Human-only development notes
-├── REFACTOR_PLAN.md    # Detailed refactoring implementation plan
-├── tsconfig.json       # TypeScript configuration
-├── biome.json         # Code formatting config
-└── README.md          # This file
+.langton/
+├── state.json              # Single source of truth
+├── state.json.bak         # Automatic backup
+├── events.jsonl           # Event log for debugging
+└── runs/
+    └── 1234567890-abc/    # Unique run folder
+        ├── phase-research-claude.log
+        └── phase-implement-claude.log
 ```
 
-## Core Concepts
+### 🔄 Phase State Machine
 
-### Phases
+Phases progress through 8 distinct states:
 
-A phase represents a discrete task for Claude with its own:
+```typescript
+// Normal flow
+preparing → starting → initializing → running → completing → completed
 
-- Prompt (file or inline text)
-- Model selection
-- Workspace setup operations (copy files, run commands)
-- File watching and checkpoint patterns
-- Continuation settings
+// Can skip to terminal states from any point
+any_state → failed
+any_state → skipped (except completing)
+```
 
-### Phase Configuration
+Each state transition is validated and persisted atomically:
+
+```typescript
+// Fire-and-forget transitions
+stateManager.transition({
+  type: "PhaseTransitioned",
+  data: {
+    runId,
+    phaseId,
+    from: "initializing",
+    to: "running",
+    metadata: { claudeSessionId: "session-123" },
+  },
+});
+```
+
+### 💰 Cost Tracking
+
+Three levels of cost tracking with automatic caching:
+
+```typescript
+// Get costs instantly (cached for performance)
+const currentRunCost = stateManager.getCurrentRunCost();
+const totalCost = stateManager.getTotalCost();
+const costSinceRun = stateManager.getCostSince(runId);
+```
+
+### 🔍 Type-Safe Queries
+
+Query your state with full type safety:
+
+```typescript
+// Find last successful execution of a phase
+const result = stateManager.getLastSuccessfulPhase("research");
+if (result) {
+  console.log(`Session: ${result.phase.claudeSessionId}`);
+  console.log(`Cost: $${result.phase.finalCost}`);
+}
+
+// Get phase history across all runs
+const history = stateManager.getPhaseHistory("implement");
+history.forEach(({ run, phase }) => {
+  console.log(`Run ${run.runId}: ${phase.status}`);
+});
+```
+
+## Phase Configuration
 
 Create a `phases.json` file:
 
@@ -97,300 +130,241 @@ Create a `phases.json` file:
     "id": "research",
     "name": "Research Phase",
     "promptFile": "./prompts/research.md",
-    "appendSystemPromptFile": "./prompts/research-guidelines.md",
-    "model": "claude-3-opus-20240229",
-    "workspaceSetup": [
-      {
-        "type": "command",
-        "command": { "run": "mkdir -p research" }
-      }
-    ],
-    "watch": "./research/**/*.md",
-    "checkpointAndWatch": ["research/**/*"]
-  },
-  {
-    "id": "implement",
-    "name": "Implementation Phase",
-    "promptFile": ["./prompts/context.md", "./prompts/implementation-task.md"],
-    "appendSystemPromptFile": [
-      "./prompts/coding-standards.md",
-      "./prompts/best-practices.md"
-    ],
-    "model": "claude-3-sonnet-20240229",
-    "continueFromPrevious": true,
+    "model": "sonnet",
+    "continuationMode": "fresh",
     "workspaceSetup": [
       {
         "type": "copy",
-        "copy": { "from": "../templates/project", "to": "src" }
-      },
-      {
-        "type": "command",
-        "command": { "run": "npm install", "workingDirectory": "lastCopied" }
+        "copy": {
+          "from": "../templates/research",
+          "to": "research"
+        }
       }
     ],
-    "watch": "./src/**/*.ts",
-    "checkpointAndWatch": ["src/**/*.ts", "package.json"]
+    "trackedFiles": ["research/**/*.md"]
+  },
+  {
+    "id": "implement",
+    "name": "Implementation",
+    "promptFile": ["./prompts/context.md", "./prompts/task.md"],
+    "model": "opus",
+    "continuationMode": "continue-previous",
+    "workspaceSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "npm install",
+          "workingDirectory": "project"
+        }
+      }
+    ],
+    "trackedFiles": ["src/**/*.ts", "*.json"]
   }
 ]
 ```
 
-**Key Features**:
+## WebSocket Protocol
 
-- **Multiple File Support**: Both `promptFile` and `appendSystemPromptFile` can accept arrays of file paths. Files are concatenated with double newlines between them.
-- **Workspace Setup**: Use `workspaceSetup` to copy files and run commands before a phase starts. Supports both file operations and shell commands.
-- **Checkpoint System**: Use `checkpointAndWatch` to specify which files should be tracked in git-based snapshots of your work progress.
+### Server → Client Events
 
-### WebSocket Protocol
-
-The server uses WebSocket for bidirectional communication:
-
-**Server → Client Events**:
-
-- `server.ready`: Server initialized
-- `phase.started`: Phase execution began
-- `phase.completed`: Phase finished
-- `assistant.action`: Claude performed an action
-- `file.updated`: Watched file changed
-- `token.usage`: Token consumption update
-
-**Client → Server Commands**:
-
-- `phase.start`: Start specific phase
-- `phase.next`: Continue to next phase
-- `phase.skip`: Skip current phase
-- `server.shutdown`: Graceful shutdown
-
-## Usage
-
-### Command Line
-
-```bash
-# Basic usage
-bun run server
-
-# Custom configuration
-bun run server -- --config=my-phases.json
-
-# Different port
-bun run server -- --port=8080
-
-# With terminal UI
-bun run server:basic
-
-# Custom API endpoint
-bun run server -- --anthropic-base-url=https://proxy.example.com
-
-# Clean up all Langton artifacts
-bun run server -- --cleanup --config=phases.json
-
-# Clean up without confirmation prompt
-bun run server -- --cleanup --config=phases.json -y
-```
-
-### Available Scripts
-
-```bash
-# Development
-bun run server        # Start server
-bun run server:basic  # Start with terminal UI
-
-# Code quality
-bun run lint         # Check code style
-bun run lint:fix     # Fix code style
-bun run format       # Format code
-bun run type-check   # TypeScript validation
-bun run build        # Full build check
-
-# Testing
-bun run test         # Run all tests
-bun run test:happy   # Happy path test only
-bun run test:skip    # Skip tests only
-bun run test:check   # Pre-test environment check
-bun run test:cleanup # Clean up stuck tests
-
-# Cleanup
-bun run cleanup:example  # Clean up with phases.json
-bun run cleanup:force    # Clean up without prompts
-```
-
-## Architecture
-
-### Server Components
-
-1. **WebSocket Server**: Single-client connection for security
-2. **Phase Executor**: Manages Claude process lifecycle via ClaudeProcessManager
-3. **Process Manager**: Dedicated subprocess lifecycle management with logging
-4. **Log Parser**: Real-time parsing of Claude's output with result message handling
-5. **File Watcher**: Monitors project files during execution
-6. **State Manager**: Persists state through Claude logs
-7. **Error Handler**: Severity-based error handling (Fatal, Phase, Operation, Warning)
-8. **Type Guards**: Runtime validation for WebSocket messages and tool inputs
-9. **Cleanup System**: Comprehensive cleanup of all Langton artifacts
-
-### Event Flow
-
-```
-Client ←→ WebSocket ←→ Server
-                         ↓
-                    Phase Executor
-                         ↓
-                 ClaudeProcessManager
-                         ↓
-                    Claude CLI → Log Parser
-                         ↓              ↓
-                    File Watcher    Result Messages
-```
-
-### State Persistence
-
-State is persisted through multiple mechanisms:
-
-- **Claude Logs**: `.langton/logs/log-{phase-id}.jsonl` - Claude session logs
-- **Server Logs**: `.langton/logs/server.log` - Server operation logs
-- **Lock File**: `.langton/server.lock` - Prevents multiple server instances
-- **Checkpoints**: `.langton/checkpoints/` - Git-based snapshots of tracked files
-- Server reads logs on startup to recover state and track completed phases with costs and durations
-
-## Testing
-
-The project includes comprehensive end-to-end tests:
-
-```bash
-# Run all tests
-bun run test
-
-# Run specific test suite
-bun run test:happy          # Success scenarios
-bun run test:skip-continue  # Skip and continue
-bun run test:skip-quit      # Skip and shutdown
-```
-
-Tests validate:
-
-- Complete phase workflows
-- Event streaming accuracy
-- File watching functionality
-- Cost tracking precision with result message integration
-- Error handling with severity levels
-- State recovery from logs and checkpoints
-- Type safety across server and test code
-- Process lifecycle management
-- Workspace setup operations
-- Cleanup functionality and artifact removal
-
-### Test Infrastructure
-
-The test suite includes:
-
-- **Isolated Test Directories**: Each test runs in its own subdirectory to prevent conflicts
-- **Cleanup Integration**: Automatic cleanup after tests using `force` mode for reliability
-- **Checkpoint Validation**: Tests capture git state before cleanup for verification
-- **Comprehensive Coverage**: Unit tests for cleanup utilities and e2e tests for integration
-
-## Cleanup System
-
-Langton includes a comprehensive cleanup system to remove all artifacts and restore your project to its initial state:
-
-### Usage
-
-```bash
-# Clean up with confirmation prompt
-bun run server -- --cleanup --config=phases.json
-
-# Skip confirmation (useful for scripts)
-bun run server -- --cleanup --config=phases.json -y
-```
-
-### What Gets Cleaned
-
-- **Copied Directories**: All directories copied via `workspaceSetup`
-- **Git-tracked Files**: Reset to initial commit (if checkpoint system was used)
-- **.langton Directory**: Complete removal including:
-  - Server and Claude logs
-  - Checkpoint git repository
-  - Lock files
-
-### What Is Preserved
-
-- **Command-created Directories**: Directories created by shell commands (e.g., `mkdir -p notes`)
-- **Files Outside Tracked Patterns**: Files not matching `checkpointAndWatch` patterns
-- **Pre-existing Files**: Any files that existed before Langton was run
-
-### Safety Features
-
-- Requires explicit `--config` parameter to prevent accidental cleanup
-- Shows detailed preview of what will be removed
-- Interactive confirmation (can be skipped with `-y`)
-- Refuses to run if server is currently running
-- Validates all paths to prevent deletion outside project directory
-
-### Test Integration
-
-The cleanup system is integrated into all e2e tests with a robust pattern:
+All events include full state context:
 
 ```typescript
-import { executeTestCleanup } from "../utils/cleanup-integration.js";
+// Phase started (emitted when Claude sends session ID)
+{
+  type: "phase.started",
+  data: {
+    phaseId: "research",
+    sessionId: "550e8400-e29b-41d4-a716-446655440000",
+    previousSessionId: "previous-session-id", // if continuing
+    startTime: "2024-01-01T00:00:00Z"
+  }
+}
 
-afterAll(async () => {
-  const cleanupResult = await executeTestCleanup({
-    testDir: TEST_DIR,
-    phasesConfig: PHASES_CONFIG,
-    force: true, // Falls back to manual cleanup if needed
-  });
+// State snapshot
+{
+  type: "state.snapshot",
+  data: {
+    currentPhase: {
+      status: "running",
+      phase: { /* config */ },
+      sessionId: "...",
+      phaseCost: 0.0234,
+      phaseTokens: { /* usage */ }
+    },
+    completedPhases: [...],
+    totalCost: 0.1523,
+    totalTime: 120000
+  }
+}
+```
+
+### Client → Server Commands
+
+```typescript
+// Start specific phase
+{ type: "phase.start", data: { phaseId: "research" } }
+
+// Continue workflow
+{ type: "phase.next" }
+
+// Skip current phase
+{ type: "phase.skip" }
+
+// Graceful shutdown
+{ type: "server.shutdown" }
+```
+
+## Advanced Features
+
+### 🔄 Crash Recovery
+
+Lock files now include heartbeats:
+
+```json
+{
+  "pid": 12345,
+  "runId": "1234567890-abc",
+  "startTime": "2024-01-01T00:00:00Z",
+  "lastHeartbeat": "2024-01-01T00:30:00Z"
+}
+```
+
+On startup:
+
+1. Detects stale lock files (>2 minutes old)
+2. Marks crashed runs in state
+3. Can optionally continue the same run
+
+### 🌳 Continuation from Any Point
+
+Continue from any successful phase in history:
+
+```typescript
+// In future versions
+stateManager.transition({
+  type: "RunStarted",
+  data: {
+    startingConditions: {
+      type: "continuation",
+      source: {
+        runId: "previous-run",
+        afterPhase: "research",
+        checkpointSha: "abc123",
+      },
+    },
+  },
 });
 ```
 
-This ensures test isolation and prevents interference between test runs.
+### 📸 Per-Run Git Branches
 
-## Security Considerations
+Each run gets its own git branch for checkpoints:
 
-1. **Single Client**: Only one WebSocket connection allowed
-2. **File Access**: Server has full filesystem access
-3. **Command Execution**: Pre-start commands run directly
-4. **API Keys**: Managed by Claude CLI, not the server
+```bash
+.langton/checkpoints/
+├── .git/
+└── (working tree points to your project)
 
-## Error Handling
+# Branches:
+# - main (initial state)
+# - run-1234567890-abc (current run)
+# - run-0987654321-xyz (previous run)
+```
 
-- **Fatal Errors**: Trigger graceful shutdown
-- **Phase Failures**: Stop execution, preserve state
-- **Connection Loss**: Server shuts down
-- **Process Crashes**: State recoverable from logs
+### 🧹 Comprehensive Cleanup
+
+Remove all Langton artifacts intelligently:
+
+```bash
+# Preview what will be cleaned
+bun run server -- --cleanup --config=phases.json
+
+# Force cleanup without prompts
+bun run server -- --cleanup --config=phases.json -y
+```
+
+Cleanup understands:
+
+- Copied vs command-created directories
+- Git-tracked vs untracked files
+- Run-specific artifacts
+
+## Architecture
+
+### State Management Flow
+
+```
+Commands → StateManager → Transitions → Persistence
+              ↓              ↓             ↓
+         Validation      Pure Apply    Atomic Write
+              ↓              ↓             ↓
+           Events      State Update   state.json
+```
+
+### Key Components
+
+1. **StateManager**: Central brain with fire-and-forget transitions
+2. **State Types**: 50+ TypeScript types ensuring impossible states are impossible
+3. **Transition Guards**: Compile-time validation of state changes
+4. **Event System**: Async processing queue for state updates
+5. **Cost Cache**: Lightning-fast cost queries
+6. **Recovery System**: Multiple fallback strategies
+
+### Phase Execution States
+
+```typescript
+type PhaseStatus =
+  | "preparing" // Workspace setup running
+  | "starting" // Spawning Claude process
+  | "initializing" // Waiting for session ID
+  | "running" // Claude is working
+  | "completing" // Waiting for result message
+  | "completed" // Success - terminal state
+  | "failed" // Failed - terminal state
+  | "skipped"; // User skipped - terminal state
+```
+
+## Testing
+
+Comprehensive test coverage including state management:
+
+```bash
+# All tests
+bun run test
+
+# Specific suites
+bun run test:unit          # Unit tests
+bun run test:e2e           # End-to-end tests
+
+# Individual e2e tests
+bun test tests/e2e/happy-path-e2e.test.ts
+bun test tests/e2e/crash-recovery-e2e.test.ts
+```
+
+The test suite validates:
+
+- State transitions and persistence
+- Crash recovery scenarios
+- Cost calculation accuracy
+- File operation safety
+- Cleanup completeness
+- Type safety throughout
 
 ## Requirements
 
-- **Bun.js**: Runtime and package manager
-- **Claude CLI**: Installed and configured with API access
-- **TypeScript**: For development (strict type checking enabled)
-- **Unix-like OS**: For shell commands and process management
-- **Git**: For checkpoint system functionality
+- **Bun**: v1.0+ (runtime and package manager)
+- **Claude CLI**: Installed and configured
+- **TypeScript**: 5.0+ (development)
+- **Git**: For checkpoint system
+- **Unix-like OS**: For process management
 
 ## Philosophy
 
-Langton Runner is designed with these principles:
+Langton is built on these principles:
 
-1. **Simplicity**: Clear phase progression, minimal configuration
-2. **Transparency**: All actions logged and streamed
-3. **Recoverability**: Crash-resistant through log persistence
-4. **Testability**: Comprehensive test coverage
-5. **Extensibility**: Easy to add new events and features
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `bun run test`
-5. Run linting: `bun run lint`
-6. Submit a pull request
-
-## License
-
-[Add your license here]
-
-## Support
-
-For issues, questions, or contributions:
-
-- Check the server README for detailed documentation
-- Review the test README for testing guidance
-- Open an issue for bugs or feature requests
+1. **Production-Grade**: Handle crashes, preserve state, never lose work
+2. **Type Safety**: If it compiles, it works
+3. **Observability**: Every state change is logged and streamed
+4. **Performance**: Cached queries, async transitions
+5. **Extensibility**: Clean interfaces for new features
