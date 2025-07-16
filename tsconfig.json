@@ -14,5 +14,5 @@
     "types": ["bun-types"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", ".logs/**/*"]
+  "exclude": ["node_modules", ".logs/**/*", "intermediates/**/*"]
 }

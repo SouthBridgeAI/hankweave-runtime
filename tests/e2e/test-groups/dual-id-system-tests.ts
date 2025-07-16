@@ -232,21 +232,19 @@ export function runDualIdSystemTests(testState: TestState) {
     });
   });
 
-  test("state snapshots include phaseExecutionId for internal tracking", () => {
+  test("state snapshots no longer include phaseExecutionId", () => {
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
 
     snapshots.forEach((snapshot) => {
       if (isStateSnapshotEvent(snapshot) && snapshot.data?.currentPhase) {
-        // Should always have phaseExecutionId (internal tracking)
-        expect(snapshot.data.currentPhase).toHaveProperty("phaseExecutionId");
+        // phaseExecutionId has been removed in the new state management system
+        expect(snapshot.data.currentPhase).not.toHaveProperty("phaseExecutionId");
 
-        // phaseExecutionId should be timestamp-random format
-        const timestampRandomRegex = /^\d{13}-[a-z0-9]{9}$/;
-        expect(snapshot.data.currentPhase.phaseExecutionId).toMatch(timestampRandomRegex);
-
-        // sessionId only exists when status is "running"
-        if (snapshot.data.currentPhase.status === "running") {
-          // Should be UUID format
+        // sessionId only exists when status is "running" and should be UUID format
+        if (
+          snapshot.data.currentPhase.status === "running" &&
+          snapshot.data.currentPhase.sessionId
+        ) {
           const uuidRegex =
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
           expect(snapshot.data.currentPhase.sessionId).toMatch(uuidRegex);

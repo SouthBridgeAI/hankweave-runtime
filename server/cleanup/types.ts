@@ -38,6 +38,7 @@ export interface LangtonDirInfo {
   contents: {
     logs: string[];
     checkpoints: boolean;
+    runs: string[];
     other: string[];
   };
 }

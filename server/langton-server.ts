@@ -11,14 +11,16 @@ import type {
   ThinkingContent,
   ToolUseContent,
 } from "../types/claude-session-schema.js";
-import { EventId, PhaseExecutionId, type PhaseId, SessionId } from "./branded-types.js";
+import { EventId, PhaseId, RunId, SessionId } from "./branded-types.js";
 import { CheckpointGit } from "./checkpoint-git.js";
-import { ClaudeLogParser, loadPhaseStateFromLog } from "./claude-log-parser.js";
+import { ClaudeLogParser } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { APITimeoutError, ErrorSeverity } from "./error-types.js";
 import { fileResolver } from "./file-resolver.js";
+import { StateManager } from "./state-manager.js";
+import { isTerminalPhaseStatus, type PhaseExecution, type PhaseStatus } from "./state-types.js";
 import type { ToolInputMap, ToolName } from "./tool-types.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type {
@@ -30,13 +32,10 @@ import type {
   FailureReason,
   FileTreeUpdatedEvent,
   FileUpdatedEvent,
-  IncompletePhaseEvent,
   InfoEvent,
   PhaseCompletedEvent,
   PhaseConfig,
   PhaseStartedEvent,
-  PhaseState,
-  ProcessExit,
   ServerConfig,
   ServerEvent,
   ServerReadyEvent,
@@ -49,7 +48,6 @@ import {
   assertNever,
   buildFileTree,
   escapeShellArg,
-  extractSessionIdFromLog,
   generateId,
   Logger,
   toError,
@@ -86,9 +84,30 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private client: ServerWebSocket<ClientData> | null = null;
   public readonly config: ServerConfig;
   private logger: Logger;
-  private currentPhase: PhaseState | undefined;
-  private completedPhases: CompletedPhase[] = [];
+
+  // State management
+  private _stateManager: StateManager;
+  private currentRunId: RunId | null = null;
+  private heartbeatInterval?: NodeJS.Timeout;
+
+  // Public getter for tests and external access
+  public get stateManager(): Readonly<StateManager> {
+    return this._stateManager;
+  }
+
+  // Temporary state during phase execution
   private watchedPatterns: string[] = [];
+  private currentPhase:
+    | {
+        status: "initializing" | "running";
+        phase: PhaseConfig;
+        previousSessionId?: SessionId;
+        sessionId?: SessionId;
+        startTime: Date;
+        phaseCost: number;
+        phaseTokens: TokenUsage;
+      }
+    | undefined;
   private recentFileAccess:
     | {
         path: string;
@@ -97,12 +116,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     | undefined;
   private processManager: ClaudeProcessManager | undefined;
-  private totalCost = 0;
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingPhase = false;
   private logParser: ClaudeLogParser | null = null;
-  private runId: string;
   private resultMessagePromises = new Map<
     string,
     {
@@ -132,7 +149,45 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     };
     this.logger = new Logger(this.config.serverLogFile);
     this.serverStartTime = new Date();
-    this.runId = generateId();
+
+    // Initialize state manager
+    const langtonDir = path.join(this.config.projectPath, ".langton");
+    this._stateManager = new StateManager(langtonDir, this.logger, this.config.phases);
+
+    // Set up state manager listeners
+    this.setupStateManagerListeners();
+  }
+
+  private setupStateManagerListeners(): void {
+    this._stateManager.on("phaseRunning", (data) => {
+      // State is already saved when we get here
+      const phase = this._stateManager.getCurrentPhase();
+      if (phase && "claudeSessionId" in phase) {
+        const phaseConfig = this.config.phases.find((p) => p.id === data.phaseId);
+        if (phaseConfig) {
+          this.sendEvent({
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "phase.started",
+            data: {
+              phaseId: data.phaseId,
+              phaseName: phaseConfig.name,
+              phaseDescription: phaseConfig.description,
+              sessionId: phase.claudeSessionId,
+              previousSessionId: "previousSessionId" in phase ? phase.previousSessionId : undefined,
+              startTime: phase.startTime,
+            },
+          } as PhaseStartedEvent);
+        }
+      }
+    });
+
+    this._stateManager.on("transitionError", ({ event: _event, error }) => {
+      if (error.name === "PersistenceError") {
+        // Can't save state - this is fatal
+        this.handleError(error, "state-persistence", ErrorSeverity.FATAL);
+      }
+    });
   }
 
   // ============================================================================
@@ -168,7 +223,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    * Steps:
    * 1. Check for existing lock file (prevent multiple instances)
    * 2. Create lock file with current PID
-   * 3. Load previous session state from logs
+   * 3. Initialize state manager
    * 4. Start WebSocket server on configured port
    * 5. Set up process termination handlers
    *
@@ -182,23 +237,60 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     // Initialize checkpoint system (checks for existing .langton)
     await this.initializeCheckpoints();
 
+    // Initialize state manager
+    await this._stateManager.initialize();
+
     // Check for existing lock file
     if (fs.existsSync(this.config.lockFile)) {
       const lockData = fs.readFileSync(this.config.lockFile, "utf-8");
-      throw new Error(
-        `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`,
-      );
+
+      // Parse lock file for enhanced data
+      try {
+        const lockInfo = JSON.parse(lockData);
+        const heartbeatAge = Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
+
+        if (heartbeatAge > 120000) {
+          // 2 minutes
+          this.logger.log(`Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`);
+          fs.unlinkSync(this.config.lockFile);
+
+          // Mark the run as crashed
+          if (lockInfo.runId) {
+            this._stateManager.transition({
+              type: "RunCrashed",
+              data: {
+                runId: RunId(lockInfo.runId),
+                detectedAt: new Date().toISOString(),
+                lastPhaseStatus: "unknown" as PhaseStatus,
+              },
+            });
+          }
+        } else {
+          // Check if it's our current run
+          const state = this._stateManager.getState();
+          if (state.currentRunId && state.currentRunId === lockInfo.runId) {
+            // We're recovering from a crash - continue the same run
+            // TODO: This needs a lot more implementation to properly continue, but not implemented yet.
+            this.currentRunId = RunId(lockInfo.runId);
+            this.logger.log(`Recovering run ${this.currentRunId}`);
+          } else {
+            throw new Error(
+              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`,
+            );
+          }
+        }
+      } catch (_e) {
+        // Old format lock file - just PID
+        throw new Error(
+          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`,
+        );
+      }
     }
 
-    // Create lock file
-    const lockDir = path.dirname(this.config.lockFile);
-    if (!fs.existsSync(lockDir)) {
-      fs.mkdirSync(lockDir, { recursive: true });
+    // Start a new run if needed
+    if (!this.currentRunId) {
+      await this.startNewRun();
     }
-    fs.writeFileSync(this.config.lockFile, process.pid.toString());
-
-    // Load previous state from logs
-    await this.loadPreviousState();
 
     // Start Bun WebSocket server
     this.server = Bun.serve<ClientData, undefined>({
@@ -354,7 +446,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private sendStateSnapshot(): void {
-    const totalTime = Date.now() - this.serverStartTime.getTime();
+    // Calculate costs
+    const totalCost = this._stateManager.getTotalCost();
+
+    const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
+
+    // Convert completed phases from state for backward compatibility
+    const completedPhases = this.getCompletedPhasesForSnapshot();
 
     this.sendEvent({
       id: EventId(generateId()),
@@ -362,58 +460,104 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       type: "state.snapshot",
       data: {
         currentPhase: this.currentPhase,
-        completedPhases: this.completedPhases,
+        completedPhases,
         fileTree: [],
-        totalCost: this.totalCost,
-        totalTime: totalTime,
+        totalCost,
+        totalTime,
         recentFileAccess: this.recentFileAccess,
       },
     } as StateSnapshotEvent);
   }
 
+  // Helper to maintain backward compatibility
+  private getCompletedPhasesForSnapshot(): CompletedPhase[] {
+    // Try current run first, then fallback to most recent run
+    const state = this._stateManager.getState();
+    const run =
+      this._stateManager.getCurrentRun() || (state.runs.length > 0 ? state.runs[0] : null);
+    if (!run) return [];
+
+    return run.phases
+      .filter((p) => p.status === "completed")
+      .map((p) => ({
+        phaseId: p.phaseId,
+        sessionId: "claudeSessionId" in p ? p.claudeSessionId : SessionId("unknown"),
+        success: true,
+        cost: "finalCost" in p ? p.finalCost : 0,
+        duration:
+          "endTime" in p && p.startTime
+            ? new Date(p.endTime).getTime() - new Date(p.startTime).getTime()
+            : 0,
+        completedAt: "endTime" in p ? new Date(p.endTime) : new Date(),
+      }));
+  }
+
   /**
-   * Load state from previous sessions by parsing Claude log files.
-   *
-   * For each phase:
-   * 1. Check if log file exists
-   * 2. Extract session ID, success status, and token usage
-   * 3. Calculate costs from token usage
-   * 4. Add to completedPhases if successful
-   *
-   * This allows the server to resume where it left off after restarts.
+   * Start a new run and create necessary infrastructure
    */
-  private async loadPreviousState(): Promise<void> {
-    this.logger.log("Loading previous state from logs");
+  private async startNewRun(): Promise<void> {
+    const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+    const runFolder = path.join(this.config.projectPath, ".langton", "runs", runId);
 
-    for (const phase of this.config.phases) {
-      const logPath = path.join(this.config.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
+    // Create run folder
+    await fs.promises.mkdir(runFolder, { recursive: true });
 
-      const { sessionId, success, cost } = loadPhaseStateFromLog(logPath, this.config.costsPerMTok);
+    // Create run in state
+    this._stateManager.transition({
+      type: "RunStarted",
+      data: {
+        runId,
+        runFolder,
+        gitBranch: `run-${runId}`,
+        startingConditions: { type: "fresh" }, // TODO: Handle continuations
+        serverPid: process.pid,
+      },
+    });
 
-      if (sessionId && success) {
-        this.completedPhases.push({
-          phaseId: phase.id,
-          sessionId: SessionId(sessionId),
-          success: true,
-          cost,
-          duration: 0,
-          completedAt: new Date(),
-        });
+    this.currentRunId = runId;
 
-        this.logger.log(
-          `Loaded completed phase ${phase.id}: cost=$${cost.toFixed(4)}, session=${sessionId}`,
-        );
-      }
+    // Update lock file with runId and heartbeat
+    interface LockFile {
+      pid: number;
+      runId: string;
+      startTime: string;
+      lastHeartbeat: string;
     }
 
-    // Calculate total cost from loaded phases
-    this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
+    const lockData: LockFile = {
+      pid: process.pid,
+      runId,
+      startTime: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+    };
 
-    this.logger.log(
-      `Loaded ${
-        this.completedPhases.length
-      } completed phases, total cost: $${this.totalCost.toFixed(4)}`,
-    );
+    const lockDir = path.dirname(this.config.lockFile);
+    if (!fs.existsSync(lockDir)) {
+      fs.mkdirSync(lockDir, { recursive: true });
+    }
+    fs.writeFileSync(this.config.lockFile, JSON.stringify(lockData));
+
+    // Start heartbeat
+    this.heartbeatInterval = setInterval(() => {
+      this.updateHeartbeat();
+    }, 30000); // Every 30 seconds
+
+    this.logger.log(`Started new run: ${runId}`);
+  }
+
+  /**
+   * Update heartbeat in lock file
+   */
+  private updateHeartbeat(): void {
+    try {
+      if (fs.existsSync(this.config.lockFile)) {
+        const lock = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8"));
+        lock.lastHeartbeat = new Date().toISOString();
+        fs.writeFileSync(this.config.lockFile, JSON.stringify(lock));
+      }
+    } catch (error) {
+      this.logger.log(`Failed to update heartbeat: ${error}`, "error");
+    }
   }
 
   // ============================================================================
@@ -446,18 +590,47 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    if (this.currentPhase) {
+    this.logger.log(`Starting phase: ${phase.name}`);
+
+    // Check if phase already running via state manager (single source of truth)
+    const currentPhase = this._stateManager.getCurrentPhase();
+    if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
       await this.handleError(
-        new Error(`Phase already running: ${this.currentPhase.phase.id}`),
+        new Error(`Phase already running: ${currentPhase.phaseId}`),
         "startPhase",
         ErrorSeverity.OPERATION,
       );
       return;
     }
 
-    this.logger.log(`Starting phase: ${phase.name}`);
+    // Create phase started transition (fire-and-forget)
+    const _previousSessionIdString =
+      phase.continuationMode === "continue-previous" ? this.getPreviousSessionId(phase.id) : null;
 
-    // Run workspace setup operations
+    if (!this.currentRunId) {
+      await this.handleError(new Error("No active run"), "startPhase", ErrorSeverity.FATAL);
+      return;
+    }
+
+    this._stateManager.transition({
+      type: "PhaseStarted",
+      data: {
+        runId: this.currentRunId,
+        phaseId: phase.id,
+      },
+    });
+
+    // Always transition from preparing to starting
+    if (!this.currentRunId) {
+      await this.handleError(
+        new Error("No active run during phase start"),
+        "startPhase",
+        ErrorSeverity.FATAL,
+      );
+      return;
+    }
+
+    // Run workspace setup operations if configured
     if (!skipPreCommands && phase.workspaceSetup) {
       this.logger.log(`Running workspace setup for phase: ${phase.name}`);
       let lastCopiedPath: string | null = null;
@@ -488,6 +661,17 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
+    // Transition to starting after preparing (regardless of workspace setup)
+    this._stateManager.transition({
+      type: "PhaseTransitioned",
+      data: {
+        runId: this.currentRunId,
+        phaseId: phase.id,
+        from: "preparing",
+        to: "starting",
+      },
+    });
+
     // Add checkpoint patterns - accumulate from all phases up to current
     // This ensures resume functionality works correctly
     const currentPhaseIndex = this.config.phases.findIndex((p) => p.id === phase.id);
@@ -506,7 +690,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           status: "workspace-setup",
           phaseId: phase.id,
           phaseName: phase.name,
-          runId: this.runId,
+          runId: this.currentRunId || RunId("unknown"),
           timestamp: new Date().toISOString(),
         });
       }
@@ -552,9 +736,15 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     this.currentPhase = {
       status: "initializing",
       phase,
-      phaseExecutionId: PhaseExecutionId(generateId()), // Internal tracking ID
       previousSessionId: previousSessionId ? SessionId(previousSessionId) : undefined, // Store for phase.started event
       startTime: new Date(),
+      phaseCost: 0,
+      phaseTokens: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
     };
 
     // Store watch patterns for tool-based tracking
@@ -627,22 +817,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const currentIndex = this.config.phases.findIndex((p) => p.id === currentPhaseId);
     if (currentIndex <= 0) return null;
 
-    const previousPhase = this.config.phases[currentIndex - 1];
+    const previousPhaseId = this.config.phases[currentIndex - 1].id;
+    const lastSuccessful = this._stateManager.getLastSuccessfulPhase(PhaseId(previousPhaseId));
 
-    // Check log file for successful completion and extract Claude's actual session ID
-    const logPath = path.join(
-      this.config.projectPath,
-      `.langton/logs/log-${previousPhase.id}.jsonl`,
-    );
-
-    // Only return Claude's session ID if the phase was successful
-    const { success } = loadPhaseStateFromLog(logPath, this.config.costsPerMTok);
-    if (success) {
-      // Extract Claude's actual UUID session ID from the log
-      return extractSessionIdFromLog(logPath);
-    }
-
-    return null;
+    return lastSuccessful?.phase.claudeSessionId || null;
   }
 
   // ============================================================================
@@ -676,14 +854,77 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     });
 
     try {
-      // Spawn process and get log path
-      const logPath = await this.processManager.spawn(phase, previousSessionId);
+      // Get run folder from state
+      const currentRun = this._stateManager.getCurrentRun();
+      if (!currentRun || !currentRun.runFolder) {
+        throw new Error("No active run or run folder not found");
+      }
+      const runFolder = currentRun.runFolder;
+
+      // Ensure run folder exists
+      await fs.promises.mkdir(runFolder, { recursive: true });
+
+      // Modify log path to use run folder
+      const logPath = path.join(runFolder, `phase-${phase.id}-claude.log`);
+
+      // Spawn process with custom log path
+      const _logPathResult = await this.processManager.spawn(phase, previousSessionId, logPath);
+
+      // Transition to initializing (fire-and-forget)
+      if (!this.currentRunId) {
+        throw new Error("No active run while starting Claude process");
+      }
+
+      const pid = this.processManager.getPid();
+      if (!pid) {
+        throw new Error("Failed to get Claude process PID");
+      }
+
+      // Get the phase from current state to check for previousSessionId
+      const _currentPhase = this.currentPhase;
+
+      this._stateManager.transition({
+        type: "PhaseTransitioned",
+        data: {
+          runId: this.currentRunId,
+          phaseId: phase.id,
+          from: "starting",
+          to: "initializing",
+          metadata: {
+            claudePid: pid,
+            claudeLogPath: path.relative(this.config.projectPath, logPath),
+            ...(previousSessionId && {
+              previousSessionId: SessionId(previousSessionId),
+            }),
+          },
+        },
+      });
 
       // Set up log parsing with delay
       setTimeout(() => {
         this.setupLogParsing(logPath, phase.id);
       }, TIMEOUTS.LOG_PARSER_DELAY_MS);
     } catch (error) {
+      // Transition to failed (fire-and-forget) if we have a run
+      if (this.currentRunId) {
+        this._stateManager.transition({
+          type: "PhaseTransitioned",
+          data: {
+            runId: this.currentRunId,
+            phaseId: phase.id,
+            from: "starting",
+            to: "failed",
+            metadata: {
+              failedDuring: "starting",
+              failureReason: {
+                type: "unknown",
+                retriable: false,
+                message: toError(error).message,
+              },
+            },
+          },
+        });
+      }
       this.cleanupCurrentPhase();
       throw error;
     }
@@ -709,11 +950,26 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       this.currentPhase &&
       this.currentPhase.status === "initializing"
     ) {
-      // Transition from initializing to running state
+      // Transition to running (fire-and-forget)
+      if (this.currentRunId) {
+        this._stateManager.transition({
+          type: "PhaseTransitioned",
+          data: {
+            runId: this.currentRunId,
+            phaseId: PhaseId(phaseId),
+            from: "initializing",
+            to: "running",
+            metadata: {
+              claudeSessionId: SessionId(msg.session_id),
+            },
+          },
+        });
+      }
+
+      // Update local state for backward compatibility
       this.currentPhase = {
         status: "running",
         phase: this.currentPhase.phase,
-        phaseExecutionId: this.currentPhase.phaseExecutionId,
         sessionId: SessionId(msg.session_id),
         previousSessionId: this.currentPhase.previousSessionId,
         startTime: this.currentPhase.startTime,
@@ -728,21 +984,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // Log the session ID update
       this.logger.log(`Claude started phase ${phaseId} with session ID: ${msg.session_id}`);
-
-      // NOW send the phase.started event with the real session ID
-      this.sendEvent({
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "phase.started",
-        data: {
-          phaseId: this.currentPhase.phase.id,
-          phaseName: this.currentPhase.phase.name,
-          phaseDescription: this.currentPhase.phase.description,
-          sessionId: msg.session_id, // Use Claude's real ID
-          previousSessionId: this.currentPhase.previousSessionId || undefined,
-          startTime: this.currentPhase.startTime.toISOString(),
-        },
-      } as PhaseStartedEvent);
 
       // Send existing info event
       this.sendEvent({
@@ -815,6 +1056,33 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         this.currentPhase.phaseTokens.outputTokens += usage.outputTokens;
         this.currentPhase.phaseTokens.cacheCreationTokens += usage.cacheCreationTokens;
         this.currentPhase.phaseTokens.cacheReadTokens += usage.cacheReadTokens;
+
+        // Fire cost update transition (fire-and-forget)
+        const currentStatePhase = this._stateManager.getCurrentPhase();
+        if (currentStatePhase && currentStatePhase.status === "running") {
+          const newCost =
+            "currentCost" in currentStatePhase
+              ? currentStatePhase.currentCost + messageCost
+              : messageCost;
+          const newTokens = {
+            inputTokens: this.currentPhase.phaseTokens.inputTokens,
+            outputTokens: this.currentPhase.phaseTokens.outputTokens,
+            cacheCreationTokens: this.currentPhase.phaseTokens.cacheCreationTokens,
+            cacheReadTokens: this.currentPhase.phaseTokens.cacheReadTokens,
+          };
+
+          if (this.currentRunId) {
+            this._stateManager.transition({
+              type: "CostsUpdated",
+              data: {
+                runId: this.currentRunId,
+                phaseId: PhaseId(phaseId),
+                cost: newCost,
+                tokens: newTokens,
+              },
+            });
+          }
+        }
 
         this.logger.log(
           `Phase ${phaseId} token update - Call cost: $${messageCost.toFixed(
@@ -944,13 +1212,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private handleResultMessage(msg: ResultMessage, phaseId: string): void {
     this.logger.log(`Phase ${phaseId} result message received: ${msg.subtype}`);
 
-    // Resolve any waiting promise using phaseExecutionId
-    const executionId = this.currentPhase?.phaseExecutionId;
-    if (executionId) {
-      const promise = this.resultMessagePromises.get(executionId);
+    // Resolve any waiting promise using phase ID from current phase
+    const currentPhaseId = this.currentPhase?.phase.id;
+    if (currentPhaseId) {
+      const promise = this.resultMessagePromises.get(currentPhaseId);
       if (promise) {
         clearTimeout(promise.timeout);
-        this.resultMessagePromises.delete(executionId);
+        this.resultMessagePromises.delete(currentPhaseId);
         promise.resolve(msg);
       }
     }
@@ -1039,172 +1307,209 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private async handlePhaseComplete(exitCode: number): Promise<void> {
+    // Get the current phase from the in-memory state first
     if (!this.currentPhase) return;
 
-    // Capture all phase information immediately to avoid race conditions
-    const phaseSnapshot = {
-      phase: { ...this.currentPhase.phase },
-      phaseExecutionId: this.currentPhase.phaseExecutionId, // Internal tracking
-      sessionId: this.currentPhase.status === "running" ? this.currentPhase.sessionId : undefined, // Claude's UUID (may be undefined if failed early)
-      previousSessionId: this.currentPhase.previousSessionId,
-      startTime: this.currentPhase.startTime,
-      phaseCost: this.currentPhase.status === "running" ? this.currentPhase.phaseCost : 0,
-      phaseTokens:
-        this.currentPhase.status === "running"
-          ? { ...this.currentPhase.phaseTokens }
-          : {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheCreationTokens: 0,
-              cacheReadTokens: 0,
-            },
-      isSkipping: this.isSkippingPhase,
-    };
+    const phaseId = this.currentPhase.phase.id;
+    const wasSkipped = this.isSkippingPhase;
 
-    // Only wait for result message if phase wasn't skipped and we're not shutting down
-    if (!phaseSnapshot.isSkipping && exitCode === 0 && !this.isShuttingDown) {
-      try {
-        // Wait for result message with 30 second timeout
-        const resultMsg = await this.waitForResultMessage(
-          phaseSnapshot.phaseExecutionId,
-          TIMEOUTS.RESULT_MESSAGE_MS,
-        );
+    // Now get the phase from state manager to ensure we have the latest status
+    const currentPhase = this._stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
+    if (!currentPhase || isTerminalPhaseStatus(currentPhase.status)) return;
 
-        // Update costs from result message
-        if (resultMsg.usage) {
-          phaseSnapshot.phaseTokens = {
-            inputTokens: resultMsg.usage.input_tokens || 0,
-            outputTokens: resultMsg.usage.output_tokens || 0,
-            cacheCreationTokens: resultMsg.usage.cache_creation_input_tokens || 0,
-            cacheReadTokens: resultMsg.usage.cache_read_input_tokens || 0,
-          };
-          phaseSnapshot.phaseCost =
-            resultMsg.total_cost_usd ||
-            calculateCost(phaseSnapshot.phaseTokens, this.config.costsPerMTok);
-        }
-      } catch (error) {
-        // Log timeout but continue
-        this.logger.log(
-          `Result message timeout for phase ${phaseSnapshot.phase.id}: ${error}`,
-          "info",
-        );
-      }
-    }
+    // Get current status before any transitions
+    const currentStatus = currentPhase.status;
 
-    // Process completion with the captured snapshot
-    const duration = Date.now() - phaseSnapshot.startTime.getTime();
-    // Phase is only successful if it exited cleanly AND we're not shutting down
-    const success = exitCode === 0 && !this.isShuttingDown;
-    const phaseCost = phaseSnapshot.phaseCost;
-
-    // Add to completed phases (even if skipped, to track progress)
-    if ((success || phaseSnapshot.isSkipping) && phaseSnapshot.sessionId) {
-      this.completedPhases.push({
-        phaseId: phaseSnapshot.phase.id,
-        sessionId: phaseSnapshot.sessionId,
-        success,
-        cost: phaseCost,
-        duration,
-        completedAt: new Date(),
+    // Transition to completing (unless skipped or failed)
+    if (
+      !wasSkipped &&
+      exitCode === 0 &&
+      !this.isShuttingDown &&
+      this.currentRunId &&
+      currentStatus === "running"
+    ) {
+      this._stateManager.transition({
+        type: "PhaseTransitioned",
+        data: {
+          runId: this.currentRunId,
+          phaseId: PhaseId(phaseId),
+          from: currentStatus,
+          to: "completing",
+        },
       });
 
-      // Create checkpoint for phase completion
-      if (this.checkpointingEnabled) {
-        const status = phaseSnapshot.isSkipping ? "skipped" : "completed";
-        await this.createCheckpoint({
-          status,
-          phaseId: phaseSnapshot.phase.id,
-          phaseName: phaseSnapshot.phase.name,
-          runId: this.runId,
-          timestamp: new Date().toISOString(),
-          duration,
-        });
+      // Wait for result message
+      try {
+        const resultMsg = await this.waitForResultMessage(phaseId, TIMEOUTS.RESULT_MESSAGE_MS);
+
+        // Update with final costs (fire-and-forget)
+        if (resultMsg.usage && this.currentRunId) {
+          this._stateManager.transition({
+            type: "CostsUpdated",
+            data: {
+              runId: this.currentRunId,
+              phaseId: PhaseId(phaseId),
+              cost:
+                resultMsg.total_cost_usd ||
+                calculateCost(
+                  {
+                    inputTokens: resultMsg.usage.input_tokens || 0,
+                    outputTokens: resultMsg.usage.output_tokens || 0,
+                    cacheCreationTokens: resultMsg.usage.cache_creation_input_tokens || 0,
+                    cacheReadTokens: resultMsg.usage.cache_read_input_tokens || 0,
+                  },
+                  this.config.costsPerMTok,
+                ),
+              tokens: {
+                inputTokens: resultMsg.usage.input_tokens || 0,
+                outputTokens: resultMsg.usage.output_tokens || 0,
+                cacheCreationTokens: resultMsg.usage.cache_creation_input_tokens || 0,
+                cacheReadTokens: resultMsg.usage.cache_read_input_tokens || 0,
+              },
+            },
+          });
+        }
+      } catch (error) {
+        this.logger.log(`Result message timeout for phase ${phaseId}: ${error}`, "info");
       }
-
-      // Recalculate total cost from all completed phases
-      this.totalCost = this.completedPhases.reduce((sum, phase) => sum + phase.cost, 0);
-
-      this.logger.log(
-        `Phase ${phaseSnapshot.phase.id} ${
-          success ? "completed" : "skipped"
-        } - Cost: $${phaseCost.toFixed(4)}, ` + `Total project cost: $${this.totalCost.toFixed(4)}`,
-      );
     }
 
-    const exitStatus: ProcessExit =
-      exitCode === 0 ? { type: "success" } : { type: "error", code: exitCode };
+    // Re-fetch the specific phase after potential transition to completing
+    const updatedPhase = this._stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
+    if (!updatedPhase) return;
+
+    // Determine final status
+    let finalStatus: PhaseStatus = wasSkipped ? "skipped" : exitCode === 0 ? "completed" : "failed";
+
+    // Create checkpoint BEFORE state transition
+    let checkpointSha: string | undefined;
+    if (this.checkpointingEnabled) {
+      try {
+        const checkpointType =
+          finalStatus === "completed"
+            ? "completed"
+            : finalStatus === "skipped"
+              ? "skipped"
+              : "error";
+
+        const commitInfo = await this.createCheckpoint({
+          status: checkpointType,
+          phaseId: phaseId,
+          phaseName: this.currentPhase?.phase.name || phaseId,
+          runId: this.currentRunId || RunId("unknown"),
+          timestamp: new Date().toISOString(),
+          duration: Date.now() - new Date(currentPhase.startTime).getTime(),
+        });
+
+        checkpointSha = commitInfo || undefined;
+      } catch (error) {
+        this.logger.log(`Checkpoint creation failed: ${error}`, "error");
+        // Decide: fail the phase or continue without checkpoint?
+        if (finalStatus === "completed") {
+          // For completed phases, checkpoint failure is critical
+          finalStatus = "failed";
+          this.phaseFailureReason = {
+            type: "unknown",
+            retriable: false,
+            message: `Checkpoint creation failed: ${toError(error).message}`,
+          };
+        }
+      }
+    }
+
+    // Final transition (fire-and-forget)
+    if (this.currentRunId) {
+      this._stateManager.transition({
+        type: "PhaseTransitioned",
+        data: {
+          runId: this.currentRunId,
+          phaseId,
+          from: updatedPhase.status, // Use the updated status (might be "completing" now)
+          to: finalStatus,
+          metadata: {
+            exitCode,
+            resultMessageReceived: updatedPhase.status === "completing",
+            checkpointSha: checkpointSha || "", // Ensure we always have a string
+            ...(finalStatus === "failed" && {
+              failedDuring: wasSkipped ? currentStatus : updatedPhase.status,
+              failureReason: this.phaseFailureReason || {
+                type: "unknown",
+                retriable: false,
+              },
+            }),
+            ...(finalStatus === "skipped" && {
+              skippedDuring: currentStatus, // Use original status for skip
+            }),
+          },
+        },
+      });
+    }
+
+    // Send phase.completed event
+    // For skipped phases, always report zero cost (by design)
+    const phaseCost = finalStatus === "skipped" ? 0 : this.currentPhase?.phaseCost || 0;
 
     this.sendEvent({
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "phase.completed",
       data: {
-        phaseId: phaseSnapshot.phase.id,
-        success,
+        phaseId,
+        success: finalStatus === "completed",
         cost: phaseCost,
-        duration,
-        exitStatus,
-        failureReason: !success ? this.phaseFailureReason : undefined,
+        duration: Date.now() - new Date(currentPhase.startTime).getTime(),
+        exitStatus: exitCode === 0 ? { type: "success" } : { type: "error", code: exitCode },
+        failureReason: finalStatus === "failed" ? this.phaseFailureReason : undefined,
       },
     } as PhaseCompletedEvent);
 
-    // Capture failure reason before cleanup
-    const failureReason = this.phaseFailureReason;
-
+    // Clean up - ensure this completes before continuing
     this.cleanupCurrentPhase();
 
-    // Send updated state snapshot after phase completion
+    // Wait a tick to ensure cleanup is complete
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Give state manager time to process the transition before sending snapshot
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Send state snapshot
     this.sendStateSnapshot();
 
-    if (!success && !this.isShuttingDown) {
-      if (phaseSnapshot.isSkipping) {
-        // Phase was skipped, not failed - continue to next phase
-        this.logger.log("Phase was skipped, continuing to next phase");
-        this.isSkippingPhase = false;
-        // Small delay to ensure cleanup completes
-        await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS));
-        await this.autoStartNextPhase();
-      } else if (failureReason?.retriable) {
-        // Retriable error - don't shutdown
-        this.logger.log(
-          `Phase failed with retriable error: ${failureReason.type}. Server remains active for retry.`,
-        );
-        // Create error checkpoint
-        if (this.checkpointingEnabled) {
-          await this.createCheckpoint({
-            status: "error",
-            phaseId: phaseSnapshot.phase.id,
-            phaseName: phaseSnapshot.phase.name,
-            runId: this.runId,
-            timestamp: new Date().toISOString(),
-            duration,
-          });
-        }
-        // Don't shutdown - let client decide what to do
-      } else {
-        // Non-retriable error - treat as fatal
-        // Create error checkpoint before shutdown
-        if (this.checkpointingEnabled) {
-          await this.createCheckpoint({
-            status: "error",
-            phaseId: phaseSnapshot.phase.id,
-            phaseName: phaseSnapshot.phase.name,
-            runId: this.runId,
-            timestamp: new Date().toISOString(),
-            duration,
-          });
-        }
-        await this.handleError(
-          new Error(`Phase failed with exit code ${exitCode}`),
-          `phase ${phaseSnapshot.phase.id}`,
-          ErrorSeverity.FATAL,
-        );
-      }
-    } else if (success && !this.isShuttingDown) {
-      // Auto-continue to next phase after a short delay
-      // Small delay to ensure cleanup completes
-      await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.PHASE_CLEANUP_DELAY_MS));
+    // Handle next steps
+    if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
+      // Give state manager a moment to process the transition
+      await new Promise((resolve) => setTimeout(resolve, 100));
       await this.autoStartNextPhase();
+    } else if (finalStatus === "failed" && !this.isShuttingDown) {
+      if (this.phaseFailureReason?.retriable) {
+        this.logger.log(`Phase failed with retriable error. Server remains active.`);
+      } else {
+        // Non-retriable failure - shut down run (fire-and-forget)
+        if (this.currentRunId) {
+          this._stateManager.transition({
+            type: "RunFailed",
+            data: { runId: this.currentRunId },
+          });
+        }
+        await this.shutdown("phase failure");
+      }
+    }
+  }
+
+  // Helper method to calculate phase cost
+  private calculatePhaseCost(phase: PhaseExecution): number {
+    switch (phase.status) {
+      case "completed":
+        return phase.finalCost;
+      case "failed":
+        return phase.partialCost;
+      case "skipped":
+        return 0;
+      case "running":
+      case "completing":
+        return phase.currentCost;
+      default:
+        return 0;
     }
   }
 
@@ -1378,14 +1683,15 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
 
   private async checkIncompletePhases(): Promise<void> {
-    let nextPhaseIndex = 0;
+    let _nextPhaseIndex = 0;
 
-    if (this.completedPhases.length > 0) {
-      const lastCompleted = this.completedPhases[this.completedPhases.length - 1];
+    const completedPhases = this.getCompletedPhasesForSnapshot();
+    if (completedPhases.length > 0) {
+      const lastCompleted = completedPhases[completedPhases.length - 1];
       const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
 
       if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
-        nextPhaseIndex = lastIndex + 1;
+        _nextPhaseIndex = lastIndex + 1;
       } else if (lastIndex === this.config.phases.length - 1) {
         this.logger.log("All phases have been completed");
         this.sendEvent({
@@ -1400,27 +1706,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    const nextPhase = this.config.phases[nextPhaseIndex];
-    const logPath = path.join(this.config.projectPath, `.langton/logs/log-${nextPhase.id}.jsonl`);
-
-    if (fs.existsSync(logPath)) {
-      const content = fs.readFileSync(logPath, "utf8");
-      const hasResult = content.includes('"type":"result"');
-
-      if (!hasResult) {
-        this.logger.log(`Found incomplete phase: ${nextPhase.id}`);
-        this.sendEvent({
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "incomplete.phase",
-          data: {
-            phaseId: nextPhase.id,
-            phaseName: nextPhase.name,
-            message: `Phase ${nextPhase.name} appears to be incomplete. Use 'phase.next' to continue or 'phase.redo' to restart it.`,
-          },
-        } as IncompletePhaseEvent);
-      }
-    }
+    // Skip checking for incomplete phases - this is now handled by state
+    // The state system tracks which phases completed vs failed
   }
 
   /**
@@ -1457,18 +1744,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private getNextPhaseIndex(): number {
-    if (this.completedPhases.length === 0) {
-      return this.config.phases.length > 0 ? 0 : -1;
-    }
+    const nextPhaseId = this._stateManager.getNextPhaseToExecute();
+    if (!nextPhaseId) return -1;
 
-    const lastCompleted = this.completedPhases[this.completedPhases.length - 1];
-    const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
-
-    if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
-      return lastIndex + 1;
-    }
-
-    return -1; // All phases completed
+    return this.config.phases.findIndex((p) => p.id === nextPhaseId);
   }
 
   private async startNextPhase(): Promise<void> {
@@ -1481,7 +1760,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const lastCompleted = this.completedPhases[this.completedPhases.length - 1];
+    const completedPhases = this.getCompletedPhasesForSnapshot();
+    const lastCompleted = completedPhases[completedPhases.length - 1];
     if (!lastCompleted) {
       if (this.config.phases.length > 0) {
         await this.startPhase(this.config.phases[0].id);
@@ -1529,7 +1809,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const lastPhase = this.completedPhases[this.completedPhases.length - 1];
+    const completedPhases = this.getCompletedPhasesForSnapshot();
+    const lastPhase = completedPhases[completedPhases.length - 1];
     if (lastPhase) {
       await this.startPhase(lastPhase.phaseId);
     }
@@ -1555,13 +1836,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Clean up any pending result message promises
-    const executionId = this.currentPhase?.phaseExecutionId;
-    if (executionId && this.resultMessagePromises.has(executionId)) {
-      const promise = this.resultMessagePromises.get(executionId);
+    const phaseId = this.currentPhase?.phase.id;
+    if (phaseId && this.resultMessagePromises.has(phaseId)) {
+      const promise = this.resultMessagePromises.get(phaseId);
       if (promise) {
         clearTimeout(promise.timeout);
         promise.reject(new Error("Phase cleanup - result message promise cancelled"));
-        this.resultMessagePromises.delete(executionId);
+        this.resultMessagePromises.delete(phaseId);
       }
     }
 
@@ -1667,7 +1948,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   /**
    * Create a checkpoint commit
    */
-  private async createCheckpoint(info: CheckpointInfo): Promise<void> {
+  private async createCheckpoint(info: CheckpointInfo): Promise<string | undefined> {
     if (!this.checkpointingEnabled || !this.checkpointGit) return;
 
     try {
@@ -1686,15 +1967,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       const commitMessage = `${firstLine}\n${body.join("\n")}`;
 
-      // Determine if we need to create a branch
-      const shouldBranch = info.status === "error" || info.status === "exit";
-      const branchName = shouldBranch
-        ? info.status === "error"
-          ? `error/${info.phaseId}/${Date.now()}`
-          : `exit/${Date.now()}`
-        : undefined;
+      // Get current run's branch
+      const currentRun = this._stateManager.getCurrentRun();
+      const branchName = currentRun?.gitBranch || `run-${this.currentRunId}`;
 
-      // Create checkpoint (allow empty commits for skipped phases)
+      // Create checkpoint on run-specific branch
       const allowEmpty = info.status === "skipped";
       const commitHash = await this.checkpointGit.commit(commitMessage, {
         branch: branchName,
@@ -1702,7 +1979,34 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       });
 
       if (commitHash) {
-        this.logger.log(`Created checkpoint: ${commitHash} (${info.status})`);
+        this.logger.log(
+          `Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`,
+        );
+
+        // Fire checkpoint created transition to store SHA in state
+        const checkpointType =
+          info.status === "workspace-setup"
+            ? "workspace-setup"
+            : info.status === "completed"
+              ? "completed"
+              : info.status === "error"
+                ? "error"
+                : "skipped";
+
+        if (this.currentRunId) {
+          this._stateManager.transition({
+            type: "CheckpointCreated",
+            data: {
+              runId: this.currentRunId,
+              phaseId: PhaseId(info.phaseId),
+              checkpointType,
+              sha: commitHash,
+              branch: branchName,
+            },
+          });
+        }
+
+        return commitHash;
       }
     } catch (error) {
       // Handle disk full or other git errors
@@ -1740,12 +2044,35 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         status: "exit",
         phaseId: this.currentPhase.phase.id,
         phaseName: this.currentPhase.phase.name,
-        runId: this.runId,
+        runId: this.currentRunId || RunId("unknown"),
         timestamp: new Date().toISOString(),
       });
     }
 
     this.cleanupCurrentPhase();
+
+    // Mark run as completed or failed based on reason
+    if (this.currentRunId && reason === "all phases completed") {
+      this._stateManager.transition({
+        type: "RunCompleted",
+        data: { runId: this.currentRunId },
+      });
+    } else if (this.currentRunId && reason !== "phase failure") {
+      // Phase failure already marked the run as failed
+      this._stateManager.transition({
+        type: "RunFailed",
+        data: { runId: this.currentRunId },
+      });
+    }
+
+    // Wait for any pending state transitions
+    await this._stateManager.waitForPendingTransitions();
+
+    // Clear heartbeat interval
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = undefined;
+    }
 
     // Clean up all pending result message promises
     for (const promise of this.resultMessagePromises.values()) {

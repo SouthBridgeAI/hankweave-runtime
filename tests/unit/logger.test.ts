@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { Logger, generateId, extractSessionIdFromLog, isError, toError } from "../../server/utils";
+import { Logger, generateId, isError, toError } from "../../server/utils";
 import * as fs from "fs";
 import * as path from "path";
 import { rmSync } from "fs";
@@ -10,7 +10,11 @@ describe("Logger", () => {
   let logger: Logger;
 
   beforeEach(async () => {
-    tempDir = path.resolve("tests", "test-area", `temp-test-logger-${Date.now()}`);
+    tempDir = path.resolve(
+      "tests",
+      "test-area",
+      `temp-test-logger-${Date.now()}`
+    );
     await fs.promises.mkdir(tempDir, { recursive: true });
     logPath = path.join(tempDir, "test.log");
     logger = new Logger(logPath);
@@ -22,7 +26,7 @@ describe("Logger", () => {
 
   test("logs info messages", () => {
     logger.log("Test info message");
-    
+
     const logContent = fs.readFileSync(logPath, "utf-8");
     expect(logContent).toContain("[INFO]");
     expect(logContent).toContain("Test info message");
@@ -30,7 +34,7 @@ describe("Logger", () => {
 
   test("logs error messages", () => {
     logger.log("Test error message", "error");
-    
+
     const logContent = fs.readFileSync(logPath, "utf-8");
     expect(logContent).toContain("[ERROR]");
     expect(logContent).toContain("Test error message");
@@ -38,7 +42,7 @@ describe("Logger", () => {
 
   test("logs debug messages", () => {
     logger.log("Test debug message", "debug");
-    
+
     const logContent = fs.readFileSync(logPath, "utf-8");
     expect(logContent).toContain("[DEBUG]");
     expect(logContent).toContain("Test debug message");
@@ -46,7 +50,7 @@ describe("Logger", () => {
 
   test("includes timestamp in logs", () => {
     logger.log("Test message");
-    
+
     const logContent = fs.readFileSync(logPath, "utf-8");
     // Check for ISO timestamp pattern
     expect(logContent).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
@@ -55,9 +59,9 @@ describe("Logger", () => {
   test("logSocketTraffic logs to separate file", () => {
     const socketLogPath = path.join(tempDir, "socket.log");
     const data = { type: "test", payload: "data" };
-    
+
     logger.logSocketTraffic(socketLogPath, "in", data);
-    
+
     const socketLogContent = fs.readFileSync(socketLogPath, "utf-8");
     expect(socketLogContent).toContain("[IN]");
     expect(socketLogContent).toContain(JSON.stringify(data));
@@ -66,9 +70,9 @@ describe("Logger", () => {
   test("logSocketTraffic handles out direction", () => {
     const socketLogPath = path.join(tempDir, "socket.log");
     const data = { type: "response", payload: "data" };
-    
+
     logger.logSocketTraffic(socketLogPath, "out", data);
-    
+
     const socketLogContent = fs.readFileSync(socketLogPath, "utf-8");
     expect(socketLogContent).toContain("[OUT]");
     expect(socketLogContent).toContain(JSON.stringify(data));
@@ -77,7 +81,7 @@ describe("Logger", () => {
   test("appends to existing log files", () => {
     logger.log("First message");
     logger.log("Second message");
-    
+
     const logContent = fs.readFileSync(logPath, "utf-8");
     expect(logContent).toContain("First message");
     expect(logContent).toContain("Second message");
@@ -88,13 +92,13 @@ describe("generateId", () => {
   test("generates unique IDs", () => {
     const id1 = generateId();
     const id2 = generateId();
-    
+
     expect(id1).not.toBe(id2);
   });
 
   test("generates IDs in correct format", () => {
     const id = generateId();
-    
+
     // Should be alphanumeric with hyphens
     expect(id).toMatch(/^[a-zA-Z0-9-]+$/);
     expect(id.length).toBeGreaterThan(0);
@@ -102,69 +106,9 @@ describe("generateId", () => {
 
   test("generates reasonably short IDs", () => {
     const id = generateId();
-    
+
     // IDs should be manageable length
     expect(id.length).toBeLessThan(50);
-  });
-});
-
-describe("extractSessionIdFromLog", () => {
-  let tempDir: string;
-
-  beforeEach(async () => {
-    tempDir = path.resolve("tests", "test-area", `temp-test-session-${Date.now()}`);
-    await fs.promises.mkdir(tempDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  test("extracts session ID from log file", () => {
-    const logPath = path.join(tempDir, "session.log");
-    const sessionId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-    // extractSessionIdFromLog expects JSONL format with system init message
-    const logContent = `{"type":"system","subtype":"init","session_id":"${sessionId}"}
-{"type":"other","message":"Processing..."}`;
-    
-    fs.writeFileSync(logPath, logContent);
-    
-    const extracted = extractSessionIdFromLog(logPath);
-    expect(extracted).toBe(sessionId);
-  });
-
-  test("returns null when no session ID found", () => {
-    const logPath = path.join(tempDir, "no-session.log");
-    const logContent = `
-    Starting process...
-    No session information available
-    Process complete
-    `;
-    
-    fs.writeFileSync(logPath, logContent);
-    
-    const extracted = extractSessionIdFromLog(logPath);
-    expect(extracted).toBeNull();
-  });
-
-  test("returns null for non-existent file", () => {
-    const logPath = path.join(tempDir, "non-existent.log");
-    
-    const extracted = extractSessionIdFromLog(logPath);
-    expect(extracted).toBeNull();
-  });
-
-  test("extracts first session ID when multiple present", () => {
-    const logPath = path.join(tempDir, "multiple-sessions.log");
-    const sessionId1 = "aaaa1111-2222-3333-4444-555566667777";
-    const sessionId2 = "bbbb1111-2222-3333-4444-555566667777";
-    const logContent = `{"type":"system","subtype":"init","session_id":"${sessionId1}"}
-{"type":"system","subtype":"init","session_id":"${sessionId2}"}`;
-    
-    fs.writeFileSync(logPath, logContent);
-    
-    const extracted = extractSessionIdFromLog(logPath);
-    expect(extracted).toBe(sessionId1);
   });
 });
 
@@ -191,7 +135,7 @@ describe("isError", () => {
         this.name = "CustomError";
       }
     }
-    
+
     expect(isError(new CustomError("test"))).toBe(true);
   });
 });

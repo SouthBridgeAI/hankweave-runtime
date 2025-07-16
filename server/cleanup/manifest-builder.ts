@@ -128,13 +128,14 @@ export class ManifestBuilder {
         path: ".langton",
         exists: false,
         sizeBytes: 0,
-        contents: { logs: [], checkpoints: false, other: [] },
+        contents: { logs: [], checkpoints: false, runs: [], other: [] },
       };
     }
 
     const contents = {
       logs: [] as string[],
       checkpoints: false,
+      runs: [] as string[],
       other: [] as string[],
     };
 
@@ -149,6 +150,9 @@ export class ManifestBuilder {
         contents.logs = logFiles;
       } else if (entry.name === "checkpoints" && entry.isDirectory()) {
         contents.checkpoints = true;
+      } else if (entry.name === "runs" && entry.isDirectory()) {
+        const runDirs = await fs.promises.readdir(path.join(langtonPath, "runs"));
+        contents.runs = runDirs;
       } else {
         contents.other.push(entry.name);
       }

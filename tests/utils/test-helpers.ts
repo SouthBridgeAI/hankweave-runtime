@@ -7,6 +7,8 @@ import type {
   PhaseStartedEvent,
   PhaseCompletedEvent,
 } from "../../server/types.js";
+import type { LangtonServer } from "../../server/langton-server.js";
+import type { LangtonState } from "../../server/state-types.js";
 
 // ============================================================================
 // Colors for terminal output
@@ -367,8 +369,11 @@ export function startServer(config: ServerConfig): ChildProcess {
   const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
 
   // Use absolute path to server to ensure it's found regardless of where test is run from
-  const serverPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../server/index.ts");
-  
+  const serverPath = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../../server/index.ts"
+  );
+
   const serverProcess = spawn(
     "bun",
     [
@@ -579,4 +584,136 @@ export async function cleanupLockFile(
     }
     fs.unlinkSync(lockFile);
   }
+}
+
+// ============================================================================
+// State Inspection Helpers for E2E Tests
+// ============================================================================
+
+/**
+ * Get the server state by reading from the state file.
+ * This is used in e2e tests where we don't have direct access to the server instance.
+ */
+export async function getServerState(testDir: string): Promise<LangtonState> {
+  const statePath = path.join(testDir, ".langton", "state.json");
+  if (!fs.existsSync(statePath)) {
+    throw new Error("State file not found");
+  }
+  const content = await fs.promises.readFile(statePath, "utf-8");
+  return JSON.parse(content);
+}
+
+/**
+ * Wait for a run to reach a specific status.
+ */
+export async function waitForRunStatus(
+  testDir: string,
+  status: "running" | "completed" | "failed" | "crashed",
+  timeout = 5000
+): Promise<void> {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeout) {
+    try {
+      const state = await getServerState(testDir);
+      const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
+      if (currentRun?.status === status) return;
+    } catch {
+      // State file might not exist yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timeout waiting for run status ${status}`);
+}
+
+/**
+ * Wait for a phase to reach a specific status.
+ */
+export async function waitForPhaseStatus(
+  testDir: string,
+  phaseId: string,
+  status: string,
+  timeout = 10000
+): Promise<void> {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeout) {
+    try {
+      const state = await getServerState(testDir);
+      const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
+      if (currentRun) {
+        const phase = currentRun.phases.find((p) => p.phaseId === phaseId);
+        if (phase?.status === status) return;
+      }
+    } catch {
+      // State file might not exist yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `Timeout waiting for phase ${phaseId} to reach status ${status}`
+  );
+}
+
+/**
+ * Get completed phases from the current or most recent run in state.
+ */
+export async function getCompletedPhasesFromState(testDir: string): Promise<
+  Array<{
+    phaseId: string;
+    cost: number;
+    sessionId: string;
+  }>
+> {
+  const state = await getServerState(testDir);
+  // Try current run first, then fallback to most recent run
+  const run =
+    state.runs.find((r) => r.runId === state.currentRunId) ||
+    (state.runs.length > 0 ? state.runs[0] : null);
+  if (!run) return [];
+
+  return run.phases
+    .filter((p) => p.status === "completed")
+    .map((p) => ({
+      phaseId: p.phaseId,
+      cost: "finalCost" in p ? p.finalCost : 0,
+      sessionId: "claudeSessionId" in p ? p.claudeSessionId : "unknown",
+    }));
+}
+
+/**
+ * Get the total cost from state.
+ */
+export async function getTotalCostFromState(testDir: string): Promise<number> {
+  const state = await getServerState(testDir);
+  let total = 0;
+
+  for (const run of state.runs) {
+    for (const phase of run.phases) {
+      if (phase.status === "completed" && "finalCost" in phase) {
+        total += phase.finalCost;
+      } else if (phase.status === "failed" && "partialCost" in phase) {
+        total += phase.partialCost;
+      } else if (
+        (phase.status === "running" || phase.status === "completing") &&
+        "currentCost" in phase
+      ) {
+        total += phase.currentCost;
+      }
+    }
+  }
+
+  return total;
+}
+
+/**
+ * Check if a phase exists in the current run.
+ */
+export async function phaseExistsInCurrentRun(
+  testDir: string,
+  phaseId: string
+): Promise<boolean> {
+  const state = await getServerState(testDir);
+  const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
+  if (!currentRun) return false;
+
+  return currentRun.phases.some((p) => p.phaseId === phaseId);
 }

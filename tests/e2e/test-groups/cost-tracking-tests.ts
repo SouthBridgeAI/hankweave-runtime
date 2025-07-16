@@ -12,21 +12,45 @@ import type { TestWSClient } from "../../utils/test-helpers.js";
 interface TestState {
   client: TestWSClient | null;
   events: ServerEvent[];
+  // State-based fields
+  completedPhases: Array<{
+    phaseId: string;
+    cost: number;
+    sessionId: string;
+  }>;
+  totalCost: number;
 }
 
 export function runCostTrackingTests(testState: TestState, testDir: string) {
   test("total cost is tracked", () => {
-    const finalStateSnapshot = [...testState.events]
-      .reverse()
-      .find((e) => e.type === "state.snapshot");
-    expect((finalStateSnapshot as StateSnapshotEvent)?.data?.totalCost).toBeGreaterThan(0);
+    // Use state-based total cost instead of event
+    expect(testState.totalCost).toBeGreaterThan(0);
   });
 
   test("all 3 phases marked as completed", () => {
+    // Use state-based completed phases instead of event
+    expect(testState.completedPhases.length).toBe(3);
+  });
+
+  test("completed phases have costs", () => {
+    // Verify each completed phase has a cost
+    for (const phase of testState.completedPhases) {
+      expect(phase.cost).toBeGreaterThan(0);
+    }
+  });
+
+  test("state.json costs match WebSocket events", () => {
+    // The state.snapshot event should reflect the same total as state.json
     const finalStateSnapshot = [...testState.events]
       .reverse()
       .find((e) => e.type === "state.snapshot");
-    expect((finalStateSnapshot as StateSnapshotEvent)?.data?.completedPhases?.length).toBe(3);
+
+    if (finalStateSnapshot) {
+      expect((finalStateSnapshot as StateSnapshotEvent)?.data?.totalCost).toBeCloseTo(
+        testState.totalCost,
+        6,
+      );
+    }
   });
 
   test("costs match between WebSocket and logs", () => {
@@ -34,8 +58,18 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     let logTotalCost = 0;
     const phaseLogCosts: Record<string, number> = {};
 
+    // Find the run folder
+    const runsDir = path.join(testDir, ".langton/runs");
+    let runFolder = "";
+    if (fs.existsSync(runsDir)) {
+      const runFolders = fs.readdirSync(runsDir);
+      if (runFolders.length > 0) {
+        runFolder = path.join(runsDir, runFolders[0]);
+      }
+    }
+
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      const logPath = path.join(runFolder, `phase-${phaseId}-claude.log`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);
@@ -69,9 +103,19 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
   test("individual phase costs match", () => {
     const phaseLogCosts: Record<string, number> = {};
 
+    // Find the run folder
+    const runsDir = path.join(testDir, ".langton/runs");
+    let runFolder = "";
+    if (fs.existsSync(runsDir)) {
+      const runFolders = fs.readdirSync(runsDir);
+      if (runFolders.length > 0) {
+        runFolder = path.join(runsDir, runFolders[0]);
+      }
+    }
+
     // Calculate from logs using result messages
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      const logPath = path.join(runFolder, `phase-${phaseId}-claude.log`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);

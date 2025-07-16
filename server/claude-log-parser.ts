@@ -5,8 +5,6 @@ import {
   type ResultMessage,
   type SystemMessage,
 } from "../types/claude-session-schema.js";
-import { calculateCost } from "./config.js";
-import type { ServerConfig, TokenUsage } from "./types.js";
 
 /**
  * Configuration options for Claude log parser.
@@ -123,117 +121,5 @@ export class ClaudeLogParser {
     } catch {
       // Invalid JSON, skip
     }
-  }
-}
-
-// ============================================================================
-// Helper Functions for Phase State Loading
-// ============================================================================
-
-/**
- * Load phase execution state from a Claude log file.
- *
- * Used during server startup to recover previous session state.
- * Extracts:
- * - Session ID from init message
- * - Success status from result message
- * - Token usage from all assistant messages
- * - Calculated costs based on token usage
- *
- * @param logPath - Path to Claude log file
- * @param costsPerMTok - Cost configuration for calculations
- * @returns Phase state information
- */
-export function loadPhaseStateFromLog(
-  logPath: string,
-  costsPerMTok: ServerConfig["costsPerMTok"],
-): {
-  sessionId: string | null;
-  success: boolean;
-  cost: number;
-  tokens: TokenUsage;
-} {
-  let sessionId: string | null = null;
-  let success = false;
-  const tokens: TokenUsage & { _totalCost?: number } = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheCreationTokens: 0,
-    cacheReadTokens: 0,
-  };
-
-  try {
-    if (!fs.existsSync(logPath)) {
-      return { sessionId, success, cost: 0, tokens };
-    }
-
-    const content = fs.readFileSync(logPath, "utf8");
-    const lines = content.split("\n");
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      try {
-        const result = logMessageSchema.safeParse(JSON.parse(trimmed));
-        if (!result.success) continue;
-
-        const entry = result.data;
-
-        if (entry.type === "system" && entry.subtype === "init") {
-          sessionId = entry.session_id;
-        }
-
-        if (entry.type === "result") {
-          // Mark success only if subtype is "success" AND is_error is false
-          if (entry.subtype === "success" && !entry.is_error) {
-            success = true;
-          }
-
-          // Use final usage from result message if available (for both success and error)
-          if (entry.usage) {
-            tokens.inputTokens = entry.usage.input_tokens || 0;
-            tokens.outputTokens = entry.usage.output_tokens || 0;
-            tokens.cacheCreationTokens = entry.usage.cache_creation_input_tokens || 0;
-            tokens.cacheReadTokens = entry.usage.cache_read_input_tokens || 0;
-          }
-
-          // If total_cost_usd is provided, we'll use it directly in cost calculation
-          if (entry.total_cost_usd !== undefined) {
-            // Store it temporarily - we'll return it directly
-            tokens._totalCost = entry.total_cost_usd;
-          }
-        }
-
-        // Only use assistant message usage if we haven't found result usage yet
-        if (entry.type === "assistant" && entry.message.usage && !tokens._totalCost) {
-          // Claude reports cumulative usage, so we take the last one
-          const usage = entry.message.usage;
-          tokens.inputTokens = usage.input_tokens || 0;
-          tokens.outputTokens = usage.output_tokens || 0;
-          tokens.cacheCreationTokens = usage.cache_creation_input_tokens || 0;
-          tokens.cacheReadTokens = usage.cache_read_input_tokens || 0;
-        }
-      } catch {
-        // Skip invalid lines
-      }
-    }
-
-    // Use the total cost from result message if available, otherwise calculate
-    const tokensWithCost = tokens as TokenUsage & { _totalCost?: number };
-    const cost =
-      tokensWithCost._totalCost !== undefined
-        ? tokensWithCost._totalCost
-        : calculateCost(tokens, costsPerMTok);
-
-    // Clean up temporary property
-    if (tokensWithCost._totalCost !== undefined) {
-      delete tokensWithCost._totalCost;
-    }
-
-    return { sessionId, success, cost, tokens };
-  } catch (error) {
-    console.error(`Error loading state from log ${logPath}:`, error);
-    return { sessionId, success: false, cost: 0, tokens };
   }
 }

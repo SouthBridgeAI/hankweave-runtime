@@ -12,11 +12,23 @@ export function runLockFileTests(testState: TestState, testDir: string) {
   test("lock file PID matches server process", () => {
     const lockFile = path.join(testDir, ".langton/server.lock");
     if (fs.existsSync(lockFile) && testState.serverProcess?.pid) {
-      const lockPid = parseInt(fs.readFileSync(lockFile, "utf-8").trim());
+      const lockContent = fs.readFileSync(lockFile, "utf-8");
 
-      // For running server, should match
-      if (!testState.serverExited) {
-        expect(lockPid).toBe(testState.serverProcess.pid);
+      // The lock file is now JSON format with { pid, runId, startTime, lastHeartbeat }
+      try {
+        const lockData = JSON.parse(lockContent);
+        const lockPid = lockData.pid;
+
+        // For running server, should match
+        if (!testState.serverExited) {
+          expect(lockPid).toBe(testState.serverProcess.pid);
+        }
+      } catch (_error) {
+        // Old format - just PID
+        const lockPid = parseInt(lockContent.trim());
+        if (!testState.serverExited) {
+          expect(lockPid).toBe(testState.serverProcess.pid);
+        }
       }
     }
   });

@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import type { PhaseId, RunId } from "./branded-types.js";
+import type { PhaseStatus, StateTransition } from "./state-types.js";
 import type { ServerEvent } from "./types.js";
 
 /**
@@ -97,5 +99,21 @@ export interface ProcessEvents {
   error: [error: Error];
   stdout: [data: string];
   stderr: [data: string];
+  [key: string]: unknown[]; // Index signature to satisfy constraint
+}
+
+// Define state manager event map
+export interface StateManagerEvents {
+  stateChanged: [StateTransition];
+  phaseRunning: [
+    {
+      runId: RunId;
+      phaseId: PhaseId;
+      from: PhaseStatus;
+      to: "running";
+      metadata?: Record<string, unknown>;
+    },
+  ];
+  transitionError: [{ event: StateTransition; error: Error }];
   [key: string]: unknown[]; // Index signature to satisfy constraint
 }

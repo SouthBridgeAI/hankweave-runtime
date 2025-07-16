@@ -4,9 +4,21 @@ import * as path from "node:path";
 import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runLogFilesTests(testDir: string) {
+  // Find the run folder - there should be exactly one
+  const runsDir = path.join(testDir, ".langton/runs");
+  let runFolder = "";
+
+  if (fs.existsSync(runsDir)) {
+    const runFolders = fs.readdirSync(runsDir);
+    if (runFolders.length > 0) {
+      runFolder = path.join(runsDir, runFolders[0]);
+    }
+  }
+
   for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
     describe(`${phaseId} logs`, () => {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      // Logs are now in .langton/runs/{runId}/phase-{phaseId}-claude.log
+      const logPath = path.join(runFolder, `phase-${phaseId}-claude.log`);
 
       test(`log file exists`, () => {
         expect(fs.existsSync(logPath)).toBe(true);

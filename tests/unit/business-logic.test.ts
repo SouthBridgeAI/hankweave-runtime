@@ -2,216 +2,366 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as path from "path";
 import { rmSync } from "fs";
+import { StateManager } from "../../server/state-manager.js";
+import { PhaseId, RunId, SessionId } from "../../server/branded-types.js";
+import { Logger } from "../../server/utils.js";
+import type { PhaseConfig } from "../../server/types.js";
+import { StateBuilder, createCompletedPhase } from "../utils/mock-builders.js";
 
-// Since these functions are likely internal to langton-server.ts, we'll test the logic patterns
-// This demonstrates how to test business logic in isolation
-
-describe("getNextPhaseIndex", () => {
-  // Simulating the logic for finding the next phase to execute
-  function getNextPhaseIndex(phases: any[], completedPhases: string[]): number {
-    if (completedPhases.length === 0) return 0;
-    if (completedPhases.length >= phases.length) return -1;
-    
-    // Find the index of the last completed phase
-    let lastCompletedIndex = -1;
-    for (let i = phases.length - 1; i >= 0; i--) {
-      if (completedPhases.includes(phases[i].id)) {
-        lastCompletedIndex = i;
-        break;
-      }
-    }
-    
-    // Return next index or -1 if all completed
-    return lastCompletedIndex + 1 < phases.length ? lastCompletedIndex + 1 : -1;
-  }
-
-  const mockPhases = [
-    { id: "phase-1", name: "Phase 1" },
-    { id: "phase-2", name: "Phase 2" },
-    { id: "phase-3", name: "Phase 3" }
+describe("StateManager - getNextPhaseToExecute", () => {
+  let tempDir: string;
+  let stateManager: StateManager;
+  const mockPhases: PhaseConfig[] = [
+    {
+      id: PhaseId("phase-1"),
+      name: "Phase 1",
+      model: "sonnet",
+      continuationMode: "fresh",
+    },
+    {
+      id: PhaseId("phase-2"),
+      name: "Phase 2",
+      model: "sonnet",
+      continuationMode: "fresh",
+    },
+    {
+      id: PhaseId("phase-3"),
+      name: "Phase 3",
+      model: "sonnet",
+      continuationMode: "fresh",
+    },
   ];
 
-  test("returns 0 when no phases completed", () => {
-    const result = getNextPhaseIndex(mockPhases, []);
-    expect(result).toBe(0);
-  });
-
-  test("returns next index after last completed", () => {
-    const result = getNextPhaseIndex(mockPhases, ["phase-1"]);
-    expect(result).toBe(1);
-  });
-
-  test("returns -1 when all phases completed", () => {
-    const result = getNextPhaseIndex(mockPhases, ["phase-1", "phase-2", "phase-3"]);
-    expect(result).toBe(-1);
-  });
-
-  test("handles non-sequential completion (after skip)", () => {
-    // If phase-2 was skipped
-    const result = getNextPhaseIndex(mockPhases, ["phase-1", "phase-3"]);
-    expect(result).toBe(-1); // All phases after phase-3 are done
-  });
-
-  test("handles out-of-order completion", () => {
-    // If phases were completed out of order
-    const result = getNextPhaseIndex(mockPhases, ["phase-2", "phase-1"]);
-    expect(result).toBe(2); // Should return phase-3
-  });
-});
-
-describe("getPreviousSessionId", () => {
-  let tempDir: string;
-
   beforeEach(async () => {
-    tempDir = path.resolve("tests", "test-area", `temp-test-session-${Date.now()}`);
-    await fs.promises.mkdir(path.join(tempDir, ".langton", "logs"), { recursive: true });
+    tempDir = path.resolve("tests", "test-area", `temp-state-${Date.now()}`);
+    await fs.promises.mkdir(path.join(tempDir, ".langton"), {
+      recursive: true,
+    });
+
+    const logger = new Logger(path.join(tempDir, "test.log"));
+    stateManager = new StateManager(
+      path.join(tempDir, ".langton"),
+      logger,
+      mockPhases
+    );
+    await stateManager.initialize();
   });
 
   afterEach(async () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  // Simulating the logic for extracting session ID from logs
-  async function getPreviousSessionId(
-    projectPath: string, 
-    phaseIndex: number,
-    phases: any[],
-    continueFromPrevious: boolean
-  ): Promise<string | null> {
-    if (phaseIndex === 0 || !continueFromPrevious) return null;
-    
-    const prevPhase = phases[phaseIndex - 1];
-    const logPath = path.join(projectPath, ".langton", "logs", `${prevPhase.id}.log`);
-    
-    try {
-      const logContent = await fs.promises.readFile(logPath, "utf-8");
-      
-      // Look for session ID in log (simulating Claude's output format)
-      const sessionMatch = logContent.match(/session_id":"([a-f0-9-]+)"/);
-      if (sessionMatch) {
-        return sessionMatch[1];
-      }
-      
-      // Alternative format
-      const altMatch = logContent.match(/Session ID: ([a-f0-9-]+)/);
-      if (altMatch) {
-        return altMatch[1];
-      }
-      
-      return null;
-    } catch (error) {
-      return null;
-    }
-  }
+  test("returns first phase when no phases completed", async () => {
+    // Start a new run
+    const runId = RunId("test-run-1");
+    stateManager.transition({
+      type: "RunStarted",
+      data: {
+        runId,
+        runFolder: path.join(tempDir, ".langton", "runs", runId),
+        gitBranch: `run-${runId}`,
+        startingConditions: { type: "fresh" },
+        serverPid: process.pid,
+      },
+    });
 
-  test("returns null for first phase", async () => {
-    const result = await getPreviousSessionId(tempDir, 0, [], true);
-    expect(result).toBeNull();
+    await stateManager.waitForPendingTransitions();
+
+    const nextPhase = stateManager.getNextPhaseToExecute();
+    expect(nextPhase).toBe(PhaseId("phase-1"));
   });
 
-  test("returns null when previous phase failed", async () => {
-    const phases = [
-      { id: "phase-1", name: "Phase 1" },
-      { id: "phase-2", name: "Phase 2" }
-    ];
-    
-    // Create a log file without session ID (indicating failure)
-    const logPath = path.join(tempDir, ".langton", "logs", "phase-1.log");
-    await fs.promises.writeFile(logPath, "Error: Phase failed");
-    
-    const result = await getPreviousSessionId(tempDir, 1, phases, true);
-    expect(result).toBeNull();
+  test("returns next phase after one completed", async () => {
+    // Start a run with one completed phase
+    const runId = RunId("test-run-2");
+    const state = new StateBuilder()
+      .withRun({ runId })
+      .withCurrentRun(runId)
+      .withPhaseInRun(runId, createCompletedPhase("phase-1", "session-1"))
+      .build();
+
+    // Directly set the state (for testing)
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const nextPhase = stateManager.getNextPhaseToExecute();
+    expect(nextPhase).toBe(PhaseId("phase-2"));
   });
 
-  test("extracts UUID from successful phase log", async () => {
-    const phases = [
-      { id: "phase-1", name: "Phase 1" },
-      { id: "phase-2", name: "Phase 2" }
-    ];
-    
-    // Create a log file with session ID
-    const sessionId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-    const logPath = path.join(tempDir, ".langton", "logs", "phase-1.log");
-    await fs.promises.writeFile(logPath, `{"session_id":"${sessionId}"}`);
-    
-    const result = await getPreviousSessionId(tempDir, 1, phases, true);
-    expect(result).toBe(sessionId);
+  test("returns null when all phases completed", async () => {
+    // Start a run with all phases completed
+    const runId = RunId("test-run-3");
+    const state = new StateBuilder()
+      .withRun({ runId })
+      .withCurrentRun(runId)
+      .withPhaseInRun(runId, createCompletedPhase("phase-1", "session-1"))
+      .withPhaseInRun(runId, createCompletedPhase("phase-2", "session-2"))
+      .withPhaseInRun(runId, createCompletedPhase("phase-3", "session-3"))
+      .build();
+
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const nextPhase = stateManager.getNextPhaseToExecute();
+    expect(nextPhase).toBeNull();
   });
 
-  test("returns null when log file missing", async () => {
-    const phases = [
-      { id: "phase-1", name: "Phase 1" },
-      { id: "phase-2", name: "Phase 2" }
-    ];
-    
-    // Don't create any log file
-    const result = await getPreviousSessionId(tempDir, 1, phases, true);
-    expect(result).toBeNull();
+  test("handles skipped phases correctly", async () => {
+    // Run with phase-2 skipped
+    const runId = RunId("test-run-4");
+    const state = new StateBuilder()
+      .withRun({ runId })
+      .withCurrentRun(runId)
+      .withPhaseInRun(runId, createCompletedPhase("phase-1", "session-1"))
+      .withPhaseInRun(runId, {
+        phaseId: PhaseId("phase-2"),
+        startTime: new Date().toISOString(),
+        status: "skipped",
+        endTime: new Date().toISOString(),
+        skippedDuring: "running",
+        partialCost: 0,
+        partialTokens: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+      })
+      .build();
+
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const nextPhase = stateManager.getNextPhaseToExecute();
+    expect(nextPhase).toBe(PhaseId("phase-3"));
   });
 
-  test("returns null when continueFromPrevious is false", async () => {
-    const phases = [
-      { id: "phase-1", name: "Phase 1" },
-      { id: "phase-2", name: "Phase 2" }
-    ];
-    
-    // Create a valid log file
-    const sessionId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-    const logPath = path.join(tempDir, ".langton", "logs", "phase-1.log");
-    await fs.promises.writeFile(logPath, `{"session_id":"${sessionId}"}`);
-    
-    // But continueFromPrevious is false
-    const result = await getPreviousSessionId(tempDir, 1, phases, false);
-    expect(result).toBeNull();
-  });
+  test("handles continuation from specific phase", async () => {
+    // Run that continues from phase-1
+    const runId = RunId("test-run-5");
+    const state = new StateBuilder()
+      .withRun({
+        runId,
+        startingConditions: {
+          type: "continuation",
+          source: {
+            runId: RunId("previous-run"),
+            afterPhase: PhaseId("phase-1"),
+            checkpointSha: "abc123",
+          },
+        },
+      })
+      .withCurrentRun(runId)
+      .build();
 
-  test("handles alternative log format", async () => {
-    const phases = [
-      { id: "phase-1", name: "Phase 1" },
-      { id: "phase-2", name: "Phase 2" }
-    ];
-    
-    // Create a log file with alternative format
-    const sessionId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-    const logPath = path.join(tempDir, ".langton", "logs", "phase-1.log");
-    await fs.promises.writeFile(logPath, `Session started\nSession ID: ${sessionId}\nPhase completed`);
-    
-    const result = await getPreviousSessionId(tempDir, 1, phases, true);
-    expect(result).toBe(sessionId);
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const nextPhase = stateManager.getNextPhaseToExecute();
+    expect(nextPhase).toBe(PhaseId("phase-2"));
   });
 });
 
-describe("Token calculation utilities", () => {
-  test("calculates total tokens correctly", () => {
-    const usage = {
-      input: 100,
-      output: 200,
-      cache: 50
-    };
-    
-    const total = usage.input + usage.output + usage.cache;
-    expect(total).toBe(350);
+describe("StateManager - getLastSuccessfulPhase", () => {
+  let tempDir: string;
+  let stateManager: StateManager;
+
+  beforeEach(async () => {
+    tempDir = path.resolve("tests", "test-area", `temp-state-${Date.now()}`);
+    await fs.promises.mkdir(path.join(tempDir, ".langton"), {
+      recursive: true,
+    });
+
+    const logger = new Logger(path.join(tempDir, "test.log"));
+    stateManager = new StateManager(path.join(tempDir, ".langton"), logger);
+    await stateManager.initialize();
   });
 
-  test("handles missing token fields", () => {
-    const usage: any = {
-      input: 100,
-      output: 200
-      // cache is undefined
-    };
-    
-    const total = (usage.input || 0) + (usage.output || 0) + (usage.cache || 0);
-    expect(total).toBe(300);
+  afterEach(async () => {
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("calculates cumulative costs", () => {
-    const phases = [
-      { id: "p1", cost: 0.05 },
-      { id: "p2", cost: 0.10 },
-      { id: "p3", cost: 0.03 }
-    ];
-    
-    const totalCost = phases.reduce((sum, phase) => sum + phase.cost, 0);
-    expect(totalCost).toBeCloseTo(0.18, 2);
+  test("returns null when no successful executions", async () => {
+    const result = stateManager.getLastSuccessfulPhase(PhaseId("phase-1"));
+    expect(result).toBeNull();
+  });
+
+  test("finds last successful phase across runs", async () => {
+    // Create state with multiple runs
+    const state = new StateBuilder()
+      .withRun({ runId: RunId("run-1") })
+      .withPhaseInRun(
+        RunId("run-1"),
+        createCompletedPhase("phase-1", "session-1")
+      )
+      .withPhaseInRun(RunId("run-1"), {
+        phaseId: PhaseId("phase-2"),
+        startTime: new Date().toISOString(),
+        status: "failed",
+        endTime: new Date().toISOString(),
+        failedDuring: "running",
+        exitCode: 1,
+        failureReason: { type: "unknown", retriable: false },
+        partialCost: 0.05,
+        partialTokens: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+      })
+      .withRun({ runId: RunId("run-2") })
+      .withPhaseInRun(
+        RunId("run-2"),
+        createCompletedPhase("phase-1", "session-2")
+      )
+      .withPhaseInRun(
+        RunId("run-2"),
+        createCompletedPhase("phase-2", "session-3")
+      )
+      .build();
+
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const result = stateManager.getLastSuccessfulPhase(PhaseId("phase-2"));
+    expect(result).not.toBeNull();
+    expect(result!.run.runId).toBe(RunId("run-2"));
+    expect(result!.phase.claudeSessionId).toBe(SessionId("session-3"));
+  });
+
+  test("returns most recent successful execution", async () => {
+    // Create state with multiple successful executions
+    const state = new StateBuilder()
+      .withRun({ runId: RunId("run-1") })
+      .withPhaseInRun(
+        RunId("run-1"),
+        createCompletedPhase("phase-1", "old-session")
+      )
+      .withRun({ runId: RunId("run-2") })
+      .withPhaseInRun(
+        RunId("run-2"),
+        createCompletedPhase("phase-1", "new-session")
+      )
+      .build();
+
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const result = stateManager.getLastSuccessfulPhase(PhaseId("phase-1"));
+    expect(result).not.toBeNull();
+    expect(result!.phase.claudeSessionId).toBe(SessionId("new-session"));
+  });
+});
+
+describe("StateManager - Cost Calculations", () => {
+  let tempDir: string;
+  let stateManager: StateManager;
+
+  beforeEach(async () => {
+    tempDir = path.resolve("tests", "test-area", `temp-state-${Date.now()}`);
+    await fs.promises.mkdir(path.join(tempDir, ".langton"), {
+      recursive: true,
+    });
+
+    const logger = new Logger(path.join(tempDir, "test.log"));
+    stateManager = new StateManager(path.join(tempDir, ".langton"), logger);
+    await stateManager.initialize();
+  });
+
+  afterEach(async () => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("calculates total cost across all runs", async () => {
+    const state = new StateBuilder()
+      .withRun({ runId: RunId("run-1") })
+      .withPhaseInRun(
+        RunId("run-1"),
+        createCompletedPhase("phase-1", "s1", 0.05)
+      )
+      .withPhaseInRun(
+        RunId("run-1"),
+        createCompletedPhase("phase-2", "s2", 0.1)
+      )
+      .withRun({ runId: RunId("run-2") })
+      .withPhaseInRun(
+        RunId("run-2"),
+        createCompletedPhase("phase-1", "s3", 0.03)
+      )
+      .build();
+
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const totalCost = stateManager.getTotalCost();
+    expect(totalCost).toBeCloseTo(0.18, 4);
+  });
+
+  test("calculates current run cost", async () => {
+    const runId = RunId("current-run");
+    const state = new StateBuilder()
+      .withRun({ runId: RunId("old-run") })
+      .withPhaseInRun(
+        RunId("old-run"),
+        createCompletedPhase("phase-1", "s1", 0.05)
+      )
+      .withRun({ runId })
+      .withCurrentRun(runId)
+      .withPhaseInRun(runId, createCompletedPhase("phase-1", "s2", 0.03))
+      .withPhaseInRun(runId, createCompletedPhase("phase-2", "s3", 0.07))
+      .build();
+
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const currentRunCost = stateManager.getCurrentRunCost();
+    expect(currentRunCost).toBeCloseTo(0.1, 4);
+  });
+
+  test("handles missing cost fields gracefully", async () => {
+    const runId = RunId("test-run");
+    const state = new StateBuilder()
+      .withRun({ runId })
+      .withCurrentRun(runId)
+      .withPhaseInRun(runId, {
+        phaseId: PhaseId("phase-1"),
+        startTime: new Date().toISOString(),
+        status: "preparing",
+      })
+      .build();
+
+    await fs.promises.writeFile(
+      path.join(tempDir, ".langton", "state.json"),
+      JSON.stringify(state)
+    );
+    await stateManager.initialize();
+
+    const cost = stateManager.getCurrentRunCost();
+    expect(cost).toBe(0);
   });
 });

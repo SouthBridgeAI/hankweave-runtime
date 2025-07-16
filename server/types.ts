@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
-import type { EventId, PhaseExecutionId, PhaseId, SessionId } from "./branded-types.js";
+import type { EventId, PhaseId, SessionId } from "./branded-types.js";
 import type { ErrorSeverity } from "./error-types.js";
 
 // ============================================================================
@@ -257,8 +257,6 @@ export type PhaseState =
       status: "initializing";
       /** The phase configuration being executed */
       phase: PhaseConfig;
-      /** Internal execution ID for tracking (timestamp-random format) */
-      phaseExecutionId: PhaseExecutionId;
       /** Previous claude session ID if continuing from another phase */
       previousSessionId: SessionId | undefined;
       /** When this phase started */
@@ -269,8 +267,6 @@ export type PhaseState =
       status: "running";
       /** The phase configuration being executed */
       phase: PhaseConfig;
-      /** Internal execution ID for tracking (timestamp-random format) */
-      phaseExecutionId: PhaseExecutionId;
       /** Claude session ID for this execution (always present when running) */
       sessionId: SessionId;
       /** Previous claude session ID if continuing from another phase */

@@ -111,13 +111,31 @@ export class CleanupCommand {
         `  ✗ ${manifest.langtonDir.path}/ (${formatSize(manifest.langtonDir.sizeBytes)})`,
       );
 
-      if (manifest.langtonDir.contents.logs.length > 0) {
-        for (const log of manifest.langtonDir.contents.logs.slice(0, 5)) {
-          console.log(`    - logs/${log}`);
+      // Show state.json separately
+      if (manifest.langtonDir.contents.other.includes("state.json")) {
+        console.log("    - state.json (all run history)");
+      }
+
+      // Show runs directory
+      if (manifest.langtonDir.contents.runs.length > 0) {
+        console.log(`    - runs/ (${manifest.langtonDir.contents.runs.length} run folders)`);
+        for (const run of manifest.langtonDir.contents.runs.slice(0, 3)) {
+          console.log(`      - ${run}/`);
         }
-        if (manifest.langtonDir.contents.logs.length > 5) {
+        if (manifest.langtonDir.contents.runs.length > 3) {
+          console.log(`      - ... and ${manifest.langtonDir.contents.runs.length - 3} more runs`);
+        }
+      }
+
+      // Show legacy logs if any
+      if (manifest.langtonDir.contents.logs.length > 0) {
+        console.log(`    - logs/ (legacy logs)`);
+        for (const log of manifest.langtonDir.contents.logs.slice(0, 3)) {
+          console.log(`      - ${log}`);
+        }
+        if (manifest.langtonDir.contents.logs.length > 3) {
           console.log(
-            `    - ... and ${manifest.langtonDir.contents.logs.length - 5} more log files`,
+            `      - ... and ${manifest.langtonDir.contents.logs.length - 3} more log files`,
           );
         }
       }
@@ -125,6 +143,15 @@ export class CleanupCommand {
       if (manifest.langtonDir.contents.checkpoints) {
         console.log("    - checkpoints/.git/");
         console.log("    - checkpoints/.gitconfig");
+      }
+
+      // Show other files
+      const otherFiles = manifest.langtonDir.contents.other.filter((f) => f !== "state.json");
+      if (otherFiles.length > 0) {
+        console.log("    - Other files:");
+        for (const file of otherFiles) {
+          console.log(`      - ${file}`);
+        }
       }
       console.log();
     }

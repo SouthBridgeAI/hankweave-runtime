@@ -160,8 +160,15 @@ export async function runCheckpointSystemTests(testDir: string) {
         .split("\n")
         .map((b) => b.trim());
 
-      // Should only have main branch (marked with *)
-      expect(branches).toEqual(["* main"]);
+      // Should have main branch and a run-specific branch
+      // The run branch should be the current one (marked with *)
+      expect(branches.length).toBeGreaterThanOrEqual(2);
+      expect(branches).toContain("main");
+      // One branch should be marked as current with *
+      const currentBranch = branches.find((b) => b.startsWith("*"));
+      expect(currentBranch).toBeDefined();
+      // Current branch should be a run-specific branch
+      expect(currentBranch).toMatch(/\* run-\d+-\w+/);
     } catch (error) {
       console.error(`Git branch failed: ${error}`);
     }
@@ -180,8 +187,16 @@ export async function runCheckpointSystemTests(testDir: string) {
         encoding: "utf-8",
       });
 
-      // Should have no uncommitted changes (empty output)
-      expect(gitStatus.trim()).toBe("");
+      // There may be untracked files that are not part of checkpoint patterns
+      // Filter out untracked files (marked with ??)
+      const trackedChanges = gitStatus
+        .trim()
+        .split("\n")
+        .filter((line) => line && !line.startsWith("??"))
+        .join("\n");
+
+      // Should have no uncommitted changes to tracked files
+      expect(trackedChanges).toBe("");
     } catch (error) {
       console.error(`Git status failed: ${error}`);
     }

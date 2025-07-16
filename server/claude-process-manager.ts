@@ -26,22 +26,32 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   /**
    * Spawn a Claude process for the given phase configuration.
    * Sets up logging, environment, and process monitoring.
+   *
+   * @param phase - Phase configuration
+   * @param previousSessionId - Session ID to continue from (if any)
+   * @param logPath - Custom log file path (optional, defaults to .langton/logs/)
    */
-  async spawn(phase: PhaseConfig, previousSessionId: string | null): Promise<string> {
+  async spawn(
+    phase: PhaseConfig,
+    previousSessionId: string | null,
+    logPath?: string,
+  ): Promise<string> {
     if (this.process) {
       throw new Error("Process already running");
     }
 
-    const logPath = path.join(this.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
+    // Use provided logPath or default to .langton/logs/
+    const actualLogPath =
+      logPath || path.join(this.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
 
     // Ensure log directory exists
-    const logsDir = path.dirname(logPath);
+    const logsDir = path.dirname(actualLogPath);
     if (!fs.existsSync(logsDir)) {
       fs.mkdirSync(logsDir, { recursive: true });
     }
 
     // Create log stream
-    this.logStream = fs.createWriteStream(logPath);
+    this.logStream = fs.createWriteStream(actualLogPath);
 
     // Build Claude arguments
     const args = this.buildClaudeArgs(phase, previousSessionId);
@@ -99,7 +109,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     this.logger.log(`Claude process started for phase ${phase.id} (PID: ${this.process.pid})`);
 
-    return logPath;
+    return actualLogPath;
   }
 
   /**

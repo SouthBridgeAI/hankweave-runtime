@@ -116,10 +116,25 @@ export class CheckpointGit {
   ): Promise<string | null> {
     if (!this.git) return null;
 
-    // Create branch if specified
+    let originalBranch: string | undefined;
+
+    // Always use the branch from options if provided
     if (options?.branch) {
-      await this.git.checkoutLocalBranch(options.branch);
-      this.logger.log(`Created branch: ${options.branch}`);
+      // Remember current branch to switch back later
+      const currentBranchInfo = await this.git.branch();
+      originalBranch = currentBranchInfo.current;
+
+      // Check if branch exists
+      const branches = await this.git.branch();
+      if (!branches.all.includes(options.branch)) {
+        // Create new branch from current HEAD
+        await this.git.checkoutLocalBranch(options.branch);
+        this.logger.log(`Created branch: ${options.branch}`);
+      } else {
+        // Switch to existing branch
+        await this.git.checkout(options.branch);
+        this.logger.log(`Switched to branch: ${options.branch}`);
+      }
     }
 
     // Get resolved files to add
@@ -144,10 +159,6 @@ export class CheckpointGit {
     const status = await this.git.status();
     if (status.staged.length === 0 && !options?.allowEmpty) {
       this.logger.log("No changes to commit for checkpoint");
-      // Switch back to main if we branched
-      if (options?.branch) {
-        await this.git.checkout("main");
-      }
       return null;
     }
 
@@ -157,9 +168,10 @@ export class CheckpointGit {
         ? await this.git.commit(message, { "--allow-empty": null })
         : await this.git.commit(message);
 
-    // Switch back to main if we branched
-    if (options?.branch) {
-      await this.git.checkout("main");
+    // Switch back to original branch if we switched
+    if (originalBranch && options?.branch && originalBranch !== options.branch) {
+      await this.git.checkout(originalBranch);
+      this.logger.log(`Switched back to branch: ${originalBranch}`);
     }
 
     return result.commit || null;

@@ -54,36 +54,6 @@ export class Logger {
 }
 
 // ============================================================================
-// Session ID Extraction
-// ============================================================================
-
-export function extractSessionIdFromLog(logPath: string): string | null {
-  try {
-    if (!fs.existsSync(logPath)) return null;
-
-    const content = fs.readFileSync(logPath, "utf8");
-    const lines = content.split("\n");
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed?.startsWith("{") && trimmed.endsWith("}")) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed.type === "system" && parsed.subtype === "init" && parsed.session_id) {
-            return parsed.session_id;
-          }
-        } catch {
-          // Continue to next line
-        }
-      }
-    }
-  } catch {
-    // Error reading file
-  }
-  return null;
-}
-
-// ============================================================================
 // File System Utilities
 // ============================================================================
 

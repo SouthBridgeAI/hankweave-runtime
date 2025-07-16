@@ -13,6 +13,8 @@ import {
   cleanupTest,
   colors,
   generateTestTimestamp,
+  getCompletedPhasesFromState,
+  getTotalCostFromState,
   type ServerConfig,
   setupTestDirectory,
   startServer,
@@ -120,6 +122,13 @@ interface TestState {
     branches: string[];
     trackedFiles: string[];
   };
+  // State-based fields for new state management
+  completedPhases: Array<{
+    phaseId: string;
+    cost: number;
+    sessionId: string;
+  }>;
+  totalCost: number;
 }
 
 const testState: TestState = {
@@ -134,6 +143,8 @@ const testState: TestState = {
   phase3Completed: null,
   errorEvents: [],
   testStartTime: 0,
+  completedPhases: [],
+  totalCost: 0,
 };
 
 // ============================================================================
@@ -176,19 +187,28 @@ async function setupAndRunPhases(): Promise<void> {
   console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
 
   // Phase 2
-  // Wait a moment for phase 2 to auto-start
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  // Wait for phase 2 to start (it should auto-start after phase 1)
+  // We'll poll for the event with a timeout
+  const phase2StartTime = Date.now();
+  const phase2Timeout = 10000; // 10 seconds
 
-  const phase2StartEvent = testState.client
-    .getEvents()
-    .find((e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-2");
+  while (Date.now() - phase2StartTime < phase2Timeout) {
+    const phase2StartEvent = testState.client
+      .getEvents()
+      .find((e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-2");
 
-  if (!phase2StartEvent || !isPhaseStartedEvent(phase2StartEvent)) {
+    if (phase2StartEvent && isPhaseStartedEvent(phase2StartEvent)) {
+      testState.phase2Started = phase2StartEvent;
+      console.log(`${colors.green}✓ Phase 2 started${colors.reset}`);
+      break;
+    }
+
+    // Wait 100ms before checking again
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (!testState.phase2Started) {
     console.log(`${colors.red}✗ Phase 2 did not start${colors.reset}`);
-    testState.phase2Started = null;
-  } else {
-    testState.phase2Started = phase2StartEvent;
-    console.log(`${colors.green}✓ Phase 2 started${colors.reset}`);
   }
 
   testState.phase2Completed = await testState.client.waitForPhaseCompletion("phase-2", 60000);
@@ -222,8 +242,8 @@ async function setupAndRunPhases(): Promise<void> {
   testState.phase3Completed = await testState.client.waitForPhaseCompletion("phase-3", 60000);
   console.log(`${colors.green}✓ Phase 3 completed${colors.reset}`);
 
-  // Give a moment for final events
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Give a moment for final events and state transitions to complete
+  await new Promise((resolve) => setTimeout(resolve, 5000));
 
   // Store all events for tests
   testState.events = testState.client.getEvents();
@@ -234,6 +254,18 @@ async function setupAndRunPhases(): Promise<void> {
   // Run checkpoint validation BEFORE cleanup can happen
   console.log(`\n${colors.blue}Validating checkpoint system...${colors.reset}`);
   await validateCheckpointSystem();
+
+  // Populate state-based fields from state.json
+  console.log(`\n${colors.blue}Reading state from state.json...${colors.reset}`);
+  try {
+    testState.completedPhases = await getCompletedPhasesFromState(TEST_DIR);
+    testState.totalCost = await getTotalCostFromState(TEST_DIR);
+    console.log(`${colors.green}✓ State data loaded from state.json${colors.reset}`);
+    console.log(`  - Completed phases: ${testState.completedPhases.length}`);
+    console.log(`  - Total cost: $${testState.totalCost.toFixed(6)}`);
+  } catch (error) {
+    console.error(`${colors.red}Failed to load state data: ${error}${colors.reset}`);
+  }
 }
 
 // Validate checkpoint system while it still exists
