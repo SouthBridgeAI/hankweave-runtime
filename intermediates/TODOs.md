@@ -9,11 +9,15 @@
 3. Add an interactive prompt to e2e tests (maybe a password?) so that Claude can't run it
 4. Add in API key on start
 5. Happy path test-notes isn't cleaned up?
+6. Add documentation for the server events and commands
 
 ## Improvements
 
 1. Implement a scaffold to replay existing claude logs for tests
 2. Allow starting persistent commands (like servers) that are only cleaned up when server fully exits - with interactive prompts
+3. Add proper error types to events
+4. Add an ability to queue commands or something where the server can start up and shut down?
+5. Consider ignoring gitignores?
 
 ## Major features
 
@@ -26,6 +30,7 @@
 7. Validators - phases concurrent or otherwise that provide feedback
 8. Dockerization
 9. Automated proxy
+10. Auto-server serving files
 
 ## Applications
 
