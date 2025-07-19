@@ -8,3 +8,5 @@ This is a project I'm working on. Read the readme files to get a good idea on th
 6. Use bun lint:fix and bun run build to check your results.
 7. DO NOT RUN bun test (or any of the tests). Ask the user to run the tests - they're expensive and take some time.
 8. Read the readme files in ./README.md, ./server/README.md, ./tests/README.md as a way to understand the code - but keep in mind that the READMEs may be a little stale to where the code is now. Always verify.
+9. Don't loosen types just to pass linting or tests. Make sure you understand what's happening before you open up types. If you see loose types as you look for something else, feel free to investigate if we can't tighten them up.
+10. Beware the optional type pattern. That can let a lot of problems through.
