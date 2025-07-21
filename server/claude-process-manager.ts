@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { PhaseConfig } from "./types.js";
@@ -18,6 +19,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   constructor(
     private projectPath: string,
     private logger: Logger,
+    private logParser: ClaudeLogParser,
     private anthropicBaseURL?: string,
   ) {
     super();
@@ -250,6 +252,13 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     this.killed = true;
     this.logger.log(`Killing Claude process with ${signal}`);
+
+    // Force an immediate parse of the log file to capture any final messages
+    // This ensures we don't lose token counts or other important data when killing
+    this.logParser.parseNow();
+
+    // Give the log parser a moment to process any final messages
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     this.process.kill(signal);
 

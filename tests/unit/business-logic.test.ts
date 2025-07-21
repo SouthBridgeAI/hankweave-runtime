@@ -67,7 +67,7 @@ describe("StateManager - getNextPhaseToExecute", () => {
 
     await stateManager.waitForPendingTransitions();
 
-    const nextPhase = stateManager.getNextPhaseToExecute();
+    const nextPhase = await stateManager.getNextPhaseToExecute();
     expect(nextPhase).toBe(PhaseId("phase-1"));
   });
 
@@ -87,7 +87,7 @@ describe("StateManager - getNextPhaseToExecute", () => {
     );
     await stateManager.initialize();
 
-    const nextPhase = stateManager.getNextPhaseToExecute();
+    const nextPhase = await stateManager.getNextPhaseToExecute();
     expect(nextPhase).toBe(PhaseId("phase-2"));
   });
 
@@ -108,7 +108,7 @@ describe("StateManager - getNextPhaseToExecute", () => {
     );
     await stateManager.initialize();
 
-    const nextPhase = stateManager.getNextPhaseToExecute();
+    const nextPhase = await stateManager.getNextPhaseToExecute();
     expect(nextPhase).toBeNull();
   });
 
@@ -141,7 +141,7 @@ describe("StateManager - getNextPhaseToExecute", () => {
     );
     await stateManager.initialize();
 
-    const nextPhase = stateManager.getNextPhaseToExecute();
+    const nextPhase = await stateManager.getNextPhaseToExecute();
     expect(nextPhase).toBe(PhaseId("phase-3"));
   });
 
@@ -169,7 +169,7 @@ describe("StateManager - getNextPhaseToExecute", () => {
     );
     await stateManager.initialize();
 
-    const nextPhase = stateManager.getNextPhaseToExecute();
+    const nextPhase = await stateManager.getNextPhaseToExecute();
     expect(nextPhase).toBe(PhaseId("phase-2"));
   });
 });

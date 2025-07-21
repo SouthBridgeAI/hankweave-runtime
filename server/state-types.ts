@@ -15,7 +15,7 @@ export type { PhaseId, RunId, SessionId, FailureReason, TokenUsage };
 /**
  * Phase execution status progression.
  *
- * Normal flow: preparing → starting → initializing → running → completing → completed
+ * Normal flow: preparing → starting → initializing → running → completed
  * Can skip to "failed" or "skipped" from any non-terminal state.
  *
  * Intent: Track granular progress for better crash recovery and user feedback.
@@ -25,7 +25,6 @@ export type PhaseStatus =
   | "starting" // Spawning Claude process
   | "initializing" // Process started, waiting for session ID
   | "running" // Claude is working (have session ID)
-  | "completing" // Claude done, waiting for result message
   | "completed" // Success - terminal state
   | "failed" // Failed - terminal state
   | "skipped"; // User skipped - terminal state
@@ -131,7 +130,7 @@ export interface InitializingPhase extends BasePhase {
  * This is where most time is spent.
  *
  * Next states:
- * - completing: Claude process exited cleanly
+ * - completed: Claude process exited cleanly
  * - failed: Timeout, API error, crash
  * - skipped: User skipped
  */
@@ -166,25 +165,15 @@ export interface RunningPhase extends BasePhase {
    * Used by: Token display, rate limit tracking
    */
   currentTokens: TokenUsage;
-}
 
-/**
- * Claude finished, waiting for result message.
- * Transitional state with 30-second timeout.
- *
- * Next states:
- * - completed: Got result message or timeout
- * - failed: Unexpected error during completion
- */
-export interface CompletingPhase extends BasePhase {
-  status: "completing";
-  workspaceSetupCheckpoint?: string;
-  claudePid: number;
-  claudeSessionId: SessionId;
-  claudeLogPath: string;
-  previousSessionId?: SessionId;
-  currentCost: number;
-  currentTokens: TokenUsage;
+  /**
+   * Number of assistant messages received.
+   * Used to determine if Claude has established a conversation.
+   * Initialized to 0 when phase enters running state.
+   *
+   * Used by: Continue functionality to check if session is valid
+   */
+  assistantMessageCount: number;
 }
 
 // ============================================================================
@@ -268,7 +257,7 @@ export interface FailedPhase extends BasePhase {
    * Used by: Error analysis, retry strategies
    * Example: "preparing" means workspace setup failed
    */
-  failedDuring: "preparing" | "starting" | "initializing" | "running" | "completing";
+  failedDuring: "preparing" | "starting" | "initializing" | "running";
 
   // Claude info - only set if we got that far
   claudePid?: number;
@@ -328,7 +317,7 @@ export interface SkippedPhase extends BasePhase {
    *
    * Used by: Understanding skip patterns
    */
-  skippedDuring: "preparing" | "starting" | "initializing" | "running" | "completing";
+  skippedDuring: "preparing" | "starting" | "initializing" | "running";
 
   // Claude info - only set if we got that far
   claudePid?: number;
@@ -337,16 +326,25 @@ export interface SkippedPhase extends BasePhase {
   previousSessionId?: SessionId;
 
   /**
-   * Always 0 - skipped phases have no cost.
+   * Partial cost accumulated before skip.
+   * Usually 0, but may have accumulated costs if skipped while running.
    *
-   * Used by: Cost calculations exclude skipped
+   * Used by: Cost calculations, continuation logic
    */
-  partialCost: 0;
+  partialCost: number;
 
   /**
    * All zeros - no tokens used for skipped.
    */
   partialTokens: TokenUsage;
+
+  /**
+   * Number of assistant messages received before skip.
+   * Used to determine if session can be continued.
+   *
+   * Used by: Continue functionality
+   */
+  assistantMessageCount?: number;
 
   // Checkpoints
   workspaceSetupCheckpoint?: string;
@@ -369,7 +367,6 @@ export type PhaseExecution =
   | StartingPhase
   | InitializingPhase
   | RunningPhase
-  | CompletingPhase
   | CompletedPhase
   | FailedPhase
   | SkippedPhase;
@@ -461,7 +458,7 @@ export interface Run {
 export type StartingConditions =
   | {
       type: "fresh";
-      // No additional data needed - starting from scratch
+      initialCheckpointSha?: string; // SHA of the initial checkpoint commit
     }
   | {
       type: "continuation";
@@ -532,6 +529,15 @@ export interface LangtonState {
    */
   currentRunId: RunId | null;
 
+  /**
+   * Initial checkpoint SHA from git repository initialization.
+   * This is the empty commit created when the checkpoint system starts.
+   * Represents the project's clean state before any phases have executed.
+   *
+   * Used by: Rollback to clean state, project-level rollback commands
+   */
+  initialCheckpoint?: string;
+
   // No denormalized costs/tokens - computed from runs when needed
   // This avoids sync issues and keeps state minimal
 }
@@ -553,8 +559,7 @@ export const PhaseTransitions: Record<PhaseStatus, PhaseStatus[]> = {
   preparing: ["starting", "failed", "skipped"],
   starting: ["initializing", "failed", "skipped"],
   initializing: ["running", "failed", "skipped"],
-  running: ["completing", "failed", "skipped"],
-  completing: ["completed", "failed"], // Can't skip during completion
+  running: ["completed", "failed", "skipped"],
   completed: [], // Terminal - no transitions
   failed: [], // Terminal - no transitions
   skipped: [], // Terminal - no transitions
@@ -620,13 +625,13 @@ export type StateTransition =
     }
 
   /**
-   * Previous run crashed (detected on recovery).
+   * Run crashed (detected on recovery).
    *
-   * Triggered by: Server startup finding "running" run
+   * Triggered by: Stale lock file detection
    * State changes:
    * - Sets run.status = "crashed"
-   * - Sets run.endTime to detection time
-   * - Marks any running phase as failed
+   * - Sets run.endTime
+   * - Marks running phases as failed
    */
   | {
       type: "RunCrashed";
@@ -719,6 +724,25 @@ export type StateTransition =
       };
     }
 
+  // ===== Assistant Message Tracking =====
+
+  /**
+   * Assistant message count update.
+   * Incremented when Claude sends a message.
+   *
+   * Triggered by: Assistant messages in Claude logs
+   * State changes:
+   * - Increments assistantMessageCount (if running/completing)
+   */
+  | {
+      type: "AssistantMessageCountUpdated";
+      data: {
+        runId: RunId;
+        phaseId: PhaseId;
+        newCount: number; // New total count
+      };
+    }
+
   // ===== Checkpoint Events =====
 
   /**
@@ -736,6 +760,20 @@ export type StateTransition =
         checkpointType: "workspace-setup" | "completed" | "error" | "skipped";
         sha: string;
         branch: string;
+      };
+    }
+
+  /**
+   * Initial checkpoint set for the project.
+   *
+   * Triggered by: Git repository initialization
+   * State changes:
+   * - Sets state.initialCheckpoint
+   */
+  | {
+      type: "InitialCheckpointSet";
+      data: {
+        sha: string;
       };
     };
 
@@ -805,7 +843,7 @@ export interface StateManager {
    * Get the currently executing phase.
    * @returns null if between phases or no run active
    */
-  getCurrentPhase(): PhaseExecution | null;
+  getCurrentlyRunningPhase(): PhaseExecution | null;
 
   /**
    * Get specific phase in current run.
@@ -827,7 +865,7 @@ export interface StateManager {
    *
    * @returns null if all phases completed
    */
-  getNextPhaseToExecute(): PhaseId | null;
+  getNextPhaseToExecute(): Promise<PhaseId | null>;
 
   // ===== Historical Queries =====
 
@@ -995,6 +1033,43 @@ export interface RecoveryResult {
 }
 
 // ============================================================================
+// Latest Phase Info
+// ============================================================================
+
+/**
+ * Information about the latest phase execution.
+ * Used to determine the current position in the workflow.
+ */
+export interface LatestPhaseInfo {
+  /**
+   * The phase execution object containing all phase details
+   */
+  phase: PhaseExecution;
+
+  /**
+   * Which run this phase belongs to
+   */
+  runId: RunId;
+
+  /**
+   * Current status of the phase (convenience field)
+   */
+  status: PhaseStatus;
+
+  /**
+   * The next phase that should be executed (if any).
+   * null means all phases are complete or a new run is needed.
+   */
+  nextPhaseId: PhaseId | null;
+
+  /**
+   * Whether to continue execution in the current run.
+   * false means a new run needs to be started (e.g., after rollback).
+   */
+  continueInCurrentRun: boolean;
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -1017,7 +1092,6 @@ export function getPhaseCost(phase: PhaseExecution): number {
     case "skipped":
       return 0;
     case "running":
-    case "completing":
       return phase.currentCost;
     default:
       return 0;
@@ -1041,7 +1115,6 @@ export function getPhaseTokens(phase: PhaseExecution): TokenUsage {
         cacheReadTokens: 0,
       };
     case "running":
-    case "completing":
       return phase.currentTokens;
     default:
       return {

@@ -62,16 +62,28 @@ export class ClaudeLogParser {
     this.lastPosition = 0;
   }
 
+  /**
+   * Force an immediate parse of the log file.
+   * Useful when we need to ensure all messages are processed before process termination.
+   */
+  parseNow(): void {
+    this.parseLogFile();
+  }
+
   private parseLogFile(): void {
     const { logPath } = this.options;
-    if (!fs.existsSync(logPath)) return;
+    if (!fs.existsSync(logPath)) {
+      return;
+    }
 
     try {
       const content = fs.readFileSync(logPath, "utf-8");
 
       // On first parse, read from beginning to catch any messages written before we started
       const newContent = this.isFirstParse ? content : content.slice(this.lastPosition);
-      if (!newContent) return;
+      if (!newContent) {
+        return;
+      }
 
       this.buffer += newContent;
       const lines = this.buffer.split("\n");

@@ -172,6 +172,7 @@ describe("StateManager", () => {
                   cacheCreationTokens: 0,
                   cacheReadTokens: 0,
                 },
+                assistantMessageCount: 0,
               },
             ],
             status: "running",
@@ -344,9 +345,8 @@ describe("StateManager", () => {
           to: "running",
           metadata: { claudeSessionId: SessionId("session-123") },
         },
-        { from: "running", to: "completing" },
         {
-          from: "completing",
+          from: "running",
           to: "completed",
           metadata: { checkpointSha: "abc123" },
         },
@@ -464,7 +464,7 @@ describe("StateManager", () => {
       expect(currentRun!.runId).toBe(runId);
     });
 
-    test("getCurrentPhase returns running phase", async () => {
+    test("getCurrentlyRunningPhase returns running phase", async () => {
       // Progress to running state
       stateManager.transition({
         type: "PhaseTransitioned",
@@ -500,7 +500,7 @@ describe("StateManager", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      const currentPhase = stateManager.getCurrentPhase();
+      const currentPhase = stateManager.getCurrentlyRunningPhase();
       expect(currentPhase).not.toBeNull();
       expect(currentPhase!.status).toBe("running");
       expect(currentPhase!.phaseId).toBe(phaseId);
@@ -520,9 +520,8 @@ describe("StateManager", () => {
           to: "running",
           metadata: { claudeSessionId: SessionId("session-123") },
         },
-        { from: "running", to: "completing" },
         {
-          from: "completing",
+          from: "running",
           to: "completed",
           metadata: { checkpointSha: "abc123" },
         },

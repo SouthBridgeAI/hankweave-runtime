@@ -1,6 +1,7 @@
 import type { LangtonServer } from "./langton-server.js";
 import type {
   AssistantActionEvent,
+  CheckpointListEvent,
   ClientCommand,
   ErrorEvent,
   FileTreeUpdatedEvent,
@@ -10,7 +11,9 @@ import type {
   NextPhaseCommand,
   PhaseCompletedEvent,
   PhaseStartedEvent,
+  RollbackCompletedEvent,
   ServerEvent,
+  ServerIdleEvent,
   SkipPhaseCommand,
   StateSnapshotEvent,
   TokenUsageEvent,
@@ -32,6 +35,8 @@ import { generateId } from "./utils.js";
 export class BasicTUI {
   private ws: WebSocket | null = null;
   private isConnected = false;
+  private checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
+  private waitingForCheckpoints = false;
 
   constructor(private server: LangtonServer) {
     this.connectToServer();
@@ -71,7 +76,7 @@ export class BasicTUI {
     };
   }
 
-  private handleServerEvent(event: ServerEvent): void {
+  private async handleServerEvent(event: ServerEvent): Promise<void> {
     const timestamp = new Date(event.timestamp).toLocaleTimeString();
 
     switch (event.type) {
@@ -126,7 +131,7 @@ export class BasicTUI {
       case "assistant.action": {
         const actionData = (event as AssistantActionEvent).data;
         if (actionData.action === "message") {
-          console.log(`\n💬 [${timestamp}] ${actionData.content}...`);
+          console.log(`\n💬 [${timestamp}] ${actionData.content}`);
         } else if (actionData.action === "thinking") {
           console.log(`\n🤔 [${timestamp}] Thinking: ${actionData.content}`);
         } else if (actionData.action === "tool_use") {
@@ -171,6 +176,53 @@ export class BasicTUI {
         break;
       }
 
+      case "server.idle": {
+        const data = (event as ServerIdleEvent).data;
+        console.log(`\n⏸️  [${timestamp}] Server idle: ${data.reason}`);
+        console.log(`   ${data.message}`);
+        break;
+      }
+
+      case "checkpoint.list": {
+        const data = (event as CheckpointListEvent).data;
+
+        // Store checkpoints for interactive selection
+        this.checkpoints = data.checkpoints;
+
+        if (this.waitingForCheckpoints) {
+          // We're in interactive mode - show selection menu
+          this.waitingForCheckpoints = false;
+          await this.showCheckpointSelection(data);
+        } else {
+          // Regular display mode
+          console.log(`\n📋 [${timestamp}] Checkpoints in run ${data.runId}:`);
+
+          if (data.checkpoints.length === 0) {
+            console.log("   No checkpoints found");
+          } else {
+            data.checkpoints.forEach((cp, index) => {
+              console.log(
+                `   [${index + 1}] ${cp.phaseName} - ${cp.checkpointType} ` +
+                  `(${cp.sha.substring(0, 7)})`,
+              );
+            });
+          }
+        }
+        break;
+      }
+
+      case "rollback.completed": {
+        const data = (event as RollbackCompletedEvent).data;
+        console.log(
+          `\n✅ [${timestamp}] Rollback completed!\n` +
+            `   From run: ${data.fromRun}\n` +
+            `   To run: ${data.toRun}\n` +
+            `   Phase: ${data.phaseName} (${data.checkpointType})\n` +
+            `   Checkpoint: ${data.checkpoint.substring(0, 7)}`,
+        );
+        break;
+      }
+
       default:
         // Show all unknown events for debugging
         console.log(
@@ -190,13 +242,19 @@ export class BasicTUI {
   }
 
   private setupKeyboardInput(): void {
-    console.log("\n📌 Commands: [n] next phase | [s] skip | [q] quit\n");
+    console.log("\n📌 Commands:");
+    console.log("  [n] next phase");
+    console.log("  [s] skip current");
+    console.log("  [f] force stop");
+    console.log("  [l] list checkpoints");
+    console.log("  [r] rollback menu");
+    console.log("  [q] quit\n");
 
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
 
-    process.stdin.on("data", (key: string) => {
+    process.stdin.on("data", async (key: string) => {
       switch (key) {
         case "n":
           console.log("\n⏭️  Advancing to next phase...");
@@ -214,6 +272,27 @@ export class BasicTUI {
           } as SkipPhaseCommand);
           break;
 
+        case "f":
+          console.log("\n⛔ Force stopping current phase...");
+          this.sendCommand({
+            id: generateId(),
+            type: "phase.forceStop",
+            data: { reason: "User requested from TUI" },
+          } as ClientCommand);
+          break;
+
+        case "l":
+          console.log("\n📋 Requesting checkpoint list...");
+          this.sendCommand({
+            id: generateId(),
+            type: "checkpoint.list",
+          });
+          break;
+
+        case "r":
+          await this.showRollbackMenu();
+          break;
+
         case "q":
         case "\u0003": // Ctrl+C
           console.log("\n👋 Shutting down...");
@@ -223,6 +302,124 @@ export class BasicTUI {
           this.server.shutdown("user request");
           break;
       }
+    });
+  }
+
+  /**
+   * Show interactive rollback menu
+   */
+  private async showRollbackMenu(): Promise<void> {
+    console.log("\n🔄 Rollback Options:");
+    console.log("  [1] Rollback to last successful phase");
+    console.log("  [2] List checkpoints and select");
+    console.log("  [c] Cancel");
+
+    const response = await this.waitForKey();
+
+    switch (response) {
+      case "1":
+        await this.confirmAndRollback("last successful phase", async () => {
+          this.sendCommand({
+            id: generateId(),
+            type: "rollback.toLastSuccess",
+            data: { autoRestart: false },
+          } as ClientCommand);
+        });
+        break;
+
+      case "2":
+        // Set flag to indicate we're waiting for interactive selection
+        this.waitingForCheckpoints = true;
+        this.sendCommand({
+          id: generateId(),
+          type: "checkpoint.list",
+        });
+        console.log("\n⏳ Fetching checkpoints...");
+        break;
+
+      case "c":
+        console.log("\n❌ Rollback cancelled");
+        break;
+    }
+  }
+
+  /**
+   * Confirm rollback with effects
+   */
+  private async confirmAndRollback(target: string, action: () => Promise<void>): Promise<void> {
+    console.log(`\n⚠️  Rollback to: ${target}`);
+    console.log("\nThis will:");
+    console.log("  - End the current run");
+    console.log("  - Reset project files to checkpoint state");
+    console.log("  - Start a new continuation run");
+    console.log("  - Preserve all history in state.json");
+    console.log("\nContinue? (y/N): ");
+
+    const response = await this.waitForKey();
+
+    if (response === "y" || response === "Y") {
+      await action();
+    } else {
+      console.log("\n❌ Rollback cancelled");
+    }
+  }
+
+  /**
+   * Show interactive checkpoint selection menu
+   */
+  private async showCheckpointSelection(data: CheckpointListEvent["data"]): Promise<void> {
+    if (data.checkpoints.length === 0) {
+      console.log("\n❌ No checkpoints found in current run");
+      return;
+    }
+
+    console.log(`\n📋 Select checkpoint to rollback to (run ${data.runId}):`);
+    data.checkpoints.forEach((cp, index) => {
+      const timestamp = new Date(cp.timestamp).toLocaleTimeString();
+      console.log(`  [${index + 1}] ${cp.phaseName} - ${cp.checkpointType} (${timestamp})`);
+      console.log(`      SHA: ${cp.sha.substring(0, 7)}...`);
+    });
+    console.log("  [c] Cancel");
+    console.log("\nEnter your choice: ");
+
+    const response = await this.waitForKey();
+
+    if (response === "c" || response === "C") {
+      console.log("\n❌ Rollback cancelled");
+      return;
+    }
+
+    const choice = parseInt(response, 10);
+    if (Number.isNaN(choice) || choice < 1 || choice > data.checkpoints.length) {
+      console.log("\n❌ Invalid selection");
+      return;
+    }
+
+    const selectedCheckpoint = data.checkpoints[choice - 1];
+    const target = `${selectedCheckpoint.phaseName} (${selectedCheckpoint.checkpointType})`;
+
+    await this.confirmAndRollback(target, async () => {
+      this.sendCommand({
+        id: generateId(),
+        type: "rollback.toCheckpoint",
+        data: {
+          checkpointSha: selectedCheckpoint.sha,
+          autoRestart: false,
+        },
+      } as ClientCommand);
+    });
+  }
+
+  /**
+   * Wait for a single key press
+   */
+  private waitForKey(): Promise<string> {
+    return new Promise((resolve) => {
+      const handler = (key: string) => {
+        process.stdin.removeListener("data", handler);
+        resolve(key);
+      };
+      process.stdin.once("data", handler);
     });
   }
 }

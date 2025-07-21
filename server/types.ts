@@ -226,6 +226,9 @@ export interface ServerConfig {
 
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
   anthropicBaseURL?: string;
+
+  /** Whether to automatically start phases (default: true) */
+  autostart: boolean;
 }
 
 // ============================================================================
@@ -384,6 +387,8 @@ export interface StateSnapshotEvent extends ServerEvent {
           timestamp: Date;
         }
       | undefined;
+    /** Whether the server is currently performing a rollback */
+    isRollingBack: boolean;
   };
 }
 
@@ -520,6 +525,8 @@ export interface ErrorEvent extends ServerEvent {
     severity?: ErrorSeverity;
     /** Additional error context */
     context?: string;
+    /** Optional error code for specific error types */
+    code?: string;
   };
 }
 
@@ -548,6 +555,112 @@ export interface InfoEvent extends ServerEvent {
   data: {
     /** Informational message */
     message: string;
+  };
+}
+
+/**
+ * Server idle notification
+ */
+export interface ServerIdleEvent extends ServerEvent {
+  type: "server.idle";
+  data: {
+    reason: "startup" | "phase-completed" | "all-phases-completed";
+    message: string;
+  };
+}
+
+/**
+ * Checkpoint information for query responses
+ */
+export interface CheckpointQueryInfo {
+  phaseId: PhaseId;
+  phaseName: string;
+  checkpointType: "workspace-setup" | "completed" | "error" | "skipped";
+  sha: string;
+  status: import("./state-types.js").PhaseStatus;
+  timestamp: string;
+}
+
+/**
+ * Response to checkpoint.list command
+ */
+export interface CheckpointListEvent extends ServerEvent {
+  type: "checkpoint.list";
+  data: {
+    runId: string;
+    checkpoints: CheckpointQueryInfo[];
+    currentBranch: string;
+  };
+}
+
+/**
+ * Rollback started notification
+ */
+export interface RollbackStartedEvent extends ServerEvent {
+  type: "rollback.started";
+  data: {
+    fromRun: string;
+    fromPhase: string;
+    toPhase: string;
+    toCheckpoint: string;
+    checkpointType: string;
+    phasesToProcess: string[]; // Phases we'll roll back through
+  };
+}
+
+/**
+ * Rollback phase checkpoint notification
+ */
+export interface RollbackPhaseCheckpointEvent extends ServerEvent {
+  type: "rollback.phaseCheckpoint";
+  data: {
+    phaseId: string;
+    phaseName: string;
+    checkpoint: string;
+    checkpointType: string;
+    message: string; // e.g., "Reset to phase-2 completion checkpoint"
+  };
+}
+
+/**
+ * Rollback workspace cleanup notification
+ */
+export interface RollbackWorkspaceCleanupEvent extends ServerEvent {
+  type: "rollback.workspaceCleanup";
+  data: {
+    phaseId: string;
+    phaseName: string;
+    directories: string[];
+    status: "started" | "completed" | "failed";
+    error?: string; // Only if status is "failed"
+  };
+}
+
+/**
+ * Rollback progress notification
+ */
+export interface RollbackProgressEvent extends ServerEvent {
+  type: "rollback.progress";
+  data: {
+    currentStep: number;
+    totalSteps: number;
+    message: string; // Human-readable progress message
+  };
+}
+
+/**
+ * Rollback completed notification
+ */
+export interface RollbackCompletedEvent extends ServerEvent {
+  type: "rollback.completed";
+  data: {
+    fromRun: string;
+    toRun: string;
+    checkpoint: string;
+    phaseId: string;
+    phaseName: string;
+    checkpointType: string;
+    autoRestart: boolean;
   };
 }
 

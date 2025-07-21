@@ -15,6 +15,7 @@ async function main() {
   const validateMode = args.includes("--validate") || args.includes("-v");
   const cleanupMode = args.includes("--cleanup");
   const skipConfirmation = args.includes("-y");
+  const noAutostart = args.includes("--no-autostart");
   const configPath =
     args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "phases.json";
   const anthropicBaseURL = args
@@ -35,6 +36,7 @@ Options:
   --validate, -v            Validate configuration without running server
   --cleanup                 Clean up all Langton artifacts (requires --config)
   -y                        Skip confirmation prompts (for scripts/tests)
+  --no-autostart            Don't automatically start phases (wait for commands)
   --anthropic-base-url=<url> Custom Anthropic API base URL (for proxies/gateways)
   --help, -h                Show this help message
 
@@ -117,6 +119,7 @@ Examples:
       projectPath: process.cwd(),
       phases,
       anthropicBaseURL,
+      autostart: !noAutostart, // New property
     };
 
     if (port) {

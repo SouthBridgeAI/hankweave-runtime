@@ -28,6 +28,60 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     id: z.string(),
     type: z.literal("server.shutdown"),
   }),
+
+  // Query checkpoints
+  z.object({
+    id: z.string(),
+    type: z.literal("checkpoint.list"),
+    data: z
+      .object({
+        runId: z.string().optional(), // Defaults to current run
+      })
+      .optional(),
+  }),
+
+  // Force stop current phase
+  z.object({
+    id: z.string(),
+    type: z.literal("phase.forceStop"),
+    data: z
+      .object({
+        reason: z.string().optional(),
+      })
+      .optional(),
+  }),
+
+  // Rollback to specific checkpoint
+  z.object({
+    id: z.string(),
+    type: z.literal("rollback.toCheckpoint"),
+    data: z.object({
+      checkpointSha: z.string(),
+      autoRestart: z.boolean().optional().default(false),
+    }),
+  }),
+
+  // Rollback to phase + checkpoint type
+  z.object({
+    id: z.string(),
+    type: z.literal("rollback.toPhase"),
+    data: z.object({
+      phaseId: phaseIdSchema,
+      checkpointType: z.enum(["start", "end", "workspace-setup", "completed", "error", "skipped"]),
+      autoRestart: z.boolean().optional().default(false),
+    }),
+  }),
+
+  // Rollback to last successful phase
+  z.object({
+    id: z.string(),
+    type: z.literal("rollback.toLastSuccess"),
+    data: z
+      .object({
+        autoRestart: z.boolean().optional().default(false),
+      })
+      .optional(),
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;

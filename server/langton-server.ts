@@ -20,9 +20,16 @@ import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { APITimeoutError, ErrorSeverity } from "./error-types.js";
 import { fileResolver } from "./file-resolver.js";
 import { StateManager } from "./state-manager.js";
-import { isTerminalPhaseStatus, type PhaseExecution, type PhaseStatus } from "./state-types.js";
+import {
+  isTerminalPhaseStatus,
+  type PhaseExecution,
+  type PhaseStatus,
+} from "./state-types.js";
 import type { ToolInputMap, ToolName } from "./tool-types.js";
-import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
+import {
+  type ServerInternalEvents,
+  TypedEventEmitter,
+} from "./typed-event-emitter.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
@@ -86,14 +93,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private logger: Logger;
 
   // State management
-  private _stateManager: StateManager;
+  private stateManager: StateManager;
   private currentRunId: RunId | null = null;
   private heartbeatInterval?: NodeJS.Timeout;
-
-  // Public getter for tests and external access
-  public get stateManager(): Readonly<StateManager> {
-    return this._stateManager;
-  }
 
   // Temporary state during phase execution
   private watchedPatterns: string[] = [];
@@ -120,14 +122,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private isShuttingDown = false;
   private isSkippingPhase = false;
   private logParser: ClaudeLogParser | null = null;
-  private resultMessagePromises = new Map<
-    string,
-    {
-      resolve: (msg: ResultMessage) => void;
-      reject: (error: Error) => void;
-      timeout: NodeJS.Timeout;
-    }
-  >();
 
   // Checkpoint-related properties
   private checkpointGit: CheckpointGit | null = null;
@@ -135,12 +129,21 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
   // Failure tracking
   private phaseFailureReason?: FailureReason;
+  private isForceStopping = false;
+  private resultMessageReceived = false;
+
+  // Rollback state
+  private isRollingBack = false;
+  private readonly READ_ONLY_COMMANDS = new Set([
+    "checkpoint.list",
+    "server.shutdown", // Special case - always allowed
+  ]);
 
   constructor(
     config: Partial<ServerConfig> & {
       projectPath: string;
       phases: PhaseConfig[];
-    },
+    }
   ) {
     super();
     this.config = {
@@ -152,18 +155,24 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize state manager
     const langtonDir = path.join(this.config.projectPath, ".langton");
-    this._stateManager = new StateManager(langtonDir, this.logger, this.config.phases);
+    this.stateManager = new StateManager(
+      langtonDir,
+      this.logger,
+      this.config.phases
+    );
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
   }
 
   private setupStateManagerListeners(): void {
-    this._stateManager.on("phaseRunning", (data) => {
+    this.stateManager.on("phaseRunning", (data) => {
       // State is already saved when we get here
-      const phase = this._stateManager.getCurrentPhase();
+      const phase = this.stateManager.getCurrentlyRunningPhase();
       if (phase && "claudeSessionId" in phase) {
-        const phaseConfig = this.config.phases.find((p) => p.id === data.phaseId);
+        const phaseConfig = this.config.phases.find(
+          (p) => p.id === data.phaseId
+        );
         if (phaseConfig) {
           this.sendEvent({
             id: EventId(generateId()),
@@ -174,7 +183,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
               phaseName: phaseConfig.name,
               phaseDescription: phaseConfig.description,
               sessionId: phase.claudeSessionId,
-              previousSessionId: "previousSessionId" in phase ? phase.previousSessionId : undefined,
+              previousSessionId:
+                "previousSessionId" in phase
+                  ? phase.previousSessionId
+                  : undefined,
               startTime: phase.startTime,
             },
           } as PhaseStartedEvent);
@@ -182,7 +194,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     });
 
-    this._stateManager.on("transitionError", ({ event: _event, error }) => {
+    this.stateManager.on("transitionError", ({ event: _event, error }) => {
       if (error.name === "PersistenceError") {
         // Can't save state - this is fatal
         this.handleError(error, "state-persistence", ErrorSeverity.FATAL);
@@ -193,29 +205,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
   // Initialization & Server Management
   // ============================================================================
-
-  /**
-   * Wait for result message from a specific phase execution.
-   */
-  private waitForResultMessage(
-    phaseExecutionId: string,
-    timeoutMs = 60000,
-  ): Promise<ResultMessage> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.resultMessagePromises.delete(phaseExecutionId);
-        reject(
-          new Error(`Timeout waiting for result message from phase execution ${phaseExecutionId}`),
-        );
-      }, timeoutMs);
-
-      this.resultMessagePromises.set(phaseExecutionId, {
-        resolve,
-        reject,
-        timeout,
-      });
-    });
-  }
 
   /**
    * Initialize and start the WebSocket server.
@@ -231,14 +220,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    */
   async start(): Promise<void> {
     this.logger.log(
-      `Starting Langton Server v${this.config.version} in ${this.config.projectPath}`,
+      `Starting Langton Server v${this.config.version} in ${this.config.projectPath}`
     );
 
     // Initialize checkpoint system (checks for existing .langton)
     await this.initializeCheckpoints();
 
     // Initialize state manager
-    await this._stateManager.initialize();
+    await this.stateManager.initialize();
 
     // Check for existing lock file
     if (fs.existsSync(this.config.lockFile)) {
@@ -247,16 +236,19 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       // Parse lock file for enhanced data
       try {
         const lockInfo = JSON.parse(lockData);
-        const heartbeatAge = Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
+        const heartbeatAge =
+          Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
 
         if (heartbeatAge > 120000) {
           // 2 minutes
-          this.logger.log(`Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`);
+          this.logger.log(
+            `Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`
+          );
           fs.unlinkSync(this.config.lockFile);
 
           // Mark the run as crashed
           if (lockInfo.runId) {
-            this._stateManager.transition({
+            this.stateManager.transition({
               type: "RunCrashed",
               data: {
                 runId: RunId(lockInfo.runId),
@@ -267,7 +259,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           }
         } else {
           // Check if it's our current run
-          const state = this._stateManager.getState();
+          const state = this.stateManager.getState();
           if (state.currentRunId && state.currentRunId === lockInfo.runId) {
             // We're recovering from a crash - continue the same run
             // TODO: This needs a lot more implementation to properly continue, but not implemented yet.
@@ -275,14 +267,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
             this.logger.log(`Recovering run ${this.currentRunId}`);
           } else {
             throw new Error(
-              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`,
+              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`
             );
           }
         }
       } catch (_e) {
         // Old format lock file - just PID
         throw new Error(
-          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`,
+          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`
         );
       }
     }
@@ -290,6 +282,28 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     // Start a new run if needed
     if (!this.currentRunId) {
       await this.startNewRun();
+
+      // Now switch to the new run's branch if we have checkpoints
+      const currentRun = this.stateManager.getCurrentRun();
+      if (currentRun?.gitBranch && this.checkpointGit) {
+        // For fresh runs, the branch doesn't exist yet - it will be created on first checkpoint
+        // Check if this is a fresh run to avoid unnecessary warnings
+        const isFreshRun = currentRun.startingConditions?.type === "fresh";
+        if (!isFreshRun) {
+          try {
+            await this.checkpointGit.switchToBranch(currentRun.gitBranch);
+          } catch (error) {
+            this.logger.log(
+              `Failed to switch to run branch: ${error}`,
+              "error"
+            );
+          }
+        } else {
+          this.logger.log(
+            `Fresh run ${currentRun.runId} - branch will be created on first checkpoint`
+          );
+        }
+      }
     }
 
     // Start Bun WebSocket server
@@ -319,7 +333,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       this.shutdown("uncaughtException");
     });
     process.on("unhandledRejection", (reason, promise) => {
-      this.logger.log(`Unhandled rejection at: ${promise}, reason: ${reason}`, "error");
+      this.logger.log(
+        `Unhandled rejection at: ${promise}, reason: ${reason}`,
+        "error"
+      );
       this.shutdown("unhandledRejection");
     });
   }
@@ -359,11 +376,26 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     // Check for incomplete phases
     this.checkIncompletePhases();
 
-    // Auto-start the next available phase
-    this.autoStartNextPhase();
+    // Only auto-start if enabled
+    if (this.config.autostart) {
+      this.autoStartNextPhase();
+    } else {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "server.idle",
+        data: {
+          reason: "startup",
+          message: "Server ready. Waiting for commands (autostart disabled).",
+        },
+      } as import("./types.js").ServerIdleEvent);
+    }
   }
 
-  private handleMessage(ws: ServerWebSocket<ClientData>, message: string | Buffer): void {
+  private handleMessage(
+    ws: ServerWebSocket<ClientData>,
+    message: string | Buffer
+  ): void {
     try {
       ws.data.lastActivity = new Date();
 
@@ -371,7 +403,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       const result = clientCommandSchema.safeParse(parsed);
 
       if (!result.success) {
-        this.logger.log(`Invalid client command: ${result.error.message}`, "error");
+        this.logger.log(
+          `Invalid client command: ${result.error.message}`,
+          "error"
+        );
         this.sendEvent({
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
@@ -384,10 +419,17 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         return;
       }
 
-      this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
+      this.logger.logSocketTraffic(
+        this.config.socketLogFile,
+        "in",
+        result.data
+      );
       this.handleCommand(result.data);
     } catch (error) {
-      this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
+      this.logger.log(
+        `Error parsing command: ${toError(error).message}`,
+        "error"
+      );
     }
   }
 
@@ -403,9 +445,31 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   async handleCommand(command: ClientCommand): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
 
+    // Check if command is blocked during rollback
+    if (this.isRollingBack && !this.READ_ONLY_COMMANDS.has(command.type)) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message:
+            "Cannot execute state-modifying commands while rollback is in progress",
+          context: `Attempted command: ${command.type}`,
+          phase: this.currentPhase?.phase.id,
+          fatal: false,
+          severity: ErrorSeverity.OPERATION,
+          code: "ROLLBACK_IN_PROGRESS",
+        },
+      } as ErrorEvent);
+      return;
+    }
+
     switch (command.type) {
       case "phase.start": {
-        await this.startPhase(command.data.phaseId, command.data.skipPreCommands);
+        await this.startPhase(
+          command.data.phaseId,
+          command.data.skipPreCommands
+        );
         break;
       }
 
@@ -423,6 +487,33 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       case "server.shutdown":
         await this.shutdown("client request");
+        break;
+
+      case "checkpoint.list":
+        await this.listCheckpoints(command.data?.runId);
+        break;
+
+      case "phase.forceStop":
+        await this.forceStopPhase(command.data?.reason);
+        break;
+
+      case "rollback.toCheckpoint":
+        await this.rollbackToCheckpoint(
+          command.data.checkpointSha,
+          command.data.autoRestart ?? false
+        );
+        break;
+
+      case "rollback.toPhase":
+        await this.rollbackToPhase(
+          command.data.phaseId,
+          command.data.checkpointType,
+          command.data.autoRestart ?? false
+        );
+        break;
+
+      case "rollback.toLastSuccess":
+        await this.rollbackToLastSuccess(command.data?.autoRestart ?? false);
         break;
 
       default:
@@ -447,9 +538,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
   private sendStateSnapshot(): void {
     // Calculate costs
-    const totalCost = this._stateManager.getTotalCost();
+    const totalCost = this.stateManager.getTotalCost();
 
-    const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
+    const totalTime = this.serverStartTime
+      ? Date.now() - this.serverStartTime.getTime()
+      : 0;
 
     // Convert completed phases from state for backward compatibility
     const completedPhases = this.getCompletedPhasesForSnapshot();
@@ -465,6 +558,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         totalCost,
         totalTime,
         recentFileAccess: this.recentFileAccess,
+        isRollingBack: this.isRollingBack,
       },
     } as StateSnapshotEvent);
   }
@@ -472,16 +566,18 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   // Helper to maintain backward compatibility
   private getCompletedPhasesForSnapshot(): CompletedPhase[] {
     // Try current run first, then fallback to most recent run
-    const state = this._stateManager.getState();
+    const state = this.stateManager.getState();
     const run =
-      this._stateManager.getCurrentRun() || (state.runs.length > 0 ? state.runs[0] : null);
+      this.stateManager.getCurrentRun() ||
+      (state.runs.length > 0 ? state.runs[0] : null);
     if (!run) return [];
 
     return run.phases
       .filter((p) => p.status === "completed")
       .map((p) => ({
         phaseId: p.phaseId,
-        sessionId: "claudeSessionId" in p ? p.claudeSessionId : SessionId("unknown"),
+        sessionId:
+          "claudeSessionId" in p ? p.claudeSessionId : SessionId("unknown"),
         success: true,
         cost: "finalCost" in p ? p.finalCost : 0,
         duration:
@@ -495,21 +591,30 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   /**
    * Start a new run and create necessary infrastructure
    */
-  private async startNewRun(): Promise<void> {
-    const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
-    const runFolder = path.join(this.config.projectPath, ".langton", "runs", runId);
+  private async startNewRun(
+    startingConditions?: import("./state-types.js").StartingConditions
+  ): Promise<void> {
+    const runId = RunId(
+      `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+    );
+    const runFolder = path.join(
+      this.config.projectPath,
+      ".langton",
+      "runs",
+      runId
+    );
 
     // Create run folder
     await fs.promises.mkdir(runFolder, { recursive: true });
 
     // Create run in state
-    this._stateManager.transition({
+    this.stateManager.transition({
       type: "RunStarted",
       data: {
         runId,
         runFolder,
         gitBranch: `run-${runId}`,
-        startingConditions: { type: "fresh" }, // TODO: Handle continuations
+        startingConditions: startingConditions || { type: "fresh" },
         serverPid: process.pid,
       },
     });
@@ -579,13 +684,16 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    * 6. Send phase.started event
    * 7. Spawn Claude process with prompt
    */
-  private async startPhase(phaseId: PhaseId, skipPreCommands?: boolean): Promise<void> {
+  private async startPhase(
+    phaseId: PhaseId,
+    skipPreCommands?: boolean
+  ): Promise<void> {
     const phase = this.config.phases.find((p) => p.id === phaseId);
     if (!phase) {
       await this.handleError(
         new Error(`Unknown phase: ${phaseId}`),
         "startPhase",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -593,26 +701,61 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(`Starting phase: ${phase.name}`);
 
     // Check if phase already running via state manager (single source of truth)
-    const currentPhase = this._stateManager.getCurrentPhase();
+    const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
       await this.handleError(
         new Error(`Phase already running: ${currentPhase.phaseId}`),
         "startPhase",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
 
+    // Check if this phase was already attempted in current run
+    const currentRun = this.stateManager.getCurrentRun();
+    if (currentRun) {
+      const previousAttempt = currentRun.phases.find(
+        (p) => p.phaseId === phaseId
+      );
+      if (previousAttempt && isTerminalPhaseStatus(previousAttempt.status)) {
+        // Phase was already attempted and finished - start new run
+        this.logger.log(
+          `Phase ${phaseId} was already attempted in current run, starting new run`
+        );
+
+        // Complete current run
+        this.stateManager.transition({
+          type: "RunCompleted",
+          data: { runId: currentRun.runId },
+        });
+
+        await this.stateManager.waitForPendingTransitions();
+
+        // Start new run
+        await this.startNewRun({
+          type: "continuation",
+          source: {
+            runId: currentRun.runId,
+            afterPhase: null, // Start from beginning of this phase
+            checkpointSha: "", // Will use current state
+          },
+          reason: "retry", // Use 'retry' for phase restart
+        });
+      }
+    }
+
     // Create phase started transition (fire-and-forget)
-    const _previousSessionIdString =
-      phase.continuationMode === "continue-previous" ? this.getPreviousSessionId(phase.id) : null;
 
     if (!this.currentRunId) {
-      await this.handleError(new Error("No active run"), "startPhase", ErrorSeverity.FATAL);
+      await this.handleError(
+        new Error("No active run"),
+        "startPhase",
+        ErrorSeverity.FATAL
+      );
       return;
     }
 
-    this._stateManager.transition({
+    this.stateManager.transition({
       type: "PhaseStarted",
       data: {
         runId: this.currentRunId,
@@ -625,7 +768,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("No active run during phase start"),
         "startPhase",
-        ErrorSeverity.FATAL,
+        ErrorSeverity.FATAL
       );
       return;
     }
@@ -648,13 +791,63 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
                 ? lastCopiedPath
                 : this.config.projectPath;
             await this.runCommand(item.command.run, workingDir);
-            this.logger.log(`Ran command in ${workingDir}: ${item.command.run}`);
+            this.logger.log(
+              `Ran command in ${workingDir}: ${item.command.run}`
+            );
           }
         } catch (error) {
+          const errorMessage = toError(error).message;
+          this.logger.log(
+            `Workspace setup failed at item ${index + 1}: ${errorMessage}`,
+            "error"
+          );
+
+          // Set failure reason with detailed information
+          this.phaseFailureReason = {
+            type: "unknown",
+            retriable: true,
+            message: `Workspace setup failed at ${item.type} operation: ${errorMessage}`,
+          };
+
+          // Transition phase to failed state
+          if (this.currentRunId) {
+            this.stateManager.transition({
+              type: "PhaseTransitioned",
+              data: {
+                runId: this.currentRunId,
+                phaseId: phase.id,
+                from: "preparing",
+                to: "failed",
+                metadata: {
+                  failedDuring: "preparing",
+                  failureReason: this.phaseFailureReason,
+                },
+              },
+            });
+          }
+
+          // Send error event with details
+          this.sendEvent({
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            data: {
+              message: `Workspace setup failed: ${errorMessage}`,
+              context: `Phase ${phase.id} - ${item.type} operation (item ${
+                index + 1
+              })`,
+              phase: phase.id,
+              fatal: true,
+              severity: ErrorSeverity.FATAL,
+            },
+          } as ErrorEvent);
+
+          // Clean up and handle error
+          this.cleanupCurrentPhase();
           await this.handleError(
             toError(error),
             `Workspace setup item ${index + 1}`,
-            ErrorSeverity.FATAL,
+            ErrorSeverity.FATAL
           );
           return;
         }
@@ -662,7 +855,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Transition to starting after preparing (regardless of workspace setup)
-    this._stateManager.transition({
+    this.stateManager.transition({
       type: "PhaseTransitioned",
       data: {
         runId: this.currentRunId,
@@ -674,7 +867,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Add checkpoint patterns - accumulate from all phases up to current
     // This ensures resume functionality works correctly
-    const currentPhaseIndex = this.config.phases.findIndex((p) => p.id === phase.id);
+    const currentPhaseIndex = this.config.phases.findIndex(
+      (p) => p.id === phase.id
+    );
     if (currentPhaseIndex >= 0) {
       // Accumulate patterns from all phases up to and including current
       for (let i = 0; i <= currentPhaseIndex; i++) {
@@ -685,7 +880,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Create checkpoint after workspace setup if we have workspace setup
-      if (!skipPreCommands && phase.workspaceSetup && this.checkpointingEnabled) {
+      if (
+        !skipPreCommands &&
+        phase.workspaceSetup &&
+        this.checkpointingEnabled
+      ) {
         await this.createCheckpoint({
           status: "workspace-setup",
           phaseId: phase.id,
@@ -703,7 +902,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       previousSessionId = this.getPreviousSessionId(phase.id);
       if (previousSessionId) {
         this.logger.log(
-          `Phase ${phase.id} will continue from previous session: ${previousSessionId}`,
+          `Phase ${phase.id} will continue from previous session: ${previousSessionId}`
         );
 
         // Send info event about continuation
@@ -716,19 +915,51 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           },
         } as InfoEvent);
       } else {
-        this.logger.log(
-          `Phase ${phase.id} requested continuation but no valid previous session found - starting fresh`,
-        );
+        // Phase requires continuation but no valid session found - this is an error
+        const errorMessage = `Phase ${phase.id} requires continuation from previous phase but no valid session found. Previous phase must complete successfully or be skipped with at least one assistant message.`;
 
-        // Send info event about starting fresh
+        this.logger.log(errorMessage, "error");
+
+        // Set failure reason
+        this.phaseFailureReason = {
+          type: "unknown",
+          retriable: false,
+          message: errorMessage,
+        };
+
+        // Transition to failed state
+        if (this.currentRunId) {
+          this.stateManager.transition({
+            type: "PhaseTransitioned",
+            data: {
+              runId: this.currentRunId,
+              phaseId: phase.id,
+              from: "starting",
+              to: "failed",
+              metadata: {
+                failedDuring: "starting",
+                failureReason: this.phaseFailureReason,
+              },
+            },
+          });
+        }
+
+        // Send error event
         this.sendEvent({
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
-          type: "info",
+          type: "error",
           data: {
-            message: `No valid previous session found - starting phase fresh`,
+            message: errorMessage,
+            phase: phase.id,
+            fatal: true,
+            severity: ErrorSeverity.PHASE,
           },
-        } as InfoEvent);
+        } as ErrorEvent);
+
+        // Clean up and return
+        this.cleanupCurrentPhase();
+        return;
       }
     }
 
@@ -736,7 +967,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     this.currentPhase = {
       status: "initializing",
       phase,
-      previousSessionId: previousSessionId ? SessionId(previousSessionId) : undefined, // Store for phase.started event
+      previousSessionId: previousSessionId
+        ? SessionId(previousSessionId)
+        : undefined, // Store for phase.started event
       startTime: new Date(),
       phaseCost: 0,
       phaseTokens: {
@@ -761,7 +994,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       // Use the unified file resolver to get files respecting gitignore
       const resolvedFiles = await fileResolver.resolveFiles(
         this.config.projectPath,
-        phase.trackedFiles,
+        phase.trackedFiles
       );
 
       // Get file contents for each resolved file
@@ -775,7 +1008,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
             content,
             lastModified: stats.mtime.toISOString(),
           };
-        }),
+        })
       );
 
       // Only send events if we have files
@@ -796,7 +1029,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
         // Store most recent file
         const mostRecent = files.reduce((latest, file) =>
-          new Date(file.lastModified) > new Date(latest.lastModified) ? file : latest,
+          new Date(file.lastModified) > new Date(latest.lastModified)
+            ? file
+            : latest
         );
         this.recentFileAccess = {
           path: mostRecent.path,
@@ -814,13 +1049,48 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private getPreviousSessionId(currentPhaseId: string): string | null {
-    const currentIndex = this.config.phases.findIndex((p) => p.id === currentPhaseId);
+    const currentIndex = this.config.phases.findIndex(
+      (p) => p.id === currentPhaseId
+    );
     if (currentIndex <= 0) return null;
 
     const previousPhaseId = this.config.phases[currentIndex - 1].id;
-    const lastSuccessful = this._stateManager.getLastSuccessfulPhase(PhaseId(previousPhaseId));
 
-    return lastSuccessful?.phase.claudeSessionId || null;
+    // First try to get the last successful phase
+    const lastSuccessful = this.stateManager.getLastSuccessfulPhase(
+      PhaseId(previousPhaseId)
+    );
+
+    if (lastSuccessful?.phase.claudeSessionId) {
+      return lastSuccessful.phase.claudeSessionId;
+    }
+
+    // If no successful phase, check if the previous phase was skipped but has a session ID AND meaningful content
+    const currentRun = this.stateManager.getCurrentRun();
+    if (currentRun) {
+      // Find the most recent execution of the previous phase in the current run
+      const previousPhaseExecutions = currentRun.phases.filter(
+        (p) => p.phaseId === previousPhaseId
+      );
+
+      if (previousPhaseExecutions.length > 0) {
+        const lastExecution =
+          previousPhaseExecutions[previousPhaseExecutions.length - 1];
+
+        // If it was skipped but has a session ID and Claude generated output, we can use it
+        if (
+          lastExecution.status === "skipped" &&
+          "claudeSessionId" in lastExecution &&
+          lastExecution.claudeSessionId &&
+          "partialTokens" in lastExecution &&
+          lastExecution.partialTokens.outputTokens > 0
+        ) {
+          return lastExecution.claudeSessionId;
+        }
+      }
+    }
+
+    return null;
   }
 
   // ============================================================================
@@ -835,27 +1105,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    */
   private async startClaudeProcess(
     phase: PhaseConfig,
-    previousSessionId: string | null,
+    previousSessionId: string | null
   ): Promise<void> {
-    // Create process manager
-    this.processManager = new ClaudeProcessManager(
-      this.config.projectPath,
-      this.logger,
-      this.config.anthropicBaseURL,
-    );
-
-    // Set up event handlers
-    this.processManager.on("exit", (code: number) => {
-      this.handlePhaseComplete(code);
-    });
-
-    this.processManager.on("error", (error: Error) => {
-      this.handleError(error, `Claude process for phase ${phase.id}`, ErrorSeverity.FATAL);
-    });
-
     try {
       // Get run folder from state
-      const currentRun = this._stateManager.getCurrentRun();
+      const currentRun = this.stateManager.getCurrentRun();
       if (!currentRun || !currentRun.runFolder) {
         throw new Error("No active run or run folder not found");
       }
@@ -867,8 +1121,43 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       // Modify log path to use run folder
       const logPath = path.join(runFolder, `phase-${phase.id}-claude.log`);
 
+      // Create log parser first
+      this.logParser = new ClaudeLogParser({
+        logPath,
+        phaseId: phase.id,
+        parsingInterval: this.config.logParsingInterval,
+        onSystemMessage: (msg) => this.handleSystemMessage(msg, phase.id),
+        onAssistantMessage: (msg) => this.handleAssistantMessage(msg, phase.id),
+        onResultMessage: (msg) => this.handleResultMessage(msg, phase.id),
+      });
+
+      // Create process manager with the log parser
+      this.processManager = new ClaudeProcessManager(
+        this.config.projectPath,
+        this.logger,
+        this.logParser,
+        this.config.anthropicBaseURL
+      );
+
+      // Set up event handlers
+      this.processManager.on("exit", (code: number) => {
+        this.handlePhaseComplete(code);
+      });
+
+      this.processManager.on("error", (error: Error) => {
+        this.handleError(
+          error,
+          `Claude process for phase ${phase.id}`,
+          ErrorSeverity.FATAL
+        );
+      });
+
       // Spawn process with custom log path
-      const _logPathResult = await this.processManager.spawn(phase, previousSessionId, logPath);
+      const _logPathResult = await this.processManager.spawn(
+        phase,
+        previousSessionId,
+        logPath
+      );
 
       // Transition to initializing (fire-and-forget)
       if (!this.currentRunId) {
@@ -883,7 +1172,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       // Get the phase from current state to check for previousSessionId
       const _currentPhase = this.currentPhase;
 
-      this._stateManager.transition({
+      this.stateManager.transition({
         type: "PhaseTransitioned",
         data: {
           runId: this.currentRunId,
@@ -900,14 +1189,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         },
       });
 
-      // Set up log parsing with delay
+      // Start log parsing with delay
       setTimeout(() => {
-        this.setupLogParsing(logPath, phase.id);
+        this.logParser?.start();
       }, TIMEOUTS.LOG_PARSER_DELAY_MS);
     } catch (error) {
       // Transition to failed (fire-and-forget) if we have a run
       if (this.currentRunId) {
-        this._stateManager.transition({
+        this.stateManager.transition({
           type: "PhaseTransitioned",
           data: {
             runId: this.currentRunId,
@@ -930,19 +1219,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private setupLogParsing(logPath: string, phaseId: string): void {
-    this.logParser = new ClaudeLogParser({
-      logPath,
-      phaseId,
-      parsingInterval: this.config.logParsingInterval,
-      onSystemMessage: (msg) => this.handleSystemMessage(msg, phaseId),
-      onAssistantMessage: (msg) => this.handleAssistantMessage(msg, phaseId),
-      onResultMessage: (msg) => this.handleResultMessage(msg, phaseId),
-    });
-
-    this.logParser.start();
-  }
-
   private handleSystemMessage(msg: SystemMessage, phaseId: string): void {
     if (
       msg.subtype === "init" &&
@@ -952,7 +1228,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     ) {
       // Transition to running (fire-and-forget)
       if (this.currentRunId) {
-        this._stateManager.transition({
+        this.stateManager.transition({
           type: "PhaseTransitioned",
           data: {
             runId: this.currentRunId,
@@ -983,7 +1259,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       };
 
       // Log the session ID update
-      this.logger.log(`Claude started phase ${phaseId} with session ID: ${msg.session_id}`);
+      this.logger.log(
+        `Claude started phase ${phaseId} with session ID: ${msg.session_id}`
+      );
 
       // Send existing info event
       this.sendEvent({
@@ -998,9 +1276,32 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private handleAssistantMessage(msg: AssistantMessage, phaseId: string): void {
+    // Track that we've received an assistant message
+    if (this.currentRunId) {
+      const currentPhase = this.stateManager.getPhaseInCurrentRun(
+        PhaseId(phaseId)
+      );
+      const currentCount =
+        currentPhase && "assistantMessageCount" in currentPhase
+          ? currentPhase.assistantMessageCount ?? 0
+          : 0;
+
+      this.stateManager.transition({
+        type: "AssistantMessageCountUpdated",
+        data: {
+          runId: this.currentRunId,
+          phaseId: PhaseId(phaseId),
+          newCount: currentCount + 1,
+        },
+      });
+    }
+
     // Use type guard to check for synthetic timeout messages
     if (isSyntheticTimeout(msg as ClaudeLogMessage)) {
-      this.logger.log(`API timeout detected in synthetic message for phase ${phaseId}`, "error");
+      this.logger.log(
+        `API timeout detected in synthetic message for phase ${phaseId}`,
+        "error"
+      );
 
       const timeoutError = new APITimeoutError(phaseId, {
         message: "API Error: Request timed out.",
@@ -1054,11 +1355,12 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         // Update token counts (these are cumulative per message)
         this.currentPhase.phaseTokens.inputTokens += usage.inputTokens;
         this.currentPhase.phaseTokens.outputTokens += usage.outputTokens;
-        this.currentPhase.phaseTokens.cacheCreationTokens += usage.cacheCreationTokens;
+        this.currentPhase.phaseTokens.cacheCreationTokens +=
+          usage.cacheCreationTokens;
         this.currentPhase.phaseTokens.cacheReadTokens += usage.cacheReadTokens;
 
         // Fire cost update transition (fire-and-forget)
-        const currentStatePhase = this._stateManager.getCurrentPhase();
+        const currentStatePhase = this.stateManager.getCurrentlyRunningPhase();
         if (currentStatePhase && currentStatePhase.status === "running") {
           const newCost =
             "currentCost" in currentStatePhase
@@ -1067,12 +1369,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           const newTokens = {
             inputTokens: this.currentPhase.phaseTokens.inputTokens,
             outputTokens: this.currentPhase.phaseTokens.outputTokens,
-            cacheCreationTokens: this.currentPhase.phaseTokens.cacheCreationTokens,
+            cacheCreationTokens:
+              this.currentPhase.phaseTokens.cacheCreationTokens,
             cacheReadTokens: this.currentPhase.phaseTokens.cacheReadTokens,
           };
 
           if (this.currentRunId) {
-            this._stateManager.transition({
+            this.stateManager.transition({
               type: "CostsUpdated",
               data: {
                 runId: this.currentRunId,
@@ -1086,10 +1389,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
         this.logger.log(
           `Phase ${phaseId} token update - Call cost: $${messageCost.toFixed(
-            4,
+            4
           )}, Running total: $${this.currentPhase.phaseCost.toFixed(4)} ` +
             `(${usage.inputTokens} in, ${usage.outputTokens} out, ` +
-            `${usage.cacheCreationTokens} cache create, ${usage.cacheReadTokens} cache read)`,
+            `${usage.cacheCreationTokens} cache create, ${usage.cacheReadTokens} cache read)`
         );
       }
 
@@ -1182,11 +1485,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         const fileTools: ToolName[] = ["Read", "Write", "Edit", "MultiEdit"];
         if (fileTools.includes(toolItem.name as ToolName)) {
           // Call async function without awaiting to avoid blocking
-          this.handleFileToolCall(toolItem.name as ToolName, toolItem.input).catch((err) => {
+          this.handleFileToolCall(
+            toolItem.name as ToolName,
+            toolItem.input
+          ).catch((err) => {
             this.handleError(
               toError(err),
               `handleFileToolCall(${toolItem.name})`,
-              ErrorSeverity.OPERATION,
+              ErrorSeverity.OPERATION
             );
           });
         }
@@ -1212,20 +1518,15 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private handleResultMessage(msg: ResultMessage, phaseId: string): void {
     this.logger.log(`Phase ${phaseId} result message received: ${msg.subtype}`);
 
-    // Resolve any waiting promise using phase ID from current phase
-    const currentPhaseId = this.currentPhase?.phase.id;
-    if (currentPhaseId) {
-      const promise = this.resultMessagePromises.get(currentPhaseId);
-      if (promise) {
-        clearTimeout(promise.timeout);
-        this.resultMessagePromises.delete(currentPhaseId);
-        promise.resolve(msg);
-      }
-    }
+    // Mark that we received a result message
+    this.resultMessageReceived = true;
 
     // Check for API timeout in result (can be error subtype OR success with is_error=true)
     if (msg.result === "API Error: Request timed out." && msg.is_error) {
-      this.logger.log(`API timeout detected in result message for phase ${phaseId}`, "error");
+      this.logger.log(
+        `API timeout detected in result message for phase ${phaseId}`,
+        "error"
+      );
 
       const timeoutError = new APITimeoutError(phaseId, {
         message: msg.result,
@@ -1261,7 +1562,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       this.logger.log(`Phase ${phaseId} completed successfully`);
 
       // Update final token usage and cost from result message
-      if (msg.usage && this.currentPhase && this.currentPhase.status === "running") {
+      if (
+        msg.usage &&
+        this.currentPhase &&
+        this.currentPhase.status === "running"
+      ) {
         const finalUsage: TokenUsage = {
           inputTokens: msg.usage.input_tokens || 0,
           outputTokens: msg.usage.output_tokens || 0,
@@ -1270,14 +1575,17 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         };
 
         // The result message contains the final cumulative cost for the entire phase
-        const finalCost = msg.total_cost_usd || calculateCost(finalUsage, this.config.costsPerMTok);
+        const finalCost =
+          msg.total_cost_usd ||
+          calculateCost(finalUsage, this.config.costsPerMTok);
 
         // Log if there's a discrepancy between our accumulated cost and Claude's final cost
         const accumulatedCost = this.currentPhase.phaseCost;
         if (Math.abs(accumulatedCost - finalCost) > 0.0001) {
           this.logger.log(
-            `Phase ${phaseId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(4)}, ` +
-              `Final: $${finalCost.toFixed(4)} (using final)`,
+            `Phase ${phaseId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(
+              4
+            )}, ` + `Final: $${finalCost.toFixed(4)} (using final)`
           );
         }
 
@@ -1288,7 +1596,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         this.logger.log(
           `Phase ${phaseId} final cost from result: $${finalCost.toFixed(4)} ` +
             `(${finalUsage.inputTokens} in, ${finalUsage.outputTokens} out, ` +
-            `${finalUsage.cacheCreationTokens} cache create, ${finalUsage.cacheReadTokens} cache read)`,
+            `${finalUsage.cacheCreationTokens} cache create, ${finalUsage.cacheReadTokens} cache read)`
         );
 
         // Send a final token usage event with the correct values
@@ -1314,72 +1622,40 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const wasSkipped = this.isSkippingPhase;
 
     // Now get the phase from state manager to ensure we have the latest status
-    const currentPhase = this._stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
+    const currentPhase = this.stateManager.getPhaseInCurrentRun(
+      PhaseId(phaseId)
+    );
     if (!currentPhase || isTerminalPhaseStatus(currentPhase.status)) return;
 
     // Get current status before any transitions
     const currentStatus = currentPhase.status;
 
-    // Transition to completing (unless skipped or failed)
-    if (
-      !wasSkipped &&
-      exitCode === 0 &&
-      !this.isShuttingDown &&
-      this.currentRunId &&
-      currentStatus === "running"
-    ) {
-      this._stateManager.transition({
-        type: "PhaseTransitioned",
-        data: {
-          runId: this.currentRunId,
-          phaseId: PhaseId(phaseId),
-          from: currentStatus,
-          to: "completing",
-        },
-      });
-
-      // Wait for result message
-      try {
-        const resultMsg = await this.waitForResultMessage(phaseId, TIMEOUTS.RESULT_MESSAGE_MS);
-
-        // Update with final costs (fire-and-forget)
-        if (resultMsg.usage && this.currentRunId) {
-          this._stateManager.transition({
-            type: "CostsUpdated",
-            data: {
-              runId: this.currentRunId,
-              phaseId: PhaseId(phaseId),
-              cost:
-                resultMsg.total_cost_usd ||
-                calculateCost(
-                  {
-                    inputTokens: resultMsg.usage.input_tokens || 0,
-                    outputTokens: resultMsg.usage.output_tokens || 0,
-                    cacheCreationTokens: resultMsg.usage.cache_creation_input_tokens || 0,
-                    cacheReadTokens: resultMsg.usage.cache_read_input_tokens || 0,
-                  },
-                  this.config.costsPerMTok,
-                ),
-              tokens: {
-                inputTokens: resultMsg.usage.input_tokens || 0,
-                outputTokens: resultMsg.usage.output_tokens || 0,
-                cacheCreationTokens: resultMsg.usage.cache_creation_input_tokens || 0,
-                cacheReadTokens: resultMsg.usage.cache_read_input_tokens || 0,
-              },
-            },
-          });
-        }
-      } catch (error) {
-        this.logger.log(`Result message timeout for phase ${phaseId}: ${error}`, "info");
-      }
-    }
+    // Wait for 2x the log parsing interval to ensure log parser catches up with final messages
+    await new Promise((resolve) =>
+      setTimeout(resolve, this.config.logParsingInterval * 2)
+    );
 
     // Re-fetch the specific phase after potential transition to completing
-    const updatedPhase = this._stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
+    const updatedPhase = this.stateManager.getPhaseInCurrentRun(
+      PhaseId(phaseId)
+    );
     if (!updatedPhase) return;
 
-    // Determine final status
-    let finalStatus: PhaseStatus = wasSkipped ? "skipped" : exitCode === 0 ? "completed" : "failed";
+    // Determine final status based on the actual phase outcome
+    // Priority order: force stop > result message > skip request > exit code
+    let finalStatus: PhaseStatus;
+    if (this.isForceStopping) {
+      finalStatus = "failed";
+    } else if (exitCode === 0 && this.resultMessageReceived) {
+      finalStatus = "completed"; // Result message with exit 0 = completed
+    } else if (wasSkipped && !this.resultMessageReceived) {
+      finalStatus = "skipped"; // Skip requested AND no result = skipped
+    } else if (exitCode !== 0) {
+      finalStatus = "failed"; // Non-zero exit = failed
+    } else {
+      // Exit 0 but no result message and not skipped = failed
+      finalStatus = "failed";
+    }
 
     // Create checkpoint BEFORE state transition
     let checkpointSha: string | undefined;
@@ -1389,8 +1665,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           finalStatus === "completed"
             ? "completed"
             : finalStatus === "skipped"
-              ? "skipped"
-              : "error";
+            ? "skipped"
+            : "error";
 
         const commitInfo = await this.createCheckpoint({
           status: checkpointType,
@@ -1419,7 +1695,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Final transition (fire-and-forget)
     if (this.currentRunId) {
-      this._stateManager.transition({
+      this.stateManager.transition({
         type: "PhaseTransitioned",
         data: {
           runId: this.currentRunId,
@@ -1428,7 +1704,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           to: finalStatus,
           metadata: {
             exitCode,
-            resultMessageReceived: updatedPhase.status === "completing",
+            resultMessageReceived: this.resultMessageReceived,
             checkpointSha: checkpointSha || "", // Ensure we always have a string
             ...(finalStatus === "failed" && {
               failedDuring: wasSkipped ? currentStatus : updatedPhase.status,
@@ -1443,11 +1719,15 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           },
         },
       });
+
+      // Wait for this critical state transition to complete before cleanup
+      await this.stateManager.waitForPendingTransitions();
     }
 
     // Send phase.completed event
     // For skipped phases, always report zero cost (by design)
-    const phaseCost = finalStatus === "skipped" ? 0 : this.currentPhase?.phaseCost || 0;
+    const phaseCost =
+      finalStatus === "skipped" ? 0 : this.currentPhase?.phaseCost || 0;
 
     this.sendEvent({
       id: EventId(generateId()),
@@ -1458,38 +1738,56 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         success: finalStatus === "completed",
         cost: phaseCost,
         duration: Date.now() - new Date(currentPhase.startTime).getTime(),
-        exitStatus: exitCode === 0 ? { type: "success" } : { type: "error", code: exitCode },
-        failureReason: finalStatus === "failed" ? this.phaseFailureReason : undefined,
+        exitStatus:
+          finalStatus === "skipped"
+            ? { type: "error", code: exitCode }
+            : exitCode === 0
+            ? { type: "success" }
+            : { type: "error", code: exitCode },
+        failureReason:
+          finalStatus === "failed" ? this.phaseFailureReason : undefined,
       },
     } as PhaseCompletedEvent);
 
-    // Clean up - ensure this completes before continuing
+    // Clean up - now happens after state is persisted
     this.cleanupCurrentPhase();
-
-    // Wait a tick to ensure cleanup is complete
-    await new Promise((resolve) => setImmediate(resolve));
-
-    // Give state manager time to process the transition before sending snapshot
-    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Send state snapshot
     this.sendStateSnapshot();
 
     // Handle next steps
-    if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
-      // Give state manager a moment to process the transition
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      await this.autoStartNextPhase();
+    if (
+      (finalStatus === "completed" || finalStatus === "skipped") &&
+      !this.isShuttingDown
+    ) {
+      if (this.config.autostart) {
+        await this.autoStartNextPhase();
+      } else {
+        // Emit idle event
+        this.sendEvent({
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "server.idle",
+          data: {
+            reason: "phase-completed",
+            message: `Phase ${phaseId} ${finalStatus}. Use 'phase.next' to continue.`,
+          },
+        } as import("./types.js").ServerIdleEvent);
+      }
     } else if (finalStatus === "failed" && !this.isShuttingDown) {
       if (this.phaseFailureReason?.retriable) {
-        this.logger.log(`Phase failed with retriable error. Server remains active.`);
+        this.logger.log(
+          `Phase failed with retriable error. Server remains active.`
+        );
       } else {
-        // Non-retriable failure - shut down run (fire-and-forget)
+        // Non-retriable failure - shut down run
         if (this.currentRunId) {
-          this._stateManager.transition({
+          this.stateManager.transition({
             type: "RunFailed",
             data: { runId: this.currentRunId },
           });
+          // Wait for this transition too
+          await this.stateManager.waitForPendingTransitions();
         }
         await this.shutdown("phase failure");
       }
@@ -1506,7 +1804,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       case "skipped":
         return 0;
       case "running":
-      case "completing":
         return phase.currentCost;
       default:
         return 0;
@@ -1519,7 +1816,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
   private async handleFileToolCall<T extends ToolName>(
     toolName: T,
-    toolInput: Record<string, unknown> | undefined,
+    toolInput: Record<string, unknown> | undefined
   ): Promise<void> {
     if (this.watchedPatterns.length === 0) return;
 
@@ -1585,7 +1882,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         try {
           content = fs.readFileSync(fullPath, "utf-8");
         } catch (error) {
-          this.logger.log(`Error reading file ${filePath}: ${toError(error).message}`, "error");
+          this.logger.log(
+            `Error reading file ${filePath}: ${toError(error).message}`,
+            "error"
+          );
           return;
         }
       }
@@ -1620,7 +1920,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Build file tree for all watched patterns
     const allTrees = await Promise.all(
-      this.watchedPatterns.map((pattern) => buildFileTree(this.config.projectPath, pattern)),
+      this.watchedPatterns.map((pattern) =>
+        buildFileTree(this.config.projectPath, pattern)
+      )
     );
 
     // Merge all trees into one
@@ -1644,12 +1946,12 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   private async handleError(
     error: Error,
     context: string,
-    severity: ErrorSeverity = ErrorSeverity.OPERATION,
+    severity: ErrorSeverity = ErrorSeverity.OPERATION
   ): Promise<void> {
     // Always log
     this.logger.log(
       `[${severity}] ${context}: ${error.message}`,
-      severity === ErrorSeverity.FATAL ? "error" : "info",
+      severity === ErrorSeverity.FATAL ? "error" : "info"
     );
 
     // Always send to client
@@ -1688,7 +1990,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const completedPhases = this.getCompletedPhasesForSnapshot();
     if (completedPhases.length > 0) {
       const lastCompleted = completedPhases[completedPhases.length - 1];
-      const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
+      const lastIndex = this.config.phases.findIndex(
+        (p) => p.id === lastCompleted.phaseId
+      );
 
       if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
         _nextPhaseIndex = lastIndex + 1;
@@ -1699,7 +2003,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           timestamp: new Date().toISOString(),
           type: "info",
           data: {
-            message: "All phases have been completed. Use phase.redo to re-run the last phase.",
+            message:
+              "All phases have been completed. Use phase.redo to re-run the last phase.",
           },
         } as InfoEvent);
         return;
@@ -1715,39 +2020,77 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    * Called on connection and after phase completion.
    */
   private async autoStartNextPhase(): Promise<void> {
+    this.logger.log(
+      `[autoStartNextPhase] Called - currentPhase: ${!!this
+        .currentPhase}, isShuttingDown: ${this.isShuttingDown}`
+    );
+
     if (this.currentPhase || this.isShuttingDown) {
+      this.logger.log(
+        `[autoStartNextPhase] Returning early - phase running or shutting down`
+      );
       return; // Phase already running or shutting down
     }
 
     // Determine next phase to run
-    const nextPhaseIndex = this.getNextPhaseIndex();
-    if (nextPhaseIndex === -1) {
-      this.logger.log("All phases completed - shutting down");
-      this.sendEvent({
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "info",
-        data: {
-          message: "All phases completed successfully. Server shutting down.",
-        },
-      } as InfoEvent);
+    const nextPhaseIndex = await this.getNextPhaseIndex();
+    this.logger.log(
+      `[autoStartNextPhase] getNextPhaseIndex returned: ${nextPhaseIndex}`
+    );
 
-      setTimeout(() => {
-        this.shutdown("all phases completed");
-      }, 2000);
+    if (nextPhaseIndex === -1) {
+      this.logger.log("[autoStartNextPhase] No more phases to run");
+
+      if (this.config.autostart) {
+        // Current behavior - shut down
+        this.sendEvent({
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "info",
+          data: {
+            message: "All phases completed successfully. Server shutting down.",
+          },
+        } as InfoEvent);
+
+        setTimeout(() => {
+          this.shutdown("all phases completed");
+        }, 2000);
+      } else {
+        // New behavior - stay running and emit idle
+        this.sendEvent({
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "server.idle",
+          data: {
+            reason: "all-phases-completed",
+            message: "All phases completed. Server remains active.",
+          },
+        } as import("./types.js").ServerIdleEvent);
+      }
       return;
     }
 
     const nextPhase = this.config.phases[nextPhaseIndex];
-    this.logger.log(`Auto-starting phase: ${nextPhase.name}`);
+    this.logger.log(
+      `[autoStartNextPhase] Auto-starting phase: ${nextPhase.name} (${nextPhase.id})`
+    );
     await this.startPhase(nextPhase.id);
   }
 
-  private getNextPhaseIndex(): number {
-    const nextPhaseId = this._stateManager.getNextPhaseToExecute();
-    if (!nextPhaseId) return -1;
+  private async getNextPhaseIndex(): Promise<number> {
+    const nextPhaseId = await this.stateManager.getNextPhaseToExecute();
+    this.logger.log(
+      `[getNextPhaseIndex] StateManager returned nextPhaseId: ${nextPhaseId}`
+    );
 
-    return this.config.phases.findIndex((p) => p.id === nextPhaseId);
+    if (!nextPhaseId) {
+      this.logger.log(`[getNextPhaseIndex] No next phase ID, returning -1`);
+      return -1;
+    }
+
+    const index = this.config.phases.findIndex((p) => p.id === nextPhaseId);
+    this.logger.log(`[getNextPhaseIndex] Found phase at index: ${index}`);
+    return index;
   }
 
   private async startNextPhase(): Promise<void> {
@@ -1755,7 +2098,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("Cannot start next phase while current phase is running"),
         "startNextPhase",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -1769,14 +2112,16 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
+    const lastIndex = this.config.phases.findIndex(
+      (p) => p.id === lastCompleted.phaseId
+    );
     if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
       await this.startPhase(this.config.phases[lastIndex + 1].id);
     } else {
       await this.handleError(
         new Error("No more phases to run"),
         "startNextPhase",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
     }
   }
@@ -1786,7 +2131,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("No phase is currently running"),
         "skipCurrentPhase",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -1804,7 +2149,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("Cannot redo while phase is running"),
         "redoCurrentPhase",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -1813,6 +2158,957 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const lastPhase = completedPhases[completedPhases.length - 1];
     if (lastPhase) {
       await this.startPhase(lastPhase.phaseId);
+    }
+  }
+
+  /**
+   * List available checkpoints
+   */
+  private async listCheckpoints(runId?: string): Promise<void> {
+    const targetRun = runId
+      ? this.stateManager.getRun(RunId(runId))
+      : this.stateManager.getCurrentRun();
+
+    if (!targetRun) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: runId ? `Run ${runId} not found` : "No active run",
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    const checkpoints: import("./types.js").CheckpointQueryInfo[] = [];
+
+    for (const phase of targetRun.phases) {
+      const phaseConfig = this.config.phases.find(
+        (p) => p.id === phase.phaseId
+      );
+      const phaseName = phaseConfig?.name || phase.phaseId;
+
+      // Workspace setup checkpoint
+      if (
+        "workspaceSetupCheckpoint" in phase &&
+        phase.workspaceSetupCheckpoint
+      ) {
+        checkpoints.push({
+          phaseId: phase.phaseId,
+          phaseName,
+          checkpointType: "workspace-setup",
+          sha: phase.workspaceSetupCheckpoint,
+          status: phase.status,
+          timestamp: phase.startTime,
+        });
+      }
+
+      // Completion checkpoint
+      if (phase.status === "completed" && phase.completionCheckpoint) {
+        checkpoints.push({
+          phaseId: phase.phaseId,
+          phaseName,
+          checkpointType: "completed",
+          sha: phase.completionCheckpoint,
+          status: phase.status,
+          timestamp: phase.endTime,
+        });
+      }
+
+      // Error checkpoint
+      if (
+        phase.status === "failed" &&
+        "errorCheckpoint" in phase &&
+        phase.errorCheckpoint
+      ) {
+        checkpoints.push({
+          phaseId: phase.phaseId,
+          phaseName,
+          checkpointType: "error",
+          sha: phase.errorCheckpoint,
+          status: phase.status,
+          timestamp: phase.endTime,
+        });
+      }
+
+      // Skip checkpoint
+      if (
+        phase.status === "skipped" &&
+        "skipCheckpoint" in phase &&
+        phase.skipCheckpoint
+      ) {
+        checkpoints.push({
+          phaseId: phase.phaseId,
+          phaseName,
+          checkpointType: "skipped",
+          sha: phase.skipCheckpoint,
+          status: phase.status,
+          timestamp: phase.endTime,
+        });
+      }
+    }
+
+    this.sendEvent({
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "checkpoint.list",
+      data: {
+        runId: targetRun.runId,
+        checkpoints,
+        currentBranch: targetRun.gitBranch,
+      },
+    } as import("./types.js").CheckpointListEvent);
+  }
+
+  /**
+   * Force stop the current running phase
+   */
+  private async forceStopPhase(reason?: string): Promise<void> {
+    const currentPhase = this.stateManager.getCurrentlyRunningPhase();
+    if (!currentPhase || isTerminalPhaseStatus(currentPhase.status)) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: "No running phase to stop",
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    this.logger.log(
+      `Force stopping phase ${currentPhase.phaseId}: ${
+        reason || "user request"
+      }`
+    );
+
+    // Set the force stopping flag
+    this.isForceStopping = true;
+
+    // Set failure reason
+    this.phaseFailureReason = {
+      type: "unknown",
+      retriable: true,
+      message: `Force stopped: ${reason || "user request"}`,
+    };
+
+    // Immediate state transition to failed
+    if (this.currentRunId) {
+      this.stateManager.transition({
+        type: "PhaseTransitioned",
+        data: {
+          runId: this.currentRunId,
+          phaseId: currentPhase.phaseId,
+          from: currentPhase.status,
+          to: "failed",
+          metadata: {
+            exitCode: -1,
+            failureReason: this.phaseFailureReason,
+            failedDuring: currentPhase.status,
+          },
+        },
+      });
+    }
+
+    // Kill the process (if exists)
+    if (this.processManager) {
+      await this.processManager.kill("SIGTERM");
+    }
+
+    // Clean up phase state
+    this.cleanupCurrentPhase();
+
+    // Send confirmation
+    this.sendEvent({
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "info",
+      data: {
+        message: `Phase ${currentPhase.phaseId} force stopped`,
+      },
+    } as InfoEvent);
+  }
+
+  /**
+   * Rollback to a specific checkpoint SHA
+   */
+  private async rollbackToCheckpoint(
+    sha: string,
+    autoRestart: boolean
+  ): Promise<void> {
+    // Check if phase is running
+    const currentPhase = this.stateManager.getCurrentlyRunningPhase();
+    if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message:
+            "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
+          phase: currentPhase.phaseId,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    const currentRun = this.stateManager.getCurrentRun();
+    if (!currentRun) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: "No active run",
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    // Find the phase and checkpoint type for this SHA
+    let targetPhase: PhaseExecution | null = null;
+    let checkpointType: string | null = null;
+
+    for (const phase of currentRun.phases) {
+      if (
+        "workspaceSetupCheckpoint" in phase &&
+        phase.workspaceSetupCheckpoint === sha
+      ) {
+        targetPhase = phase;
+        checkpointType = "workspace-setup";
+        break;
+      }
+      if (phase.status === "completed" && phase.completionCheckpoint === sha) {
+        targetPhase = phase;
+        checkpointType = "completed";
+        break;
+      }
+      if (
+        phase.status === "failed" &&
+        "errorCheckpoint" in phase &&
+        phase.errorCheckpoint === sha
+      ) {
+        targetPhase = phase;
+        checkpointType = "error";
+        break;
+      }
+      if (
+        phase.status === "skipped" &&
+        "skipCheckpoint" in phase &&
+        phase.skipCheckpoint === sha
+      ) {
+        targetPhase = phase;
+        checkpointType = "skipped";
+        break;
+      }
+    }
+
+    if (!targetPhase || !checkpointType) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: `Checkpoint ${sha} not found in current run`,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    await this.executeRollback(targetPhase, sha, checkpointType, autoRestart);
+  }
+
+  /**
+   * Rollback to a phase + checkpoint type
+   */
+  private async rollbackToPhase(
+    phaseId: PhaseId,
+    checkpointType:
+      | "start"
+      | "end"
+      | "workspace-setup"
+      | "completed"
+      | "error"
+      | "skipped",
+    autoRestart: boolean
+  ): Promise<void> {
+    // Check if phase is running
+    const currentPhase = this.stateManager.getCurrentlyRunningPhase();
+    if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message:
+            "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
+          phase: currentPhase.phaseId,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    const currentRun = this.stateManager.getCurrentRun();
+    if (!currentRun) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: "No active run",
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    // Find the phase
+    const targetPhase = currentRun.phases.find((p) => p.phaseId === phaseId);
+    if (!targetPhase) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: `Phase ${phaseId} not found in current run`,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    // Resolve checkpoint type aliases
+    let actualCheckpointType:
+      | "workspace-setup"
+      | "completed"
+      | "error"
+      | "skipped"
+      | undefined;
+    let sha: string | null = null;
+
+    if (checkpointType === "start") {
+      // Find first checkpoint in phase
+      if (
+        "workspaceSetupCheckpoint" in targetPhase &&
+        targetPhase.workspaceSetupCheckpoint
+      ) {
+        sha = targetPhase.workspaceSetupCheckpoint;
+        actualCheckpointType = "workspace-setup";
+      } else if (
+        targetPhase.status === "completed" &&
+        targetPhase.completionCheckpoint
+      ) {
+        sha = targetPhase.completionCheckpoint;
+        actualCheckpointType = "completed";
+      } else if (
+        targetPhase.status === "failed" &&
+        "errorCheckpoint" in targetPhase &&
+        targetPhase.errorCheckpoint
+      ) {
+        sha = targetPhase.errorCheckpoint;
+        actualCheckpointType = "error";
+      } else if (
+        targetPhase.status === "skipped" &&
+        "skipCheckpoint" in targetPhase &&
+        targetPhase.skipCheckpoint
+      ) {
+        sha = targetPhase.skipCheckpoint;
+        actualCheckpointType = "skipped";
+      }
+    } else if (checkpointType === "end") {
+      // Find last checkpoint in phase based on status
+      if (
+        targetPhase.status === "completed" &&
+        targetPhase.completionCheckpoint
+      ) {
+        sha = targetPhase.completionCheckpoint;
+        actualCheckpointType = "completed";
+      } else if (
+        targetPhase.status === "failed" &&
+        "errorCheckpoint" in targetPhase &&
+        targetPhase.errorCheckpoint
+      ) {
+        sha = targetPhase.errorCheckpoint;
+        actualCheckpointType = "error";
+      } else if (
+        targetPhase.status === "skipped" &&
+        "skipCheckpoint" in targetPhase &&
+        targetPhase.skipCheckpoint
+      ) {
+        sha = targetPhase.skipCheckpoint;
+        actualCheckpointType = "skipped";
+      } else if (
+        "workspaceSetupCheckpoint" in targetPhase &&
+        targetPhase.workspaceSetupCheckpoint
+      ) {
+        // Fallback to workspace setup if no end checkpoint
+        sha = targetPhase.workspaceSetupCheckpoint;
+        actualCheckpointType = "workspace-setup";
+      }
+    } else {
+      // Direct checkpoint type specified
+      actualCheckpointType = checkpointType as
+        | "workspace-setup"
+        | "completed"
+        | "error"
+        | "skipped";
+
+      switch (checkpointType) {
+        case "workspace-setup":
+          sha =
+            "workspaceSetupCheckpoint" in targetPhase
+              ? targetPhase.workspaceSetupCheckpoint || null
+              : null;
+          break;
+        case "completed":
+          sha =
+            targetPhase.status === "completed"
+              ? targetPhase.completionCheckpoint
+              : null;
+          break;
+        case "error":
+          sha =
+            targetPhase.status === "failed" && "errorCheckpoint" in targetPhase
+              ? targetPhase.errorCheckpoint || null
+              : null;
+          break;
+        case "skipped":
+          sha =
+            targetPhase.status === "skipped" && "skipCheckpoint" in targetPhase
+              ? targetPhase.skipCheckpoint || null
+              : null;
+          break;
+      }
+    }
+
+    if (!sha || !actualCheckpointType) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: `No ${checkpointType} checkpoint found for phase ${phaseId}`,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    await this.executeRollback(
+      targetPhase,
+      sha,
+      actualCheckpointType,
+      autoRestart
+    );
+  }
+
+  /**
+   * Rollback to last successful phase
+   */
+  private async rollbackToLastSuccess(autoRestart: boolean): Promise<void> {
+    // Check if phase is running
+    const currentPhase = this.stateManager.getCurrentlyRunningPhase();
+    if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message:
+            "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
+          phase: currentPhase.phaseId,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    const currentRun = this.stateManager.getCurrentRun();
+    if (!currentRun) {
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: "No active run",
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    // Find last completed phase
+    let lastCompleted: PhaseExecution | null = null;
+    for (let i = currentRun.phases.length - 1; i >= 0; i--) {
+      if (currentRun.phases[i].status === "completed") {
+        lastCompleted = currentRun.phases[i];
+        break;
+      }
+    }
+
+    if (lastCompleted && lastCompleted.status === "completed") {
+      // Rollback to last successful phase
+      await this.executeRollback(
+        lastCompleted,
+        lastCompleted.completionCheckpoint,
+        "completed",
+        autoRestart
+      );
+    } else {
+      // No successful phases - rollback to start
+      // Find the first checkpoint in the run
+      let firstCheckpoint: {
+        phase: PhaseExecution;
+        sha: string;
+        type: string;
+      } | null = null;
+
+      for (const phase of currentRun.phases) {
+        if (
+          "workspaceSetupCheckpoint" in phase &&
+          phase.workspaceSetupCheckpoint
+        ) {
+          firstCheckpoint = {
+            phase,
+            sha: phase.workspaceSetupCheckpoint,
+            type: "workspace-setup",
+          };
+          break;
+        }
+        // Check other checkpoint types if no workspace setup
+        if (phase.status === "completed" && phase.completionCheckpoint) {
+          firstCheckpoint = {
+            phase,
+            sha: phase.completionCheckpoint,
+            type: "completed",
+          };
+          break;
+        }
+        if (
+          phase.status === "failed" &&
+          "errorCheckpoint" in phase &&
+          phase.errorCheckpoint
+        ) {
+          firstCheckpoint = {
+            phase,
+            sha: phase.errorCheckpoint,
+            type: "error",
+          };
+          break;
+        }
+        if (
+          phase.status === "skipped" &&
+          "skipCheckpoint" in phase &&
+          phase.skipCheckpoint
+        ) {
+          firstCheckpoint = {
+            phase,
+            sha: phase.skipCheckpoint,
+            type: "skipped",
+          };
+          break;
+        }
+      }
+
+      if (firstCheckpoint) {
+        this.logger.log("No successful phases found, rolling back to start");
+        await this.executeRollback(
+          firstCheckpoint.phase,
+          firstCheckpoint.sha,
+          firstCheckpoint.type,
+          autoRestart
+        );
+      } else {
+        this.sendEvent({
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "error",
+          data: {
+            message: "No checkpoints found in current run",
+            fatal: false,
+          },
+        } as ErrorEvent);
+      }
+    }
+  }
+
+  /**
+   * Execute the actual rollback
+   */
+  private async executeRollback(
+    targetPhase: PhaseExecution,
+    sha: string,
+    checkpointType: string,
+    autoRestart: boolean
+  ): Promise<void> {
+    const currentRun = this.stateManager.getCurrentRun();
+    if (!currentRun) throw new Error("No active run");
+
+    const phaseConfig = this.config.phases.find(
+      (p) => p.id === targetPhase.phaseId
+    );
+    const phaseName = phaseConfig?.name || targetPhase.phaseId;
+
+    this.logger.log(
+      `Starting phase-by-phase rollback to ${checkpointType} checkpoint ${sha} ` +
+        `in phase ${targetPhase.phaseId} (${phaseName})`
+    );
+
+    // Set the rollback flag
+    this.isRollingBack = true;
+
+    try {
+      // Execute the new phase-by-phase rollback
+      await this.executePhaseByPhaseRollback(
+        currentRun,
+        targetPhase,
+        sha,
+        checkpointType,
+        phaseName,
+        autoRestart
+      );
+    } finally {
+      // Always clear the flag, even if rollback fails
+      this.isRollingBack = false;
+    }
+  }
+
+  /**
+   * Execute phase-by-phase rollback with workspace cleanup
+   */
+  private async executePhaseByPhaseRollback(
+    currentRun: import("./state-types.js").Run,
+    targetPhase: PhaseExecution,
+    targetSha: string,
+    checkpointType: string,
+    targetPhaseName: string,
+    autoRestart: boolean
+  ): Promise<void> {
+    // 1. Clean up current phase state
+    this.cleanupCurrentPhase();
+
+    // 2. Find phases to process
+    const phasesToProcess = this.getPhasesToRollback(currentRun, targetPhase);
+
+    // 3. Emit rollback started event
+    this.sendEvent({
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "rollback.started",
+      data: {
+        fromRun: currentRun.runId,
+        fromPhase: phasesToProcess[0]?.phaseId || targetPhase.phaseId,
+        toPhase: targetPhase.phaseId,
+        toCheckpoint: targetSha,
+        checkpointType,
+        phasesToProcess: phasesToProcess.map((p) => p.phaseId),
+      },
+    } as import("./types.js").RollbackStartedEvent);
+
+    // 4. Process each phase in reverse order
+    let currentStep = 0;
+    const totalSteps = phasesToProcess.length + 1; // +1 for final checkpoint
+
+    for (let i = phasesToProcess.length - 1; i >= 0; i--) {
+      const phase = phasesToProcess[i];
+      currentStep++;
+
+      // Emit progress
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "rollback.progress",
+        data: {
+          currentStep,
+          totalSteps,
+          message: `Rolling back through ${phase.phaseId}`,
+        },
+      } as import("./types.js").RollbackProgressEvent);
+
+      // Get the last checkpoint for this phase
+      const checkpoint = this.getLastCheckpointForPhase(phase);
+      if (checkpoint && this.checkpointGit) {
+        // Reset to this phase's checkpoint
+        await this.checkpointGit.resetToCheckpoint(checkpoint.sha);
+
+        // Emit checkpoint event
+        const phaseConfig = this.config.phases.find(
+          (p) => p.id === phase.phaseId
+        );
+        this.sendEvent({
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "rollback.phaseCheckpoint",
+          data: {
+            phaseId: phase.phaseId,
+            phaseName: phaseConfig?.name || phase.phaseId,
+            checkpoint: checkpoint.sha,
+            checkpointType: checkpoint.type,
+            message: `Reset to ${phase.phaseId} ${checkpoint.type} checkpoint`,
+          },
+        } as import("./types.js").RollbackPhaseCheckpointEvent);
+      }
+
+      // Clean up workspace directories from the NEXT phase
+      if (i < phasesToProcess.length - 1) {
+        const nextPhase = phasesToProcess[i + 1];
+        await this.cleanupPhaseWorkspaceDirectories(nextPhase);
+      }
+    }
+
+    // 5. Final reset to target checkpoint
+    currentStep++;
+    this.sendEvent({
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "rollback.progress",
+      data: {
+        currentStep,
+        totalSteps,
+        message: `Applying final checkpoint`,
+      },
+    } as import("./types.js").RollbackProgressEvent);
+
+    if (this.checkpointGit) {
+      await this.checkpointGit.resetToCheckpoint(targetSha);
+    }
+
+    this.sendEvent({
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "rollback.phaseCheckpoint",
+      data: {
+        phaseId: targetPhase.phaseId,
+        phaseName: targetPhaseName,
+        checkpoint: targetSha,
+        checkpointType,
+        message: `Reset to target checkpoint ${targetPhase.phaseId} (${checkpointType})`,
+      },
+    } as import("./types.js").RollbackPhaseCheckpointEvent);
+
+    // 6. Complete current run
+    this.stateManager.transition({
+      type: "RunCompleted",
+      data: { runId: currentRun.runId },
+    });
+
+    // 7. Wait for state transition
+    await this.stateManager.waitForPendingTransitions();
+
+    // 8. Start new continuation run
+    const afterPhase =
+      checkpointType === "workspace-setup" ? null : targetPhase.phaseId;
+
+    await this.startNewRun({
+      type: "continuation",
+      source: {
+        runId: currentRun.runId,
+        afterPhase: afterPhase ? PhaseId(afterPhase) : null,
+        checkpointSha: targetSha,
+      },
+      reason: "rollback",
+    });
+
+    // 9. Restore checkpoint patterns
+    const targetPhaseIndex = this.config.phases.findIndex(
+      (p) => p.id === targetPhase.phaseId
+    );
+    if (targetPhaseIndex >= 0) {
+      const includeTarget = checkpointType === "workspace-setup";
+      const maxIndex = includeTarget ? targetPhaseIndex : targetPhaseIndex - 1;
+
+      for (let i = 0; i <= maxIndex; i++) {
+        const phase = this.config.phases[i];
+        if (phase.trackedFiles?.length) {
+          await this.addCheckpointPatterns(phase.trackedFiles);
+        }
+      }
+    }
+
+    // 10. Send completion event
+    this.sendEvent({
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "rollback.completed",
+      data: {
+        fromRun: currentRun.runId,
+        toRun: this.currentRunId || "",
+        checkpoint: targetSha,
+        phaseId: targetPhase.phaseId,
+        phaseName: targetPhaseName,
+        checkpointType,
+        autoRestart,
+      },
+    } as import("./types.js").RollbackCompletedEvent);
+
+    // 11. Send state snapshot
+    this.sendStateSnapshot();
+
+    // 12. Auto-restart if requested
+    if (autoRestart && this.config.autostart) {
+      const nextPhase = await this.stateManager.getNextPhaseToExecute();
+      if (nextPhase) {
+        await this.startPhase(nextPhase);
+      }
+    }
+  }
+
+  /**
+   * Get phases that need to be rolled back through
+   */
+  private getPhasesToRollback(
+    currentRun: import("./state-types.js").Run,
+    targetPhase: PhaseExecution
+  ): PhaseExecution[] {
+    // Find the target phase by comparing object identity
+    // Since we're passing the exact phase object from the run, we can use indexOf
+    const targetIndex = currentRun.phases.indexOf(targetPhase);
+
+    if (targetIndex === -1) return [];
+
+    // Get all phases after the target
+    return currentRun.phases.slice(targetIndex + 1);
+  }
+
+  /**
+   * Get the last checkpoint for a phase
+   */
+  private getLastCheckpointForPhase(
+    phase: PhaseExecution
+  ): { sha: string; type: string } | null {
+    // Priority: completed > error > skipped > workspace-setup
+    if (phase.status === "completed" && phase.completionCheckpoint) {
+      return { sha: phase.completionCheckpoint, type: "completed" };
+    }
+    if (
+      phase.status === "failed" &&
+      "errorCheckpoint" in phase &&
+      phase.errorCheckpoint
+    ) {
+      return { sha: phase.errorCheckpoint, type: "error" };
+    }
+    if (
+      phase.status === "skipped" &&
+      "skipCheckpoint" in phase &&
+      phase.skipCheckpoint
+    ) {
+      return { sha: phase.skipCheckpoint, type: "skipped" };
+    }
+    if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
+      return { sha: phase.workspaceSetupCheckpoint, type: "workspace-setup" };
+    }
+    return null;
+  }
+
+  /**
+   * Get workspace setup directories for a phase
+   */
+  private getWorkspaceSetupDirectories(phaseId: PhaseId): string[] {
+    const phase = this.config.phases.find((p) => p.id === phaseId);
+    if (!phase?.workspaceSetup) return [];
+
+    const directories: string[] = [];
+    for (const item of phase.workspaceSetup) {
+      if (item.type === "copy" && item.copy) {
+        directories.push(item.copy.to);
+      }
+    }
+    return directories;
+  }
+
+  /**
+   * Clean up workspace directories created by a phase
+   */
+  private async cleanupPhaseWorkspaceDirectories(
+    phase: PhaseExecution
+  ): Promise<void> {
+    const directories = this.getWorkspaceSetupDirectories(phase.phaseId);
+    if (directories.length === 0) return;
+
+    const phaseConfig = this.config.phases.find((p) => p.id === phase.phaseId);
+    const phaseName = phaseConfig?.name || phase.phaseId;
+
+    // Emit cleanup started
+    this.sendEvent({
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "rollback.workspaceCleanup",
+      data: {
+        phaseId: phase.phaseId,
+        phaseName,
+        directories,
+        status: "started",
+      },
+    } as import("./types.js").RollbackWorkspaceCleanupEvent);
+
+    const successfulCleanups: string[] = [];
+    const failedCleanups: { directory: string; error: string }[] = [];
+
+    for (const dir of directories) {
+      const fullPath = path.join(this.config.projectPath, dir);
+      try {
+        if (fs.existsSync(fullPath)) {
+          await fs.promises.rm(fullPath, { recursive: true, force: true });
+          this.logger.log(`Removed workspace setup directory: ${dir}`);
+          successfulCleanups.push(dir);
+        } else {
+          // Directory doesn't exist, consider it a success
+          this.logger.log(`Workspace setup directory already absent: ${dir}`);
+          successfulCleanups.push(dir);
+        }
+      } catch (error) {
+        const errorMessage = toError(error).message;
+        this.logger.log(
+          `Failed to remove workspace directory ${dir}: ${errorMessage}`,
+          "error"
+        );
+        failedCleanups.push({ directory: dir, error: errorMessage });
+      }
+    }
+
+    // Emit cleanup result with detailed information
+    if (failedCleanups.length > 0) {
+      // Partial or complete failure
+      const status = successfulCleanups.length > 0 ? "partial" : "failed";
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "rollback.workspaceCleanup",
+        data: {
+          phaseId: phase.phaseId,
+          phaseName,
+          directories,
+          status,
+          successfulCleanups,
+          failedCleanups,
+          error: failedCleanups
+            .map((f) => `${f.directory}: ${f.error}`)
+            .join(", "),
+        },
+      } as import("./types.js").RollbackWorkspaceCleanupEvent);
+    } else {
+      // Complete success
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "rollback.workspaceCleanup",
+        data: {
+          phaseId: phase.phaseId,
+          phaseName,
+          directories,
+          status: "completed",
+          successfulCleanups,
+          failedCleanups: [],
+        },
+      } as import("./types.js").RollbackWorkspaceCleanupEvent);
     }
   }
 
@@ -1831,32 +3127,26 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       // Ensure log stream is closed
       this.processManager
         .closeLogStream()
-        .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
+        .catch((err) =>
+          this.logger.log(`Error closing log stream: ${err}`, "error")
+        );
       this.processManager = undefined;
-    }
-
-    // Clean up any pending result message promises
-    const phaseId = this.currentPhase?.phase.id;
-    if (phaseId && this.resultMessagePromises.has(phaseId)) {
-      const promise = this.resultMessagePromises.get(phaseId);
-      if (promise) {
-        clearTimeout(promise.timeout);
-        promise.reject(new Error("Phase cleanup - result message promise cancelled"));
-        this.resultMessagePromises.delete(phaseId);
-      }
     }
 
     this.watchedPatterns = [];
     this.recentFileAccess = undefined;
     this.currentPhase = undefined;
     this.phaseFailureReason = undefined;
+    this.isForceStopping = false;
+    this.isSkippingPhase = false; // Reset skip flag after phase completion
+    this.resultMessageReceived = false; // Reset result message flag
   }
 
-  private async runCommand(command: string, workingDir?: string): Promise<void> {
+  private async runCommand(command: string, workingDir: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const proc = spawn(command, {
         shell: true,
-        cwd: workingDir || this.config.projectPath,
+        cwd: workingDir,
       });
 
       proc.on("exit", (code) => {
@@ -1882,7 +3172,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const targetParent = path.dirname(to);
     const parentStats = await fs.promises.stat(targetParent).catch(() => null);
     if (!parentStats || !parentStats.isDirectory()) {
-      throw new Error(`Target parent directory does not exist: ${targetParent}`);
+      throw new Error(
+        `Target parent directory does not exist: ${targetParent}`
+      );
     }
 
     // Check if target already exists
@@ -1893,7 +3185,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Copy using cp command with recursive flag
     const cpCommand = `cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`;
-    await this.runCommand(cpCommand);
+    await this.runCommand(cpCommand, this.config.projectPath);
   }
 
   // ============================================================================
@@ -1901,7 +3193,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
 
   /**
-   * Initialize checkpoint system - check git availability
+   * Initialize checkpoint system - check git availability and switch branch
    */
   private async initializeCheckpoints(): Promise<void> {
     // Check if git is available
@@ -1910,6 +3202,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       this.checkpointingEnabled = false;
       return;
     }
+
+    // Initialize checkpoint git
+    this.checkpointGit = new CheckpointGit(
+      this.config.projectPath,
+      this.logger
+    );
+    await this.checkpointGit.initialize();
 
     this.logger.log("Checkpoint system initialized");
   }
@@ -1936,7 +3235,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize repository on first tracked patterns
     if (!this.checkpointGit) {
-      this.checkpointGit = new CheckpointGit(this.config.projectPath, this.logger);
+      this.checkpointGit = new CheckpointGit(
+        this.config.projectPath,
+        this.logger
+      );
       await this.checkpointGit.initialize();
     }
 
@@ -1948,8 +3250,24 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   /**
    * Create a checkpoint commit
    */
-  private async createCheckpoint(info: CheckpointInfo): Promise<string | undefined> {
-    if (!this.checkpointingEnabled || !this.checkpointGit) return;
+  private async createCheckpoint(
+    info: CheckpointInfo
+  ): Promise<string | undefined> {
+    if (!this.checkpointingEnabled || !this.checkpointGit) {
+      this.logger.log(
+        `[CHECKPOINT-DEBUG] Checkpoint creation skipped - enabled: ${
+          this.checkpointingEnabled
+        }, git: ${!!this.checkpointGit}`
+      );
+      return;
+    }
+
+    this.logger.log(
+      `[CHECKPOINT-DEBUG] Creating checkpoint for phase ${info.phaseId} with status ${info.status}`
+    );
+    this.logger.log(
+      `[CHECKPOINT-DEBUG] Checkpoint info: ${JSON.stringify(info)}`
+    );
 
     try {
       // Format commit message
@@ -1966,21 +3284,25 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       const commitMessage = `${firstLine}\n${body.join("\n")}`;
+      this.logger.log(`[CHECKPOINT-DEBUG] Commit message: ${commitMessage}`);
 
       // Get current run's branch
-      const currentRun = this._stateManager.getCurrentRun();
+      const currentRun = this.stateManager.getCurrentRun();
       const branchName = currentRun?.gitBranch || `run-${this.currentRunId}`;
+      this.logger.log(`[CHECKPOINT-DEBUG] Using branch: ${branchName}`);
 
       // Create checkpoint on run-specific branch
-      const allowEmpty = info.status === "skipped";
       const commitHash = await this.checkpointGit.commit(commitMessage, {
         branch: branchName,
-        allowEmpty,
       });
+
+      this.logger.log(
+        `[CHECKPOINT-DEBUG] Checkpoint commit returned: ${commitHash}`
+      );
 
       if (commitHash) {
         this.logger.log(
-          `Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`,
+          `[CHECKPOINT-DEBUG] Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`
         );
 
         // Fire checkpoint created transition to store SHA in state
@@ -1988,13 +3310,17 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           info.status === "workspace-setup"
             ? "workspace-setup"
             : info.status === "completed"
-              ? "completed"
-              : info.status === "error"
-                ? "error"
-                : "skipped";
+            ? "completed"
+            : info.status === "error"
+            ? "error"
+            : "skipped";
+
+        this.logger.log(
+          `[CHECKPOINT-DEBUG] Firing CheckpointCreated transition with type: ${checkpointType}`
+        );
 
         if (this.currentRunId) {
-          this._stateManager.transition({
+          this.stateManager.transition({
             type: "CheckpointCreated",
             data: {
               runId: this.currentRunId,
@@ -2007,13 +3333,17 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         }
 
         return commitHash;
+      } else {
+        this.logger.log(
+          `[CHECKPOINT-DEBUG] No commit hash returned from checkpoint.commit()`
+        );
       }
     } catch (error) {
       // Handle disk full or other git errors
       this.logger.log(
-        `Checkpoint failed: ${toError(error).message}. ` +
+        `[CHECKPOINT-DEBUG] Checkpoint failed: ${toError(error).message}. ` +
           "Disabling checkpointing for this session.",
-        "error",
+        "error"
       );
       this.checkpointingEnabled = false;
     }
@@ -2039,7 +3369,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     this.isShuttingDown = true;
 
     // Create exit checkpoint if not shutting down normally (all phases completed)
-    if (reason !== "all phases completed" && this.checkpointingEnabled && this.currentPhase) {
+    if (
+      reason !== "all phases completed" &&
+      this.checkpointingEnabled &&
+      this.currentPhase
+    ) {
       await this.createCheckpoint({
         status: "exit",
         phaseId: this.currentPhase.phase.id,
@@ -2053,33 +3387,26 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Mark run as completed or failed based on reason
     if (this.currentRunId && reason === "all phases completed") {
-      this._stateManager.transition({
+      this.stateManager.transition({
         type: "RunCompleted",
         data: { runId: this.currentRunId },
       });
     } else if (this.currentRunId && reason !== "phase failure") {
       // Phase failure already marked the run as failed
-      this._stateManager.transition({
+      this.stateManager.transition({
         type: "RunFailed",
         data: { runId: this.currentRunId },
       });
     }
 
     // Wait for any pending state transitions
-    await this._stateManager.waitForPendingTransitions();
+    await this.stateManager.waitForPendingTransitions();
 
     // Clear heartbeat interval
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = undefined;
     }
-
-    // Clean up all pending result message promises
-    for (const promise of this.resultMessagePromises.values()) {
-      clearTimeout(promise.timeout);
-      promise.reject(new Error("Server shutdown - result message promise cancelled"));
-    }
-    this.resultMessagePromises.clear();
 
     if (this.client) {
       this.client.close();

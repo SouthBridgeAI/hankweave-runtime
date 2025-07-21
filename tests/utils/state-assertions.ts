@@ -54,10 +54,7 @@ export function assertPhaseCost(
     cost = phase.finalCost;
   } else if (phase!.status === "failed" && "partialCost" in phase!) {
     cost = phase.partialCost;
-  } else if (
-    (phase!.status === "running" || phase!.status === "completing") &&
-    "currentCost" in phase!
-  ) {
+  } else if (phase!.status === "running" && "currentCost" in phase!) {
     cost = phase.currentCost;
   }
 

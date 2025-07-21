@@ -164,6 +164,7 @@ export const DEFAULT_CONFIG: Omit<ServerConfig, "projectPath" | "phases"> = {
     output: 15.0, // $15 per million output tokens
   },
   logParsingInterval: 1000, // Check for new log entries every second
+  autostart: true, // Default to current behavior
 };
 
 // ============================================================================

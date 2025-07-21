@@ -60,15 +60,22 @@ export class TestWSClient {
           // Resolve any waiting promises for this event type
           const waiters = this.eventPromises.get(serverEvent.type);
           if (waiters) {
-            waiters.forEach(({ resolve }) => resolve(serverEvent));
-            this.eventPromises.delete(serverEvent.type);
+            // Create a new array to hold waiters that don't match
+            const remainingWaiters: typeof waiters = [];
+
+            waiters.forEach(({ resolve }) => {
+              // Each waiter's resolve function will check if it matches
+              resolve(serverEvent);
+            });
+
+            // Don't delete the waiters array - let each waiter remove itself if it matches
           }
 
           // Also resolve "any" event waiters
           const anyWaiters = this.eventPromises.get("*");
           if (anyWaiters) {
             anyWaiters.forEach(({ resolve }) => resolve(serverEvent));
-            this.eventPromises.delete("*");
+            // Don't delete - let each waiter remove itself
           }
         } catch (error) {
           console.error("Failed to parse server event:", error);
@@ -119,24 +126,80 @@ export class TestWSClient {
 
   async waitForEvent(
     type: string,
-    timeout: number = 30000
+    timeoutMs: number = 30000,
+    filter?: (event: ServerEvent) => boolean,
+    onlyAfterTimestamp?: string
   ): Promise<ServerEvent> {
     // Check if we already have this event
-    const existing = this.events.find((e) => type === "*" || e.type === type);
+    let existing: ServerEvent | undefined;
+
+    if (onlyAfterTimestamp) {
+      // Option 3: Only return events after the specified timestamp
+      existing = this.events.find((e) => {
+        const matchesType = type === "*" || e.type === type;
+        const isAfterTimestamp = e.timestamp > onlyAfterTimestamp;
+        const passesFilter = !filter || filter(e);
+        return matchesType && isAfterTimestamp && passesFilter;
+      });
+    } else {
+      // Original behavior with optional filter (Option 2)
+      existing = this.events.find((e) => {
+        const matchesType = type === "*" || e.type === type;
+        const passesFilter = !filter || filter(e);
+        return matchesType && passesFilter;
+      });
+    }
+
     if (existing) return existing;
 
     // Wait for future event
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        // Remove this waiter from the list on timeout
+        const waiters = this.eventPromises.get(type) || [];
+        const index = waiters.findIndex((w) => w.resolve === waiterResolve);
+        if (index > -1) {
+          waiters.splice(index, 1);
+          if (waiters.length === 0) {
+            this.eventPromises.delete(type);
+          }
+        }
         reject(new Error(`Timeout waiting for event: ${type}`));
-      }, timeout);
+      }, timeoutMs);
+
+      let resolved = false;
+
+      const waiterResolve = (event: ServerEvent) => {
+        if (resolved) return; // Already resolved
+
+        // Apply the same filtering logic to future events
+        const passesFilter = !filter || filter(event);
+        const isAfterTimestamp =
+          !onlyAfterTimestamp || event.timestamp > onlyAfterTimestamp;
+
+        if (passesFilter && isAfterTimestamp) {
+          resolved = true;
+          clearTimeout(timer);
+
+          // Remove this waiter from the list
+          const waiters = this.eventPromises.get(type) || [];
+          const index = waiters.findIndex((w) => w.resolve === waiterResolve);
+          if (index > -1) {
+            waiters.splice(index, 1);
+            if (waiters.length === 0) {
+              this.eventPromises.delete(type);
+            }
+          }
+
+          resolve(event);
+        }
+        // If event doesn't pass filter, this waiter stays in the list
+        // and will be called again for the next matching event type
+      };
 
       const waiters = this.eventPromises.get(type) || [];
       waiters.push({
-        resolve: (event: ServerEvent) => {
-          clearTimeout(timer);
-          resolve(event);
-        },
+        resolve: waiterResolve,
         reject,
       });
       this.eventPromises.set(type, waiters);
@@ -145,43 +208,32 @@ export class TestWSClient {
 
   async waitForPhaseStart(
     phaseId: string,
-    timeout: number = 10000
+    timeout: number = 10000,
+    afterTimestamp?: string
   ): Promise<PhaseStartedEvent> {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeout) {
-      const started = this.events.find(
-        (e) =>
-          e.type === "phase.started" &&
-          (e as PhaseStartedEvent).data?.phaseId === phaseId
-      ) as PhaseStartedEvent | undefined;
-      if (started) return started;
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    throw new Error(`Timeout waiting for phase ${phaseId} to start`);
+    // Use waitForEvent with proper filtering
+    const event = await this.waitForEvent(
+      "phase.started",
+      timeout,
+      (e) => (e as PhaseStartedEvent).data?.phaseId === phaseId,
+      afterTimestamp
+    );
+    return event as PhaseStartedEvent;
   }
 
   async waitForPhaseCompletion(
     phaseId: string,
-    timeout: number = 120000
+    timeout: number = 120000,
+    afterTimestamp?: string
   ): Promise<PhaseCompletedEvent> {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeout) {
-      const completed = this.events.find(
-        (e) =>
-          e.type === "phase.completed" &&
-          (e as PhaseCompletedEvent).data?.phaseId === phaseId
-      ) as PhaseCompletedEvent | undefined;
-      if (completed) return completed;
-
-      // Wait a bit before checking again
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    throw new Error(`Timeout waiting for phase ${phaseId} to complete`);
+    // Use waitForEvent with proper filtering
+    const event = await this.waitForEvent(
+      "phase.completed",
+      timeout,
+      (e) => (e as PhaseCompletedEvent).data?.phaseId === phaseId,
+      afterTimestamp
+    );
+    return event as PhaseCompletedEvent;
   }
 
   getEvents(): ServerEvent[] {
@@ -376,18 +428,12 @@ export function startServer(config: ServerConfig): ChildProcess {
 
   const serverProcess = spawn(
     "bun",
-    [
-      serverPath,
-      `--config=${config.phasesConfig}`,
-      `--port=${config.port}`,
-      `--test-mode=${config.testMode}`,
-    ],
+    [serverPath, `--config=${config.phasesConfig}`, `--port=${config.port}`],
     {
       cwd: config.cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        LANGTON_TEST_RUN: "true",
       },
     }
   );
@@ -446,17 +492,44 @@ export async function preserveTestResults(
 ): Promise<void> {
   console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
 
-  // Copy Claude logs
+  // Copy the entire runs directory to preserve Claude logs with proper structure
+  const runsDir = path.join(config.testDir, ".langton/runs");
+  if (fs.existsSync(runsDir)) {
+    const destRunsDir = path.join(config.testRunDir, "runs");
+    copyDirectoryRecursive(runsDir, destRunsDir);
+
+    // Count Claude log files for reporting
+    let claudeLogCount = 0;
+    const countLogs = (dir: string) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          countLogs(fullPath);
+        } else if (entry.name.match(/^phase-.*-claude\.log$/)) {
+          claudeLogCount++;
+        }
+      }
+    };
+    countLogs(destRunsDir);
+    console.log(
+      `  ✓ Copied runs directory with ${claudeLogCount} Claude log files`
+    );
+  }
+
+  // Copy state.json
+  const stateFile = path.join(config.testDir, ".langton/state.json");
+  if (fs.existsSync(stateFile)) {
+    fs.copyFileSync(stateFile, path.join(config.testRunDir, "state.json"));
+    console.log(`  ✓ Copied state.json`);
+  }
+
+  // Copy logs directory (for websocket.log and server.log)
   const logsDir = path.join(config.testDir, ".langton/logs");
   if (fs.existsSync(logsDir)) {
-    const destLogsDir = path.join(config.testRunDir, "claude-logs");
-    fs.mkdirSync(destLogsDir, { recursive: true });
-
-    const logFiles = fs.readdirSync(logsDir);
-    for (const file of logFiles) {
-      fs.copyFileSync(path.join(logsDir, file), path.join(destLogsDir, file));
-    }
-    console.log(`  ✓ Copied ${logFiles.length} Claude log files`);
+    const destLogsDir = path.join(config.testRunDir, "logs");
+    copyDirectoryRecursive(logsDir, destLogsDir);
+    console.log(`  ✓ Copied logs directory`);
   }
 
   // Save all WebSocket events for debugging
@@ -467,10 +540,29 @@ export async function preserveTestResults(
     `\n${colors.yellow}Test results saved to: ${config.testRunDir}/${colors.reset}`
   );
   console.log(`${colors.gray}  - Server logs: server.log${colors.reset}`);
-  console.log(`${colors.gray}  - Claude logs: claude-logs/${colors.reset}`);
+  console.log(`${colors.gray}  - State: state.json${colors.reset}`);
+  console.log(`${colors.gray}  - Runs directory: runs/${colors.reset}`);
+  console.log(`${colors.gray}  - Logs directory: logs/${colors.reset}`);
   console.log(
     `${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`
   );
+}
+
+// Helper function to copy directory recursively
+function copyDirectoryRecursive(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      copyDirectoryRecursive(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
 }
 
 // ============================================================================
@@ -692,10 +784,7 @@ export async function getTotalCostFromState(testDir: string): Promise<number> {
         total += phase.finalCost;
       } else if (phase.status === "failed" && "partialCost" in phase) {
         total += phase.partialCost;
-      } else if (
-        (phase.status === "running" || phase.status === "completing") &&
-        "currentCost" in phase
-      ) {
+      } else if (phase.status === "running" && "currentCost" in phase) {
         total += phase.currentCost;
       }
     }

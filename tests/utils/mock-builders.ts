@@ -84,6 +84,7 @@ export function createRunningPhase(
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     },
+    assistantMessageCount: 0,
   };
 }
 
