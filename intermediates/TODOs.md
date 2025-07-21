@@ -18,6 +18,7 @@
 1. Copy if not exists
 1. Test and figure out if we're checking for running out of context on a phase, and handling properly
 1. Bun isolated linker
+1. Use proper discriminated unions for types
 
 ## Improvements
 
