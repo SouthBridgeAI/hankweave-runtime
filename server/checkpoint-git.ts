@@ -145,6 +145,11 @@ export class CheckpointGit {
   async commit(message: string, options?: { branch?: string }): Promise<string | null> {
     if (!this.git) return null;
 
+    this.logger.log(`[CHECKPOINT-COMMIT] Starting commit with message: ${message.split("\n")[0]}`);
+    this.logger.log(
+      `[CHECKPOINT-COMMIT] Tracked patterns: ${Array.from(this.trackedPatterns).join(", ")}`,
+    );
+
     let originalBranch: string | undefined;
 
     // Always use the branch from options if provided
@@ -152,23 +157,52 @@ export class CheckpointGit {
       // Remember current branch to switch back later
       const currentBranchInfo = await this.git.branch();
       originalBranch = currentBranchInfo.current;
+      this.logger.log(
+        `[CHECKPOINT-COMMIT] Current branch: ${originalBranch}, switching to: ${options.branch}`,
+      );
 
       // Check if branch exists
       const branches = await this.git.branch();
       if (!branches.all.includes(options.branch)) {
         // Create new branch from current HEAD
+        this.logger.log(`[CHECKPOINT-COMMIT] Creating new branch: ${options.branch}`);
         await this.git.checkoutLocalBranch(options.branch);
       } else {
         // Switch to existing branch
+        this.logger.log(`[CHECKPOINT-COMMIT] Switching to existing branch: ${options.branch}`);
         await this.git.checkout(options.branch);
       }
     }
 
     // Get resolved files to add
     const files = await this.getTrackedFiles();
+    this.logger.log(`[CHECKPOINT-COMMIT] Resolved ${files.length} files to track`);
+    if (files.length > 0) {
+      this.logger.log(
+        `[CHECKPOINT-COMMIT] First few files: ${files.slice(0, 5).join(", ")}${
+          files.length > 5 ? "..." : ""
+        }`,
+      );
+    }
 
-    // First, reset the index to ensure we start clean
-    await this.git.reset(["HEAD"]);
+    // Check working directory status before reset
+    const statusBefore = await this.git.status();
+    this.logger.log(
+      `[CHECKPOINT-COMMIT] Status before reset - modified: ${statusBefore.modified.length}, not_added: ${statusBefore.not_added.length}`,
+    );
+
+    // IMPORTANT: Only reset the INDEX, not the working directory
+    // Using 'mixed' reset (default) to only affect the index
+    this.logger.log(
+      `[CHECKPOINT-COMMIT] Resetting index (mixed mode - working directory unchanged)`,
+    );
+    await this.git.reset(["--mixed", "HEAD"]);
+
+    // Check status after reset to confirm working directory unchanged
+    const statusAfter = await this.git.status();
+    this.logger.log(
+      `[CHECKPOINT-COMMIT] Status after reset - modified: ${statusAfter.modified.length}, not_added: ${statusAfter.not_added.length}`,
+    );
 
     // Explicitly add each resolved file
     if (files.length > 0) {
@@ -178,22 +212,27 @@ export class CheckpointGit {
         const batch = files.slice(i, i + batchSize);
         try {
           // Use force add to override any gitignore rules
+          this.logger.log(
+            `[CHECKPOINT-COMMIT] Adding batch ${
+              Math.floor(i / batchSize) + 1
+            }/${Math.ceil(files.length / batchSize)} (${batch.length} files)`,
+          );
           await this.git.raw(["add", "-f", ...batch]);
         } catch (error) {
-          this.logger.log(`Error adding files to checkpoint: ${error}`, "error");
+          this.logger.log(
+            `[CHECKPOINT-COMMIT] Error adding files to checkpoint: ${error}`,
+            "error",
+          );
         }
       }
     }
 
     // Always create commit, even if empty (for semantic consistency)
+    this.logger.log(`[CHECKPOINT-COMMIT] Creating commit`);
     const result = await this.git.commit(message, { "--allow-empty": null });
 
-    // Switch back to original branch if we switched
-    if (originalBranch && options?.branch && originalBranch !== options.branch) {
-      await this.git.checkout(originalBranch);
-    }
-
     const commitSha = result.commit || null;
+    this.logger.log(`[CHECKPOINT-COMMIT] Commit complete: ${commitSha}`);
     return commitSha;
   }
 

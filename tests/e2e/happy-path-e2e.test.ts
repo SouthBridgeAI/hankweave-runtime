@@ -375,7 +375,7 @@ async function validateCheckpointSystem(): Promise<void> {
 //    - runFullCleanup() removes files and directories
 //    - This prevents "file not found" errors during test assertions
 //
-// 2. Cleanup runs in afterAll(), not in the main test flow
+// 2. Cleanup runs ONLY in the final afterAll(), not during test execution
 //    - Ensures tests can verify files before they're deleted
 //    - Guarantees cleanup even if tests fail
 //
@@ -592,76 +592,76 @@ describe("Langton E2E Test", () => {
   describe("Error Event Metadata", () => {
     runErrorEventTests(testState);
   });
-});
 
-// Cleanup after all tests
-//
-// ## Cleanup Integration Pattern
-//
-// This afterAll() block demonstrates the standard cleanup pattern for e2e tests:
-//
-// 1. **Conditional execution**: Only runs if not already done
-// 2. **Two-phase cleanup**: Server shutdown, then file removal
-// 3. **Force mode**: Uses force=true to handle git failures
-// 4. **Verification**: Tests that cleanup actually worked
-//
-// ## What gets verified:
-//
-// - Cleanup success (allowing for git errors with force mode)
-// - Expected directories were removed (typescript_code, .langton)
-// - Only expected files remain (notes/, maybe untracked.txt)
-// - No .langton directory remains
-//
-// ## Edge cases handled:
-//
-// - untracked.txt: Created by checkpoint exclusion tests
-// - notes/: Created by command, not workspace setup, so preserved
-// - Git failures: Force mode ensures cleanup continues
-afterAll(async () => {
-  // First shutdown the server if needed
-  if (!testState.cleanupResult) {
-    await shutdownServer();
-  }
-
-  // Now run the full cleanup and verify it worked
-  console.log(`\n${colors.blue}Running final cleanup...${colors.reset}`);
-
-  if (!testState.cleanupResult) {
-    await runFullCleanup();
-  }
-
-  // Verify cleanup worked correctly
-  if (testState.cleanupResult) {
-    console.log(`\n${colors.blue}Verifying cleanup results...${colors.reset}`);
-
-    // Check if cleanup was successful
-    if (testState.cleanupResult.errors.length === 0) {
-      expect(testState.cleanupResult.success).toBe(true);
+  // Cleanup after all tests
+  //
+  // ## Cleanup Integration Pattern
+  //
+  // This afterAll() block demonstrates the standard cleanup pattern for e2e tests:
+  //
+  // 1. **Conditional execution**: Only runs if not already done
+  // 2. **Two-phase cleanup**: Server shutdown, then file removal
+  // 3. **Force mode**: Uses force=true to handle git failures
+  // 4. **Verification**: Tests that cleanup actually worked
+  //
+  // ## What gets verified:
+  //
+  // - Cleanup success (allowing for git errors with force mode)
+  // - Expected directories were removed (typescript_code, .langton)
+  // - Only expected files remain (notes/, maybe untracked.txt)
+  // - No .langton directory remains
+  //
+  // ## Edge cases handled:
+  //
+  // - untracked.txt: Created by checkpoint exclusion tests
+  // - notes/: Created by command, not workspace setup, so preserved
+  // - Git failures: Force mode ensures cleanup continues
+  afterAll(async () => {
+    // First shutdown the server if needed
+    if (!testState.cleanupResult) {
+      await shutdownServer();
     }
 
-    // Verify directories were removed
-    expect(testState.cleanupResult.directoriesRemoved.length).toBeGreaterThan(0);
-    const removedDirs = testState.cleanupResult.directoriesRemoved;
-    expect(removedDirs.some((d) => d === "typescript_code" || d.includes("typescript_code"))).toBe(
-      true,
-    );
-    expect(removedDirs.some((d) => d === ".langton" || d.includes(".langton"))).toBe(true);
+    // Now run the full cleanup and verify it worked
+    console.log(`\n${colors.blue}Running final cleanup...${colors.reset}`);
 
-    // Verify test directory state
-    const testDirContents = fs.readdirSync(TEST_DIR);
-    const visibleFiles = testDirContents.filter((f) => !f.startsWith("."));
-    // Should only have 'notes' directory (created by command, not workspace setup)
-    // and possibly 'untracked.txt' from checkpoint exclusion tests
-    const expectedFiles = ["notes"];
-    if (visibleFiles.includes("untracked.txt")) {
-      expectedFiles.push("untracked.txt");
+    if (!testState.cleanupResult) {
+      await runFullCleanup();
     }
-    expect(visibleFiles.sort()).toEqual(expectedFiles.sort());
 
-    // Verify .langton directory is gone
-    const langtonDir = path.join(TEST_DIR, ".langton");
-    expect(fs.existsSync(langtonDir)).toBe(false);
+    // Verify cleanup worked correctly
+    if (testState.cleanupResult) {
+      console.log(`\n${colors.blue}Verifying cleanup results...${colors.reset}`);
 
-    console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
-  }
+      // Check if cleanup was successful
+      if (testState.cleanupResult.errors.length === 0) {
+        expect(testState.cleanupResult.success).toBe(true);
+      }
+
+      // Verify directories were removed
+      expect(testState.cleanupResult.directoriesRemoved.length).toBeGreaterThan(0);
+      const removedDirs = testState.cleanupResult.directoriesRemoved;
+      expect(
+        removedDirs.some((d) => d === "typescript_code" || d.includes("typescript_code")),
+      ).toBe(true);
+      expect(removedDirs.some((d) => d === ".langton" || d.includes(".langton"))).toBe(true);
+
+      // Verify test directory state
+      const testDirContents = fs.readdirSync(TEST_DIR);
+      const visibleFiles = testDirContents.filter((f) => !f.startsWith("."));
+      // Should only have 'notes' directory (created by command, not workspace setup)
+      // and possibly 'untracked.txt' from checkpoint exclusion tests
+      const expectedFiles = ["notes"];
+      if (visibleFiles.includes("untracked.txt")) {
+        expectedFiles.push("untracked.txt");
+      }
+      expect(visibleFiles.sort()).toEqual(expectedFiles.sort());
+
+      // Verify .langton directory is gone
+      const langtonDir = path.join(TEST_DIR, ".langton");
+      expect(fs.existsSync(langtonDir)).toBe(false);
+
+      console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
+    }
+  });
 });
