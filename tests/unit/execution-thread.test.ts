@@ -1,9 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import {
   analyzeExecutionThread,
-  getNextPhaseId,
   findContinuationSessionId,
-  getPhasesToRollback,
   type ExecutionThread,
 } from "../../server/execution-thread.js";
 import {
@@ -384,42 +382,6 @@ describe("Execution Thread Analysis", () => {
     });
   });
 
-  describe("Rollback Phase Detection", () => {
-    test("should get phases to rollback through", async () => {
-      const testState = loadTestState();
-      const thread = await analyzeExecutionThread(testState, testPhaseConfigs);
-
-      // Thread has: phase-3 (continuation), phase-2 (continuation), phase-1 (original)
-      // Since we can't rollback to phase-2 in original (it's not in the thread),
-      // let's rollback to phase-1 in original instead
-      const phasesToRollback = getPhasesToRollback(
-        thread,
-        "phase-1" as PhaseId,
-        "1753110411854-28u0x" as RunId
-      );
-
-      // Should rollback through: phase-3 from continuation, phase-2 from continuation
-      expect(phasesToRollback).toHaveLength(2);
-      expect(phasesToRollback[0].phase.phaseId).toBe("phase-3" as PhaseId);
-      expect(phasesToRollback[0].runId).toBe("1753110463686-yayna" as RunId);
-      expect(phasesToRollback[1].phase.phaseId).toBe("phase-2" as PhaseId);
-      expect(phasesToRollback[1].runId).toBe("1753110463686-yayna" as RunId);
-    });
-
-    test("should return empty array for invalid target", async () => {
-      const testState = loadTestState();
-      const thread = await analyzeExecutionThread(testState, testPhaseConfigs);
-
-      const phasesToRollback = getPhasesToRollback(
-        thread,
-        "nonexistent-phase" as PhaseId,
-        "nonexistent-run" as RunId
-      );
-
-      expect(phasesToRollback).toHaveLength(0);
-    });
-  });
-
   describe("Checkpoint Validation", () => {
     test("should only include validated checkpoints", async () => {
       const testState: LangtonState = {
@@ -519,32 +481,6 @@ describe("Execution Thread Analysis", () => {
 
       expect(thread.phases).toHaveLength(1);
       expect(thread.phases[0].validatedCheckpoints).toHaveLength(0);
-    });
-  });
-
-  describe("Query Functions", () => {
-    test("getNextPhaseId should return thread nextPhaseId", () => {
-      const mockThread: ExecutionThread = {
-        phases: [],
-        totalRuns: 0,
-        hasRunningPhase: false,
-        nextPhaseId: "phase-2" as PhaseId,
-      };
-
-      const result = getNextPhaseId(mockThread);
-      expect(result).toBe("phase-2" as PhaseId);
-    });
-
-    test("getNextPhaseId should return null when no next phase", () => {
-      const mockThread: ExecutionThread = {
-        phases: [],
-        totalRuns: 0,
-        hasRunningPhase: false,
-        nextPhaseId: null,
-      };
-
-      const result = getNextPhaseId(mockThread);
-      expect(result).toBeNull();
     });
   });
 

@@ -2163,35 +2163,34 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const currentRun = this.stateManager.getCurrentRun();
-    if (!currentRun) {
-      this.sendEvent({
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: "No active run",
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
+    // Build execution thread to search across all runs
+    const thread = await analyzeExecutionThread(
+      this.stateManager.getState(),
+      this.config.phases,
+      undefined, // No checkpoint validation needed for search
+      undefined, // Use latest run
+      this.logger,
+    );
 
-    // Find all matching checkpoints (supporting partial SHA)
+    // Find all matching checkpoints across the thread
     const matches: Array<{
-      phase: PhaseExecution;
+      threadPhase: import("./execution-thread.js").ThreadPhase;
       checkpointType: string;
       fullSha: string;
+      phaseIndex: number;
     }> = [];
 
-    for (const phase of currentRun.phases) {
+    thread.phases.forEach((threadPhase, index) => {
+      const phase = threadPhase.phase;
+
       // Check workspace setup checkpoint
       if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
         if (phase.workspaceSetupCheckpoint.startsWith(sha)) {
           matches.push({
-            phase,
+            threadPhase,
             checkpointType: "workspace-setup",
             fullSha: phase.workspaceSetupCheckpoint,
+            phaseIndex: index,
           });
         }
       }
@@ -2200,9 +2199,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       if (phase.status === "completed" && phase.completionCheckpoint) {
         if (phase.completionCheckpoint.startsWith(sha)) {
           matches.push({
-            phase,
+            threadPhase,
             checkpointType: "completed",
             fullSha: phase.completionCheckpoint,
+            phaseIndex: index,
           });
         }
       }
@@ -2211,9 +2211,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
         if (phase.errorCheckpoint.startsWith(sha)) {
           matches.push({
-            phase,
+            threadPhase,
             checkpointType: "error",
             fullSha: phase.errorCheckpoint,
+            phaseIndex: index,
           });
         }
       }
@@ -2222,13 +2223,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
         if (phase.skipCheckpoint.startsWith(sha)) {
           matches.push({
-            phase,
+            threadPhase,
             checkpointType: "skipped",
             fullSha: phase.skipCheckpoint,
+            phaseIndex: index,
           });
         }
       }
-    }
+    });
 
     // Handle matches
     if (matches.length === 0) {
@@ -2237,7 +2239,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message: `Checkpoint ${sha} not found in current run`,
+          message: `Checkpoint ${sha} not found in execution history`,
           fatal: false,
         },
       } as ErrorEvent);
@@ -2248,9 +2250,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       // Ambiguous SHA - provide helpful error message
       const matchDetails = matches
         .map((m) => {
-          const phaseConfig = this.config.phases.find((p) => p.id === m.phase.phaseId);
-          const phaseName = phaseConfig?.name || m.phase.phaseId;
-          return `  - ${m.fullSha.substring(0, 7)}... (${phaseName} - ${m.checkpointType})`;
+          const phaseConfig = this.config.phases.find((p) => p.id === m.threadPhase.phase.phaseId);
+          const phaseName = phaseConfig?.name || m.threadPhase.phase.phaseId;
+          return `  - ${m.fullSha.substring(0, 7)}... (${phaseName} - ${
+            m.checkpointType
+          }) in run ${m.threadPhase.runId}`;
         })
         .join("\n");
 
@@ -2268,7 +2272,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Single match found - proceed with rollback
     const match = matches[0];
-    await this.executeRollback(match.phase, match.fullSha, match.checkpointType, autoRestart);
+    await this.executeRollback(
+      thread,
+      match.phaseIndex,
+      match.fullSha,
+      match.checkpointType,
+      autoRestart,
+    );
   }
 
   /**
@@ -2295,34 +2305,41 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const currentRun = this.stateManager.getCurrentRun();
-    if (!currentRun) {
+    // Build execution thread to search across all runs
+    const thread = await analyzeExecutionThread(
+      this.stateManager.getState(),
+      this.config.phases,
+      undefined, // No checkpoint validation needed for search
+      undefined, // Use latest run
+      this.logger,
+    );
+
+    // Find the phase in the thread
+    let targetThreadPhase: import("./execution-thread.js").ThreadPhase | null = null;
+    let targetPhaseIndex = -1;
+
+    for (let i = 0; i < thread.phases.length; i++) {
+      if (thread.phases[i].phase.phaseId === phaseId) {
+        targetThreadPhase = thread.phases[i];
+        targetPhaseIndex = i;
+        break;
+      }
+    }
+
+    if (!targetThreadPhase) {
       this.sendEvent({
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message: "No active run",
+          message: `Phase ${phaseId} not found in execution history`,
           fatal: false,
         },
       } as ErrorEvent);
       return;
     }
 
-    // Find the phase
-    const targetPhase = currentRun.phases.find((p) => p.phaseId === phaseId);
-    if (!targetPhase) {
-      this.sendEvent({
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: `Phase ${phaseId} not found in current run`,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
+    const targetPhase = targetThreadPhase.phase;
 
     // Resolve checkpoint type aliases
     let actualCheckpointType: "workspace-setup" | "completed" | "error" | "skipped" | undefined;
@@ -2424,7 +2441,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    await this.executeRollback(targetPhase, sha, actualCheckpointType, autoRestart);
+    await this.executeRollback(thread, targetPhaseIndex, sha, actualCheckpointType, autoRestart);
   }
 
   /**
@@ -2447,101 +2464,86 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const currentRun = this.stateManager.getCurrentRun();
-    if (!currentRun) {
+    // Build execution thread to search across all runs
+    const thread = await analyzeExecutionThread(
+      this.stateManager.getState(),
+      this.config.phases,
+      undefined, // No checkpoint validation needed for search
+      undefined, // Use latest run
+      this.logger,
+    );
+
+    // Find last completed phase in the thread
+    let lastCompletedIndex = -1;
+    for (let i = 0; i < thread.phases.length; i++) {
+      if (thread.phases[i].phase.status === "completed") {
+        lastCompletedIndex = i;
+        break;
+      }
+    }
+
+    if (lastCompletedIndex >= 0) {
+      const lastCompleted = thread.phases[lastCompletedIndex];
+      if (lastCompleted.phase.status === "completed") {
+        // Rollback to last successful phase
+        await this.executeRollback(
+          thread,
+          lastCompletedIndex,
+          lastCompleted.phase.completionCheckpoint,
+          "completed",
+          autoRestart,
+        );
+        return;
+      }
+    }
+
+    // No successful phases - find the first checkpoint in the thread
+    let firstCheckpointIndex = -1;
+    let firstCheckpointSha: string | null = null;
+    let firstCheckpointType: string | null = null;
+
+    for (let i = thread.phases.length - 1; i >= 0; i--) {
+      const threadPhase = thread.phases[i];
+      const phase = threadPhase.phase;
+
+      if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
+        firstCheckpointIndex = i;
+        firstCheckpointSha = phase.workspaceSetupCheckpoint;
+        firstCheckpointType = "workspace-setup";
+      } else if (phase.status === "completed" && phase.completionCheckpoint) {
+        firstCheckpointIndex = i;
+        firstCheckpointSha = phase.completionCheckpoint;
+        firstCheckpointType = "completed";
+      } else if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
+        firstCheckpointIndex = i;
+        firstCheckpointSha = phase.errorCheckpoint;
+        firstCheckpointType = "error";
+      } else if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
+        firstCheckpointIndex = i;
+        firstCheckpointSha = phase.skipCheckpoint;
+        firstCheckpointType = "skipped";
+      }
+    }
+
+    if (firstCheckpointIndex >= 0 && firstCheckpointSha && firstCheckpointType) {
+      this.logger.log("No successful phases found, rolling back to start");
+      await this.executeRollback(
+        thread,
+        firstCheckpointIndex,
+        firstCheckpointSha,
+        firstCheckpointType,
+        autoRestart,
+      );
+    } else {
       this.sendEvent({
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message: "No active run",
+          message: "No checkpoints found in execution history",
           fatal: false,
         },
       } as ErrorEvent);
-      return;
-    }
-
-    // Find last completed phase
-    let lastCompleted: PhaseExecution | null = null;
-    for (let i = currentRun.phases.length - 1; i >= 0; i--) {
-      if (currentRun.phases[i].status === "completed") {
-        lastCompleted = currentRun.phases[i];
-        break;
-      }
-    }
-
-    if (lastCompleted && lastCompleted.status === "completed") {
-      // Rollback to last successful phase
-      await this.executeRollback(
-        lastCompleted,
-        lastCompleted.completionCheckpoint,
-        "completed",
-        autoRestart,
-      );
-    } else {
-      // No successful phases - rollback to start
-      // Find the first checkpoint in the run
-      let firstCheckpoint: {
-        phase: PhaseExecution;
-        sha: string;
-        type: string;
-      } | null = null;
-
-      for (const phase of currentRun.phases) {
-        if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
-          firstCheckpoint = {
-            phase,
-            sha: phase.workspaceSetupCheckpoint,
-            type: "workspace-setup",
-          };
-          break;
-        }
-        // Check other checkpoint types if no workspace setup
-        if (phase.status === "completed" && phase.completionCheckpoint) {
-          firstCheckpoint = {
-            phase,
-            sha: phase.completionCheckpoint,
-            type: "completed",
-          };
-          break;
-        }
-        if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
-          firstCheckpoint = {
-            phase,
-            sha: phase.errorCheckpoint,
-            type: "error",
-          };
-          break;
-        }
-        if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
-          firstCheckpoint = {
-            phase,
-            sha: phase.skipCheckpoint,
-            type: "skipped",
-          };
-          break;
-        }
-      }
-
-      if (firstCheckpoint) {
-        this.logger.log("No successful phases found, rolling back to start");
-        await this.executeRollback(
-          firstCheckpoint.phase,
-          firstCheckpoint.sha,
-          firstCheckpoint.type,
-          autoRestart,
-        );
-      } else {
-        this.sendEvent({
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "error",
-          data: {
-            message: "No checkpoints found in current run",
-            fatal: false,
-          },
-        } as ErrorEvent);
-      }
     }
   }
 
@@ -2549,20 +2551,23 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    * Execute the actual rollback
    */
   private async executeRollback(
-    targetPhase: PhaseExecution,
+    thread: import("./execution-thread.js").ExecutionThread,
+    targetPhaseIndex: number,
     sha: string,
     checkpointType: string,
     autoRestart: boolean,
   ): Promise<void> {
-    const currentRun = this.stateManager.getCurrentRun();
-    if (!currentRun) throw new Error("No active run");
+    const targetThreadPhase = thread.phases[targetPhaseIndex];
+    if (!targetThreadPhase) {
+      throw new Error(`Invalid target phase index: ${targetPhaseIndex}`);
+    }
 
-    const phaseConfig = this.config.phases.find((p) => p.id === targetPhase.phaseId);
-    const phaseName = phaseConfig?.name || targetPhase.phaseId;
+    const phaseConfig = this.config.phases.find((p) => p.id === targetThreadPhase.phase.phaseId);
+    const phaseName = phaseConfig?.name || targetThreadPhase.phase.phaseId;
 
     this.logger.log(
       `Starting phase-by-phase rollback to ${checkpointType} checkpoint ${sha} ` +
-        `in phase ${targetPhase.phaseId} (${phaseName})`,
+        `in phase ${targetThreadPhase.phase.phaseId} (${phaseName})`,
     );
 
     // Set the rollback flag
@@ -2571,8 +2576,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     try {
       // Execute the new phase-by-phase rollback
       await this.executePhaseByPhaseRollback(
-        currentRun,
-        targetPhase,
+        thread,
+        targetPhaseIndex,
         sha,
         checkpointType,
         phaseName,
@@ -2588,8 +2593,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    * Execute phase-by-phase rollback with workspace cleanup
    */
   private async executePhaseByPhaseRollback(
-    currentRun: import("./state-types.js").Run,
-    targetPhase: PhaseExecution,
+    thread: import("./execution-thread.js").ExecutionThread,
+    targetPhaseIndex: number,
     targetSha: string,
     checkpointType: string,
     targetPhaseName: string,
@@ -2598,30 +2603,38 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     // 1. Clean up current phase state
     this.cleanupCurrentPhase();
 
-    // 2. Find phases to process
-    const phasesToProcess = this.getPhasesToRollback(currentRun, targetPhase);
+    // 2. Get target phase and phases to process from thread
+    const targetThreadPhase = thread.phases[targetPhaseIndex];
+    if (!targetThreadPhase) {
+      throw new Error(`Invalid target phase index: ${targetPhaseIndex}`);
+    }
+
+    // Get all phases before target (they're already in reverse order)
+    const phasesToProcess = thread.phases.slice(0, targetPhaseIndex);
 
     // 3. Emit rollback started event
+    const fromRun = thread.phases[0]?.runId || targetThreadPhase.runId;
+    const fromPhase = thread.phases[0]?.phase.phaseId || targetThreadPhase.phase.phaseId;
+
     this.sendEvent({
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "rollback.started",
       data: {
-        fromRun: currentRun.runId,
-        fromPhase: phasesToProcess[0]?.phaseId || targetPhase.phaseId,
-        toPhase: targetPhase.phaseId,
+        fromRun,
+        fromPhase,
+        toPhase: targetThreadPhase.phase.phaseId,
         toCheckpoint: targetSha,
         checkpointType,
-        phasesToProcess: phasesToProcess.map((p) => p.phaseId),
+        phasesToProcess: phasesToProcess.map((tp) => tp.phase.phaseId),
       },
     } as import("./types.js").RollbackStartedEvent);
 
-    // 4. Process each phase in reverse order
+    // 4. Process each phase (they're already in reverse order)
     let currentStep = 0;
     const totalSteps = phasesToProcess.length + 1; // +1 for final checkpoint
 
-    for (let i = phasesToProcess.length - 1; i >= 0; i--) {
-      const phase = phasesToProcess[i];
+    for (const threadPhase of phasesToProcess) {
       currentStep++;
 
       // Emit progress
@@ -2632,37 +2645,34 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         data: {
           currentStep,
           totalSteps,
-          message: `Rolling back through ${phase.phaseId}`,
+          message: `Rolling back through ${threadPhase.phase.phaseId}`,
         },
       } as import("./types.js").RollbackProgressEvent);
 
       // Get the last checkpoint for this phase
-      const checkpoint = this.getLastCheckpointForPhase(phase);
+      const checkpoint = this.getLastCheckpointForPhase(threadPhase.phase);
       if (checkpoint && this.checkpointGit) {
         // Reset to this phase's checkpoint
         await this.checkpointGit.resetToCheckpoint(checkpoint.sha);
 
         // Emit checkpoint event
-        const phaseConfig = this.config.phases.find((p) => p.id === phase.phaseId);
+        const phaseConfig = this.config.phases.find((p) => p.id === threadPhase.phase.phaseId);
         this.sendEvent({
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "rollback.phaseCheckpoint",
           data: {
-            phaseId: phase.phaseId,
-            phaseName: phaseConfig?.name || phase.phaseId,
+            phaseId: threadPhase.phase.phaseId,
+            phaseName: phaseConfig?.name || threadPhase.phase.phaseId,
             checkpoint: checkpoint.sha,
             checkpointType: checkpoint.type,
-            message: `Reset to ${phase.phaseId} ${checkpoint.type} checkpoint`,
+            message: `Reset to ${threadPhase.phase.phaseId} ${checkpoint.type} checkpoint`,
           },
         } as import("./types.js").RollbackPhaseCheckpointEvent);
       }
 
-      // Clean up workspace directories from the NEXT phase
-      if (i < phasesToProcess.length - 1) {
-        const nextPhase = phasesToProcess[i + 1];
-        await this.cleanupPhaseWorkspaceDirectories(nextPhase);
-      }
+      // Clean up workspace directories from this phase
+      await this.cleanupPhaseWorkspaceDirectories(threadPhase.phase);
     }
 
     // 5. Final reset to target checkpoint
@@ -2687,30 +2697,34 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       timestamp: new Date().toISOString(),
       type: "rollback.phaseCheckpoint",
       data: {
-        phaseId: targetPhase.phaseId,
+        phaseId: targetThreadPhase.phase.phaseId,
         phaseName: targetPhaseName,
         checkpoint: targetSha,
         checkpointType,
-        message: `Reset to target checkpoint ${targetPhase.phaseId} (${checkpointType})`,
+        message: `Reset to target checkpoint ${targetThreadPhase.phase.phaseId} (${checkpointType})`,
       },
     } as import("./types.js").RollbackPhaseCheckpointEvent);
 
     // 6. Complete current run
-    this.stateManager.transition({
-      type: "RunCompleted",
-      data: { runId: currentRun.runId },
-    });
+    const currentRun = this.stateManager.getCurrentRun();
+    if (currentRun) {
+      this.stateManager.transition({
+        type: "RunCompleted",
+        data: { runId: currentRun.runId },
+      });
+    }
 
     // 7. Wait for state transition
     await this.stateManager.waitForPendingTransitions();
 
     // 8. Start new continuation run
-    const afterPhase = checkpointType === "workspace-setup" ? null : targetPhase.phaseId;
+    const afterPhase =
+      checkpointType === "workspace-setup" ? null : targetThreadPhase.phase.phaseId;
 
     await this.startNewRun({
       type: "continuation",
       source: {
-        runId: currentRun.runId,
+        runId: targetThreadPhase.runId,
         afterPhase: afterPhase ? PhaseId(afterPhase) : null,
         checkpointSha: targetSha,
       },
@@ -2718,10 +2732,12 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     });
 
     // 9. Restore checkpoint patterns
-    const targetPhaseIndex = this.config.phases.findIndex((p) => p.id === targetPhase.phaseId);
-    if (targetPhaseIndex >= 0) {
+    const targetPhaseConfigIndex = this.config.phases.findIndex(
+      (p) => p.id === targetThreadPhase.phase.phaseId,
+    );
+    if (targetPhaseConfigIndex >= 0) {
       const includeTarget = checkpointType === "workspace-setup";
-      const maxIndex = includeTarget ? targetPhaseIndex : targetPhaseIndex - 1;
+      const maxIndex = includeTarget ? targetPhaseConfigIndex : targetPhaseConfigIndex - 1;
 
       for (let i = 0; i <= maxIndex; i++) {
         const phase = this.config.phases[i];
@@ -2737,10 +2753,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       timestamp: new Date().toISOString(),
       type: "rollback.completed",
       data: {
-        fromRun: currentRun.runId,
+        fromRun,
         toRun: this.currentRunId || "",
         checkpoint: targetSha,
-        phaseId: targetPhase.phaseId,
+        phaseId: targetThreadPhase.phase.phaseId,
         phaseName: targetPhaseName,
         checkpointType,
         autoRestart,
@@ -2757,23 +2773,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         await this.startPhase(nextPhase);
       }
     }
-  }
-
-  /**
-   * Get phases that need to be rolled back through
-   */
-  private getPhasesToRollback(
-    currentRun: import("./state-types.js").Run,
-    targetPhase: PhaseExecution,
-  ): PhaseExecution[] {
-    // Find the target phase by comparing object identity
-    // Since we're passing the exact phase object from the run, we can use indexOf
-    const targetIndex = currentRun.phases.indexOf(targetPhase);
-
-    if (targetIndex === -1) return [];
-
-    // Get all phases after the target
-    return currentRun.phases.slice(targetIndex + 1);
   }
 
   /**
