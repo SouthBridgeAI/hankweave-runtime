@@ -1,0 +1,171 @@
+{
+  "runs": [
+    {
+      "runId": "1753110463686-yayna",
+      "runFolder": "/Users/hrishioa/Dropbox/Projects/Southbridge/tadpole/tests/test-area/rollback-improved/.langton/runs/1753110463686-yayna",
+      "gitBranch": "run-1753110463686-yayna",
+      "startingConditions": {
+        "type": "continuation",
+        "source": {
+          "runId": "1753110411854-28u0x",
+          "afterPhase": "phase-1",
+          "checkpointSha": "7765e00e81dde339c850a7be4761a631a15f2424"
+        },
+        "reason": "rollback"
+      },
+      "phases": [
+        {
+          "phaseId": "phase-2",
+          "startTime": "2025-07-21T15:07:43.690Z",
+          "status": "completed",
+          "claudePid": 27757,
+          "claudeLogPath": ".langton/runs/1753110463686-yayna/phase-phase-2-claude.log",
+          "previousSessionId": "7dc6f567-ed4d-42d9-ae0a-2cdfb084c14c",
+          "claudeSessionId": "bbd022da-9972-4280-a0be-3fbc6145f391",
+          "currentCost": 0.007292399999999999,
+          "currentTokens": {
+            "inputTokens": 11,
+            "outputTokens": 2,
+            "cacheCreationTokens": 0,
+            "cacheReadTokens": 24098
+          },
+          "assistantMessageCount": 2,
+          "endTime": "2025-07-21T15:07:52.266Z",
+          "exitCode": 0,
+          "finalCost": 0.007292399999999999,
+          "finalTokens": {
+            "inputTokens": 11,
+            "outputTokens": 2,
+            "cacheCreationTokens": 0,
+            "cacheReadTokens": 24098
+          },
+          "resultMessageReceived": true,
+          "completionCheckpoint": "62afd429e800d29ec897c9be2f3de12768c0de31"
+        },
+        {
+          "phaseId": "phase-3",
+          "startTime": "2025-07-21T15:07:54.281Z",
+          "status": "completed",
+          "workspaceSetupCheckpoint": "ebfcbda24dfd3ad9fe33bea50843389e6b0e4b8c",
+          "claudePid": 28604,
+          "claudeLogPath": ".langton/runs/1753110463686-yayna/phase-phase-3-claude.log",
+          "claudeSessionId": "87a26dff-1024-4692-b05c-f74ab65f154a",
+          "currentCost": 0.053676299999999996,
+          "currentTokens": {
+            "inputTokens": 55,
+            "outputTokens": 222,
+            "cacheCreationTokens": 3242,
+            "cacheReadTokens": 140148
+          },
+          "assistantMessageCount": 12,
+          "endTime": "2025-07-21T15:08:27.494Z",
+          "exitCode": 0,
+          "finalCost": 0.053676299999999996,
+          "finalTokens": {
+            "inputTokens": 55,
+            "outputTokens": 222,
+            "cacheCreationTokens": 3242,
+            "cacheReadTokens": 140148
+          },
+          "resultMessageReceived": true,
+          "completionCheckpoint": "d20e6dd563da2bb5514973dacefaa3cdf1750f11"
+        }
+      ],
+      "status": "failed",
+      "startTime": "2025-07-21T15:07:43.687Z",
+      "serverPid": 25144,
+      "endTime": "2025-07-21T15:08:59.179Z"
+    },
+    {
+      "runId": "1753110411854-28u0x",
+      "runFolder": "/Users/hrishioa/Dropbox/Projects/Southbridge/tadpole/tests/test-area/rollback-improved/.langton/runs/1753110411854-28u0x",
+      "gitBranch": "run-1753110411854-28u0x",
+      "startingConditions": {
+        "type": "fresh"
+      },
+      "phases": [
+        {
+          "phaseId": "phase-1",
+          "startTime": "2025-07-21T15:06:53.541Z",
+          "status": "completed",
+          "workspaceSetupCheckpoint": "a7fe1193332dfc671ff7a60f042bf645d2a86421",
+          "claudePid": 25168,
+          "claudeLogPath": ".langton/runs/1753110411854-28u0x/phase-phase-1-claude.log",
+          "claudeSessionId": "7dc6f567-ed4d-42d9-ae0a-2cdfb084c14c",
+          "currentCost": 0.01517925,
+          "currentTokens": {
+            "inputTokens": 20,
+            "outputTokens": 32,
+            "cacheCreationTokens": 1187,
+            "cacheReadTokens": 45238
+          },
+          "assistantMessageCount": 4,
+          "endTime": "2025-07-21T15:07:17.683Z",
+          "exitCode": 0,
+          "finalCost": 0.01517925,
+          "finalTokens": {
+            "inputTokens": 20,
+            "outputTokens": 32,
+            "cacheCreationTokens": 1187,
+            "cacheReadTokens": 45238
+          },
+          "resultMessageReceived": true,
+          "completionCheckpoint": "7765e00e81dde339c850a7be4761a631a15f2424"
+        },
+        {
+          "phaseId": "phase-2",
+          "startTime": "2025-07-21T15:07:18.696Z",
+          "status": "completed",
+          "claudePid": 26101,
+          "claudeLogPath": ".langton/runs/1753110411854-28u0x/phase-phase-2-claude.log",
+          "previousSessionId": "7dc6f567-ed4d-42d9-ae0a-2cdfb084c14c",
+          "claudeSessionId": "035c4954-43f7-428a-8285-18b6aeed0a00",
+          "currentCost": 0.016766549999999998,
+          "currentTokens": {
+            "inputTokens": 11,
+            "outputTokens": 149,
+            "cacheCreationTokens": 2107,
+            "cacheReadTokens": 21991
+          },
+          "assistantMessageCount": 2,
+          "endTime": "2025-07-21T15:07:28.366Z",
+          "exitCode": 0,
+          "finalCost": 0.016766549999999998,
+          "finalTokens": {
+            "inputTokens": 11,
+            "outputTokens": 149,
+            "cacheCreationTokens": 2107,
+            "cacheReadTokens": 21991
+          },
+          "resultMessageReceived": true,
+          "completionCheckpoint": "ff6994a70bc3f396f90eb5a9bfe58ab7e9c67180"
+        },
+        {
+          "phaseId": "phase-3",
+          "startTime": "2025-07-21T15:07:29.380Z",
+          "status": "skipped",
+          "endTime": "2025-07-21T15:07:40.031Z",
+          "skippedDuring": "running",
+          "partialCost": 0.0033524999999999996,
+          "partialTokens": {
+            "inputTokens": 4,
+            "outputTokens": 3,
+            "cacheCreationTokens": 0,
+            "cacheReadTokens": 10985
+          },
+          "workspaceSetupCheckpoint": "099715fb7a406b95b5b98a62d2853643e5c161f4",
+          "claudePid": 26927,
+          "claudeSessionId": "b2e3d882-e8a0-4ef9-946c-9b49305b536b",
+          "claudeLogPath": ".langton/runs/1753110411854-28u0x/phase-phase-3-claude.log",
+          "assistantMessageCount": 1,
+          "skipCheckpoint": "9157a41052d26b5ec236a2b964116ef46db93870"
+        }
+      ],
+      "status": "completed",
+      "startTime": "2025-07-21T15:06:51.855Z",
+      "serverPid": 25144,
+      "endTime": "2025-07-21T15:07:43.675Z"
+    }
+  ],
+  "currentRunId": null
+}
