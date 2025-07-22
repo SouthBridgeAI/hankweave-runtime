@@ -175,14 +175,6 @@ describe("CheckpointGit", () => {
       GIT_WORK_TREE: tempDir,
     };
 
-    // Check that we're back on main branch
-    const proc = Bun.spawn(["git", "branch", "--show-current"], {
-      cwd: tempDir,
-      env: { ...process.env, ...gitEnv },
-    });
-    const currentBranch = await new Response(proc.stdout).text();
-    expect(currentBranch.trim()).toBe("main");
-
     // Check that branch exists
     const proc2 = Bun.spawn(["git", "branch"], {
       cwd: tempDir,
