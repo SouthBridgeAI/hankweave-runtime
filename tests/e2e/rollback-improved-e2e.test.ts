@@ -670,7 +670,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
     id: generateId(),
     type: "rollback.toCheckpoint",
     data: {
-      checkpointSha: firstCheckpoint.sha.substring(0, 5),
+      checkpointSha: firstCheckpoint.sha,
       autoRestart: false,
     },
   } as ClientCommand);

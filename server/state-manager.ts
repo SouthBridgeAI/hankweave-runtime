@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PhaseId, RunId } from "./branded-types.js";
 import type { CheckpointGit } from "./checkpoint-git.js";
+import { analyzeExecutionThread, type ExecutionThread } from "./execution-thread.js";
 import { MetadataValidationError, validateTransitionMetadata } from "./state-transition-guards.js";
 import type * as ST from "./state-types.js";
 import { getPhaseCost, isTerminalPhaseStatus, PhaseTransitions } from "./state-types.js";
@@ -324,27 +325,22 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
   /**
    * Get the next phase that should be executed based on current state.
-   * Uses getLatestPhase() to determine where we are in the workflow.
+   * Uses the execution thread to determine where we are in the workflow.
    *
    * @returns PhaseId of next phase to execute, or null if all phases are complete
    */
   async getNextPhaseToExecute(): Promise<PhaseId | null> {
-    // Get the latest phase info which now includes next phase planning
-    const latestPhase = await this.getLatestPhase();
+    // Use the execution thread for a cleaner implementation
+    const thread = await this.getExecutionThread();
 
-    if (!latestPhase) {
-      // No phases executed yet and no phase configs
-      this.logger.log(`[getNextPhaseToExecute] No latest phase found`, "debug");
-      return null;
-    }
-
-    // The enhanced getLatestPhase now returns the next phase to execute
     this.logger.log(
-      `[getNextPhaseToExecute] Latest phase determined next phase: ${latestPhase.nextPhaseId}`,
+      `[getNextPhaseToExecute] Execution thread determined next phase: ${
+        thread.nextPhaseId || "none"
+      }`,
       "debug",
     );
 
-    return latestPhase.nextPhaseId;
+    return thread.nextPhaseId || null;
   }
 
   getRun(runId: RunId): ST.Run | null {
@@ -661,6 +657,69 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
    */
   setCheckpointGit(checkpointGit: CheckpointGit): void {
     this.checkpointGit = checkpointGit;
+  }
+
+  /**
+   * Get the execution thread for the current state.
+   * This provides a unified view of phase execution across all runs.
+   *
+   * @param targetRunId - Optional run ID to start from (defaults to latest)
+   * @param includeCheckpointValidation - Whether to validate checkpoints against git
+   * @returns Complete execution thread with all metadata
+   */
+  async getExecutionThread(
+    targetRunId?: RunId,
+    includeCheckpointValidation = true,
+  ): Promise<ExecutionThread> {
+    // Get checkpoint data if requested and available
+    const checkpointData =
+      includeCheckpointValidation && this.checkpointGit?.isInitialized()
+        ? await this.getCheckpointDataMap()
+        : undefined;
+
+    return analyzeExecutionThread(
+      this.state,
+      this.phaseConfigs || [],
+      checkpointData,
+      targetRunId,
+      this.logger,
+    );
+  }
+
+  /**
+   * Helper to convert checkpoint array to map for execution thread
+   */
+  private async getCheckpointDataMap(): Promise<
+    Map<
+      string,
+      {
+        message: string;
+        timestamp: string;
+        branch: string;
+      }
+    >
+  > {
+    const checkpoints = await this.getAllCheckpoints();
+    if (!checkpoints) return new Map();
+
+    const map = new Map<
+      string,
+      {
+        message: string;
+        timestamp: string;
+        branch: string;
+      }
+    >();
+
+    for (const cp of checkpoints) {
+      map.set(cp.sha, {
+        message: cp.message,
+        timestamp: cp.timestamp,
+        branch: cp.branch,
+      });
+    }
+
+    return map;
   }
 
   /**

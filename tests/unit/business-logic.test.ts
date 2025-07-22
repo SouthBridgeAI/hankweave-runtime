@@ -146,21 +146,30 @@ describe("StateManager - getNextPhaseToExecute", () => {
   });
 
   test("handles continuation from specific phase", async () => {
-    // Run that continues from phase-1
-    const runId = RunId("test-run-5");
+    // Create a state with a previous run that has phase-1 completed
+    const previousRunId = RunId("previous-run");
+    const currentRunId = RunId("test-run-5");
+
     const state = new StateBuilder()
+      // First add the previous run with phase-1 completed
+      .withRun({ runId: previousRunId })
+      .withPhaseInRun(
+        previousRunId,
+        createCompletedPhase("phase-1", "session-1")
+      )
+      // Then add the continuation run
       .withRun({
-        runId,
+        runId: currentRunId,
         startingConditions: {
           type: "continuation",
           source: {
-            runId: RunId("previous-run"),
+            runId: previousRunId,
             afterPhase: PhaseId("phase-1"),
             checkpointSha: "abc123",
           },
         },
       })
-      .withCurrentRun(runId)
+      .withCurrentRun(currentRunId)
       .build();
 
     await fs.promises.writeFile(

@@ -18,6 +18,7 @@ import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { APITimeoutError, ErrorSeverity } from "./error-types.js";
+import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { StateManager } from "./state-manager.js";
 import { isTerminalPhaseStatus, type PhaseExecution, type PhaseStatus } from "./state-types.js";
@@ -821,7 +822,19 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     let previousSessionId: string | null = null;
 
     if (phase.continuationMode === "continue-previous") {
-      previousSessionId = this.getPreviousSessionId(phase.id);
+      // Build execution thread to find continuation session
+      const state = this.stateManager.getState();
+      const thread = await analyzeExecutionThread(
+        state,
+        this.config.phases,
+        undefined, // No checkpoint data needed for session lookup
+        undefined, // Use latest run
+        this.logger,
+      );
+
+      const sessionId = findContinuationSessionId(thread, phase.id, this.config.phases);
+      previousSessionId = sessionId;
+
       if (previousSessionId) {
         this.logger.log(
           `Phase ${phase.id} will continue from previous session: ${previousSessionId}`,
@@ -964,46 +977,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Start Claude process
     await this.startClaudeProcess(phase, previousSessionId);
-  }
-
-  private getPreviousSessionId(currentPhaseId: string): string | null {
-    const currentIndex = this.config.phases.findIndex((p) => p.id === currentPhaseId);
-    if (currentIndex <= 0) return null;
-
-    const previousPhaseId = this.config.phases[currentIndex - 1].id;
-
-    // First try to get the last successful phase
-    const lastSuccessful = this.stateManager.getLastSuccessfulPhase(PhaseId(previousPhaseId));
-
-    if (lastSuccessful?.phase.claudeSessionId) {
-      return lastSuccessful.phase.claudeSessionId;
-    }
-
-    // If no successful phase, check if the previous phase was skipped but has a session ID AND meaningful content
-    const currentRun = this.stateManager.getCurrentRun();
-    if (currentRun) {
-      // Find the most recent execution of the previous phase in the current run
-      const previousPhaseExecutions = currentRun.phases.filter(
-        (p) => p.phaseId === previousPhaseId,
-      );
-
-      if (previousPhaseExecutions.length > 0) {
-        const lastExecution = previousPhaseExecutions[previousPhaseExecutions.length - 1];
-
-        // If it was skipped but has a session ID and Claude generated output, we can use it
-        if (
-          lastExecution.status === "skipped" &&
-          "claudeSessionId" in lastExecution &&
-          lastExecution.claudeSessionId &&
-          "partialTokens" in lastExecution &&
-          lastExecution.partialTokens.outputTokens > 0
-        ) {
-          return lastExecution.claudeSessionId;
-        }
-      }
-    }
-
-    return null;
   }
 
   // ============================================================================
@@ -2171,7 +2144,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   /**
-   * Rollback to a specific checkpoint SHA
+   * Rollback to a specific checkpoint SHA (supports partial matching)
    */
   private async rollbackToCheckpoint(sha: string, autoRestart: boolean): Promise<void> {
     // Check if phase is running
@@ -2204,38 +2177,61 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    // Find the phase and checkpoint type for this SHA
-    let targetPhase: PhaseExecution | null = null;
-    let checkpointType: string | null = null;
+    // Find all matching checkpoints (supporting partial SHA)
+    const matches: Array<{
+      phase: PhaseExecution;
+      checkpointType: string;
+      fullSha: string;
+    }> = [];
 
     for (const phase of currentRun.phases) {
-      if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint === sha) {
-        targetPhase = phase;
-        checkpointType = "workspace-setup";
-        break;
+      // Check workspace setup checkpoint
+      if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
+        if (phase.workspaceSetupCheckpoint.startsWith(sha)) {
+          matches.push({
+            phase,
+            checkpointType: "workspace-setup",
+            fullSha: phase.workspaceSetupCheckpoint,
+          });
+        }
       }
-      if (phase.status === "completed" && phase.completionCheckpoint === sha) {
-        targetPhase = phase;
-        checkpointType = "completed";
-        break;
+
+      // Check completion checkpoint
+      if (phase.status === "completed" && phase.completionCheckpoint) {
+        if (phase.completionCheckpoint.startsWith(sha)) {
+          matches.push({
+            phase,
+            checkpointType: "completed",
+            fullSha: phase.completionCheckpoint,
+          });
+        }
       }
-      if (
-        phase.status === "failed" &&
-        "errorCheckpoint" in phase &&
-        phase.errorCheckpoint === sha
-      ) {
-        targetPhase = phase;
-        checkpointType = "error";
-        break;
+
+      // Check error checkpoint
+      if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
+        if (phase.errorCheckpoint.startsWith(sha)) {
+          matches.push({
+            phase,
+            checkpointType: "error",
+            fullSha: phase.errorCheckpoint,
+          });
+        }
       }
-      if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint === sha) {
-        targetPhase = phase;
-        checkpointType = "skipped";
-        break;
+
+      // Check skip checkpoint
+      if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
+        if (phase.skipCheckpoint.startsWith(sha)) {
+          matches.push({
+            phase,
+            checkpointType: "skipped",
+            fullSha: phase.skipCheckpoint,
+          });
+        }
       }
     }
 
-    if (!targetPhase || !checkpointType) {
+    // Handle matches
+    if (matches.length === 0) {
       this.sendEvent({
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
@@ -2248,7 +2244,31 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    await this.executeRollback(targetPhase, sha, checkpointType, autoRestart);
+    if (matches.length > 1) {
+      // Ambiguous SHA - provide helpful error message
+      const matchDetails = matches
+        .map((m) => {
+          const phaseConfig = this.config.phases.find((p) => p.id === m.phase.phaseId);
+          const phaseName = phaseConfig?.name || m.phase.phaseId;
+          return `  - ${m.fullSha.substring(0, 7)}... (${phaseName} - ${m.checkpointType})`;
+        })
+        .join("\n");
+
+      this.sendEvent({
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: `Ambiguous checkpoint SHA '${sha}'. Multiple checkpoints match:\n${matchDetails}\nPlease provide more characters to uniquely identify the checkpoint.`,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      return;
+    }
+
+    // Single match found - proceed with rollback
+    const match = matches[0];
+    await this.executeRollback(match.phase, match.fullSha, match.checkpointType, autoRestart);
   }
 
   /**
