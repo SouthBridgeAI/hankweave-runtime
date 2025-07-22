@@ -118,7 +118,10 @@ function parseLogForTesting(
 }
 
 describe("Real Claude Logs Validation", () => {
-  const testLogsBaseDir = path.join(import.meta.dir, "../test-claude-logs");
+  const testLogsBaseDir = path.join(
+    import.meta.dir,
+    "../test-data/claude-logs"
+  );
 
   // Auto-discover all .jsonl files in test-claude-logs directory
   function findAllLogFiles(dir: string): string[] {
