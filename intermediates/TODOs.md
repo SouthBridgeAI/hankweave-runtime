@@ -2,53 +2,52 @@
 
 ## TODOs - tasks to pick and solve
 
-## Additional
+### P1
 
-Writing new end to end tests. We want to create a new e2e test for:
-1. Crash server and restart. We want to intentional kill the server, restart, roll back the current phase’s work and continue the phase. If all goes well we should be able to finish executing all phases.
+1. Implement a resume function which will clean up the current phase and restart a run.
+2. Reloading prompt files on rollback and restart.
+3. Move phases to an array and phase configs can be an object
 
-2. When we do rollback and restart, can we reload the prompt files? Allows us to edit them which is one of the main reasons for rollback and restart.
-3. Should we move our packets or state or anything else to discriminated unions?
+### P2
+
+1. Universal system prompts
+2. Symlink in data and run in a separate folder
+3. Explainers - prompt calls that explain and stream active processes
+
+
+### P3 (much later)
+
+1. Interactive message sending
+2. Ability to be dropped into an agent after any phase
+3. Allow starting persistent commands (like servers) that are only cleaned up when server fully exits - with interactive prompts
+4. Add an ability to queue commands or something where the server can start up and shut down?
+5. Abstract out claude code
+6. Validators - phases concurrent or otherwise that provide feedback
+7. Dockerization
+8. Automated proxy
+9. Auto-server serving files
+
+
+
+### Cleanup stuff
+
+1. Consider discriminated unions for some types
+2. Rename things
+3. Bun isolated linker
+4. Add an interactive prompt to heay tests so they can't be autorun
 
 ## Bugs
 
 1. When we continue from a phase (or likely, have a pattern matching existing files) we read them as created new
-2. In the cli don't accept wrong params
-3. Explain config validation failures better
+2. Check why some of the qwen logs weren't being read properly
 
-## Minor
 
-1. Universal system prompt
-1. Add an interactive prompt to e2e tests (maybe a password?) so that Claude can't run it
-1. Add in API key on start
-1. Happy path test-notes isn't cleaned up?
-1. Add documentation for the server events and commands
-1. Copy if not exists
-1. Test and figure out if we're checking for running out of context on a phase, and handling properly
-1. Bun isolated linker
-1. Use proper discriminated unions for types
+### Tests
 
-## Improvements
+1. Crash server and restart. We want to intentionally kill the server, restart, roll back the current phase’s work and continue the phase. If all goes well we should be able to finish executing all phases.
+2. Test and figure out if we're checking for running out of context on a phase, and handling properly
+3. Be able to replay existing logs
 
-1. Implement a scaffold to replay existing claude logs for tests
-2. Allow starting persistent commands (like servers) that are only cleaned up when server fully exits - with interactive prompts
-3. Add proper error types to events
-4. Add an ability to queue commands or something where the server can start up and shut down?
-5. Passing in keys
-
-## Major features
-
-1. Symlink in the data folder and create a new folder for our run? Maybe id the run itself so that we maintain the problems?
-1. Rollback functionality to a particular checkpoint (IN PROGRESS 2)
-1. Restart a phase (IN PROGRESS 3)
-1. Resume functionality (IN PROGRESS 4)
-1. Explainers - prompt calls that explain and stream active processes
-1. Accept real-time prompts using input-stream json from claude
-1. Abstract out claude code
-1. Validators - phases concurrent or otherwise that provide feedback
-1. Dockerization
-1. Automated proxy
-1. Auto-server serving files
 
 ## Applications
 
