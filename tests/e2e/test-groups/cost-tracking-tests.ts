@@ -69,7 +69,7 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     }
 
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(runFolder, `phase-${phaseId}-claude.log`);
+      const logPath = path.join(runFolder, `${phaseId}-claude.log`); // Corrected path
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);
@@ -97,7 +97,7 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
       }
     }
 
-    expect(wsReportedCost).toBeCloseTo(logTotalCost, 1);
+    expect(wsReportedCost).toBeCloseTo(logTotalCost, 4); // Increased precision
   });
 
   test("individual phase costs match", () => {
@@ -115,7 +115,7 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
 
     // Calculate from logs using result messages
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(runFolder, `phase-${phaseId}-claude.log`);
+      const logPath = path.join(runFolder, `${phaseId}-claude.log`); // Corrected path
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);
@@ -132,9 +132,9 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
     for (const event of phaseCompletedEvents) {
       const completedEvent = event as PhaseCompletedEvent;
-      if (completedEvent.data?.success) {
-        const logCost = phaseLogCosts[completedEvent.data?.phaseId || ""] || 0;
-        expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 1);
+      if (completedEvent.data?.success && completedEvent.data?.phaseId) {
+        const logCost = phaseLogCosts[completedEvent.data.phaseId] || 0;
+        expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 4); // Increased precision
       }
     }
   });

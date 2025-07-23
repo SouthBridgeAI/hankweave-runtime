@@ -794,6 +794,25 @@ export type StateTransition =
       data: {
         sha: string;
       };
+    }
+
+  /**
+   * Phase final cost set from Claude's result message.
+   * This ensures the authoritative cost from Claude's result message
+   * is stored before the phase completes.
+   *
+   * Triggered by: Claude result message with final cost
+   * State changes:
+   * - Updates currentCost and currentTokens in running phase
+   */
+  | {
+      type: "PhaseFinalCostSet";
+      data: {
+        runId: RunId;
+        phaseId: PhaseId;
+        finalCost: number;
+        finalTokens: TokenUsage;
+      };
     };
 
 // ============================================================================

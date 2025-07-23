@@ -1,7 +1,8 @@
 import type { z } from "zod";
 import type { logMessageSchema } from "../types/claude-session-schema.js";
-import type { EventId, PhaseId, SessionId } from "./branded-types.js";
+import type { EventId, PhaseId } from "./branded-types.js";
 import type { ErrorSeverity } from "./error-types.js";
+import type { PhaseExecution } from "./state-types.js";
 
 // ============================================================================
 // Model Types
@@ -254,52 +255,6 @@ export interface TokenUsage {
  * Runtime state of an active phase - discriminated union based on execution status.
  * Makes impossible states unrepresentable (e.g., having sessionId without being running).
  */
-export type PhaseState =
-  | {
-      /** Phase is initializing - Claude process started but no session ID yet */
-      status: "initializing";
-      /** The phase configuration being executed */
-      phase: PhaseConfig;
-      /** Previous claude session ID if continuing from another phase */
-      previousSessionId: SessionId | undefined;
-      /** When this phase started */
-      startTime: Date;
-    }
-  | {
-      /** Phase is running - Claude has sent init message with session ID */
-      status: "running";
-      /** The phase configuration being executed */
-      phase: PhaseConfig;
-      /** Claude session ID for this execution (always present when running) */
-      sessionId: SessionId;
-      /** Previous claude session ID if continuing from another phase */
-      previousSessionId: SessionId | undefined;
-      /** When this phase started */
-      startTime: Date;
-      /** Accumulated cost for this phase in dollars */
-      phaseCost: number;
-      /** Token usage breakdown for this phase */
-      phaseTokens: TokenUsage;
-    };
-
-/**
- * Record of a phase that has finished execution.
- * Used for state persistence and cost tracking.
- */
-export interface CompletedPhase {
-  /** ID of the phase that was completed */
-  phaseId: PhaseId;
-  /** Claude session ID used */
-  sessionId: SessionId;
-  /** Whether the phase completed successfully */
-  success: boolean;
-  /** Total cost in dollars */
-  cost: number;
-  /** Execution time in milliseconds */
-  duration: number;
-  /** When the phase completed */
-  completedAt: Date;
-}
 
 /**
  * Represents a file or directory in the watched file tree.
@@ -370,9 +325,9 @@ export interface StateSnapshotEvent extends ServerEvent {
   type: "state.snapshot";
   data: {
     /** Currently executing phase, undefined if idle */
-    currentPhase: PhaseState | undefined;
-    /** List of all completed phases in this session */
-    completedPhases: CompletedPhase[];
+    currentPhase: PhaseExecution | undefined;
+    /** List of all terminal phases (completed, failed, skipped) in this session */
+    completedPhases: PhaseExecution[];
     /** Current file tree structure (if watching files) */
     fileTree: FileNode[];
     /** Total accumulated cost across all phases in dollars */

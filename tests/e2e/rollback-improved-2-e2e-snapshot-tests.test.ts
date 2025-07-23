@@ -677,19 +677,10 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
     test("3.4 Log File Integrity: All phases have corresponding log files", () => {
       for (const snapshot of snapshots.values()) {
-        console.log(`\n=== Checking log files for ${snapshot.name} ===`);
-
         for (const run of snapshot.state.runs) {
-          console.log(`\nRun ${run.runId}:`);
-
           for (const phase of run.phases) {
             if ("claudeLogPath" in phase && phase.claudeLogPath) {
               const logPath = path.join(snapshot.directory, phase.claudeLogPath);
-
-              console.log(`  Phase ${phase.phaseId} (${phase.status}):`);
-              console.log(`    Log path in state: ${phase.claudeLogPath}`);
-              console.log(`    Full path: ${logPath}`);
-              console.log(`    Exists: ${fs.existsSync(logPath)}`);
 
               // Log files MUST exist for phases that reached running state
               if (
@@ -704,7 +695,6 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
                   const runDir = path.dirname(logPath);
                   const oldPattern = path.join(runDir, `phase-${phase.phaseId}-claude.log`);
                   if (fs.existsSync(oldPattern)) {
-                    console.log(`    Found with old pattern: ${oldPattern}`);
                     actualLogPath = oldPattern;
                   } else {
                     // List actual files in the run directory for debugging
@@ -723,7 +713,6 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
                 // If log file exists, verify it's not empty
                 const stats = fs.statSync(actualLogPath);
-                console.log(`    Size: ${stats.size} bytes`);
                 expect(stats.size).toBeGreaterThan(0);
               }
             }
@@ -757,11 +746,6 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
         if (rollbackStartedEvents.length === 0) {
           continue;
         }
-
-        // Acknowledge that a rollback occurred for logging purposes
-        console.log(
-          `Analyzing ${rollbackStartedEvents.length} rollback operation(s) in snapshot: ${snapshot.name}`,
-        );
 
         for (const startEvent of rollbackStartedEvents) {
           // Find the corresponding completion event for this specific rollback
@@ -929,11 +913,8 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
   // --- Priority 7: Additional Validation Tests ---
   describe("Priority 7: Additional Validation Tests", () => {
     test("7.1 Resource Cleanup: Lock files removed", () => {
-      console.log("\nVerifying resource cleanup in main test directory...");
       const mainLockFilePath = path.join(TEST_DIR, ".langton", "server.lock");
       const mainLockFileExists = fs.existsSync(mainLockFilePath);
-      console.log(`  Main test directory lock file path: ${mainLockFilePath}`);
-      console.log(`  Main test directory lock file exists: ${mainLockFileExists}`);
       expect(mainLockFileExists).toBe(false);
     });
 

@@ -62,25 +62,32 @@ export function runEarlyPhaseFailureTests(testState: TestState) {
 
     snapshots.forEach((snapshot) => {
       if (isStateSnapshotEvent(snapshot)) {
-        // Current phase might have null sessionId if Claude hasn't initialized yet
+        // Current phase might not have claudeSessionId if Claude hasn't initialized yet
         if (snapshot.data?.currentPhase) {
-          // sessionId can be null during execution
-          expect(snapshot.data.currentPhase).toHaveProperty("sessionId");
-          // But phaseExecutionId should always be present
-          expect(snapshot.data.currentPhase).toHaveProperty("phaseExecutionId");
+          // phaseId should always be present
+          expect(snapshot.data.currentPhase.phaseId).toBeDefined();
+          expect(snapshot.data.currentPhase.startTime).toBeDefined();
 
           if (snapshot.data.currentPhase.status === "initializing") {
             // If status is initializing, phase should still have other required fields
-            expect(snapshot.data.currentPhase.phase).toBeDefined();
+            expect(snapshot.data.currentPhase.phaseId).toBeDefined();
             expect(snapshot.data.currentPhase.startTime).toBeDefined();
-            // No sessionId or cost/token fields in initializing state
+            // No claudeSessionId or cost/token fields in initializing state
           }
         }
 
         // Completed phases should always have session IDs (they wouldn't be in completed list otherwise)
         snapshot.data?.completedPhases?.forEach((phase) => {
-          expect(phase.sessionId).toBeDefined();
-          expect(phase.sessionId).not.toBeNull();
+          if (phase.status === "completed") {
+            expect(phase.claudeSessionId).toBeDefined();
+            expect(phase.claudeSessionId).not.toBeNull();
+          } else if (phase.status === "failed" && phase.claudeSessionId) {
+            expect(phase.claudeSessionId).toBeDefined();
+            expect(phase.claudeSessionId).not.toBeNull();
+          } else if (phase.status === "skipped" && phase.claudeSessionId) {
+            expect(phase.claudeSessionId).toBeDefined();
+            expect(phase.claudeSessionId).not.toBeNull();
+          }
         });
       }
     });

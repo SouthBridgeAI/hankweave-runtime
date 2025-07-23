@@ -36,7 +36,7 @@ export function runRaceConditionTests(testState: TestState) {
         expect(inSnapshot).toBe(true);
 
         // Current phase should be null or different
-        expect(nextSnapshot.data?.currentPhase?.phase.id).not.toBe(phaseId);
+        expect(nextSnapshot.data?.currentPhase?.phaseId).not.toBe(phaseId);
       }
     });
   });
@@ -59,7 +59,7 @@ export function runRaceConditionTests(testState: TestState) {
         if (isStateSnapshotEvent(e)) {
           // Current phase should still be phase-1 until completion
           if (e.data?.currentPhase) {
-            expect(e.data.currentPhase.phase.id).toBe(PhaseId("phase-1"));
+            expect(e.data.currentPhase.phaseId).toBe(PhaseId("phase-1"));
           }
         }
       });
@@ -91,8 +91,20 @@ export function runRaceConditionTests(testState: TestState) {
     if (finalSnapshot?.data?.completedPhases) {
       const completedSessionIds = new Set<string>();
       finalSnapshot.data.completedPhases.forEach((phase) => {
-        expect(completedSessionIds.has(phase.sessionId)).toBe(false);
-        completedSessionIds.add(phase.sessionId);
+        if (phase.status === "completed" && phase.claudeSessionId) {
+          expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
+        } else if (phase.status === "failed" && phase.claudeSessionId) {
+          expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
+        } else if (phase.status === "skipped" && phase.claudeSessionId) {
+          expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
+        }
+        if (phase.status === "completed" && phase.claudeSessionId) {
+          completedSessionIds.add(phase.claudeSessionId);
+        } else if (phase.status === "failed" && phase.claudeSessionId) {
+          completedSessionIds.add(phase.claudeSessionId);
+        } else if (phase.status === "skipped" && phase.claudeSessionId) {
+          completedSessionIds.add(phase.claudeSessionId);
+        }
       });
 
       // Completed phases should also have unique session IDs

@@ -28,7 +28,6 @@ import type {
   AssistantActionEvent,
   CheckpointInfo,
   ClaudeLogMessage,
-  CompletedPhase,
   ErrorEvent,
   FailureReason,
   FileTreeUpdatedEvent,
@@ -349,9 +348,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     this.sendStateSnapshot();
 
-    // Check for incomplete phases
-    this.checkIncompletePhases();
-
     // Only auto-start if enabled
     if (this.config.autostart) {
       this.autoStartNextPhase();
@@ -496,21 +492,27 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private sendStateSnapshot(): void {
-    // Calculate costs
     const totalCost = this.stateManager.getTotalCost();
-
     const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
 
-    // Convert completed phases from state for backward compatibility
-    const completedPhases = this.getCompletedPhasesForSnapshot();
+    // === The Correct and Performant Logic ===
+    const state = this.stateManager.getState();
+    // 1. Get the current run, or fallback to the latest run if the server is shutting down.
+    const run = this.stateManager.getCurrentRun() || (state.runs.length > 0 ? state.runs[0] : null);
+
+    // 2. Get the terminal phases *from that specific run*.
+    const terminalPhases = run ? run.phases.filter((p) => isTerminalPhaseStatus(p.status)) : [];
+
+    // 3. Get the currently executing phase.
+    const currentPhase = this.stateManager.getCurrentlyRunningPhase();
 
     this.sendEvent({
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "state.snapshot",
       data: {
-        currentPhase: this.currentPhase,
-        completedPhases,
+        currentPhase,
+        completedPhases: terminalPhases, // Correctly scoped to the current run
         fileTree: [],
         totalCost,
         totalTime,
@@ -520,26 +522,15 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     } as StateSnapshotEvent);
   }
 
-  // Helper to maintain backward compatibility
-  private getCompletedPhasesForSnapshot(): CompletedPhase[] {
-    // Try current run first, then fallback to most recent run
+  // Get terminal phases for snapshot - returns all terminal phases (completed, failed, skipped)
+  private getTerminalPhasesForSnapshot(): PhaseExecution[] {
     const state = this.stateManager.getState();
+    // Fallback to the most recent run if currentRunId is null (e.g., during shutdown)
     const run = this.stateManager.getCurrentRun() || (state.runs.length > 0 ? state.runs[0] : null);
     if (!run) return [];
 
-    return run.phases
-      .filter((p) => p.status === "completed")
-      .map((p) => ({
-        phaseId: p.phaseId,
-        sessionId: "claudeSessionId" in p ? p.claudeSessionId : SessionId("unknown"),
-        success: true,
-        cost: "finalCost" in p ? p.finalCost : 0,
-        duration:
-          "endTime" in p && p.startTime
-            ? new Date(p.endTime).getTime() - new Date(p.startTime).getTime()
-            : 0,
-        completedAt: "endTime" in p ? new Date(p.endTime) : new Date(),
-      }));
+    // Return all phases that are in a terminal state (completed, failed, or skipped)
+    return run.phases.filter((p) => isTerminalPhaseStatus(p.status));
   }
 
   /**
@@ -1411,7 +1402,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       this.logger.log(`Phase ${phaseId} completed successfully`);
 
       // Update final token usage and cost from result message
-      if (msg.usage && this.currentPhase && this.currentPhase.status === "running") {
+      if (msg.usage && this.currentRunId) {
         const finalUsage: TokenUsage = {
           inputTokens: msg.usage.input_tokens || 0,
           outputTokens: msg.usage.output_tokens || 0,
@@ -1419,27 +1410,26 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           cacheReadTokens: msg.usage.cache_read_input_tokens || 0,
         };
 
-        // The result message contains the final cumulative cost for the entire phase
         const finalCost = msg.total_cost_usd || calculateCost(finalUsage, this.config.costsPerMTok);
 
-        // Log if there's a discrepancy between our accumulated cost and Claude's final cost
-        const accumulatedCost = this.currentPhase.phaseCost;
+        const accumulatedCost = this.currentPhase?.phaseCost || 0; // Still useful for logging
         if (Math.abs(accumulatedCost - finalCost) > 0.0001) {
           this.logger.log(
             `Phase ${phaseId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(4)}, ` +
-              `Final: $${finalCost.toFixed(4)} (using final)`,
+              `Final: $${finalCost.toFixed(4)} (using final from result message)`,
           );
         }
 
-        // Use Claude's final cost as the authoritative value
-        this.currentPhase.phaseTokens = finalUsage;
-        this.currentPhase.phaseCost = finalCost;
-
-        this.logger.log(
-          `Phase ${phaseId} final cost from result: $${finalCost.toFixed(4)} ` +
-            `(${finalUsage.inputTokens} in, ${finalUsage.outputTokens} out, ` +
-            `${finalUsage.cacheCreationTokens} cache create, ${finalUsage.cacheReadTokens} cache read)`,
-        );
+        // Fire a state transition with the authoritative final cost.
+        this.stateManager.transition({
+          type: "PhaseFinalCostSet",
+          data: {
+            runId: this.currentRunId,
+            phaseId: PhaseId(phaseId),
+            finalCost: finalCost,
+            finalTokens: finalUsage,
+          },
+        });
 
         // Send a final token usage event with the correct values
         this.sendEvent({
@@ -1595,11 +1585,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as PhaseCompletedEvent);
 
-    // Clean up - now happens after state is persisted
-    this.cleanupCurrentPhase();
-
     // Send state snapshot
     this.sendStateSnapshot();
+
+    // Clean up - now happens after state is persisted
+    this.cleanupCurrentPhase();
 
     // Handle next steps
     if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
@@ -1804,34 +1794,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   // Phase Status & Control
   // ============================================================================
 
-  private async checkIncompletePhases(): Promise<void> {
-    let _nextPhaseIndex = 0;
-
-    const completedPhases = this.getCompletedPhasesForSnapshot();
-    if (completedPhases.length > 0) {
-      const lastCompleted = completedPhases[completedPhases.length - 1];
-      const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
-
-      if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
-        _nextPhaseIndex = lastIndex + 1;
-      } else if (lastIndex === this.config.phases.length - 1) {
-        this.logger.log("All phases have been completed");
-        this.sendEvent({
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "info",
-          data: {
-            message: "All phases have been completed. Use phase.redo to re-run the last phase.",
-          },
-        } as InfoEvent);
-        return;
-      }
-    }
-
-    // Skip checking for incomplete phases - this is now handled by state
-    // The state system tracks which phases completed vs failed
-  }
-
   /**
    * Automatically start the next available phase if none is running.
    * Called on connection and after phase completion.
@@ -1914,8 +1876,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const completedPhases = this.getCompletedPhasesForSnapshot();
-    const lastCompleted = completedPhases[completedPhases.length - 1];
+    const terminalPhases = this.getTerminalPhasesForSnapshot();
+    const lastCompleted = terminalPhases.filter((p) => p.status === "completed")[
+      terminalPhases.length - 1
+    ];
     if (!lastCompleted) {
       if (this.config.phases.length > 0) {
         await this.startPhase(this.config.phases[0].id);
@@ -1963,10 +1927,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const completedPhases = this.getCompletedPhasesForSnapshot();
-    const lastPhase = completedPhases[completedPhases.length - 1];
-    if (lastPhase) {
-      await this.startPhase(lastPhase.phaseId);
+    const terminalPhases = this.getTerminalPhasesForSnapshot();
+    const lastCompletedPhase = terminalPhases.filter((p) => p.status === "completed").slice(-1)[0];
+    if (lastCompletedPhase) {
+      await this.startPhase(lastCompletedPhase.phaseId);
     }
   }
 
@@ -2969,6 +2933,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     // Initialize checkpoint git
     this.checkpointGit = new CheckpointGit(this.config.projectPath, this.logger);
     await this.checkpointGit.initialize();
+
+    // Provide checkpoint git to state manager for git operations
+    this.stateManager.setCheckpointGit(this.checkpointGit);
 
     this.logger.log("Checkpoint system initialized");
   }

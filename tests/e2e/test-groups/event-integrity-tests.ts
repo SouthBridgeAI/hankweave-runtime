@@ -109,16 +109,23 @@ export function runEventIntegrityTests(testState: TestState) {
     if (finalSnapshot?.data?.completedPhases) {
       // Completed phases should only have essential data
       finalSnapshot.data.completedPhases.forEach((phase) => {
+        // Check for new properties
         expect(phase).toHaveProperty("phaseId");
-        expect(phase).toHaveProperty("sessionId");
-        expect(phase).toHaveProperty("success");
-        expect(phase).toHaveProperty("cost");
-        expect(phase).toHaveProperty("duration");
-        expect(phase).toHaveProperty("completedAt");
+
+        expect(phase).toHaveProperty("claudeSessionId");
+
+        expect(phase).toHaveProperty("status");
+        expect(phase.status).toBe("completed"); // Also check the value
+
+        // Add checks for other important final properties
+        expect(phase).toHaveProperty("endTime");
+        expect(phase).toHaveProperty("finalCost");
+        expect(phase).toHaveProperty("completionCheckpoint");
 
         // Should not have large data structures
         const phaseStr = JSON.stringify(phase);
-        expect(phaseStr.length).toBeLessThan(1000); // Reasonable size
+        // The object is richer, so we increase the size limit slightly.
+        expect(phaseStr.length).toBeLessThan(2000);
       });
     }
   });

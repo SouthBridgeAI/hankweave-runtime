@@ -34,7 +34,15 @@ export function runStateConsistencyTests(testState: TestState) {
       const snapshot = event as StateSnapshotEvent;
       snapshot.data?.completedPhases?.forEach((phase) => {
         if (!sessionIdMap.has(phase.phaseId)) sessionIdMap.set(phase.phaseId, new Set());
-        sessionIdMap.get(phase.phaseId)?.add(phase.sessionId);
+        if (phase.status === "completed" && phase.claudeSessionId) {
+          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
+        } else if (phase.status === "failed" && phase.claudeSessionId) {
+          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
+        } else if (phase.status === "skipped" && phase.claudeSessionId) {
+          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
+        } else if (phase.status === "running" && phase.claudeSessionId) {
+          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
+        }
       });
     });
 

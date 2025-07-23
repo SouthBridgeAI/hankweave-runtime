@@ -180,7 +180,11 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
   // Cost cache management
   private updateCostCache(event: ST.StateTransition): void {
-    if (event.type === "CostsUpdated") {
+    if (
+      event.type === "CostsUpdated" ||
+      event.type === "CostsIncremented" ||
+      event.type === "PhaseFinalCostSet"
+    ) {
       // Just rebuild the cache from scratch to ensure accuracy
       this.rebuildCostCache();
     } else if (event.type === "RunStarted") {
@@ -1196,6 +1200,22 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
               phase.skipCheckpoint = event.data.sha;
             }
             break;
+        }
+        break;
+      }
+
+      case "PhaseFinalCostSet": {
+        const run = newState.runs.find((r) => r.runId === event.data.runId);
+        if (!run) break;
+
+        const phase = run.phases
+          .slice()
+          .reverse()
+          .find((p) => p.phaseId === event.data.phaseId && p.status === "running");
+
+        if (phase && phase.status === "running") {
+          phase.currentCost = event.data.finalCost;
+          phase.currentTokens = event.data.finalTokens;
         }
         break;
       }
