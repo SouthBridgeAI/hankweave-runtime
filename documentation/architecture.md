@@ -1,0 +1,81 @@
+# Langton Runner Architecture
+
+## System Overview
+
+Langton Runner is a sophisticated orchestration server designed to manage complex, multi-step AI workflows executed by the Claude AI. At its core, it is a stateful, WebSocket-based application that provides a structured environment for breaking down large tasks into discrete, manageable "phases". This architecture enables robust features such as persistent state, file tracking, cost monitoring, and a powerful git-based rollback system.
+
+### Core Design Principles
+
+The architecture is guided by several key principles to ensure robustness, maintainability, and extensibility:
+
+-   **Single Responsibility**: Each module and class is designed to have a clear and focused purpose, such as state management, process control, or configuration parsing. This separation of concerns makes the system easier to understand, test, and extend.
+-   **Type Safety**: The entire codebase is written in TypeScript and leverages advanced features like branded types (`PhaseId`, `RunId`) and discriminated unions (`PhaseExecution`) to enforce correctness at compile time, making impossible states unrepresentable.
+-   **Event-Driven Communication**: Internal modules communicate through a type-safe event emitter. This decouples components and allows for flexible, asynchronous interactions. For example, the log parser emits events that the main server listens for, without the two being tightly coupled.
+-   **State Immutability**: All state transitions are handled as pure functions that take the current state and an event, and return a new state object. This avoids side effects and makes state changes predictable and easy to reason about.
+-   **Fail-Safe Operation**: The system is designed to be resilient. It includes mechanisms for graceful degradation (e.g., disabling checkpointing if Git is unavailable) and recovery from crashes, primarily through atomic state writes and a robust lock file mechanism.
+-   **Append-Only History**: To ensure a complete and auditable trail, historical data (runs, phase executions, checkpoints) is never modified or deleted. New states are appended, preserving the full history of the workflow.
+
+## Module Organization
+
+The server is composed of several distinct, yet interconnected, modules.
+
+### Entry Points & User Interfaces
+
+-   **`server/index.ts`**: The main entry point of the application. It is responsible for parsing command-line arguments, validating the workflow configuration, instantiating the main server, and selecting the operational mode (WebSocket, TUI, etc.).
+-   **`server/basic-tui.ts`**: A self-contained Terminal User Interface. It acts as a WebSocket client that connects to the server, providing a real-time, color-coded display of events and handling keyboard input for interactive control.
+
+### The Core Orchestrator
+
+-   **`server/langton-server.ts`**: This is the central nervous system of the application. The `LangtonServer` class orchestrates all other components. Its key responsibilities include managing the WebSocket server and client connection, processing incoming commands, controlling the phase execution lifecycle, and routing events from various subsystems to the connected client.
+
+### State Management Subsystem
+
+-   **`server/state-manager.ts`**: This module implements a centralized, event-sourcing-inspired pattern for state management. It exposes a simple `transition()` method, which queues state change events. These events are processed sequentially, ensuring that all state modifications are validated, applied immutably, and persisted atomically to disk. It also features a cost cache for performance and crash recovery logic.
+-   **`server/state-types.ts`**: This file is crucial for the system's type safety. It defines the TypeScript interfaces for the entire state tree, including the `LangtonState`, `Run`, and the `PhaseExecution` discriminated union, which models the seven distinct states of a phase's lifecycle.
+-   **`server/execution-thread.ts`**: This module contains the logic for analyzing the execution history. Its primary export, `analyzeExecutionThread`, is a powerful function that traverses the potentially branching history of runs to construct a single, logical "thread" of execution, which is used to determine the next phase to run.
+
+### Process & Log Management
+
+-   **`server/claude-process-manager.ts`**: This class is responsible for the entire lifecycle of the Claude CLI subprocess. It handles spawning the process with the correct arguments and environment variables, creating and managing log streams, and ensuring the process is properly monitored and cleaned up.
+-   **`server/claude-log-parser.ts`**: A real-time parser for Claude's JSONL output. It reads new lines from the log file as they are written, validates them against a schema, and emits typed events for different message types (system, assistant, result), which the main server then processes.
+
+### Checkpoint & File System
+
+-   **`server/checkpoint-git.ts`**: This module manages all interactions with the "shadow" git repository. It handles repository initialization, creating run-specific branches, committing changes with structured metadata, and performing hard resets for rollbacks.
+-   **`server/file-resolver.ts`**: Provides a unified and consistent way to resolve file glob patterns while respecting `.gitignore` rules. This is used by both the file tracking and checkpointing systems to ensure they operate on the same set of files.
+
+## Data Flow and Interaction
+
+### A Typical Phase Execution Flow
+
+1.  **Command Reception**: A client sends a `phase.start` command over WebSocket. The `LangtonServer` receives it and calls its internal `startPhase` method.
+2.  **Phase Initialization**: `startPhase` orchestrates the setup, which includes running `workspaceSetup` commands, creating a `workspace-setup` checkpoint via `CheckpointGit`, and finally using `ClaudeProcessManager` to spawn the Claude CLI process.
+3.  **Log Processing**: As the Claude process runs, it writes JSONL logs to a file. The `ClaudeLogParser` tails this file, parses new lines, and emits events (e.g., for an assistant message).
+4.  **State Updates**: The `LangtonServer` listens for these parser events. Upon receiving one, it creates a corresponding `StateTransition` object (e.g., `CostsIncremented`) and sends it to the `StateManager`. The `StateManager` validates, applies, and persists the change.
+5.  **Client Notification**: The `LangtonServer` also transforms the parser event into a WebSocket protocol event (e.g., `assistant.action`) and sends it to the client.
+
+### The State Transition Flow
+
+The state transition process is designed to be robust and atomic:
+1.  A component calls `stateManager.transition({...})`. The transition is added to a queue.
+2.  The `StateManager` processes the queue sequentially. For each transition, it first validates that the change is legal (e.g., a phase cannot transition from `running` to `initializing`).
+3.  It then applies the transition by creating a deep clone of the current state and modifying it, ensuring immutability.
+4.  The new state is persisted to disk using an atomic write operation (write to temp, backup old, rename).
+5.  Finally, after the state is safely on disk, the `StateManager` emits a `stateChanged` event to notify other parts of the system.
+
+## Key Architectural Decisions
+
+### Shadow Git Repository
+
+Instead of interfering with the user's project git repository, the server maintains its own isolated repository in `.langton/checkpoints`. This provides several advantages:
+-   **No Interference**: It doesn't create commits or branches in the user's repository.
+-   **Complete History**: It can track files that might be in the user's `.gitignore` (e.g., build artifacts), providing a more complete snapshot of the workspace state.
+-   **Clean Slate**: It starts from an empty commit, providing a reliable baseline to diff against.
+
+### Fire-and-Forget State Transitions
+
+The `StateManager.transition()` method is asynchronous in effect but synchronous in invocation ("fire-and-forget"). This decouples the components that generate state changes from the persistence logic, simplifying the codebase. A queue ensures that all transitions are processed in the correct order, preserving causality.
+
+### The Execution Thread
+
+The concept of an Execution Thread is a solution to the complexity introduced by rollbacks. A simple linear history is not sufficient when a user can branch off from any point in the past. The thread algorithm reconstructs the *logical* sequence of events as the user perceives it, making it possible to correctly determine the "next" phase even in complex, non-linear histories.
