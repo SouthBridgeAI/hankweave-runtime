@@ -152,6 +152,9 @@ export interface PhaseConfig {
    * - Resolved using gitignore rules for consistency
    */
   trackedFiles?: string[];
+
+  /** Optional environment variables to set for the Claude process */
+  env?: Record<string, string>;
 }
 
 /**

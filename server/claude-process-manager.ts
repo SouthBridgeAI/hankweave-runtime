@@ -59,10 +59,27 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     const args = this.buildClaudeArgs(phase, previousSessionId);
 
     // Set up environment
-    const env = { ...process.env };
+    const env = { ...process.env }; // Start with server's environment
+
+    // Pass through TADPOLE_ prefixed variables from server environment
+    for (const key in process.env) {
+      if (key.startsWith("TADPOLE_")) {
+        const newKey = key.substring("TADPOLE_".length);
+        env[newKey] = process.env[key];
+        this.logger.log(`Passing through env var: ${newKey}`);
+      }
+    }
+
     if (this.anthropicBaseURL) {
       env.ANTHROPIC_BASE_URL = this.anthropicBaseURL;
       this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseURL}`);
+    }
+
+    // Add phase-specific environment variables from config
+    // These will override any existing variables with the same name
+    if (phase.env) {
+      this.logger.log("Applying phase-specific environment variables...");
+      Object.assign(env, phase.env);
     }
 
     // Log the exact command being run

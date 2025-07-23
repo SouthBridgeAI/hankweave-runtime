@@ -10,6 +10,25 @@ import type { PhaseConfig, ServerConfig } from "./types.js";
 // ============================================================================
 
 async function main() {
+  // Strict argument validation
+  const rawArgs = process.argv.slice(2);
+  const validPatterns = [
+    /^--basic$/, /^-b$/,
+    /^--validate$/, /^-v$/,
+    /^--cleanup$/,
+    /^-y$/,
+    /^--no-autostart$/,
+    /^--config=.+$/,
+    /^--anthropic-base-url=.+$/,
+    /^--port=\d+$/,
+    /^--help$/, /^-h$/,
+  ];
+  for (const arg of rawArgs) {
+    if (!validPatterns.some(pattern => pattern.test(arg))) {
+      console.error(`❌ Error: Unknown argument '${arg}'. Run with --help for available options.`);
+      process.exit(1);
+    }
+  }
   const args = process.argv.slice(2);
   const basicMode = args.includes("--basic") || args.includes("-b");
   const validateMode = args.includes("--validate") || args.includes("-v");
@@ -70,6 +89,31 @@ Examples:
         console.log(`  - Phases with file watching: ${validationResult.watchingPhaseCount}`);
         console.log(`  - Phases with checkpoints: ${validationResult.checkpointPhaseCount}`);
 
+        // Display environment variables
+        const hasSystemVars = Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
+        const hasPhaseVars = validationResult.environmentVariables.fromPhases.length > 0;
+
+        if (hasSystemVars || hasPhaseVars) {
+          console.log(`\n🔧 Environment Variables:`);
+
+          if (hasSystemVars) {
+            console.log(`\n  From System (TADPOLE_ prefixed):`);
+            for (const [key, value] of Object.entries(validationResult.environmentVariables.fromSystem)) {
+              console.log(`    - ${key}: ${value}`);
+            }
+          }
+
+          if (hasPhaseVars) {
+            console.log(`\n  From Phase Configurations:`);
+            for (const phaseEnv of validationResult.environmentVariables.fromPhases) {
+              console.log(`    Phase "${phaseEnv.phaseName}" (${phaseEnv.phaseId}):`);
+              for (const [key, value] of Object.entries(phaseEnv.variables)) {
+                console.log(`      - ${key}: ${value}`);
+              }
+            }
+          }
+        }
+
         if (validationResult.warnings.length > 0) {
           console.log(`\n⚠️  Warnings:`);
           for (const warning of validationResult.warnings) {
@@ -111,7 +155,18 @@ Examples:
     }
 
     // Normal server startup
-    const phases = loadPhaseConfig(configPath);
+    // Validate config on every startup, not just with --validate
+    const { phases, warnings } = await validatePhaseConfig(configPath, process.cwd());
+
+    // Log any non-fatal warnings
+    if (warnings.length > 0) {
+      console.log("\n⚠️  Configuration warnings:");
+      for (const warning of warnings) {
+        console.log(`  - ${warning}`);
+      }
+      console.log();
+    }
+
     const serverConfig: Partial<ServerConfig> & {
       projectPath: string;
       phases: PhaseConfig[];

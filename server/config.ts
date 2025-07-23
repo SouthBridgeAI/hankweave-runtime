@@ -58,7 +58,7 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
       const phaseName = phaseData?.name || "unnamed";
 
       if (phaseIndex !== undefined) {
-        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles.`;
+        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles, env.`;
       } else {
         errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
       }
@@ -128,6 +128,7 @@ const phaseConfigSchema = z
     workspaceSetup: z.array(workspaceSetupItemSchema).optional(),
     description: z.string().optional(),
     trackedFiles: z.array(z.string()).optional(),
+    env: z.record(z.string()).optional(),
   })
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
@@ -378,6 +379,7 @@ export function calculateCost(
 // ============================================================================
 
 export interface ValidationResult {
+  phases: PhaseConfig[];
   phaseCount: number;
   promptFileCount: number;
   systemPromptFileCount: number;
@@ -385,6 +387,14 @@ export interface ValidationResult {
   watchingPhaseCount: number;
   checkpointPhaseCount: number;
   warnings: string[];
+  environmentVariables: {
+    fromSystem: Record<string, string>;
+    fromPhases: Array<{
+      phaseId: string;
+      phaseName: string;
+      variables: Record<string, string>;
+    }>;
+  };
 }
 
 /**
@@ -408,6 +418,7 @@ export async function validatePhaseConfig(
   const phases = loadPhaseConfig(configPath);
 
   const result: ValidationResult = {
+    phases,
     phaseCount: phases.length,
     promptFileCount: 0,
     systemPromptFileCount: 0,
@@ -415,7 +426,19 @@ export async function validatePhaseConfig(
     watchingPhaseCount: 0,
     checkpointPhaseCount: 0,
     warnings: [],
+    environmentVariables: {
+      fromSystem: {},
+      fromPhases: [],
+    },
   };
+
+  // Collect TADPOLE_ prefixed environment variables from system
+  for (const key in process.env) {
+    if (key.startsWith("TADPOLE_")) {
+      const newKey = key.substring("TADPOLE_".length);
+      result.environmentVariables.fromSystem[newKey] = process.env[key] || "";
+    }
+  }
 
   // Additional validation checks
   const phaseIds = new Set<string>();
@@ -435,6 +458,15 @@ export async function validatePhaseConfig(
       result.warnings.push(`${phaseLabel}: Duplicate phase name "${phase.name}"`);
     }
     phaseNames.add(phase.name);
+
+    // Collect phase environment variables
+    if (phase.env && Object.keys(phase.env).length > 0) {
+      result.environmentVariables.fromPhases.push({
+        phaseId: phase.id,
+        phaseName: phase.name,
+        variables: phase.env,
+      });
+    }
 
     // Count prompt files
     if (phase.promptFile) {
