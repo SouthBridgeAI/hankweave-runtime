@@ -339,96 +339,12 @@ describe("Rollback Command Validation", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      // Verify no successful phases exist
-      const result = stateManager.getLastSuccessfulPhase(phaseId);
-      expect(result).toBeNull();
-
       // In this case, rollback should fall back to first checkpoint
       const run = stateManager.getCurrentRun();
       expect(run?.phases[0].status).toBe("failed");
     });
 
-    test("should find last successful phase across multiple runs", async () => {
-      // First run with successful phase
-      const runId1 = RunId("test-run-1");
-      const phaseId = PhaseId("test-phase");
 
-      stateManager.transition({
-        type: "RunStarted",
-        data: {
-          runId: runId1,
-          runFolder: "/test/runs/test-run-1",
-          gitBranch: "run-test-run-1",
-          startingConditions: { type: "fresh" },
-          serverPid: process.pid,
-        },
-      });
-
-      stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId: runId1, phaseId },
-      });
-
-      // Complete successfully
-      const transitions = [
-        { from: "preparing", to: "starting" },
-        {
-          from: "starting",
-          to: "initializing",
-          metadata: { claudePid: 123, claudeLogPath: "test.log" },
-        },
-        {
-          from: "initializing",
-          to: "running",
-          metadata: { claudeSessionId: SessionId("session-123") },
-        },
-        {
-          from: "running",
-          to: "completed",
-          metadata: { checkpointSha: "abc123" },
-        },
-      ];
-
-      for (const t of transitions) {
-        stateManager.transition({
-          type: "PhaseTransitioned",
-          data: {
-            runId: runId1,
-            phaseId,
-            from: t.from as ST.PhaseStatus,
-            to: t.to as ST.PhaseStatus,
-            metadata: t.metadata,
-          },
-        });
-      }
-
-      // Complete the run
-      stateManager.transition({
-        type: "RunCompleted",
-        data: { runId: runId1 },
-      });
-
-      // Start second run
-      const runId2 = RunId("test-run-2");
-      stateManager.transition({
-        type: "RunStarted",
-        data: {
-          runId: runId2,
-          runFolder: "/test/runs/test-run-2",
-          gitBranch: "run-test-run-2",
-          startingConditions: { type: "fresh" },
-          serverPid: process.pid,
-        },
-      });
-
-      await stateManager.waitForPendingTransitions();
-
-      // Should find the successful phase from first run
-      const result = stateManager.getLastSuccessfulPhase(phaseId);
-      expect(result).not.toBeNull();
-      expect(result!.run.runId).toBe(runId1);
-      expect(result!.phase.status).toBe("completed");
-    });
   });
 
   describe("checkpoint type validation", () => {

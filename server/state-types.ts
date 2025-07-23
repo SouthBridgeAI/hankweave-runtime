@@ -915,30 +915,6 @@ export interface StateManager {
    */
   getRun(runId: RunId): Run | null;
 
-  /**
-   * Find the last successful execution of a phase.
-   * Searches all runs in reverse chronological order.
-   *
-   * Used by: Continue functionality to find session ID
-   *
-   * @returns Run and phase, or null if never succeeded
-   */
-  getLastSuccessfulPhase(phaseId: PhaseId): {
-    run: Run;
-    phase: CompletedPhase; // Type narrowed to successful only
-  } | null;
-
-  /**
-   * Get all attempts at a specific phase across all runs.
-   * Useful for retry analysis, success rates.
-   *
-   * @returns Array of executions, newest first
-   */
-  getPhaseHistory(phaseId: PhaseId): Array<{
-    run: Run;
-    phase: PhaseExecution;
-  }>;
-
   // ===== Cost Queries =====
 
   /**

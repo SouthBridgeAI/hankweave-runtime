@@ -1,7 +1,7 @@
 // server/state-manager.ts
 import fs from "node:fs";
 import path from "node:path";
-import { PhaseId, RunId } from "./branded-types.js";
+import type { PhaseId, RunId } from "./branded-types.js";
 import type { CheckpointGit } from "./checkpoint-git.js";
 import { analyzeExecutionThread, type ExecutionThread } from "./execution-thread.js";
 import { MetadataValidationError, validateTransitionMetadata } from "./state-transition-guards.js";
@@ -334,7 +334,6 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
    * @returns PhaseId of next phase to execute, or null if all phases are complete
    */
   async getNextPhaseToExecute(): Promise<PhaseId | null> {
-    // Use the execution thread for a cleaner implementation
     const thread = await this.getExecutionThread();
 
     this.logger.log(
@@ -351,8 +350,10 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     return this.state.runs.find((r) => r.runId === runId) || null;
   }
 
-  getLastSuccessfulPhase(phaseId: PhaseId): { run: ST.Run; phase: ST.CompletedPhase } | null {
-    // Search all runs in reverse chronological order
+  async getLastSuccessfulPhase(
+    phaseId: PhaseId,
+  ): Promise<{ run: ST.Run; phase: ST.CompletedPhase } | null> {
+    // Search all runs in reverse chronological order (newest first)
     for (const run of this.state.runs) {
       for (const phase of run.phases) {
         if (phase.phaseId === phaseId && phase.status === "completed") {
@@ -363,9 +364,12 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     return null;
   }
 
-  getPhaseHistory(phaseId: PhaseId): Array<{ run: ST.Run; phase: ST.PhaseExecution }> {
+  async getPhaseHistory(
+    phaseId: PhaseId,
+  ): Promise<Array<{ run: ST.Run; phase: ST.PhaseExecution }>> {
     const history: Array<{ run: ST.Run; phase: ST.PhaseExecution }> = [];
 
+    // Search all runs in reverse chronological order (newest first)
     for (const run of this.state.runs) {
       for (const phase of run.phases) {
         if (phase.phaseId === phaseId) {
@@ -436,220 +440,6 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
   getRunById(runId: RunId): ST.Run | null {
     return this.state.runs.find((r) => r.runId === runId) || null;
-  }
-
-  /**
-   * Get the latest phase execution across all runs.
-   * This is the core function for determining "where we are" in the workflow.
-   *
-   * Algorithm:
-   * 1. First check for any running (non-terminal) phase - that's always the latest
-   * 2. If no running phase, find the most recent terminal phase that exists in git
-   * 3. Fallback to most recent phase if git is unavailable
-   * 4. Determine next phase to execute based on current position
-   *
-   * @returns Latest phase info with execution planning details, or null if no phases exist
-   */
-  async getLatestPhase(): Promise<ST.LatestPhaseInfo | null> {
-    // Step 1: Fast path - check for any running phase in current run
-    // A running phase is always the "latest" regardless of timestamps
-    const currentRun = this.getCurrentRun();
-    if (currentRun) {
-      // Search from end of phases array (most recent first)
-      const runningPhase = currentRun.phases
-        .slice()
-        .reverse()
-        .find((phase) => !isTerminalPhaseStatus(phase.status));
-
-      if (runningPhase) {
-        this.logger.log(
-          `[getLatestPhase] Found running phase: ${runningPhase.phaseId} (${runningPhase.status})`,
-          "debug",
-        );
-        // For running phases, we can't start a new phase yet
-        return {
-          phase: runningPhase,
-          runId: currentRun.runId,
-          status: runningPhase.status,
-          nextPhaseId: null,
-          continueInCurrentRun: true,
-        };
-      }
-    }
-
-    // Step 2: Check current run for continuation logic
-    if (currentRun && currentRun.startingConditions.type === "continuation") {
-      // Handle continuation run that hasn't started any phases yet
-      if (currentRun.phases.length === 0) {
-        const { afterPhase, checkpointSha } = currentRun.startingConditions.source;
-
-        // Determine next phase based on continuation point
-        const nextPhaseId = this.determineNextPhaseForContinuation(afterPhase, checkpointSha);
-
-        this.logger.log(
-          `[getLatestPhase] Continuation run with no phases. After phase: ${afterPhase}, next: ${nextPhaseId}`,
-          "debug",
-        );
-
-        // Log more details about the synthetic response
-        this.logger.log(
-          `[getLatestPhase] Creating synthetic latest phase info for continuation run:` +
-            `\n  - Run ID: ${currentRun.runId}` +
-            `\n  - Source run: ${currentRun.startingConditions.source.runId}` +
-            `\n  - After phase: ${afterPhase || "(from beginning)"}` +
-            `\n  - Checkpoint SHA: ${checkpointSha.substring(0, 7)}` +
-            `\n  - Next phase to execute: ${nextPhaseId || "(none - all complete)"}` +
-            `\n  - Continue in current run: true`,
-          "debug",
-        );
-
-        // Return a synthetic latest phase info based on continuation source
-        return {
-          phase: {
-            phaseId: afterPhase || PhaseId(""),
-            status: "completed",
-          } as ST.PhaseExecution,
-          runId: currentRun.runId,
-          status: "completed",
-          nextPhaseId,
-          continueInCurrentRun: true,
-        };
-      }
-    }
-
-    // Step 3: Get checkpoint validation set from git (if available)
-    let validCheckpoints: Set<string> | null = null;
-    if (this.checkpointGit?.isInitialized()) {
-      try {
-        validCheckpoints = await this.checkpointGit.getAllCheckpointShas();
-        this.logger.log(
-          `[getLatestPhase] Got ${validCheckpoints.size} valid checkpoints from git`,
-          "debug",
-        );
-      } catch (error) {
-        this.logger.log(`[getLatestPhase] Failed to get checkpoints from git: ${error}`, "info");
-      }
-    }
-
-    // Step 4: Get all terminal phases sorted by end time (latest first)
-    const terminalPhases = this.state.runs
-      .flatMap((run) =>
-        run.phases
-          .filter((phase) => isTerminalPhaseStatus(phase.status) && "endTime" in phase)
-          .map((phase) => ({
-            phase,
-            run,
-            runId: run.runId,
-            status: phase.status,
-            endTime: (phase as ST.CompletedPhase | ST.FailedPhase | ST.SkippedPhase).endTime,
-            checkpoints: (() => {
-              // Get all checkpoint SHAs for this phase in priority order
-              const checkpoints: string[] = [];
-
-              // Completed checkpoint has highest priority
-              if (phase.status === "completed" && phase.completionCheckpoint) {
-                checkpoints.push(phase.completionCheckpoint);
-              }
-
-              // Error checkpoint
-              if (
-                phase.status === "failed" &&
-                "errorCheckpoint" in phase &&
-                phase.errorCheckpoint
-              ) {
-                checkpoints.push(phase.errorCheckpoint);
-              }
-
-              // Skip checkpoint
-              if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
-                checkpoints.push(phase.skipCheckpoint);
-              }
-
-              // Workspace setup checkpoint
-              if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
-                checkpoints.push(phase.workspaceSetupCheckpoint);
-              }
-
-              return checkpoints;
-            })(),
-          })),
-      )
-      .sort((a, b) => {
-        // Sort by endTime descending (latest first)
-        const timeDiff = new Date(b.endTime).getTime() - new Date(a.endTime).getTime();
-        if (timeDiff !== 0) return timeDiff;
-
-        // Tiebreaker: Use phase ID comparison (later phases come after earlier ones)
-        return b.phase.phaseId.localeCompare(a.phase.phaseId);
-      });
-
-    if (terminalPhases.length === 0) {
-      this.logger.log("[getLatestPhase] No terminal phases found", "debug");
-      // No phases executed yet - start from the beginning
-      const firstPhaseId = this.phaseConfigs?.[0]?.id ? PhaseId(this.phaseConfigs[0].id) : null;
-      return firstPhaseId
-        ? {
-            phase: {
-              phaseId: PhaseId(""),
-              status: "completed",
-            } as ST.PhaseExecution,
-            runId: currentRun?.runId || RunId(""),
-            status: "completed",
-            nextPhaseId: firstPhaseId,
-            continueInCurrentRun: !!currentRun,
-          }
-        : null;
-    }
-
-    // Step 5: Find the latest phase that exists in git (or just return latest if no git)
-    let latestValidPhase: (typeof terminalPhases)[0] | null = null;
-
-    if (!validCheckpoints) {
-      // No git validation available - just use the most recent phase
-      this.logger.log(
-        "[getLatestPhase] No checkpoint validation available, using latest phase by timestamp",
-        "debug",
-      );
-      latestValidPhase = terminalPhases[0];
-    } else {
-      // Find first phase with a valid checkpoint in git
-      for (const phaseInfo of terminalPhases) {
-        const validCheckpoint = phaseInfo.checkpoints.find((sha) => validCheckpoints.has(sha));
-        if (validCheckpoint) {
-          this.logger.log(
-            `[getLatestPhase] Found valid phase: ${phaseInfo.phase.phaseId} ` +
-              `(${phaseInfo.status}) ended at ${phaseInfo.endTime} ` +
-              `with checkpoint ${validCheckpoint.substring(0, 7)}`,
-            "debug",
-          );
-          latestValidPhase = phaseInfo;
-          break;
-        }
-      }
-    }
-
-    if (!latestValidPhase) {
-      this.logger.log(
-        "[getLatestPhase] No phases with valid checkpoints found - possible after aggressive rollback",
-        "info",
-      );
-      return null;
-    }
-
-    // Step 6: Determine next phase and whether to continue in current run
-    const { nextPhaseId, continueInCurrentRun } = this.determineNextPhaseAndRun(
-      latestValidPhase.phase,
-      latestValidPhase.run,
-      currentRun,
-    );
-
-    return {
-      phase: latestValidPhase.phase,
-      runId: latestValidPhase.runId,
-      status: latestValidPhase.status,
-      nextPhaseId,
-      continueInCurrentRun,
-    };
   }
 
   // Add reference to CheckpointGit for git operations
@@ -1288,126 +1078,5 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     while (this.isProcessing || this.transitionQueue.length > 0) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-  }
-
-  /**
-   * Determine the next phase to execute for a continuation run.
-   *
-   * @param afterPhase - The phase after which to continue (null means from beginning)
-   * @param checkpointSha - The checkpoint SHA we're continuing from
-   * @returns The next phase ID to execute, or null if all phases are complete
-   */
-  private determineNextPhaseForContinuation(
-    afterPhase: PhaseId | null,
-    checkpointSha: string,
-  ): PhaseId | null {
-    if (!this.phaseConfigs || this.phaseConfigs.length === 0) {
-      return null;
-    }
-
-    // If afterPhase is null, we're continuing from the beginning
-    if (!afterPhase) {
-      return PhaseId(this.phaseConfigs[0].id);
-    }
-
-    // Find the index of afterPhase
-    const afterPhaseIndex = this.phaseConfigs.findIndex((p) => p.id === afterPhase);
-
-    if (afterPhaseIndex === -1) {
-      this.logger.log(
-        `[determineNextPhaseForContinuation] Phase ${afterPhase} not found in configs`,
-        "error",
-      );
-      return null;
-    }
-
-    // Check if we need to determine checkpoint type
-    const currentRunConditions = this.getCurrentRun()?.startingConditions;
-    const sourceRun =
-      currentRunConditions?.type === "continuation"
-        ? this.getRunById(currentRunConditions.source.runId)
-        : null;
-
-    if (sourceRun && checkpointSha) {
-      // Find the phase in the source run
-      const sourcePhase = sourceRun.phases.find((p) => p.phaseId === afterPhase);
-
-      // Check if this is a workspace-setup checkpoint
-      if (
-        sourcePhase &&
-        "workspaceSetupCheckpoint" in sourcePhase &&
-        sourcePhase.workspaceSetupCheckpoint === checkpointSha
-      ) {
-        // Workspace setup checkpoint - re-run the same phase
-        return afterPhase;
-      }
-    }
-
-    // For completed/error/skipped checkpoints, continue to next phase
-    if (afterPhaseIndex >= this.phaseConfigs.length - 1) {
-      // No more phases
-      return null;
-    }
-
-    return PhaseId(this.phaseConfigs[afterPhaseIndex + 1].id);
-  }
-
-  /**
-   * Determine the next phase and whether to continue in the current run.
-   *
-   * @param latestPhase - The latest phase that was executed
-   * @param latestRun - The run containing the latest phase
-   * @param currentRun - The current active run (if any)
-   * @returns Object with nextPhaseId and continueInCurrentRun
-   */
-  private determineNextPhaseAndRun(
-    latestPhase: ST.PhaseExecution,
-    latestRun: ST.Run,
-    currentRun: ST.Run | null,
-  ): { nextPhaseId: PhaseId | null; continueInCurrentRun: boolean } {
-    if (!this.phaseConfigs || this.phaseConfigs.length === 0) {
-      return { nextPhaseId: null, continueInCurrentRun: false };
-    }
-
-    // Find the index of the latest phase
-    const latestPhaseIndex = this.phaseConfigs.findIndex((p) => p.id === latestPhase.phaseId);
-
-    if (latestPhaseIndex === -1) {
-      this.logger.log(
-        `[determineNextPhaseAndRun] Phase ${latestPhase.phaseId} not found in configs`,
-        "error",
-      );
-      return { nextPhaseId: null, continueInCurrentRun: false };
-    }
-
-    // Check if we've reached the end
-    if (latestPhaseIndex >= this.phaseConfigs.length - 1) {
-      return { nextPhaseId: null, continueInCurrentRun: false };
-    }
-
-    // Determine next phase
-    const nextPhaseId = PhaseId(this.phaseConfigs[latestPhaseIndex + 1].id);
-
-    // Determine if we can continue in current run
-    if (!currentRun) {
-      // No current run - need a new one
-      return { nextPhaseId, continueInCurrentRun: false };
-    }
-
-    // If the latest phase is in the current run, we can continue
-    if (latestRun.runId === currentRun.runId) {
-      return { nextPhaseId, continueInCurrentRun: true };
-    }
-
-    // If current run is a continuation of the run containing latest phase, we can continue
-    if (
-      currentRun.startingConditions.type === "continuation" &&
-      currentRun.startingConditions.source.runId === latestRun.runId
-    ) {
-      return { nextPhaseId, continueInCurrentRun: true };
-    }
-
-    // Otherwise, we need a new run
-    return { nextPhaseId, continueInCurrentRun: false };
   }
 }

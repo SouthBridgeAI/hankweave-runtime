@@ -491,19 +491,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     this.emit("event", event);
   }
 
-  private sendStateSnapshot(): void {
+  private async sendStateSnapshot(): Promise<void> {
     const totalCost = this.stateManager.getTotalCost();
     const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
 
-    // === The Correct and Performant Logic ===
-    const state = this.stateManager.getState();
-    // 1. Get the current run, or fallback to the latest run if the server is shutting down.
-    const run = this.stateManager.getCurrentRun() || (state.runs.length > 0 ? state.runs[0] : null);
+    // Get terminal phases using execution thread
+    const terminalPhases = await this.getTerminalPhasesForSnapshot();
 
-    // 2. Get the terminal phases *from that specific run*.
-    const terminalPhases = run ? run.phases.filter((p) => isTerminalPhaseStatus(p.status)) : [];
-
-    // 3. Get the currently executing phase.
+    // Get the currently executing phase
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
 
     this.sendEvent({
@@ -512,7 +507,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       type: "state.snapshot",
       data: {
         currentPhase,
-        completedPhases: terminalPhases, // Correctly scoped to the current run
+        completedPhases: terminalPhases,
         fileTree: [],
         totalCost,
         totalTime,
@@ -523,14 +518,13 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   // Get terminal phases for snapshot - returns all terminal phases (completed, failed, skipped)
-  private getTerminalPhasesForSnapshot(): PhaseExecution[] {
-    const state = this.stateManager.getState();
-    // Fallback to the most recent run if currentRunId is null (e.g., during shutdown)
-    const run = this.stateManager.getCurrentRun() || (state.runs.length > 0 ? state.runs[0] : null);
-    if (!run) return [];
+  private async getTerminalPhasesForSnapshot(): Promise<PhaseExecution[]> {
+    const thread = await this.stateManager.getExecutionThread();
 
-    // Return all phases that are in a terminal state (completed, failed, or skipped)
-    return run.phases.filter((p) => isTerminalPhaseStatus(p.status));
+    // Filter for terminal phases and extract just the phase execution objects
+    return thread.phases
+      .filter((threadPhase) => isTerminalPhaseStatus(threadPhase.phase.status))
+      .map((threadPhase) => threadPhase.phase);
   }
 
   /**
@@ -1586,7 +1580,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     } as PhaseCompletedEvent);
 
     // Send state snapshot
-    this.sendStateSnapshot();
+    await this.sendStateSnapshot();
 
     // Clean up - now happens after state is persisted
     this.cleanupCurrentPhase();
@@ -1799,21 +1793,21 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    * Called on connection and after phase completion.
    */
   private async autoStartNextPhase(): Promise<void> {
+    const thread = await this.stateManager.getExecutionThread();
+
     this.logger.log(
-      `[autoStartNextPhase] Called - currentPhase: ${!!this
-        .currentPhase}, isShuttingDown: ${this.isShuttingDown}`,
+      `[autoStartNextPhase] Called - hasRunningPhase: ${thread.hasRunningPhase}, isShuttingDown: ${this.isShuttingDown}`,
     );
 
-    if (this.currentPhase || this.isShuttingDown) {
+    if (thread.hasRunningPhase || this.isShuttingDown) {
       this.logger.log(`[autoStartNextPhase] Returning early - phase running or shutting down`);
       return; // Phase already running or shutting down
     }
 
-    // Determine next phase to run
-    const nextPhaseIndex = await this.getNextPhaseIndex();
-    this.logger.log(`[autoStartNextPhase] getNextPhaseIndex returned: ${nextPhaseIndex}`);
+    const nextPhaseId = thread.nextPhaseId;
+    this.logger.log(`[autoStartNextPhase] ExecutionThread returned nextPhaseId: ${nextPhaseId}`);
 
-    if (nextPhaseIndex === -1) {
+    if (!nextPhaseId) {
       this.logger.log("[autoStartNextPhase] No more phases to run");
 
       if (this.config.autostart) {
@@ -1845,29 +1839,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const nextPhase = this.config.phases[nextPhaseIndex];
-    this.logger.log(
-      `[autoStartNextPhase] Auto-starting phase: ${nextPhase.name} (${nextPhase.id})`,
-    );
-    await this.startPhase(nextPhase.id);
-  }
-
-  private async getNextPhaseIndex(): Promise<number> {
-    const nextPhaseId = await this.stateManager.getNextPhaseToExecute();
-    this.logger.log(`[getNextPhaseIndex] StateManager returned nextPhaseId: ${nextPhaseId}`);
-
-    if (!nextPhaseId) {
-      this.logger.log(`[getNextPhaseIndex] No next phase ID, returning -1`);
-      return -1;
-    }
-
-    const index = this.config.phases.findIndex((p) => p.id === nextPhaseId);
-    this.logger.log(`[getNextPhaseIndex] Found phase at index: ${index}`);
-    return index;
+    this.logger.log(`[autoStartNextPhase] Auto-starting phase: ${nextPhaseId}`);
+    await this.startPhase(nextPhaseId);
   }
 
   private async startNextPhase(): Promise<void> {
-    if (this.currentPhase) {
+    const thread = await this.stateManager.getExecutionThread();
+
+    if (thread.hasRunningPhase) {
       await this.handleError(
         new Error("Cannot start next phase while current phase is running"),
         "startNextPhase",
@@ -1876,20 +1855,11 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const terminalPhases = this.getTerminalPhasesForSnapshot();
-    const lastCompleted = terminalPhases.filter((p) => p.status === "completed")[
-      terminalPhases.length - 1
-    ];
-    if (!lastCompleted) {
-      if (this.config.phases.length > 0) {
-        await this.startPhase(this.config.phases[0].id);
-      }
-      return;
-    }
+    const nextPhaseId = thread.nextPhaseId;
 
-    const lastIndex = this.config.phases.findIndex((p) => p.id === lastCompleted.phaseId);
-    if (lastIndex >= 0 && lastIndex < this.config.phases.length - 1) {
-      await this.startPhase(this.config.phases[lastIndex + 1].id);
+    if (nextPhaseId) {
+      this.logger.log(`[startNextPhase] Advancing to next phase: ${nextPhaseId}`);
+      await this.startPhase(nextPhaseId);
     } else {
       await this.handleError(
         new Error("No more phases to run"),
@@ -1918,7 +1888,9 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   private async redoCurrentPhase(): Promise<void> {
-    if (this.currentPhase) {
+    const thread = await this.stateManager.getExecutionThread();
+
+    if (thread.hasRunningPhase) {
       await this.handleError(
         new Error("Cannot redo while phase is running"),
         "redoCurrentPhase",
@@ -1927,10 +1899,17 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const terminalPhases = this.getTerminalPhasesForSnapshot();
-    const lastCompletedPhase = terminalPhases.filter((p) => p.status === "completed").slice(-1)[0];
-    if (lastCompletedPhase) {
-      await this.startPhase(lastCompletedPhase.phaseId);
+    if (thread.phases.length > 0) {
+      // Redo the most recently executed phase, whatever its status
+      const lastAttemptedPhase = thread.phases[0];
+      this.logger.log(`[redoCurrentPhase] Redoing last phase: ${lastAttemptedPhase.phase.phaseId}`);
+      await this.startPhase(lastAttemptedPhase.phase.phaseId);
+    } else {
+      await this.handleError(
+        new Error("No phase has been run yet to redo."),
+        "redoCurrentPhase",
+        ErrorSeverity.OPERATION,
+      );
     }
   }
 
@@ -2715,7 +2694,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     } as import("./types.js").RollbackCompletedEvent);
 
     // 12. Send state snapshot
-    this.sendStateSnapshot();
+    await this.sendStateSnapshot();
 
     // 12. Auto-restart if requested
     if (autoRestart && this.config.autostart) {
