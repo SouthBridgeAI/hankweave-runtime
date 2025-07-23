@@ -1,229 +1,214 @@
-# Execution Thread Refactoring Opportunities
 
-This document outlines functions in the codebase that can be simplified, removed, or refactored to use the execution thread system.
+### 1. Functions to Refactor Using `ExecutionThread`
 
-## Overview
+#### In `langton-server.ts`:
 
-The execution thread system (`server/execution-thread.ts`) provides a unified view of phase execution across all runs, with pre-calculated metadata and simplified traversal. Many existing functions implement complex custom logic that could be replaced with cleaner execution thread queries.
+**1. `startNextPhase()`**
 
-## Functions Already Using Execution Thread
+*   **Current Problem:** It manually queries the state for terminal phases (`getTerminalPhasesForSnapshot`), finds the last completed one, and then calculates the next phase index. This logic is complex and only considers the current run's snapshot.
+*   **Refactoring Strategy:** The `ExecutionThread` already calculates `nextPhaseId` for you, considering all runs and continuation logic. The function becomes dramatically simpler.
 
-### In `langton-server.ts`:
+    **Current Logic (Simplified):**
+    ```typescript
+    // langton-server.ts
+    private async startNextPhase(): Promise<void> {
+      // ... error if phase running ...
+      const terminalPhases = this.getTerminalPhasesForSnapshot();
+      const lastCompleted = terminalPhases.filter(p => p.status === "completed").pop();
+      if (!lastCompleted) {
+        // ... handle starting from beginning ...
+        return;
+      }
+      const lastIndex = this.config.phases.findIndex(p => p.id === lastCompleted.phaseId);
+      if (lastIndex < this.config.phases.length - 1) {
+        await this.startPhase(this.config.phases[lastIndex + 1].id);
+      } else {
+        // ... handle no more phases ...
+      }
+    }
+    ```
 
-- Session ID lookup for continuation uses `findContinuationSessionId()`
-- Rollback functions use `analyzeExecutionThread()` for finding checkpoints
+    **New Logic:**
+    ```typescript
+    // langton-server.ts
+    private async startNextPhase(): Promise<void> {
+      const thread = await this.stateManager.getExecutionThread();
 
-### In `state-manager.ts`:
+      if (thread.hasRunningPhase) {
+        await this.handleError(
+          new Error("Cannot start next phase while current phase is running"),
+          "startNextPhase",
+          ErrorSeverity.OPERATION,
+        );
+        return;
+      }
 
-- `getNextPhaseToExecute()` - Already simplified to use execution thread
+      const nextPhaseId = thread.nextPhaseId; // Already calculated for us!
 
-## Functions to Simplify/Remove
+      if (nextPhaseId) {
+        await this.startPhase(nextPhaseId);
+      } else {
+        await this.handleError(
+          new Error("No more phases to run"),
+          "startNextPhase",
+          ErrorSeverity.OPERATION,
+        );
+      }
+    }
+    ```
 
-### 1. `langton-server.ts` Functions
+**2. `redoCurrentPhase()`**
 
-#### `getPreviousSessionId()`
+*   **Current Problem:** Similar to `startNextPhase`, it manually gets a snapshot of terminal phases to find the "last completed phase". This doesn't account for a sequence where the last action was a failure or skip. "Redo" should probably mean "redo the *last thing that was attempted*", not just the last *success*.
+*   **Refactoring Strategy:** The `ExecutionThread` gives you the most recent phase executed, regardless of its status, as `thread.phases[0]`.
 
-- **Status**: Already removed (not found in codebase)
-- **Original purpose**: Find session ID for phase continuation
-- **Replacement**: `findContinuationSessionId()` from execution thread
+    **New Logic:**
+    ```typescript
+    // langton-server.ts
+    private async redoCurrentPhase(): Promise<void> {
+      const thread = await this.stateManager.getExecutionThread();
 
-#### `getNextPhaseIndex()`
+      if (thread.hasRunningPhase) {
+        await this.handleError(
+          new Error("Cannot redo while phase is running"),
+          "redoCurrentPhase",
+          ErrorSeverity.OPERATION,
+        );
+        return;
+      }
 
-- **Current implementation**:
-  ```typescript
-  private async getNextPhaseIndex(): Promise<number> {
-    const nextPhaseId = await this.stateManager.getNextPhaseToExecute();
-    if (!nextPhaseId) return -1;
-    const index = this.config.phases.findIndex((p) => p.id === nextPhaseId);
-    return index;
-  }
-  ```
-- **Issues**: Just a thin wrapper around state manager
-- **Recommendation**: Inline this logic where used or remove entirely
+      if (thread.phases.length > 0) {
+        // Redo the most recently executed phase, whatever it was.
+        const lastPhaseToRedo = thread.phases[0];
+        await this.startPhase(lastPhaseToRedo.phase.phaseId);
+      } else {
+        await this.handleError(
+            new Error("No phase has been run yet to redo."),
+            "redoCurrentPhase",
+            ErrorSeverity.OPERATION
+        );
+      }
+    }
+    ```
 
-#### `checkIncompletePhases()`
+**3. `getTerminalPhasesForSnapshot()`**
 
-- **Current implementation**: Complex logic to determine next phase from completed phases
-- **Issues**:
-  - Duplicates logic that's already in `autoStartNextPhase()`
-  - Has special handling for "all phases completed"
-  - Not actually checking for incomplete phases anymore
-- **Recommendation**: Remove entirely, rely on `autoStartNextPhase()`
+*   **Current Problem:** Manually filters phases from the current run's state. It's inefficient and limited.
+*   **Refactoring Strategy:** Use the thread, which gives you a complete, ordered history across all relevant runs.
 
-#### `getCompletedPhasesForSnapshot()`
+    **New Logic:**
+    ```typescript
+    // langton-server.ts
+    private async getTerminalPhasesForSnapshot(): Promise<PhaseExecution[]> {
+      const thread = await this.stateManager.getExecutionThread();
+      // The thread already contains the complete, ordered list of historical phases.
+      // We just need to filter for terminal ones.
+      return thread.phases
+        .filter(threadPhase => isTerminalPhaseStatus(threadPhase.phase.status))
+        .map(threadPhase => threadPhase.phase);
+    }
+    ```
+    *(Note: This is still useful for the `state.snapshot` event, but it's now much more correct and powerful).*
 
-- **Current implementation**: Manually builds completed phases array from state
-- **Issues**:
-  - Complex backward compatibility logic
-  - Manually filters and maps phase data
-- **Recommendation**: Use execution thread to get completed phases more cleanly
+---
 
-#### `getLastCheckpointForPhase()`
+### 2. Helpers to Simplify or Eliminate
 
-- **Current implementation**: Simple priority-based checkpoint selection
-- **Issues**: Duplicates logic that could be centralized
-- **Recommendation**: Move to execution thread as a utility function
+Your refactor plan is spot-on. Consolidating logic into `ExecutionThread` allows for a significant cleanup.
 
-### 2. `state-manager.ts` Functions
+#### In `langton-server.ts`:
 
-#### `getLatestPhase()` (200+ lines)
+*   **`getNextPhaseIndex()`**: This can be **eliminated**. The `autoStartNextPhase` function can directly use the `nextPhaseId` from the thread.
+    *   **Change in `autoStartNextPhase`**:
+        ```typescript
+        // From:
+        const nextPhaseIndex = await this.getNextPhaseIndex();
+        if (nextPhaseIndex === -1) { /* ... */ }
+        const nextPhase = this.config.phases[nextPhaseIndex];
+        await this.startPhase(nextPhase.id);
 
-- **Current implementation**:
-  - Checks for running phases
-  - Handles continuation runs with synthetic phase info
-  - Validates checkpoints against git
-  - Complex traversal of all runs and phases
-- **Issues**:
-  - Extremely complex with multiple responsibilities
-  - Duplicates logic that execution thread already handles
-  - Hard to maintain and understand
-- **Recommendation**: Replace with execution thread query
+        // To:
+        const thread = await this.stateManager.getExecutionThread();
+        const nextPhaseId = thread.nextPhaseId;
+        if (!nextPhaseId) { /* ... */ }
+        await this.startPhase(nextPhaseId);
+        ```
 
-#### `determineNextPhaseForContinuation()`
+#### In `state-manager.ts`:
 
-- **Current implementation**:
-  - Determines if workspace-setup checkpoint means re-run same phase
-  - Finds next phase after continuation point
-- **Issues**:
-  - Complex conditional logic
-  - Duplicates phase ordering logic
-- **Recommendation**: Replace with execution thread's `nextPhaseId` calculation
+*   **`getLatestPhase()`**: This massive (200+ line) function can be **completely eliminated**. Its entire purpose is to do what `analyzeExecutionThread` now does cleanly and correctly. Any part of the codebase that called this should now call `getExecutionThread()` instead.
 
-#### `determineNextPhaseAndRun()`
+*   **`determineNextPhaseForContinuation()`** and **`determineNextPhaseAndRun()`**: These are helpers for `getLatestPhase`. Since `getLatestPhase` is removed, these can be **eliminated** as well. Their logic is now correctly encapsulated within `analyzeExecutionThread`.
 
-- **Current implementation**:
-  - Determines if we can continue in current run
-  - Finds next phase based on latest phase
-- **Issues**:
-  - Complex run relationship logic
-  - Could be simplified
-- **Recommendation**: Use execution thread metadata
+*   **`getLastSuccessfulPhase()`**: Can be simplified.
+    *   **New Logic**:
+        ```typescript
+        // state-manager.ts
+        async getLastSuccessfulPhase(phaseId: PhaseId): Promise<{ run: ST.Run; phase: ST.CompletedPhase } | null> {
+            const thread = await this.getExecutionThread();
+            const successfulPhase = thread.phases.find(
+                p => p.phase.phaseId === phaseId && p.phase.status === "completed"
+            );
+            if (successfulPhase) {
+                const run = this.getRun(successfulPhase.runId); // getRun is still useful
+                if (run) {
+                    return { run, phase: successfulPhase.phase as ST.CompletedPhase };
+                }
+            }
+            return null;
+        }
+        ```
 
-#### `getLastSuccessfulPhase()`
+*   **`getPhaseHistory()`**: Can be simplified.
+    *   **New Logic**:
+        ```typescript
+        // state-manager.ts
+        async getPhaseHistory(phaseId: PhaseId): Promise<Array<{ run: ST.Run; phase: ST.PhaseExecution }>> {
+            const thread = await this.getExecutionThread();
+            const history: Array<{ run: ST.Run; phase: ST.PhaseExecution }> = [];
 
-- **Current implementation**: Manually searches all runs in reverse order
-- **Issues**:
-  - Inefficient manual traversal
-  - No caching or optimization
-- **Recommendation**: Use execution thread with filtering
+            const phaseExecutions = thread.phases.filter(p => p.phase.phaseId === phaseId);
 
-#### `canContinueFrom()` and `getCheckpointForContinuation()`
+            for (const threadPhase of phaseExecutions) {
+                const run = this.getRun(threadPhase.runId);
+                if (run) {
+                    history.push({ run, phase: threadPhase.phase });
+                }
+            }
+            return history; // Already in reverse chronological order
+        }
+        ```
 
-- **Current implementation**:
-  - Validates continuation points
-  - Finds appropriate checkpoints
-- **Issues**:
-  - Manual phase lookups
-  - Duplicated validation logic
-- **Recommendation**: Use execution thread for validation
+---
 
-### 3. Additional Refactoring Opportunities
+### 3. Expected Behavior Changes (Good and Bad)
 
-#### Complex State Queries
+The changes are overwhelmingly positive.
 
-##### Phase History Tracking
+**Positive Changes (Good):**
 
-- **Current approach**: Functions like `getPhaseHistory()` and `getLastSuccessfulPhase()` manually traverse all runs and phases
-- **Thread approach**: The thread already provides all phases in chronological order with run context
-- **Benefits**: Single traversal, pre-sorted data, includes metadata like continuation sessions
-- **Implementation**: Add filtering methods to execution thread for common queries
+1.  **Increased Correctness and Consistency:** This is the biggest win. All functions that reason about the "next" or "last" phase will use the exact same, robust algorithm (`analyzeExecutionThread`). This eliminates subtle bugs where different parts of the code might interpret the execution history differently.
+2.  **Full History Awareness:** Functions like `startNextPhase`, `redoCurrentPhase`, and `rollback` commands are no longer limited to the `currentRun`. They now correctly see the entire chain of execution, making them much more powerful and intuitive, especially after a rollback.
+3.  **Correct Handling of Edge Cases:** The centralized `analyzeExecutionThread` is designed to handle complex continuation scenarios (e.g., re-running a phase after a `workspace-setup` rollback). Spreading this logic across multiple helpers was error-prone; centralizing it makes it correct everywhere.
+4.  **Improved "Redo" Behavior:** `redoCurrentPhase` will now redo the *actual* last phase that was attempted (completed, failed, or skipped), which is more intuitive than only redoing the last *successful* phase.
+5.  **Simplified Codebase:** Eliminating over 250 lines of complex, hard-to-maintain code from `state-manager.ts` (`getLatestPhase` and its helpers) is a massive improvement for readability and future development.
 
-##### Cost Calculations
+**Potential Downsides (Negligible):**
 
-- **Current approach**: Functions like `getTotalCost()`, `getCurrentRunCost()`, and `getCostSince()` iterate through phases manually
-- **Thread approach**: Could add cost accumulation to thread metadata during analysis
-- **Benefits**: Pre-calculated costs, ability to cache results, single pass calculation
-- **Implementation**: Enhance `ThreadPhase` with accumulated cost fields
+1.  **Minor Performance Overhead:** For a very simple query (e.g., just getting the last phase ID), `getExecutionThread` might do slightly more work than a targeted manual search. However, this is almost certainly negligible compared to the gains in correctness and maintainability. The analysis is not computationally expensive unless you have thousands of runs with thousands of phases.
 
-##### Session Continuity Checks
+### Action Plan Summary
 
-- **Current approach**: Logic for determining valid continuation sessions is spread across multiple places
-- **Thread approach**: `findContinuationSessionId()` already handles this, but could be enhanced
-- **Benefits**: Centralized validation rules, consistent behavior, easier to test
-- **Implementation**: Add session validation metadata to thread
+1.  **Eliminate:**
+    *   In `state-manager.ts`, delete `getLatestPhase`, `determineNextPhaseForContinuation`, and `determineNextPhaseAndRun`.
+    *   In `langton-server.ts`, delete `getNextPhaseIndex`.
 
-#### Rollback Improvements
+2.  **Refactor:**
+    *   Update `langton-server.ts` functions: `startNextPhase`, `redoCurrentPhase`, `autoStartNextPhase`, and `getTerminalPhasesForSnapshot` to use `this.stateManager.getExecutionThread()`.
+    *   Update `state-manager.ts` functions: `getLastSuccessfulPhase` and `getPhaseHistory` to use `this.getExecutionThread()`.
 
-##### `executePhaseByPhaseRollback()`
+3.  **Verify:**
+    *   Run your tests to ensure the new, consistent behavior is captured. You may need to update some tests that relied on the old, potentially incorrect logic.
+    *   Pay special attention to testing scenarios involving rollbacks followed by `phase.next` or `phase.redo` commands, as this is where the new cross-run awareness will shine.
 
-This function already uses the execution thread but still has complex logic:
-
-**Current complexity:**
-
-1. **Phase processing**: Manually slices and processes phases in reverse
-2. **Checkpoint finding**: Uses `getLastCheckpointForPhase()` with priority logic
-3. **Workspace cleanup**: Calls `getWorkspaceSetupDirectories()` and manages cleanup
-4. **State management**: Complex logic for completing runs and starting new ones
-
-**Potential simplifications:**
-
-1. **Add to thread**: Include workspace setup directories in thread metadata
-2. **Checkpoint priority**: Move checkpoint selection logic to thread building
-3. **Reverse traversal**: Thread could provide a method for reverse phase iteration
-4. **Cleanup tracking**: Thread could track which phases created workspace directories
-
-**Proposed enhancement to execution thread:**
-
-```typescript
-interface ThreadPhase {
-  // ... existing fields ...
-
-  // New fields for rollback
-  workspaceDirectories: string[]; // Directories created by workspace setup
-  primaryCheckpoint: CheckpointInfo | null; // Best checkpoint for this phase
-  requiresCleanup: boolean; // Whether phase created resources
-}
-```
-
-This would allow `executePhaseByPhaseRollback()` to be much simpler:
-
-- Get phases to rollback from thread
-- For each phase: use `primaryCheckpoint` and `workspaceDirectories`
-- No need for separate checkpoint priority logic
-- No need to re-calculate workspace directories
-
-## Benefits of Execution Thread Refactoring
-
-1. **Single source of truth** for execution history
-2. **Pre-calculated metadata** including:
-   - Continuation session IDs
-   - Validated checkpoints
-   - Run relationships
-   - Phase ordering
-3. **Simplified traversal** of run/phase relationships
-4. **Consistent ordering** and phase resolution
-5. **Better performance** through pre-computation
-6. **Easier testing** with centralized logic
-7. **Reduced code duplication**
-
-## Implementation Priority
-
-### High Priority (Remove/Inline)
-
-1. `checkIncompletePhases()` - Remove entirely
-2. `getNextPhaseIndex()` - Inline or remove
-3. `determineNextPhaseForContinuation()` - Replace with thread logic
-4. `determineNextPhaseAndRun()` - Replace with thread logic
-
-### Medium Priority (Refactor)
-
-1. `getLatestPhase()` - Major refactor using execution thread
-2. `getCompletedPhasesForSnapshot()` - Simplify with thread
-3. `getLastSuccessfulPhase()` - Use thread filtering
-4. Complex state queries (phase history, costs, sessions)
-
-### Low Priority (Consider)
-
-1. `getLastCheckpointForPhase()` - Move to thread utilities
-2. `canContinueFrom()` - Simplify validation
-3. `getCheckpointForContinuation()` - Use thread data
-4. `executePhaseByPhaseRollback()` - Further simplification
-
-## Next Steps
-
-1. Start with high-priority removals to clean up the codebase
-2. Enhance execution thread with missing metadata (costs, workspace dirs, checkpoint priority)
-3. Refactor `getLatestPhase()` as it's the most complex function
-4. Update tests to ensure behavior is preserved
-5. Consider adding caching to execution thread for performance
-6. Document the new execution thread capabilities
+This is an excellent direction for the project. By committing to the `ExecutionThread` as the single source of truth for historical analysis, you are building a much more stable and predictable system.
