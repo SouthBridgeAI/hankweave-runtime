@@ -2,6 +2,14 @@
 
 ## TODOs - tasks to pick and solve
 
+## Additional
+
+Writing new end to end tests. We want to create a new e2e test for:
+1. Crash server and restart. We want to intentional kill the server, restart, roll back the current phase’s work and continue the phase. If all goes well we should be able to finish executing all phases.
+
+1. When we do rollback and restart, can we reload the prompt files? Allows us to edit them which is one of the main reasons for rollback and restart.
+2. Should we move our packets or state or anything else to discriminated unions?
+
 ## Bugs
 
 1. When we continue from a phase (or likely, have a pattern matching existing files) we read them as created new
