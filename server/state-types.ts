@@ -724,6 +724,25 @@ export type StateTransition =
       };
     }
 
+  /**
+   * Incremental token usage update from Claude.
+   * More resilient to race conditions than CostsUpdated.
+   *
+   * Triggered by: Assistant messages with usage (incremental approach)
+   * State changes:
+   * - Adds costDelta to currentCost (if running)
+   * - Adds tokensDelta to currentTokens (if running)
+   */
+  | {
+      type: "CostsIncremented";
+      data: {
+        runId: RunId;
+        phaseId: PhaseId;
+        costDelta: number; // The amount to add to the cost
+        tokensDelta: TokenUsage; // The tokens to add to the totals
+      };
+    }
+
   // ===== Assistant Message Tracking =====
 
   /**

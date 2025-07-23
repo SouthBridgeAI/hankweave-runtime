@@ -18,7 +18,7 @@ export function runLogFilesTests(testDir: string) {
   for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
     describe(`${phaseId} logs`, () => {
       // Logs are now in .langton/runs/{runId}/phase-{phaseId}-claude.log
-      const logPath = path.join(runFolder, `phase-${phaseId}-claude.log`);
+      const logPath = path.join(runFolder, `${phaseId}-claude.log`);
 
       test(`log file exists`, () => {
         expect(fs.existsSync(logPath)).toBe(true);

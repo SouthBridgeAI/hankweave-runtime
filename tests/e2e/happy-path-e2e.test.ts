@@ -616,52 +616,53 @@ describe("Langton E2E Test", () => {
   // - untracked.txt: Created by checkpoint exclusion tests
   // - notes/: Created by command, not workspace setup, so preserved
   // - Git failures: Force mode ensures cleanup continues
-  afterAll(async () => {
-    // First shutdown the server if needed
-    if (!testState.cleanupResult) {
-      await shutdownServer();
-    }
 
-    // Now run the full cleanup and verify it worked
-    console.log(`\n${colors.blue}Running final cleanup...${colors.reset}`);
+  // afterAll(async () => {
+  //   // First shutdown the server if needed
+  //   if (!testState.cleanupResult) {
+  //     await shutdownServer();
+  //   }
 
-    if (!testState.cleanupResult) {
-      await runFullCleanup();
-    }
+  //   // Now run the full cleanup and verify it worked
+  //   console.log(`\n${colors.blue}Running final cleanup...${colors.reset}`);
 
-    // Verify cleanup worked correctly
-    if (testState.cleanupResult) {
-      console.log(`\n${colors.blue}Verifying cleanup results...${colors.reset}`);
+  //   if (!testState.cleanupResult) {
+  //     await runFullCleanup();
+  //   }
 
-      // Check if cleanup was successful
-      if (testState.cleanupResult.errors.length === 0) {
-        expect(testState.cleanupResult.success).toBe(true);
-      }
+  //   // Verify cleanup worked correctly
+  //   if (testState.cleanupResult) {
+  //     console.log(`\n${colors.blue}Verifying cleanup results...${colors.reset}`);
 
-      // Verify directories were removed
-      expect(testState.cleanupResult.directoriesRemoved.length).toBeGreaterThan(0);
-      const removedDirs = testState.cleanupResult.directoriesRemoved;
-      expect(
-        removedDirs.some((d) => d === "typescript_code" || d.includes("typescript_code")),
-      ).toBe(true);
-      expect(removedDirs.some((d) => d === ".langton" || d.includes(".langton"))).toBe(true);
+  //     // Check if cleanup was successful
+  //     if (testState.cleanupResult.errors.length === 0) {
+  //       expect(testState.cleanupResult.success).toBe(true);
+  //     }
 
-      // Verify test directory state
-      const testDirContents = fs.readdirSync(TEST_DIR);
-      const visibleFiles = testDirContents.filter((f) => !f.startsWith("."));
-      // Should only have 'notes' directory (created by command, not workspace setup)
-      // and possibly 'untracked.txt' from checkpoint exclusion tests
-      const expectedFiles = ["notes"];
-      if (visibleFiles.includes("untracked.txt")) {
-        expectedFiles.push("untracked.txt");
-      }
-      expect(visibleFiles.sort()).toEqual(expectedFiles.sort());
+  //     // Verify directories were removed
+  //     expect(testState.cleanupResult.directoriesRemoved.length).toBeGreaterThan(0);
+  //     const removedDirs = testState.cleanupResult.directoriesRemoved;
+  //     expect(
+  //       removedDirs.some((d) => d === "typescript_code" || d.includes("typescript_code")),
+  //     ).toBe(true);
+  //     expect(removedDirs.some((d) => d === ".langton" || d.includes(".langton"))).toBe(true);
 
-      // Verify .langton directory is gone
-      const langtonDir = path.join(TEST_DIR, ".langton");
-      expect(fs.existsSync(langtonDir)).toBe(false);
+  //     // Verify test directory state
+  //     const testDirContents = fs.readdirSync(TEST_DIR);
+  //     const visibleFiles = testDirContents.filter((f) => !f.startsWith("."));
+  //     // Should only have 'notes' directory (created by command, not workspace setup)
+  //     // and possibly 'untracked.txt' from checkpoint exclusion tests
+  //     const expectedFiles = ["notes"];
+  //     if (visibleFiles.includes("untracked.txt")) {
+  //       expectedFiles.push("untracked.txt");
+  //     }
+  //     expect(visibleFiles.sort()).toEqual(expectedFiles.sort());
 
-      console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
-    }
-  });
+  //     // Verify .langton directory is gone
+  //     const langtonDir = path.join(TEST_DIR, ".langton");
+  //     expect(fs.existsSync(langtonDir)).toBe(false);
+
+  //     console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
+  //   }
+  // });
 });

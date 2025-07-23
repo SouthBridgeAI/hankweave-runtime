@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -24,7 +24,6 @@ import {
 } from "../utils/test-helpers.js";
 
 // Test configuration
-const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const TEST_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved");
 const SNAPSHOT_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-snapshots");
@@ -742,7 +741,34 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   }
 
   await testState.client.disconnect();
-  testState.serverProcess.kill();
+  console.log(
+    `\n${colors.blue}Final test cleanup: Gracefully shutting down server...${colors.reset}`,
+  );
+
+  if (testState.serverProcess && !testState.serverProcess.killed) {
+    const shutdownPromise = new Promise<void>((resolve) => {
+      // Listen for the 'exit' event on the server process.
+      // This event fires only after the process has fully terminated.
+      testState.serverProcess?.on("exit", (code, signal) => {
+        console.log(
+          `${colors.green}✓ Server process exited with code ${code}, signal ${signal}${colors.reset}`,
+        );
+        resolve();
+      });
+    });
+
+    // Now, send the kill signal.
+    console.log(`${colors.gray}  Sending SIGTERM to server process...${colors.reset}`);
+    testState.serverProcess.kill("SIGTERM");
+
+    // Wait for the server to exit, with a timeout as a safety measure.
+    await Promise.race([
+      shutdownPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Server shutdown timed out")), 10000),
+      ),
+    ]);
+  }
 
   console.log(`${colors.green}✓ Test execution completed${colors.reset}`);
   console.log(`${colors.green}✓ Created ${testState.snapshots.length} snapshots${colors.reset}`);

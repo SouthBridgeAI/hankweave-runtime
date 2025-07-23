@@ -1124,6 +1124,26 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
         break;
       }
 
+      case "CostsIncremented": {
+        const run = newState.runs.find((r) => r.runId === event.data.runId);
+        if (!run) break;
+
+        // Find the most recent running phase with this ID
+        const phase = run.phases
+          .slice()
+          .reverse()
+          .find((p) => p.phaseId === event.data.phaseId && p.status === "running");
+
+        if (phase && phase.status === "running") {
+          phase.currentCost += event.data.costDelta;
+          phase.currentTokens.inputTokens += event.data.tokensDelta.inputTokens;
+          phase.currentTokens.outputTokens += event.data.tokensDelta.outputTokens;
+          phase.currentTokens.cacheCreationTokens += event.data.tokensDelta.cacheCreationTokens;
+          phase.currentTokens.cacheReadTokens += event.data.tokensDelta.cacheReadTokens;
+        }
+        break;
+      }
+
       case "AssistantMessageCountUpdated": {
         const run = newState.runs.find((r) => r.runId === event.data.runId);
         if (!run) break;

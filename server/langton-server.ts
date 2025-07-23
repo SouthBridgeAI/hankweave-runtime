@@ -1005,7 +1005,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       await fs.promises.mkdir(runFolder, { recursive: true });
 
       // Modify log path to use run folder
-      const logPath = path.join(runFolder, `phase-${phase.id}-claude.log`);
+      const logPath = path.join(runFolder, `${phase.id}-claude.log`);
 
       // Create log parser first
       this.logParser = new ClaudeLogParser({
@@ -1210,69 +1210,55 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     if (msg.message.usage) {
-      const usage: TokenUsage = {
+      const usageDelta: TokenUsage = {
         inputTokens: msg.message.usage.input_tokens || 0,
         outputTokens: msg.message.usage.output_tokens || 0,
         cacheCreationTokens: msg.message.usage.cache_creation_input_tokens || 0,
         cacheReadTokens: msg.message.usage.cache_read_input_tokens || 0,
       };
 
-      const messageCost = calculateCost(usage, this.config.costsPerMTok);
+      const costDelta = calculateCost(usageDelta, this.config.costsPerMTok);
 
+      // This part is fine, it updates the transient in-memory state for now
       if (this.currentPhase && this.currentPhase.status === "running") {
-        // Claude reports per-call costs, so we accumulate them
-        this.currentPhase.phaseCost += messageCost;
-
-        // Update token counts (these are cumulative per message)
-        this.currentPhase.phaseTokens.inputTokens += usage.inputTokens;
-        this.currentPhase.phaseTokens.outputTokens += usage.outputTokens;
-        this.currentPhase.phaseTokens.cacheCreationTokens += usage.cacheCreationTokens;
-        this.currentPhase.phaseTokens.cacheReadTokens += usage.cacheReadTokens;
-
-        // Fire cost update transition (fire-and-forget)
-        const currentStatePhase = this.stateManager.getCurrentlyRunningPhase();
-        if (currentStatePhase && currentStatePhase.status === "running") {
-          const newCost =
-            "currentCost" in currentStatePhase
-              ? currentStatePhase.currentCost + messageCost
-              : messageCost;
-          const newTokens = {
-            inputTokens: this.currentPhase.phaseTokens.inputTokens,
-            outputTokens: this.currentPhase.phaseTokens.outputTokens,
-            cacheCreationTokens: this.currentPhase.phaseTokens.cacheCreationTokens,
-            cacheReadTokens: this.currentPhase.phaseTokens.cacheReadTokens,
-          };
-
-          if (this.currentRunId) {
-            this.stateManager.transition({
-              type: "CostsUpdated",
-              data: {
-                runId: this.currentRunId,
-                phaseId: PhaseId(phaseId),
-                cost: newCost,
-                tokens: newTokens,
-              },
-            });
-          }
-        }
-
-        this.logger.log(
-          `Phase ${phaseId} token update - Call cost: $${messageCost.toFixed(
-            4,
-          )}, Running total: $${this.currentPhase.phaseCost.toFixed(4)} ` +
-            `(${usage.inputTokens} in, ${usage.outputTokens} out, ` +
-            `${usage.cacheCreationTokens} cache create, ${usage.cacheReadTokens} cache read)`,
-        );
+        this.currentPhase.phaseCost += costDelta;
+        this.currentPhase.phaseTokens.inputTokens += usageDelta.inputTokens;
+        this.currentPhase.phaseTokens.outputTokens += usageDelta.outputTokens;
+        this.currentPhase.phaseTokens.cacheCreationTokens += usageDelta.cacheCreationTokens;
+        this.currentPhase.phaseTokens.cacheReadTokens += usageDelta.cacheReadTokens;
       }
 
+      // Fire cost INCREMENT transition (fire-and-forget)
+      if (this.currentRunId) {
+        // Instead of calculating a new total from state, we just send the delta.
+        this.stateManager.transition({
+          type: "CostsIncremented", // Use the new incremental type
+          data: {
+            runId: this.currentRunId,
+            phaseId: PhaseId(phaseId),
+            costDelta: costDelta, // Send the delta
+            tokensDelta: usageDelta, // Send the delta
+          },
+        });
+      }
+
+      this.logger.log(
+        `Phase ${phaseId} token update - Call cost: $${costDelta.toFixed(
+          4,
+        )}, Running total: $${this.currentPhase?.phaseCost.toFixed(4) || 0} ` +
+          `(${usageDelta.inputTokens} in, ${usageDelta.outputTokens} out, ` +
+          `${usageDelta.cacheCreationTokens} cache create, ${usageDelta.cacheReadTokens} cache read)`,
+      );
+
+      // Send token.usage event with the delta cost
       this.sendEvent({
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "token.usage",
         data: {
           phaseId,
-          ...usage,
-          totalCost: messageCost,
+          ...usageDelta,
+          totalCost: costDelta, // This event should report the delta cost
         },
       } as TokenUsageEvent);
     }
@@ -1569,14 +1555,26 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           },
         },
       });
-
-      // Wait for this critical state transition to complete before cleanup
-      await this.stateManager.waitForPendingTransitions();
     }
 
-    // Send phase.completed event
-    // For skipped phases, always report zero cost (by design)
-    const phaseCost = finalStatus === "skipped" ? 0 : this.currentPhase?.phaseCost || 0;
+    // Wait for this critical state transition to complete before cleanup
+    await this.stateManager.waitForPendingTransitions();
+
+    // Get the final persisted state for the phase
+    const finalPhaseState = this.stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
+
+    // Authoritatively get the cost from the final state object
+    let finalCost = 0;
+    if (finalPhaseState) {
+      if (finalPhaseState.status === "completed") {
+        finalCost = finalPhaseState.finalCost;
+      } else if (finalPhaseState.status === "failed" || finalPhaseState.status === "skipped") {
+        finalCost = finalPhaseState.partialCost;
+      }
+    }
+
+    // The design decision to report 0 for skipped phases is handled here
+    const reportedCost = finalStatus === "skipped" ? 0 : finalCost;
 
     this.sendEvent({
       id: EventId(generateId()),
@@ -1585,7 +1583,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       data: {
         phaseId,
         success: finalStatus === "completed",
-        cost: phaseCost,
+        cost: reportedCost, // Use the authoritative, persisted cost
         duration: Date.now() - new Date(currentPhase.startTime).getTime(),
         exitStatus:
           finalStatus === "skipped"
@@ -1634,22 +1632,6 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         }
         await this.shutdown("phase failure");
       }
-    }
-  }
-
-  // Helper method to calculate phase cost
-  private calculatePhaseCost(phase: PhaseExecution): number {
-    switch (phase.status) {
-      case "completed":
-        return phase.finalCost;
-      case "failed":
-        return phase.partialCost;
-      case "skipped":
-        return 0;
-      case "running":
-        return phase.currentCost;
-      default:
-        return 0;
     }
   }
 
@@ -2573,20 +2555,18 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     // Set the rollback flag
     this.isRollingBack = true;
 
-    try {
-      // Execute the new phase-by-phase rollback
-      await this.executePhaseByPhaseRollback(
-        thread,
-        targetPhaseIndex,
-        sha,
-        checkpointType,
-        phaseName,
-        autoRestart,
-      );
-    } finally {
-      // Always clear the flag, even if rollback fails
+    // Execute the new phase-by-phase rollback
+    // The flag will be cleared inside executePhaseByPhaseRollback before sending events
+    await this.executePhaseByPhaseRollback(
+      thread,
+      targetPhaseIndex,
+      sha,
+      checkpointType,
+      phaseName,
+      autoRestart,
+    ).finally(() => {
       this.isRollingBack = false;
-    }
+    });
   }
 
   /**
@@ -2747,7 +2727,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // 10. Send completion event
+    // 8.b. Wait for transitions
+
+    await this.stateManager.waitForPendingTransitions();
+
+    // 10. Clear rollback flag BEFORE sending events
+    this.isRollingBack = false;
+
+    // 11. Send completion event
     this.sendEvent({
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
@@ -2763,7 +2750,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as import("./types.js").RollbackCompletedEvent);
 
-    // 11. Send state snapshot
+    // 12. Send state snapshot
     this.sendStateSnapshot();
 
     // 12. Auto-restart if requested

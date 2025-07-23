@@ -2,14 +2,14 @@
 // execution-thread.ts - Clean implementation with simplified algorithm
 // ============================================================================
 
-import type {
-  LangtonState,
-  PhaseExecution,
-  PhaseId,
-  PhaseStatus,
-  Run,
-  RunId,
-  SessionId,
+import {
+  isTerminalPhaseStatus,
+  type LangtonState,
+  type PhaseExecution,
+  type PhaseId,
+  type Run,
+  type RunId,
+  type SessionId,
 } from "./state-types.js";
 import type { PhaseConfig } from "./types.js";
 import type { Logger } from "./utils.js";
@@ -123,7 +123,7 @@ export async function analyzeExecutionThread(
       const phase = currentRun.phases[i];
 
       // Check if this is a running phase
-      if (!isTerminalStatus(phase.status)) {
+      if (!isTerminalPhaseStatus(phase.status)) {
         hasRunningPhase = true;
       }
 
@@ -368,13 +368,6 @@ function buildCheckpointInfo(
   }
 
   return checkpoints;
-}
-
-/**
- * Check if a phase status is terminal
- */
-function isTerminalStatus(status: PhaseStatus): boolean {
-  return status === "completed" || status === "failed" || status === "skipped";
 }
 
 // ============================================================================
