@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import fg from "fast-glob";
 import { fileResolver } from "./file-resolver.js";
 import type { FileNode } from "./types.js";
 
@@ -56,50 +55,6 @@ export class Logger {
 // ============================================================================
 // File System Utilities
 // ============================================================================
-
-/**
- * Scan for files matching a glob pattern and read their contents.
- *
- * Used to get initial state of watched files when a phase starts.
- * Ignores common directories like node_modules and .git.
- *
- * @param projectPath - Base directory to search from
- * @param pattern - Glob pattern
- * @returns Array of files with paths, contents, and last modified times
- */
-export async function scanWatchedFiles(
-  projectPath: string,
-  pattern: string,
-): Promise<{ path: string; content: string; lastModified: string }[]> {
-  const files: { path: string; content: string; lastModified: string }[] = [];
-
-  try {
-    const matches = await fg(pattern, {
-      cwd: projectPath,
-      ignore: ["node_modules/**", ".langton/logs/**", ".git/**"],
-      absolute: false,
-    });
-
-    for (const match of matches) {
-      const fullPath = path.join(projectPath, match);
-      try {
-        const content = fs.readFileSync(fullPath, "utf-8");
-        const stats = fs.statSync(fullPath);
-        files.push({
-          path: match,
-          content,
-          lastModified: stats.mtime.toISOString(),
-        });
-      } catch {
-        // Skip unreadable files
-      }
-    }
-  } catch {
-    // Error scanning files
-  }
-
-  return files;
-}
 
 /**
  * Build a hierarchical file tree from files matching a pattern.
