@@ -3,7 +3,7 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "type-check": "bun run tsc --noEmit && echo 'Type check passed ✅'",
+    "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

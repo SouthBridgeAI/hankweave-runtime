@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { BasicTUI } from "./basic-tui.js";
 import { CleanupCommand } from "./cleanup-command.js";
-import { loadPhaseConfig, validatePhaseConfig } from "./config.js";
+import { validatePhaseConfig } from "./config.js";
 import { LangtonServer } from "./langton-server.js";
 import type { PhaseConfig, ServerConfig } from "./types.js";
 
@@ -13,18 +13,21 @@ async function main() {
   // Strict argument validation
   const rawArgs = process.argv.slice(2);
   const validPatterns = [
-    /^--basic$/, /^-b$/,
-    /^--validate$/, /^-v$/,
+    /^--basic$/,
+    /^-b$/,
+    /^--validate$/,
+    /^-v$/,
     /^--cleanup$/,
     /^-y$/,
     /^--no-autostart$/,
     /^--config=.+$/,
     /^--anthropic-base-url=.+$/,
     /^--port=\d+$/,
-    /^--help$/, /^-h$/,
+    /^--help$/,
+    /^-h$/,
   ];
   for (const arg of rawArgs) {
-    if (!validPatterns.some(pattern => pattern.test(arg))) {
+    if (!validPatterns.some((pattern) => pattern.test(arg))) {
       console.error(`❌ Error: Unknown argument '${arg}'. Run with --help for available options.`);
       process.exit(1);
     }
@@ -90,7 +93,8 @@ Examples:
         console.log(`  - Phases with checkpoints: ${validationResult.checkpointPhaseCount}`);
 
         // Display environment variables
-        const hasSystemVars = Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
+        const hasSystemVars =
+          Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
         const hasPhaseVars = validationResult.environmentVariables.fromPhases.length > 0;
 
         if (hasSystemVars || hasPhaseVars) {
@@ -98,7 +102,9 @@ Examples:
 
           if (hasSystemVars) {
             console.log(`\n  From System (TADPOLE_ prefixed):`);
-            for (const [key, value] of Object.entries(validationResult.environmentVariables.fromSystem)) {
+            for (const [key, value] of Object.entries(
+              validationResult.environmentVariables.fromSystem,
+            )) {
               console.log(`    - ${key}: ${value}`);
             }
           }
