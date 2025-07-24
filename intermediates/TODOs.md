@@ -31,10 +31,9 @@
 
 ### Cleanup stuff
 
-1. Consider discriminated unions for some types
-2. Rename things
-3. Bun isolated linker
-4. Add an interactive prompt to heay tests so they can't be autorun
+1. Rename things
+2. Bun isolated linker
+3. Add an interactive prompt to heay tests so they can't be autorun
 
 ## Bugs
 

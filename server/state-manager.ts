@@ -350,20 +350,6 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     return this.state.runs.find((r) => r.runId === runId) || null;
   }
 
-  async getLastSuccessfulPhase(
-    phaseId: PhaseId,
-  ): Promise<{ run: ST.Run; phase: ST.CompletedPhase } | null> {
-    // Search all runs in reverse chronological order (newest first)
-    for (const run of this.state.runs) {
-      for (const phase of run.phases) {
-        if (phase.phaseId === phaseId && phase.status === "completed") {
-          return { run, phase };
-        }
-      }
-    }
-    return null;
-  }
-
   async getPhaseHistory(
     phaseId: PhaseId,
   ): Promise<Array<{ run: ST.Run; phase: ST.PhaseExecution }>> {

@@ -96,7 +96,7 @@ export class TestWSClient {
         const closeWaiters = this.eventPromises.get("__connection_closed__");
         if (closeWaiters) {
           closeWaiters.forEach(({ resolve }) =>
-            resolve({ type: "__connection_closed__" } as ServerEvent)
+            resolve({ type: "__connection_closed__" } as any as ServerEvent)
           );
           this.eventPromises.delete("__connection_closed__");
         }

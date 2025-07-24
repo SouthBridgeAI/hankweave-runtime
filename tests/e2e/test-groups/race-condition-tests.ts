@@ -1,10 +1,5 @@
 import { expect, test } from "bun:test";
 import { PhaseId } from "../../../server/branded-types.js";
-import {
-  isPhaseCompletedEvent,
-  isPhaseStartedEvent,
-  isStateSnapshotEvent,
-} from "../../../server/type-guards.js";
 import type { PhaseCompletedEvent, PhaseStartedEvent, ServerEvent } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
@@ -22,21 +17,23 @@ export function runRaceConditionTests(testState: TestState) {
     const stateSnapshots = testState.client?.getEventsByType("state.snapshot") || [];
 
     phaseCompletions.forEach((completion) => {
-      const completionTime = new Date(completion.timestamp).getTime();
+      if (completion.type === "phase.completed") {
+        const completionTime = new Date(completion.timestamp).getTime();
 
-      // Find the next state snapshot
-      const nextSnapshot = stateSnapshots.find(
-        (s) => new Date(s.timestamp).getTime() > completionTime,
-      );
+        // Find the next state snapshot
+        const nextSnapshot = stateSnapshots.find(
+          (s) => new Date(s.timestamp).getTime() > completionTime,
+        );
 
-      if (nextSnapshot && isStateSnapshotEvent(nextSnapshot) && isPhaseCompletedEvent(completion)) {
-        // The completed phase should be in the snapshot
-        const phaseId = completion.data?.phaseId;
-        const inSnapshot = nextSnapshot.data?.completedPhases?.some((p) => p.phaseId === phaseId);
-        expect(inSnapshot).toBe(true);
+        if (nextSnapshot && nextSnapshot.type === "state.snapshot") {
+          // The completed phase should be in the snapshot
+          const phaseId = completion.data.phaseId;
+          const inSnapshot = nextSnapshot.data.completedPhases.some((p) => p.phaseId === phaseId);
+          expect(inSnapshot).toBe(true);
 
-        // Current phase should be null or different
-        expect(nextSnapshot.data?.currentPhase?.phaseId).not.toBe(phaseId);
+          // Current phase should be null or different
+          expect(nextSnapshot.data.currentPhase?.phaseId).not.toBe(phaseId);
+        }
       }
     });
   });
@@ -56,9 +53,9 @@ export function runRaceConditionTests(testState: TestState) {
       // Should not have conflicting state events
       const stateEvents = eventsInBetween.filter((e) => e.type === "state.snapshot");
       stateEvents.forEach((e) => {
-        if (isStateSnapshotEvent(e)) {
+        if (e.type === "state.snapshot") {
           // Current phase should still be phase-1 until completion
-          if (e.data?.currentPhase) {
+          if (e.data.currentPhase) {
             expect(e.data.currentPhase.phaseId).toBe(PhaseId("phase-1"));
           }
         }
@@ -70,12 +67,12 @@ export function runRaceConditionTests(testState: TestState) {
     // Since state snapshots are only sent after phase completion (when currentPhase is null),
     // we need to look at phase.started events which contain the session IDs that prove
     // separate phase executions occurred
-    const phaseStartedEvents = testState.events.filter((e) => isPhaseStartedEvent(e));
+    const phaseStartedEvents = testState.events.filter((e) => e.type === "phase.started");
 
     const sessionIds = new Set<string>();
 
     phaseStartedEvents.forEach((event) => {
-      if (event.data?.sessionId) {
+      if (event.type === "phase.started" && event.data.sessionId) {
         // Each session ID should be unique (proves separate phase executions)
         expect(sessionIds.has(event.data.sessionId)).toBe(false);
         sessionIds.add(event.data.sessionId);
@@ -86,23 +83,19 @@ export function runRaceConditionTests(testState: TestState) {
     expect(sessionIds.size).toBeGreaterThanOrEqual(3);
 
     // Additionally verify that completed phases each have unique session IDs
-    const finalSnapshot = [...testState.events].reverse().find((e) => isStateSnapshotEvent(e));
+    const finalSnapshot = [...testState.events].reverse().find((e) => e.type === "state.snapshot");
 
-    if (finalSnapshot?.data?.completedPhases) {
+    if (finalSnapshot?.type === "state.snapshot" && finalSnapshot.data.completedPhases) {
       const completedSessionIds = new Set<string>();
       finalSnapshot.data.completedPhases.forEach((phase) => {
         if (phase.status === "completed" && phase.claudeSessionId) {
           expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
-        } else if (phase.status === "failed" && phase.claudeSessionId) {
-          expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
-        } else if (phase.status === "skipped" && phase.claudeSessionId) {
-          expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
-        }
-        if (phase.status === "completed" && phase.claudeSessionId) {
           completedSessionIds.add(phase.claudeSessionId);
         } else if (phase.status === "failed" && phase.claudeSessionId) {
+          expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
           completedSessionIds.add(phase.claudeSessionId);
         } else if (phase.status === "skipped" && phase.claudeSessionId) {
+          expect(completedSessionIds.has(phase.claudeSessionId)).toBe(false);
           completedSessionIds.add(phase.claudeSessionId);
         }
       });

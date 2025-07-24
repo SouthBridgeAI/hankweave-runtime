@@ -4,7 +4,6 @@ import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { PhaseId } from "../../server/branded-types.js";
-import { isAssistantActionEvent } from "../../server/type-guards.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
@@ -397,7 +396,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   const assistantActionEventPhase3 = await testState.client.waitForEvent(
     "assistant.action",
     30000,
-    (event) => isAssistantActionEvent(event),
+    (event) => event.type === "assistant.action",
     phase3StartTime,
   );
   console.log(

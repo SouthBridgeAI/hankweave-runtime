@@ -1,22 +1,10 @@
 import type { LangtonServer } from "./langton-server.js";
 import type {
-  AssistantActionEvent,
   CheckpointListEvent,
   ClientCommand,
-  ErrorEvent,
-  FileTreeUpdatedEvent,
-  FileUpdatedEvent,
-  IncompletePhaseEvent,
-  InfoEvent,
   NextPhaseCommand,
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
-  RollbackCompletedEvent,
   ServerEvent,
-  ServerIdleEvent,
   SkipPhaseCommand,
-  StateSnapshotEvent,
-  TokenUsageEvent,
 } from "./types.js";
 import { generateId } from "./utils.js";
 
@@ -85,122 +73,110 @@ export class BasicTUI {
         break;
 
       case "state.snapshot": {
-        const snapshotData = (event as StateSnapshotEvent).data;
         console.log(`\n📸 [${timestamp}] State snapshot received`);
-        if (snapshotData.recentFileAccess) {
-          console.log(`   Recent file: ${snapshotData.recentFileAccess.path}`);
+        if (event.data.recentFileAccess) {
+          console.log(`   Recent file: ${event.data.recentFileAccess.path}`);
         }
-        console.log(`   Total cost: $${snapshotData.totalCost.toFixed(4)}`);
+        console.log(`   Total cost: $${event.data.totalCost.toFixed(4)}`);
         break;
       }
 
       case "phase.started": {
-        const startData = (event as PhaseStartedEvent).data;
-        console.log(`\n📋 [${timestamp}] Started: ${startData.phaseName}`);
-        console.log(`   Session ID: ${startData.sessionId}`);
-        if (startData.previousSessionId) {
-          console.log(`   Continuing from: ${startData.previousSessionId}`);
+        console.log(`\n📋 [${timestamp}] Started: ${event.data.phaseName}`);
+        console.log(`   Session ID: ${event.data.sessionId}`);
+        if (event.data.previousSessionId) {
+          console.log(`   Continuing from: ${event.data.previousSessionId}`);
         }
-        if (startData.phaseDescription) {
-          console.log(`   ${startData.phaseDescription}`);
+        if (event.data.phaseDescription) {
+          console.log(`   ${event.data.phaseDescription}`);
         }
         break;
       }
 
       case "phase.completed": {
-        const completeData = (event as PhaseCompletedEvent).data;
-        const status = completeData.success ? "✅" : "❌";
-        console.log(`\n${status} [${timestamp}] Completed: Phase ${completeData.phaseId}`);
+        const status = event.data.success ? "✅" : "❌";
+        console.log(`\n${status} [${timestamp}] Completed: Phase ${event.data.phaseId}`);
         console.log(
-          `   Cost: $${completeData.cost.toFixed(4)}, Duration: ${(
-            completeData.duration / 1000
+          `   Cost: $${event.data.cost.toFixed(4)}, Duration: ${(
+            event.data.duration / 1000
           ).toFixed(1)}s`,
         );
 
-        if (!completeData.success && completeData.failureReason) {
+        if (!event.data.success && event.data.failureReason) {
           console.log(
-            `   Failure: ${completeData.failureReason.type} (retriable: ${completeData.failureReason.retriable})`,
+            `   Failure: ${event.data.failureReason.type} (retriable: ${event.data.failureReason.retriable})`,
           );
-          if (completeData.failureReason.message) {
-            console.log(`   Message: ${completeData.failureReason.message}`);
+          if (event.data.failureReason.message) {
+            console.log(`   Message: ${event.data.failureReason.message}`);
           }
         }
         break;
       }
 
       case "assistant.action": {
-        const actionData = (event as AssistantActionEvent).data;
-        if (actionData.action === "message") {
-          console.log(`\n💬 [${timestamp}] ${actionData.content}`);
-        } else if (actionData.action === "thinking") {
-          console.log(`\n🤔 [${timestamp}] Thinking: ${actionData.content}`);
-        } else if (actionData.action === "tool_use") {
-          console.log(`\n🔧 [${timestamp}] Using tool: ${actionData.toolName}`);
+        if (event.data.action === "message") {
+          console.log(`\n💬 [${timestamp}] ${event.data.content}`);
+        } else if (event.data.action === "thinking") {
+          console.log(`\n🤔 [${timestamp}] Thinking: ${event.data.content}`);
+        } else if (event.data.action === "tool_use") {
+          console.log(`\n🔧 [${timestamp}] Using tool: ${event.data.toolName}`);
         }
         break;
       }
 
       case "token.usage": {
-        const usageData = (event as TokenUsageEvent).data;
-        console.log(`\n📊 [${timestamp}] Tokens used - Cost: $${usageData.totalCost.toFixed(4)}`);
+        console.log(`\n📊 [${timestamp}] Tokens used - Cost: $${event.data.totalCost.toFixed(4)}`);
         break;
       }
 
       case "file.updated": {
-        const fileData = (event as FileUpdatedEvent).data;
-        console.log(`\n📄 [${timestamp}] File ${fileData.action}: ${fileData.path}`);
+        console.log(`\n📄 [${timestamp}] File ${event.data.action}: ${event.data.path}`);
         break;
       }
 
       case "filetree.updated": {
-        const treeData = (event as FileTreeUpdatedEvent).data;
-        console.log(`\n🌲 [${timestamp}] File tree updated (${treeData.tree.length} root items)`);
+        console.log(`\n🌲 [${timestamp}] File tree updated (${event.data.tree.length} root items)`);
         break;
       }
 
       case "error": {
-        const errorData = (event as ErrorEvent).data;
-        console.error(`\n❌ [${timestamp}] Error: ${errorData.message}`);
+        console.error(`\n❌ [${timestamp}] Error: ${event.data.message}`);
         break;
       }
 
       case "incomplete.phase": {
-        const incompleteData = (event as IncompletePhaseEvent).data;
-        console.log(`\n⚠️  [${timestamp}] Incomplete phase detected: ${incompleteData.phaseName}`);
-        console.log(`   ${incompleteData.message}`);
+        console.log(`\n⚠️  [${timestamp}] Incomplete phase detected: ${event.data.phaseName}`);
+        console.log(`   ${event.data.message}`);
         break;
       }
 
       case "info": {
-        console.log(`\nℹ️  [${timestamp}] ${(event as InfoEvent).data.message}`);
+        console.log(`\nℹ️  [${timestamp}] ${event.data.message}`);
         break;
       }
 
       case "server.idle": {
-        const data = (event as ServerIdleEvent).data;
-        console.log(`\n⏸️  [${timestamp}] Server idle: ${data.reason}`);
-        console.log(`   ${data.message}`);
+        console.log(`\n⏸️  [${timestamp}] Server idle: ${event.data.reason}`);
+        console.log(`   ${event.data.message}`);
         break;
       }
 
       case "checkpoint.list": {
-        const data = (event as CheckpointListEvent).data;
-
         // Store checkpoints for interactive selection
-        this.checkpoints = data.checkpoints;
+        this.checkpoints = event.data.checkpoints;
 
         if (this.waitingForCheckpoints) {
           // We're in interactive mode - show selection menu
           this.waitingForCheckpoints = false;
-          await this.showCheckpointSelection(data);
+          await this.showCheckpointSelection(event.data);
         } else {
           // Regular display mode
-          console.log(`\n📋 [${timestamp}] Checkpoints in run ${data.runId}:`);
+          console.log(`\n📋 [${timestamp}] Checkpoints in run ${event.data.runId}:`);
 
-          if (data.checkpoints.length === 0) {
+          if (event.data.checkpoints.length === 0) {
             console.log("   No checkpoints found");
           } else {
-            data.checkpoints.forEach((cp, index) => {
+            event.data.checkpoints.forEach((cp, index) => {
               console.log(
                 `   [${index + 1}] ${cp.phaseName} - ${cp.checkpointType} ` +
                   `(${cp.sha.substring(0, 7)})`,
@@ -212,13 +188,12 @@ export class BasicTUI {
       }
 
       case "rollback.completed": {
-        const data = (event as RollbackCompletedEvent).data;
         console.log(
           `\n✅ [${timestamp}] Rollback completed!\n` +
-            `   From run: ${data.fromRun}\n` +
-            `   To run: ${data.toRun}\n` +
-            `   Phase: ${data.phaseName} (${data.checkpointType})\n` +
-            `   Checkpoint: ${data.checkpoint.substring(0, 7)}`,
+            `   From run: ${event.data.fromRun}\n` +
+            `   To run: ${event.data.toRun}\n` +
+            `   Phase: ${event.data.phaseName} (${event.data.checkpointType})\n` +
+            `   Checkpoint: ${event.data.checkpoint.substring(0, 7)}`,
         );
         break;
       }

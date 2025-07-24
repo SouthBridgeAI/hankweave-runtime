@@ -1,9 +1,4 @@
 import { expect, test } from "bun:test";
-import {
-  isAssistantActionEvent,
-  isStateSnapshotEvent,
-  isTokenUsageEvent,
-} from "../../../server/type-guards.js";
 import type { ServerEvent } from "../../../server/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
@@ -51,8 +46,8 @@ export function runEventIntegrityTests(testState: TestState) {
       if (events.length > 1) {
         // Multiple events at same timestamp should have different token counts
         const tokenCounts = events.map((e) => {
-          if (isTokenUsageEvent(e)) {
-            return e.data?.outputTokens || 0;
+          if (e.type === "token.usage") {
+            return e.data.outputTokens || 0;
           }
           return 0;
         });
@@ -73,8 +68,8 @@ export function runEventIntegrityTests(testState: TestState) {
     const actionSignatures = new Map<string, number>();
 
     assistantActions.forEach((action) => {
-      if (isAssistantActionEvent(action)) {
-        const signature = `${action.data?.phaseId}_${action.data?.action}_${action.data?.content}`;
+      if (action.type === "assistant.action") {
+        const signature = `${action.data.phaseId}_${action.data.action}_${action.data.content}`;
         actionSignatures.set(signature, (actionSignatures.get(signature) || 0) + 1);
       }
     });
@@ -104,9 +99,9 @@ export function runEventIntegrityTests(testState: TestState) {
   });
 
   test("memory and resource monitoring in completed phases", () => {
-    const finalSnapshot = [...testState.events].reverse().find((e) => isStateSnapshotEvent(e));
+    const finalSnapshot = [...testState.events].reverse().find((e) => e.type === "state.snapshot");
 
-    if (finalSnapshot?.data?.completedPhases) {
+    if (finalSnapshot?.type === "state.snapshot" && finalSnapshot.data.completedPhases) {
       // Completed phases should only have essential data
       finalSnapshot.data.completedPhases.forEach((phase) => {
         // Check for new properties

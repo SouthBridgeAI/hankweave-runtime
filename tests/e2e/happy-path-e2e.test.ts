@@ -3,7 +3,6 @@ import { afterAll, describe, expect } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isErrorEvent, isPhaseStartedEvent } from "../../server/type-guards.js";
 import {
   type CleanupIntegrationResult,
   executeTestCleanup,
@@ -177,7 +176,7 @@ async function setupAndRunPhases(): Promise<void> {
 
   // Phase 1
   const phase1StartEvent = await testState.client.waitForEvent("phase.started", 10000);
-  if (!isPhaseStartedEvent(phase1StartEvent)) {
+  if (phase1StartEvent.type !== "phase.started") {
     throw new Error("Expected phase.started event for phase 1");
   }
   testState.phase1Started = phase1StartEvent;
@@ -195,9 +194,9 @@ async function setupAndRunPhases(): Promise<void> {
   while (Date.now() - phase2StartTime < phase2Timeout) {
     const phase2StartEvent = testState.client
       .getEvents()
-      .find((e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-2");
+      .find((e) => e.type === "phase.started" && e.data.phaseId === "phase-2");
 
-    if (phase2StartEvent && isPhaseStartedEvent(phase2StartEvent)) {
+    if (phase2StartEvent && phase2StartEvent.type === "phase.started") {
       testState.phase2Started = phase2StartEvent;
       console.log(`${colors.green}✓ Phase 2 started${colors.reset}`);
       break;
@@ -223,9 +222,9 @@ async function setupAndRunPhases(): Promise<void> {
   while (Date.now() - phase3StartTime < phase3Timeout) {
     const phase3StartEvent = testState.client
       .getEvents()
-      .find((e) => isPhaseStartedEvent(e) && e.data.phaseId === "phase-3");
+      .find((e) => e.type === "phase.started" && e.data.phaseId === "phase-3");
 
-    if (phase3StartEvent && isPhaseStartedEvent(phase3StartEvent)) {
+    if (phase3StartEvent && phase3StartEvent.type === "phase.started") {
       testState.phase3Started = phase3StartEvent;
       console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
       break;
@@ -249,7 +248,7 @@ async function setupAndRunPhases(): Promise<void> {
   testState.events = testState.client.getEvents();
 
   // Extract error events for specific error testing
-  testState.errorEvents = testState.events.filter((e) => isErrorEvent(e));
+  testState.errorEvents = testState.events.filter((e) => e.type === "error") as ErrorEvent[];
 
   // Run checkpoint validation BEFORE cleanup can happen
   console.log(`\n${colors.blue}Validating checkpoint system...${colors.reset}`);

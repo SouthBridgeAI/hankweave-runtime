@@ -292,39 +292,31 @@ export type FileNode =
 // ============================================================================
 
 /**
- * Base interface for all server-to-client events.
- * Events are sent over WebSocket to inform clients of server state changes.
+ * Sent immediately after client connection to indicate server is ready.
+ * Contains basic server information for client compatibility checks.
  */
-export interface ServerEvent<T extends string = string, D = unknown> {
+export interface ServerReadyEvent {
   /** Unique ID for this event instance */
   id: EventId;
   /** ISO 8601 timestamp of when the event was created */
   timestamp: string;
   /** Event type identifier for client-side routing */
-  type: T;
-  data?: D;
+  type: "server.ready";
+  data: {
+    /** Server version for compatibility checking */
+    serverVersion: string;
+    /** Absolute path where Claude will execute */
+    projectPath: string;
+  };
 }
-
-/**
- * Sent immediately after client connection to indicate server is ready.
- * Contains basic server information for client compatibility checks.
- */
-export interface ServerReadyEvent
-  extends ServerEvent<
-    "server.ready",
-    {
-      /** Server version for compatibility checking */
-      serverVersion: string;
-      /** Absolute path where Claude will execute */
-      projectPath: string;
-    }
-  > {}
 
 /**
  * Comprehensive state snapshot sent after connection and on major state changes.
  * Allows clients to sync with server state after connection or reconnection.
  */
-export interface StateSnapshotEvent extends ServerEvent {
+export interface StateSnapshotEvent {
+  id: EventId;
+  timestamp: string;
   type: "state.snapshot";
   data: {
     /** Currently executing phase, undefined if idle */
@@ -354,7 +346,9 @@ export interface StateSnapshotEvent extends ServerEvent {
  * Emitted when a phase begins execution.
  * Indicates Claude process has been spawned and prompt has been sent.
  */
-export interface PhaseStartedEvent extends ServerEvent {
+export interface PhaseStartedEvent {
+  id: EventId;
+  timestamp: string;
   type: "phase.started";
   data: {
     /** ID of the phase that started */
@@ -376,7 +370,9 @@ export interface PhaseStartedEvent extends ServerEvent {
  * Emitted when a phase finishes execution.
  * Includes success status, costs, and timing information.
  */
-export interface PhaseCompletedEvent extends ServerEvent {
+export interface PhaseCompletedEvent {
+  id: EventId;
+  timestamp: string;
   type: "phase.completed";
   data: {
     /** ID of the completed phase */
@@ -398,7 +394,9 @@ export interface PhaseCompletedEvent extends ServerEvent {
  * Real-time stream of Claude's actions during phase execution.
  * Parsed from Claude's JSON log output.
  */
-export interface AssistantActionEvent extends ServerEvent {
+export interface AssistantActionEvent {
+  id: EventId;
+  timestamp: string;
   type: "assistant.action";
   data: {
     /** Phase this action belongs to */
@@ -418,7 +416,9 @@ export interface AssistantActionEvent extends ServerEvent {
  * Token usage update for cost tracking.
  * Emitted after each Claude message with usage information.
  */
-export interface TokenUsageEvent extends ServerEvent {
+export interface TokenUsageEvent {
+  id: EventId;
+  timestamp: string;
   type: "token.usage";
   data: {
     /** Phase that consumed these tokens */
@@ -440,7 +440,9 @@ export interface TokenUsageEvent extends ServerEvent {
  * File change notification for watched files.
  * Only emitted for files matching the phase's watch pattern.
  */
-export interface FileUpdatedEvent extends ServerEvent {
+export interface FileUpdatedEvent {
+  id: EventId;
+  timestamp: string;
   type: "file.updated";
   data: {
     /** Relative path from project root */
@@ -458,7 +460,9 @@ export interface FileUpdatedEvent extends ServerEvent {
  * Complete file tree structure update.
  * Sent after file changes to provide updated directory structure.
  */
-export interface FileTreeUpdatedEvent extends ServerEvent {
+export interface FileTreeUpdatedEvent {
+  id: EventId;
+  timestamp: string;
   type: "filetree.updated";
   data: {
     /** Root nodes of the file tree */
@@ -470,7 +474,9 @@ export interface FileTreeUpdatedEvent extends ServerEvent {
  * Error notification for both fatal and non-fatal errors.
  * Fatal errors will trigger server shutdown.
  */
-export interface ErrorEvent extends ServerEvent {
+export interface ErrorEvent {
+  id: EventId;
+  timestamp: string;
   type: "error";
   data: {
     /** Human-readable error message */
@@ -492,7 +498,9 @@ export interface ErrorEvent extends ServerEvent {
  * Notification of incomplete phase from previous session.
  * Helps users recover from interrupted workflows.
  */
-export interface IncompletePhaseEvent extends ServerEvent {
+export interface IncompletePhaseEvent {
+  id: EventId;
+  timestamp: string;
   type: "incomplete.phase";
   data: {
     /** ID of the incomplete phase */
@@ -508,7 +516,9 @@ export interface IncompletePhaseEvent extends ServerEvent {
  * General informational messages.
  * Used for non-error status updates.
  */
-export interface InfoEvent extends ServerEvent {
+export interface InfoEvent {
+  id: EventId;
+  timestamp: string;
   type: "info";
   data: {
     /** Informational message */
@@ -519,7 +529,9 @@ export interface InfoEvent extends ServerEvent {
 /**
  * Server idle notification
  */
-export interface ServerIdleEvent extends ServerEvent {
+export interface ServerIdleEvent {
+  id: EventId;
+  timestamp: string;
   type: "server.idle";
   data: {
     reason: "startup" | "phase-completed" | "all-phases-completed";
@@ -542,7 +554,9 @@ export interface CheckpointQueryInfo {
 /**
  * Response to checkpoint.list command
  */
-export interface CheckpointListEvent extends ServerEvent {
+export interface CheckpointListEvent {
+  id: EventId;
+  timestamp: string;
   type: "checkpoint.list";
   data: {
     runId: string;
@@ -554,7 +568,9 @@ export interface CheckpointListEvent extends ServerEvent {
 /**
  * Rollback started notification
  */
-export interface RollbackStartedEvent extends ServerEvent {
+export interface RollbackStartedEvent {
+  id: EventId;
+  timestamp: string;
   type: "rollback.started";
   data: {
     fromRun: string;
@@ -569,7 +585,9 @@ export interface RollbackStartedEvent extends ServerEvent {
 /**
  * Rollback phase checkpoint notification
  */
-export interface RollbackPhaseCheckpointEvent extends ServerEvent {
+export interface RollbackPhaseCheckpointEvent {
+  id: EventId;
+  timestamp: string;
   type: "rollback.phaseCheckpoint";
   data: {
     phaseId: string;
@@ -583,21 +601,27 @@ export interface RollbackPhaseCheckpointEvent extends ServerEvent {
 /**
  * Rollback workspace cleanup notification
  */
-export interface RollbackWorkspaceCleanupEvent extends ServerEvent {
+export interface RollbackWorkspaceCleanupEvent {
+  id: EventId;
+  timestamp: string;
   type: "rollback.workspaceCleanup";
   data: {
     phaseId: string;
     phaseName: string;
     directories: string[];
-    status: "started" | "completed" | "failed";
-    error?: string; // Only if status is "failed"
+    status: "started" | "completed" | "failed" | "partial";
+    successfulCleanups?: string[];
+    failedCleanups?: { directory: string; error: string }[];
+    error?: string; // Overall error message
   };
 }
 
 /**
  * Rollback progress notification
  */
-export interface RollbackProgressEvent extends ServerEvent {
+export interface RollbackProgressEvent {
+  id: EventId;
+  timestamp: string;
   type: "rollback.progress";
   data: {
     currentStep: number;
@@ -609,7 +633,9 @@ export interface RollbackProgressEvent extends ServerEvent {
 /**
  * Rollback completed notification
  */
-export interface RollbackCompletedEvent extends ServerEvent {
+export interface RollbackCompletedEvent {
+  id: EventId;
+  timestamp: string;
   type: "rollback.completed";
   data: {
     fromRun: string;
@@ -622,26 +648,42 @@ export interface RollbackCompletedEvent extends ServerEvent {
   };
 }
 
+/**
+ * Discriminated union of all server-to-client event types.
+ * Use this instead of the generic ServerEvent interface for better type safety.
+ * TypeScript will automatically narrow the type based on the `type` field.
+ */
+export type ServerEvent =
+  | ServerReadyEvent
+  | StateSnapshotEvent
+  | PhaseStartedEvent
+  | PhaseCompletedEvent
+  | AssistantActionEvent
+  | TokenUsageEvent
+  | FileUpdatedEvent
+  | FileTreeUpdatedEvent
+  | ErrorEvent
+  | IncompletePhaseEvent
+  | InfoEvent
+  | ServerIdleEvent
+  | CheckpointListEvent
+  | RollbackStartedEvent
+  | RollbackPhaseCheckpointEvent
+  | RollbackWorkspaceCleanupEvent
+  | RollbackProgressEvent
+  | RollbackCompletedEvent;
+
 // ============================================================================
 // Client -> Server Commands
 // ============================================================================
 
 /**
- * Base interface for all client-to-server commands.
- * Commands are sent over WebSocket to control server behavior.
- */
-export interface ClientCommand {
-  /** Unique ID for this command (for request/response correlation) */
-  id: string;
-  /** Command type identifier for server-side routing */
-  type: string;
-}
-
-/**
  * Start a specific phase by ID.
  * Can optionally skip pre-start commands for retry scenarios.
  */
-export interface StartPhaseCommand extends ClientCommand {
+export interface StartPhaseCommand {
+  /** Unique ID for this command (for request/response correlation) */
+  id: string;
   type: "phase.start";
   data: {
     /** ID of the phase to start */
@@ -655,7 +697,8 @@ export interface StartPhaseCommand extends ClientCommand {
  * Start the next phase in sequence.
  * Determines next phase based on completion history.
  */
-export interface NextPhaseCommand extends ClientCommand {
+export interface NextPhaseCommand {
+  id: string;
   type: "phase.next";
 }
 
@@ -663,7 +706,8 @@ export interface NextPhaseCommand extends ClientCommand {
  * Skip the currently running phase.
  * Terminates the Claude process and marks phase as skipped.
  */
-export interface SkipPhaseCommand extends ClientCommand {
+export interface SkipPhaseCommand {
+  id: string;
   type: "phase.skip";
 }
 
@@ -671,7 +715,8 @@ export interface SkipPhaseCommand extends ClientCommand {
  * Re-run the last completed phase.
  * Useful for retrying failed phases or regenerating outputs.
  */
-export interface RedoPhaseCommand extends ClientCommand {
+export interface RedoPhaseCommand {
+  id: string;
   type: "phase.redo";
 }
 
@@ -679,9 +724,93 @@ export interface RedoPhaseCommand extends ClientCommand {
  * Gracefully shutdown the server.
  * Cleans up all resources and removes lock file.
  */
-export interface ShutdownCommand extends ClientCommand {
+export interface ShutdownCommand {
+  id: string;
   type: "server.shutdown";
 }
+
+/**
+ * Force stop the current running phase.
+ */
+export interface ForceStopCommand {
+  id: string;
+  type: "phase.forceStop";
+  data?: {
+    /** Optional reason for force stopping */
+    reason?: string;
+  };
+}
+
+/**
+ * List available checkpoints.
+ */
+export interface ListCheckpointsCommand {
+  id: string;
+  type: "checkpoint.list";
+  data?: {
+    /** Optional run ID to list checkpoints for */
+    runId?: string;
+  };
+}
+
+/**
+ * Rollback to a specific checkpoint.
+ */
+export interface RollbackToCheckpointCommand {
+  id: string;
+  type: "rollback.toCheckpoint";
+  data: {
+    /** Checkpoint SHA (can be partial) */
+    checkpointSha: string;
+    /** Whether to auto-restart after rollback */
+    autoRestart?: boolean;
+  };
+}
+
+/**
+ * Rollback to a phase with specific checkpoint type.
+ */
+export interface RollbackToPhaseCommand {
+  id: string;
+  type: "rollback.toPhase";
+  data: {
+    /** Phase ID to rollback to */
+    phaseId: string;
+    /** Checkpoint type within that phase */
+    checkpointType: "start" | "end" | "workspace-setup" | "completed" | "error" | "skipped";
+    /** Whether to auto-restart after rollback */
+    autoRestart?: boolean;
+  };
+}
+
+/**
+ * Rollback to last successful phase.
+ */
+export interface RollbackToLastSuccessCommand {
+  id: string;
+  type: "rollback.toLastSuccess";
+  data?: {
+    /** Whether to auto-restart after rollback */
+    autoRestart?: boolean;
+  };
+}
+
+/**
+ * Discriminated union of all client-to-server command types.
+ * Use this instead of generic command interfaces for better type safety.
+ * TypeScript will automatically narrow the type based on the `type` field.
+ */
+export type ClientCommand =
+  | StartPhaseCommand
+  | NextPhaseCommand
+  | SkipPhaseCommand
+  | RedoPhaseCommand
+  | ShutdownCommand
+  | ForceStopCommand
+  | ListCheckpointsCommand
+  | RollbackToCheckpointCommand
+  | RollbackToPhaseCommand
+  | RollbackToLastSuccessCommand;
 
 // ============================================================================
 // Synthetic Message Types
