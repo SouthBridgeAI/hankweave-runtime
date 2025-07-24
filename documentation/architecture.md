@@ -9,10 +9,35 @@ Langton Runner is a sophisticated orchestration server designed to manage comple
 The architecture is guided by several key principles to ensure robustness, maintainability, and extensibility:
 
 -   **Single Responsibility**: Each module and class is designed to have a clear and focused purpose, such as state management, process control, or configuration parsing. This separation of concerns makes the system easier to understand, test, and extend.
--   **Type Safety**: The entire codebase is written in TypeScript and leverages advanced features like branded types (`PhaseId`, `RunId`) and discriminated unions (`PhaseExecution`) to enforce correctness at compile time, making impossible states unrepresentable.
+
+-   **Type Safety**: The entire codebase is written in TypeScript and leverages advanced features:
+    - **Branded Types**: These are nominal types that prevent accidental type confusion. For example, `PhaseId` and `RunId` are both strings at runtime, but TypeScript ensures you can't accidentally pass a `RunId` where a `PhaseId` is expected:
+      ```typescript
+      type Branded<T, Brand> = T & { __brand: Brand };
+      type PhaseId = Branded<string, "PhaseId">;
+      type RunId = Branded<string, "RunId">;
+      ```
+    - **Discriminated Unions**: The `PhaseExecution` type uses the `status` field as a discriminator, allowing TypeScript to narrow the type and ensure type-safe access to status-specific fields:
+      ```typescript
+      type PhaseExecution =
+        | { status: "running"; currentCost: number; /* ... */ }
+        | { status: "completed"; finalCost: number; /* ... */ }
+        | { status: "failed"; failureReason: FailureReason; /* ... */ }
+      ```
+
 -   **Event-Driven Communication**: Internal modules communicate through a type-safe event emitter. This decouples components and allows for flexible, asynchronous interactions. For example, the log parser emits events that the main server listens for, without the two being tightly coupled.
+
 -   **State Immutability**: All state transitions are handled as pure functions that take the current state and an event, and return a new state object. This avoids side effects and makes state changes predictable and easy to reason about.
+
+-   **Event Sourcing Pattern**: The state manager uses an event-sourcing-inspired approach where:
+    - All state changes are represented as discrete events (`StateTransition` types)
+    - Events are queued and processed sequentially
+    - Each event is validated before application
+    - The current state can be reconstructed by replaying events
+    - All events are logged to `events.jsonl` for auditing
+
 -   **Fail-Safe Operation**: The system is designed to be resilient. It includes mechanisms for graceful degradation (e.g., disabling checkpointing if Git is unavailable) and recovery from crashes, primarily through atomic state writes and a robust lock file mechanism.
+
 -   **Append-Only History**: To ensure a complete and auditable trail, historical data (runs, phase executions, checkpoints) is never modified or deleted. New states are appended, preserving the full history of the workflow.
 
 ## Module Organization
@@ -63,6 +88,34 @@ The state transition process is designed to be robust and atomic:
 4.  The new state is persisted to disk using an atomic write operation (write to temp, backup old, rename).
 5.  Finally, after the state is safely on disk, the `StateManager` emits a `stateChanged` event to notify other parts of the system.
 
+## System Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Client (WebSocket)                          │
+└─────────────────────────────────┬───────────────────────────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │    LangtonServer          │
+                    │  (Core Orchestrator)      │
+                    └──┬──────┬──────┬──────┬──┘
+                       │      │      │      │
+           ┌───────────▼──┐ ┌─▼──────▼──┐ ┌─▼────────────┐ ┌─────────┐
+           │StateManager  │ │ Claude    │ │CheckpointGit │ │ File    │
+           │             │ │ Process   │ │              │ │Resolver │
+           │ ┌─────────┐ │ │ Manager   │ │  ┌────────┐  │ └─────────┘
+           │ │ State   │ │ │           │ │  │ Shadow │  │
+           │ │Transition│ │ │ ┌───────┐│ │  │  Git   │  │
+           │ │ Queue   │ │ │ │ Log   ││ │  │  Repo  │  │
+           │ └─────────┘ │ │ │Parser ││ │  └────────┘  │
+           └─────┬───────┘ │ └───────┘│ └──────────────┘
+                 │         └───────────┘
+         ┌───────▼────────┐
+         │  state.json    │
+         │ (Persistence)  │
+         └────────────────┘
+```
+
 ## Key Architectural Decisions
 
 ### Shadow Git Repository
@@ -71,11 +124,41 @@ Instead of interfering with the user's project git repository, the server mainta
 -   **No Interference**: It doesn't create commits or branches in the user's repository.
 -   **Complete History**: It can track files that might be in the user's `.gitignore` (e.g., build artifacts), providing a more complete snapshot of the workspace state.
 -   **Clean Slate**: It starts from an empty commit, providing a reliable baseline to diff against.
+-   **Branch Strategy**: Each run gets its own branch (`run-<runId>`), isolating different execution paths:
+     ```
+     main (initial empty commit)
+       ├── run-1234-abc
+       │     ├── workspace-setup: phase-1
+       │     ├── completed: phase-1
+       │     └── completed: phase-2
+       └── run-5678-def (rollback from phase-1)
+             ├── completed: phase-1 (different approach)
+             └── completed: phase-2
+     ```
 
 ### Fire-and-Forget State Transitions
 
 The `StateManager.transition()` method is asynchronous in effect but synchronous in invocation ("fire-and-forget"). This decouples the components that generate state changes from the persistence logic, simplifying the codebase. A queue ensures that all transitions are processed in the correct order, preserving causality.
 
+```
+Component → transition() → Queue → Validate → Apply → Persist → Emit
+                            ↑                                      │
+                            └──────────────────────────────────────┘
+                                     (Next transition)
+```
+
 ### The Execution Thread
 
 The concept of an Execution Thread is a solution to the complexity introduced by rollbacks. A simple linear history is not sufficient when a user can branch off from any point in the past. The thread algorithm reconstructs the *logical* sequence of events as the user perceives it, making it possible to correctly determine the "next" phase even in complex, non-linear histories.
+
+#### Example: Rollback Scenario
+```
+Run 1: [Phase A] → [Phase B] → [Phase C failed]
+                        ↓
+                    (rollback)
+                        ↓
+Run 2:             [Phase B'] → [Phase C'] → [Phase D]
+
+Execution Thread: [Phase A] → [Phase B'] → [Phase C'] → [Phase D]
+                 (from Run 1)  (from Run 2 - newer versions)
+```

@@ -7,8 +7,31 @@ Getting the Langton Runner up and running involves a few prerequisites and a sim
 ### Prerequisites
 
 1.  **Bun Runtime**: The server is built on Bun, a fast JavaScript runtime. Ensure you have Bun v1.0.0 or later installed. You can find installation instructions at [bun.sh](https://bun.sh).
+    ```bash
+    # Check Bun version
+    bun --version
+    ```
+
 2.  **Git**: The powerful checkpoint and rollback features rely on Git. Make sure Git is installed and accessible in your system's PATH.
+    ```bash
+    # Check Git version (2.25+ recommended)
+    git --version
+    ```
+
 3.  **Claude CLI**: The server orchestrates the official Claude CLI. You must have it installed and configured with a valid Anthropic API key.
+    ```bash
+    # Install Claude CLI
+    npm install -g @anthropic-ai/claude-cli
+
+    # Configure with your API key
+    claude auth
+    ```
+
+**System Requirements:**
+- **OS**: macOS, Linux, or Windows (with WSL)
+- **Memory**: 4GB RAM minimum (8GB recommended)
+- **Disk**: 1GB free space for logs and checkpoints
+- **Network**: Stable internet for Claude API calls
 
 ### Project Setup
 
@@ -43,6 +66,13 @@ bun server/index.ts [options]
 bun run server          # Starts the standard WebSocket server
 bun run server:basic    # Starts the server with the Basic TUI
 ```
+
+**Exit Codes:**
+- `0`: Successful completion
+- `1`: Configuration error
+- `2`: Runtime error
+- `3`: Cleanup requested
+- `130`: Interrupted (Ctrl+C)
 
 ### Command-Line Options
 
@@ -132,7 +162,22 @@ You can pass environment variables to the Claude process in two ways:
     # Claude process will see CUSTOM_API_KEY=secret123
     ```
 
+    **Why TADPOLE?** The prefix serves as a namespace to:
+    - Prevent accidental exposure of sensitive system variables
+    - Make it clear which variables are intended for Claude
+    - Avoid conflicts with existing environment variables
+    - The name comes from the project's internal codename
+
 2.  **Phase-Specific Variables**: You can define an `env` object within a phase's configuration to set variables that are only active during that phase. These will override any system-provided variables with the same name.
+    ```json
+    {
+      "id": "phase-1",
+      "env": {
+        "API_ENDPOINT": "https://staging.api.com",
+        "DEBUG": "true"
+      }
+    }
+    ```
 
 ## Typical Workflows
 
@@ -159,3 +204,26 @@ When a phase fails:
 3.  Examine the logs in `.langton/runs/<runId>/` to diagnose the issue.
 4.  Use rollback commands to revert to a known good state before retrying.
 5.  If you wish to start completely fresh, use the `bun server/index.ts --cleanup` command.
+
+**Common Issues and Solutions:**
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| "Claude CLI not found" | CLI not installed or not in PATH | Install with `npm install -g @anthropic-ai/claude-cli` |
+| "API timeout" | Network issues or rate limiting | Check connection, wait for rate limit reset |
+| "Permission denied" | File permissions or locked files | Check file ownership, close other programs |
+| "Git not available" | Git not installed | Install Git (checkpointing will be disabled) |
+| "Port already in use" | Another server running | Change port with `--port` or kill other process |
+| "State corrupted" | Disk error or crash during write | Server will auto-recover from backup |
+
+**Debug Mode:**
+For verbose logging, set the `DEBUG` environment variable:
+```bash
+DEBUG=langton:* bun run server
+```
+
+**Performance Tuning:**
+- **Large Projects**: Use specific glob patterns in `trackedFiles` to avoid tracking unnecessary files
+- **Slow Checkpoints**: Exclude large binary files and build artifacts
+- **Memory Usage**: The server streams logs and doesn't load entire files into memory
+- **API Rate Limits**: The server respects Claude's rate limits automatically

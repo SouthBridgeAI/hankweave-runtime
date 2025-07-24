@@ -16,6 +16,35 @@ The connection model is designed for simplicity and state consistency:
 
 - **Lock File**: On startup, the server creates a lock file at `.langton/server.lock`. This file contains the server's process ID (PID) and the current run ID. This mechanism prevents multiple server instances from running in the same project directory, which would otherwise lead to state corruption and race conditions. The lock file also includes a heartbeat timestamp, allowing the server to detect and clean up stale locks from crashed previous sessions.
 
+### Connection Flow Diagram
+```
+Client                    Server
+  │                         │
+  ├──── Connect WS ────────>│
+  │                         ├─ Check for existing clients
+  │                         ├─ Create/verify lock file
+  │<──── server.ready ──────┤
+  │<─── state.snapshot ─────┤
+  │                         │
+  │─── phase.start ────────>│
+  │<──── phase.started ─────┤
+  │<─── assistant.action ───┤ (streaming)
+  │<──── token.usage ───────┤ (periodic)
+  │<─── phase.completed ────┤
+  │                         │
+  │──── Disconnect ─────────>│
+  │                         ├─ Kill Claude process
+  │                         ├─ Save final state
+  │                         └─ Remove lock file
+```
+
+### WebSocket Close Codes
+- `1000`: Normal closure
+- `1001`: Going away (server shutdown)
+- `1006`: Abnormal closure (connection lost)
+- `1008`: Policy violation (client already connected)
+- `1011`: Internal server error
+
 ## Message Format
 
 ### Base Message Structure
@@ -134,7 +163,15 @@ Reverts the project's file state and execution history to a specific checkpoint,
 ```
 
 #### `rollback.toPhase`
-A more abstract way to roll back. Instead of a specific SHA, you specify a target phase and a checkpoint type (`start`, `end`, `completed`, etc.). The server resolves this to the correct checkpoint SHA from the execution history.
+A more abstract way to roll back. Instead of a specific SHA, you specify a target phase and a checkpoint type. The server resolves this to the correct checkpoint SHA from the execution history.
+
+**Checkpoint Types:**
+- `"workspace-setup"`: After workspace setup, before Claude starts
+- `"completed"`: After successful completion
+- `"error"`: After failure (if checkpoint was created)
+- `"skipped"`: After skip
+- `"start"`: Alias for workspace-setup
+- `"end"`: Latest checkpoint for the phase
 
 ```json
 {
@@ -378,3 +415,41 @@ The server provides strong guarantees about the order of events, which simplifie
 - Phase lifecycle events (`phase.started`, `phase.completed`) will always be sent in the correct sequence for a given phase.
 - A `state.snapshot` always reflects the state *after* the event that triggered it (e.g., after a `phase.completed` event).
 - File system events (`file.updated`, `filetree.updated`) are sent as changes are detected during a phase's execution.
+
+### Message Size Limits
+- Maximum message size: 10MB (configurable in WebSocket options)
+- Large file contents in `file.updated` events may be truncated
+- Binary files are not included in file update events
+- For very large state snapshots, consider pagination (future feature)
+
+### Error Handling
+When errors occur, the server sends structured error events:
+
+```json
+{
+  "id": "evt-err-001",
+  "timestamp": "2025-01-19T10:00:00Z",
+  "type": "error",
+  "data": {
+    "code": "PHASE_TIMEOUT",
+    "message": "Phase execution timed out after 30 minutes",
+    "details": {
+      "phaseId": "phase-1",
+      "elapsed": 1800000
+    },
+    "fatal": false,
+    "retriable": true,
+    "severity": "error"
+  }
+}
+```
+
+**Error Codes:**
+- `CONFIG_INVALID`: Phase configuration error
+- `CLAUDE_NOT_FOUND`: Claude CLI not available
+- `API_ERROR`: Claude API error (rate limit, auth, etc.)
+- `PHASE_TIMEOUT`: Phase took too long
+- `STATE_CORRUPTED`: State file corruption detected
+- `GIT_ERROR`: Checkpoint operation failed
+- `WORKSPACE_SETUP_FAILED`: Copy/command failed
+- `INTERNAL_ERROR`: Unexpected server error

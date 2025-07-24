@@ -9,8 +9,6 @@
     "format": "biome format --write .",
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
-    "validate": "bun server/index.ts --validate",
-    "validate:custom": "bun server/index.ts --validate --config=",
     "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts && bun test tests/e2e/rollback-improved-2-e2e-snapshot-tests.test.ts && bun tests/unit/cleanup-after-tests.ts",
     "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",
     "test:e2e:check": "bun tests/utils/check-test-ready.ts",

@@ -109,6 +109,17 @@ Langton Runner incorporates several advanced design patterns to provide its powe
 -   **Shadow Git Repository**: By maintaining its own git repository in the `.langton` folder, the server can provide powerful versioning and rollback features without ever interfering with your project's own git history.
 -   **Granular Phase States**: The server tracks each phase through a seven-stage lifecycle (`preparing`, `starting`, `initializing`, `running`, `completed`, `failed`, `skipped`). This provides extremely precise state tracking and error reporting.
 
+## Documentation
+
+Comprehensive documentation is available in the `documentation/` directory:
+
+-   **[Architecture Overview](documentation/architecture.md)** - System design, modules, and key architectural decisions
+-   **[Phase Configuration Guide](documentation/phase-configuration-guide.md)** - Complete guide to building phase configurations
+-   **[Phase System](documentation/phase-system.md)** - Understanding phases, runs, and execution threads
+-   **[Running the Server](documentation/running-the-server.md)** - Installation, setup, and command-line options
+-   **[Server Protocol](documentation/server-protocol.md)** - WebSocket protocol reference for client developers
+-   **[Langton Folder Structure](documentation/langton-folder-structure.md)** - Understanding the `.langton` directory
+
 ## Important Considerations
 
 -   **Single Client Model**: The server is designed to be controlled by a single client at a time. When that client disconnects, the server gracefully shuts down.
