@@ -79,8 +79,10 @@ export const systemMessageSchema = z
 export const toolUseContentSchema = z.object({
   type: z.literal("tool_use"),
 
-  // Unique identifier for this tool use (format: toolu_[alphanumeric])
-  id: z.string().regex(/^toolu_[a-zA-Z0-9]+$/, "Invalid tool use ID format"),
+  // Unique identifier for this tool use
+  // - Claude format: toolu_[alphanumeric]
+  // - Non-Claude models (e.g., Qwen): call_[hex string]
+  id: z.string().regex(/^(toolu_[a-zA-Z0-9]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
 
   // Name of the tool being invoked
   name: toolNameSchema,
@@ -118,7 +120,9 @@ export const toolResultContentSchema = z.object({
   type: z.literal("tool_result"),
 
   // ID of the tool use this result corresponds to
-  tool_use_id: z.string().regex(/^toolu_[a-zA-Z0-9]+$/, "Invalid tool use ID format"),
+  // - Claude format: toolu_[alphanumeric]
+  // - Non-Claude models (e.g., Qwen): call_[hex string]
+  tool_use_id: z.string().regex(/^(toolu_[a-zA-Z0-9]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
 
   // Result content from tool execution (can be string, object, or array of content items)
   content: z.union([
@@ -186,10 +190,10 @@ export const assistantMessageSchema = z.object({
       .optional(),
 
     // Stop reason for the response (can be null)
-    stop_reason: z.enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"]).nullable(),
+    stop_reason: z.enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"]).nullable().optional(),
 
     // Stop sequence used (if applicable, can be null)
-    stop_sequence: z.string().nullable(),
+    stop_sequence: z.string().nullable().optional(),
   }),
 });
 
