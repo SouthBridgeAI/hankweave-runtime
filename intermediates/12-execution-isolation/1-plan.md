@@ -1,4 +1,4 @@
-# Langton Execution Isolation - Complete Implementation Plan
+# Langton Execution Isolation - Complete Implementation Plan (Updated)
 
 ## Overview
 
@@ -16,143 +16,153 @@ This plan implements execution isolation where Langton runs in a separate direct
       └── generated-files/  # Files created by Claude
 ```
 
-### Key Paths
-- **`dataSourcePath`**: Original user project directory (from `--data` flag, default: cwd)
-- **`executionPath`**: Where server runs, `.langton` lives, git operates
-- **`usableDataPath`**: Always `${executionPath}/data` (symlink/copy target)
+### Key Paths - UPDATED NAMES
+- **`readOnlySourceDataPath`**: Original user project directory (from `--data` flag, default: cwd)
+- **`executionPath`**: Primary directory where EVERYTHING gets written - server runs here, `.langton` lives here, git operates here, Claude runs here
+- **`dataPathInExecutionDir`**: Always `${executionPath}/data` - the symlink/copy target used ONLY during setup and verification
 
 ### Template Variables
-- **`<%EXECUTION_DIR%>`**: Points to `executionPath` (replaces `PROJECT_DIR`)
-- **`<%DATA_DIR%>`**: Points to `usableDataPath` (new, for accessing user data)
+- **`<%PROJECT_DIR%>`**: Points to `executionPath` (legacy support)
+- **`<%EXECUTION_DIR%>`**: Points to `executionPath`
+- **`<%DATA_DIR%>`**: Points to `dataPathInExecutionDir` (the data/ subdirectory)
 
-### Important Principles
-- `dataSourcePath` is ONLY used during initial setup
-- All file operations after setup use either `executionPath` or `usableDataPath`
+### Important Principles - CLARIFIED
+- `readOnlySourceDataPath` is ONLY used during initial setup to create the symlink/copy
+- `dataPathInExecutionDir` is ONLY used:
+  1. During execution directory setup (to create symlink/copy)
+  2. At startup for verification
+  3. NOWHERE ELSE - everything else uses `executionPath`
+- All file operations after setup use `executionPath`
 - Claude runs with `cwd = executionPath` and accesses user files via `data/` subdirectory
-- Checkpoint git completely ignores the `data/` directory
+- Checkpoint git completely ignores the `data/` directory via file resolver, NOT gitignore
 - Config files are loaded from their original locations (not copied)
+- Relative paths in config:
+  - Prompt files: resolved relative to config file location
+  - Copy sources: resolved relative to config file location
+  - Copy targets: resolved relative to executionPath
+  - `.langton` is always in executionPath
 
 ## Implementation Plan
 
 ### Phase 1: Core Infrastructure
 
-#### 1.1 Create `server/data-hasher.ts`
+#### 1.1 Create `server/data-hasher.ts` - AS FUNCTIONS NOT CLASS
 ```typescript
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { DEFAULT_CONFIG } from './config.js';
+import os from 'os';
 
-export class DataHasher {
-  /**
-   * Generate a hash based on directory structure with depth and time limits
-   * Uses file names, types, sizes, and modification times
-   */
-  static async hashDataDirectory(dataPath: string, timeLimit?: number): Promise<string> {
-    const maxDepth = 3;
-    const limit = timeLimit ?? DEFAULT_CONFIG.dataHashTimeLimit;
-    const startTime = Date.now();
-    const entries: string[] = [];
+/**
+ * Generate a hash based on directory structure with depth and time limits
+ * Uses file names, types, sizes, and modification times
+ */
+export async function hashDataDirectory(
+  dataPath: string,
+  timeLimit: number = 5000
+): Promise<string> {
+  const maxDepth = 3;
+  const startTime = Date.now();
+  const entries: string[] = [];
 
-    async function scan(currentDir: string, depth: number) {
-      // Check time limit
-      if (Date.now() - startTime > limit) {
-        entries.push('TIMEOUT:scan_truncated');
-        return;
-      }
-
-      if (depth > maxDepth) return;
-
-      try {
-        const items = await fs.promises.readdir(currentDir, { withFileTypes: true });
-
-        // Sort for deterministic hashing
-        items.sort((a, b) => a.name.localeCompare(b.name));
-
-        // Limit entries per directory to prevent explosion
-        const limitedItems = items.slice(0, 100);
-        if (items.length > 100) {
-          entries.push(`TRUNCATED:${currentDir}:${items.length - 100}_more_items`);
-        }
-
-        for (const item of limitedItems) {
-          // Skip hidden files and common large directories
-          if (item.name.startsWith('.') ||
-              item.name === 'node_modules' ||
-              item.name === '__pycache__' ||
-              item.name === 'dist' ||
-              item.name === 'build') {
-            continue;
-          }
-
-          const fullPath = path.join(currentDir, item.name);
-          const relativePath = path.relative(dataPath, fullPath);
-
-          try {
-            const stats = await fs.promises.stat(fullPath);
-
-            // Include type, name, size, and mtime for better discrimination
-            const mtime = Math.floor(stats.mtimeMs / 1000); // Round to seconds
-            const entry = item.isDirectory()
-              ? `d:${relativePath}:${mtime}`
-              : `f:${relativePath}:${stats.size}:${mtime}`;
-
-            entries.push(entry);
-
-            // Recurse into directories
-            if (item.isDirectory() && depth < maxDepth) {
-              await scan(fullPath, depth + 1);
-            }
-          } catch (error) {
-            // Skip files we can't stat (permissions, symlinks, etc)
-            entries.push(`e:${relativePath}:error`);
-          }
-        }
-      } catch (error) {
-        // Skip directories we can't read
-        entries.push(`e:${currentDir}:read_error`);
-      }
+  async function scan(currentDir: string, depth: number) {
+    // Check time limit
+    if (Date.now() - startTime > timeLimit) {
+      entries.push('TIMEOUT:scan_truncated');
+      return;
     }
 
-    await scan(dataPath, 0);
+    if (depth > maxDepth) return;
 
-    // If we got very few entries, add the data path itself for uniqueness
-    if (entries.length < 5) {
-      entries.push(`path:${dataPath}`);
+    try {
+      const items = await fs.promises.readdir(currentDir, { withFileTypes: true });
+
+      // Sort for deterministic hashing
+      items.sort((a, b) => a.name.localeCompare(b.name));
+
+      // Limit entries per directory to prevent explosion
+      const limitedItems = items.slice(0, 100);
+      if (items.length > 100) {
+        entries.push(`TRUNCATED:${currentDir}:${items.length - 100}_more_items`);
+      }
+
+      for (const item of limitedItems) {
+        // Skip hidden files and common large directories
+        if (item.name.startsWith('.') ||
+            item.name === 'node_modules' ||
+            item.name === '__pycache__' ||
+            item.name === 'dist' ||
+            item.name === 'build') {
+          continue;
+        }
+
+        const fullPath = path.join(currentDir, item.name);
+        const relativePath = path.relative(dataPath, fullPath);
+
+        try {
+          const stats = await fs.promises.stat(fullPath);
+
+          // Include type, name, size, and mtime for better discrimination
+          const mtime = Math.floor(stats.mtimeMs / 1000); // Round to seconds
+          const entry = item.isDirectory()
+            ? `d:${relativePath}:${mtime}`
+            : `f:${relativePath}:${stats.size}:${mtime}`;
+
+          entries.push(entry);
+
+          // Recurse into directories
+          if (item.isDirectory() && depth < maxDepth) {
+            await scan(fullPath, depth + 1);
+          }
+        } catch (error) {
+          // Skip files we can't stat (permissions, symlinks, etc)
+          entries.push(`e:${relativePath}:error`);
+        }
+      }
+    } catch (error) {
+      // Skip directories we can't read
+      entries.push(`e:${currentDir}:read_error`);
     }
-
-    // Create hash from sorted entries
-    const hash = crypto.createHash('sha256');
-    hash.update(entries.join('\n'));
-    return hash.digest('hex').substring(0, 12);
   }
 
-  /**
-   * Find existing execution directories for a data hash
-   */
-  static async findExecutionDirs(dataHash: string): Promise<string[]> {
-    const executionRoot = path.join(os.homedir(), '.langton-executions');
-    if (!fs.existsSync(executionRoot)) return [];
+  await scan(dataPath, 0);
 
-    const dirs: string[] = [];
-    const entries = await fs.promises.readdir(executionRoot, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-
-      const metaPath = path.join(executionRoot, entry.name, '.langton', 'execution-meta.json');
-      try {
-        const meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8'));
-        if (meta.dataHash === dataHash) {
-          dirs.push(path.join(executionRoot, entry.name));
-        }
-      } catch {
-        // Ignore directories without valid metadata
-      }
-    }
-
-    return dirs.sort((a, b) => b.localeCompare(a)); // Newest first
+  // If we got very few entries, add the data path itself for uniqueness
+  if (entries.length < 5) {
+    entries.push(`path:${dataPath}`);
   }
+
+  // Create hash from sorted entries
+  const hash = crypto.createHash('sha256');
+  hash.update(entries.join('\n'));
+  return hash.digest('hex').substring(0, 12);
+}
+
+/**
+ * Find existing execution directories for a data hash
+ */
+export async function findExecutionDirs(dataHash: string): Promise<string[]> {
+  const executionRoot = path.join(os.homedir(), '.langton-executions');
+  if (!fs.existsSync(executionRoot)) return [];
+
+  const dirs: string[] = [];
+  const entries = await fs.promises.readdir(executionRoot, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const metaPath = path.join(executionRoot, entry.name, '.langton', 'execution-meta.json');
+    try {
+      const meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8'));
+      if (meta.dataHash === dataHash) {
+        dirs.push(path.join(executionRoot, entry.name));
+      }
+    } catch {
+      // Ignore directories without valid metadata
+    }
+  }
+
+  return dirs.sort((a, b) => b.localeCompare(a)); // Newest first
 }
 ```
 
@@ -161,12 +171,13 @@ export class DataHasher {
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import { DataHasher } from './data-hasher.js';
+import { hashDataDirectory, findExecutionDirs } from './data-hasher.js';
+import { DEFAULT_CONFIG } from './config.js';
 
 export interface ExecutionSetup {
-  dataSourcePath: string;    // Absolute path to original data
-  executionPath: string;     // Absolute path where we run
-  usableDataPath: string;    // Always executionPath + '/data'
+  readOnlySourceDataPath: string;   // Absolute path to original data
+  executionPath: string;            // Absolute path where we run
+  dataPathInExecutionDir: string;   // Always executionPath + '/data'
   dataHash: string;
   isNewExecution: boolean;
   isResuming: boolean;
@@ -180,25 +191,31 @@ export interface ExecutionSetup {
 }
 
 export async function setupExecutionEnvironment(options: {
-  dataSourcePath: string;    // Already resolved to absolute
-  executionPath?: string;     // Already resolved to absolute, or undefined
-  useSymlink?: boolean;       // Default true, --copy flag sets to false
+  readOnlySourceDataPath: string;  // Already resolved to absolute
+  executionPath?: string;          // Already resolved to absolute, or undefined
+  useSymlink?: boolean;            // Default true, --copy flag sets to false
+  dataHashTimeLimit?: number;      // Time limit for hashing
 }): Promise<ExecutionSetup> {
-  const { dataSourcePath, executionPath, useSymlink = true } = options;
+  const {
+    readOnlySourceDataPath,
+    executionPath,
+    useSymlink = true,
+    dataHashTimeLimit = DEFAULT_CONFIG.dataHashTimeLimit
+  } = options;
 
   // Verify data source exists
-  if (!fs.existsSync(dataSourcePath)) {
-    throw new Error(`Data source not found: ${dataSourcePath}`);
+  if (!fs.existsSync(readOnlySourceDataPath)) {
+    throw new Error(`Data source not found: ${readOnlySourceDataPath}`);
   }
 
-  const stats = await fs.promises.stat(dataSourcePath);
+  const stats = await fs.promises.stat(readOnlySourceDataPath);
   if (!stats.isDirectory()) {
-    throw new Error(`Data source is not a directory: ${dataSourcePath}`);
+    throw new Error(`Data source is not a directory: ${readOnlySourceDataPath}`);
   }
 
   // Calculate data hash
   console.log('Calculating data signature...');
-  const dataHash = await DataHasher.hashDataDirectory(dataSourcePath);
+  const dataHash = await hashDataDirectory(readOnlySourceDataPath, dataHashTimeLimit);
   console.log(`Data signature: ${dataHash}`);
 
   let finalExecutionPath: string;
@@ -206,9 +223,15 @@ export async function setupExecutionEnvironment(options: {
   let isResuming = false;
 
   if (executionPath) {
-    // Explicit execution path provided - resume mode
+    // Explicit execution path provided - must already exist
     if (!fs.existsSync(executionPath)) {
       throw new Error(`Execution directory not found: ${executionPath}`);
+    }
+
+    // Verify it's a directory
+    const stats = await fs.promises.stat(executionPath);
+    if (!stats.isDirectory()) {
+      throw new Error(`Execution path is not a directory: ${executionPath}`);
     }
 
     // Prevent nested execution
@@ -218,35 +241,37 @@ export async function setupExecutionEnvironment(options: {
     }
 
     // Prevent using data source as execution
-    if (path.resolve(executionPath) === path.resolve(dataSourcePath)) {
+    if (path.resolve(executionPath) === path.resolve(readOnlySourceDataPath)) {
       throw new Error('Execution directory cannot be the same as data source');
     }
 
-    // Verify it's a valid execution directory
+    // Check if it has execution metadata
     const metaPath = path.join(executionPath, '.langton', 'execution-meta.json');
-    if (!fs.existsSync(metaPath)) {
-      throw new Error(`Not a valid execution directory (missing metadata): ${executionPath}`);
-    }
-
-    // Verify data hash matches
-    const meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8'));
-    if (meta.dataHash !== dataHash) {
-      throw new Error(
-        `Data source mismatch. Execution directory was created for different data.\n` +
-        `Expected hash: ${meta.dataHash}\n` +
-        `Current hash: ${dataHash}`
-      );
+    if (fs.existsSync(metaPath)) {
+      // Verify data hash matches
+      const meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8'));
+      if (meta.dataHash !== dataHash) {
+        throw new Error(
+          `Data source mismatch. Execution directory was created for different data.\n` +
+          `Expected hash: ${meta.dataHash}\n` +
+          `Current hash: ${dataHash}`
+        );
+      }
+      isResuming = true;
+    } else {
+      // Directory exists but no metadata - treat as fresh execution
+      isNewExecution = true;
+      console.log(`Using existing directory as execution directory: ${executionPath}`);
     }
 
     finalExecutionPath = executionPath;
-    isResuming = true;
   } else {
     // Auto-detect or create execution directory
     const executionRoot = path.join(os.homedir(), '.langton-executions');
     await fs.promises.mkdir(executionRoot, { recursive: true });
 
     // Look for existing execution directories
-    const existingDirs = await DataHasher.findExecutionDirs(dataHash);
+    const existingDirs = await findExecutionDirs(dataHash);
 
     if (existingDirs.length > 0) {
       // Use most recent
@@ -265,22 +290,22 @@ export async function setupExecutionEnvironment(options: {
     }
   }
 
-  const usableDataPath = path.join(finalExecutionPath, 'data');
+  const dataPathInExecutionDir = path.join(finalExecutionPath, 'data');
 
   // Set up data access (symlink or copy)
   let linkType: 'symlink' | 'copy' = 'symlink';
-  if (isNewExecution || !fs.existsSync(usableDataPath)) {
+  if (isNewExecution || !fs.existsSync(dataPathInExecutionDir)) {
     if (useSymlink) {
       try {
-        await fs.promises.symlink(dataSourcePath, usableDataPath, 'dir');
+        await fs.promises.symlink(readOnlySourceDataPath, dataPathInExecutionDir, 'dir');
         linkType = 'symlink';
       } catch (error) {
         console.warn(`Failed to create symlink: ${error}. Falling back to copy.`);
-        await copyDirectory(dataSourcePath, usableDataPath);
+        await copyDirectory(readOnlySourceDataPath, dataPathInExecutionDir);
         linkType = 'copy';
       }
     } else {
-      await copyDirectory(dataSourcePath, usableDataPath);
+      await copyDirectory(readOnlySourceDataPath, dataPathInExecutionDir);
       linkType = 'copy';
     }
   }
@@ -291,8 +316,8 @@ export async function setupExecutionEnvironment(options: {
 
   const meta = {
     version: '1.0.0',
-    dataSourcePath,
-    sourceRealPath: await fs.promises.realpath(dataSourcePath),
+    readOnlySourceDataPath,
+    sourceRealPath: await fs.promises.realpath(readOnlySourceDataPath),
     dataHash,
     linkType,
     createdAt: isNewExecution ? new Date().toISOString() :
@@ -308,9 +333,9 @@ export async function setupExecutionEnvironment(options: {
   );
 
   return {
-    dataSourcePath,
+    readOnlySourceDataPath,
     executionPath: finalExecutionPath,
-    usableDataPath,
+    dataPathInExecutionDir,
     dataHash,
     isNewExecution,
     isResuming,
@@ -329,9 +354,14 @@ async function copyDirectory(src: string, dest: string): Promise<void> {
 
     if (entry.isDirectory()) {
       await copyDirectory(srcPath, destPath);
-    } else {
+    } else if (entry.isSymbolicLink()) {
+      // Handle symlinks
+      const target = await fs.promises.readlink(srcPath);
+      await fs.promises.symlink(target, destPath);
+    } else if (entry.isFile()) {
       await fs.promises.copyFile(srcPath, destPath);
     }
+    // Skip other types (FIFO, socket, etc.)
   }
 }
 ```
@@ -340,22 +370,16 @@ async function copyDirectory(src: string, dest: string): Promise<void> {
 
 #### 2.1 Update `server/types.ts`
 
-**REMOVE projectPath from ServerConfig**:
+**REMOVE projectPath from ServerConfig and ADD execution fields**:
 ```typescript
 export interface ServerConfig {
-  projectPath: string;  // DELETE THIS LINE
-}
-```
+  // REMOVE THIS:
+  // projectPath: string;
 
-**REMOVE executionSetup from config and embed directly**:
-```typescript
-// REMOVE the ExecutionPaths interface and instead embed these properties directly in ServerConfig
-
-export interface ServerConfig {
-  // Execution paths (from ExecutionSetup)
-  dataSourcePath: string;    // Original data location (for reference only)
-  executionPath: string;     // Where server runs
-  usableDataPath: string;    // executionPath + '/data'
+  // ADD THESE - Execution paths (from ExecutionSetup)
+  readOnlySourceDataPath: string;   // Original data location (for reference only)
+  executionPath: string;            // Primary directory where everything runs
+  dataPathInExecutionDir: string;   // executionPath + '/data' - ONLY for setup
   dataHash: string;
   isNewExecution: boolean;
   isResuming: boolean;
@@ -372,7 +396,7 @@ export interface ServerConfig {
   // ... other existing fields
 }
 
-// Update event types - REMOVE projectPath entirely
+// Update ServerReadyEvent - IMPORTANT UPDATE
 export interface ServerReadyEvent {
   id: EventId;
   timestamp: string;
@@ -380,14 +404,14 @@ export interface ServerReadyEvent {
   data: {
     serverVersion: string;
     executionPath: string;    // Where server/git/logs operate
-    dataPath: string;         // Where user data is accessible
+    dataPath: string;         // Where user data is accessible (data/ subdirectory)
   };
 }
 ```
 
-**ADD to DEFAULT_CONFIG in server/config.ts**:
+**UPDATE DEFAULT_CONFIG in server/config.ts**:
 ```typescript
-export const DEFAULT_CONFIG = {
+export const DEFAULT_CONFIG: Omit<ServerConfig, "executionPath" | "phases" | /* other execution fields */> = {
   // ... existing defaults ...
   dataHashTimeLimit: 5000,  // 5 seconds for directory hashing
 };
@@ -448,8 +472,8 @@ private async initializeCheckpoints(): Promise<void> {
 ```typescript
 private async copyPath(from: string, to: string): Promise<void> {
   // 'from' is already absolute (resolved in loadPhaseConfig)
-  // 'to' is relative to usableDataPath
-  const targetPath = path.join(this.config.usableDataPath, to);
+  // 'to' is relative to executionPath (NOT readOnlySourceData!)
+  const targetPath = path.join(this.config.executionPath, to);
 
   // Check if target parent directory exists
   const targetParent = path.dirname(targetPath);
@@ -462,12 +486,18 @@ private async copyPath(from: string, to: string): Promise<void> {
 }
 ```
 
-4. **Workspace setup command execution**:
+4. **Workspace setup command execution** - Update `runCommand()`:
 ```typescript
 // In startPhase() workspace setup section
 const workingDir = item.command.workingDirectory === "lastCopied" && lastCopiedPath
   ? lastCopiedPath
-  : this.config.usableDataPath;  // Changed from this.config.projectPath
+  : this.config.executionPath;  // Changed from this.config.projectPath
+
+// And update the runCommand method itself:
+private async runCommand(command: string, cwd: string): Promise<void> {
+  // cwd is now already resolved to executionPath or lastCopied path
+  // ... existing implementation
+}
 ```
 
 5. **File tracking** - Update `handleFileToolCall()`:
@@ -482,7 +512,7 @@ private async handleFileToolCall<T extends ToolName>(
 
   // Make path relative if it's absolute
   if (path.isAbsolute(filePath)) {
-    filePath = path.relative(this.config.usableDataPath, filePath);
+    filePath = path.relative(this.config.executionPath, filePath);
   }
 
   // Check if file matches any watch pattern
@@ -498,7 +528,7 @@ private async handleFileToolCall<T extends ToolName>(
 
   // Read current file content if not provided
   if (!content) {
-    const fullPath = path.join(this.config.usableDataPath, filePath);
+    const fullPath = path.join(this.config.executionPath, filePath);
     if (fs.existsSync(fullPath)) {
       try {
         content = fs.readFileSync(fullPath, "utf-8");
@@ -518,10 +548,10 @@ private async handleFileToolCall<T extends ToolName>(
 private async sendFileTreeUpdate(): Promise<void> {
   if (this.watchedPatterns.length === 0) return;
 
-  // Build file tree for patterns within usableDataPath
+  // Build file tree for patterns within executionPath (NOT readOnlySourceData!)
   const allTrees = await Promise.all(
     this.watchedPatterns.map((pattern) =>
-      buildFileTree(this.config.usableDataPath, pattern)
+      buildFileTree(this.config.executionPath, pattern)
     ),
   );
 
@@ -539,14 +569,52 @@ private buildSystemPrompt(phase: PhaseConfig): string | null {
     return content
       .replace(/<%PROJECT_DIR%>/g, this.config.executionPath)  // Legacy support
       .replace(/<%EXECUTION_DIR%>/g, this.config.executionPath)
-      .replace(/<%DATA_DIR%>/g, this.config.usableDataPath);
+      .replace(/<%DATA_DIR%>/g, this.config.dataPathInExecutionDir);
   }
 
   return null;
 }
+
+// ALSO need to update prompt feeding in ClaudeProcessManager feedPrompt method
 ```
 
-8. **Server ready event**:
+9. **Additional path updates in LangtonServer**:
+
+```typescript
+// Update all references to this.config.projectPath to this.config.executionPath:
+
+// In ClaudeProcessManager instantiation:
+this.processManager = new ClaudeProcessManager(
+  this.config.executionPath,  // Changed from projectPath
+  this.logger,
+  this.logParser,
+  this.config.anthropicBaseURL,
+);
+
+// In CheckpointGit instantiation:
+this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
+
+// In buildFileTree calls:
+buildFileTree(this.config.executionPath, pattern)
+
+// In fileResolver.resolveFiles calls:
+const resolvedFiles = await fileResolver.resolveFiles(
+  this.config.executionPath,
+  phase.trackedFiles,
+);
+
+// In file path operations (handleFileToolCall, etc):
+const fullPath = path.join(this.config.executionPath, filePath);
+
+// In copyPath method - already covered above but ensure the runCommand call uses executionPath:
+await this.runCommand(cpCommand, this.config.executionPath);
+```
+
+10. **Additional missing component - Template processing in prompt content**:
+
+Since LangtonServer doesn't directly process prompt content (it's done in ClaudeProcessManager), we need to ensure the prompt content is processed with template variables. Look for where the prompt is loaded and fed to Claude.
+
+8. **Server ready event** - IMPORTANT UPDATE:
 ```typescript
 // In handleConnection()
 this.sendEvent({
@@ -556,7 +624,7 @@ this.sendEvent({
   data: {
     serverVersion: this.config.version,
     executionPath: this.config.executionPath,
-    dataPath: this.config.usableDataPath,
+    dataPath: this.config.dataPathInExecutionDir,
   },
 } as ServerReadyEvent);
 ```
@@ -630,15 +698,13 @@ export class CheckpointGit {
   async initialize(): Promise<string | undefined> {
     // ... existing initialization ...
 
-    // IMPORTANT: Configure git to ignore the data directory
-    const gitignorePath = path.join(this.executionPath, '.gitignore');
-    const ignoreContent = 'data/\n';
-
-    // Only create if it doesn't exist (don't overwrite)
-    if (!fs.existsSync(gitignorePath)) {
-      await fs.promises.writeFile(gitignorePath, ignoreContent);
-      this.logger.log('Created .gitignore to exclude data directory');
-    }
+    // IMPORTANT: Do NOT create gitignore!
+    // File resolver will handle excluding data/ directory
+    // Add comment explaining this:
+    // NOTE: We do NOT create a .gitignore file here.
+    // The file resolver is responsible for excluding the data/ directory
+    // from checkpoint operations. This ensures consistent behavior
+    // across all file operations.
 
     // Set up git with proper environment
     this.git = simpleGit(this.executionPath, {
@@ -672,6 +738,7 @@ export class UnifiedFileResolver {
     const ig = await this.getIgnoreRules(basePath);
 
     // IMPORTANT: Always ignore the data directory for checkpoints
+    // This is enforced here, not via gitignore
     ig.add('data/');
     ig.add('data/**');
 
@@ -730,7 +797,9 @@ export async function buildFileTree(basePath: string, pattern: string): Promise<
 
 ### Phase 4: Entry Point Updates
 
-#### 4.1 Complete rewrite of `server/index.ts` main function:
+#### 4.1 COMPLETE REWRITE of `server/index.ts` main function:
+
+**Find the existing `main()` function in server/index.ts and REPLACE THE ENTIRE FUNCTION with this new implementation:**
 
 ```typescript
 async function main() {
@@ -745,7 +814,7 @@ async function main() {
   const executionPath = args.find((arg) => arg.startsWith("--execution="))?.split("=")[1];
   const useSymlink = !args.includes("--copy");
 
-  // ... other flag parsing ...
+  // ... other flag parsing (port, basic, validate, cleanup, etc.) ...
 
   // Help text
   if (args.includes("--help") || args.includes("-h")) {
@@ -805,7 +874,7 @@ Examples:
   let executionSetup: ExecutionSetup;
   try {
     executionSetup = await setupExecutionEnvironment({
-      dataSourcePath: resolvedDataPath,
+      readOnlySourceDataPath: resolvedDataPath,
       executionPath: executionPath ? path.resolve(executionPath) : undefined,
       useSymlink,
     });
@@ -814,18 +883,18 @@ Examples:
     process.exit(1);
   }
 
-  console.log(`📁 Data source: ${executionSetup.dataSourcePath}`);
+  console.log(`📁 Data source: ${executionSetup.readOnlySourceDataPath}`);
   console.log(`🏃 Execution: ${executionSetup.executionPath}`);
   console.log(`🔗 Link type: ${executionSetup.linkType}`);
 
   // Change to execution directory for server operation
   process.chdir(executionSetup.executionPath);
 
-  // Handle cleanup mode
+  // Handle cleanup mode - UPDATED FOR LATEST EXECUTION ONLY
   if (cleanupMode) {
     try {
       const cleanup = new CleanupCommand({
-        dataSourcePath: executionSetup.dataSourcePath,
+        dataSourcePath: executionSetup.readOnlySourceDataPath,
         executionPath: executionSetup.executionPath,
         skipConfirmation,
       });
@@ -851,7 +920,7 @@ Examples:
 
       const validationResult = await validatePhaseConfig(
         absoluteConfigPath,
-        executionSetup.usableDataPath
+        executionSetup.executionPath  // Changed from readOnlySourceData
       );
 
       // ... existing validation output ...
@@ -862,7 +931,7 @@ Examples:
     // Normal server mode - validate config
     const { phases, warnings } = await validatePhaseConfig(
       absoluteConfigPath,
-      executionSetup.usableDataPath
+      executionSetup.executionPath  // Changed from readOnlySourceData
     );
 
     // Log any non-fatal warnings
@@ -879,9 +948,9 @@ Examples:
       phases: PhaseConfig[];
     } = {
       // Spread all ExecutionSetup properties into config
-      dataSourcePath: executionSetup.dataSourcePath,
+      readOnlySourceDataPath: executionSetup.readOnlySourceDataPath,
       executionPath: executionSetup.executionPath,
-      usableDataPath: executionSetup.usableDataPath,
+      dataPathInExecutionDir: executionSetup.dataPathInExecutionDir,
       dataHash: executionSetup.dataHash,
       isNewExecution: executionSetup.isNewExecution,
       isResuming: executionSetup.isResuming,
@@ -918,9 +987,13 @@ Examples:
 
 ### Phase 5: Command Updates
 
-#### 5.1 Rewrite `server/cleanup-command.ts`:
+#### 5.1 Rewrite `server/cleanup-command.ts` - UPDATED FOR LATEST ONLY:
 
 ```typescript
+import fs from 'fs';
+import path from 'path';
+import { hashDataDirectory, findExecutionDirs } from './data-hasher.js';
+
 export interface CleanupOptions {
   dataSourcePath?: string;   // For finding by hash
   executionPath?: string;    // For direct cleanup
@@ -949,20 +1022,29 @@ export class CleanupCommand {
       let dirsToRemove: string[] = [];
 
       if (this.options.executionPath) {
-        // Direct execution path cleanup
+        // Direct execution path cleanup - just clean this one
         dirsToRemove = [this.options.executionPath];
       } else if (this.options.dataSourcePath) {
-        // Find by data hash
+        // Find by data hash - ONLY clean up the latest
         console.log('Calculating data signature for cleanup...');
-        const dataHash = await DataHasher.hashDataDirectory(this.options.dataSourcePath);
+        const dataHash = await hashDataDirectory(this.options.dataSourcePath);
         console.log(`Data signature: ${dataHash}`);
 
-        dirsToRemove = await DataHasher.findExecutionDirs(dataHash);
+        const allDirs = await findExecutionDirs(dataHash);
 
-        if (dirsToRemove.length === 0) {
+        if (allDirs.length === 0) {
           console.log("No execution directories found for this data source.");
           result.success = true;
           return result;
+        }
+
+        // UPDATED: Only clean up the latest (first in sorted list)
+        dirsToRemove = [allDirs[0]];
+
+        // Show all directories found but note we're only cleaning the latest
+        if (allDirs.length > 1) {
+          console.log(`Found ${allDirs.length} execution directories.`);
+          console.log('Only the latest will be cleaned up.\n');
         }
       } else {
         throw new Error("Either dataSourcePath or executionPath must be provided");
@@ -970,7 +1052,7 @@ export class CleanupCommand {
 
       // Display what will be removed
       console.log("🧹 Langton Cleanup Tool\n");
-      console.log("The following execution directories will be removed:\n");
+      console.log("The following execution directory will be removed:\n");
 
       for (const dir of dirsToRemove) {
         const metaPath = path.join(dir, '.langton', 'execution-meta.json');
@@ -991,6 +1073,20 @@ export class CleanupCommand {
         console.log();
       }
 
+      // If there are other directories, list them but note they won't be removed
+      if (this.options.dataSourcePath) {
+        const allDirs = await findExecutionDirs(await hashDataDirectory(this.options.dataSourcePath));
+        const otherDirs = allDirs.filter(d => !dirsToRemove.includes(d));
+
+        if (otherDirs.length > 0) {
+          console.log("Other execution directories (will NOT be removed):");
+          for (const dir of otherDirs) {
+            console.log(`  - ${dir}`);
+          }
+          console.log();
+        }
+      }
+
       // Get confirmation
       if (!this.options.skipConfirmation) {
         const confirmed = await this.getConfirmation();
@@ -1000,8 +1096,8 @@ export class CleanupCommand {
         }
       }
 
-      // Remove directories
-      console.log("\n🗑️  Removing execution directories...\n");
+      // Remove directory
+      console.log("\n🗑️  Removing execution directory...\n");
 
       for (const dir of dirsToRemove) {
         try {
@@ -1028,7 +1124,7 @@ export class CleanupCommand {
       console.log(`\n${"=".repeat(50)}\n`);
       if (result.success) {
         console.log(`✅ Cleanup completed successfully!`);
-        console.log(`   Removed ${result.directoriesRemoved.length} execution directories`);
+        console.log(`   Removed ${result.directoriesRemoved.length} execution directory`);
       } else {
         console.log(`⚠️  Cleanup completed with errors`);
         console.log(`   Removed: ${result.directoriesRemoved.length} directories`);
@@ -1054,13 +1150,41 @@ export class CleanupCommand {
   }
 }
 
-// Also need to import/create these helper functions
+// Helper functions
 async function getDirectorySize(dirPath: string): Promise<number> {
-  // ... implementation from original cleanup file-operations.ts
+  let totalSize = 0;
+
+  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+
+    if (entry.isDirectory()) {
+      totalSize += await getDirectorySize(fullPath);
+    } else if (entry.isFile()) {
+      try {
+        const stats = await fs.promises.stat(fullPath);
+        totalSize += stats.size;
+      } catch {
+        // Ignore files we can't stat
+      }
+    }
+  }
+
+  return totalSize;
 }
 
 function formatSize(bytes: number): string {
-  // ... implementation from original cleanup file-operations.ts
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  return `${size.toFixed(2)} ${units[unitIndex]}`;
 }
 ```
 
@@ -1070,11 +1194,11 @@ function formatSize(bytes: number): string {
 
 The `loadPhaseConfig()` function doesn't need changes - it already resolves paths relative to the config file location, which is correct.
 
-**Update `validatePhaseConfig()` to accept usableDataPath**:
+**Update `validatePhaseConfig()` to accept executionPath**:
 ```typescript
 export async function validatePhaseConfig(
   configPath: string,
-  usableDataPath: string,  // Changed from projectPath
+  executionPath: string,  // Changed from projectPath, and definitely NOT readOnlySourceData
 ): Promise<ValidationResult> {
   // First, use loadPhaseConfig to do basic validation
   const phases = loadPhaseConfig(configPath);
@@ -1096,21 +1220,21 @@ export async function validatePhaseConfig(
 
   // ... existing validation logic ...
 
-  // When checking workspace setup targets, validate against usableDataPath
+  // When checking workspace setup targets, validate against executionPath
   if (phase.workspaceSetup) {
     for (const [itemIndex, item] of phase.workspaceSetup.entries()) {
       if (item.type === "copy" && item.copy) {
         // Source files are already validated by loadPhaseConfig
-        // Check target would be within usableDataPath
-        const targetPath = path.join(usableDataPath, item.copy.to);
+        // Check target would be within executionPath
+        const targetPath = path.join(executionPath, item.copy.to);
         const targetParent = path.dirname(targetPath);
 
         try {
-          const relativeParent = path.relative(usableDataPath, targetParent);
+          const relativeParent = path.relative(executionPath, targetParent);
           if (relativeParent.startsWith("..")) {
             throw new Error(
               `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
-              `Target path "${item.copy.to}" would write outside data directory`,
+              `Target path "${item.copy.to}" would write outside execution directory`,
             );
           }
         } catch (_error) {
@@ -1129,21 +1253,78 @@ export async function validatePhaseConfig(
 }
 ```
 
+### Phase 7: Additional Component Updates
+
+#### 7.1 Update `server/basic-tui.ts`
+
+The Basic TUI needs to handle the new execution directory structure:
+
+```typescript
+// Update any references to project paths
+// Ensure the display shows the correct execution and data paths
+// Handle the new ServerReadyEvent structure with executionPath and dataPath
+```
+
+#### 7.2 Error Messages
+
+Search for and update all error messages that reference "project directory":
+
+```typescript
+// Examples to search and replace:
+"Failed to read project directory" → "Failed to read execution directory"
+"Outside project directory" → "Outside execution directory"
+"Target parent directory does not exist" → Keep as is (already correct)
+```
+
+#### 7.3 Log Parser Updates
+
+If log parser references paths, ensure they use execution paths:
+
+```typescript
+// Log paths are already relative to run folder which is in execution directory
+// No changes likely needed
+```
+
+## Additional Considerations
+
+### Windows Compatibility
+- The `--copy` flag is essential for Windows where symlinks require admin privileges
+- Ensure path separators work correctly across platforms
+- Test copy fallback mechanism thoroughly
+
+### Performance Considerations
+- Data hashing with time limits prevents hanging on large directories
+- Symlinks avoid duplicating data
+- File resolver caching remains effective
+
+### Security Considerations
+- Execution isolation prevents accidental modification of source data
+- Each execution is sandboxed in its own directory
+- Rollbacks only affect generated files, not source data
+
+### Migration Path
+For existing users:
+1. First run will create new execution directory
+2. Existing `.langton` in project will be ignored
+3. No automatic migration of state (clean start)
+4. Old cleanup commands will need updating
+
 ## Summary of Key Changes
 
 1. **Path System**:
    - Removed `projectPath` completely
-   - Added three distinct paths: `dataSourcePath`, `executionPath`, `usableDataPath`
+   - Added three distinct paths: `readOnlySourceDataPath`, `executionPath`, `dataPathInExecutionDir`
    - All components updated to use appropriate paths
+   - `dataPathInExecutionDir` is ONLY used during setup/verification
 
 2. **Template Variables**:
-   - `<%EXECUTION_DIR%>` replaces `<%PROJECT_DIR%>`
-   - `<%DATA_DIR%>` added for user data access
+   - `<%PROJECT_DIR%>` and `<%EXECUTION_DIR%>` resolve to `executionPath`
+   - `<%DATA_DIR%>` resolves to `dataPathInExecutionDir` (data/ subdirectory)
 
 3. **Git Isolation**:
    - Checkpoint git runs in `executionPath`
-   - Completely ignores `data/` directory
-   - Tracks only files created by Claude
+   - File resolver enforces ignoring `data/` directory
+   - NO gitignore files created
 
 4. **Claude Execution**:
    - Runs with `cwd = executionPath`
@@ -1151,7 +1332,7 @@ export async function validatePhaseConfig(
    - All paths work naturally from Claude's perspective
 
 5. **File Operations**:
-   - User file operations use `usableDataPath`
+   - User file operations use `executionPath`
    - Langton state/logs use `executionPath`
    - Config files loaded from original locations
 
@@ -1161,8 +1342,8 @@ export async function validatePhaseConfig(
    - Graceful handling of permissions/read errors
 
 7. **Cleanup**:
-   - Simplified to just remove execution directories
-   - Shows metadata about each execution
+   - Only removes the latest execution directory by default
+   - Shows all executions but clarifies what will be removed
    - Prevents removal of running servers
 
 8. **Process Management**:
@@ -1170,166 +1351,24 @@ export async function validatePhaseConfig(
    - Config paths resolved relative to original location
    - Server operates entirely within execution directory
 
-# Additional areas to update
-
-### 1. **Checkpoint Git `.gitignore` Location**
-The plan creates `.gitignore` in the execution root, but it should be in the checkpoint repository's working tree:
-
-```typescript
-// Current plan (incorrect):
-const gitignorePath = path.join(this.executionPath, '.gitignore');
-
-// Should be:
-const gitignorePath = path.join(this.checkpointPath, '.gitignore');
-```
-
-Since the checkpoint git uses the execution directory as its working tree, we need to be careful about where the `.gitignore` is placed.
-
-### 2. **Missing Path Updates in LangtonServer**
-
-Several methods still reference paths that need updating:
-
-```typescript
-// In runCommand() method:
-await this.runCommand(cpCommand, this.config.projectPath); // Needs update
-
-// In feedPrompt() - this is actually in LangtonServer, not ClaudeProcessManager:
-private async feedPrompt(phase: PhaseConfig): Promise<void> {
-  // ...
-  // The prompt content also needs template variable replacement:
-  const processedContent = promptContent
-    .replace(/<%PROJECT_DIR%>/g, this.paths.executionPath)
-    .replace(/<%EXECUTION_DIR%>/g, this.paths.executionPath)
-    .replace(/<%DATA_DIR%>/g, this.paths.usableDataPath);
-}
-```
-
-## Missing Updates
-
-### 1. **State Manager Paths**
-The state manager's event logging and crash detection need path updates:
-
-```typescript
-// In logTransitionEvent():
-const eventLog = path.join(this.langtonDir, "events.jsonl");
-// This already uses langtonDir, but make sure langtonDir is set correctly
-
-// In detectCrashedRuns() - the lock file path validation
-```
-
-### 2. **Environment Variable Documentation**
-The `buildSystemPrompt` method handles template variables, but the main prompt feeding in `startClaudeProcess` also needs this.
-
-### 3. **Socket and Server Log Paths**
-These paths aren't explicitly updated in the plan:
-
-```typescript
-// Should be:
-this.config.socketLogFile = path.join(this.paths.executionPath, '.langton/logs/websocket.log');
-this.config.serverLogFile = path.join(this.paths.executionPath, '.langton/logs/server.log');
-```
-
-## Improvements Needed
-
-### 1. **Symlink and Special File Handling**
-The `copyDirectory` function needs better handling:
-
-```typescript
-async function copyDirectory(src: string, dest: string): Promise<void> {
-  await fs.promises.mkdir(dest, { recursive: true });
-  const entries = await fs.promises.readdir(src, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      await copyDirectory(srcPath, destPath);
-    } else if (entry.isSymbolicLink()) {
-      // Handle symlinks
-      const target = await fs.promises.readlink(srcPath);
-      await fs.promises.symlink(target, destPath);
-    } else if (entry.isFile()) {
-      await fs.promises.copyFile(srcPath, destPath);
-    }
-    // Skip other types (FIFO, socket, etc.)
-  }
-}
-```
-
-### 3. **Data Hash Improvements**
-Consider including more metadata:
-
-```typescript
-// Add to hash calculation:
-- Total file count
-- Directory permission bits
-- Perhaps first few bytes of files for content-based hashing
-```
-
-### 4. **Progress Indication for Large Copies**
-```typescript
-// Add progress callback to copyDirectory:
-async function copyDirectory(src: string, dest: string, onProgress?: (copied: number, total: number) => void): Promise<void> {
-  // First count total files
-  const total = await countFiles(src);
-  let copied = 0;
-  // ... in copy loop:
-  copied++;
-  onProgress?.(copied, total);
-}
-```
-
-## Additional Components to Update
-
-### 1. **Basic TUI** (`basic-tui.ts`)
-- Update any hardcoded paths
-- Handle the new execution directory structure in display
-
-### 2. **Error Messages**
-Search and update all references to "project directory":
-```typescript
-// Examples:
-"Failed to read project directory" → "Failed to read data directory"
-"Outside project directory" → "Outside data directory"
-```
-
-### 3. **Rollback Operations**
-The rollback system needs to understand it's operating in the execution directory:
-- Workspace cleanup should not touch the data/ directory
-- File restoration should only restore generated files
-
 ## Testing Checklist
 
 - [ ] Symlink creation and fallback to copy
 - [ ] Data hashing completes within time limit
 - [ ] Execution directory reuse with same data hash
 - [ ] Resume with `--execution` flag
-- [ ] Git ignores `data/` directory
+- [ ] Git operations ignore `data/` directory
 - [ ] Claude can access files in `data/`
 - [ ] Template variables resolve correctly
-- [ ] Cleanup removes execution directories
+- [ ] Cleanup removes only latest execution directory
 - [ ] Lock file in correct location
 - [ ] State persistence in execution directory
 - [ ] File watching works for generated files
 - [ ] Config file resolution from various locations
 - [ ] Windows compatibility with copy mode
 - [ ] Error handling for invalid paths
-- [ ] Validation against usableDataPath
-
-# Updates needed to the plan
-
-Here are some things we discovered during implementation of the plan above:
-
-1. We need better names. a better name for usablDatAPath is readOnlySourceData. usableDataPath was confusing the agent that did the implementation.
-2. Then we also need to better define executionPath as the primary directory where everything gets written to.
-3. When we run cleanup, we want to list all the directories we can see with the data hash, but only clean up the latest execution directory. If an execution directory is provided, we want to clean that up - by deleting everything in it.
-4. We should NOT use gitignores to enforce the data directory not being added. This should be enforced in fileresolver, and we should add a comment to the git part of things that says NOT to create gitignores because fileresolver is the boss. (checkpoint-git around line 92 but not exactly)
-5. <%PROJECT_DIR%> and <%EXECUTION_DIR%> can resolve to the execution path. <%DATA_DIR%> is the symlinked/copied data path inside the execution directory.
-6. When the user provides an execution directory, we should see if it has an execution, but if not let's treat it as the execution directory and start a run there, even if it doesn't have a meta.json.
-7. Datahasher can be a set of functions instead of a class.
-8. ServerReadyEvent, runcommand, copypath and buildsystemprompt also need updating.
-9. We should be careful on how relative paths are resolved. In phase.config, relative paths for prompts are resolved to the location of the phase.config, as well as source directories for copying. For the target of the copy, the source is (relative path or not) the execution directory. .langton is a directory that's in the executionpath.
-10. If we have a time limit for datahash and things, it should be in a config file.
-11. We need to rewrite server/index.ts. Point out where.
-12. In lots of places during the implementation, we were using usableDataPath instead of the execution path. As far as we know, usableDataPath (now going to be called readonlySourceData) is only useful for symplinking in and during the creation of the execution directory (and once again for verification at startup). NOTHING ELSE SHOULD BE USING THIS.
+- [ ] Validation uses executionPath not readOnlySourceData
+- [ ] Execution directory must exist when provided by user
+- [ ] Execution directory can be used without metadata (but must exist)
+- [ ] Nested execution prevention works
+- [ ] Data source as execution prevention works
