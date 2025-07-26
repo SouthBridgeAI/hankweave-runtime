@@ -24,7 +24,8 @@ import {
 
 // Test configuration
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const TEST_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved");
+const EXECUTION_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved"); // Use as execution directory
+const DATA_SOURCE_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved-data"); // Empty data source
 const SNAPSHOT_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-snapshots");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7786");
@@ -36,7 +37,7 @@ const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `rollback-improved-${TEST_TIMES
 
 // Test directory configuration
 const testDirConfig: TestDirectoryConfig = {
-  testDir: TEST_DIR,
+  testDir: EXECUTION_DIR, // Use execution directory
   testResultsDir: TEST_RESULTS_DIR,
   testRunDir: TEST_RUN_DIR,
 };
@@ -66,6 +67,7 @@ interface TestState {
   client: TestWSClient | null;
   snapshots: TestSnapshot[];
   scenario5RollbackResult?: RollbackCompletedEvent;
+  executionPath?: string; // Track execution path for execution isolation
 }
 
 const testState: TestState = {
@@ -135,7 +137,7 @@ class EnhancedTestWSClient extends TestWSClient {
 // Helper to create a snapshot
 async function createSnapshot(
   name: string,
-  testDir: string,
+  executionPath: string, // Changed from testDir to executionPath
   snapshotDir: string,
   client: TestWSClient,
 ): Promise<void> {
@@ -143,12 +145,12 @@ async function createSnapshot(
 
   const snapshotPath = path.join(snapshotDir, name);
 
-  // Copy entire test directory
-  console.log(`${colors.gray}  Copying ${testDir} -> ${snapshotPath}${colors.reset}`);
-  await fs.promises.cp(testDir, snapshotPath, { recursive: true });
+  // Copy entire execution directory
+  console.log(`${colors.gray}  Copying ${executionPath} -> ${snapshotPath}${colors.reset}`);
+  await fs.promises.cp(executionPath, snapshotPath, { recursive: true });
 
   // Get current state
-  const statePath = path.join(testDir, ".langton/state.json");
+  const statePath = path.join(executionPath, ".langton/state.json");
   const state = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
   console.log(
     `${colors.gray}  State: ${state.runs.length} runs, current: ${state.currentRunId}${colors.reset}`,
@@ -201,10 +203,18 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
 
   // Setup initial test directory
   await setupTestDirectory(testDirConfig);
-  console.log(`${colors.green}✓ Test directory created: ${TEST_DIR}${colors.reset}`);
+  console.log(`${colors.green}✓ Test directory created: ${EXECUTION_DIR}${colors.reset}`);
 
-  // Start server with --no-autostart
-  console.log(`\n${colors.blue}Starting server with --no-autostart...${colors.reset}`);
+  // Create empty data source directory
+  if (!fs.existsSync(DATA_SOURCE_DIR)) {
+    fs.mkdirSync(DATA_SOURCE_DIR, { recursive: true });
+  }
+  console.log(`${colors.green}✓ Data source directory created: ${DATA_SOURCE_DIR}${colors.reset}`);
+
+  // Start server with --no-autostart, --data flag for data source, and --execution flag for execution directory
+  console.log(
+    `\n${colors.blue}Starting server with --no-autostart and execution isolation...${colors.reset}`,
+  );
   const serverPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
     "../../server/index.ts",
@@ -212,9 +222,16 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
 
   testState.serverProcess = spawn(
     "bun",
-    [serverPath, `--config=${PHASES_CONFIG}`, `--port=${SERVER_PORT}`, "--no-autostart"],
+    [
+      serverPath,
+      `--config=${PHASES_CONFIG}`,
+      `--port=${SERVER_PORT}`,
+      `--data=${DATA_SOURCE_DIR}`,
+      `--execution=${EXECUTION_DIR}`,
+      "--no-autostart",
+    ],
     {
-      cwd: TEST_DIR,
+      cwd: process.cwd(), // Run from test runner's CWD
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -249,9 +266,15 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await testState.client.connect(SERVER_PORT);
   console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
 
-  // Wait for server ready
+  // Wait for server ready and capture execution path
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
-  await testState.client.waitForEvent("server.ready");
+  const readyEvent = await testState.client.waitForEvent("server.ready");
+  if (readyEvent.type === "server.ready") {
+    testState.executionPath = readyEvent.data.executionPath;
+    console.log(`${colors.green}✓ Server ready${colors.reset}`);
+    console.log(`  Execution path: ${testState.executionPath}`);
+  }
+
   const idleEvent = (await testState.client.waitForEvent("server.idle", 5000)) as ServerIdleEvent;
   expect(idleEvent.data.reason).toBe("startup");
   console.log(
@@ -447,7 +470,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // SNAPSHOT 1: After Phase 2 complete, Phase 3 skipped
-  await createSnapshot("1-after-phase2-phase3-skipped", TEST_DIR, SNAPSHOT_DIR, testState.client);
+  await createSnapshot(
+    "1-after-phase2-phase3-skipped",
+    testState.executionPath!,
+    SNAPSHOT_DIR,
+    testState.client,
+  );
 
   // === SCENARIO 2: Rollback to Phase 1 ===
   console.log(`\n${colors.blue}${"=".repeat(60)}${colors.reset}`);
@@ -508,7 +536,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   console.log(`${colors.gray}  To run: ${rollback1.data.toRun}${colors.reset}`);
 
   // SNAPSHOT 2: After rollback to Phase 1
-  await createSnapshot("2-after-rollback-to-phase1", TEST_DIR, SNAPSHOT_DIR, testState.client);
+  await createSnapshot(
+    "2-after-rollback-to-phase1",
+    testState.executionPath!,
+    SNAPSHOT_DIR,
+    testState.client,
+  );
 
   // === SCENARIO 3: Continue from rollback ===
   console.log(`\n${colors.blue}${"=".repeat(60)}${colors.reset}`);
@@ -606,7 +639,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   );
 
   // SNAPSHOT 3: After full completion from rollback
-  await createSnapshot("3-after-full-completion", TEST_DIR, SNAPSHOT_DIR, testState.client);
+  await createSnapshot(
+    "3-after-full-completion",
+    testState.executionPath!,
+    SNAPSHOT_DIR,
+    testState.client,
+  );
 
   // === SCENARIO 4: Rollback to Very Start (Complete Cleanup) ===
   console.log(`\n${colors.blue}${"=".repeat(60)}${colors.reset}`);
@@ -709,9 +747,9 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // Verify complete cleanup
-  const notesDir = path.join(TEST_DIR, "notes");
-  const typescriptDir = path.join(TEST_DIR, "typescript_code");
-  const langtonDir = path.join(TEST_DIR, ".langton");
+  const notesDir = path.join(EXECUTION_DIR, "notes");
+  const typescriptDir = path.join(EXECUTION_DIR, "typescript_code");
+  const langtonDir = path.join(EXECUTION_DIR, ".langton");
 
   console.log(`${colors.blue}Verifying complete cleanup...${colors.reset}`);
   console.log(`${colors.gray}  notes/ exists: ${fs.existsSync(notesDir)}${colors.reset}`);
@@ -727,7 +765,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   }
 
   // SNAPSHOT 4: After rollback to very start
-  await createSnapshot("4-after-rollback-to-start", TEST_DIR, SNAPSHOT_DIR, testState.client);
+  await createSnapshot(
+    "4-after-rollback-to-start",
+    testState.executionPath!,
+    SNAPSHOT_DIR,
+    testState.client,
+  );
 
   // Clean up
   console.log(`\n${colors.blue}Cleaning up...${colors.reset}`);

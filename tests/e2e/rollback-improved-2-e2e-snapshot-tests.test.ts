@@ -94,10 +94,14 @@ async function hashDirectory(dir: string): Promise<string> {
   }
   const allFilePaths = (await getFilePaths(dir)).sort();
 
-  // Filter out .langton directory files
+  // Filter out .langton directory files and data directory (execution isolation symlink)
   const filePaths = allFilePaths.filter((filePath) => {
     const relativePath = path.relative(dir, filePath);
-    return !relativePath.startsWith(`.langton${path.sep}`) && !relativePath.startsWith(".langton/");
+    return !relativePath.startsWith(`.langton${path.sep}`) &&
+           !relativePath.startsWith(".langton/") &&
+           !relativePath.startsWith(`data${path.sep}`) &&
+           !relativePath.startsWith("data/") &&
+           relativePath !== "data";
   });
 
   const hash = createHash("sha256");
