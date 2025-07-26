@@ -1,9 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { formatSize, removeDirectory, removeFile } from "./cleanup/file-operations.js";
-import { GitOperations } from "./cleanup/git-operations.js";
-import { ManifestBuilder } from "./cleanup/manifest-builder.js";
-import type { CleanupManifest, CleanupOptions, CleanupResult } from "./cleanup/types.js";
+import { findExecutionDirs, hashDataDirectory } from "./data-hasher.js";
+
+export interface CleanupOptions {
+  dataSourcePath?: string; // For finding by hash
+  executionPath?: string; // For direct cleanup
+  skipConfirmation: boolean;
+}
+
+export interface CleanupResult {
+  success: boolean;
+  directoriesRemoved: string[];
+  warnings: string[];
+  errors: string[];
+}
 
 export class CleanupCommand {
   constructor(private options: CleanupOptions) {}
@@ -11,29 +21,87 @@ export class CleanupCommand {
   async execute(): Promise<CleanupResult> {
     const result: CleanupResult = {
       success: false,
-      filesRemoved: [],
       directoriesRemoved: [],
-      gitFilesReset: [],
       warnings: [],
       errors: [],
     };
 
     try {
-      // Check if server is running
-      const lockFile = path.join(this.options.projectPath, ".langton/server.lock");
-      if (fs.existsSync(lockFile)) {
-        throw new Error("Server is currently running. Please stop it before cleanup.");
+      let dirsToRemove: string[] = [];
+
+      if (this.options.executionPath) {
+        // Direct execution path cleanup - just clean this one
+        dirsToRemove = [this.options.executionPath];
+      } else if (this.options.dataSourcePath) {
+        // Validate data source exists
+        if (!fs.existsSync(this.options.dataSourcePath)) {
+          result.errors.push(`Data source not found: ${this.options.dataSourcePath}`);
+          return result;
+        }
+
+        // Find by data hash - ONLY clean up the latest
+        console.log("Calculating data signature for cleanup...");
+        const dataHash = await hashDataDirectory(this.options.dataSourcePath);
+        console.log(`Data signature: ${dataHash}`);
+
+        const allDirs = await findExecutionDirs(dataHash);
+
+        if (allDirs.length === 0) {
+          console.log("No execution directories found for this data source.");
+          result.success = true;
+          return result;
+        }
+
+        // UPDATED: Only clean up the latest (first in sorted list)
+        dirsToRemove = [allDirs[0]];
+
+        // Show all directories found but note we're only cleaning the latest
+        if (allDirs.length > 1) {
+          console.log(`Found ${allDirs.length} execution directories.`);
+          console.log("Only the latest will be cleaned up.\n");
+        }
+      } else {
+        throw new Error("Either dataSourcePath or executionPath must be provided");
       }
 
-      // Build manifest
-      const manifestBuilder = new ManifestBuilder(
-        this.options.configPath,
-        this.options.projectPath,
-      );
-      const manifest = await manifestBuilder.build();
+      // Display what will be removed
+      console.log("🧹 Langton Cleanup Tool\n");
+      console.log("The following execution directory will be removed:\n");
 
-      // Display plan
-      this.displayCleanupPlan(manifest);
+      for (const dir of dirsToRemove) {
+        const metaPath = path.join(dir, ".langton", "execution-meta.json");
+        try {
+          const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
+          console.log(`📁 ${dir}`);
+          console.log(`   Created: ${meta.createdAt}`);
+          console.log(`   Last used: ${meta.lastUsed}`);
+          console.log(`   Link type: ${meta.linkType}`);
+          console.log(`   Original data: ${meta.readOnlySourceDataPath}`);
+
+          // Calculate size
+          const size = await getDirectorySize(dir);
+          console.log(`   Size: ${formatSize(size)}`);
+        } catch {
+          console.log(`📁 ${dir} (metadata unavailable)`);
+        }
+        console.log();
+      }
+
+      // If there are other directories, list them but note they won't be removed
+      if (this.options.dataSourcePath) {
+        const allDirs = await findExecutionDirs(
+          await hashDataDirectory(this.options.dataSourcePath),
+        );
+        const otherDirs = allDirs.filter((d) => !dirsToRemove.includes(d));
+
+        if (otherDirs.length > 0) {
+          console.log("Other execution directories (will NOT be removed):");
+          for (const dir of otherDirs) {
+            console.log(`  - ${dir}`);
+          }
+          console.log();
+        }
+      }
 
       // Get confirmation
       if (!this.options.skipConfirmation) {
@@ -44,144 +112,57 @@ export class CleanupCommand {
         }
       }
 
-      // Execute cleanup
-      console.log("\n🧹 Executing cleanup...\n");
+      // Remove directory
+      console.log("\n🗑️  Removing execution directory...\n");
 
-      // 1. Reset git if available
-      if (manifest.checkpointRepoExists && !manifest.isAtInitialCommit) {
-        await this.resetGit(manifest, result);
+      for (const dir of dirsToRemove) {
+        try {
+          // Check if directory exists
+          if (!fs.existsSync(dir)) {
+            console.log(`⚠️  Directory does not exist: ${dir}`);
+            continue;
+          }
+
+          // Check for running server
+          const lockFile = path.join(dir, ".langton", "server.lock");
+          if (fs.existsSync(lockFile)) {
+            result.errors.push(`Cannot remove ${dir}: Server is running`);
+            console.log(`❌ Skipped (server running): ${dir}`);
+            continue;
+          }
+
+          await fs.promises.rm(dir, { recursive: true, force: true });
+          result.directoriesRemoved.push(dir);
+          console.log(`✅ Removed: ${dir}`);
+        } catch (error) {
+          result.errors.push(`Failed to remove ${dir}: ${(error as Error).message}`);
+          console.log(`❌ Failed: ${dir} - ${(error as Error).message}`);
+        }
       }
-
-      // 2. Remove copied directories
-      await this.removeCopiedItems(manifest, result);
-
-      // 3. Remove .langton directory
-      await this.removeLangtonDir(manifest, result);
 
       result.success = result.errors.length === 0;
 
-      // Display results
-      this.displayResults(result);
+      // Display summary
+      console.log(`\n${"=".repeat(50)}\n`);
+      if (result.success) {
+        console.log(`✅ Cleanup completed successfully!`);
+        console.log(`   Removed ${result.directoriesRemoved.length} execution directory`);
+      } else {
+        console.log(`⚠️  Cleanup completed with errors`);
+        console.log(`   Removed: ${result.directoriesRemoved.length} directories`);
+        console.log(`   Failed: ${result.errors.length} directories`);
+      }
     } catch (error) {
-      result.errors.push(error instanceof Error ? error.message : String(error));
+      result.errors.push((error as Error).message);
+      console.error(`\n❌ Cleanup failed: ${(error as Error).message}`);
     }
 
     return result;
   }
 
-  private displayCleanupPlan(manifest: CleanupManifest): void {
-    console.log("🧹 Langton Cleanup Tool\n");
-    console.log(`📋 Analyzing configuration: ${this.options.configPath}\n`);
-
-    console.log("The following will be removed:\n");
-
-    // Show copied directories
-    if (manifest.copiedItems.length > 0) {
-      console.log("📁 Directories (from workspace setup):");
-      for (const item of manifest.copiedItems) {
-        if (item.exists) {
-          const size = item.sizeBytes ? ` (${formatSize(item.sizeBytes)})` : "";
-          console.log(`  ✗ ${item.destination}${size} (copied from ${item.source})`);
-        }
-      }
-      console.log();
-    }
-
-    // Show git-tracked files
-    if (manifest.gitTrackedFiles.length > 0) {
-      console.log("📄 Files (tracked in git):");
-      for (const file of manifest.gitTrackedFiles) {
-        const status =
-          file.status === "added"
-            ? "(new)"
-            : file.status === "modified"
-              ? "(modified)"
-              : file.status === "deleted"
-                ? "(deleted)"
-                : "";
-        console.log(`  ✗ ${file.path} ${status}`);
-      }
-      console.log();
-    }
-
-    // Show .langton directory
-    if (manifest.langtonDir.exists) {
-      console.log("📁 Langton data:");
-      console.log(
-        `  ✗ ${manifest.langtonDir.path}/ (${formatSize(manifest.langtonDir.sizeBytes)})`,
-      );
-
-      // Show state.json separately
-      if (manifest.langtonDir.contents.other.includes("state.json")) {
-        console.log("    - state.json (all run history)");
-      }
-
-      // Show runs directory
-      if (manifest.langtonDir.contents.runs.length > 0) {
-        console.log(`    - runs/ (${manifest.langtonDir.contents.runs.length} run folders)`);
-        for (const run of manifest.langtonDir.contents.runs.slice(0, 3)) {
-          console.log(`      - ${run}/`);
-        }
-        if (manifest.langtonDir.contents.runs.length > 3) {
-          console.log(`      - ... and ${manifest.langtonDir.contents.runs.length - 3} more runs`);
-        }
-      }
-
-      // Show legacy logs if any
-      if (manifest.langtonDir.contents.logs.length > 0) {
-        console.log(`    - logs/ (legacy logs)`);
-        for (const log of manifest.langtonDir.contents.logs.slice(0, 3)) {
-          console.log(`      - ${log}`);
-        }
-        if (manifest.langtonDir.contents.logs.length > 3) {
-          console.log(
-            `      - ... and ${manifest.langtonDir.contents.logs.length - 3} more log files`,
-          );
-        }
-      }
-
-      if (manifest.langtonDir.contents.checkpoints) {
-        console.log("    - checkpoints/.git/");
-        console.log("    - checkpoints/.gitconfig");
-      }
-
-      // Show other files
-      const otherFiles = manifest.langtonDir.contents.other.filter((f) => f !== "state.json");
-      if (otherFiles.length > 0) {
-        console.log("    - Other files:");
-        for (const file of otherFiles) {
-          console.log(`      - ${file}`);
-        }
-      }
-      console.log();
-    }
-
-    // Show warnings about commands
-    if (manifest.executedCommands.length > 0) {
-      console.log("⚠️  The following commands were run and CANNOT be undone:");
-      for (const cmd of manifest.executedCommands) {
-        const dir =
-          cmd.workingDirectory === "." ? "" : `, workingDirectory: ${cmd.workingDirectory}`;
-        console.log(`  - ${cmd.command} (in ${cmd.phaseId}${dir})`);
-        for (const effect of cmd.possibleSideEffects) {
-          console.log(`    → ${effect}`);
-        }
-      }
-      console.log();
-    }
-
-    // Additional warnings
-    console.log("⚠️  Additional warnings:");
-    console.log("  - Claude may have created files outside tracked patterns");
-    console.log("  - System changes from Claude's tool use cannot be undone");
-    console.log("  - If any of these directories existed before, they will be lost");
-    console.log();
-  }
-
   private async getConfirmation(): Promise<boolean> {
     console.log("❓ Proceed with cleanup? This cannot be undone! (y/N): ");
 
-    // Read user input
     return new Promise((resolve) => {
       process.stdin.once("data", (data) => {
         const input = data.toString().trim().toLowerCase();
@@ -189,97 +170,41 @@ export class CleanupCommand {
       });
     });
   }
+}
 
-  private async resetGit(manifest: CleanupManifest, result: CleanupResult): Promise<void> {
-    if (!manifest.checkpointRepoExists || !manifest.initialCommitHash) {
-      result.warnings.push("No checkpoint repository found, skipping git reset");
-      return;
-    }
+// Helper functions
+async function getDirectorySize(dirPath: string): Promise<number> {
+  let totalSize = 0;
 
-    const checkpointPath = path.join(this.options.projectPath, ".langton", "checkpoints");
-    const gitOps = new GitOperations(this.options.projectPath, checkpointPath);
+  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
 
-    try {
-      console.log("📝 Resetting git to initial commit...");
-      await gitOps.resetToInitial();
-      result.gitFilesReset = manifest.gitTrackedFiles.map((f) => f.path);
-      console.log(`  ✓ Reset ${result.gitFilesReset.length} tracked files`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      result.errors.push(`Git reset failed: ${message}`);
-      console.log(`  ✗ Git reset failed: ${message}`);
-    }
-  }
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
 
-  private async removeCopiedItems(manifest: CleanupManifest, result: CleanupResult): Promise<void> {
-    for (const item of manifest.copiedItems) {
-      if (!item.exists) continue;
-
-      const fullPath = path.join(this.options.projectPath, item.destination);
-
+    if (entry.isDirectory()) {
+      totalSize += await getDirectorySize(fullPath);
+    } else if (entry.isFile()) {
       try {
-        if (item.type === "directory") {
-          console.log(`🗑️  Removing directory: ${item.destination}`);
-          await removeDirectory(fullPath, this.options.projectPath);
-          result.directoriesRemoved.push(item.destination);
-        } else {
-          console.log(`🗑️  Removing file: ${item.destination}`);
-          await removeFile(fullPath, this.options.projectPath);
-          result.filesRemoved.push(item.destination);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        result.errors.push(`Failed to remove ${item.destination}: ${message}`);
-        console.log(`  ✗ Failed: ${message}`);
+        const stats = await fs.promises.stat(fullPath);
+        totalSize += stats.size;
+      } catch {
+        // Ignore files we can't stat
       }
     }
   }
 
-  private async removeLangtonDir(manifest: CleanupManifest, result: CleanupResult): Promise<void> {
-    if (!manifest.langtonDir.exists) return;
+  return totalSize;
+}
 
-    const langtonPath = path.join(this.options.projectPath, manifest.langtonDir.path);
+function formatSize(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unitIndex = 0;
 
-    try {
-      console.log(`🗑️  Removing .langton directory...`);
-      await fs.promises.rm(langtonPath, { recursive: true, force: true });
-      result.directoriesRemoved.push(".langton");
-      console.log("  ✓ Removed .langton directory");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      result.errors.push(`Failed to remove .langton: ${message}`);
-      console.log(`  ✗ Failed: ${message}`);
-    }
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
   }
 
-  private displayResults(result: CleanupResult): void {
-    console.log(`\n${"=".repeat(50)}\n`);
-
-    if (result.success) {
-      console.log("✅ Cleanup completed successfully!\n");
-
-      if (result.filesRemoved.length > 0) {
-        console.log(`📄 Files removed: ${result.filesRemoved.length}`);
-      }
-      if (result.directoriesRemoved.length > 0) {
-        console.log(`📁 Directories removed: ${result.directoriesRemoved.length}`);
-      }
-      if (result.gitFilesReset.length > 0) {
-        console.log(`📝 Git files reset: ${result.gitFilesReset.length}`);
-      }
-    } else {
-      console.log("❌ Cleanup completed with errors\n");
-
-      for (const error of result.errors) {
-        console.log(`  Error: ${error}`);
-      }
-    }
-
-    if (result.warnings.length > 0) {
-      console.log("\n⚠️  Warnings:");
-      for (const warning of result.warnings) {
-        console.log(`  - ${warning}`);
-      }
-    }
-  }
+  return `${size.toFixed(2)} ${units[unitIndex]}`;
 }

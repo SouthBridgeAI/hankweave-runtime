@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
+import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
 import { CleanupCommand } from "./cleanup-command.js";
 import { validatePhaseConfig } from "./config.js";
+import type { ExecutionSetup } from "./execution-setup.js";
+import { setupExecutionEnvironment } from "./execution-setup.js";
 import { LangtonServer } from "./langton-server.js";
-import type { PhaseConfig, ServerConfig } from "./types.js";
 
 // ============================================================================
 // Main Entry Point
@@ -21,6 +23,9 @@ async function main() {
     /^-y$/,
     /^--no-autostart$/,
     /^--config=.+$/,
+    /^--data=.+$/,
+    /^--execution=.+$/,
+    /^--copy$/,
     /^--anthropic-base-url=.+$/,
     /^--port=\d+$/,
     /^--help$/,
@@ -33,13 +38,16 @@ async function main() {
     }
   }
   const args = process.argv.slice(2);
+  const configPath =
+    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "phases.json";
+  const dataSourcePath = args.find((arg) => arg.startsWith("--data="))?.split("=")[1];
+  const executionPath = args.find((arg) => arg.startsWith("--execution="))?.split("=")[1];
+  const useSymlink = !args.includes("--copy");
   const basicMode = args.includes("--basic") || args.includes("-b");
   const validateMode = args.includes("--validate") || args.includes("-v");
   const cleanupMode = args.includes("--cleanup");
   const skipConfirmation = args.includes("-y");
   const noAutostart = args.includes("--no-autostart");
-  const configPath =
-    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "phases.json";
   const anthropicBaseURL = args
     .find((arg) => arg.startsWith("--anthropic-base-url="))
     ?.split("=")[1];
@@ -53,116 +61,157 @@ Usage: bun server/index.ts [options]
 
 Options:
   --config=<path>           Path to phases configuration file (default: phases.json)
+  --data=<path>             Path to data/project directory (default: current directory)
+  --execution=<path>        Resume in specific execution directory
+  --copy                    Copy data instead of symlinking (for compatibility)
   --port=<port>             WebSocket server port (default: 7777)
-  --basic, -b               Run in basic TUI mode (prints events to console)
-  --validate, -v            Validate configuration without running server
-  --cleanup                 Clean up all Langton artifacts (requires --config)
-  -y                        Skip confirmation prompts (for scripts/tests)
-  --no-autostart            Don't automatically start phases (wait for commands)
-  --anthropic-base-url=<url> Custom Anthropic API base URL (for proxies/gateways)
+  --basic, -b               Run in basic TUI mode
+  --validate, -v            Validate configuration without running
+  --cleanup                 Clean up execution directories
+  -y                        Skip confirmation prompts
+  --no-autostart            Don't automatically start phases
+  --anthropic-base-url=<url> Custom Anthropic API base URL
   --help, -h                Show this help message
 
+Execution Isolation:
+  Langton runs in an isolated execution directory separate from your data.
+  This enables clean rollbacks and multiple execution tracking.
+
+  Your data is accessed via: <execution-dir>/data/
+
+Template Variables:
+  <%EXECUTION_DIR%>  - The execution directory path
+  <%DATA_DIR%>       - The data directory path (execution-dir/data)
+
 Examples:
-  bun server/index.ts                          # Normal WebSocket server
-  bun server/index.ts --basic                  # Basic TUI mode
-  bun server/index.ts --config=my-phases.json  # Custom config file
-  bun server/index.ts --validate               # Validate configuration only
-  bun server/index.ts --cleanup --config=phases.json     # Clean up project
-  bun server/index.ts --cleanup --config=phases.json -y  # Clean up without prompts
-  bun server/index.ts --anthropic-base-url=https://proxy.example.com
+  # Run with default data (current directory)
+  bun server/index.ts
+
+  # Run with specific data directory
+  bun server/index.ts --data=/path/to/project
+
+  # Resume specific execution
+  bun server/index.ts --execution=/home/.langton-executions/1234-abc
+
+  # Copy data instead of symlinking (for Windows/permissions issues)
+  bun server/index.ts --data=/path/to/project --copy
+
+  # Clean up all executions for a data directory
+  bun server/index.ts --cleanup --data=/path/to/project
 `);
     process.exit(0);
   }
 
+  // Resolve data source path
+  const originalCwd = process.cwd(); // Save original CWD
+  const resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
+
+  // Set up execution environment
+  let executionSetup: ExecutionSetup;
   try {
-    // If validate mode, just validate and exit
+    executionSetup = await setupExecutionEnvironment({
+      readOnlySourceDataPath: resolvedDataPath,
+      executionPath: executionPath ? path.resolve(executionPath) : undefined,
+      useSymlink,
+    });
+  } catch (error) {
+    console.error(`❌ Execution setup failed: ${(error as Error).message}`);
+    process.exit(1);
+  }
+
+  console.log(`📁 Data source: ${executionSetup.readOnlySourceDataPath}`);
+  console.log(`🏃 Execution: ${executionSetup.executionPath}`);
+  console.log(`🔗 Link type: ${executionSetup.linkType}`);
+
+  // Change to execution directory for server operation
+  process.chdir(executionSetup.executionPath);
+
+  // Handle cleanup mode - UPDATED FOR LATEST EXECUTION ONLY
+  if (cleanupMode) {
+    try {
+      const cleanup = new CleanupCommand({
+        dataSourcePath: executionSetup.readOnlySourceDataPath,
+        executionPath: executionSetup.executionPath,
+        skipConfirmation,
+      });
+
+      const result = await cleanup.execute();
+      process.exit(result.success ? 0 : 1);
+    } catch (error) {
+      console.error(`\n❌ Cleanup failed: ${(error as Error).message}`);
+      process.exit(1);
+    }
+  }
+
+  // Load and validate configuration
+  // Config path is resolved relative to original CWD, not execution dir
+  const absoluteConfigPath = path.isAbsolute(configPath)
+    ? configPath
+    : path.resolve(originalCwd, configPath);
+
+  try {
+    // Validation mode
     if (validateMode) {
-      console.log(`\n🔍 Validating configuration: ${configPath}\n`);
+      console.log(`\n🔍 Validating configuration: ${absoluteConfigPath}\n`);
 
-      try {
-        const validationResult = await validatePhaseConfig(configPath, process.cwd());
+      const validationResult = await validatePhaseConfig(
+        absoluteConfigPath,
+        executionSetup.executionPath, // Changed from readOnlySourceData
+      );
 
-        // Print summary
-        console.log(`✅ Configuration is valid!\n`);
-        console.log(`📋 Summary:`);
-        console.log(`  - Phases: ${validationResult.phaseCount}`);
-        console.log(`  - Total prompt files: ${validationResult.promptFileCount}`);
-        console.log(`  - Total system prompt files: ${validationResult.systemPromptFileCount}`);
-        console.log(`  - Workspace setup operations: ${validationResult.workspaceSetupCount}`);
-        console.log(`  - Phases with file watching: ${validationResult.watchingPhaseCount}`);
-        console.log(`  - Phases with checkpoints: ${validationResult.checkpointPhaseCount}`);
+      // Print summary
+      console.log(`✅ Configuration is valid!\n`);
+      console.log(`📋 Summary:`);
+      console.log(`  - Phases: ${validationResult.phaseCount}`);
+      console.log(`  - Total prompt files: ${validationResult.promptFileCount}`);
+      console.log(`  - Total system prompt files: ${validationResult.systemPromptFileCount}`);
+      console.log(`  - Workspace setup operations: ${validationResult.workspaceSetupCount}`);
+      console.log(`  - Phases with file watching: ${validationResult.watchingPhaseCount}`);
+      console.log(`  - Phases with checkpoints: ${validationResult.checkpointPhaseCount}`);
 
-        // Display environment variables
-        const hasSystemVars =
-          Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
-        const hasPhaseVars = validationResult.environmentVariables.fromPhases.length > 0;
+      // Display environment variables
+      const hasSystemVars =
+        Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
+      const hasPhaseVars = validationResult.environmentVariables.fromPhases.length > 0;
 
-        if (hasSystemVars || hasPhaseVars) {
-          console.log(`\n🔧 Environment Variables:`);
+      if (hasSystemVars || hasPhaseVars) {
+        console.log(`\n🔧 Environment Variables:`);
 
-          if (hasSystemVars) {
-            console.log(`\n  From System (TADPOLE_ prefixed):`);
-            for (const [key, value] of Object.entries(
-              validationResult.environmentVariables.fromSystem,
-            )) {
-              console.log(`    - ${key}: ${value}`);
-            }
-          }
-
-          if (hasPhaseVars) {
-            console.log(`\n  From Phase Configurations:`);
-            for (const phaseEnv of validationResult.environmentVariables.fromPhases) {
-              console.log(`    Phase "${phaseEnv.phaseName}" (${phaseEnv.phaseId}):`);
-              for (const [key, value] of Object.entries(phaseEnv.variables)) {
-                console.log(`      - ${key}: ${value}`);
-              }
-            }
+        if (hasSystemVars) {
+          console.log(`\n  From System (TADPOLE_ prefixed):`);
+          for (const [key, value] of Object.entries(
+            validationResult.environmentVariables.fromSystem,
+          )) {
+            console.log(`    - ${key}: ${value}`);
           }
         }
 
-        if (validationResult.warnings.length > 0) {
-          console.log(`\n⚠️  Warnings:`);
-          for (const warning of validationResult.warnings) {
-            console.log(`  - ${warning}`);
+        if (hasPhaseVars) {
+          console.log(`\n  From Phase Configurations:`);
+          for (const phaseEnv of validationResult.environmentVariables.fromPhases) {
+            console.log(`    Phase "${phaseEnv.phaseName}" (${phaseEnv.phaseId}):`);
+            for (const [key, value] of Object.entries(phaseEnv.variables)) {
+              console.log(`      - ${key}: ${value}`);
+            }
           }
         }
-
-        process.exit(0);
-      } catch (error) {
-        console.error(`\n❌ Validation failed:\n`);
-        console.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
       }
+
+      if (validationResult.warnings.length > 0) {
+        console.log(`\n⚠️  Warnings:`);
+        for (const warning of validationResult.warnings) {
+          console.log(`  - ${warning}`);
+        }
+      }
+
+      process.exit(0);
     }
 
-    // Add cleanup mode handling
-    if (cleanupMode) {
-      if (!configPath || configPath === "phases.json") {
-        console.error("❌ Error: --cleanup requires explicit --config=<path>");
-        console.error("   This ensures you're cleaning up the right project.");
-        process.exit(1);
-      }
-
-      try {
-        const cleanup = new CleanupCommand({
-          configPath,
-          projectPath: process.cwd(),
-          skipConfirmation,
-        });
-
-        const result = await cleanup.execute();
-        process.exit(result.success ? 0 : 1);
-      } catch (error) {
-        console.error(
-          `\n❌ Cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        process.exit(1);
-      }
-    }
-
-    // Normal server startup
-    // Validate config on every startup, not just with --validate
-    const { phases, warnings } = await validatePhaseConfig(configPath, process.cwd());
+    // Normal server mode - validate config
+    const { phases, warnings } = await validatePhaseConfig(
+      absoluteConfigPath,
+      executionSetup.executionPath, // Changed from readOnlySourceData
+    );
 
     // Log any non-fatal warnings
     if (warnings.length > 0) {
@@ -173,22 +222,27 @@ Examples:
       console.log();
     }
 
-    const serverConfig: Partial<ServerConfig> & {
-      projectPath: string;
-      phases: PhaseConfig[];
-    } = {
-      projectPath: process.cwd(),
+    // Create server configuration by merging ExecutionSetup with other config
+    const serverConfig = {
+      // Required execution properties from ExecutionSetup
+      readOnlySourceDataPath: executionSetup.readOnlySourceDataPath,
+      executionPath: executionSetup.executionPath,
+      dataPathInExecutionDir: executionSetup.dataPathInExecutionDir,
+      dataHash: executionSetup.dataHash,
+      isNewExecution: executionSetup.isNewExecution,
+      isResuming: executionSetup.isResuming,
+      linkType: executionSetup.linkType,
+
+      // Required phases
       phases,
-      anthropicBaseURL,
-      autostart: !noAutostart, // New property
+
+      // Optional config (will use defaults if not provided)
+      ...(anthropicBaseURL && { anthropicBaseURL }),
+      ...(port && { port: parseInt(port, 10) }),
+      autostart: !noAutostart,
     };
 
-    if (port) {
-      serverConfig.port = parseInt(port, 10);
-    }
-
     const server = new LangtonServer(serverConfig);
-
     await server.start();
 
     if (basicMode) {

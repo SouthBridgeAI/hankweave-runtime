@@ -1,0 +1,197 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { DEFAULT_CONFIG } from "./config.js";
+import { findExecutionDirs, hashDataDirectory } from "./data-hasher.js";
+
+export interface ExecutionSetup {
+  readOnlySourceDataPath: string; // Absolute path to original data
+  executionPath: string; // Absolute path where we run
+  dataPathInExecutionDir: string; // Always executionPath + '/data'
+  dataHash: string;
+  isNewExecution: boolean;
+  isResuming: boolean;
+  linkType: "symlink" | "copy";
+  meta: {
+    createdAt: string;
+    lastUsed: string;
+    readOnlySourceResolvedDataPath: string;
+    version: string;
+  };
+}
+
+export async function setupExecutionEnvironment(options: {
+  readOnlySourceDataPath: string; // Already resolved to absolute
+  executionPath?: string; // Already resolved to absolute, or undefined
+  useSymlink?: boolean; // Default true, --copy flag sets to false
+  dataHashTimeLimit?: number; // Time limit for hashing
+}): Promise<ExecutionSetup> {
+  const {
+    readOnlySourceDataPath,
+    executionPath,
+    useSymlink = true,
+    dataHashTimeLimit = DEFAULT_CONFIG.dataHashTimeLimit,
+  } = options;
+
+  // Verify data source exists
+  if (!fs.existsSync(readOnlySourceDataPath)) {
+    throw new Error(`Data source not found: ${readOnlySourceDataPath}`);
+  }
+
+  const stats = await fs.promises.stat(readOnlySourceDataPath);
+  if (!stats.isDirectory()) {
+    throw new Error(`Data source is not a directory: ${readOnlySourceDataPath}`);
+  }
+
+  // Calculate data hash
+  console.log("Calculating data signature...");
+  const dataHash = await hashDataDirectory(readOnlySourceDataPath, dataHashTimeLimit);
+  console.log(`Data signature: ${dataHash}`);
+
+  let finalExecutionPath: string;
+  let isNewExecution = false;
+  let isResuming = false;
+
+  if (executionPath) {
+    // Explicit execution path provided - must already exist
+    if (!fs.existsSync(executionPath)) {
+      throw new Error(`Execution directory not found: ${executionPath}`);
+    }
+
+    // Verify it's a directory
+    const stats = await fs.promises.stat(executionPath);
+    if (!stats.isDirectory()) {
+      throw new Error(`Execution path is not a directory: ${executionPath}`);
+    }
+
+    // Prevent nested execution
+    if (executionPath.includes("/.langton-executions/") && executionPath.includes("/data")) {
+      throw new Error("Cannot create execution inside another execution directory");
+    }
+
+    // Prevent using data source as execution
+    if (path.resolve(executionPath) === path.resolve(readOnlySourceDataPath)) {
+      throw new Error("Execution directory cannot be the same as data source");
+    }
+
+    // Check if it has execution metadata
+    const metaPath = path.join(executionPath, ".langton", "execution-meta.json");
+    if (fs.existsSync(metaPath)) {
+      // Verify data hash matches
+      const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
+      if (meta.dataHash !== dataHash) {
+        throw new Error(
+          `Data source mismatch. Execution directory was created for different data.\n` +
+            `Expected hash: ${meta.dataHash}\n` +
+            `Current hash: ${dataHash}`,
+        );
+      }
+      isResuming = true;
+    } else {
+      // Directory exists but no metadata - treat as fresh execution
+      isNewExecution = true;
+      console.log(`Using existing directory as execution directory: ${executionPath}`);
+    }
+
+    finalExecutionPath = executionPath;
+  } else {
+    // Auto-detect or create execution directory
+    const executionRoot = path.join(os.homedir(), ".langton-executions");
+    await fs.promises.mkdir(executionRoot, { recursive: true });
+
+    // Look for existing execution directories
+    const existingDirs = await findExecutionDirs(dataHash);
+
+    if (existingDirs.length > 0) {
+      // Use most recent
+      finalExecutionPath = existingDirs[0];
+      isResuming = true;
+      console.log(`Resuming execution in: ${finalExecutionPath}`);
+    } else {
+      // Create new execution directory
+      const timestamp = Date.now();
+      const random = Math.random().toString(36).substring(2, 6);
+      const dirName = `${timestamp}-${random}-${dataHash.substring(0, 6)}`;
+      finalExecutionPath = path.join(executionRoot, dirName);
+      await fs.promises.mkdir(finalExecutionPath, { recursive: true });
+      isNewExecution = true;
+      console.log(`Created execution directory: ${finalExecutionPath}`);
+    }
+  }
+
+  const dataPathInExecutionDir = path.join(finalExecutionPath, "data");
+
+  // Set up data access (symlink or copy)
+  let linkType: "symlink" | "copy" = "symlink";
+  if (isNewExecution || !fs.existsSync(dataPathInExecutionDir)) {
+    if (useSymlink) {
+      try {
+        await fs.promises.symlink(readOnlySourceDataPath, dataPathInExecutionDir, "dir");
+        linkType = "symlink";
+      } catch (error) {
+        console.warn(`Failed to create symlink: ${error}. Falling back to copy.`);
+        await copyDirectory(readOnlySourceDataPath, dataPathInExecutionDir);
+        linkType = "copy";
+      }
+    } else {
+      await copyDirectory(readOnlySourceDataPath, dataPathInExecutionDir);
+      linkType = "copy";
+    }
+  }
+
+  // Create/update metadata
+  const metaDir = path.join(finalExecutionPath, ".langton");
+  await fs.promises.mkdir(metaDir, { recursive: true });
+
+  const meta = {
+    version: "1.0.0",
+    readOnlySourceDataPath,
+    readOnlySourceResolvedDataPath: await fs.promises.realpath(readOnlySourceDataPath),
+    dataHash,
+    linkType,
+    createdAt: isNewExecution
+      ? new Date().toISOString()
+      : fs.existsSync(path.join(metaDir, "execution-meta.json"))
+        ? JSON.parse(await fs.promises.readFile(path.join(metaDir, "execution-meta.json"), "utf-8"))
+            .createdAt
+        : new Date().toISOString(),
+    lastUsed: new Date().toISOString(),
+  };
+
+  await fs.promises.writeFile(
+    path.join(metaDir, "execution-meta.json"),
+    JSON.stringify(meta, null, 2),
+  );
+
+  return {
+    readOnlySourceDataPath,
+    executionPath: finalExecutionPath,
+    dataPathInExecutionDir,
+    dataHash,
+    isNewExecution,
+    isResuming,
+    linkType,
+    meta,
+  };
+}
+
+async function copyDirectory(src: string, dest: string): Promise<void> {
+  await fs.promises.mkdir(dest, { recursive: true });
+  const entries = await fs.promises.readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectory(srcPath, destPath);
+    } else if (entry.isSymbolicLink()) {
+      // Handle symlinks
+      const target = await fs.promises.readlink(srcPath);
+      await fs.promises.symlink(target, destPath);
+    } else if (entry.isFile()) {
+      await fs.promises.copyFile(srcPath, destPath);
+    }
+    // Skip other types (FIFO, socket, etc.)
+  }
+}

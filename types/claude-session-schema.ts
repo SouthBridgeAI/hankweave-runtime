@@ -122,7 +122,9 @@ export const toolResultContentSchema = z.object({
   // ID of the tool use this result corresponds to
   // - Claude format: toolu_[alphanumeric]
   // - Non-Claude models (e.g., Qwen): call_[hex string]
-  tool_use_id: z.string().regex(/^(toolu_[a-zA-Z0-9]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
+  tool_use_id: z
+    .string()
+    .regex(/^(toolu_[a-zA-Z0-9]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
 
   // Result content from tool execution (can be string, object, or array of content items)
   content: z.union([
@@ -190,7 +192,10 @@ export const assistantMessageSchema = z.object({
       .optional(),
 
     // Stop reason for the response (can be null)
-    stop_reason: z.enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"]).nullable().optional(),
+    stop_reason: z
+      .enum(["end_turn", "max_tokens", "stop_sequence", "tool_use"])
+      .nullable()
+      .optional(),
 
     // Stop sequence used (if applicable, can be null)
     stop_sequence: z.string().nullable().optional(),

@@ -133,21 +133,23 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
   ]);
 
   constructor(
-    config: Partial<ServerConfig> & {
-      projectPath: string;
-      phases: PhaseConfig[];
-    },
+    config: Omit<ServerConfig, keyof typeof DEFAULT_CONFIG> &
+      Partial<Pick<ServerConfig, keyof typeof DEFAULT_CONFIG>> & {
+        phases: PhaseConfig[];
+      },
   ) {
     super();
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
-    };
-    this.logger = new Logger(this.config.serverLogFile);
+    } as ServerConfig;
+
+    // Update logger to use execution path
+    this.logger = new Logger(path.join(this.config.executionPath, this.config.serverLogFile));
     this.serverStartTime = new Date();
 
-    // Initialize state manager
-    const langtonDir = path.join(this.config.projectPath, ".langton");
+    // Initialize state manager with execution path
+    const langtonDir = path.join(this.config.executionPath, ".langton");
     this.stateManager = new StateManager(langtonDir, this.logger, this.config.phases);
 
     // Set up state manager listeners
@@ -204,7 +206,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    */
   async start(): Promise<void> {
     this.logger.log(
-      `Starting Langton Server v${this.config.version} in ${this.config.projectPath}`,
+      `Starting Langton Server v${this.config.version} in ${this.config.executionPath}`,
     );
 
     // Initialize checkpoint system (checks for existing .langton)
@@ -342,7 +344,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       type: "server.ready",
       data: {
         serverVersion: this.config.version,
-        projectPath: this.config.projectPath,
+        executionPath: this.config.executionPath,
+        dataPath: this.config.dataPathInExecutionDir,
       },
     } as ServerReadyEvent);
 
@@ -534,7 +537,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     startingConditions?: import("./state-types.js").StartingConditions,
   ): Promise<void> {
     const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
-    const runFolder = path.join(this.config.projectPath, ".langton", "runs", runId);
+    const runFolder = path.join(this.config.executionPath, ".langton", "runs", runId);
 
     // Create run folder
     await fs.promises.mkdir(runFolder, { recursive: true });
@@ -702,7 +705,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
       for (const [index, item] of phase.workspaceSetup.entries()) {
         try {
           if (item.type === "copy" && item.copy) {
-            const targetPath = path.join(this.config.projectPath, item.copy.to);
+            const targetPath = path.join(this.config.executionPath, item.copy.to);
             await this.copyPath(item.copy.from, targetPath);
             lastCopiedPath = targetPath;
             this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
@@ -710,7 +713,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
             const workingDir =
               item.command.workingDirectory === "lastCopied" && lastCopiedPath
                 ? lastCopiedPath
-                : this.config.projectPath;
+                : this.config.executionPath;
             await this.runCommand(item.command.run, workingDir);
             this.logger.log(`Ran command in ${workingDir}: ${item.command.run}`);
           }
@@ -911,14 +914,14 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     if (phase.trackedFiles && phase.trackedFiles.length > 0) {
       // Use the unified file resolver to get files respecting gitignore
       const resolvedFiles = await fileResolver.resolveFiles(
-        this.config.projectPath,
+        this.config.executionPath,
         phase.trackedFiles,
       );
 
       // Get file contents for each resolved file
       const files = await Promise.all(
         resolvedFiles.map(async (filePath) => {
-          const fullPath = path.join(this.config.projectPath, filePath);
+          const fullPath = path.join(this.config.executionPath, filePath);
           const stats = await fs.promises.stat(fullPath);
           const content = await fs.promises.readFile(fullPath, "utf-8");
           return {
@@ -1004,7 +1007,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // Create process manager with the log parser
       this.processManager = new ClaudeProcessManager(
-        this.config.projectPath,
+        this.config.executionPath,
         this.logger,
         this.logParser,
         this.config.anthropicBaseURL,
@@ -1044,7 +1047,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
           to: "initializing",
           metadata: {
             claudePid: pid,
-            claudeLogPath: path.relative(this.config.projectPath, logPath),
+            claudeLogPath: path.relative(this.config.executionPath, logPath),
             ...(previousSessionId && {
               previousSessionId: SessionId(previousSessionId),
             }),
@@ -1646,7 +1649,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
         filePath = input?.file_path || null;
         content = input?.content || "";
         if (filePath) {
-          action = fs.existsSync(path.join(this.config.projectPath, filePath))
+          action = fs.existsSync(path.join(this.config.executionPath, filePath))
             ? "modified"
             : "created";
         }
@@ -1670,7 +1673,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Make path relative if it's absolute
     if (path.isAbsolute(filePath)) {
-      filePath = path.relative(this.config.projectPath, filePath);
+      filePath = path.relative(this.config.executionPath, filePath);
     }
 
     // Check if file matches any watch pattern
@@ -1686,7 +1689,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Read current file content if not provided
     if (!content) {
-      const fullPath = path.join(this.config.projectPath, filePath);
+      const fullPath = path.join(this.config.executionPath, filePath);
       if (fs.existsSync(fullPath)) {
         try {
           content = fs.readFileSync(fullPath, "utf-8");
@@ -1726,7 +1729,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Build file tree for all watched patterns
     const allTrees = await Promise.all(
-      this.watchedPatterns.map((pattern) => buildFileTree(this.config.projectPath, pattern)),
+      this.watchedPatterns.map((pattern) => buildFileTree(this.config.executionPath, pattern)),
     );
 
     // Merge all trees into one
@@ -2768,7 +2771,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     const failedCleanups: { directory: string; error: string }[] = [];
 
     for (const dir of directories) {
-      const fullPath = path.join(this.config.projectPath, dir);
+      const fullPath = path.join(this.config.executionPath, dir);
       try {
         if (fs.existsSync(fullPath)) {
           await fs.promises.rm(fullPath, { recursive: true, force: true });
@@ -2891,7 +2894,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Copy using cp command with recursive flag
     const cpCommand = `cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`;
-    await this.runCommand(cpCommand, this.config.projectPath);
+    await this.runCommand(cpCommand, this.config.executionPath);
   }
 
   // ============================================================================
@@ -2910,7 +2913,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Initialize checkpoint git
-    this.checkpointGit = new CheckpointGit(this.config.projectPath, this.logger);
+    this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
     await this.checkpointGit.initialize();
 
     // Provide checkpoint git to state manager for git operations
@@ -2941,7 +2944,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize repository on first tracked patterns
     if (!this.checkpointGit) {
-      this.checkpointGit = new CheckpointGit(this.config.projectPath, this.logger);
+      this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
       await this.checkpointGit.initialize();
     }
 

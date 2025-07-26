@@ -150,9 +150,19 @@ const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one p
  * Default server configuration values.
  * Can be overridden by passing config to LangtonServer constructor.
  *
- * Note: projectPath and phases must be provided by the user.
+ * Note: execution paths and phases must be provided by the user.
  */
-export const DEFAULT_CONFIG: Omit<ServerConfig, "projectPath" | "phases"> = {
+export const DEFAULT_CONFIG: Omit<
+  ServerConfig,
+  | "readOnlySourceDataPath"
+  | "executionPath"
+  | "dataPathInExecutionDir"
+  | "dataHash"
+  | "isNewExecution"
+  | "isResuming"
+  | "linkType"
+  | "phases"
+> = {
   port: 7777,
   version: "1.0.0",
   lockFile: ".langton/server.lock",
@@ -166,6 +176,7 @@ export const DEFAULT_CONFIG: Omit<ServerConfig, "projectPath" | "phases"> = {
   },
   logParsingInterval: 1000, // Check for new log entries every second
   autostart: true, // Default to current behavior
+  dataHashTimeLimit: 5000, // 5 seconds for directory hashing
 };
 
 // ============================================================================
@@ -405,13 +416,13 @@ export interface ValidationResult {
  * required for running.
  *
  * @param configPath - Path to configuration file
- * @param projectPath - Project root directory for relative path resolution
+ * @param executionPath - Execution directory for relative path resolution
  * @returns Validation result with statistics and warnings
  * @throws Error with detailed messages if validation fails
  */
 export async function validatePhaseConfig(
   configPath: string,
-  projectPath: string,
+  executionPath: string,
 ): Promise<ValidationResult> {
   // First, use loadPhaseConfig to do basic validation
   // This will throw if there are any structural issues
@@ -511,15 +522,15 @@ export async function validatePhaseConfig(
         if (item.type === "copy" && item.copy) {
           // Check source exists (already done by loadPhaseConfig)
           // Check target parent directory
-          const targetPath = path.join(projectPath, item.copy.to);
+          const targetPath = path.join(executionPath, item.copy.to);
           const targetParent = path.dirname(targetPath);
 
           try {
-            const relativeParent = path.relative(projectPath, targetParent);
+            const relativeParent = path.relative(executionPath, targetParent);
             if (relativeParent.startsWith("..")) {
               throw new Error(
                 `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
-                  `Target path "${item.copy.to}" would write outside project directory`,
+                  `Target path "${item.copy.to}" would write outside execution directory`,
               );
             }
           } catch (_error) {

@@ -9,15 +9,15 @@ import type { Logger } from "./utils.js";
  * Handles the shadow git repository in .langton/checkpoints.
  */
 export class CheckpointGit {
-  private projectPath: string;
+  private executionPath: string;
   private checkpointPath: string;
   private git: SimpleGit | null = null;
   private logger: Logger;
   private trackedPatterns: Set<string> = new Set();
 
-  constructor(projectPath: string, logger: Logger) {
-    this.projectPath = projectPath;
-    this.checkpointPath = path.join(projectPath, ".langton", "checkpoints");
+  constructor(executionPath: string, logger: Logger) {
+    this.executionPath = executionPath;
+    this.checkpointPath = path.join(executionPath, ".langton", "checkpoints");
     this.logger = logger;
   }
 
@@ -35,14 +35,14 @@ export class CheckpointGit {
 
     if (repoExists) {
       // Repository exists - just set up git instance
-      this.git = simpleGit(this.projectPath, {
+      this.git = simpleGit(this.executionPath, {
         config: [
-          `core.worktree=${this.projectPath}`,
+          `core.worktree=${this.executionPath}`,
           `core.gitdir=${path.join(this.checkpointPath, ".git")}`,
         ],
       }).env({
         GIT_DIR: path.join(this.checkpointPath, ".git"),
-        GIT_WORK_TREE: this.projectPath,
+        GIT_WORK_TREE: this.executionPath,
         HOME: this.checkpointPath,
         XDG_CONFIG_HOME: this.checkpointPath,
       });
@@ -71,14 +71,14 @@ export class CheckpointGit {
     await fs.promises.writeFile(gitConfigPath, gitConfigContent);
 
     // Initialize git with proper environment
-    this.git = simpleGit(this.projectPath, {
+    this.git = simpleGit(this.executionPath, {
       config: [
-        `core.worktree=${this.projectPath}`,
+        `core.worktree=${this.executionPath}`,
         `core.gitdir=${path.join(this.checkpointPath, ".git")}`,
       ],
     }).env({
       GIT_DIR: path.join(this.checkpointPath, ".git"),
-      GIT_WORK_TREE: this.projectPath,
+      GIT_WORK_TREE: this.executionPath,
       HOME: this.checkpointPath,
       XDG_CONFIG_HOME: this.checkpointPath,
     });
@@ -135,7 +135,7 @@ export class CheckpointGit {
 
     const patterns = Array.from(this.trackedPatterns);
     // Use the unified file resolver to get files respecting gitignore
-    const files = await fileResolver.resolveFiles(this.projectPath, patterns);
+    const files = await fileResolver.resolveFiles(this.executionPath, patterns);
     return files;
   }
 

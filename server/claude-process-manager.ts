@@ -17,7 +17,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   private killed = false;
 
   constructor(
-    private projectPath: string,
+    private executionPath: string,
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseURL?: string,
@@ -44,7 +44,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     // Use provided logPath or default to .langton/logs/
     const actualLogPath =
-      logPath || path.join(this.projectPath, `.langton/logs/log-${phase.id}.jsonl`);
+      logPath || path.join(this.executionPath, `.langton/logs/log-${phase.id}.jsonl`);
 
     // Ensure log directory exists
     const logsDir = path.dirname(actualLogPath);
@@ -85,21 +85,21 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     // Log the exact command being run
     const fullCommand = `claude ${args.join(" ")}`;
     this.logger.log(`Executing Claude command: ${fullCommand}`);
-    this.logger.log(`Working directory: ${this.projectPath}`);
+    this.logger.log(`Working directory: ${this.executionPath}`);
 
     // Additional debugging
     this.logger.log(`Current process.cwd(): ${process.cwd()}`);
-    this.logger.log(`Absolute projectPath: ${path.resolve(this.projectPath)}`);
-    this.logger.log(`Project path exists: ${fs.existsSync(this.projectPath)}`);
+    this.logger.log(`Absolute executionPath: ${path.resolve(this.executionPath)}`);
+    this.logger.log(`Execution path exists: ${fs.existsSync(this.executionPath)}`);
     this.logger.log(
-      `Project path is directory: ${
-        fs.existsSync(this.projectPath) && fs.statSync(this.projectPath).isDirectory()
+      `Execution path is directory: ${
+        fs.existsSync(this.executionPath) && fs.statSync(this.executionPath).isDirectory()
       }`,
     );
 
     // Spawn process
     this.process = spawn("claude", args, {
-      cwd: this.projectPath,
+      cwd: this.executionPath,
       stdio: ["pipe", "pipe", "pipe"],
       env,
     });
@@ -184,7 +184,10 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     if (content) {
       // Replace template variables
-      return content.replace(/<%PROJECT_DIR%>/g, this.projectPath);
+      return content
+        .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
+        .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
+        .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "data"));
     }
 
     return null;
@@ -213,7 +216,10 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       throw new Error("No prompt file or text provided");
     }
 
-    const processedContent = promptContent.replace(/<%PROJECT_DIR%>/g, this.projectPath);
+    const processedContent = promptContent
+      .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
+      .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
+      .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "data"));
 
     this.process.stdin.write(processedContent);
     this.process.stdin.end();

@@ -186,7 +186,7 @@ export interface CheckpointInfo {
 
 /**
  * Main server configuration containing all runtime settings.
- * Most values have defaults in config.ts except projectPath and phases.
+ * Most values have defaults in config.ts except execution paths and phases.
  */
 export interface ServerConfig {
   /** WebSocket server port (default: 7777) */
@@ -204,8 +204,21 @@ export interface ServerConfig {
   /** Path to general server log file */
   serverLogFile: string;
 
-  /** Absolute path to the project directory where Claude will run */
-  projectPath: string;
+  // Execution paths (from ExecutionSetup)
+  /** Original data location (for reference only) */
+  readOnlySourceDataPath: string;
+  /** Primary directory where everything runs */
+  executionPath: string;
+  /** executionPath + '/data' - ONLY for setup */
+  dataPathInExecutionDir: string;
+  /** Hash of the data directory structure */
+  dataHash: string;
+  /** Whether this is a new execution */
+  isNewExecution: boolean;
+  /** Whether we're resuming an existing execution */
+  isResuming: boolean;
+  /** How data is linked (symlink or copy) */
+  linkType: "symlink" | "copy";
 
   /** Array of phase configurations to execute */
   phases: PhaseConfig[];
@@ -233,6 +246,9 @@ export interface ServerConfig {
 
   /** Whether to automatically start phases (default: true) */
   autostart: boolean;
+
+  /** Time limit for hashing directories in milliseconds (default: 5000) */
+  dataHashTimeLimit: number;
 }
 
 // ============================================================================
@@ -305,8 +321,10 @@ export interface ServerReadyEvent {
   data: {
     /** Server version for compatibility checking */
     serverVersion: string;
-    /** Absolute path where Claude will execute */
-    projectPath: string;
+    /** Where server/git/logs operate */
+    executionPath: string;
+    /** Where user data is accessible (data/ subdirectory) */
+    dataPath: string;
   };
 }
 
