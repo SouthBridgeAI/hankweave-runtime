@@ -1,21 +1,14 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { CleanupCommand } from "../../server/cleanup-command.js";
-import { ManifestBuilder } from "../../server/cleanup/manifest-builder.js";
-import { GitOperations } from "../../server/cleanup/git-operations.js";
-import type {
-  CleanupManifest,
-  CleanupOptions,
-  CleanupResult,
-} from "../../server/cleanup/types.js";
-import { PhaseId } from "../../server/branded-types.js";
-import * as fs from "fs";
-import * as path from "path";
-import { rmSync } from "fs";
+import type { CleanupOptions, CleanupResult } from "../../server/cleanup-command.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { rmSync } from "node:fs";
 
 describe("CleanupCommand", () => {
   let tempDir: string;
-  let configPath: string;
-  let lockFile: string;
+  let executionRoot: string;
+  let dataSourcePath: string;
 
   beforeEach(async () => {
     tempDir = path.resolve(
@@ -25,43 +18,21 @@ describe("CleanupCommand", () => {
     );
     await fs.promises.mkdir(tempDir, { recursive: true });
 
-    // Create source directory for copy operations
-    const sourceDir = path.join(tempDir, "source-template");
-    await fs.promises.mkdir(sourceDir, { recursive: true });
+    // Create mock execution root
+    executionRoot = path.join(tempDir, ".langton-executions");
+    await fs.promises.mkdir(executionRoot, { recursive: true });
+
+    // Create mock data source
+    dataSourcePath = path.join(tempDir, "data-source");
+    await fs.promises.mkdir(dataSourcePath, { recursive: true });
     await fs.promises.writeFile(
-      path.join(sourceDir, "template.txt"),
-      "template content"
+      path.join(dataSourcePath, "file1.txt"),
+      "content 1"
     );
-
-    // Create a mock config file
-    configPath = path.join(tempDir, "test-config.json");
-    const mockConfig = [
-      {
-        id: "phase-1",
-        name: "Phase 1",
-        model: "opus",
-        continuationMode: "fresh",
-        promptText: "Test prompt",
-        workspaceSetup: [
-          {
-            type: "copy",
-            copy: {
-              from: sourceDir,
-              to: "copied-dir",
-            },
-          },
-          {
-            type: "command",
-            command: {
-              run: "mkdir -p test-dir",
-            },
-          },
-        ],
-      },
-    ];
-    await fs.promises.writeFile(configPath, JSON.stringify(mockConfig));
-
-    lockFile = path.join(tempDir, ".langton/server.lock");
+    await fs.promises.writeFile(
+      path.join(dataSourcePath, "file2.txt"),
+      "content 2"
+    );
   });
 
   afterEach(async () => {
@@ -70,8 +41,7 @@ describe("CleanupCommand", () => {
 
   test("constructor initializes with options", () => {
     const options: CleanupOptions = {
-      configPath: "test.json",
-      projectPath: "/project",
+      dataSourcePath: "/some/path",
       skipConfirmation: true,
     };
 
@@ -79,27 +49,93 @@ describe("CleanupCommand", () => {
     expect(cleanup).toBeInstanceOf(CleanupCommand);
   });
 
-  test("fails if server is running (lock file exists)", async () => {
-    // Create lock file
-    await fs.promises.mkdir(path.dirname(lockFile), { recursive: true });
-    await fs.promises.writeFile(lockFile, "12345");
+  test("returns success when no execution directories found", async () => {
+    // Create a data source that won't have any execution directories
+    const uniqueDataPath = path.join(tempDir, `unique-data-${Date.now()}`);
+    await fs.promises.mkdir(uniqueDataPath, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(uniqueDataPath, "unique.txt"),
+      "unique content"
+    );
 
     const cleanup = new CleanupCommand({
-      configPath,
-      projectPath: tempDir,
+      dataSourcePath: uniqueDataPath,
+      skipConfirmation: true,
+    });
+
+    const result = await cleanup.execute();
+
+    expect(result.success).toBe(true);
+    expect(result.directoriesRemoved).toHaveLength(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  test("removes execution directory by path", async () => {
+    // Create a mock execution directory
+    const executionDir = path.join(executionRoot, "1234567-abc-def123");
+    const langtonDir = path.join(executionDir, ".langton");
+    await fs.promises.mkdir(langtonDir, { recursive: true });
+
+    // Create execution metadata
+    const meta = {
+      version: "1.0.0",
+      readOnlySourceDataPath: dataSourcePath,
+      readOnlySourceResolvedDataPath: dataSourcePath,
+      dataHash: "def123",
+      linkType: "symlink",
+      createdAt: new Date().toISOString(),
+      lastUsed: new Date().toISOString(),
+    };
+    await fs.promises.writeFile(
+      path.join(langtonDir, "execution-meta.json"),
+      JSON.stringify(meta, null, 2)
+    );
+
+    const cleanup = new CleanupCommand({
+      executionPath: executionDir,
+      skipConfirmation: true,
+    });
+
+    const result = await cleanup.execute();
+
+    expect(result.success).toBe(true);
+    expect(result.directoriesRemoved).toContain(executionDir);
+    expect(fs.existsSync(executionDir)).toBe(false);
+  });
+
+  test("skips execution directory with running server", async () => {
+    // Create a mock execution directory with lock file
+    const executionDir = path.join(executionRoot, "1234567-abc-def123");
+    const langtonDir = path.join(executionDir, ".langton");
+    await fs.promises.mkdir(langtonDir, { recursive: true });
+
+    // Create lock file
+    await fs.promises.writeFile(
+      path.join(langtonDir, "server.lock"),
+      JSON.stringify({
+        pid: process.pid,
+        runId: "test-run",
+        startTime: new Date().toISOString(),
+        lastHeartbeat: new Date().toISOString(),
+      })
+    );
+
+    const cleanup = new CleanupCommand({
+      executionPath: executionDir,
       skipConfirmation: true,
     });
 
     const result = await cleanup.execute();
 
     expect(result.success).toBe(false);
-    expect(result.errors[0]).toContain("Server is currently running");
+    expect(result.errors[0]).toContain("Server is running");
+    expect(result.directoriesRemoved).not.toContain(executionDir);
+    expect(fs.existsSync(executionDir)).toBe(true);
   });
 
-  test("returns error in result on manifest builder failure", async () => {
+  test("handles errors gracefully", async () => {
     const cleanup = new CleanupCommand({
-      configPath: "/non-existent/config.json",
-      projectPath: tempDir,
+      dataSourcePath: "/non-existent/path",
       skipConfirmation: true,
     });
 
@@ -109,68 +145,42 @@ describe("CleanupCommand", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  test("respects skipConfirmation option", async () => {
-    // Create a simpler config that doesn't require source paths
-    const simpleConfig = [
-      {
-        id: "phase-1",
-        name: "Phase 1",
-        model: "opus",
-        continuationMode: "fresh",
-        promptText: "Test prompt",
-      },
-    ];
-    await fs.promises.writeFile(configPath, JSON.stringify(simpleConfig));
+  test("removes specific execution directory when multiple exist", async () => {
+    // Create multiple execution directories
+    const execDir1 = path.join(executionRoot, "1000000-aaa-abc123");
+    const execDir2 = path.join(executionRoot, "2000000-bbb-def456");
 
+    for (const dir of [execDir1, execDir2]) {
+      const langtonDir = path.join(dir, ".langton");
+      await fs.promises.mkdir(langtonDir, { recursive: true });
+
+      const meta = {
+        version: "1.0.0",
+        readOnlySourceDataPath: dataSourcePath,
+        readOnlySourceResolvedDataPath: dataSourcePath,
+        dataHash: path.basename(dir).split('-')[2], // Extract hash from dir name
+        linkType: "symlink",
+        createdAt: new Date().toISOString(),
+        lastUsed: new Date().toISOString(),
+      };
+      await fs.promises.writeFile(
+        path.join(langtonDir, "execution-meta.json"),
+        JSON.stringify(meta, null, 2)
+      );
+    }
+
+    // Test removing specific execution directory
     const cleanup = new CleanupCommand({
-      configPath,
-      projectPath: tempDir,
+      executionPath: execDir2,
       skipConfirmation: true,
     });
 
     const result = await cleanup.execute();
 
-    // Should succeed with minimal manifest
     expect(result.success).toBe(true);
-  });
-
-  test("removes copied items from manifest", async () => {
-    // Create a copied directory
-    const copiedDir = path.join(tempDir, "copied-dir");
-    await fs.promises.mkdir(copiedDir, { recursive: true });
-    await fs.promises.writeFile(path.join(copiedDir, "test.txt"), "content");
-
-    const cleanup = new CleanupCommand({
-      configPath,
-      projectPath: tempDir,
-      skipConfirmation: true,
-    });
-
-    const result = await cleanup.execute();
-
-    // The directory should be removed
-    expect(fs.existsSync(copiedDir)).toBe(false);
-    expect(result.directoriesRemoved).toContain("copied-dir");
-  });
-
-  test("removes .langton directory", async () => {
-    // Create .langton directory
-    const langtonDir = path.join(tempDir, ".langton");
-    await fs.promises.mkdir(path.join(langtonDir, "logs"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(langtonDir, "logs", "test.log"),
-      "log content"
-    );
-
-    const cleanup = new CleanupCommand({
-      configPath,
-      projectPath: tempDir,
-      skipConfirmation: true,
-    });
-
-    const result = await cleanup.execute();
-
-    expect(fs.existsSync(langtonDir)).toBe(false);
-    expect(result.directoriesRemoved).toContain(".langton");
+    expect(result.directoriesRemoved).toHaveLength(1);
+    expect(result.directoriesRemoved[0]).toBe(execDir2);
+    expect(fs.existsSync(execDir1)).toBe(true); // First one remains
+    expect(fs.existsSync(execDir2)).toBe(false); // Second one removed
   });
 });

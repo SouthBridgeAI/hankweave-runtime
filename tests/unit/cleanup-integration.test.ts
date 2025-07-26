@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   executeTestCleanup,
@@ -13,35 +14,20 @@ describe("Cleanup Integration Utility", () => {
     process.cwd(),
     "tests/unit/test-cleanup-integration"
   );
-  const testDir = path.join(testRoot, "test-project");
-  const configPath = path.join(testRoot, "test-config.json");
+  const executionRoot = path.join(testRoot, ".langton-executions");
+  const dataSourcePath = path.join(testRoot, "test-data");
+  const testExecutionDir = path.join(executionRoot, "test-execution-123");
 
   beforeEach(async () => {
     // Create test directory structure
-    await fs.promises.mkdir(testDir, { recursive: true });
+    await fs.promises.mkdir(executionRoot, { recursive: true });
+    await fs.promises.mkdir(dataSourcePath, { recursive: true });
+    await fs.promises.mkdir(testExecutionDir, { recursive: true });
 
-    // Create a minimal test config
-    const testConfig = [
-      {
-        id: "test-phase",
-        name: "Test Phase",
-        promptText: "Test prompt",
-        model: "claude-3-sonnet-20240229",
-        workspaceSetup: [
-          {
-            type: "copy",
-            copy: {
-              from: ".",
-              to: "copied-dir",
-            },
-          },
-        ],
-      },
-    ];
-
+    // Create some test data files
     await fs.promises.writeFile(
-      configPath,
-      JSON.stringify(testConfig, null, 2)
+      path.join(dataSourcePath, "test.txt"),
+      "test content"
     );
   });
 
@@ -57,159 +43,132 @@ describe("Cleanup Integration Utility", () => {
       expect(isCleanupNeeded("/non/existent/path")).toBe(false);
     });
 
-    test("returns false for clean directory", () => {
-      expect(isCleanupNeeded(testDir)).toBe(false);
+    test("returns false when no directories exist", async () => {
+      // Remove the directory created in beforeEach
+      await fs.promises.rm(testExecutionDir, { recursive: true, force: true });
+      expect(isCleanupNeeded(testExecutionDir)).toBe(false);
     });
 
-    test("returns true when .langton directory exists", async () => {
-      const langtonDir = path.join(testDir, ".langton");
+    test("returns true when execution directory exists", async () => {
+      // Create .langton directory in execution
+      const langtonDir = path.join(testExecutionDir, ".langton");
       await fs.promises.mkdir(langtonDir, { recursive: true });
 
-      expect(isCleanupNeeded(testDir)).toBe(true);
+      expect(isCleanupNeeded(testExecutionDir)).toBe(true);
     });
 
-    test("returns true when test artifacts exist", async () => {
-      const notesDir = path.join(testDir, "notes");
-      await fs.promises.mkdir(notesDir, { recursive: true });
+    test("returns true when test directory exists", async () => {
+      const testDir = path.join(testRoot, "some-test-dir");
+      await fs.promises.mkdir(testDir, { recursive: true });
 
-      expect(isCleanupNeeded(testDir)).toBe(true);
+      expect(isCleanupNeeded(undefined, testDir)).toBe(true);
     });
 
-    test("detects multiple artifact types", async () => {
-      // Create various test artifacts
-      await fs.promises.mkdir(path.join(testDir, "typescript_code"), {
-        recursive: true,
-      });
-      await fs.promises.mkdir(path.join(testDir, "output"), {
-        recursive: true,
-      });
+    test("checks both execution and test directories", async () => {
+      const langtonDir = path.join(testExecutionDir, ".langton");
+      await fs.promises.mkdir(langtonDir, { recursive: true });
 
-      expect(isCleanupNeeded(testDir)).toBe(true);
+      const testDir = path.join(testRoot, "some-test-dir");
+      await fs.promises.mkdir(testDir, { recursive: true });
+
+      expect(isCleanupNeeded(testExecutionDir, testDir)).toBe(true);
     });
   });
 
   describe("executeTestCleanup", () => {
-    test("returns error when test directory doesn't exist", async () => {
+    test("returns success when no directories to clean", async () => {
       const result = await executeTestCleanup({
-        testDir: "/non/existent/path",
-        phasesConfig: configPath,
+        executionPath: "/non/existent/path",
+        skipConfirmation: true,
       });
 
-      expect(result.success).toBe(false);
-      expect(result.errors).toContain(
-        "Test directory does not exist: /non/existent/path"
-      );
-    });
-
-    test("returns error when config doesn't exist", async () => {
-      const result = await executeTestCleanup({
-        testDir: testDir,
-        phasesConfig: "/non/existent/config.json",
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.errors).toContain(
-        "Phases configuration does not exist: /non/existent/config.json"
-      );
-    });
-
-    test("falls back to manual cleanup when force is true", async () => {
-      // Create .langton directory
-      const langtonDir = path.join(testDir, ".langton");
-      await fs.promises.mkdir(langtonDir, { recursive: true });
-      await fs.promises.writeFile(
-        path.join(langtonDir, "test.log"),
-        "test content"
-      );
-
-      // Use an invalid config to force CleanupCommand to fail
-      await fs.promises.writeFile(configPath, "invalid json");
-
-      const result = await executeTestCleanup({
-        testDir: testDir,
-        phasesConfig: configPath,
-        force: true,
-      });
-
-      // Debug output
-      if (!result.success) {
-        console.log("Result:", result);
-      }
-
-      // Should succeed with warnings
       expect(result.success).toBe(true);
-      expect(result.warnings.length).toBeGreaterThan(0);
-      expect(result.warnings[1]).toBe(
-        "Performing manual cleanup of .langton directory only"
-      );
-      expect(result.directoriesRemoved).toContain(".langton");
+      expect(result.directoriesRemoved).toHaveLength(0);
+      expect(result.errors).toHaveLength(0);
+    });
 
-      // Verify .langton was actually removed
-      expect(fs.existsSync(langtonDir)).toBe(false);
+    test("cleans up execution directory by path", async () => {
+      // Create execution directory with metadata
+      const langtonDir = path.join(testExecutionDir, ".langton");
+      await fs.promises.mkdir(langtonDir, { recursive: true });
+
+      const meta = {
+        version: "1.0.0",
+        readOnlySourceDataPath: dataSourcePath,
+        readOnlySourceResolvedDataPath: dataSourcePath,
+        dataHash: "test123",
+        linkType: "symlink",
+        createdAt: new Date().toISOString(),
+        lastUsed: new Date().toISOString(),
+      };
+      await fs.promises.writeFile(
+        path.join(langtonDir, "execution-meta.json"),
+        JSON.stringify(meta, null, 2)
+      );
+
+      const result = await executeTestCleanup({
+        executionPath: testExecutionDir,
+        skipConfirmation: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.directoriesRemoved).toContain(testExecutionDir);
+      expect(fs.existsSync(testExecutionDir)).toBe(false);
+    });
+
+    test("cleans up test directory when provided", async () => {
+      const testDir = path.join(testRoot, "test-artifacts");
+      await fs.promises.mkdir(testDir, { recursive: true });
+      await fs.promises.writeFile(
+        path.join(testDir, "artifact.txt"),
+        "test artifact"
+      );
+
+      const result = await executeTestCleanup({
+        testDir,
+        skipConfirmation: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.directoriesRemoved).toContain(testDir);
+      expect(fs.existsSync(testDir)).toBe(false);
     });
 
     test("returns error without fallback when force is false", async () => {
-      // Use invalid config to force failure
-      await fs.promises.writeFile(configPath, "invalid json");
-
+      // Try to clean up with invalid data source path
       const result = await executeTestCleanup({
-        testDir: testDir,
-        phasesConfig: configPath,
+        dataSourcePath: "/non/existent/data/source",
+        skipConfirmation: true,
         force: false,
       });
 
       expect(result.success).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.warnings.length).toBe(0);
     });
 
-    test("manual cleanup handles missing .langton directory gracefully", async () => {
-      // Don't create .langton directory
-      // Use invalid config to trigger manual cleanup
-      await fs.promises.writeFile(configPath, "invalid json");
+    test("handles cleanup errors gracefully", async () => {
+      // Create a directory that can't be removed
+      const protectedDir = path.join(testRoot, "protected");
+      await fs.promises.mkdir(protectedDir, { recursive: true });
 
-      const result = await executeTestCleanup({
-        testDir: testDir,
-        phasesConfig: configPath,
-        force: true,
-      });
-
-      // When there's nothing to clean, it should still be successful
-      expect(result.success).toBe(true);
-      expect(result.directoriesRemoved.length).toBe(0);
-      expect(result.warnings.length).toBeGreaterThan(0);
-      expect(result.warnings[0]).toContain("Cleanup command failed");
-    });
-
-    test("manual cleanup reports errors when removal fails", async () => {
-      // Create .langton directory with a file that can't be removed
-      const langtonDir = path.join(testDir, ".langton");
-      await fs.promises.mkdir(langtonDir, { recursive: true });
-
-      // Make directory read-only to simulate removal failure
-      // Note: This might not work on all systems, so we'll skip if it doesn't
+      // Try to make it unremovable (this might not work on all systems)
       try {
-        await fs.promises.chmod(langtonDir, 0o444);
-
-        // Use invalid config to trigger manual cleanup
-        await fs.promises.writeFile(configPath, "invalid json");
+        await fs.promises.chmod(protectedDir, 0o444);
 
         const result = await executeTestCleanup({
-          testDir: testDir,
-          phasesConfig: configPath,
-          force: true,
+          testDir: protectedDir,
+          skipConfirmation: true,
+          force: false,
         });
 
         // If chmod worked, removal should fail
-        if (result.success === false) {
+        if (!result.success) {
           expect(result.errors.length).toBeGreaterThan(0);
-          expect(result.errors[0]).toContain(
-            "Failed to manually remove .langton"
-          );
+          expect(result.errors[0]).toContain("Failed to remove test directory");
         }
 
         // Restore permissions for cleanup
-        await fs.promises.chmod(langtonDir, 0o755);
+        await fs.promises.chmod(protectedDir, 0o755);
       } catch (error) {
         // Skip test if chmod isn't supported
         console.log("Skipping read-only test - chmod not supported");
@@ -236,7 +195,6 @@ describe("Cleanup Integration Utility", () => {
     test("logs success message for successful cleanup", () => {
       const result: CleanupIntegrationResult = {
         success: true,
-        filesRemoved: [],
         directoriesRemoved: [],
         errors: [],
         warnings: [],
@@ -250,8 +208,7 @@ describe("Cleanup Integration Utility", () => {
     test("logs verbose details when requested", () => {
       const result: CleanupIntegrationResult = {
         success: true,
-        filesRemoved: ["file1.txt", "file2.txt"],
-        directoriesRemoved: ["dir1", "dir2", "dir3"],
+        directoriesRemoved: ["/path/to/dir1", "/path/to/dir2", "/path/to/dir3"],
         errors: [],
         warnings: ["Warning 1", "Warning 2"],
       };
@@ -259,8 +216,10 @@ describe("Cleanup Integration Utility", () => {
       logCleanupResults(result, true);
 
       expect(consoleOutput).toContain("✅ Test cleanup completed successfully");
-      expect(consoleOutput).toContain("  - Files removed: 2");
       expect(consoleOutput).toContain("  - Directories removed: 3");
+      expect(consoleOutput).toContain("    - /path/to/dir1");
+      expect(consoleOutput).toContain("    - /path/to/dir2");
+      expect(consoleOutput).toContain("    - /path/to/dir3");
       expect(consoleOutput).toContain("⚠️  Warnings:");
       expect(consoleOutput).toContain("  - Warning 1");
       expect(consoleOutput).toContain("  - Warning 2");
@@ -269,7 +228,6 @@ describe("Cleanup Integration Utility", () => {
     test("logs error details for failed cleanup", () => {
       const result: CleanupIntegrationResult = {
         success: false,
-        filesRemoved: [],
         directoriesRemoved: [],
         errors: ["Error 1", "Error 2"],
         warnings: [],
@@ -285,7 +243,6 @@ describe("Cleanup Integration Utility", () => {
     test("doesn't log warnings in non-verbose mode", () => {
       const result: CleanupIntegrationResult = {
         success: true,
-        filesRemoved: [],
         directoriesRemoved: [],
         errors: [],
         warnings: ["Warning 1"],
@@ -295,6 +252,21 @@ describe("Cleanup Integration Utility", () => {
 
       expect(consoleOutput).not.toContain("⚠️  Warnings:");
       expect(consoleOutput).not.toContain("Warning 1");
+    });
+
+    test("logs correctly when only directories were removed", () => {
+      const result: CleanupIntegrationResult = {
+        success: true,
+        directoriesRemoved: ["dir1", "dir2"],
+        errors: [],
+        warnings: [],
+      };
+
+      logCleanupResults(result, true);
+
+      expect(consoleOutput).toContain("✅ Test cleanup completed successfully");
+      expect(consoleOutput).toContain("  - Directories removed: 2");
+      expect(consoleOutput).not.toContain("Files removed");
     });
   });
 });
