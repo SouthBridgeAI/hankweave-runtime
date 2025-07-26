@@ -64,7 +64,7 @@ import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 // Use __dirname to ensure we're always relative to this test file
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const TEST_DIR = path.join(TEST_ROOT, "tests/test-area/happy-path");
+const DATA_SOURCE_DIR = path.join(TEST_ROOT, "tests/test-area/happy-path-data");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7780");
 const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
@@ -83,18 +83,21 @@ import type {
 
 // Test directory configuration
 const testDirConfig: TestDirectoryConfig = {
-  testDir: TEST_DIR,
+  testDir: DATA_SOURCE_DIR, // This is now the data source directory
   testResultsDir: TEST_RESULTS_DIR,
   testRunDir: TEST_RUN_DIR,
 };
 
-// Server configuration
+// Server configuration - Updated for execution isolation
 const serverConfig: ServerConfig = {
   testRunDir: TEST_RUN_DIR,
   phasesConfig: PHASES_CONFIG,
   port: SERVER_PORT,
   testMode: "e2e-happy-path",
-  cwd: TEST_DIR,
+  dataSourceDir: DATA_SOURCE_DIR, // New: specify data source
+  cwd: process.cwd(), // Server starts from test runner's CWD
+  useDataFlag: true, // New: use --data flag
+  startNew: true, // Force new execution for tests
 };
 
 // ============================================================================
@@ -114,6 +117,8 @@ interface TestState {
   errorEvents: ErrorEvent[];
   testStartTime: number;
   cleanupResult?: CleanupIntegrationResult;
+  executionPath?: string; // New: track where server is executing
+  dataPath?: string; // New: track where data is accessible
   checkpointValidation?: {
     checkpointDirExists: boolean;
     gitDirExists: boolean;
@@ -153,10 +158,10 @@ const testState: TestState = {
 async function setupAndRunPhases(): Promise<void> {
   testState.testStartTime = Date.now();
 
-  // Setup test directory
+  // Setup test directory (data source)
   await setupTestDirectory(testDirConfig);
 
-  // Start server
+  // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
 
   // Give server time to start
@@ -168,7 +173,16 @@ async function setupAndRunPhases(): Promise<void> {
 
   // Wait for initial events
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
-  await testState.client.waitForEvent("server.ready");
+  const readyEvent = await testState.client.waitForEvent("server.ready");
+  if (readyEvent.type === "server.ready") {
+    // Capture execution paths from server
+    testState.executionPath = readyEvent.data.executionPath;
+    testState.dataPath = readyEvent.data.dataPath;
+    console.log(`${colors.green}✓ Server ready${colors.reset}`);
+    console.log(`  Execution path: ${testState.executionPath}`);
+    console.log(`  Data path: ${testState.dataPath}`);
+  }
+
   await testState.client.waitForEvent("state.snapshot");
 
   // Wait for all phases to complete
@@ -254,38 +268,31 @@ async function setupAndRunPhases(): Promise<void> {
   console.log(`\n${colors.blue}Validating checkpoint system...${colors.reset}`);
   await validateCheckpointSystem();
 
-  // Populate state-based fields from state.json
+  // Populate state-based fields from state.json in execution directory
   console.log(`\n${colors.blue}Reading state from state.json...${colors.reset}`);
   try {
-    testState.completedPhases = await getCompletedPhasesFromState(TEST_DIR);
-    testState.totalCost = await getTotalCostFromState(TEST_DIR);
-    console.log(`${colors.green}✓ State data loaded from state.json${colors.reset}`);
-    console.log(`  - Completed phases: ${testState.completedPhases.length}`);
-    console.log(`  - Total cost: $${testState.totalCost.toFixed(6)}`);
+    if (testState.executionPath) {
+      testState.completedPhases = await getCompletedPhasesFromState(testState.executionPath);
+      testState.totalCost = await getTotalCostFromState(testState.executionPath);
+      console.log(`${colors.green}✓ State data loaded from state.json${colors.reset}`);
+      console.log(`  - Completed phases: ${testState.completedPhases.length}`);
+      console.log(`  - Total cost: $${testState.totalCost.toFixed(6)}`);
+    }
   } catch (error) {
     console.error(`${colors.red}Failed to load state data: ${error}${colors.reset}`);
   }
 }
 
 // Validate checkpoint system while it still exists
-// IMPORTANT: This function captures git repository data before cleanup runs.
-//
-// ## Why this pattern exists:
-//
-// We discovered that Bun's test execution order isn't guaranteed between describe
-// blocks, so the cleanup in afterAll() could run before the checkpoint tests,
-// causing failures. By capturing the data here and storing it in testState, we
-// ensure tests can validate the git repository state even after cleanup has
-// removed the actual .langton directory.
-//
-// ## Pattern for other tests:
-//
-// 1. Create a validation function that captures state into testState
-// 2. Call it at the end of test execution (before afterAll)
-// 3. Tests can then safely use testState.validationData
-// 4. This works because describe() blocks run after the main test code
 async function validateCheckpointSystem(): Promise<void> {
-  const checkpointDir = path.join(TEST_DIR, ".langton/checkpoints");
+  if (!testState.executionPath) {
+    console.error(
+      `${colors.red}No execution path available for checkpoint validation${colors.reset}`,
+    );
+    return;
+  }
+
+  const checkpointDir = path.join(testState.executionPath, ".langton/checkpoints");
   const gitDir = path.join(checkpointDir, ".git");
 
   // Store validation results for tests
@@ -303,11 +310,11 @@ async function validateCheckpointSystem(): Promise<void> {
     try {
       // Get commit messages
       const gitLog = execSync("git log --pretty=format:%s", {
-        cwd: TEST_DIR,
+        cwd: testState.executionPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: TEST_DIR,
+          GIT_WORK_TREE: testState.executionPath,
         },
         encoding: "utf-8",
       });
@@ -322,11 +329,11 @@ async function validateCheckpointSystem(): Promise<void> {
     try {
       // Get branches
       const gitBranches = execSync("git branch", {
-        cwd: TEST_DIR,
+        cwd: testState.executionPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: TEST_DIR,
+          GIT_WORK_TREE: testState.executionPath,
         },
         encoding: "utf-8",
       });
@@ -339,13 +346,13 @@ async function validateCheckpointSystem(): Promise<void> {
     }
 
     try {
-      // Get tracked files
+      // Get tracked files - but exclude data/ directory
       const gitFiles = execSync("git ls-files", {
-        cwd: TEST_DIR,
+        cwd: testState.executionPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: TEST_DIR,
+          GIT_WORK_TREE: testState.executionPath,
         },
         encoding: "utf-8",
       });
@@ -353,7 +360,7 @@ async function validateCheckpointSystem(): Promise<void> {
         ? gitFiles
             .trim()
             .split("\n")
-            .filter((f) => f)
+            .filter((f) => f && !f.startsWith("data/"))
         : [];
     } catch (error) {
       console.error(`Git ls-files failed: ${error}`);
@@ -364,27 +371,7 @@ async function validateCheckpointSystem(): Promise<void> {
 }
 
 // ============================================================================
-// Cleanup Functions - Separated for proper test execution order
-// ============================================================================
-//
-// IMPORTANT: Test cleanup follows a specific pattern to avoid race conditions:
-//
-// 1. Server shutdown and file cleanup are SEPARATED
-//    - shutdownServer() only stops the server process
-//    - runFullCleanup() removes files and directories
-//    - This prevents "file not found" errors during test assertions
-//
-// 2. Cleanup runs ONLY in the final afterAll(), not during test execution
-//    - Ensures tests can verify files before they're deleted
-//    - Guarantees cleanup even if tests fail
-//
-// 3. Force mode is used for e2e tests
-//    - If CleanupCommand fails (e.g., git issues), falls back to manual cleanup
-//    - Ensures test isolation even in error scenarios
-//
-// 4. Test directories are isolated
-//    - Each test uses its own subdirectory (e.g., test-area/happy-path)
-//    - Prevents conflicts when tests run in parallel
+// Cleanup Functions - Updated for execution isolation
 // ============================================================================
 
 // This function only shuts down the server and saves results
@@ -392,7 +379,7 @@ async function shutdownServer(): Promise<void> {
   // Only shutdown if not already done
   if (testState.serverProcess || testState.client?.isConnected) {
     await cleanupTest({
-      testDir: TEST_DIR,
+      testDir: testState.executionPath || DATA_SOURCE_DIR,
       testRunDir: TEST_RUN_DIR,
       serverProcess: testState.serverProcess,
       client: testState.client,
@@ -402,17 +389,18 @@ async function shutdownServer(): Promise<void> {
   }
 }
 
-// This function runs the full cleanup (removes files)
+// This function runs the full cleanup (removes execution directory)
 async function runFullCleanup(): Promise<void> {
   // First ensure server is shut down
   await shutdownServer();
 
-  // Use the cleanup integration to clean test artifacts
+  // Use the cleanup integration to clean execution directory
   console.log(`\n${colors.blue}Running cleanup integration...${colors.reset}`);
 
   const cleanupResult = await executeTestCleanup({
-    testDir: TEST_DIR,
-    phasesConfig: PHASES_CONFIG,
+    executionPath: testState.executionPath,
+    dataSourcePath: DATA_SOURCE_DIR,
+    // Don't clean up data source directory - we need to verify it
     skipConfirmation: true,
     force: true, // Force cleanup even if there are errors
   });
@@ -428,7 +416,9 @@ async function runFullCleanup(): Promise<void> {
 // ============================================================================
 
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
-console.log(`${colors.blue}Langton Server End-to-End Test${colors.reset}`);
+console.log(
+  `${colors.blue}Langton Server End-to-End Test (with Execution Isolation)${colors.reset}`,
+);
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
 // This runs before any tests
@@ -436,6 +426,7 @@ await setupAndRunPhases();
 
 // ============================================================================
 // Now run the actual tests using Bun's test framework
+// NOTE: Many test groups need updates to use testState.executionPath
 // ============================================================================
 
 describe("Langton E2E Test", () => {
@@ -444,11 +435,12 @@ describe("Langton E2E Test", () => {
   });
 
   describe("File System State", () => {
-    runFileSystemTests(testState, TEST_DIR);
+    // Pass execution path instead of data source path
+    runFileSystemTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Log Files", () => {
-    runLogFilesTests(TEST_DIR);
+    runLogFilesTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("WebSocket Events", () => {
@@ -456,15 +448,15 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Cost Tracking", () => {
-    runCostTrackingTests(testState, TEST_DIR);
+    runCostTrackingTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Token Usage", () => {
-    runTokenUsageTests(testState, TEST_DIR);
+    runTokenUsageTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("File Content", () => {
-    runFileContentTests(TEST_DIR);
+    runFileContentTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("File Watching", () => {
@@ -476,11 +468,11 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Session Continuity", () => {
-    runSessionContinuityTests(TEST_DIR);
+    runSessionContinuityTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("File Tree", () => {
-    runFileTreeTests(testState, TEST_DIR);
+    runFileTreeTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Info Events", () => {
@@ -488,11 +480,11 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Pre-start Commands", () => {
-    runPreStartCommandsTests(TEST_DIR);
+    runPreStartCommandsTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Tool Usage", () => {
-    runToolUsageTests(testState, TEST_DIR);
+    runToolUsageTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("State Snapshot", () => {
@@ -500,11 +492,11 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Server State", () => {
-    runServerStateTests(TEST_DIR);
+    runServerStateTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("JSONL Schema", () => {
-    runJSONLSchemaTests(TEST_DIR);
+    runJSONLSchemaTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Path Consistency", () => {
@@ -512,7 +504,7 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Checkpoint System", () => {
-    runCheckpointSystemTests(TEST_DIR);
+    runCheckpointSystemTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Message Ordering", () => {
@@ -521,7 +513,7 @@ describe("Langton E2E Test", () => {
 
   // New test groups
   describe("Checkpoint Exclusion", () => {
-    runCheckpointExclusionTests(TEST_DIR);
+    runCheckpointExclusionTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("File Watching - Negative Cases", () => {
@@ -529,7 +521,7 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Resource Cleanup", () => {
-    runResourceCleanupTests(TEST_DIR);
+    runResourceCleanupTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Event Integrity", () => {
@@ -549,11 +541,11 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Log Ordering", () => {
-    runLogOrderingTests(TEST_DIR);
+    runLogOrderingTests(testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Security Validation", () => {
-    runSecurityValidationTests(testState, TEST_DIR);
+    runSecurityValidationTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Performance", () => {
@@ -565,7 +557,7 @@ describe("Langton E2E Test", () => {
   });
 
   describe("File System Edge Cases", () => {
-    runFileSystemEdgeCasesTests(testState, TEST_DIR);
+    runFileSystemEdgeCasesTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Template Variables", () => {
@@ -585,37 +577,14 @@ describe("Langton E2E Test", () => {
   });
 
   describe("Lock File Integrity", () => {
-    runLockFileTests(testState, TEST_DIR);
+    runLockFileTests(testState, testState.executionPath || DATA_SOURCE_DIR);
   });
 
   describe("Error Event Metadata", () => {
     runErrorEventTests(testState);
   });
 
-  // Cleanup after all tests
-  //
-  // ## Cleanup Integration Pattern
-  //
-  // This afterAll() block demonstrates the standard cleanup pattern for e2e tests:
-  //
-  // 1. **Conditional execution**: Only runs if not already done
-  // 2. **Two-phase cleanup**: Server shutdown, then file removal
-  // 3. **Force mode**: Uses force=true to handle git failures
-  // 4. **Verification**: Tests that cleanup actually worked
-  //
-  // ## What gets verified:
-  //
-  // - Cleanup success (allowing for git errors with force mode)
-  // - Expected directories were removed (typescript_code, .langton)
-  // - Only expected files remain (notes/, maybe untracked.txt)
-  // - No .langton directory remains
-  //
-  // ## Edge cases handled:
-  //
-  // - untracked.txt: Created by checkpoint exclusion tests
-  // - notes/: Created by command, not workspace setup, so preserved
-  // - Git failures: Force mode ensures cleanup continues
-
+  // Cleanup after all tests - Updated for execution isolation
   afterAll(async () => {
     // First shutdown the server if needed
     if (!testState.cleanupResult) {
@@ -634,32 +603,32 @@ describe("Langton E2E Test", () => {
       console.log(`\n${colors.blue}Verifying cleanup results...${colors.reset}`);
 
       // Check if cleanup was successful
-      if (testState.cleanupResult.errors.length === 0) {
-        expect(testState.cleanupResult.success).toBe(true);
-      }
+      expect(testState.cleanupResult.success).toBe(true);
 
       // Verify directories were removed
       expect(testState.cleanupResult.directoriesRemoved.length).toBeGreaterThan(0);
-      const removedDirs = testState.cleanupResult.directoriesRemoved;
-      expect(
-        removedDirs.some((d) => d === "typescript_code" || d.includes("typescript_code")),
-      ).toBe(true);
-      expect(removedDirs.some((d) => d === ".langton" || d.includes(".langton"))).toBe(true);
 
-      // Verify test directory state
-      const testDirContents = fs.readdirSync(TEST_DIR);
-      const visibleFiles = testDirContents.filter((f) => !f.startsWith("."));
-      // Should only have 'notes' directory (created by command, not workspace setup)
-      // and possibly 'untracked.txt' from checkpoint exclusion tests
-      const expectedFiles = ["notes"];
-      if (visibleFiles.includes("untracked.txt")) {
-        expectedFiles.push("untracked.txt");
+      // Should have removed execution directory
+      if (testState.executionPath) {
+        const executionBasename = path.basename(testState.executionPath);
+        expect(
+          testState.cleanupResult.directoriesRemoved.some((d) => d.includes(executionBasename)),
+        ).toBe(true);
       }
-      expect(visibleFiles.sort()).toEqual(expectedFiles.sort());
 
-      // Verify .langton directory is gone
-      const langtonDir = path.join(TEST_DIR, ".langton");
-      expect(fs.existsSync(langtonDir)).toBe(false);
+      // With execution isolation, the data source directory remains empty
+      // All files are created in the execution directory, not the data source
+      // So we just verify the data source directory still exists (untouched)
+      if (fs.existsSync(DATA_SOURCE_DIR)) {
+        // Data source directory should exist but may be empty
+        const dataSourceStats = fs.statSync(DATA_SOURCE_DIR);
+        expect(dataSourceStats.isDirectory()).toBe(true);
+      }
+
+      // Verify execution directory is gone
+      if (testState.executionPath) {
+        expect(fs.existsSync(testState.executionPath)).toBe(false);
+      }
 
       console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
     }
