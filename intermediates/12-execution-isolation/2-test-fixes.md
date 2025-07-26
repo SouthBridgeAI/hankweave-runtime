@@ -1,3 +1,9 @@
+## Additional notes:
+1. The cleanup command shouldn't just remove latest execution when multiple exist. It should remove the latest execution even if it's the last one.
+2. For datahasher - is this an actual functionality issue? It should be able to pass datahasher (not just for testing) other execution directories so that we can specify it from the user side.
+3. What is sourcerealpath? Explain it to me.
+4. Why do we have a lot of fallbacks for manual cleanup? Can you explain this?
+
 # Test Fixes for Execution Isolation
 
 ## Overview

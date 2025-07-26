@@ -408,6 +408,10 @@ export interface ServerConfig {
   port: number;
   testMode: string;
   cwd: string;
+  dataSourceDir?: string; // For execution isolation
+  useDataFlag?: boolean; // Whether to use --data flag
+  executionDir?: string; // Explicit execution directory
+  useExecutionFlag?: boolean; // Whether to use --execution flag
 }
 
 export function startServer(config: ServerConfig): ChildProcess {
@@ -426,9 +430,26 @@ export function startServer(config: ServerConfig): ChildProcess {
     "../../server/index.ts"
   );
 
+  // Build command arguments
+  const args = [
+    serverPath,
+    `--config=${config.phasesConfig}`,
+    `--port=${config.port}`
+  ];
+
+  // Add --data flag if using execution isolation
+  if (config.useDataFlag && config.dataSourceDir) {
+    args.push(`--data=${config.dataSourceDir}`);
+  }
+
+  // Add --execution flag if using explicit execution directory
+  if (config.useExecutionFlag && config.executionDir) {
+    args.push(`--execution=${config.executionDir}`);
+  }
+
   const serverProcess = spawn(
     "bun",
-    [serverPath, `--config=${config.phasesConfig}`, `--port=${config.port}`],
+    args,
     {
       cwd: config.cwd,
       stdio: ["ignore", "pipe", "pipe"],
