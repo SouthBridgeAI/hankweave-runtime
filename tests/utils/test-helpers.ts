@@ -412,6 +412,7 @@ export interface ServerConfig {
   useDataFlag?: boolean; // Whether to use --data flag
   executionDir?: string; // Explicit execution directory
   useExecutionFlag?: boolean; // Whether to use --execution flag
+  startNew?: boolean; // Force new execution
 }
 
 export function startServer(config: ServerConfig): ChildProcess {
@@ -445,6 +446,11 @@ export function startServer(config: ServerConfig): ChildProcess {
   // Add --execution flag if using explicit execution directory
   if (config.useExecutionFlag && config.executionDir) {
     args.push(`--execution=${config.executionDir}`);
+  }
+
+  // Add --start-new flag if forcing new execution
+  if (config.startNew) {
+    args.push('--start-new');
   }
 
   const serverProcess = spawn(

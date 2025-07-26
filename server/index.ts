@@ -22,6 +22,7 @@ async function main() {
     /^--cleanup$/,
     /^-y$/,
     /^--no-autostart$/,
+    /^--start-new$/,
     /^--config=.+$/,
     /^--data=.+$/,
     /^--execution=.+$/,
@@ -48,6 +49,7 @@ async function main() {
   const cleanupMode = args.includes("--cleanup");
   const skipConfirmation = args.includes("-y");
   const noAutostart = args.includes("--no-autostart");
+  const startNew = args.includes("--start-new");
   const anthropicBaseURL = args
     .find((arg) => arg.startsWith("--anthropic-base-url="))
     ?.split("=")[1];
@@ -63,6 +65,7 @@ Options:
   --config=<path>           Path to phases configuration file (default: phases.json)
   --data=<path>             Path to data/project directory (default: current directory)
   --execution=<path>        Resume in specific execution directory
+  --start-new               Force creation of a new execution directory
   --copy                    Copy data instead of symlinking (for compatibility)
   --port=<port>             WebSocket server port (default: 7777)
   --basic, -b               Run in basic TUI mode
@@ -93,6 +96,12 @@ Examples:
   # Resume specific execution
   bun server/index.ts --execution=/home/.langton-executions/1234-abc
 
+  # Start fresh execution (ignore existing)
+  bun server/index.ts --data=/path/to/project --start-new
+
+  # Start fresh in specific empty directory
+  bun server/index.ts --data=/path/to/project --execution=/path/to/empty/dir --start-new
+
   # Copy data instead of symlinking (for Windows/permissions issues)
   bun server/index.ts --data=/path/to/project --copy
 
@@ -113,6 +122,7 @@ Examples:
       readOnlySourceDataPath: resolvedDataPath,
       executionPath: executionPath ? path.resolve(executionPath) : undefined,
       useSymlink,
+      startNew,
     });
   } catch (error) {
     console.error(`❌ Execution setup failed: ${(error as Error).message}`);
