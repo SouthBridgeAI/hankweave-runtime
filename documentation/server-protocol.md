@@ -226,10 +226,15 @@ The initial handshake event, sent once a client connects successfully. It provid
   "type": "server.ready",
   "data": {
     "serverVersion": "1.0.0",
-    "projectPath": "/path/to/project"
+    "executionPath": "/home/.langton-executions/1234-abc",
+    "dataPath": "/home/.langton-executions/1234-abc/data"
   }
 }
 ```
+
+**Note**: Prior to execution isolation, this event included `projectPath`. This has been replaced with:
+- `executionPath`: Where the server operates and all Langton artifacts are stored
+- `dataPath`: Where the user's original data is accessible (via symlink or copy)
 
 #### `state.snapshot`
 A comprehensive snapshot of the server's current state. It's sent after `server.ready` and after major state changes (like phase completion or rollback). This event is the primary source of truth for the client to build its own state representation.

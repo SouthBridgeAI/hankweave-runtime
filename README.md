@@ -6,8 +6,9 @@ Langton Runner is a powerful orchestration server designed to manage and execute
 
 At its core, Langton Runner is a bridge between your development environment and the Claude AI. It allows you to define a structured workflow in a simple JSON configuration file, and then it manages the entire lifecycle of executing that workflow. It goes far beyond simply running a series of prompts by providing a rich set of features that address the challenges of stateful, long-running AI tasks:
 
--   **State Persistence**: The server meticulously records every action, decision, and outcome in a local `.langton` directory. This means you can stop the server and resume your workflow later, with all history and context perfectly preserved.
--   **Rollback System**: A shadow git repo automatically checkpoints your project's state at key moments. This allows you to instantly revert your workspace to any point in the execution history, making it easy to explore different approaches or recover from errors.
+-   **Execution Isolation**: Langton runs in isolated execution directories, keeping your original project untouched. Your data is accessed via a symlink at `<execution-dir>/data/`, ensuring clean rollbacks and enabling multiple execution tracking.
+-   **State Persistence**: The server meticulously records every action, decision, and outcome in the execution's `.langton` directory. This means you can stop the server and resume your workflow later, with all history and context perfectly preserved.
+-   **Rollback System**: A shadow git repo automatically checkpoints your execution state at key moments. This allows you to instantly revert to any point in the execution history, making it easy to explore different approaches or recover from errors.
 -   **Cost Tracking**: Get real-time feedback on token usage and associated costs for each phase, helping you manage your budget and optimize your prompts.
 -   **File Tracking**: Specify which files Claude should pay attention to. The server will monitor these files for changes, stream updates to you in real-time, and include them in checkpoints.
 -   **Session Continuity**: Build complex, multi-turn conversations with Claude. A phase can be configured to "continue" from the previous one, inheriting the full conversational context.
@@ -114,6 +115,7 @@ Langton Runner incorporates several advanced design patterns to provide its powe
 Comprehensive documentation is available in the `documentation/` directory:
 
 -   **[Architecture Overview](documentation/architecture.md)** - System design, modules, and key architectural decisions
+-   **[Execution Model Guide](documentation/execution-model-guide.md)** - Deep dive into executions, data directories, symlinks, runs, and phases with formulas
 -   **[Phase Configuration Guide](documentation/phase-configuration-guide.md)** - Complete guide to building phase configurations
 -   **[Phase System](documentation/phase-system.md)** - Understanding phases, runs, and execution threads
 -   **[Running the Server](documentation/running-the-server.md)** - Installation, setup, and command-line options

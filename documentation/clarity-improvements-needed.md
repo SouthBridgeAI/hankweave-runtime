@@ -1,6 +1,26 @@
 # Documentation Clarity Improvements Needed
 
-After reviewing the Langton Runner documentation, here are areas that need more explanation or clarification:
+After reviewing the Langton Runner documentation, here are areas that need more explanation or clarification. This document tracks what has been addressed (✅) and what still needs work.
+
+## ✅ Recently Addressed
+
+### Execution Isolation
+- Complete documentation of the new execution isolation feature
+- Template variables updated: `<%EXECUTION_DIR%>`, `<%DATA_DIR%>`, `<%PROJECT_DIR%>` (deprecated)
+- Execution directory structure and benefits explained
+- Data hashing and execution discovery process documented
+- Cleanup changes for execution directories
+
+### Configuration Improvements
+- Phase configuration schema now complete with all fields
+- Workspace setup details clarified (sequential execution, working directory options)
+- File tracking patterns better explained with examples
+- Shadow git repository manual inspection commands added
+- Lock file behavior and stale lock handling documented
+
+### Protocol Updates
+- WebSocket protocol updated to reflect `executionPath` and `dataPath` instead of `projectPath`
+- Server ready event documentation updated
 
 ## 1. Technical Concepts Not Explained
 

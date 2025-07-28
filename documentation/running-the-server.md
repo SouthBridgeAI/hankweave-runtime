@@ -78,9 +78,26 @@ bun run server:basic    # Starts the server with the Basic TUI
 
 The server's behavior can be fine-tuned with the following command-line flags:
 
--   **`--config=<path>`**: Specifies the path to your phase configuration file. This is the most important flag, as it defines the entire workflow.
+#### Configuration & Data Options
+
+-   **`--config=<path>`**: Specifies the path to your phase configuration file. This defines the entire workflow.
     -   **Default**: `phases.json`
     -   **Example**: `bun run server --config=workflows/my-project/phases.json`
+
+-   **`--data=<path>`**: Path to your data/project directory. Langton will create an isolated execution environment with your data accessible at `<execution-dir>/data/`.
+    -   **Default**: Current directory
+    -   **Example**: `bun run server --data=/path/to/project`
+
+-   **`--execution=<path>`**: Resume work in a specific execution directory instead of auto-detecting.
+    -   **Example**: `bun run server --execution=~/.langton-executions/1234-abc`
+
+-   **`--start-new`**: Force creation of a new execution directory, ignoring any existing executions for the same data.
+    -   **Example**: `bun run server --data=/path/to/project --start-new`
+
+-   **`--copy`**: Copy data instead of creating a symlink. Use this on Windows or when symlinks aren't supported.
+    -   **Example**: `bun run server --data=/path/to/project --copy`
+
+#### Server Options
 
 -   **`--port=<port>`**: Sets the port for the WebSocket server.
     -   **Default**: `7777`
@@ -94,11 +111,66 @@ The server's behavior can be fine-tuned with the following command-line flags:
 
 -   **`--anthropic-base-url=<url>`**: Allows you to route Claude API requests through a custom endpoint, such as a proxy or a corporate gateway.
 
--   **`--cleanup`**: A powerful but destructive command that cleans up all Langton-related artifacts from a project. It requires an explicit `--config` path to ensure you are targeting the correct project. It will display a detailed preview of what will be deleted and ask for confirmation.
+#### Maintenance Options
+
+-   **`--cleanup`**: Cleans up execution directories. When used with `--data`, removes the latest execution for that data source. When used with `--execution`, removes that specific execution directory.
+    -   **Example**: `bun run server --cleanup --data=/path/to/project`
 
 -   **`-y`**: When used with `--cleanup`, this flag skips the confirmation prompt, allowing for automated, non-interactive cleanup operations.
 
 -   **`--help`** (or **`-h`**): Displays a detailed help message listing all available options.
+
+## Execution Isolation
+
+Langton Runner uses execution isolation to keep your project data safe and enable advanced features like clean rollbacks and multiple execution tracking.
+
+### How It Works
+
+Instead of running directly in your project directory, Langton:
+1. Creates an isolated execution directory (e.g., `~/.langton-executions/1234-abc/`)
+2. Links your project data via a symlink at `<execution-dir>/data/`
+3. Runs all operations within this execution environment
+4. Keeps all generated files, logs, and state separate from your original project
+
+### Benefits
+
+- **Data Safety**: Your original project files are never modified directly
+- **Clean Rollbacks**: Rollbacks only affect the execution environment
+- **Multiple Executions**: Track different approaches to the same task
+- **Easy Cleanup**: Remove execution artifacts without touching your project
+
+### Execution Directory Structure
+
+```
+~/.langton-executions/
+└── 1737123456789-abc-d4f5e6/       # Execution directory
+    ├── data/ → /path/to/your/project  # Symlink to your data
+    ├── generated-docs/                # Files created by Claude
+    ├── backend/                       # Workspace setup files
+    └── .langton/                      # Langton metadata
+        ├── execution-meta.json
+        ├── state.json
+        └── checkpoints/
+```
+
+### Common Usage Patterns
+
+```bash
+# First run - creates new execution
+bun run server --data=/path/to/project
+
+# Resume latest execution
+bun run server --data=/path/to/project
+
+# Force new execution
+bun run server --data=/path/to/project --start-new
+
+# Resume specific execution
+bun run server --execution=~/.langton-executions/1234-abc
+
+# Clean up latest execution
+bun run server --cleanup --data=/path/to/project
+```
 
 ## Server Modes of Operation
 

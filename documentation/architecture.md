@@ -4,6 +4,8 @@
 
 Langton Runner is a sophisticated orchestration server designed to manage complex, multi-step AI workflows executed by the Claude AI. At its core, it is a stateful, WebSocket-based application that provides a structured environment for breaking down large tasks into discrete, manageable "phases". This architecture enables robust features such as persistent state, file tracking, cost monitoring, and a powerful git-based rollback system.
 
+A key architectural feature is **execution isolation**: Langton runs in separate execution directories rather than directly in your project. This provides clean rollbacks, multiple execution tracking, and ensures your original data remains untouched. The user's project is accessed via a symlink or copy at `<execution-dir>/data/`.
+
 ### Core Design Principles
 
 The architecture is guided by several key principles to ensure robustness, maintainability, and extensibility:
@@ -68,6 +70,11 @@ The server is composed of several distinct, yet interconnected, modules.
 
 -   **`server/checkpoint-git.ts`**: This module manages all interactions with the "shadow" git repository. It handles repository initialization, creating run-specific branches, committing changes with structured metadata, and performing hard resets for rollbacks.
 -   **`server/file-resolver.ts`**: Provides a unified and consistent way to resolve file glob patterns while respecting `.gitignore` rules. This is used by both the file tracking and checkpointing systems to ensure they operate on the same set of files.
+
+### Execution Isolation
+
+-   **`server/execution-setup.ts`**: Manages the creation and detection of execution directories. It handles automatic execution directory creation in `~/.langton-executions/`, supports explicit execution paths, and manages data access via symlinks or copies. This module ensures clean separation between user data and execution artifacts.
+-   **`server/data-hasher.ts`**: Generates deterministic hashes of data directories to identify which executions belong to which data source. Uses time and depth limits to handle large projects efficiently while maintaining unique identification across different data sources.
 
 ## Data Flow and Interaction
 
@@ -162,3 +169,27 @@ Run 2:             [Phase B'] → [Phase C'] → [Phase D]
 Execution Thread: [Phase A] → [Phase B'] → [Phase C'] → [Phase D]
                  (from Run 1)  (from Run 2 - newer versions)
 ```
+
+### Execution Isolation
+
+The server operates in isolated execution directories rather than directly in the user's project. This architectural decision provides significant benefits:
+
+-   **Data Integrity**: The original project files remain untouched. All modifications occur in the execution directory.
+-   **Clean Rollbacks**: Rollbacks affect only the execution environment, never the source data.
+-   **Multiple Executions**: Track and compare different execution attempts for the same data source.
+-   **Simplified Cleanup**: Remove execution artifacts without affecting the original project.
+
+#### Directory Structure
+```
+~/.langton-executions/
+├── 1737123456789-abc-d4f5e6/     # Execution directory
+│   ├── data/ → /path/to/project   # Symlink to user's data
+│   ├── generated-docs/            # Files created by Claude
+│   └── .langton/                  # Langton state and metadata
+│       ├── execution-meta.json
+│       ├── state.json
+│       └── checkpoints/
+└── 1737234567890-def-d4f5e6/     # Another execution attempt
+```
+
+The system uses data hashing to identify which executions belong to which data source, enabling automatic resumption of the most recent execution or creation of new ones as needed.

@@ -2,7 +2,9 @@
 
 ## Overview
 
-The `.langton` folder, created at the root of your project, is the operational heart of the Langton Runner. It serves as the persistent storage layer, meticulously recording every aspect of the server's execution. This folder is critical for the system's core features, including state persistence, crash recovery, historical auditing, and the powerful rollback capability. Understanding its structure is key to debugging workflows and leveraging the full power of the server.
+The `.langton` folder, created within the execution directory (not your project directory), is the operational heart of the Langton Runner. It serves as the persistent storage layer, meticulously recording every aspect of the server's execution. This folder is critical for the system's core features, including state persistence, crash recovery, historical auditing, and the powerful rollback capability. Understanding its structure is key to debugging workflows and leveraging the full power of the server.
+
+With execution isolation, the `.langton` folder lives in the execution directory (e.g., `~/.langton-executions/1234-abc/.langton/`), keeping all Langton artifacts separate from your original project data.
 
 ## Directory Structure
 
@@ -10,6 +12,7 @@ The folder is organized to separate concerns, making it easy to locate state inf
 
 ```
 .langton/
+├── execution-meta.json # Metadata about this execution environment
 ├── state.json          # The central, authoritative state file for all runs.
 ├── state.json.bak      # An automatic backup of the state file for recovery.
 ├── server.lock         # A lock file present only when the server is running.
@@ -23,6 +26,32 @@ The folder is organized to separate concerns, making it easy to locate state inf
 ```
 
 ## File Specifications
+
+### `execution-meta.json`
+
+This file contains metadata about the execution environment and its relationship to the original data source. It's created when the execution directory is first set up and updated on each server run.
+
+- **Role**: Links the execution directory to its data source and tracks execution metadata.
+- **Format**: A JSON object with execution environment information.
+- **Key Data**: Data source path, data hash, link type, creation time, and last usage time.
+
+```json
+{
+  "version": "1.0.0",
+  "readOnlySourceDataPath": "/path/to/original/project",
+  "readOnlySourceResolvedDataPath": "/absolute/path/to/project",
+  "dataHash": "a1b2c3d4e5f6",
+  "linkType": "symlink",
+  "createdAt": "2025-01-19T10:00:00Z",
+  "lastUsed": "2025-01-19T15:00:00Z"
+}
+```
+
+**Key Fields:**
+- `dataHash`: A deterministic hash of the data directory structure, used to identify which executions belong to which data source
+- `linkType`: Either "symlink" (default) or "copy", indicating how the data is accessed
+- `readOnlySourceDataPath`: The original path to the data as provided by the user
+- `readOnlySourceResolvedDataPath`: The absolute, resolved path to the data source
 
 ### `state.json`
 

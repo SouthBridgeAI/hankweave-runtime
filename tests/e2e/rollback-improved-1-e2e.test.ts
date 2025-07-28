@@ -470,9 +470,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // SNAPSHOT 1: After Phase 2 complete, Phase 3 skipped
+  if (!testState.executionPath) {
+    throw new Error("Execution path not set - server initialization may have failed");
+  }
   await createSnapshot(
     "1-after-phase2-phase3-skipped",
-    testState.executionPath!,
+    testState.executionPath,
     SNAPSHOT_DIR,
     testState.client,
   );
@@ -536,9 +539,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   console.log(`${colors.gray}  To run: ${rollback1.data.toRun}${colors.reset}`);
 
   // SNAPSHOT 2: After rollback to Phase 1
+  if (!testState.executionPath) {
+    throw new Error("Execution path not set - server initialization may have failed");
+  }
   await createSnapshot(
     "2-after-rollback-to-phase1",
-    testState.executionPath!,
+    testState.executionPath,
     SNAPSHOT_DIR,
     testState.client,
   );
@@ -639,9 +645,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   );
 
   // SNAPSHOT 3: After full completion from rollback
+  if (!testState.executionPath) {
+    throw new Error("Execution path not set - server initialization may have failed");
+  }
   await createSnapshot(
     "3-after-full-completion",
-    testState.executionPath!,
+    testState.executionPath,
     SNAPSHOT_DIR,
     testState.client,
   );
@@ -765,9 +774,12 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   }
 
   // SNAPSHOT 4: After rollback to very start
+  if (!testState.executionPath) {
+    throw new Error("Execution path not set - server initialization may have failed");
+  }
   await createSnapshot(
     "4-after-rollback-to-start",
-    testState.executionPath!,
+    testState.executionPath,
     SNAPSHOT_DIR,
     testState.client,
   );

@@ -81,10 +81,18 @@ Add system-level instructions that Claude will follow:
 ```
 
 ### Template Variables
-Both prompts and system prompts support the `<%PROJECT_DIR%>` variable:
+Both prompts and system prompts support template variables that are replaced at runtime:
+
+- `<%EXECUTION_DIR%>` - The execution directory path (recommended)
+- `<%DATA_DIR%>` - The data directory path (`execution-dir/data`)
+- `<%PROJECT_DIR%>` - **Deprecated** but still works, maps to execution directory
+
+Example usage:
 ```markdown
-Please analyze the code in <%PROJECT_DIR%>/src and create documentation in <%PROJECT_DIR%>/docs
+Please analyze the code in <%DATA_DIR%>/src and create documentation in <%EXECUTION_DIR%>/docs
 ```
+
+This ensures Claude reads from your original data but writes to the execution directory, keeping your project clean.
 
 ## Model Selection
 
@@ -440,10 +448,32 @@ Claude will see these as:
 - Use specific patterns to improve performance
 
 ### 4. Workspace Setup Tips
+
+#### Performance Calculations
+
+**Setup Time Estimation:**
+```
+T_setup = T_copy + T_commands
+```
+
+Where:
+- `T_copy = ∑(S_i / R_disk)` for each copied item
+- `S_i` = size of item i in bytes
+- `R_disk` = disk read/write rate
+- `T_commands = ∑(T_cmd_i)` for each command
+
+**Copy vs Symlink Performance:**
+```
+T_symlink = O(1) ≈ 1ms
+T_copy = O(n) = S_total / R_disk
+```
+
+#### Best Practices
 - Test commands locally first
 - Ensure commands are idempotent (safe to run multiple times)
 - Use `&&` for command chaining, not separate command blocks
 - Add error handling: `command || echo 'Command failed but continuing'`
+- Consider copy time when using large templates: `T_copy ≈ size_GB × 10s` (typical SSD)
 
 ### 5. Continuation Strategy
 - Use `fresh` when starting a new logical task

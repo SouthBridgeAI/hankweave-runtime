@@ -2,6 +2,14 @@
 
 ## TODOs - tasks to pick and solve
 
+
+## Finish tasks
+1. Data directory OR file
+2. Output management and setup
+3. Parallel calls
+4. Allow looping phases?
+
+
 ### P1
 
 1. Implement a resume function which will clean up the current phase and restart a run.
