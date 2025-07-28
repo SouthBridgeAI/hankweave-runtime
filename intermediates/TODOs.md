@@ -14,7 +14,6 @@
 
 1. Implement a resume function which will clean up the current phase and restart a run.
 2. Reloading prompt files on rollback and restart.
-3. Move phases to an array and phase configs can be an object
 
 ### P2
 
@@ -39,9 +38,8 @@
 
 ### Cleanup stuff
 
-1. Rename things
-2. Bun isolated linker
-3. Add an interactive prompt to heay tests so they can't be autorun
+1. Bun isolated linker
+2. Add an interactive prompt to heay tests so they can't be autorun
 
 ## Bugs
 
@@ -58,7 +56,7 @@
 
 ## Applications
 
-1. Langtonflow for making changelogs
+1. Tadpoleflow for making changelogs
 2. Cleaning and validating data before pushing somewhere else
 3. DO upload
 4. splite/postgres interface
