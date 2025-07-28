@@ -8,6 +8,7 @@
 2. Output management and setup
 3. Parallel calls
 4. Allow looping phases?
+5. Telemetry
 
 
 ### P1
@@ -18,9 +19,8 @@
 ### P2
 
 1. Universal system prompts
-2. Symlink in data and run in a separate folder
-3. Explainers - prompt calls that explain and stream active processes
-
+2. Explainers - prompt calls that explain and stream active processes
+3. Validators - phases concurrent or otherwise that provide feedback
 
 ### P3 (much later)
 
@@ -29,12 +29,9 @@
 3. Allow starting persistent commands (like servers) that are only cleaned up when server fully exits - with interactive prompts
 4. Add an ability to queue commands or something where the server can start up and shut down?
 5. Abstract out claude code
-6. Validators - phases concurrent or otherwise that provide feedback
-7. Dockerization
-8. Automated proxy
-9. Auto-server serving files
-
-
+6. Dockerization
+7. Automated proxy
+8. Auto-server serving files
 
 ### Cleanup stuff
 

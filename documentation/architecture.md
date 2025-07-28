@@ -53,7 +53,7 @@ The server is composed of several distinct, yet interconnected, modules.
 
 ### The Core Orchestrator
 
--   **`server/langton-server.ts`**: This is the central nervous system of the application. The `TadpoleServer` class orchestrates all other components. Its key responsibilities include managing the WebSocket server and client connection, processing incoming commands, controlling the phase execution lifecycle, and routing events from various subsystems to the connected client.
+-   **`server/tadpole-server.ts`**: This is the central nervous system of the application. The `TadpoleServer` class orchestrates all other components. Its key responsibilities include managing the WebSocket server and client connection, processing incoming commands, controlling the phase execution lifecycle, and routing events from various subsystems to the connected client.
 
 ### State Management Subsystem
 
