@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { findExecutionDirs, hashDataDirectory } from "./data-hasher.js";
+import { formatSize, getDirectorySize } from "./utils.js";
 
 export interface CleanupOptions {
   dataSourcePath?: string; // For finding by hash
@@ -170,41 +171,4 @@ export class CleanupCommand {
       });
     });
   }
-}
-
-// Helper functions
-async function getDirectorySize(dirPath: string): Promise<number> {
-  let totalSize = 0;
-
-  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = path.join(dirPath, entry.name);
-
-    if (entry.isDirectory()) {
-      totalSize += await getDirectorySize(fullPath);
-    } else if (entry.isFile()) {
-      try {
-        const stats = await fs.promises.stat(fullPath);
-        totalSize += stats.size;
-      } catch {
-        // Ignore files we can't stat
-      }
-    }
-  }
-
-  return totalSize;
-}
-
-function formatSize(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB"];
-  let size = bytes;
-  let unitIndex = 0;
-
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex++;
-  }
-
-  return `${size.toFixed(2)} ${units[unitIndex]}`;
 }

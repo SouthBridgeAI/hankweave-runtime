@@ -197,3 +197,61 @@ export function toError(error: unknown): Error {
 export function assertNever(x: never): never {
   throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
 }
+
+// ============================================================================
+// Directory Utilities
+// ============================================================================
+
+/**
+ * Calculate the total size of a directory recursively.
+ * Includes a timeout to prevent hanging on large directories.
+ */
+export async function getDirectorySize(
+  dirPath: string,
+  timeoutMs = 30000, // Preserve timeout feature from cleanup folder
+): Promise<number> {
+  let totalSize = 0;
+  const startTime = Date.now();
+
+  async function walkDir(currentPath: string): Promise<void> {
+    // Check timeout
+    if (Date.now() - startTime > timeoutMs) {
+      throw new Error(`Directory size calculation timed out after ${timeoutMs}ms`);
+    }
+
+    const entries = await fs.promises.readdir(currentPath, {
+      withFileTypes: true,
+    });
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+
+      if (entry.isDirectory()) {
+        await walkDir(fullPath);
+      } else {
+        try {
+          const stats = await fs.promises.stat(fullPath);
+          totalSize += stats.size;
+        } catch {
+          // Ignore files we can't stat
+        }
+      }
+    }
+  }
+
+  await walkDir(dirPath);
+  return totalSize;
+}
+
+/**
+ * Format a byte size into a human-readable string.
+ */
+export function formatSize(bytes: number): string {
+  if (bytes === 0) return "0 B";
+
+  const units = ["B", "KB", "MB", "GB"];
+  const k = 1024;
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return `${(bytes / k ** i).toFixed(1)} ${units[i]}`;
+}

@@ -83,10 +83,10 @@ async function findLangtonReferences(filePath: string): Promise<MatchResult[]> {
 
 async function main() {
   const serverDir = 'server';
-  // const testsDir = 'tests/unit';
-  // const tests2Dir = 'tests/config';
-  // const tests3Dir = 'tests/e2e';
-  // const tests4Dir = 'tests/utils';
+  const testsDir = 'tests/unit';
+  const tests2Dir = 'tests/config';
+  const tests3Dir = 'tests/e2e';
+  const tests4Dir = 'tests/utils';
 
   if (!existsSync(serverDir) || !existsSync(testsDir)) {
     console.error('server/ or tests/ directory not found');
