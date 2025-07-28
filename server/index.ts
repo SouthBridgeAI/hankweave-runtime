@@ -63,7 +63,7 @@ Usage: bun server/index.ts [options]
 
 Options:
   --config=<path>           Path to phases configuration file (default: phases.json)
-  --data=<path>             Path to data/project directory (default: current directory)
+  --data=<path>             Path to data file or directory (default: current directory)
   --execution=<path>        Resume in specific execution directory
   --start-new               Force creation of a new execution directory
   --copy                    Copy data instead of symlinking (for compatibility)
@@ -80,11 +80,11 @@ Execution Isolation:
   Tadpole runs in an isolated execution directory separate from your data.
   This enables clean rollbacks and multiple execution tracking.
 
-  Your data is accessed via: <execution-dir>/data/
+  Your data is accessed via: <execution-dir>/read_only_data_source/
 
 Template Variables:
   <%EXECUTION_DIR%>  - The execution directory path
-  <%DATA_DIR%>       - The data directory path (execution-dir/data)
+  <%DATA_DIR%>       - The data directory path (execution-dir/read_only_data_source)
 
 Examples:
   # Run with default data (current directory)
@@ -92,6 +92,9 @@ Examples:
 
   # Run with specific data directory
   bun server/index.ts --data=/path/to/project
+
+  # Run with specific data file
+  bun server/index.ts --data=/path/to/file.txt
 
   # Resume specific execution
   bun server/index.ts --execution=/home/.tadpole-executions/1234-abc

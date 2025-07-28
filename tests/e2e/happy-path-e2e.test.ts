@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { afterAll, describe, expect } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -15,9 +15,7 @@ import {
   getCompletedPhasesFromState,
   getTotalCostFromState,
   type ServerConfig,
-  setupTestDirectory,
   startServer,
-  type TestDirectoryConfig,
   TestWSClient,
 } from "../utils/test-helpers.js";
 // New test groups
@@ -64,7 +62,7 @@ import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 // Use __dirname to ensure we're always relative to this test file
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const DATA_SOURCE_DIR = path.join(TEST_ROOT, "tests/test-area/happy-path-data");
+const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.tadpole_TEST_PORT || "7780");
 const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
@@ -81,20 +79,13 @@ import type {
   ServerEvent,
 } from "../../server/types.js";
 
-// Test directory configuration
-const testDirConfig: TestDirectoryConfig = {
-  testDir: DATA_SOURCE_DIR, // This is now the data source directory
-  testResultsDir: TEST_RESULTS_DIR,
-  testRunDir: TEST_RUN_DIR,
-};
-
 // Server configuration - Updated for execution isolation
 const serverConfig: ServerConfig = {
   testRunDir: TEST_RUN_DIR,
   phasesConfig: PHASES_CONFIG,
   port: SERVER_PORT,
   testMode: "e2e-happy-path",
-  dataSourceDir: DATA_SOURCE_DIR, // New: specify data source
+  dataSourceDir: DATA_SOURCE_FILE, // New: specify data source file
   cwd: process.cwd(), // Server starts from test runner's CWD
   useDataFlag: true, // New: use --data flag
   startNew: true, // Force new execution for tests
@@ -158,8 +149,13 @@ const testState: TestState = {
 async function setupAndRunPhases(): Promise<void> {
   testState.testStartTime = Date.now();
 
-  // Setup test directory (data source)
-  await setupTestDirectory(testDirConfig);
+  // Ensure test results directory exists
+  if (!fs.existsSync(TEST_RESULTS_DIR)) {
+    fs.mkdirSync(TEST_RESULTS_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(TEST_RUN_DIR)) {
+    fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
+  }
 
   // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
@@ -346,7 +342,7 @@ async function validateCheckpointSystem(): Promise<void> {
     }
 
     try {
-      // Get tracked files - but exclude data/ directory
+      // Get tracked files - but exclude read_only_data_source directory
       const gitFiles = execSync("git ls-files", {
         cwd: testState.executionPath,
         env: {
@@ -360,7 +356,7 @@ async function validateCheckpointSystem(): Promise<void> {
         ? gitFiles
             .trim()
             .split("\n")
-            .filter((f) => f && !f.startsWith("data/"))
+            .filter((f) => f && !f.startsWith("read_only_data_source/"))
         : [];
     } catch (error) {
       console.error(`Git ls-files failed: ${error}`);
@@ -379,7 +375,7 @@ async function shutdownServer(): Promise<void> {
   // Only shutdown if not already done
   if (testState.serverProcess || testState.client?.isConnected) {
     await cleanupTest({
-      testDir: testState.executionPath || DATA_SOURCE_DIR,
+      testDir: testState.executionPath || path.dirname(DATA_SOURCE_FILE),
       testRunDir: TEST_RUN_DIR,
       serverProcess: testState.serverProcess,
       client: testState.client,
@@ -399,8 +395,8 @@ async function runFullCleanup(): Promise<void> {
 
   const cleanupResult = await executeTestCleanup({
     executionPath: testState.executionPath,
-    dataSourcePath: DATA_SOURCE_DIR,
-    // Don't clean up data source directory - we need to verify it
+    dataSourcePath: DATA_SOURCE_FILE,
+    // Don't clean up data source file - we need to verify it
     skipConfirmation: true,
     force: true, // Force cleanup even if there are errors
   });
@@ -434,13 +430,98 @@ describe("Tadpole E2E Test", () => {
     runPhaseExecutionTests(testState);
   });
 
+  describe("Wordsworth Content Validation", () => {
+    describe("should find Wordsworth references in generated content", () => {
+      it("should find 'wordsworth' in assistant messages", () => {
+        const assistantMessages = testState.events
+          .filter((e) => e.type === "assistant.action")
+          .map((e) => e.data.content?.toLowerCase() || "");
+
+        const hasWordsworth = assistantMessages.some((content) => content.includes("wordsworth"));
+
+        expect(hasWordsworth).toBe(true);
+      });
+
+      it("should find 'wordsworth' in generated poem files", async () => {
+        if (!testState.executionPath) {
+          throw new Error("Execution path not available");
+        }
+
+        const notesDir = path.join(testState.executionPath, "notes");
+        expect(fs.existsSync(notesDir)).toBe(true);
+
+        // Check for poem files in notes directory
+        const files = fs.readdirSync(notesDir);
+        const poemFiles = files.filter((f) => f.endsWith(".txt") || f.endsWith(".md"));
+
+        expect(poemFiles.length).toBeGreaterThan(0);
+
+        let foundWordsworth = false;
+        for (const file of poemFiles) {
+          const filePath = path.join(notesDir, file);
+          const content = fs.readFileSync(filePath, "utf-8").toLowerCase();
+          if (content.includes("wordsworth")) {
+            foundWordsworth = true;
+            break;
+          }
+        }
+
+        expect(foundWordsworth).toBe(true);
+      });
+
+      it("should find 'wordsworth' in TypeScript code files", async () => {
+        if (!testState.executionPath) {
+          throw new Error("Execution path not available");
+        }
+
+        const tsCodeDir = path.join(testState.executionPath, "typescript_code/src");
+        if (fs.existsSync(tsCodeDir)) {
+          const files = fs.readdirSync(tsCodeDir);
+          const tsFiles = files.filter((f) => f.endsWith(".ts"));
+
+          if (tsFiles.length > 0) {
+            let foundWordsworth = false;
+            for (const file of tsFiles) {
+              const filePath = path.join(tsCodeDir, file);
+              const content = fs.readFileSync(filePath, "utf-8").toLowerCase();
+              if (content.includes("wordsworth")) {
+                foundWordsworth = true;
+                break;
+              }
+            }
+
+            expect(foundWordsworth).toBe(true);
+          }
+        }
+      });
+
+      it("should verify data source file is accessible in execution", async () => {
+        if (!testState.executionPath) {
+          throw new Error("Execution path not available");
+        }
+
+        // Check that the poem_guides.txt file is accessible in read_only_data_source
+        const dataSourcePath = path.join(
+          testState.executionPath,
+          "read_only_data_source",
+          "poem_guides.txt",
+        );
+        expect(fs.existsSync(dataSourcePath)).toBe(true);
+
+        const content = fs.readFileSync(dataSourcePath, "utf-8").toLowerCase();
+        expect(content).toContain("she dwelt among the untrodden ways");
+        expect(content).toContain("lucy");
+      });
+    });
+  });
+
   describe("File System State", () => {
     // Pass execution path instead of data source path
-    runFileSystemTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runFileSystemTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Log Files", () => {
-    runLogFilesTests(testState.executionPath || DATA_SOURCE_DIR);
+    runLogFilesTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("WebSocket Events", () => {
@@ -448,15 +529,15 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Cost Tracking", () => {
-    runCostTrackingTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runCostTrackingTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Token Usage", () => {
-    runTokenUsageTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runTokenUsageTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("File Content", () => {
-    runFileContentTests(testState.executionPath || DATA_SOURCE_DIR);
+    runFileContentTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("File Watching", () => {
@@ -468,11 +549,11 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Session Continuity", () => {
-    runSessionContinuityTests(testState.executionPath || DATA_SOURCE_DIR);
+    runSessionContinuityTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("File Tree", () => {
-    runFileTreeTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runFileTreeTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Info Events", () => {
@@ -480,11 +561,11 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Pre-start Commands", () => {
-    runPreStartCommandsTests(testState.executionPath || DATA_SOURCE_DIR);
+    runPreStartCommandsTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Tool Usage", () => {
-    runToolUsageTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runToolUsageTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("State Snapshot", () => {
@@ -492,11 +573,11 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Server State", () => {
-    runServerStateTests(testState.executionPath || DATA_SOURCE_DIR);
+    runServerStateTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("JSONL Schema", () => {
-    runJSONLSchemaTests(testState.executionPath || DATA_SOURCE_DIR);
+    runJSONLSchemaTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Path Consistency", () => {
@@ -504,7 +585,7 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Checkpoint System", () => {
-    runCheckpointSystemTests(testState.executionPath || DATA_SOURCE_DIR);
+    runCheckpointSystemTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Message Ordering", () => {
@@ -513,7 +594,7 @@ describe("Tadpole E2E Test", () => {
 
   // New test groups
   describe("Checkpoint Exclusion", () => {
-    runCheckpointExclusionTests(testState.executionPath || DATA_SOURCE_DIR);
+    runCheckpointExclusionTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("File Watching - Negative Cases", () => {
@@ -521,7 +602,7 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Resource Cleanup", () => {
-    runResourceCleanupTests(testState.executionPath || DATA_SOURCE_DIR);
+    runResourceCleanupTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Event Integrity", () => {
@@ -541,11 +622,14 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Log Ordering", () => {
-    runLogOrderingTests(testState.executionPath || DATA_SOURCE_DIR);
+    runLogOrderingTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Security Validation", () => {
-    runSecurityValidationTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runSecurityValidationTests(
+      testState,
+      testState.executionPath || path.dirname(DATA_SOURCE_FILE),
+    );
   });
 
   describe("Performance", () => {
@@ -557,7 +641,10 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("File System Edge Cases", () => {
-    runFileSystemEdgeCasesTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runFileSystemEdgeCasesTests(
+      testState,
+      testState.executionPath || path.dirname(DATA_SOURCE_FILE),
+    );
   });
 
   describe("Template Variables", () => {
@@ -577,7 +664,7 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Lock File Integrity", () => {
-    runLockFileTests(testState, testState.executionPath || DATA_SOURCE_DIR);
+    runLockFileTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Error Event Metadata", () => {
@@ -616,13 +703,13 @@ describe("Tadpole E2E Test", () => {
         ).toBe(true);
       }
 
-      // With execution isolation, the data source directory remains empty
+      // With execution isolation, the data source file remains untouched
       // All files are created in the execution directory, not the data source
-      // So we just verify the data source directory still exists (untouched)
-      if (fs.existsSync(DATA_SOURCE_DIR)) {
-        // Data source directory should exist but may be empty
-        const dataSourceStats = fs.statSync(DATA_SOURCE_DIR);
-        expect(dataSourceStats.isDirectory()).toBe(true);
+      // So we just verify the data source file still exists (untouched)
+      if (fs.existsSync(DATA_SOURCE_FILE)) {
+        // Data source file should exist
+        const dataSourceStats = fs.statSync(DATA_SOURCE_FILE);
+        expect(dataSourceStats.isFile()).toBe(true);
       }
 
       // Verify execution directory is gone

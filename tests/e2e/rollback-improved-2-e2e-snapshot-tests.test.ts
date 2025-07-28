@@ -94,7 +94,7 @@ async function hashDirectory(dir: string): Promise<string> {
   }
   const allFilePaths = (await getFilePaths(dir)).sort();
 
-  // Filter out .tadpole directory files and data directory (execution isolation symlink)
+  // Filter out .tadpole directory files, data directory, and read_only_data_source directory
   const filePaths = allFilePaths.filter((filePath) => {
     const relativePath = path.relative(dir, filePath);
     return (
@@ -102,7 +102,10 @@ async function hashDirectory(dir: string): Promise<string> {
       !relativePath.startsWith(".tadpole/") &&
       !relativePath.startsWith(`data${path.sep}`) &&
       !relativePath.startsWith("data/") &&
-      relativePath !== "data"
+      relativePath !== "data" &&
+      !relativePath.startsWith(`read_only_data_source${path.sep}`) &&
+      !relativePath.startsWith("read_only_data_source/") &&
+      relativePath !== "read_only_data_source"
     );
   });
 
@@ -1034,6 +1037,95 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
           }
         }
       }
+    });
+
+    test("7.7 Content Validation: Wordsworth is referenced in generated content", () => {
+      // Check at least the first and third snapshots which should have poem content
+      const snapshotsToCheck = [
+        snapshots.get("1-after-phase2-phase3-skipped"),
+        snapshots.get("3-after-full-completion"),
+      ].filter((s): s is TestSnapshot => s !== undefined);
+
+      let foundWordsworth = false;
+
+      for (const snapshot of snapshotsToCheck) {
+        // Check assistant messages for Wordsworth mentions
+        const assistantMessages = snapshot.events
+          .filter((e) => e.type === "assistant.action")
+          .map((e) => {
+            if (e.type === "assistant.action" && e.data.action === "message") {
+              return e.data.content?.toLowerCase() || "";
+            }
+            return "";
+          })
+          .filter((content) => content !== "");
+
+        const hasWordsworthInMessages = assistantMessages.some((content) =>
+          content.includes("wordsworth")
+        );
+
+        if (hasWordsworthInMessages) {
+          foundWordsworth = true;
+          console.log(`Found Wordsworth reference in assistant messages for ${snapshot.name}`);
+        }
+
+        // Check generated poem files
+        const notesDir = path.join(snapshot.directory, "notes");
+        if (fs.existsSync(notesDir)) {
+          const files = fs.readdirSync(notesDir);
+          for (const file of files) {
+            if (file.endsWith(".txt") || file.endsWith(".md")) {
+              const filePath = path.join(notesDir, file);
+              const content = fs.readFileSync(filePath, "utf-8").toLowerCase();
+              if (content.includes("wordsworth")) {
+                foundWordsworth = true;
+                console.log(`Found Wordsworth reference in ${file} for ${snapshot.name}`);
+                break;
+              }
+            }
+          }
+        }
+
+        // Also check TypeScript files for phase 3
+        const tsDir = path.join(snapshot.directory, "typescript_code/src");
+        if (fs.existsSync(tsDir)) {
+          const files = fs.readdirSync(tsDir);
+          for (const file of files) {
+            if (file.endsWith(".ts")) {
+              const filePath = path.join(tsDir, file);
+              const content = fs.readFileSync(filePath, "utf-8").toLowerCase();
+              if (content.includes("wordsworth")) {
+                foundWordsworth = true;
+                console.log(`Found Wordsworth reference in ${file} for ${snapshot.name}`);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Verify the data source file is linked correctly
+      const firstSnapshot = snapshots.get("1-after-phase2-phase3-skipped");
+      if (firstSnapshot) {
+        const dataSourceInExecution = path.join(
+          firstSnapshot.directory,
+          "read_only_data_source",
+          "poem_guides.txt"
+        );
+        const dataSourceExists = fs.existsSync(dataSourceInExecution);
+        console.log(`Data source file linked at ${dataSourceInExecution}: ${dataSourceExists}`);
+
+        if (dataSourceExists) {
+          const content = fs.readFileSync(dataSourceInExecution, "utf-8").toLowerCase();
+          // The source file contains Lucy poems (which are by Wordsworth)
+          // but doesn't mention "wordsworth" explicitly - that's intentional
+          expect(content).toContain("lucy");
+          expect(content).toContain("she dwelt among the untrodden ways");
+        }
+      }
+
+      // At least one snapshot should contain Wordsworth
+      expect(foundWordsworth).toBe(true);
     });
   });
 });

@@ -84,7 +84,7 @@ Add system-level instructions that Claude will follow:
 Both prompts and system prompts support template variables that are replaced at runtime:
 
 - `<%EXECUTION_DIR%>` - The execution directory path (recommended)
-- `<%DATA_DIR%>` - The data directory path (`execution-dir/data`)
+- `<%DATA_DIR%>` - The data directory path (`execution-dir/read_only_data_source`)
 - `<%PROJECT_DIR%>` - **Deprecated** but still works, maps to execution directory
 
 Example usage:
@@ -92,7 +92,7 @@ Example usage:
 Please analyze the code in <%DATA_DIR%>/src and create documentation in <%EXECUTION_DIR%>/docs
 ```
 
-This ensures Claude reads from your original data but writes to the execution directory, keeping your project clean.
+This ensures Claude reads from your original data but writes to the execution directory, keeping your project clean. Note that `<%DATA_DIR%>` works consistently whether your data source is a file or directory.
 
 ## Model Selection
 

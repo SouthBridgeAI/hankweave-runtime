@@ -25,7 +25,7 @@ import {
 // Test configuration
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const EXECUTION_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved"); // Use as execution directory
-const DATA_SOURCE_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved-data"); // Empty data source
+const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt"); // Use poem_guides.txt as data source
 const SNAPSHOT_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-snapshots");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const SERVER_PORT = parseInt(process.env.tadpole_TEST_PORT || "7786");
@@ -205,11 +205,11 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await setupTestDirectory(testDirConfig);
   console.log(`${colors.green}✓ Test directory created: ${EXECUTION_DIR}${colors.reset}`);
 
-  // Create empty data source directory
-  if (!fs.existsSync(DATA_SOURCE_DIR)) {
-    fs.mkdirSync(DATA_SOURCE_DIR, { recursive: true });
+  // Verify data source file exists
+  if (!fs.existsSync(DATA_SOURCE_FILE)) {
+    throw new Error(`Data source file not found: ${DATA_SOURCE_FILE}`);
   }
-  console.log(`${colors.green}✓ Data source directory created: ${DATA_SOURCE_DIR}${colors.reset}`);
+  console.log(`${colors.green}✓ Data source file exists: ${DATA_SOURCE_FILE}${colors.reset}`);
 
   // Start server with --no-autostart, --data flag for data source, and --execution flag for execution directory
   console.log(
@@ -226,7 +226,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
       serverPath,
       `--config=${PHASES_CONFIG}`,
       `--port=${SERVER_PORT}`,
-      `--data=${DATA_SOURCE_DIR}`,
+      `--data=${DATA_SOURCE_FILE}`,
       `--execution=${EXECUTION_DIR}`,
       "--no-autostart",
     ],
@@ -916,6 +916,76 @@ describe("Comprehensive Rollback E2E Test", () => {
       const snapshot4 = testSnapshots[3];
       expect(snapshot4.name).toBe("4-after-rollback-to-start");
       expect(snapshot4.state.runs.length).toBeGreaterThanOrEqual(2);
+    });
+
+    test("Wordsworth is referenced in assistant messages or generated poems", () => {
+      // Check assistant messages in events for Wordsworth mentions
+      const assistantMessages = testSnapshots[0].events
+        .filter((e) => e.type === "assistant.action")
+        .map((e) => {
+          // Type guard to ensure we have assistant action data
+          if (e.type === "assistant.action" && e.data.action === "message") {
+            return e.data.content?.toLowerCase() || "";
+          }
+          return "";
+        })
+        .filter((content) => content !== "");
+
+      const hasWordsworthInMessages = assistantMessages.some((content) =>
+        content.includes("wordsworth")
+      );
+
+      // Check generated poem files in snapshots for Wordsworth mentions
+      let hasWordsworthInFiles = false;
+
+      // Check in snapshot 1 (should have poems from phase 1 and 2)
+      const snapshot1NotesDir = path.join(testSnapshots[0].directory, "notes");
+      if (fs.existsSync(snapshot1NotesDir)) {
+        const files = fs.readdirSync(snapshot1NotesDir);
+        for (const file of files) {
+          if (file.endsWith(".txt") || file.endsWith(".md")) {
+            const content = fs.readFileSync(
+              path.join(snapshot1NotesDir, file),
+              "utf-8"
+            ).toLowerCase();
+            if (content.includes("wordsworth")) {
+              hasWordsworthInFiles = true;
+              break;
+            }
+          }
+        }
+      }
+
+      // Also check snapshot 3 which has full completion
+      if (!hasWordsworthInFiles) {
+        const snapshot3NotesDir = path.join(testSnapshots[2].directory, "notes");
+        if (fs.existsSync(snapshot3NotesDir)) {
+          const files = fs.readdirSync(snapshot3NotesDir);
+          for (const file of files) {
+            if (file.endsWith(".txt") || file.endsWith(".md")) {
+            const content = fs.readFileSync(
+              path.join(snapshot3NotesDir, file),
+              "utf-8"
+            ).toLowerCase();
+              if (content.includes("wordsworth")) {
+                hasWordsworthInFiles = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Verify that the data source file is accessible
+      const dataSourceInExecution = path.join(
+        testSnapshots[0].directory,
+        "read_only_data_source",
+        "poem_guides.txt"
+      );
+      expect(fs.existsSync(dataSourceInExecution)).toBe(true);
+
+      // At least one of these should contain Wordsworth
+      expect(hasWordsworthInMessages || hasWordsworthInFiles).toBe(true);
     });
 
     test("checkpoints are created correctly", () => {

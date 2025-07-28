@@ -4,10 +4,42 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * Generate a hash based on directory structure with depth and time limits
+ * Generate a hash for a single file based on its content and metadata
+ */
+async function hashFile(filePath: string): Promise<string> {
+  const stats = await fs.promises.stat(filePath);
+  const fileContent = await fs.promises.readFile(filePath);
+  const hash = crypto.createHash("sha256");
+  // Include metadata to differentiate files with same content but different names/timestamps
+  hash.update(`file:${path.basename(filePath)}:${stats.size}:${stats.mtimeMs}`);
+  hash.update(fileContent);
+  return hash.digest("hex").substring(0, 12);
+}
+
+/**
+ * Generate a hash based on data source (file or directory) with depth and time limits
  * Uses file names, types, sizes, and modification times
  */
-export async function hashDataDirectory(
+export async function hashDataSource(dataPath: string, timeLimit: number = 5000): Promise<string> {
+  // Check if the provided path is a file or directory
+  const stats = await fs.promises.stat(dataPath);
+
+  if (stats.isFile()) {
+    // Hash the file directly
+    return await hashFile(dataPath);
+  } else if (stats.isDirectory()) {
+    // Use existing directory hashing logic
+    return await hashDataDirectoryInternal(dataPath, timeLimit);
+  } else {
+    throw new Error(`Data source is neither a file nor a directory: ${dataPath}`);
+  }
+}
+
+/**
+ * Internal function to generate a hash based on directory structure with depth and time limits
+ * Uses file names, types, sizes, and modification times
+ */
+async function hashDataDirectoryInternal(
   dataPath: string,
   timeLimit: number = 5000,
 ): Promise<string> {
@@ -90,6 +122,16 @@ export async function hashDataDirectory(
   const hash = crypto.createHash("sha256");
   hash.update(entries.join("\n"));
   return hash.digest("hex").substring(0, 12);
+}
+
+/**
+ * @deprecated Use hashDataSource instead
+ */
+export async function hashDataDirectory(
+  dataPath: string,
+  timeLimit: number = 5000,
+): Promise<string> {
+  return await hashDataSource(dataPath, timeLimit);
 }
 
 /**

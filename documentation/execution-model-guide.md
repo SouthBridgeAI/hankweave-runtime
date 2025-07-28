@@ -5,10 +5,10 @@ This guide explains how Tadpole's execution model works, including the relations
 ## Core Concepts Hierarchy
 
 ```
-Data Source (Your Project)
+Data Source (Your Project or File)
     ↓
 Execution Directory (Isolated Environment)
-    ├── data/ → symlink to Data Source
+    ├── read_only_data_source/ → symlink to Data Source or containing linked file
     └── .tadpole/
         ├── execution-meta.json
         └── state.json
@@ -18,29 +18,37 @@ Execution Directory (Isolated Environment)
 
 ## 1. Data Source
 
-Your original project directory containing:
+Your original project directory or single file containing:
 - Source code
 - Configuration files
 - Documentation
 - Any other project assets
+- Or a single file (e.g., requirements document, data file)
 
 **Key Properties:**
 - **Read-only**: Never modified by Tadpole
 - **Location**: Can be anywhere on your filesystem
+- **Type**: Can be either a directory or a single file
 - **Identification**: Hashed to create a unique fingerprint
 
 ### Data Hash Calculation
 
-The data hash uniquely identifies your project:
+The data hash uniquely identifies your project or file:
 
+For directories:
 ```
 H(data) = SHA256(∑(f_type : f_path : f_size : f_mtime))
+```
+
+For files:
+```
+H(file) = SHA256("file:" + basename + ":" + size + ":" + mtime + content)
 ```
 
 Where:
 - `f_type` ∈ {d, f, e} (directory, file, error)
 - `f_path` = relative path from data root
-- `f_size` = file size in bytes (files only)
+- `f_size` = file size in bytes
 - `f_mtime` = modification time (seconds since epoch)
 
 ## 2. Execution Directory
@@ -66,11 +74,26 @@ Where:
 
 ## 3. Data Access via Symlinks
 
-The data directory is accessed through:
+The data is accessed through:
 
 ```
-<execution_dir>/data/ → <data_source_path>
+<execution_dir>/read_only_data_source/ → <data_source_path>
 ```
+
+### File vs Directory Handling
+
+When the data source is a **directory**:
+```
+read_only_data_source/ → /path/to/project/
+```
+
+When the data source is a **file**:
+```
+read_only_data_source/
+    └── filename.txt → /path/to/filename.txt
+```
+
+The file is placed inside the `read_only_data_source` directory to maintain a consistent interface for Claude.
 
 ### Symlink vs Copy Decision
 
@@ -237,12 +260,18 @@ find_executions(data_path):
     → ~/.tadpole-executions/exec-3/ (approach C)
 ```
 
-### 2. Execution Lifecycle
+### 2. File as Data Source
+```
+/path/to/requirements.txt (file)
+    → ~/.tadpole-executions/exec-1/read_only_data_source/requirements.txt
+```
+
+### 3. Execution Lifecycle
 ```
 Create → Link Data → Run Phases → Checkpoint → Complete/Rollback
 ```
 
-### 3. Rollback Creates New Run
+### 4. Rollback Creates New Run
 ```
 Execution-1/Run-1 → Rollback → Execution-1/Run-2
                                 (continues from checkpoint)
@@ -254,6 +283,7 @@ Execution-1/Run-1 → Rollback → Execution-1/Run-2
 - Keep data sources focused and cohesive
 - Exclude large binary files from tracking
 - Use `.gitignore` to control what's accessible
+- Single files work well for specifications, configurations, or data files
 
 ### 2. Execution Management
 - Use `--start-new` for independent experiments
@@ -272,6 +302,7 @@ Check data hash hasn't changed:
 ```bash
 # Data modifications change the hash
 touch data/new-file.txt  # Changes hash!
+echo "new line" >> file.txt  # Changes hash for files!
 ```
 
 ### Symlink Fails
@@ -289,3 +320,18 @@ du -sh ~/.tadpole-executions/*
 Clean old executions:
 ```bash
 bun run server --cleanup --data=/path/to/project
+```
+
+## Template Variables in Prompts
+
+When writing prompts, you can use these template variables:
+
+- `<%EXECUTION_DIR%>` - The execution directory path
+- `<%DATA_DIR%>` - Always resolves to `<execution-dir>/read_only_data_source`
+
+Example:
+```markdown
+Please read the requirements from <%DATA_DIR%> and create a project plan in <%EXECUTION_DIR%>/plan.md
+```
+
+This works consistently whether your data source is a file or directory.

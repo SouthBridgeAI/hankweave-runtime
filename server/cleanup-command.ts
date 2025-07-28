@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { findExecutionDirs, hashDataDirectory } from "./data-hasher.js";
+import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
 import { formatSize, getDirectorySize } from "./utils.js";
 
 export interface CleanupOptions {
@@ -42,7 +42,7 @@ export class CleanupCommand {
 
         // Find by data hash - ONLY clean up the latest
         console.log("Calculating data signature for cleanup...");
-        const dataHash = await hashDataDirectory(this.options.dataSourcePath);
+        const dataHash = await hashDataSource(this.options.dataSourcePath);
         console.log(`Data signature: ${dataHash}`);
 
         const allDirs = await findExecutionDirs(dataHash);
@@ -90,9 +90,7 @@ export class CleanupCommand {
 
       // If there are other directories, list them but note they won't be removed
       if (this.options.dataSourcePath) {
-        const allDirs = await findExecutionDirs(
-          await hashDataDirectory(this.options.dataSourcePath),
-        );
+        const allDirs = await findExecutionDirs(await hashDataSource(this.options.dataSourcePath));
         const otherDirs = allDirs.filter((d) => !dirsToRemove.includes(d));
 
         if (otherDirs.length > 0) {

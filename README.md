@@ -6,7 +6,8 @@ Tadpole Runner is a powerful orchestration server designed to manage and execute
 
 At its core, Tadpole Runner is a bridge between your development environment and the Claude AI. It allows you to define a structured workflow in a simple JSON configuration file, and then it manages the entire lifecycle of executing that workflow. It goes far beyond simply running a series of prompts by providing a rich set of features that address the challenges of stateful, long-running AI tasks:
 
--   **Execution Isolation**: Tadpole runs in isolated execution directories, keeping your original project untouched. Your data is accessed via a symlink at `<execution-dir>/data/`, ensuring clean rollbacks and enabling multiple execution tracking.
+-   **Execution Isolation**: Tadpole runs in isolated execution directories, keeping your original project untouched. Your data is accessed via a symlink at `<execution-dir>/read_only_data_source/`, ensuring clean rollbacks and enabling multiple execution tracking.
+-   **Flexible Data Sources**: You can provide either a file or a directory as your data source. Files are automatically placed in a `read_only_data_source` directory for consistent access.
 -   **State Persistence**: The server meticulously records every action, decision, and outcome in the execution's `.tadpole` directory. This means you can stop the server and resume your workflow later, with all history and context perfectly preserved.
 -   **Rollback System**: A shadow git repo automatically checkpoints your execution state at key moments. This allows you to instantly revert to any point in the execution history, making it easy to explore different approaches or recover from errors.
 -   **Cost Tracking**: Get real-time feedback on token usage and associated costs for each phase, helping you manage your budget and optimize your prompts.
@@ -94,6 +95,20 @@ bun run server:basic
 ```
 
 When you run in TUI mode, you'll see a live stream of events and can control the flow with keyboard shortcuts like `[n]` to advance to the next phase.
+
+### 4. Using Different Data Sources
+
+You can provide either a directory or a single file as your data source:
+
+```bash
+# Using a directory (default behavior)
+bun run server --data=/path/to/project
+
+# Using a single file
+bun run server --data=/path/to/document.txt
+
+# The data will be accessible at <%DATA_DIR%> in your prompts
+```
 
 ## Key Concepts Explained
 

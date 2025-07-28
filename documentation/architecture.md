@@ -4,7 +4,7 @@
 
 Tadpole Runner is a sophisticated orchestration server designed to manage complex, multi-step AI workflows executed by the Claude AI. At its core, it is a stateful, WebSocket-based application that provides a structured environment for breaking down large tasks into discrete, manageable "phases". This architecture enables robust features such as persistent state, file tracking, cost monitoring, and a powerful git-based rollback system.
 
-A key architectural feature is **execution isolation**: Tadpole runs in separate execution directories rather than directly in your project. This provides clean rollbacks, multiple execution tracking, and ensures your original data remains untouched. The user's project is accessed via a symlink or copy at `<execution-dir>/data/`.
+A key architectural feature is **execution isolation**: Tadpole runs in separate execution directories rather than directly in your project. This provides clean rollbacks, multiple execution tracking, and ensures your original data remains untouched. The user's data (file or directory) is accessed via a symlink or copy at `<execution-dir>/read_only_data_source/`.
 
 ### Core Design Principles
 
@@ -73,8 +73,8 @@ The server is composed of several distinct, yet interconnected, modules.
 
 ### Execution Isolation
 
--   **`server/execution-setup.ts`**: Manages the creation and detection of execution directories. It handles automatic execution directory creation in `~/.tadpole-executions/`, supports explicit execution paths, and manages data access via symlinks or copies. This module ensures clean separation between user data and execution artifacts.
--   **`server/data-hasher.ts`**: Generates deterministic hashes of data directories to identify which executions belong to which data source. Uses time and depth limits to handle large projects efficiently while maintaining unique identification across different data sources.
+-   **`server/execution-setup.ts`**: Manages the creation and detection of execution directories. It handles automatic execution directory creation in `~/.tadpole-executions/`, supports explicit execution paths, and manages data access via symlinks or copies. This module ensures clean separation between user data and execution artifacts. It supports both files and directories as data sources.
+-   **`server/data-hasher.ts`**: Generates deterministic hashes of data sources (files or directories) to identify which executions belong to which data source. Uses time and depth limits to handle large projects efficiently while maintaining unique identification across different data sources. Files are hashed based on content and metadata.
 
 ## Data Flow and Interaction
 
@@ -182,14 +182,15 @@ The server operates in isolated execution directories rather than directly in th
 #### Directory Structure
 ```
 ~/.tadpole-executions/
-├── 1737123456789-abc-d4f5e6/     # Execution directory
-│   ├── data/ → /path/to/project   # Symlink to user's data
-│   ├── generated-docs/            # Files created by Claude
-│   └── .tadpole/                  # Tadpole state and metadata
+├── 1737123456789-abc-d4f5e6/          # Execution directory
+│   ├── read_only_data_source/         # Symlink to user's data or contains file
+│   │   └── [filename.txt]             # (if data source is a file)
+│   ├── generated-docs/                # Files created by Claude
+│   └── .tadpole/                      # Tadpole state and metadata
 │       ├── execution-meta.json
 │       ├── state.json
 │       └── checkpoints/
-└── 1737234567890-def-d4f5e6/     # Another execution attempt
+└── 1737234567890-def-d4f5e6/          # Another execution attempt
 ```
 
 The system uses data hashing to identify which executions belong to which data source, enabling automatic resumption of the most recent execution or creation of new ones as needed.

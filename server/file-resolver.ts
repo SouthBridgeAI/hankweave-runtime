@@ -65,10 +65,10 @@ export class UnifiedFileResolver {
     // Always ignore .git directory
     ig.add(".git");
 
-    // IMPORTANT: Always ignore the data directory for checkpoints
+    // IMPORTANT: Always ignore the read_only_data_source directory for checkpoints
     // This is enforced here, not via gitignore
-    ig.add("/data/");
-    ig.add("/data/**");
+    ig.add("/read_only_data_source/");
+    ig.add("/read_only_data_source/**");
 
     // Find all .gitignore files in the project
     const gitignoreFiles = await this.findGitignoreFiles(projectPath);

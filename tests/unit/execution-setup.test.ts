@@ -27,8 +27,8 @@ describe("Execution Setup - startNew flag", () => {
     // Calculate data hash before deleting test directory
     let dataHash = "";
     if (fs.existsSync(DATA_SOURCE_DIR)) {
-      const { hashDataDirectory } = await import("../../server/data-hasher.js");
-      dataHash = await hashDataDirectory(DATA_SOURCE_DIR, 5000).catch(() => "");
+      const { hashDataSource } = await import("../../server/data-hasher.js");
+      dataHash = await hashDataSource(DATA_SOURCE_DIR, 5000).catch(() => "");
     }
 
     // Clean up test directories
@@ -98,8 +98,8 @@ describe("Execution Setup - startNew flag", () => {
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       // Calculate data hash for consistency
-      const { hashDataDirectory } = await import("../../server/data-hasher.js");
-      const dataHash = await hashDataDirectory(DATA_SOURCE_DIR, 30000);
+      const { hashDataSource } = await import("../../server/data-hasher.js");
+      const dataHash = await hashDataSource(DATA_SOURCE_DIR, 30000);
 
       // Create metadata file
       const meta = {
@@ -218,7 +218,7 @@ describe("Execution Setup - startNew flag", () => {
         startNew: true,
       });
 
-      const dataPath = path.join(EXECUTION_DIR, "data");
+      const dataPath = path.join(EXECUTION_DIR, "read_only_data_source");
       expect(fs.existsSync(dataPath)).toBe(true);
 
       // Verify files are accessible through the link/copy
@@ -242,15 +242,25 @@ describe("Execution Setup - startNew flag", () => {
       ).rejects.toThrow("Data source not found");
     });
 
-    it("should throw error if data source is not a directory", async () => {
-      const filePath = path.join(TEST_BASE_DIR, "not-a-directory.txt");
+    it("should accept a file as data source", async () => {
+      const filePath = path.join(TEST_BASE_DIR, "test-file.txt");
       await fs.promises.writeFile(filePath, "I am a file");
 
-      await expect(
-        setupExecutionEnvironment({
-          readOnlySourceDataPath: filePath,
-        }),
-      ).rejects.toThrow("Data source is not a directory");
+      const result = await setupExecutionEnvironment({
+        readOnlySourceDataPath: filePath,
+        startNew: true,
+      });
+
+      expect(result.isNewExecution).toBe(true);
+      expect(fs.existsSync(result.dataPathInExecutionDir)).toBe(true);
+
+      // Verify the file is accessible in the read_only_data_source directory
+      const fileName = path.basename(filePath);
+      const linkedFilePath = path.join(result.dataPathInExecutionDir, fileName);
+      expect(fs.existsSync(linkedFilePath)).toBe(true);
+
+      const content = await fs.promises.readFile(linkedFilePath, "utf-8");
+      expect(content).toBe("I am a file");
     });
   });
 
@@ -330,13 +340,16 @@ describe("Execution Setup - startNew flag", () => {
 
       // Verify files were actually copied
       const testContent = await fs.promises.readFile(
-        path.join(EXECUTION_DIR, "data", "test.txt"),
+        path.join(EXECUTION_DIR, "read_only_data_source", "test.txt"),
         "utf-8",
       );
       expect(testContent).toBe("test content");
 
       // Modify the copy and verify original is unchanged
-      await fs.promises.writeFile(path.join(EXECUTION_DIR, "data", "test.txt"), "modified content");
+      await fs.promises.writeFile(
+        path.join(EXECUTION_DIR, "read_only_data_source", "test.txt"),
+        "modified content",
+      );
 
       const originalContent = await fs.promises.readFile(
         path.join(DATA_SOURCE_DIR, "test.txt"),
@@ -360,7 +373,7 @@ describe("Execution Setup - startNew flag", () => {
       });
 
       // Verify symlink was preserved in copy
-      const destSymlink = path.join(EXECUTION_DIR, "data", "symlink.txt");
+      const destSymlink = path.join(EXECUTION_DIR, "read_only_data_source", "symlink.txt");
       const stats = await fs.promises.lstat(destSymlink);
       expect(stats.isSymbolicLink()).toBe(true);
     });
@@ -369,8 +382,8 @@ describe("Execution Setup - startNew flag", () => {
   describe("multiple existing executions", () => {
     it("should use most recent execution when multiple exist", async () => {
       // Create multiple executions with different timestamps
-      const { hashDataDirectory } = await import("../../server/data-hasher.js");
-      const dataHash = await hashDataDirectory(DATA_SOURCE_DIR, 30000);
+      const { hashDataSource } = await import("../../server/data-hasher.js");
+      const dataHash = await hashDataSource(DATA_SOURCE_DIR, 30000);
 
       const executionRoot = path.join(os.homedir(), ".tadpole-executions");
 
@@ -423,8 +436,8 @@ describe("Execution Setup - startNew flag", () => {
       const metaDir = path.join(EXECUTION_DIR, ".tadpole");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
-      const { hashDataDirectory } = await import("../../server/data-hasher.js");
-      const dataHash = await hashDataDirectory(DATA_SOURCE_DIR, 30000);
+      const { hashDataSource } = await import("../../server/data-hasher.js");
+      const dataHash = await hashDataSource(DATA_SOURCE_DIR, 30000);
 
       await fs.promises.writeFile(
         path.join(metaDir, "execution-meta.json"),

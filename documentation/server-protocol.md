@@ -227,14 +227,14 @@ The initial handshake event, sent once a client connects successfully. It provid
   "data": {
     "serverVersion": "1.0.0",
     "executionPath": "/home/.tadpole-executions/1234-abc",
-    "dataPath": "/home/.tadpole-executions/1234-abc/data"
+    "dataPath": "/home/.tadpole-executions/1234-abc/read_only_data_source"
   }
 }
 ```
 
 **Note**: Prior to execution isolation, this event included `projectPath`. This has been replaced with:
 - `executionPath`: Where the server operates and all Tadpole artifacts are stored
-- `dataPath`: Where the user's original data is accessible (via symlink or copy)
+- `dataPath`: Where the user's original data is accessible (via symlink or copy) at `<execution-dir>/read_only_data_source`
 
 #### `state.snapshot`
 A comprehensive snapshot of the server's current state. It's sent after `server.ready` and after major state changes (like phase completion or rollback). This event is the primary source of truth for the client to build its own state representation.

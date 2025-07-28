@@ -2,12 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_CONFIG } from "./config.js";
-import { findExecutionDirs, hashDataDirectory } from "./data-hasher.js";
+import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
 
 export interface ExecutionSetup {
   readOnlySourceDataPath: string; // Absolute path to original data
   executionPath: string; // Absolute path where we run
-  dataPathInExecutionDir: string; // Always executionPath + '/data'
+  dataPathInExecutionDir: string; // Always executionPath + '/read_only_data_source'
   dataHash: string;
   isNewExecution: boolean;
   isResuming: boolean;
@@ -41,13 +41,13 @@ export async function setupExecutionEnvironment(options: {
   }
 
   const stats = await fs.promises.stat(readOnlySourceDataPath);
-  if (!stats.isDirectory()) {
-    throw new Error(`Data source is not a directory: ${readOnlySourceDataPath}`);
+  if (!stats.isDirectory() && !stats.isFile()) {
+    throw new Error(`Data source is not a file or directory: ${readOnlySourceDataPath}`);
   }
 
   // Calculate data hash
   console.log("Calculating data signature...");
-  const dataHash = await hashDataDirectory(readOnlySourceDataPath, dataHashTimeLimit);
+  const dataHash = await hashDataSource(readOnlySourceDataPath, dataHashTimeLimit);
   console.log(`Data signature: ${dataHash}`);
 
   let finalExecutionPath: string;
@@ -158,23 +158,42 @@ export async function setupExecutionEnvironment(options: {
     }
   }
 
-  const dataPathInExecutionDir = path.join(finalExecutionPath, "data");
+  const dataPathInExecutionDir = path.join(finalExecutionPath, "read_only_data_source");
 
   // Set up data access (symlink or copy)
-  let linkType: "symlink" | "copy" = "symlink";
+  let linkType: "symlink" | "copy" = useSymlink ? "symlink" : "copy";
   if (isNewExecution || !fs.existsSync(dataPathInExecutionDir)) {
-    if (useSymlink) {
-      try {
-        await fs.promises.symlink(readOnlySourceDataPath, dataPathInExecutionDir, "dir");
-        linkType = "symlink";
-      } catch (error) {
-        console.warn(`Failed to create symlink: ${error}. Falling back to copy.`);
+    if (stats.isDirectory()) {
+      // --- Directory Logic (Existing, but with new destination) ---
+      if (useSymlink) {
+        try {
+          await fs.promises.symlink(readOnlySourceDataPath, dataPathInExecutionDir, "dir");
+        } catch (error) {
+          console.warn(`Failed to create symlink for directory: ${error}. Falling back to copy.`);
+          await copyDirectory(readOnlySourceDataPath, dataPathInExecutionDir);
+          linkType = "copy";
+        }
+      } else {
         await copyDirectory(readOnlySourceDataPath, dataPathInExecutionDir);
-        linkType = "copy";
       }
-    } else {
-      await copyDirectory(readOnlySourceDataPath, dataPathInExecutionDir);
-      linkType = "copy";
+    } else if (stats.isFile()) {
+      // --- File Logic (New) ---
+      // 1. Create the 'read_only_data_source' directory
+      await fs.promises.mkdir(dataPathInExecutionDir, { recursive: true });
+      const destFilePath = path.join(dataPathInExecutionDir, path.basename(readOnlySourceDataPath));
+
+      // 2. Link or copy the file into it
+      if (useSymlink) {
+        try {
+          await fs.promises.symlink(readOnlySourceDataPath, destFilePath);
+        } catch (error) {
+          console.warn(`Failed to create symlink for file: ${error}. Falling back to copy.`);
+          await fs.promises.copyFile(readOnlySourceDataPath, destFilePath);
+          linkType = "copy";
+        }
+      } else {
+        await fs.promises.copyFile(readOnlySourceDataPath, destFilePath);
+      }
     }
   }
 

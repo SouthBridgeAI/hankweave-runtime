@@ -187,7 +187,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       return content
         .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
         .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-        .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "data"));
+        .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
     }
 
     return null;
@@ -219,7 +219,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     const processedContent = promptContent
       .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
       .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-      .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "data"));
+      .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
 
     this.process.stdin.write(processedContent);
     this.process.stdin.end();

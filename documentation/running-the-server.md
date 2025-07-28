@@ -84,9 +84,10 @@ The server's behavior can be fine-tuned with the following command-line flags:
     -   **Default**: `phases.json`
     -   **Example**: `bun run server --config=workflows/my-project/phases.json`
 
--   **`--data=<path>`**: Path to your data/project directory. Tadpole will create an isolated execution environment with your data accessible at `<execution-dir>/data/`.
+-   **`--data=<path>`**: Path to your data source (file or directory). Tadpole will create an isolated execution environment with your data accessible at `<execution-dir>/read_only_data_source/`.
     -   **Default**: Current directory
-    -   **Example**: `bun run server --data=/path/to/project`
+    -   **Example (directory)**: `bun run server --data=/path/to/project`
+    -   **Example (file)**: `bun run server --data=/path/to/requirements.txt`
 
 -   **`--execution=<path>`**: Resume work in a specific execution directory instead of auto-detecting.
     -   **Example**: `bun run server --execution=~/.tadpole-executions/1234-abc`
@@ -128,9 +129,11 @@ Tadpole Runner uses execution isolation to keep your project data safe and enabl
 
 Instead of running directly in your project directory, Tadpole:
 1. Creates an isolated execution directory (e.g., `~/.tadpole-executions/1234-abc/`)
-2. Links your project data via a symlink at `<execution-dir>/data/`
+2. Links your data source via a symlink at `<execution-dir>/read_only_data_source/`
+   - If data is a directory: creates a direct symlink to the directory
+   - If data is a file: creates the directory and symlinks the file inside it
 3. Runs all operations within this execution environment
-4. Keeps all generated files, logs, and state separate from your original project
+4. Keeps all generated files, logs, and state separate from your original data
 
 ### Benefits
 
@@ -143,8 +146,9 @@ Instead of running directly in your project directory, Tadpole:
 
 ```
 ~/.tadpole-executions/
-└── 1737123456789-abc-d4f5e6/       # Execution directory
-    ├── data/ → /path/to/your/project  # Symlink to your data
+└── 1737123456789-abc-d4f5e6/          # Execution directory
+    ├── read_only_data_source/         # Symlink to your data or contains file
+    │   └── [filename.txt]             # (if data source is a file)
     ├── generated-docs/                # Files created by Claude
     ├── backend/                       # Workspace setup files
     └── .tadpole/                      # Tadpole metadata
