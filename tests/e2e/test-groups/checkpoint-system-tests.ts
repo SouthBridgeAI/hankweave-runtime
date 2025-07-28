@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 export async function runCheckpointSystemTests(testDir: string) {
-  const checkpointDir = path.join(testDir, ".langton/checkpoints");
+  const checkpointDir = path.join(testDir, ".tadpole/checkpoints");
   const gitDir = path.join(checkpointDir, ".git");
 
   test("checkpoint directory structure created", () => {
@@ -17,7 +17,7 @@ export async function runCheckpointSystemTests(testDir: string) {
     const gitConfigPath = path.join(checkpointDir, ".gitconfig");
     if (fs.existsSync(gitConfigPath)) {
       const gitConfig = fs.readFileSync(gitConfigPath, "utf-8");
-      expect(gitConfig).toContain("name = Langton Runner");
+      expect(gitConfig).toContain("name = Tadpole Runner");
       expect(gitConfig).toContain("email = froggie@southbridge.ai");
       expect(gitConfig).toContain("gpgsign = false");
     }

@@ -1,8 +1,8 @@
-import { RunId, PhaseId, SessionId } from "../../server/branded-types.js";
+import { PhaseId, type RunId, SessionId } from "../../server/branded-types.js";
 import type * as ST from "../../server/state-types.js";
 
 export class StateBuilder {
-  private state: ST.LangtonState = {
+  private state: ST.TadpoleState = {
     runs: [],
     currentRunId: null,
   };
@@ -35,7 +35,7 @@ export class StateBuilder {
     return this;
   }
 
-  build(): ST.LangtonState {
+  build(): ST.TadpoleState {
     return JSON.parse(JSON.stringify(this.state));
   }
 }
@@ -43,7 +43,7 @@ export class StateBuilder {
 export function createCompletedPhase(
   phaseId: string,
   sessionId: string,
-  cost = 0.1
+  cost = 0.1,
 ): ST.CompletedPhase {
   return {
     phaseId: PhaseId(phaseId),
@@ -68,7 +68,7 @@ export function createCompletedPhase(
 export function createRunningPhase(
   phaseId: string,
   sessionId: string,
-  currentCost = 0.05
+  currentCost = 0.05,
 ): ST.RunningPhase {
   return {
     phaseId: PhaseId(phaseId),
@@ -91,7 +91,7 @@ export function createRunningPhase(
 export function createFailedPhase(
   phaseId: string,
   failureReason: ST.FailureReason,
-  partialCost = 0.03
+  partialCost = 0.03,
 ): ST.FailedPhase {
   return {
     phaseId: PhaseId(phaseId),

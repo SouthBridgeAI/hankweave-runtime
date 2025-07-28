@@ -59,7 +59,7 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     const phaseLogCosts: Record<string, number> = {};
 
     // Find the run folder
-    const runsDir = path.join(testDir, ".langton/runs");
+    const runsDir = path.join(testDir, ".tadpole/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);
@@ -104,7 +104,7 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     const phaseLogCosts: Record<string, number> = {};
 
     // Find the run folder
-    const runsDir = path.join(testDir, ".langton/runs");
+    const runsDir = path.join(testDir, ".tadpole/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { PhaseId, RunId } from "../../server/branded-types";
-import type { LangtonState, Run } from "../../server/state-types";
+import type { Run, TadpoleState } from "../../server/state-types";
 import type {
   AssistantActionEvent,
   CheckpointListEvent,
@@ -49,7 +49,7 @@ const COSTS_PER_MTOK = {
 interface TestSnapshot {
   name: string;
   directory: string;
-  state: LangtonState;
+  state: TadpoleState;
   events: ServerEvent[];
   checkpoints: CheckpointListEvent["data"]["checkpoints"];
   timestamp: string;
@@ -86,7 +86,7 @@ async function getFilePaths(dir: string): Promise<string[]> {
 
 /**
  * Computes a hash for a directory's contents (files and structure).
- * Excludes .langton directory to focus on project files only.
+ * Excludes .tadpole directory to focus on project files only.
  */
 async function hashDirectory(dir: string): Promise<string> {
   if (!fs.existsSync(dir)) {
@@ -94,12 +94,12 @@ async function hashDirectory(dir: string): Promise<string> {
   }
   const allFilePaths = (await getFilePaths(dir)).sort();
 
-  // Filter out .langton directory files and data directory (execution isolation symlink)
+  // Filter out .tadpole directory files and data directory (execution isolation symlink)
   const filePaths = allFilePaths.filter((filePath) => {
     const relativePath = path.relative(dir, filePath);
     return (
-      !relativePath.startsWith(`.langton${path.sep}`) &&
-      !relativePath.startsWith(".langton/") &&
+      !relativePath.startsWith(`.tadpole${path.sep}`) &&
+      !relativePath.startsWith(".tadpole/") &&
       !relativePath.startsWith(`data${path.sep}`) &&
       !relativePath.startsWith("data/") &&
       relativePath !== "data"
@@ -253,12 +253,12 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
       const dir = path.join(SNAPSHOT_DIR, name);
       if (!fs.existsSync(dir)) continue;
 
-      const statePath = path.join(dir, ".langton", "state.json");
-      const websocketLogPath = path.join(dir, ".langton", "logs", "websocket.log");
-      const gitDir = path.join(dir, ".langton", "checkpoints", ".git");
+      const statePath = path.join(dir, ".tadpole", "state.json");
+      const websocketLogPath = path.join(dir, ".tadpole", "logs", "websocket.log");
+      const gitDir = path.join(dir, ".tadpole", "checkpoints", ".git");
 
       if (fs.existsSync(statePath)) {
-        const state: LangtonState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
+        const state: TadpoleState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
 
         const events: ServerEvent[] = [];
         let checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
@@ -332,8 +332,8 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
     test.each(Array.from(snapshots.entries()))(
       "1.1 State File Integrity: %s",
       (_name, snapshot) => {
-        const statePath = path.join(snapshot.directory, ".langton", "state.json");
-        const backupPath = path.join(snapshot.directory, ".langton", "state.json.bak");
+        const statePath = path.join(snapshot.directory, ".tadpole", "state.json");
+        const backupPath = path.join(snapshot.directory, ".tadpole", "state.json.bak");
 
         expect(fs.existsSync(backupPath)).toBe(true);
         const stateContent = fs.readFileSync(statePath, "utf-8");
@@ -345,7 +345,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
     test.each(Array.from(snapshots.entries()))(
       "1.2 Git Repository Integrity: %s",
       (_name, snapshot) => {
-        const gitDir = path.join(snapshot.directory, ".langton", "checkpoints", ".git");
+        const gitDir = path.join(snapshot.directory, ".tadpole", "checkpoints", ".git");
         expect(fs.existsSync(gitDir)).toBe(true);
         try {
           execSync(`git --git-dir=${gitDir} fsck`);
@@ -379,7 +379,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
         // State -> Filesystem
         snapshot.state.runs.forEach((run) => {
-          const runFolder = path.join(snapshot.directory, ".langton", "runs", run.runId);
+          const runFolder = path.join(snapshot.directory, ".tadpole", "runs", run.runId);
           expect(fs.existsSync(runFolder)).toBe(true);
         });
       },
@@ -404,7 +404,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
       if (!snapshot1 || !snapshot2) return;
 
-      const gitDir = path.join(snapshot1.directory, ".langton", "checkpoints", ".git");
+      const gitDir = path.join(snapshot1.directory, ".tadpole", "checkpoints", ".git");
 
       // Log git commits for debugging
       console.log("\n=== Git Commits in Checkpoint Repository ===");
@@ -419,12 +419,12 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
       execSync(`git --git-dir=${gitDir} --work-tree=${checkoutDir} checkout ${targetSha} -- .`);
 
-      // List files in both directories for comparison (excluding .langton)
+      // List files in both directories for comparison (excluding .tadpole)
       console.log("\n=== Project Files in Rolled Back Directory (Snapshot 2) ===");
       const rolledBackFiles = await getFilePaths(snapshot2.directory);
       const projectFilesRolledBack = rolledBackFiles.filter((f) => {
         const relative = path.relative(snapshot2.directory, f);
-        return !relative.startsWith(`.langton${path.sep}`) && !relative.startsWith(".langton/");
+        return !relative.startsWith(`.tadpole${path.sep}`) && !relative.startsWith(".tadpole/");
       });
       projectFilesRolledBack.sort().forEach((f) => {
         const relative = path.relative(snapshot2.directory, f);
@@ -613,7 +613,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
       "3.2 Orphaned Artifact Check: No orphaned runs or logs in %s",
       (name, snapshot) => {
         const runIdsInState = new Set(snapshot.state.runs.map((r) => r.runId));
-        const runDirsOnDisk = fs.readdirSync(path.join(snapshot.directory, ".langton", "runs"));
+        const runDirsOnDisk = fs.readdirSync(path.join(snapshot.directory, ".tadpole", "runs"));
 
         console.log(`\n=== Orphaned Artifact Check for ${name} ===`);
         console.log(`Run IDs in state: ${Array.from(runIdsInState).join(", ")}`);
@@ -630,7 +630,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
         // All runs in state must have corresponding directories
         for (const run of snapshot.state.runs) {
-          const runDir = path.join(snapshot.directory, ".langton", "runs", run.runId);
+          const runDir = path.join(snapshot.directory, ".tadpole", "runs", run.runId);
           if (!fs.existsSync(runDir)) {
             throw new Error(`Missing run directory for ${run.runId} in ${name}`);
           }
@@ -672,7 +672,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
       // Check commit message of a checkpoint
       const aCheckpoint = snapshot.checkpoints[0];
-      const gitDir = path.join(snapshot.directory, ".langton", "checkpoints", ".git");
+      const gitDir = path.join(snapshot.directory, ".tadpole", "checkpoints", ".git");
       const msg = execSync(`git --git-dir=${gitDir} show -s --format=%B ${aCheckpoint.sha}`, {
         encoding: "utf-8",
       });
@@ -812,7 +812,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
     test("5.1 State-to-Filesystem Run Integrity: All runs have folders", () => {
       for (const snapshot of snapshots.values()) {
         for (const run of snapshot.state.runs) {
-          const expectedFolder = path.join(snapshot.directory, ".langton", "runs", run.runId);
+          const expectedFolder = path.join(snapshot.directory, ".tadpole", "runs", run.runId);
           expect(fs.existsSync(expectedFolder)).toBe(true);
         }
       }
@@ -898,7 +898,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
         expect(snapshot.state.runs.length).toBeGreaterThan(0);
 
         // Git repository should still be valid
-        const gitDir = path.join(snapshot.directory, ".langton", "checkpoints", ".git");
+        const gitDir = path.join(snapshot.directory, ".tadpole", "checkpoints", ".git");
         expect(fs.existsSync(gitDir)).toBe(true);
       }
     });
@@ -919,7 +919,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
   // --- Priority 7: Additional Validation Tests ---
   describe("Priority 7: Additional Validation Tests", () => {
     test("7.1 Resource Cleanup: Lock files removed", () => {
-      const mainLockFilePath = path.join(TEST_DIR, ".langton", "server.lock");
+      const mainLockFilePath = path.join(TEST_DIR, ".tadpole", "server.lock");
       const mainLockFileExists = fs.existsSync(mainLockFilePath);
       expect(mainLockFileExists).toBe(false);
     });
@@ -928,7 +928,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
       const stateSizes: Array<{ name: string; size: number }> = [];
 
       for (const snapshot of snapshots.values()) {
-        const statePath = path.join(snapshot.directory, ".langton", "state.json");
+        const statePath = path.join(snapshot.directory, ".tadpole", "state.json");
         if (fs.existsSync(statePath)) {
           const stats = fs.statSync(statePath);
           stateSizes.push({ name: snapshot.name, size: stats.size });

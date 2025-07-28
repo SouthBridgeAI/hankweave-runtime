@@ -6,7 +6,7 @@ import type { Logger } from "./utils.js";
 
 /**
  * Git operations for the checkpoint system.
- * Handles the shadow git repository in .langton/checkpoints.
+ * Handles the shadow git repository in .tadpole/checkpoints.
  */
 export class CheckpointGit {
   private executionPath: string;
@@ -17,7 +17,7 @@ export class CheckpointGit {
 
   constructor(executionPath: string, logger: Logger) {
     this.executionPath = executionPath;
-    this.checkpointPath = path.join(executionPath, ".langton", "checkpoints");
+    this.checkpointPath = path.join(executionPath, ".tadpole", "checkpoints");
     this.logger = logger;
   }
 
@@ -63,7 +63,7 @@ export class CheckpointGit {
     // Create git config to isolate from user preferences
     const gitConfigPath = path.join(this.checkpointPath, ".gitconfig");
     const gitConfigContent = `[user]
-  name = Langton Runner
+  name = Tadpole Runner
   email = froggie@southbridge.ai
 [commit]
   gpgsign = false
@@ -85,7 +85,7 @@ export class CheckpointGit {
 
     // Initialize repository
     await this.git.init(false, { "--initial-branch": "main" });
-    await this.git.addConfig("user.name", "Langton Runner");
+    await this.git.addConfig("user.name", "Tadpole Runner");
     await this.git.addConfig("user.email", "froggie@southbridge.ai");
     await this.git.addConfig("commit.gpgsign", "false");
 

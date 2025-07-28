@@ -1,5 +1,5 @@
 /**
- * Langton Server Test Suite
+ * Tadpole Server Test Suite
  *
  * Directory Structure:
  * - config/   - Test configuration files (phases, models, etc.)

@@ -1,14 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { TadpoleState } from "../../server/state-types.js";
 import type {
   ClientCommand,
-  ServerEvent,
-  PhaseStartedEvent,
   PhaseCompletedEvent,
+  PhaseStartedEvent,
+  ServerEvent,
 } from "../../server/types.js";
-import type { LangtonServer } from "../../server/langton-server.js";
-import type { LangtonState } from "../../server/state-types.js";
 
 // ============================================================================
 // Colors for terminal output
@@ -46,9 +45,7 @@ export class TestWSClient {
       this.ws.onopen = () => {
         clearTimeout(timeout);
         this.connected = true;
-        console.log(
-          `${colors.green}✓ Connected to WebSocket server${colors.reset}`
-        );
+        console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
         resolve();
       };
 
@@ -61,7 +58,7 @@ export class TestWSClient {
           const waiters = this.eventPromises.get(serverEvent.type);
           if (waiters) {
             // Create a new array to hold waiters that don't match
-            const remainingWaiters: typeof waiters = [];
+            const _remainingWaiters: typeof waiters = [];
 
             waiters.forEach(({ resolve }) => {
               // Each waiter's resolve function will check if it matches
@@ -96,7 +93,12 @@ export class TestWSClient {
         const closeWaiters = this.eventPromises.get("__connection_closed__");
         if (closeWaiters) {
           closeWaiters.forEach(({ resolve }) =>
-            resolve({ type: "__connection_closed__" } as any as ServerEvent)
+            resolve({
+              id: "synthetic-connection-close",
+              timestamp: new Date().toISOString(),
+              type: "__connection_closed__",
+              data: {},
+            } as unknown as ServerEvent),
           );
           this.eventPromises.delete("__connection_closed__");
         }
@@ -128,7 +130,7 @@ export class TestWSClient {
     type: string,
     timeoutMs: number = 30000,
     filter?: (event: ServerEvent) => boolean,
-    onlyAfterTimestamp?: string
+    onlyAfterTimestamp?: string,
   ): Promise<ServerEvent> {
     // Check if we already have this event
     let existing: ServerEvent | undefined;
@@ -174,8 +176,7 @@ export class TestWSClient {
 
         // Apply the same filtering logic to future events
         const passesFilter = !filter || filter(event);
-        const isAfterTimestamp =
-          !onlyAfterTimestamp || event.timestamp > onlyAfterTimestamp;
+        const isAfterTimestamp = !onlyAfterTimestamp || event.timestamp > onlyAfterTimestamp;
 
         if (passesFilter && isAfterTimestamp) {
           resolved = true;
@@ -209,14 +210,14 @@ export class TestWSClient {
   async waitForPhaseStart(
     phaseId: string,
     timeout: number = 10000,
-    afterTimestamp?: string
+    afterTimestamp?: string,
   ): Promise<PhaseStartedEvent> {
     // Use waitForEvent with proper filtering
     const event = await this.waitForEvent(
       "phase.started",
       timeout,
       (e) => (e as PhaseStartedEvent).data?.phaseId === phaseId,
-      afterTimestamp
+      afterTimestamp,
     );
     return event as PhaseStartedEvent;
   }
@@ -224,14 +225,14 @@ export class TestWSClient {
   async waitForPhaseCompletion(
     phaseId: string,
     timeout: number = 120000,
-    afterTimestamp?: string
+    afterTimestamp?: string,
   ): Promise<PhaseCompletedEvent> {
     // Use waitForEvent with proper filtering
     const event = await this.waitForEvent(
       "phase.completed",
       timeout,
       (e) => (e as PhaseCompletedEvent).data?.phaseId === phaseId,
-      afterTimestamp
+      afterTimestamp,
     );
     return event as PhaseCompletedEvent;
   }
@@ -274,7 +275,7 @@ export async function rimrafSimple(dirPath: string): Promise<void> {
 // ============================================================================
 // Test Process Management
 // ============================================================================
-let activeServerProcesses: ChildProcess[] = [];
+const activeServerProcesses: ChildProcess[] = [];
 let signalHandlersRegistered = false;
 
 function registerSignalHandlers(): void {
@@ -283,13 +284,13 @@ function registerSignalHandlers(): void {
 
   const cleanup = (signal: string) => {
     console.log(
-      `\n${colors.yellow}Received ${signal}, cleaning up server processes...${colors.reset}`
+      `\n${colors.yellow}Received ${signal}, cleaning up server processes...${colors.reset}`,
     );
 
     for (const serverProcess of activeServerProcesses) {
       if (!serverProcess.killed && serverProcess.exitCode === null) {
         console.log(
-          `${colors.gray}Attempting graceful shutdown of server process ${serverProcess.pid}...${colors.reset}`
+          `${colors.gray}Attempting graceful shutdown of server process ${serverProcess.pid}...${colors.reset}`,
         );
 
         // First, try to send graceful shutdown via stdin (if server accepts commands)
@@ -299,7 +300,7 @@ function registerSignalHandlers(): void {
             serverProcess.stdin.write('{"type":"shutdown"}\n');
             serverProcess.stdin.end();
           }
-        } catch (e) {
+        } catch (_e) {
           // Stdin might not be available or server might not accept commands
         }
 
@@ -309,7 +310,7 @@ function registerSignalHandlers(): void {
             // Kill the process group (negative PID)
             process.kill(-serverProcess.pid, "SIGTERM");
           }
-        } catch (e) {
+        } catch (_e) {
           // Fallback to individual process
           serverProcess.kill("SIGTERM");
         }
@@ -321,14 +322,14 @@ function registerSignalHandlers(): void {
       for (const serverProcess of activeServerProcesses) {
         if (!serverProcess.killed && serverProcess.exitCode === null) {
           console.log(
-            `${colors.red}Force killing server process ${serverProcess.pid}...${colors.reset}`
+            `${colors.red}Force killing server process ${serverProcess.pid}...${colors.reset}`,
           );
 
           try {
             if (serverProcess.pid) {
               process.kill(-serverProcess.pid, "SIGKILL");
             }
-          } catch (e) {
+          } catch (_e) {
             serverProcess.kill("SIGKILL");
           }
         }
@@ -349,7 +350,7 @@ function registerSignalHandlers(): void {
       if (!serverProcess.killed && serverProcess.exitCode === null) {
         try {
           serverProcess.kill("SIGKILL");
-        } catch (e) {
+        } catch (_e) {
           // Process might already be dead
         }
       }
@@ -366,12 +367,8 @@ export interface TestDirectoryConfig {
   testRunDir: string;
 }
 
-export async function setupTestDirectory(
-  config: TestDirectoryConfig
-): Promise<void> {
-  console.log(
-    `${colors.blue}Setting up test directory: ${config.testDir}${colors.reset}`
-  );
+export async function setupTestDirectory(config: TestDirectoryConfig): Promise<void> {
+  console.log(`${colors.blue}Setting up test directory: ${config.testDir}${colors.reset}`);
 
   // Create directories if they don't exist
   if (!fs.existsSync(config.testDir)) {
@@ -387,7 +384,7 @@ export async function setupTestDirectory(
   }
 
   console.log(
-    `${colors.yellow}Test results will be saved to: ${config.testRunDir}${colors.reset}/`
+    `${colors.yellow}Test results will be saved to: ${config.testRunDir}${colors.reset}/`,
   );
 
   // Clean up the entire test directory for a fresh start
@@ -416,7 +413,7 @@ export interface ServerConfig {
 }
 
 export function startServer(config: ServerConfig): ChildProcess {
-  console.log(`${colors.blue}Starting Langton server...${colors.reset}`);
+  console.log(`${colors.blue}Starting Tadpole server...${colors.reset}`);
 
   // Register signal handlers for cleanup
   registerSignalHandlers();
@@ -428,15 +425,11 @@ export function startServer(config: ServerConfig): ChildProcess {
   // Use absolute path to server to ensure it's found regardless of where test is run from
   const serverPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
-    "../../server/index.ts"
+    "../../server/index.ts",
   );
 
   // Build command arguments
-  const args = [
-    serverPath,
-    `--config=${config.phasesConfig}`,
-    `--port=${config.port}`
-  ];
+  const args = [serverPath, `--config=${config.phasesConfig}`, `--port=${config.port}`];
 
   // Add --data flag if using execution isolation
   if (config.useDataFlag && config.dataSourceDir) {
@@ -450,20 +443,16 @@ export function startServer(config: ServerConfig): ChildProcess {
 
   // Add --start-new flag if forcing new execution
   if (config.startNew) {
-    args.push('--start-new');
+    args.push("--start-new");
   }
 
-  const serverProcess = spawn(
-    "bun",
-    args,
-    {
-      cwd: config.cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-      },
-    }
-  );
+  const serverProcess = spawn("bun", args, {
+    cwd: config.cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+    },
+  });
 
   serverProcess.stdout?.on("data", (data) => {
     const message = data.toString();
@@ -473,9 +462,7 @@ export function startServer(config: ServerConfig): ChildProcess {
 
   serverProcess.stderr?.on("data", (data) => {
     const message = data.toString();
-    console.error(
-      `${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`
-    );
+    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
   });
 
@@ -488,7 +475,7 @@ export function startServer(config: ServerConfig): ChildProcess {
 
   serverProcess.on("exit", (code, signal) => {
     serverLogStream.write(
-      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`
+      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
     );
     serverLogStream.end();
 
@@ -514,13 +501,11 @@ export interface PreserveResultsConfig {
   events: ServerEvent[];
 }
 
-export async function preserveTestResults(
-  config: PreserveResultsConfig
-): Promise<void> {
+export async function preserveTestResults(config: PreserveResultsConfig): Promise<void> {
   console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
 
   // Copy the entire runs directory to preserve Claude logs with proper structure
-  const runsDir = path.join(config.testDir, ".langton/runs");
+  const runsDir = path.join(config.testDir, ".tadpole/runs");
   if (fs.existsSync(runsDir)) {
     const destRunsDir = path.join(config.testRunDir, "runs");
     copyDirectoryRecursive(runsDir, destRunsDir);
@@ -539,20 +524,18 @@ export async function preserveTestResults(
       }
     };
     countLogs(destRunsDir);
-    console.log(
-      `  ✓ Copied runs directory with ${claudeLogCount} Claude log files`
-    );
+    console.log(`  ✓ Copied runs directory with ${claudeLogCount} Claude log files`);
   }
 
   // Copy state.json
-  const stateFile = path.join(config.testDir, ".langton/state.json");
+  const stateFile = path.join(config.testDir, ".tadpole/state.json");
   if (fs.existsSync(stateFile)) {
     fs.copyFileSync(stateFile, path.join(config.testRunDir, "state.json"));
     console.log(`  ✓ Copied state.json`);
   }
 
   // Copy logs directory (for websocket.log and server.log)
-  const logsDir = path.join(config.testDir, ".langton/logs");
+  const logsDir = path.join(config.testDir, ".tadpole/logs");
   if (fs.existsSync(logsDir)) {
     const destLogsDir = path.join(config.testRunDir, "logs");
     copyDirectoryRecursive(logsDir, destLogsDir);
@@ -563,16 +546,12 @@ export async function preserveTestResults(
   const eventsPath = path.join(config.testRunDir, "websocket-events.json");
   fs.writeFileSync(eventsPath, JSON.stringify(config.events, null, 2));
 
-  console.log(
-    `\n${colors.yellow}Test results saved to: ${config.testRunDir}/${colors.reset}`
-  );
+  console.log(`\n${colors.yellow}Test results saved to: ${config.testRunDir}/${colors.reset}`);
   console.log(`${colors.gray}  - Server logs: server.log${colors.reset}`);
   console.log(`${colors.gray}  - State: state.json${colors.reset}`);
   console.log(`${colors.gray}  - Runs directory: runs/${colors.reset}`);
   console.log(`${colors.gray}  - Logs directory: logs/${colors.reset}`);
-  console.log(
-    `${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`
-  );
+  console.log(`${colors.gray}  - WebSocket events: websocket-events.json${colors.reset}`);
 }
 
 // Helper function to copy directory recursively
@@ -622,9 +601,7 @@ export async function cleanupTest(config: CleanupConfig): Promise<void> {
   // Handle server shutdown
   if (config.serverProcess) {
     if (config.gracefulShutdown && config.client?.isConnected) {
-      console.log(
-        `${colors.gray}Shutting down server gracefully...${colors.reset}`
-      );
+      console.log(`${colors.gray}Shutting down server gracefully...${colors.reset}`);
 
       try {
         const { generateId } = await import("../../server/utils.js");
@@ -639,21 +616,13 @@ export async function cleanupTest(config: CleanupConfig): Promise<void> {
     }
 
     // Force shutdown if still running
-    if (
-      !config.serverProcess.killed &&
-      config.serverProcess.exitCode === null
-    ) {
+    if (!config.serverProcess.killed && config.serverProcess.exitCode === null) {
       console.log(`${colors.gray}Sending SIGTERM to server...${colors.reset}`);
       config.serverProcess.kill("SIGTERM");
 
       const shutdownTimeout = setTimeout(() => {
-        if (
-          !config.serverProcess?.killed &&
-          config.serverProcess?.exitCode === null
-        ) {
-          console.log(
-            `${colors.yellow}Force killing server with SIGKILL...${colors.reset}`
-          );
+        if (!config.serverProcess?.killed && config.serverProcess?.exitCode === null) {
+          console.log(`${colors.yellow}Force killing server with SIGKILL...${colors.reset}`);
           config.serverProcess.kill("SIGKILL");
         }
       }, 5000);
@@ -666,7 +635,7 @@ export async function cleanupTest(config: CleanupConfig): Promise<void> {
       });
     } else if (config.serverProcess.exitCode !== null) {
       console.log(
-        `${colors.gray}Server already exited with code ${config.serverProcess.exitCode}${colors.reset}`
+        `${colors.gray}Server already exited with code ${config.serverProcess.exitCode}${colors.reset}`,
       );
     }
 
@@ -688,18 +657,16 @@ export async function cleanupTest(config: CleanupConfig): Promise<void> {
 
 export async function cleanupLockFile(
   testDir: string,
-  serverShutdownGracefully: boolean
+  serverShutdownGracefully: boolean,
 ): Promise<void> {
-  const lockFile = path.join(testDir, ".langton/server.lock");
+  const lockFile = path.join(testDir, ".tadpole/server.lock");
   if (fs.existsSync(lockFile)) {
     if (serverShutdownGracefully) {
       console.log(
-        `${colors.yellow}⚠ Lock file still exists after graceful shutdown - server should have removed it${colors.reset}`
+        `${colors.yellow}⚠ Lock file still exists after graceful shutdown - server should have removed it${colors.reset}`,
       );
     } else {
-      console.log(
-        `${colors.gray}Cleaning up orphaned lock file...${colors.reset}`
-      );
+      console.log(`${colors.gray}Cleaning up orphaned lock file...${colors.reset}`);
     }
     fs.unlinkSync(lockFile);
   }
@@ -713,8 +680,8 @@ export async function cleanupLockFile(
  * Get the server state by reading from the state file.
  * This is used in e2e tests where we don't have direct access to the server instance.
  */
-export async function getServerState(testDir: string): Promise<LangtonState> {
-  const statePath = path.join(testDir, ".langton", "state.json");
+export async function getServerState(testDir: string): Promise<TadpoleState> {
+  const statePath = path.join(testDir, ".tadpole", "state.json");
   if (!fs.existsSync(statePath)) {
     throw new Error("State file not found");
   }
@@ -728,7 +695,7 @@ export async function getServerState(testDir: string): Promise<LangtonState> {
 export async function waitForRunStatus(
   testDir: string,
   status: "running" | "completed" | "failed" | "crashed",
-  timeout = 5000
+  timeout = 5000,
 ): Promise<void> {
   const startTime = Date.now();
   while (Date.now() - startTime < timeout) {
@@ -751,7 +718,7 @@ export async function waitForPhaseStatus(
   testDir: string,
   phaseId: string,
   status: string,
-  timeout = 10000
+  timeout = 10000,
 ): Promise<void> {
   const startTime = Date.now();
   while (Date.now() - startTime < timeout) {
@@ -767,9 +734,7 @@ export async function waitForPhaseStatus(
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(
-    `Timeout waiting for phase ${phaseId} to reach status ${status}`
-  );
+  throw new Error(`Timeout waiting for phase ${phaseId} to reach status ${status}`);
 }
 
 /**
@@ -823,10 +788,7 @@ export async function getTotalCostFromState(testDir: string): Promise<number> {
 /**
  * Check if a phase exists in the current run.
  */
-export async function phaseExistsInCurrentRun(
-  testDir: string,
-  phaseId: string
-): Promise<boolean> {
+export async function phaseExistsInCurrentRun(testDir: string, phaseId: string): Promise<boolean> {
   const state = await getServerState(testDir);
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
   if (!currentRun) return false;

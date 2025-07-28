@@ -1,12 +1,12 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import * as fs from "fs";
-import * as path from "path";
-import { rmSync } from "fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import { rmSync } from "node:fs";
+import * as path from "node:path";
+import { PhaseId, RunId } from "../../server/branded-types.js";
 import { StateManager } from "../../server/state-manager.js";
-import { PhaseId, RunId, SessionId } from "../../server/branded-types.js";
-import { Logger } from "../../server/utils.js";
 import type { PhaseConfig } from "../../server/types.js";
-import { StateBuilder, createCompletedPhase } from "../utils/mock-builders.js";
+import { Logger } from "../../server/utils.js";
+import { createCompletedPhase, StateBuilder } from "../utils/mock-builders.js";
 
 describe("StateManager - getNextPhaseToExecute", () => {
   let tempDir: string;
@@ -34,16 +34,12 @@ describe("StateManager - getNextPhaseToExecute", () => {
 
   beforeEach(async () => {
     tempDir = path.resolve("tests", "test-area", `temp-state-${Date.now()}`);
-    await fs.promises.mkdir(path.join(tempDir, ".langton"), {
+    await fs.promises.mkdir(path.join(tempDir, ".tadpole"), {
       recursive: true,
     });
 
     const logger = new Logger(path.join(tempDir, "test.log"));
-    stateManager = new StateManager(
-      path.join(tempDir, ".langton"),
-      logger,
-      mockPhases
-    );
+    stateManager = new StateManager(path.join(tempDir, ".tadpole"), logger, mockPhases);
     await stateManager.initialize();
   });
 
@@ -58,7 +54,7 @@ describe("StateManager - getNextPhaseToExecute", () => {
       type: "RunStarted",
       data: {
         runId,
-        runFolder: path.join(tempDir, ".langton", "runs", runId),
+        runFolder: path.join(tempDir, ".tadpole", "runs", runId),
         gitBranch: `run-${runId}`,
         startingConditions: { type: "fresh" },
         serverPid: process.pid,
@@ -82,8 +78,8 @@ describe("StateManager - getNextPhaseToExecute", () => {
 
     // Directly set the state (for testing)
     await fs.promises.writeFile(
-      path.join(tempDir, ".langton", "state.json"),
-      JSON.stringify(state)
+      path.join(tempDir, ".tadpole", "state.json"),
+      JSON.stringify(state),
     );
     await stateManager.initialize();
 
@@ -103,8 +99,8 @@ describe("StateManager - getNextPhaseToExecute", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".langton", "state.json"),
-      JSON.stringify(state)
+      path.join(tempDir, ".tadpole", "state.json"),
+      JSON.stringify(state),
     );
     await stateManager.initialize();
 
@@ -136,8 +132,8 @@ describe("StateManager - getNextPhaseToExecute", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".langton", "state.json"),
-      JSON.stringify(state)
+      path.join(tempDir, ".tadpole", "state.json"),
+      JSON.stringify(state),
     );
     await stateManager.initialize();
 
@@ -153,10 +149,7 @@ describe("StateManager - getNextPhaseToExecute", () => {
     const state = new StateBuilder()
       // First add the previous run with phase-1 completed
       .withRun({ runId: previousRunId })
-      .withPhaseInRun(
-        previousRunId,
-        createCompletedPhase("phase-1", "session-1")
-      )
+      .withPhaseInRun(previousRunId, createCompletedPhase("phase-1", "session-1"))
       // Then add the continuation run
       .withRun({
         runId: currentRunId,
@@ -173,8 +166,8 @@ describe("StateManager - getNextPhaseToExecute", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".langton", "state.json"),
-      JSON.stringify(state)
+      path.join(tempDir, ".tadpole", "state.json"),
+      JSON.stringify(state),
     );
     await stateManager.initialize();
 
@@ -189,12 +182,12 @@ describe("StateManager - Cost Calculations", () => {
 
   beforeEach(async () => {
     tempDir = path.resolve("tests", "test-area", `temp-state-${Date.now()}`);
-    await fs.promises.mkdir(path.join(tempDir, ".langton"), {
+    await fs.promises.mkdir(path.join(tempDir, ".tadpole"), {
       recursive: true,
     });
 
     const logger = new Logger(path.join(tempDir, "test.log"));
-    stateManager = new StateManager(path.join(tempDir, ".langton"), logger);
+    stateManager = new StateManager(path.join(tempDir, ".tadpole"), logger);
     await stateManager.initialize();
   });
 
@@ -205,24 +198,15 @@ describe("StateManager - Cost Calculations", () => {
   test("calculates total cost across all runs", async () => {
     const state = new StateBuilder()
       .withRun({ runId: RunId("run-1") })
-      .withPhaseInRun(
-        RunId("run-1"),
-        createCompletedPhase("phase-1", "s1", 0.05)
-      )
-      .withPhaseInRun(
-        RunId("run-1"),
-        createCompletedPhase("phase-2", "s2", 0.1)
-      )
+      .withPhaseInRun(RunId("run-1"), createCompletedPhase("phase-1", "s1", 0.05))
+      .withPhaseInRun(RunId("run-1"), createCompletedPhase("phase-2", "s2", 0.1))
       .withRun({ runId: RunId("run-2") })
-      .withPhaseInRun(
-        RunId("run-2"),
-        createCompletedPhase("phase-1", "s3", 0.03)
-      )
+      .withPhaseInRun(RunId("run-2"), createCompletedPhase("phase-1", "s3", 0.03))
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".langton", "state.json"),
-      JSON.stringify(state)
+      path.join(tempDir, ".tadpole", "state.json"),
+      JSON.stringify(state),
     );
     await stateManager.initialize();
 
@@ -234,10 +218,7 @@ describe("StateManager - Cost Calculations", () => {
     const runId = RunId("current-run");
     const state = new StateBuilder()
       .withRun({ runId: RunId("old-run") })
-      .withPhaseInRun(
-        RunId("old-run"),
-        createCompletedPhase("phase-1", "s1", 0.05)
-      )
+      .withPhaseInRun(RunId("old-run"), createCompletedPhase("phase-1", "s1", 0.05))
       .withRun({ runId })
       .withCurrentRun(runId)
       .withPhaseInRun(runId, createCompletedPhase("phase-1", "s2", 0.03))
@@ -245,8 +226,8 @@ describe("StateManager - Cost Calculations", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".langton", "state.json"),
-      JSON.stringify(state)
+      path.join(tempDir, ".tadpole", "state.json"),
+      JSON.stringify(state),
     );
     await stateManager.initialize();
 
@@ -267,8 +248,8 @@ describe("StateManager - Cost Calculations", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".langton", "state.json"),
-      JSON.stringify(state)
+      path.join(tempDir, ".tadpole", "state.json"),
+      JSON.stringify(state),
     );
     await stateManager.initialize();
 

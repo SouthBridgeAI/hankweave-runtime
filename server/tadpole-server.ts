@@ -55,7 +55,7 @@ import {
 
 /**
  * This file is organized into logical sections for easier navigation.
- * Use `grep -A1 "// ====" langton-server.ts | grep "//"` to see all sections.
+ * Use `grep -A1 "// ====" tadpole-server.ts | grep "//"` to see all sections.
  */
 
 /**
@@ -79,7 +79,7 @@ interface ClientData {
  * - Cost tracking and reporting
  * - Event streaming to clients
  */
-export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
+export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private server: Server | null = null;
   private client: ServerWebSocket<ClientData> | null = null;
   public readonly config: ServerConfig;
@@ -149,8 +149,8 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     this.serverStartTime = new Date();
 
     // Initialize state manager with execution path
-    const langtonDir = path.join(this.config.executionPath, ".langton");
-    this.stateManager = new StateManager(langtonDir, this.logger, this.config.phases);
+    const tadpoleDir = path.join(this.config.executionPath, ".tadpole");
+    this.stateManager = new StateManager(tadpoleDir, this.logger, this.config.phases);
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -206,10 +206,10 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
    */
   async start(): Promise<void> {
     this.logger.log(
-      `Starting Langton Server v${this.config.version} in ${this.config.executionPath}`,
+      `Starting Tadpole Server v${this.config.version} in ${this.config.executionPath}`,
     );
 
-    // Initialize checkpoint system (checks for existing .langton)
+    // Initialize checkpoint system (checks for existing .tadpole)
     await this.initializeCheckpoints();
 
     // Initialize state manager
@@ -537,7 +537,7 @@ export class LangtonServer extends TypedEventEmitter<ServerInternalEvents> {
     startingConditions?: import("./state-types.js").StartingConditions,
   ): Promise<void> {
     const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
-    const runFolder = path.join(this.config.executionPath, ".langton", "runs", runId);
+    const runFolder = path.join(this.config.executionPath, ".tadpole", "runs", runId);
 
     // Create run folder
     await fs.promises.mkdir(runFolder, { recursive: true });

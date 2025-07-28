@@ -5,8 +5,8 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runSessionContinuityTests(testDir: string) {
   test("Phase 2 log shows continuation from Phase 1 session", () => {
-    const phase1Log = path.join(testDir, ".langton/logs/log-phase-1.jsonl");
-    const phase2Log = path.join(testDir, ".langton/logs/log-phase-2.jsonl");
+    const phase1Log = path.join(testDir, ".tadpole/logs/log-phase-1.jsonl");
+    const phase2Log = path.join(testDir, ".tadpole/logs/log-phase-2.jsonl");
 
     if (fs.existsSync(phase1Log) && fs.existsSync(phase2Log)) {
       const phase1Entries = parseJSONL(fs.readFileSync(phase1Log, "utf-8"));

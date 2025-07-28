@@ -5,7 +5,7 @@ import { CleanupCommand } from "./cleanup-command.js";
 import { validatePhaseConfig } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
-import { LangtonServer } from "./langton-server.js";
+import { TadpoleServer } from "./tadpole-server.js";
 
 // ============================================================================
 // Main Entry Point
@@ -57,7 +57,7 @@ async function main() {
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
-Langton Server - Claude Phase Orchestration
+Tadpole Server - Phase Orchestration
 
 Usage: bun server/index.ts [options]
 
@@ -77,7 +77,7 @@ Options:
   --help, -h                Show this help message
 
 Execution Isolation:
-  Langton runs in an isolated execution directory separate from your data.
+  Tadpole runs in an isolated execution directory separate from your data.
   This enables clean rollbacks and multiple execution tracking.
 
   Your data is accessed via: <execution-dir>/data/
@@ -94,7 +94,7 @@ Examples:
   bun server/index.ts --data=/path/to/project
 
   # Resume specific execution
-  bun server/index.ts --execution=/home/.langton-executions/1234-abc
+  bun server/index.ts --execution=/home/.tadpole-executions/1234-abc
 
   # Start fresh execution (ignore existing)
   bun server/index.ts --data=/path/to/project --start-new
@@ -252,7 +252,7 @@ Examples:
       autostart: !noAutostart,
     };
 
-    const server = new LangtonServer(serverConfig);
+    const server = new TadpoleServer(serverConfig);
     await server.start();
 
     if (basicMode) {

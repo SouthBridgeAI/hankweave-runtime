@@ -1,19 +1,13 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
 import {
   analyzeExecutionThread,
   findContinuationSessionId,
-  type ExecutionThread,
 } from "../../server/execution-thread.js";
-import {
-  type LangtonState,
-  PhaseId,
-  RunId,
-  SessionId,
-} from "../../server/state-types.js";
+import type { PhaseId, RunId, SessionId, TadpoleState } from "../../server/state-types.js";
 import type { PhaseConfig } from "../../server/types.js";
 import type { Logger } from "../../server/utils.js";
-import fs from "node:fs";
-import path from "node:path";
 
 // Test data and utilities
 const testPhaseConfigs: PhaseConfig[] = [
@@ -61,7 +55,7 @@ class MockLogger {
 
 // Helper to create checkpoint data map
 function createCheckpointData(
-  shas: string[]
+  shas: string[],
 ): Map<string, { message: string; timestamp: string; branch: string }> {
   const map = new Map();
   shas.forEach((sha, index) => {
@@ -75,13 +69,10 @@ function createCheckpointData(
 }
 
 // Load the real test state
-function loadTestState(): LangtonState {
-  const testStatePath = path.join(
-    __dirname,
-    "../test-data/states/execution-state-test-state.json"
-  );
+function loadTestState(): TadpoleState {
+  const testStatePath = path.join(__dirname, "../test-data/states/execution-state-test-state.json");
   const content = fs.readFileSync(testStatePath, "utf-8");
-  return JSON.parse(content) as LangtonState;
+  return JSON.parse(content) as TadpoleState;
 }
 
 describe("Execution Thread Analysis", () => {
@@ -93,7 +84,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Basic Thread Building", () => {
     test("should handle empty state", async () => {
-      const emptyState: LangtonState = {
+      const emptyState: TadpoleState = {
         runs: [],
         currentRunId: null,
       };
@@ -103,7 +94,7 @@ describe("Execution Thread Analysis", () => {
         testPhaseConfigs,
         undefined,
         undefined,
-        mockLogger as unknown as Logger
+        mockLogger as unknown as Logger,
       );
 
       expect(thread.phases).toHaveLength(0);
@@ -117,7 +108,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should handle single run with single phase", async () => {
-      const singleRunState: LangtonState = {
+      const singleRunState: TadpoleState = {
         runs: [
           {
             runId: "test-run-1" as RunId,
@@ -159,7 +150,7 @@ describe("Execution Thread Analysis", () => {
         testPhaseConfigs,
         checkpointData,
         undefined,
-        mockLogger as unknown as Logger
+        mockLogger as unknown as Logger,
       );
 
       expect(thread.phases).toHaveLength(1);
@@ -199,7 +190,7 @@ describe("Execution Thread Analysis", () => {
         testPhaseConfigs,
         checkpointData,
         undefined,
-        mockLogger as unknown as Logger
+        mockLogger as unknown as Logger,
       );
 
       // Should have 3 phases: 2 from continuation run + 1 from original run (phase-1)
@@ -221,27 +212,23 @@ describe("Execution Thread Analysis", () => {
       const phase3FromContinuation = thread.phases[0];
       expect(phase3FromContinuation.validatedCheckpoints).toHaveLength(2);
       expect(
-        phase3FromContinuation.validatedCheckpoints.some(
-          (c) => c.type === "workspace-setup"
-        )
+        phase3FromContinuation.validatedCheckpoints.some((c) => c.type === "workspace-setup"),
       ).toBe(true);
-      expect(
-        phase3FromContinuation.validatedCheckpoints.some(
-          (c) => c.type === "completed"
-        )
-      ).toBe(true);
+      expect(phase3FromContinuation.validatedCheckpoints.some((c) => c.type === "completed")).toBe(
+        true,
+      );
 
       // Verify continuation session ID
       const phase2FromContinuation = thread.phases[1];
       expect(phase2FromContinuation.continuationSessionId).toBe(
-        "7dc6f567-ed4d-42d9-ae0a-2cdfb084c14c" as SessionId
+        "7dc6f567-ed4d-42d9-ae0a-2cdfb084c14c" as SessionId,
       );
     });
   });
 
   describe("Next Phase Detection", () => {
     test("should return first phase for fresh run with no phases", async () => {
-      const freshState: LangtonState = {
+      const freshState: TadpoleState = {
         runs: [
           {
             runId: "fresh-run" as RunId,
@@ -262,7 +249,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should return next phase after completed phase", async () => {
-      const completedPhase1State: LangtonState = {
+      const completedPhase1State: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -298,17 +285,14 @@ describe("Execution Thread Analysis", () => {
         currentRunId: null,
       };
 
-      const thread = await analyzeExecutionThread(
-        completedPhase1State,
-        testPhaseConfigs
-      );
+      const thread = await analyzeExecutionThread(completedPhase1State, testPhaseConfigs);
       expect(thread.nextPhaseId).toBe("phase-2" as PhaseId);
     });
   });
 
   describe("Session ID Finding", () => {
     test("should find session ID for continue-previous phase", async () => {
-      const testState: LangtonState = {
+      const testState: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -345,17 +329,13 @@ describe("Execution Thread Analysis", () => {
       };
 
       const thread = await analyzeExecutionThread(testState, testPhaseConfigs);
-      const sessionId = findContinuationSessionId(
-        thread,
-        "phase-2" as PhaseId,
-        testPhaseConfigs
-      );
+      const sessionId = findContinuationSessionId(thread, "phase-2" as PhaseId, testPhaseConfigs);
 
       expect(sessionId).toBe("session-1" as SessionId);
     });
 
     test("should return null for fresh phase", async () => {
-      const testState: LangtonState = {
+      const testState: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -372,11 +352,7 @@ describe("Execution Thread Analysis", () => {
       };
 
       const thread = await analyzeExecutionThread(testState, testPhaseConfigs);
-      const sessionId = findContinuationSessionId(
-        thread,
-        "phase-1" as PhaseId,
-        testPhaseConfigs
-      );
+      const sessionId = findContinuationSessionId(thread, "phase-1" as PhaseId, testPhaseConfigs);
 
       expect(sessionId).toBeNull();
     });
@@ -384,7 +360,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Checkpoint Validation", () => {
     test("should only include validated checkpoints", async () => {
-      const testState: LangtonState = {
+      const testState: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -423,24 +399,16 @@ describe("Execution Thread Analysis", () => {
 
       // Only include workspace-sha in checkpoint data
       const checkpointData = createCheckpointData(["workspace-sha"]);
-      const thread = await analyzeExecutionThread(
-        testState,
-        testPhaseConfigs,
-        checkpointData
-      );
+      const thread = await analyzeExecutionThread(testState, testPhaseConfigs, checkpointData);
 
       expect(thread.phases).toHaveLength(1);
       expect(thread.phases[0].validatedCheckpoints).toHaveLength(1);
-      expect(thread.phases[0].validatedCheckpoints[0].type).toBe(
-        "workspace-setup"
-      );
-      expect(thread.phases[0].validatedCheckpoints[0].sha).toBe(
-        "workspace-sha"
-      );
+      expect(thread.phases[0].validatedCheckpoints[0].type).toBe("workspace-setup");
+      expect(thread.phases[0].validatedCheckpoints[0].sha).toBe("workspace-sha");
     });
 
     test("should include no checkpoints when none validated", async () => {
-      const testState: LangtonState = {
+      const testState: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -488,7 +456,7 @@ describe("Execution Thread Analysis", () => {
     test("should handle workspace-setup continuation correctly", async () => {
       // This tests the critical case where we rollback to a workspace-setup checkpoint
       // and need to re-run the same phase
-      const state: LangtonState = {
+      const state: TadpoleState = {
         runs: [
           {
             runId: "continuation-run" as RunId,
@@ -574,7 +542,7 @@ describe("Execution Thread Analysis", () => {
 
     test("should handle multiple continuation runs correctly", async () => {
       // Test a chain of continuations: original -> continuation1 -> continuation2
-      const state: LangtonState = {
+      const state: TadpoleState = {
         runs: [
           {
             runId: "continuation-2" as RunId,
@@ -708,7 +676,7 @@ describe("Execution Thread Analysis", () => {
 
     test("should handle skipped phase with session for continuation", async () => {
       // Test that a skipped phase with assistant messages can be used for continuation
-      const state: LangtonState = {
+      const state: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -747,18 +715,14 @@ describe("Execution Thread Analysis", () => {
       const thread = await analyzeExecutionThread(state, testPhaseConfigs);
 
       // Find session for phase-2 which needs to continue from phase-1
-      const sessionId = findContinuationSessionId(
-        thread,
-        "phase-2" as PhaseId,
-        testPhaseConfigs
-      );
+      const sessionId = findContinuationSessionId(thread, "phase-2" as PhaseId, testPhaseConfigs);
 
       expect(sessionId).toBe("session-1" as SessionId);
     });
 
     test("should not use skipped phase without messages for continuation", async () => {
       // Test that a skipped phase without assistant messages cannot be used for continuation
-      const state: LangtonState = {
+      const state: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -796,18 +760,14 @@ describe("Execution Thread Analysis", () => {
       const thread = await analyzeExecutionThread(state, testPhaseConfigs);
 
       // Find session for phase-2 which needs to continue from phase-1
-      const sessionId = findContinuationSessionId(
-        thread,
-        "phase-2" as PhaseId,
-        testPhaseConfigs
-      );
+      const sessionId = findContinuationSessionId(thread, "phase-2" as PhaseId, testPhaseConfigs);
 
       expect(sessionId).toBeNull();
     });
 
     test("should handle continuation from beginning (null afterPhase)", async () => {
       // Test continuation from the very beginning of a run
-      const state: LangtonState = {
+      const state: TadpoleState = {
         runs: [
           {
             runId: "continuation-run" as RunId,
@@ -874,7 +834,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Edge Cases", () => {
     test("should handle failed phase in continuation chain", async () => {
-      const state: LangtonState = {
+      const state: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -944,7 +904,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should handle running phase detection", async () => {
-      const state: LangtonState = {
+      const state: TadpoleState = {
         runs: [
           {
             runId: "test-run" as RunId,

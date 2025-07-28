@@ -14,8 +14,8 @@ export function runSecurityValidationTests(_testState: TestState, testDir: strin
     const sensitivePatterns = [/ANTHROPIC_API_KEY/, /api_key.*=.*sk-/, /authorization.*bearer/i];
 
     const allLogs = [
-      path.join(testDir, ".langton/logs/server.log"),
-      path.join(testDir, ".langton/logs/websocket.log"),
+      path.join(testDir, ".tadpole/logs/server.log"),
+      path.join(testDir, ".tadpole/logs/websocket.log"),
     ];
 
     allLogs.forEach((logPath) => {

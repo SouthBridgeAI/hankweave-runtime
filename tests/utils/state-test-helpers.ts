@@ -1,19 +1,15 @@
 import path from "node:path";
-import type {
-  LangtonState,
-  PhaseExecution,
-  PhaseStatus,
-} from "../../server/state-types.js";
-import { StateManager } from "../../server/state-manager.js";
-import { Logger } from "../../server/utils.js";
 import { PhaseId } from "../../server/branded-types.js";
+import { StateManager } from "../../server/state-manager.js";
+import type { PhaseStatus, TadpoleState } from "../../server/state-types.js";
 import type { PhaseConfig } from "../../server/types.js";
+import { Logger } from "../../server/utils.js";
 
 export function waitForPhaseStatus(
   stateManager: StateManager,
   phaseId: string,
   status: PhaseStatus,
-  timeout = 5000
+  timeout = 5000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
@@ -22,11 +18,7 @@ export function waitForPhaseStatus(
       if (phase?.status === status) {
         resolve();
       } else if (Date.now() - startTime > timeout) {
-        reject(
-          new Error(
-            `Timeout waiting for phase ${phaseId} to reach status ${status}`
-          )
-        );
+        reject(new Error(`Timeout waiting for phase ${phaseId} to reach status ${status}`));
       } else {
         setTimeout(check, 100);
       }
@@ -35,9 +27,7 @@ export function waitForPhaseStatus(
   });
 }
 
-export function createMockState(
-  overrides?: Partial<LangtonState>
-): LangtonState {
+export function createMockState(overrides?: Partial<TadpoleState>): TadpoleState {
   return {
     runs: [],
     currentRunId: null,
@@ -47,13 +37,13 @@ export function createMockState(
 
 export function createTestStateManager(
   testDir: string,
-  phaseConfigs?: PhaseConfig[]
+  phaseConfigs?: PhaseConfig[],
 ): StateManager {
   const logger = new Logger(path.join(testDir, "test.log"));
-  return new StateManager(path.join(testDir, ".langton"), logger, phaseConfigs);
+  return new StateManager(path.join(testDir, ".tadpole"), logger, phaseConfigs);
 }
 
-export function getCompletedPhasesFromState(state: LangtonState): Array<{
+export function getCompletedPhasesFromState(state: TadpoleState): Array<{
   phaseId: string;
   cost: number;
   sessionId: string;

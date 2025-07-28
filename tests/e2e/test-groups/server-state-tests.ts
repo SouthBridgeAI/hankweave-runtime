@@ -5,12 +5,12 @@ import * as path from "node:path";
 export function runServerStateTests(testDir: string) {
   test("server lock file was properly cleaned up", () => {
     // Lock file should be removed after server shutdown
-    const lockFilePath = path.join(testDir, ".langton/server.lock");
+    const lockFilePath = path.join(testDir, ".tadpole/server.lock");
     expect(fs.existsSync(lockFilePath)).toBe(false);
   });
 
   test("lock file contains valid PID", () => {
-    const lockFilePath = path.join(testDir, ".langton/server.lock");
+    const lockFilePath = path.join(testDir, ".tadpole/server.lock");
     if (fs.existsSync(lockFilePath)) {
       const lockContent = fs.readFileSync(lockFilePath, "utf-8").trim();
 

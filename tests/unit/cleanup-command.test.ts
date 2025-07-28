@@ -1,9 +1,9 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { CleanupCommand } from "../../server/cleanup-command.js";
-import type { CleanupOptions, CleanupResult } from "../../server/cleanup-command.js";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { rmSync } from "node:fs";
+import * as path from "node:path";
+import type { CleanupOptions } from "../../server/cleanup-command.js";
+import { CleanupCommand } from "../../server/cleanup-command.js";
 
 describe("CleanupCommand", () => {
   let tempDir: string;
@@ -11,28 +11,18 @@ describe("CleanupCommand", () => {
   let dataSourcePath: string;
 
   beforeEach(async () => {
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-cleanup-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-test-cleanup-${Date.now()}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
 
     // Create mock execution root
-    executionRoot = path.join(tempDir, ".langton-executions");
+    executionRoot = path.join(tempDir, ".tadpole-executions");
     await fs.promises.mkdir(executionRoot, { recursive: true });
 
     // Create mock data source
     dataSourcePath = path.join(tempDir, "data-source");
     await fs.promises.mkdir(dataSourcePath, { recursive: true });
-    await fs.promises.writeFile(
-      path.join(dataSourcePath, "file1.txt"),
-      "content 1"
-    );
-    await fs.promises.writeFile(
-      path.join(dataSourcePath, "file2.txt"),
-      "content 2"
-    );
+    await fs.promises.writeFile(path.join(dataSourcePath, "file1.txt"), "content 1");
+    await fs.promises.writeFile(path.join(dataSourcePath, "file2.txt"), "content 2");
   });
 
   afterEach(async () => {
@@ -53,10 +43,7 @@ describe("CleanupCommand", () => {
     // Create a data source that won't have any execution directories
     const uniqueDataPath = path.join(tempDir, `unique-data-${Date.now()}`);
     await fs.promises.mkdir(uniqueDataPath, { recursive: true });
-    await fs.promises.writeFile(
-      path.join(uniqueDataPath, "unique.txt"),
-      "unique content"
-    );
+    await fs.promises.writeFile(path.join(uniqueDataPath, "unique.txt"), "unique content");
 
     const cleanup = new CleanupCommand({
       dataSourcePath: uniqueDataPath,
@@ -73,8 +60,8 @@ describe("CleanupCommand", () => {
   test("removes execution directory by path", async () => {
     // Create a mock execution directory
     const executionDir = path.join(executionRoot, "1234567-abc-def123");
-    const langtonDir = path.join(executionDir, ".langton");
-    await fs.promises.mkdir(langtonDir, { recursive: true });
+    const tadpoleDir = path.join(executionDir, ".tadpole");
+    await fs.promises.mkdir(tadpoleDir, { recursive: true });
 
     // Create execution metadata
     const meta = {
@@ -87,8 +74,8 @@ describe("CleanupCommand", () => {
       lastUsed: new Date().toISOString(),
     };
     await fs.promises.writeFile(
-      path.join(langtonDir, "execution-meta.json"),
-      JSON.stringify(meta, null, 2)
+      path.join(tadpoleDir, "execution-meta.json"),
+      JSON.stringify(meta, null, 2),
     );
 
     const cleanup = new CleanupCommand({
@@ -106,18 +93,18 @@ describe("CleanupCommand", () => {
   test("skips execution directory with running server", async () => {
     // Create a mock execution directory with lock file
     const executionDir = path.join(executionRoot, "1234567-abc-def123");
-    const langtonDir = path.join(executionDir, ".langton");
-    await fs.promises.mkdir(langtonDir, { recursive: true });
+    const tadpoleDir = path.join(executionDir, ".tadpole");
+    await fs.promises.mkdir(tadpoleDir, { recursive: true });
 
     // Create lock file
     await fs.promises.writeFile(
-      path.join(langtonDir, "server.lock"),
+      path.join(tadpoleDir, "server.lock"),
       JSON.stringify({
         pid: process.pid,
         runId: "test-run",
         startTime: new Date().toISOString(),
         lastHeartbeat: new Date().toISOString(),
-      })
+      }),
     );
 
     const cleanup = new CleanupCommand({
@@ -151,21 +138,21 @@ describe("CleanupCommand", () => {
     const execDir2 = path.join(executionRoot, "2000000-bbb-def456");
 
     for (const dir of [execDir1, execDir2]) {
-      const langtonDir = path.join(dir, ".langton");
-      await fs.promises.mkdir(langtonDir, { recursive: true });
+      const tadpoleDir = path.join(dir, ".tadpole");
+      await fs.promises.mkdir(tadpoleDir, { recursive: true });
 
       const meta = {
         version: "1.0.0",
         readOnlySourceDataPath: dataSourcePath,
         readOnlySourceResolvedDataPath: dataSourcePath,
-        dataHash: path.basename(dir).split('-')[2], // Extract hash from dir name
+        dataHash: path.basename(dir).split("-")[2], // Extract hash from dir name
         linkType: "symlink",
         createdAt: new Date().toISOString(),
         lastUsed: new Date().toISOString(),
       };
       await fs.promises.writeFile(
-        path.join(langtonDir, "execution-meta.json"),
-        JSON.stringify(meta, null, 2)
+        path.join(tadpoleDir, "execution-meta.json"),
+        JSON.stringify(meta, null, 2),
       );
     }
 

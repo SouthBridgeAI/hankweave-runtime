@@ -31,7 +31,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
    *
    * @param phase - Phase configuration
    * @param previousSessionId - Session ID to continue from (if any)
-   * @param logPath - Custom log file path (optional, defaults to .langton/logs/)
+   * @param logPath - Custom log file path (optional, defaults to .tadpole/logs/)
    */
   async spawn(
     phase: PhaseConfig,
@@ -42,9 +42,9 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       throw new Error("Process already running");
     }
 
-    // Use provided logPath or default to .langton/logs/
+    // Use provided logPath or default to .tadpole/logs/
     const actualLogPath =
-      logPath || path.join(this.executionPath, `.langton/logs/log-${phase.id}.jsonl`);
+      logPath || path.join(this.executionPath, `.tadpole/logs/log-${phase.id}.jsonl`);
 
     // Ensure log directory exists
     const logsDir = path.dirname(actualLogPath);

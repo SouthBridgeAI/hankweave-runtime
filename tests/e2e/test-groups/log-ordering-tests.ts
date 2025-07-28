@@ -6,7 +6,7 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 export function runLogOrderingTests(testDir: string) {
   test("log messages maintain causal ordering", () => {
     ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
       if (!fs.existsSync(logPath)) return;
 
       const entries = parseJSONL(fs.readFileSync(logPath, "utf-8"));
@@ -33,7 +33,7 @@ export function runLogOrderingTests(testDir: string) {
   test("stderr output is captured in logs", () => {
     // Check for stderr entries in Claude logs
     ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
       if (fs.existsSync(logPath)) {
         const content = fs.readFileSync(logPath, "utf-8");
         // Look for stderr entries (if any errors occurred)

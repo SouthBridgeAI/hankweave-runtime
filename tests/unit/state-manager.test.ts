@@ -1,36 +1,28 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { PhaseId, RunId, SessionId } from "../../server/branded-types.js";
 import {
-  StateManager,
   InvalidTransitionError,
   PersistenceError,
+  StateManager,
 } from "../../server/state-manager.js";
-import { RunId, PhaseId, SessionId } from "../../server/branded-types.js";
 import type * as ST from "../../server/state-types.js";
 import { Logger } from "../../server/utils.js";
 
 // Test directory setup
 const TEST_DIR = path.join(__dirname, "test-state-manager");
-const TEST_LANGTON_DIR = path.join(TEST_DIR, ".langton");
+const TEST_TADPOLE_DIR = path.join(TEST_DIR, ".tadpole");
 
 // Mock logger - extends Logger to handle private property
 class MockLogger extends Logger {
   logs: Array<{ message: string; level: string }> = [];
 
-  constructor(logFile: string) {
-    super(logFile);
-  }
-
   log(message: string, level: "info" | "error" | "debug" = "info"): void {
     this.logs.push({ message, level });
   }
 
-  logSocketTraffic(
-    socketLogFile: string,
-    direction: "in" | "out",
-    data: unknown
-  ): void {
+  logSocketTraffic(_socketLogFile: string, _direction: "in" | "out", _data: unknown): void {
     // Mock implementation
   }
 }
@@ -41,13 +33,13 @@ describe("StateManager", () => {
 
   beforeEach(async () => {
     // Create test directory
-    await fs.promises.mkdir(TEST_LANGTON_DIR, { recursive: true });
+    await fs.promises.mkdir(TEST_TADPOLE_DIR, { recursive: true });
 
     // Create mock logger
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_LANGTON_DIR, mockLogger);
+    stateManager = new StateManager(TEST_TADPOLE_DIR, mockLogger);
   });
 
   afterEach(async () => {
@@ -68,16 +60,12 @@ describe("StateManager", () => {
       expect(state.currentRunId).toBeNull();
 
       // Check log messages
-      expect(
-        mockLogger.logs.some((log) =>
-          log.message.includes("No state file found")
-        )
-      ).toBe(true);
+      expect(mockLogger.logs.some((log) => log.message.includes("No state file found"))).toBe(true);
     });
 
     test("loads existing state from disk", async () => {
       // Create a state file
-      const existingState: ST.LangtonState = {
+      const existingState: ST.TadpoleState = {
         runs: [
           {
             runId: RunId("test-run-1"),
@@ -94,7 +82,7 @@ describe("StateManager", () => {
         currentRunId: null,
       };
 
-      const statePath = path.join(TEST_LANGTON_DIR, "state.json");
+      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
       await fs.promises.writeFile(statePath, JSON.stringify(existingState));
 
       await stateManager.initialize();
@@ -104,19 +92,17 @@ describe("StateManager", () => {
       expect(state.runs[0].runId).toBe(RunId("test-run-1"));
 
       expect(
-        mockLogger.logs.some((log) =>
-          log.message.includes("Loaded existing state file")
-        )
+        mockLogger.logs.some((log) => log.message.includes("Loaded existing state file")),
       ).toBe(true);
     });
 
     test("recovers from backup when main file corrupted", async () => {
       // Create corrupted main file
-      const statePath = path.join(TEST_LANGTON_DIR, "state.json");
+      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
       await fs.promises.writeFile(statePath, "{ invalid json");
 
       // Create valid backup
-      const backupState: ST.LangtonState = {
+      const backupState: ST.TadpoleState = {
         runs: [
           {
             runId: RunId("backup-run"),
@@ -132,7 +118,7 @@ describe("StateManager", () => {
         currentRunId: null,
       };
 
-      const backupPath = path.join(TEST_LANGTON_DIR, "state.json.bak");
+      const backupPath = path.join(TEST_TADPOLE_DIR, "state.json.bak");
       await fs.promises.writeFile(backupPath, JSON.stringify(backupState));
 
       await stateManager.initialize();
@@ -142,15 +128,13 @@ describe("StateManager", () => {
       expect(state.runs[0].runId).toBe(RunId("backup-run"));
 
       expect(
-        mockLogger.logs.some((log) =>
-          log.message.includes("Recovered from backup state file")
-        )
+        mockLogger.logs.some((log) => log.message.includes("Recovered from backup state file")),
       ).toBe(true);
     });
 
     test("detects crashed runs on startup", async () => {
       // Create state with running run from dead process
-      const existingState: ST.LangtonState = {
+      const existingState: ST.TadpoleState = {
         runs: [
           {
             runId: RunId("crashed-run"),
@@ -183,7 +167,7 @@ describe("StateManager", () => {
         currentRunId: null,
       };
 
-      const statePath = path.join(TEST_LANGTON_DIR, "state.json");
+      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
       await fs.promises.writeFile(statePath, JSON.stringify(existingState));
 
       await stateManager.initialize();
@@ -300,13 +284,11 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
 
       // Check that state file exists
-      const statePath = path.join(TEST_LANGTON_DIR, "state.json");
+      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
       expect(fs.existsSync(statePath)).toBe(true);
 
       // Load and verify content
-      const savedState = JSON.parse(
-        await fs.promises.readFile(statePath, "utf-8")
-      );
+      const savedState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
       expect(savedState.currentRunId).toBe("test-run");
       expect(savedState.runs).toHaveLength(1);
     });
@@ -423,10 +405,8 @@ describe("StateManager", () => {
       expect(state.runs[0].phases).toHaveLength(5);
 
       // Verify state file is valid
-      const statePath = path.join(TEST_LANGTON_DIR, "state.json");
-      const savedState = JSON.parse(
-        await fs.promises.readFile(statePath, "utf-8")
-      );
+      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const savedState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
       expect(savedState.runs[0].phases).toHaveLength(5);
     });
   });
@@ -461,7 +441,7 @@ describe("StateManager", () => {
     test("getCurrentRun returns active run", () => {
       const currentRun = stateManager.getCurrentRun();
       expect(currentRun).not.toBeNull();
-      expect(currentRun!.runId).toBe(runId);
+      expect(currentRun?.runId).toBe(runId);
     });
 
     test("getCurrentlyRunningPhase returns running phase", async () => {
@@ -502,8 +482,8 @@ describe("StateManager", () => {
 
       const currentPhase = stateManager.getCurrentlyRunningPhase();
       expect(currentPhase).not.toBeNull();
-      expect(currentPhase!.status).toBe("running");
-      expect(currentPhase!.phaseId).toBe(phaseId);
+      expect(currentPhase?.status).toBe("running");
+      expect(currentPhase?.phaseId).toBe(phaseId);
     });
 
     test("cost calculations sum correctly", async () => {
@@ -604,8 +584,8 @@ describe("StateManager", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      const statePath = path.join(TEST_LANGTON_DIR, "state.json");
-      const backupPath = path.join(TEST_LANGTON_DIR, "state.json.bak");
+      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const backupPath = path.join(TEST_TADPOLE_DIR, "state.json.bak");
 
       // First save creates state file, no backup yet
       expect(fs.existsSync(statePath)).toBe(true);
@@ -626,21 +606,17 @@ describe("StateManager", () => {
       expect(fs.existsSync(backupPath)).toBe(true);
 
       // Backup should contain previous state
-      const backupState = JSON.parse(
-        await fs.promises.readFile(backupPath, "utf-8")
-      );
+      const backupState = JSON.parse(await fs.promises.readFile(backupPath, "utf-8"));
       expect(backupState.runs[0].phases).toHaveLength(0);
 
       // Current state should have phase
-      const currentState = JSON.parse(
-        await fs.promises.readFile(statePath, "utf-8")
-      );
+      const currentState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
       expect(currentState.runs[0].phases).toHaveLength(1);
     });
 
     test("validates state integrity", () => {
       // Test with valid state
-      const validState: ST.LangtonState = {
+      const validState: ST.TadpoleState = {
         runs: [],
         currentRunId: null,
       };
@@ -654,21 +630,17 @@ describe("StateManager", () => {
         invalid: "structure",
       });
       expect(corruptedValidation.valid).toBe(false);
-      expect(
-        corruptedValidation.errors.some((e) => e.type === "corrupted_data")
-      ).toBe(true);
+      expect(corruptedValidation.errors.some((e) => e.type === "corrupted_data")).toBe(true);
 
       // Test with missing run reference
-      const missingRunState: ST.LangtonState = {
+      const missingRunState: ST.TadpoleState = {
         runs: [],
         currentRunId: RunId("non-existent"),
       };
 
       const missingValidation = stateManager.validate(missingRunState);
       expect(missingValidation.valid).toBe(false);
-      expect(
-        missingValidation.errors.some((e) => e.type === "missing_run")
-      ).toBe(true);
+      expect(missingValidation.errors.some((e) => e.type === "missing_run")).toBe(true);
     });
   });
 
@@ -776,14 +748,14 @@ describe("StateManager", () => {
       await stateManager.initialize();
 
       // Make directory read-only to cause save error
-      const statePath = path.join(TEST_LANGTON_DIR, "state.json");
+      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
       await fs.promises.writeFile(statePath, "dummy");
-      await fs.promises.chmod(TEST_LANGTON_DIR, 0o444); // Read-only
+      await fs.promises.chmod(TEST_TADPOLE_DIR, 0o444); // Read-only
 
-      let errorEmitted = false;
+      let _errorEmitted = false;
       stateManager.on("transitionError", ({ error }) => {
         expect(error).toBeInstanceOf(PersistenceError);
-        errorEmitted = true;
+        _errorEmitted = true;
       });
 
       stateManager.transition({
@@ -800,7 +772,7 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
 
       // Restore permissions
-      await fs.promises.chmod(TEST_LANGTON_DIR, 0o755);
+      await fs.promises.chmod(TEST_TADPOLE_DIR, 0o755);
 
       // State should still be updated in memory despite save error
       const state = stateManager.getState();

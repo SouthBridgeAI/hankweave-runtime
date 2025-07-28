@@ -1,14 +1,14 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { PhaseId } from "../../server/branded-types";
 import {
   calculateCost,
+  DEFAULT_CONFIG,
   loadPhaseConfig,
   validatePhaseConfig,
 } from "../../server/config";
-import { DEFAULT_CONFIG } from "../../server/config";
-import type { PhaseConfig } from "../../server/types";
-import { PhaseId } from "../../server/branded-types";
-import * as fs from "fs";
-import * as path from "path";
+import type { ModelName, PhaseConfig } from "../../server/types";
 
 describe("calculateCost", () => {
   const costs = DEFAULT_CONFIG.costsPerMTok;
@@ -21,7 +21,7 @@ describe("calculateCost", () => {
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
-      costs
+      costs,
     );
     expect(result).toBe(0);
   });
@@ -34,7 +34,7 @@ describe("calculateCost", () => {
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
-      costs
+      costs,
     );
     expect(result).toBe(costs.input / 1000);
   });
@@ -47,7 +47,7 @@ describe("calculateCost", () => {
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
-      costs
+      costs,
     );
     expect(result).toBe(costs.output / 1000);
   });
@@ -60,7 +60,7 @@ describe("calculateCost", () => {
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
-      costs
+      costs,
     );
     const expected = (costs.input + 2 * costs.output) / 1000;
     expect(result).toBe(expected);
@@ -76,8 +76,8 @@ describe("calculateCost", () => {
           cacheCreationTokens: largeTokens,
           cacheReadTokens: largeTokens,
         },
-        costs
-      )
+        costs,
+      ),
     ).not.toThrow();
   });
 
@@ -89,7 +89,7 @@ describe("calculateCost", () => {
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
-      costs
+      costs,
     );
     const expected = (1234 * costs.input + 5678 * costs.output) / 1_000_000;
     expect(result).toBeCloseTo(expected, 6);
@@ -103,10 +103,9 @@ describe("calculateCost", () => {
         cacheCreationTokens: 500,
         cacheReadTokens: 0,
       },
-      costs
+      costs,
     );
-    const expected =
-      (costs.input + costs.output + 0.5 * costs.inputCache) / 1000;
+    const expected = (costs.input + costs.output + 0.5 * costs.inputCache) / 1000;
     expect(result).toBe(expected);
   });
 });
@@ -235,7 +234,7 @@ describe("validatePhaseConfig", () => {
 
     fs.writeFileSync(configPath, JSON.stringify(config));
     await expect(validatePhaseConfig(configPath, projectPath)).rejects.toThrow(
-      "Duplicate phase ID"
+      "Duplicate phase ID",
     );
   });
 
@@ -263,9 +262,7 @@ describe("validatePhaseConfig", () => {
     const result = await validatePhaseConfig(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toContain(
-      'Duplicate phase name "Duplicate Name"'
-    );
+    expect(result.warnings[0]).toContain('Duplicate phase name "Duplicate Name"');
   });
 
   test("warns about empty prompt files", async () => {
@@ -364,7 +361,7 @@ describe("validatePhaseConfig", () => {
 
     fs.writeFileSync(configPath, JSON.stringify(config));
     await expect(validatePhaseConfig(configPath, projectPath)).rejects.toThrow(
-      "Invalid target path"
+      "Invalid target path",
     );
   });
 
@@ -393,9 +390,7 @@ describe("validatePhaseConfig", () => {
     const result = await validatePhaseConfig(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toContain(
-      "Potentially dangerous command detected"
-    );
+    expect(result.warnings[0]).toContain("Potentially dangerous command detected");
   });
 
   test("validates continuation mode dependencies", async () => {
@@ -470,7 +465,7 @@ describe("validatePhaseConfig", () => {
 
     fs.writeFileSync(configPath, JSON.stringify(config));
     await expect(validatePhaseConfig(configPath, projectPath)).rejects.toThrow(
-      "Command cannot be empty"
+      "Command cannot be empty",
     );
   });
 
@@ -483,9 +478,7 @@ describe("validatePhaseConfig", () => {
     ];
 
     fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
-    await expect(
-      validatePhaseConfig(configPath, projectPath)
-    ).rejects.toThrow();
+    await expect(validatePhaseConfig(configPath, projectPath)).rejects.toThrow();
   });
 });
 
@@ -555,7 +548,7 @@ describe("loadPhaseConfig", () => {
       {
         id: PhaseId("test-phase"),
         name: "Test Phase",
-        model: "invalid-model-name" as any, // Intentionally invalid for testing
+        model: "invalid-model-name" as ModelName, // Intentionally invalid for testing
         continuationMode: "fresh",
         promptText: "Test prompt",
       },

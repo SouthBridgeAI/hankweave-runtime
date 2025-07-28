@@ -148,7 +148,7 @@ const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one p
 
 /**
  * Default server configuration values.
- * Can be overridden by passing config to LangtonServer constructor.
+ * Can be overridden by passing config to TadpoleServer constructor.
  *
  * Note: execution paths and phases must be provided by the user.
  */
@@ -165,9 +165,9 @@ export const DEFAULT_CONFIG: Omit<
 > = {
   port: 7777,
   version: "1.0.0",
-  lockFile: ".langton/server.lock",
-  socketLogFile: ".langton/logs/websocket.log",
-  serverLogFile: ".langton/logs/server.log",
+  lockFile: ".tadpole/server.lock",
+  socketLogFile: ".tadpole/logs/websocket.log",
+  serverLogFile: ".tadpole/logs/server.log",
   costsPerMTok: {
     input: 3.0, // $3 per million input tokens
     inputCache: 3.75, // $3.75 per million tokens when creating cache

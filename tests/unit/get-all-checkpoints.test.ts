@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { StateManager } from "../../server/state-manager.js";
 import type { CheckpointGit } from "../../server/checkpoint-git.js";
+import { StateManager } from "../../server/state-manager.js";
 import { Logger } from "../../server/utils.js";
 
 // Create mock functions
@@ -14,7 +14,7 @@ const mockGetAllCheckpoints = mock(
       message: string;
       timestamp: string;
       branch: string;
-    }>
+    }>,
 );
 
 // Mock CheckpointGit
@@ -86,14 +86,14 @@ describe("StateManager - getAllCheckpoints", () => {
     expect(result).toHaveLength(3);
 
     // Should be ordered by timestamp (newest first)
-    expect(result![0].sha).toBe("abc123");
-    expect(result![1].sha).toBe("def456");
-    expect(result![2].sha).toBe("ghi789");
+    expect(result?.[0].sha).toBe("abc123");
+    expect(result?.[1].sha).toBe("def456");
+    expect(result?.[2].sha).toBe("ghi789");
 
     // Should have all properties
-    expect(result![0]).toHaveProperty("message");
-    expect(result![0]).toHaveProperty("timestamp");
-    expect(result![0]).toHaveProperty("branch");
+    expect(result?.[0]).toHaveProperty("message");
+    expect(result?.[0]).toHaveProperty("timestamp");
+    expect(result?.[0]).toHaveProperty("branch");
   });
 
   test("handles git errors gracefully", async () => {

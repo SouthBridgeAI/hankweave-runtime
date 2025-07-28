@@ -1,8 +1,8 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { UnifiedFileResolver } from "../../server/file-resolver";
-import * as fs from "fs";
-import * as path from "path";
-import { execSync } from "child_process";
 
 describe("UnifiedFileResolver - Edge Cases", () => {
   let tempDir: string;
@@ -10,11 +10,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
   let gitRepo: string;
 
   beforeEach(async () => {
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-resolver-edge-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-resolver-edge-${Date.now()}`);
     gitRepo = path.join(tempDir, "git-test");
     await fs.promises.mkdir(tempDir, { recursive: true });
     await fs.promises.mkdir(gitRepo, { recursive: true });
@@ -41,23 +37,14 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.mkdir(path.join(tempDir, "build/temp"), {
         recursive: true,
       });
-      await fs.promises.writeFile(
-        path.join(tempDir, "build/output.js"),
-        "output"
-      );
-      await fs.promises.writeFile(
-        path.join(tempDir, "build/keep/important.js"),
-        "important"
-      );
-      await fs.promises.writeFile(
-        path.join(tempDir, "build/temp/temp.js"),
-        "temp"
-      );
+      await fs.promises.writeFile(path.join(tempDir, "build/output.js"), "output");
+      await fs.promises.writeFile(path.join(tempDir, "build/keep/important.js"), "important");
+      await fs.promises.writeFile(path.join(tempDir, "build/temp/temp.js"), "temp");
 
       // Complex gitignore
       await fs.promises.writeFile(
         path.join(tempDir, ".gitignore"),
-        "build/\n!build/keep/\nbuild/keep/temp/\n"
+        "build/\n!build/keep/\nbuild/keep/temp/\n",
       );
 
       const files = await resolver.resolveFiles(tempDir, ["**/*.js"]);
@@ -71,16 +58,10 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.mkdir(path.join(gitRepo, "src"), { recursive: true });
       await fs.promises.writeFile(path.join(gitRepo, "src/main.js"), "main");
       await fs.promises.writeFile(path.join(gitRepo, "src/test.js"), "test");
-      await fs.promises.writeFile(
-        path.join(gitRepo, "src/important.js"),
-        "important"
-      );
+      await fs.promises.writeFile(path.join(gitRepo, "src/important.js"), "important");
 
       const gitignoreContent = "src/*.js\n!src/important.js\n";
-      await fs.promises.writeFile(
-        path.join(gitRepo, ".gitignore"),
-        gitignoreContent
-      );
+      await fs.promises.writeFile(path.join(gitRepo, ".gitignore"), gitignoreContent);
 
       // Our resolver
       const ourFiles = await resolver.resolveFiles(gitRepo, ["**/*.js"]);
@@ -106,10 +87,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       });
       await fs.promises.writeFile(path.join(tempDir, "logs.txt"), "file");
       await fs.promises.writeFile(path.join(tempDir, "logs/app.log"), "log");
-      await fs.promises.writeFile(
-        path.join(tempDir, "logs/sub/debug.log"),
-        "debug"
-      );
+      await fs.promises.writeFile(path.join(tempDir, "logs/sub/debug.log"), "debug");
 
       // Test different patterns
       const tests = [
@@ -122,9 +100,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
         await fs.promises.writeFile(path.join(tempDir, ".gitignore"), pattern);
         resolver.clearCache(tempDir);
         const files = await resolver.resolveFiles(tempDir, ["**/*"]);
-        expect(files.filter((f) => !f.startsWith(".git")).sort()).toEqual(
-          expected.sort()
-        );
+        expect(files.filter((f) => !f.startsWith(".git")).sort()).toEqual(expected.sort());
       }
     });
   });
@@ -159,10 +135,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.writeFile(path.join(tempDir, "file3.txt"), "content");
 
       // Escape special chars in gitignore
-      await fs.promises.writeFile(
-        path.join(tempDir, ".gitignore"),
-        "file\\[1\\].txt\n"
-      );
+      await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "file\\[1\\].txt\n");
 
       const files = await resolver.resolveFiles(tempDir, ["*.txt"]);
       expect(files.sort()).toEqual(["file3.txt", "file[2].txt"]);
@@ -175,10 +148,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.writeFile(path.join(tempDir, "target.txt"), "target");
 
       // Create symlink
-      await fs.promises.symlink(
-        path.join(tempDir, "target.txt"),
-        path.join(tempDir, "link.txt")
-      );
+      await fs.promises.symlink(path.join(tempDir, "target.txt"), path.join(tempDir, "link.txt"));
 
       const files = await resolver.resolveFiles(tempDir, ["*.txt"]);
 
@@ -189,29 +159,20 @@ describe("UnifiedFileResolver - Edge Cases", () => {
     test("ignores symlinked directories", async () => {
       await fs.promises.mkdir(path.join(tempDir, "real-dir"));
       await fs.promises.mkdir(path.join(tempDir, "target-dir"));
-      await fs.promises.writeFile(
-        path.join(tempDir, "real-dir/file.txt"),
-        "real"
-      );
-      await fs.promises.writeFile(
-        path.join(tempDir, "target-dir/file.txt"),
-        "target"
-      );
+      await fs.promises.writeFile(path.join(tempDir, "real-dir/file.txt"), "real");
+      await fs.promises.writeFile(path.join(tempDir, "target-dir/file.txt"), "target");
 
       // Create directory symlink
       await fs.promises.symlink(
         path.join(tempDir, "target-dir"),
         path.join(tempDir, "link-dir"),
-        "dir"
+        "dir",
       );
 
       const files = await resolver.resolveFiles(tempDir, ["**/*.txt"]);
 
       // Should not follow symlinked directory
-      expect(files.sort()).toEqual([
-        "real-dir/file.txt",
-        "target-dir/file.txt",
-      ]);
+      expect(files.sort()).toEqual(["real-dir/file.txt", "target-dir/file.txt"]);
     });
   });
 
@@ -222,10 +183,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       for (let i = 0; i < 12; i++) {
         currentPath = path.join(currentPath, `level${i}`);
         await fs.promises.mkdir(currentPath, { recursive: true });
-        await fs.promises.writeFile(
-          path.join(currentPath, `file${i}.txt`),
-          `content${i}`
-        );
+        await fs.promises.writeFile(path.join(currentPath, `file${i}.txt`), `content${i}`);
       }
 
       const start = Date.now();
@@ -251,42 +209,22 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.writeFile(path.join(tempDir, "root.log"), "log");
       await fs.promises.writeFile(path.join(tempDir, "src/debug.log"), "log");
       await fs.promises.writeFile(path.join(tempDir, "src/main.js"), "js");
-      await fs.promises.writeFile(
-        path.join(tempDir, "src/components/component.test.js"),
-        "js"
-      );
-      await fs.promises.writeFile(
-        path.join(tempDir, "src/components/component.tsx"),
-        "tsx"
-      );
-      await fs.promises.writeFile(
-        path.join(tempDir, "src/utils/helper.js"),
-        "js"
-      );
-      await fs.promises.writeFile(
-        path.join(tempDir, "src/utils/temp.js"),
-        "js"
-      );
+      await fs.promises.writeFile(path.join(tempDir, "src/components/component.test.js"), "js");
+      await fs.promises.writeFile(path.join(tempDir, "src/components/component.tsx"), "tsx");
+      await fs.promises.writeFile(path.join(tempDir, "src/utils/helper.js"), "js");
+      await fs.promises.writeFile(path.join(tempDir, "src/utils/temp.js"), "js");
 
       // Root .gitignore
       await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "*.log\n");
 
       // src/.gitignore
-      await fs.promises.writeFile(
-        path.join(tempDir, "src/.gitignore"),
-        "*.test.js\n"
-      );
+      await fs.promises.writeFile(path.join(tempDir, "src/.gitignore"), "*.test.js\n");
 
       // src/utils/.gitignore
-      await fs.promises.writeFile(
-        path.join(tempDir, "src/utils/.gitignore"),
-        "temp.js\n"
-      );
+      await fs.promises.writeFile(path.join(tempDir, "src/utils/.gitignore"), "temp.js\n");
 
       const files = await resolver.resolveFiles(tempDir, ["**/*"]);
-      const jsFiles = files.filter(
-        (f) => f.endsWith(".js") || f.endsWith(".tsx")
-      );
+      const jsFiles = files.filter((f) => f.endsWith(".js") || f.endsWith(".tsx"));
 
       expect(jsFiles.sort()).toEqual([
         "src/components/component.tsx",
@@ -304,19 +242,10 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.writeFile(path.join(gitRepo, "app.js"), "app");
       await fs.promises.writeFile(path.join(gitRepo, "src/main.js"), "main");
       await fs.promises.writeFile(path.join(gitRepo, "src/test.js"), "test");
-      await fs.promises.writeFile(
-        path.join(gitRepo, "src/test/spec.js"),
-        "spec"
-      );
+      await fs.promises.writeFile(path.join(gitRepo, "src/test/spec.js"), "spec");
 
-      await fs.promises.writeFile(
-        path.join(gitRepo, ".gitignore"),
-        "*.log\ntemp/\n"
-      );
-      await fs.promises.writeFile(
-        path.join(gitRepo, "src/.gitignore"),
-        "test.js\n"
-      );
+      await fs.promises.writeFile(path.join(gitRepo, ".gitignore"), "*.log\ntemp/\n");
+      await fs.promises.writeFile(path.join(gitRepo, "src/.gitignore"), "test.js\n");
 
       // Our resolver
       const ourFiles = await resolver.resolveFiles(gitRepo, ["**/*.js"]);
@@ -344,7 +273,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       // Escape special characters
       await fs.promises.writeFile(
         path.join(tempDir, ".gitignore"),
-        "\\#comment.txt\n\\!important.txt\n"
+        "\\#comment.txt\n\\!important.txt\n",
       );
 
       const files = await resolver.resolveFiles(tempDir, ["*.txt"]);
@@ -356,10 +285,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
     test("handles gitignore with 1000+ rules efficiently", async () => {
       // Create many files
       for (let i = 0; i < 100; i++) {
-        await fs.promises.writeFile(
-          path.join(tempDir, `file${i}.txt`),
-          `content${i}`
-        );
+        await fs.promises.writeFile(path.join(tempDir, `file${i}.txt`), `content${i}`);
       }
 
       // Create large .gitignore
@@ -369,10 +295,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
         rules.push(`pattern${i}*`);
         rules.push(`!important${i}.txt`);
       }
-      await fs.promises.writeFile(
-        path.join(tempDir, ".gitignore"),
-        rules.join("\n")
-      );
+      await fs.promises.writeFile(path.join(tempDir, ".gitignore"), rules.join("\n"));
 
       const start = Date.now();
       const files = await resolver.resolveFiles(tempDir, ["*.txt"]);
@@ -389,10 +312,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
         recursive: true,
       });
       await fs.promises.writeFile(path.join(tempDir, ".env"), "env");
-      await fs.promises.writeFile(
-        path.join(tempDir, ".hidden/secret.txt"),
-        "secret"
-      );
+      await fs.promises.writeFile(path.join(tempDir, ".hidden/secret.txt"), "secret");
       await fs.promises.writeFile(path.join(tempDir, "visible.txt"), "visible");
 
       const files = await resolver.resolveFiles(tempDir, ["**/*"]);
@@ -405,10 +325,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
     test("gitignore rules apply to hidden files", async () => {
       await fs.promises.writeFile(path.join(tempDir, ".env"), "env");
       await fs.promises.writeFile(path.join(tempDir, ".env.local"), "local");
-      await fs.promises.writeFile(
-        path.join(tempDir, ".gitignore"),
-        ".env.local\n"
-      );
+      await fs.promises.writeFile(path.join(tempDir, ".gitignore"), ".env.local\n");
 
       const files = await resolver.resolveFiles(tempDir, [".*"]);
 
@@ -423,10 +340,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.mkdir(path.join(tempDir, "src", "components"), {
         recursive: true,
       });
-      await fs.promises.writeFile(
-        path.join(tempDir, "src", "components", "App.tsx"),
-        "app"
-      );
+      await fs.promises.writeFile(path.join(tempDir, "src", "components", "App.tsx"), "app");
 
       const files = await resolver.resolveFiles(tempDir, ["**/*.tsx"]);
 
@@ -441,10 +355,7 @@ describe("UnifiedFileResolver - Edge Cases", () => {
       await fs.promises.writeFile(path.join(tempDir, "file.txt"), "content");
 
       // Invalid patterns in .gitignore
-      await fs.promises.writeFile(
-        path.join(tempDir, ".gitignore"),
-        "[[\n**[[\n\\x\n"
-      );
+      await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "[[\n**[[\n\\x\n");
 
       // Should not throw, should handle gracefully
       const files = await resolver.resolveFiles(tempDir, ["*.txt"]);

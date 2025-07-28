@@ -14,7 +14,7 @@ import type {
 /**
  * STATE SYSTEM DESIGN DOCUMENT
  *
- * This is a living document describing the state management system for Langton,
+ * This is a living document describing the state management system for Tadpole,
  * focusing on enabling rollback, branching, and comprehensive attempt tracking.
  *
  * KEY PRINCIPLES:
@@ -339,12 +339,12 @@ export type AttemptState =
 // ============================================================================
 
 /**
- * Complete state for a Langton server run
+ * Complete state for a Tadpole server run
  *
  * STATE MANAGEMENT STRATEGY:
  *
  * 1. PERSISTENCE:
- *    - Stored in: .langton/runs/{runId}/state.json
+ *    - Stored in: .tadpole/runs/{runId}/state.json
  *    - Write pattern: Atomic write-rename
  *    - Backup: Previous state kept as state.json.bak
  *
@@ -467,7 +467,7 @@ export interface RunState {
  * WAL DESIGN:
  *
  * Purpose: Crash recovery and audit trail
- * Location: .langton/runs/{runId}/wal.jsonl
+ * Location: .tadpole/runs/{runId}/wal.jsonl
  *
  * Write Pattern:
  * 1. Append event to WAL

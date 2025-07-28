@@ -28,7 +28,7 @@ const EXECUTION_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved");
 const DATA_SOURCE_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-improved-data"); // Empty data source
 const SNAPSHOT_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-snapshots");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
-const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7786");
+const SERVER_PORT = parseInt(process.env.tadpole_TEST_PORT || "7786");
 const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
@@ -150,7 +150,7 @@ async function createSnapshot(
   await fs.promises.cp(executionPath, snapshotPath, { recursive: true });
 
   // Get current state
-  const statePath = path.join(executionPath, ".langton/state.json");
+  const statePath = path.join(executionPath, ".tadpole/state.json");
   const state = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
   console.log(
     `${colors.gray}  State: ${state.runs.length} runs, current: ${state.currentRunId}${colors.reset}`,
@@ -758,14 +758,14 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   // Verify complete cleanup
   const notesDir = path.join(EXECUTION_DIR, "notes");
   const typescriptDir = path.join(EXECUTION_DIR, "typescript_code");
-  const langtonDir = path.join(EXECUTION_DIR, ".langton");
+  const tadpoleDir = path.join(EXECUTION_DIR, ".tadpole");
 
   console.log(`${colors.blue}Verifying complete cleanup...${colors.reset}`);
   console.log(`${colors.gray}  notes/ exists: ${fs.existsSync(notesDir)}${colors.reset}`);
   console.log(
     `${colors.gray}  typescript_code/ exists: ${fs.existsSync(typescriptDir)}${colors.reset}`,
   );
-  console.log(`${colors.gray}  .langton/ exists: ${fs.existsSync(langtonDir)}${colors.reset}`);
+  console.log(`${colors.gray}  .tadpole/ exists: ${fs.existsSync(tadpoleDir)}${colors.reset}`);
 
   if (firstCheckpoint.checkpointType === "completed" && fs.existsSync(notesDir)) {
     console.log(
@@ -853,16 +853,16 @@ describe("Comprehensive Rollback E2E Test", () => {
         expect(fs.existsSync(snapshot.directory)).toBe(true);
 
         // Check key directories
-        const langtonDir = path.join(snapshot.directory, ".langton");
+        const tadpoleDir = path.join(snapshot.directory, ".tadpole");
         const notesDir = path.join(snapshot.directory, "notes");
         const typescriptDir = path.join(snapshot.directory, "typescript_code");
 
-        console.log(`  .langton exists: ${fs.existsSync(langtonDir)}`);
+        console.log(`  .tadpole exists: ${fs.existsSync(tadpoleDir)}`);
         console.log(`  notes exists: ${fs.existsSync(notesDir)}`);
         console.log(`  typescript_code exists: ${fs.existsSync(typescriptDir)}`);
 
         // Check state.json
-        const stateFile = path.join(langtonDir, "state.json");
+        const stateFile = path.join(tadpoleDir, "state.json");
         if (fs.existsSync(stateFile)) {
           const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
           console.log(`  Runs in state: ${state.runs.length}`);

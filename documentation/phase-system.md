@@ -1,14 +1,14 @@
-# The Langton Phase System: Runs, Phases, and Execution Threads
+# The Tadpole Phase System: Runs, Phases, and Execution Threads
 
 ## Overview
 
-The Langton phase system provides a robust framework for structuring complex AI workflows. Instead of a single, monolithic prompt, tasks are broken down into a sequence of discrete, manageable units called "phases". This modular approach enables greater control, better state management, and powerful features like context preservation and rollback. The system is built on three core concepts: Phases, Runs, and Execution Threads.
+The Tadpole phase system provides a robust framework for structuring complex AI workflows. Instead of a single, monolithic prompt, tasks are broken down into a sequence of discrete, manageable units called "phases". This modular approach enables greater control, better state management, and powerful features like context preservation and rollback. The system is built on three core concepts: Phases, Runs, and Execution Threads.
 
 ## Core Concepts
 
 ### Phase
 
-A **Phase** is the fundamental unit of work in the Langton system. It represents a single, focused task for Claude to perform, defined by a configuration object in your `phases.json` file. Each phase encapsulates everything needed for its execution:
+A **Phase** is the fundamental unit of work in the Tadpole system. It represents a single, focused task for Claude to perform, defined by a configuration object in your `phases.json` file. Each phase encapsulates everything needed for its execution:
 
 - **Identity**: A unique `id` for programmatic reference and a human-readable `name` for display.
 - **Prompt**: The instructions for Claude, which can be provided as inline text (`promptText`) or loaded from one or more files (`promptFile`).
@@ -81,7 +81,7 @@ A **Phase** is the fundamental unit of work in the Langton system. It represents
 
 ### Run
 
-A **Run** represents a single, complete lifecycle of the Langton server, from startup to shutdown. Each time you start the server, a new run is initiated. A run is not just a container for phase executions; it's a stateful entity with its own identity and history.
+A **Run** represents a single, complete lifecycle of the Tadpole server, from startup to shutdown. Each time you start the server, a new run is initiated. A run is not just a container for phase executions; it's a stateful entity with its own identity and history.
 
 - **Unique Identifier**: Each run is assigned a unique ID (e.g., `1737288000000-abc12`) that is used for logging, state management, and as the basis for its dedicated git branch.
 - **Git Branch**: To support the checkpoint and rollback system, each run is associated with its own branch in the shadow git repository, ensuring that the version history of different execution paths is kept isolated.

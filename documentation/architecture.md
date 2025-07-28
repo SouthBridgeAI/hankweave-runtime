@@ -1,10 +1,10 @@
-# Langton Runner Architecture
+# Tadpole Runner Architecture
 
 ## System Overview
 
-Langton Runner is a sophisticated orchestration server designed to manage complex, multi-step AI workflows executed by the Claude AI. At its core, it is a stateful, WebSocket-based application that provides a structured environment for breaking down large tasks into discrete, manageable "phases". This architecture enables robust features such as persistent state, file tracking, cost monitoring, and a powerful git-based rollback system.
+Tadpole Runner is a sophisticated orchestration server designed to manage complex, multi-step AI workflows executed by the Claude AI. At its core, it is a stateful, WebSocket-based application that provides a structured environment for breaking down large tasks into discrete, manageable "phases". This architecture enables robust features such as persistent state, file tracking, cost monitoring, and a powerful git-based rollback system.
 
-A key architectural feature is **execution isolation**: Langton runs in separate execution directories rather than directly in your project. This provides clean rollbacks, multiple execution tracking, and ensures your original data remains untouched. The user's project is accessed via a symlink or copy at `<execution-dir>/data/`.
+A key architectural feature is **execution isolation**: Tadpole runs in separate execution directories rather than directly in your project. This provides clean rollbacks, multiple execution tracking, and ensures your original data remains untouched. The user's project is accessed via a symlink or copy at `<execution-dir>/data/`.
 
 ### Core Design Principles
 
@@ -53,12 +53,12 @@ The server is composed of several distinct, yet interconnected, modules.
 
 ### The Core Orchestrator
 
--   **`server/langton-server.ts`**: This is the central nervous system of the application. The `LangtonServer` class orchestrates all other components. Its key responsibilities include managing the WebSocket server and client connection, processing incoming commands, controlling the phase execution lifecycle, and routing events from various subsystems to the connected client.
+-   **`server/langton-server.ts`**: This is the central nervous system of the application. The `TadpoleServer` class orchestrates all other components. Its key responsibilities include managing the WebSocket server and client connection, processing incoming commands, controlling the phase execution lifecycle, and routing events from various subsystems to the connected client.
 
 ### State Management Subsystem
 
 -   **`server/state-manager.ts`**: This module implements a centralized, event-sourcing-inspired pattern for state management. It exposes a simple `transition()` method, which queues state change events. These events are processed sequentially, ensuring that all state modifications are validated, applied immutably, and persisted atomically to disk. It also features a cost cache for performance and crash recovery logic.
--   **`server/state-types.ts`**: This file is crucial for the system's type safety. It defines the TypeScript interfaces for the entire state tree, including the `LangtonState`, `Run`, and the `PhaseExecution` discriminated union, which models the seven distinct states of a phase's lifecycle.
+-   **`server/state-types.ts`**: This file is crucial for the system's type safety. It defines the TypeScript interfaces for the entire state tree, including the `TadpoleState`, `Run`, and the `PhaseExecution` discriminated union, which models the seven distinct states of a phase's lifecycle.
 -   **`server/execution-thread.ts`**: This module contains the logic for analyzing the execution history. Its primary export, `analyzeExecutionThread`, is a powerful function that traverses the potentially branching history of runs to construct a single, logical "thread" of execution, which is used to determine the next phase to run.
 
 ### Process & Log Management
@@ -73,18 +73,18 @@ The server is composed of several distinct, yet interconnected, modules.
 
 ### Execution Isolation
 
--   **`server/execution-setup.ts`**: Manages the creation and detection of execution directories. It handles automatic execution directory creation in `~/.langton-executions/`, supports explicit execution paths, and manages data access via symlinks or copies. This module ensures clean separation between user data and execution artifacts.
+-   **`server/execution-setup.ts`**: Manages the creation and detection of execution directories. It handles automatic execution directory creation in `~/.tadpole-executions/`, supports explicit execution paths, and manages data access via symlinks or copies. This module ensures clean separation between user data and execution artifacts.
 -   **`server/data-hasher.ts`**: Generates deterministic hashes of data directories to identify which executions belong to which data source. Uses time and depth limits to handle large projects efficiently while maintaining unique identification across different data sources.
 
 ## Data Flow and Interaction
 
 ### A Typical Phase Execution Flow
 
-1.  **Command Reception**: A client sends a `phase.start` command over WebSocket. The `LangtonServer` receives it and calls its internal `startPhase` method.
+1.  **Command Reception**: A client sends a `phase.start` command over WebSocket. The `TadpoleServer` receives it and calls its internal `startPhase` method.
 2.  **Phase Initialization**: `startPhase` orchestrates the setup, which includes running `workspaceSetup` commands, creating a `workspace-setup` checkpoint via `CheckpointGit`, and finally using `ClaudeProcessManager` to spawn the Claude CLI process.
 3.  **Log Processing**: As the Claude process runs, it writes JSONL logs to a file. The `ClaudeLogParser` tails this file, parses new lines, and emits events (e.g., for an assistant message).
-4.  **State Updates**: The `LangtonServer` listens for these parser events. Upon receiving one, it creates a corresponding `StateTransition` object (e.g., `CostsIncremented`) and sends it to the `StateManager`. The `StateManager` validates, applies, and persists the change.
-5.  **Client Notification**: The `LangtonServer` also transforms the parser event into a WebSocket protocol event (e.g., `assistant.action`) and sends it to the client.
+4.  **State Updates**: The `TadpoleServer` listens for these parser events. Upon receiving one, it creates a corresponding `StateTransition` object (e.g., `CostsIncremented`) and sends it to the `StateManager`. The `StateManager` validates, applies, and persists the change.
+5.  **Client Notification**: The `TadpoleServer` also transforms the parser event into a WebSocket protocol event (e.g., `assistant.action`) and sends it to the client.
 
 ### The State Transition Flow
 
@@ -103,7 +103,7 @@ The state transition process is designed to be robust and atomic:
 └─────────────────────────────────┬───────────────────────────────────┘
                                   │
                     ┌─────────────▼─────────────┐
-                    │    LangtonServer          │
+                    │    TadpoleServer          │
                     │  (Core Orchestrator)      │
                     └──┬──────┬──────┬──────┬──┘
                        │      │      │      │
@@ -127,7 +127,7 @@ The state transition process is designed to be robust and atomic:
 
 ### Shadow Git Repository
 
-Instead of interfering with the user's project git repository, the server maintains its own isolated repository in `.langton/checkpoints`. This provides several advantages:
+Instead of interfering with the user's project git repository, the server maintains its own isolated repository in `.tadpole/checkpoints`. This provides several advantages:
 -   **No Interference**: It doesn't create commits or branches in the user's repository.
 -   **Complete History**: It can track files that might be in the user's `.gitignore` (e.g., build artifacts), providing a more complete snapshot of the workspace state.
 -   **Clean Slate**: It starts from an empty commit, providing a reliable baseline to diff against.
@@ -181,11 +181,11 @@ The server operates in isolated execution directories rather than directly in th
 
 #### Directory Structure
 ```
-~/.langton-executions/
+~/.tadpole-executions/
 ├── 1737123456789-abc-d4f5e6/     # Execution directory
 │   ├── data/ → /path/to/project   # Symlink to user's data
 │   ├── generated-docs/            # Files created by Claude
-│   └── .langton/                  # Langton state and metadata
+│   └── .tadpole/                  # Tadpole state and metadata
 │       ├── execution-meta.json
 │       ├── state.json
 │       └── checkpoints/

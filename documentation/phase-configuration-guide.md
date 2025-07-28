@@ -1,6 +1,6 @@
 # Complete Guide to Phase Configuration
 
-This guide covers all the ways you can configure phases in Langton Runner, from simple single-phase workflows to complex multi-phase automations with workspace setup, file tracking, and environment management.
+This guide covers all the ways you can configure phases in Tadpole Runner, from simple single-phase workflows to complex multi-phase automations with workspace setup, file tracking, and environment management.
 
 ## Table of Contents
 1. [Basic Phase Structure](#basic-phase-structure)
@@ -583,5 +583,4 @@ bun run validate --config=my-phases.json
 1. Start with a minimal configuration and add features incrementally
 2. Test workspace setup commands in isolation first
 3. Use the `--no-autostart` flag to manually control phase execution
-4. Check `.langton/runs/<runId>/` for Claude's actual output
-5. Enable debug logging: `DEBUG=langton:* bun run server`
+4. Check `.tadpole/runs/<runId>/` for Claude's actual output

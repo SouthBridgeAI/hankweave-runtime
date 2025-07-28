@@ -1,6 +1,6 @@
 # Documentation Clarity Improvements Needed
 
-After reviewing the Langton Runner documentation, here are areas that need more explanation or clarification. This document tracks what has been addressed (✅) and what still needs work.
+After reviewing the Tadpole Runner documentation, here are areas that need more explanation or clarification. This document tracks what has been addressed (✅) and what still needs work.
 
 ## ✅ Recently Addressed
 

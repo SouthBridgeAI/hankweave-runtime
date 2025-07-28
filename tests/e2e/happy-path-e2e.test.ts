@@ -66,7 +66,7 @@ const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const DATA_SOURCE_DIR = path.join(TEST_ROOT, "tests/test-area/happy-path-data");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
-const SERVER_PORT = parseInt(process.env.LANGTON_TEST_PORT || "7780");
+const SERVER_PORT = parseInt(process.env.tadpole_TEST_PORT || "7780");
 const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
 
 // Generate timestamp for this test run
@@ -292,7 +292,7 @@ async function validateCheckpointSystem(): Promise<void> {
     return;
   }
 
-  const checkpointDir = path.join(testState.executionPath, ".langton/checkpoints");
+  const checkpointDir = path.join(testState.executionPath, ".tadpole/checkpoints");
   const gitDir = path.join(checkpointDir, ".git");
 
   // Store validation results for tests
@@ -417,7 +417,7 @@ async function runFullCleanup(): Promise<void> {
 
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
 console.log(
-  `${colors.blue}Langton Server End-to-End Test (with Execution Isolation)${colors.reset}`,
+  `${colors.blue}Tadpole Server End-to-End Test (with Execution Isolation)${colors.reset}`,
 );
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
@@ -429,7 +429,7 @@ await setupAndRunPhases();
 // NOTE: Many test groups need updates to use testState.executionPath
 // ============================================================================
 
-describe("Langton E2E Test", () => {
+describe("Tadpole E2E Test", () => {
   describe("Phase Execution", () => {
     runPhaseExecutionTests(testState);
   });

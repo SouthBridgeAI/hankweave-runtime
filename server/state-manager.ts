@@ -28,7 +28,7 @@ export class PersistenceError extends Error {
 }
 
 export class StateManager extends TypedEventEmitter<StateManagerEvents> implements ST.StateManager {
-  private state: ST.LangtonState;
+  private state: ST.TadpoleState;
   private readonly statePath: string;
   private readonly stateBackupPath: string;
   private readonly logger: Logger;
@@ -45,14 +45,14 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
   };
 
   constructor(
-    private readonly langtonDir: string,
+    private readonly tadpoleDir: string,
     logger: Logger,
     private readonly phaseConfigs?: PhaseConfig[],
   ) {
     super();
     this.logger = logger;
-    this.statePath = path.join(langtonDir, "state.json");
-    this.stateBackupPath = path.join(langtonDir, "state.json.bak");
+    this.statePath = path.join(tadpoleDir, "state.json");
+    this.stateBackupPath = path.join(tadpoleDir, "state.json.bak");
 
     // Initialize empty state
     this.state = {
@@ -117,7 +117,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
   }
 
-  getState(): Readonly<ST.LangtonState> {
+  getState(): Readonly<ST.TadpoleState> {
     return this.state;
   }
 
@@ -217,7 +217,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
   // Event logging for debugging
   private async logTransitionEvent(event: ST.StateTransition): Promise<void> {
-    const eventLog = path.join(this.langtonDir, "events.jsonl");
+    const eventLog = path.join(this.tadpoleDir, "events.jsonl");
     const logEntry = {
       timestamp: new Date().toISOString(),
       serverPid: process.pid,
@@ -253,7 +253,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
 
     // Referential integrity
-    const typedState = state as ST.LangtonState;
+    const typedState = state as ST.TadpoleState;
     if (
       typedState.currentRunId &&
       !typedState.runs.find((r) => r.runId === typedState.currentRunId)
@@ -265,7 +265,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
 
     // Check for orphaned run folders
-    const runsDir = path.join(this.langtonDir, "runs");
+    const runsDir = path.join(this.tadpoleDir, "runs");
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);
       const stateRunIds = new Set(typedState.runs.map((r) => r.runId));
@@ -283,7 +283,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     return { valid: errors.length === 0, errors, warnings };
   }
 
-  private isValidStateStructure(state: unknown): state is ST.LangtonState {
+  private isValidStateStructure(state: unknown): state is ST.TadpoleState {
     // Basic type checking - can be expanded
     if (!state || typeof state !== "object") return false;
     const s = state as Record<string, unknown>;
@@ -433,7 +433,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
   /**
    * Set the checkpoint git instance for git operations.
-   * Called by LangtonServer after initializing CheckpointGit.
+   * Called by TadpoleServer after initializing CheckpointGit.
    */
   setCheckpointGit(checkpointGit: CheckpointGit): void {
     this.checkpointGit = checkpointGit;
@@ -556,9 +556,9 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     // Add more validation as needed
   }
 
-  private applyTransition(state: ST.LangtonState, event: ST.StateTransition): ST.LangtonState {
+  private applyTransition(state: ST.TadpoleState, event: ST.StateTransition): ST.TadpoleState {
     // Deep clone state to ensure immutability
-    const newState = JSON.parse(JSON.stringify(state)) as ST.LangtonState;
+    const newState = JSON.parse(JSON.stringify(state)) as ST.TadpoleState;
 
     switch (event.type) {
       case "RunStarted": {

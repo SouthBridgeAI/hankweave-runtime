@@ -77,9 +77,7 @@ describe("Phase Failure Reason", () => {
       expect(event.data.failureReason).toBeDefined();
       expect(event.data.failureReason?.type).toBe("timeout");
       expect(event.data.failureReason?.retriable).toBe(true);
-      expect(event.data.failureReason?.message).toBe(
-        "API Error: Request timed out."
-      );
+      expect(event.data.failureReason?.message).toBe("API Error: Request timed out.");
     });
 
     test("should not include failure reason for successful phase", () => {
@@ -130,16 +128,13 @@ describe("Phase Failure Reason", () => {
       ["unknown", false],
     ];
 
-    test.each(retriableErrors)(
-      "should classify %s as retriable: %s",
-      (type, expectedRetriable) => {
-        const failureReason: FailureReason = {
-          type,
-          retriable: expectedRetriable,
-        };
+    test.each(retriableErrors)("should classify %s as retriable: %s", (type, expectedRetriable) => {
+      const failureReason: FailureReason = {
+        type,
+        retriable: expectedRetriable,
+      };
 
-        expect(failureReason.retriable).toBe(expectedRetriable);
-      }
-    );
+      expect(failureReason.retriable).toBe(expectedRetriable);
+    });
   });
 });

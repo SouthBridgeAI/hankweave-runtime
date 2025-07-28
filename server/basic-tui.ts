@@ -1,4 +1,4 @@
-import type { LangtonServer } from "./langton-server.js";
+import type { TadpoleServer } from "./tadpole-server.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
@@ -26,7 +26,7 @@ export class BasicTUI {
   private checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
   private waitingForCheckpoints = false;
 
-  constructor(private server: LangtonServer) {
+  constructor(private server: TadpoleServer) {
     this.connectToServer();
     this.setupKeyboardInput();
   }

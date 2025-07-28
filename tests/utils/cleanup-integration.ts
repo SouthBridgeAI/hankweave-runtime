@@ -1,6 +1,5 @@
-import { CleanupCommand } from "../../server/cleanup-command.js";
-import * as path from "node:path";
 import * as fs from "node:fs";
+import { CleanupCommand } from "../../server/cleanup-command.js";
 
 /**
  * Options for the cleanup integration
@@ -64,7 +63,7 @@ export interface CleanupIntegrationResult {
  * @returns Result object with success status and details of what was cleaned
  */
 export async function executeTestCleanup(
-  options: CleanupIntegrationOptions
+  options: CleanupIntegrationOptions,
 ): Promise<CleanupIntegrationResult> {
   const {
     executionPath,
@@ -156,11 +155,9 @@ export async function executeTestCleanup(
  */
 async function forceManualCleanup(
   executionPath?: string,
-  dataSourcePath?: string
+  dataSourcePath?: string,
 ): Promise<CleanupIntegrationResult> {
-  const warnings: string[] = [
-    "Performing manual cleanup due to CleanupCommand failure",
-  ];
+  const warnings: string[] = ["Performing manual cleanup due to CleanupCommand failure"];
   const directoriesRemoved: string[] = [];
   const errors: string[] = [];
 
@@ -242,17 +239,12 @@ export function isCleanupNeeded(executionPath?: string, testDir?: string): boole
  * @param result The cleanup result to log
  * @param verbose Whether to include detailed information
  */
-export function logCleanupResults(
-  result: CleanupIntegrationResult,
-  verbose = false
-): void {
+export function logCleanupResults(result: CleanupIntegrationResult, verbose = false): void {
   if (result.success) {
     console.log("✅ Test cleanup completed successfully");
     if (verbose) {
       if (result.directoriesRemoved.length > 0) {
-        console.log(
-          `  - Directories removed: ${result.directoriesRemoved.length}`
-        );
+        console.log(`  - Directories removed: ${result.directoriesRemoved.length}`);
         if (verbose) {
           for (const dir of result.directoriesRemoved) {
             console.log(`    - ${dir}`);

@@ -1,16 +1,9 @@
-import {
-  describe,
-  test,
-  expect,
-  beforeEach,
-  afterEach,
-  beforeAll,
-} from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import { rmSync } from "node:fs";
+import * as path from "node:path";
 import { CheckpointGit } from "../../server/checkpoint-git";
 import { Logger } from "../../server/utils";
-import * as fs from "fs";
-import * as path from "path";
-import { rmSync } from "fs";
 
 describe("CheckpointGit", () => {
   let tempDir: string;
@@ -22,7 +15,7 @@ describe("CheckpointGit", () => {
     try {
       const proc = Bun.spawn(["git", "--version"]);
       await proc.exited;
-    } catch (error) {
+    } catch (_error) {
       console.error("Git is not available in test environment");
       throw new Error("Git is required for CheckpointGit tests");
     }
@@ -30,11 +23,7 @@ describe("CheckpointGit", () => {
 
   beforeEach(async () => {
     // Create a temporary directory for testing with absolute path
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-checkpoint-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-test-checkpoint-${Date.now()}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
 
     // Create a mock logger
@@ -60,7 +49,7 @@ describe("CheckpointGit", () => {
   });
 
   test("getPath returns correct checkpoint repository path", () => {
-    const expectedPath = path.join(tempDir, ".langton", "checkpoints");
+    const expectedPath = path.join(tempDir, ".tadpole", "checkpoints");
     expect(checkpointGit.getPath()).toBe(expectedPath);
   });
 
@@ -194,14 +183,8 @@ describe("CheckpointGit", () => {
     await fs.promises.mkdir(path.join(tempDir, "src", "utils"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "components", "Button.tsx"),
-      "export {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "utils", "helper.ts"),
-      "export {}"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "components", "Button.tsx"), "export {}");
+    await fs.promises.writeFile(path.join(tempDir, "src", "utils", "helper.ts"), "export {}");
     await fs.promises.writeFile(path.join(tempDir, "README.md"), "# Test");
 
     // Add patterns
@@ -288,14 +271,17 @@ describe("CheckpointGit", () => {
     // Create second commit
     const file2 = path.join(tempDir, "file2.txt");
     await fs.promises.writeFile(file2, "content 2");
-    const commit2 = await checkpointGit.commit("Second commit");
+    const _commit2 = await checkpointGit.commit("Second commit");
 
     // Verify both files exist
     expect(fs.existsSync(file1)).toBe(true);
     expect(fs.existsSync(file2)).toBe(true);
 
     // Reset to first commit
-    await checkpointGit.resetToCheckpoint(commit1!);
+    expect(commit1).not.toBeNull();
+    if (commit1) {
+      await checkpointGit.resetToCheckpoint(commit1);
+    }
 
     // Verify file2 is gone but file1 remains
     expect(fs.existsSync(file1)).toBe(true);
@@ -306,20 +292,20 @@ describe("CheckpointGit", () => {
     await checkpointGit.initialize();
 
     // Try to reset to non-existent SHA
-    await expect(
-      checkpointGit.resetToCheckpoint("nonexistent123")
-    ).rejects.toThrow("Checkpoint nonexistent123 not found in repository");
+    await expect(checkpointGit.resetToCheckpoint("nonexistent123")).rejects.toThrow(
+      "Checkpoint nonexistent123 not found in repository",
+    );
   });
 
   test("resetToCheckpoint throws when not initialized", async () => {
     await expect(checkpointGit.resetToCheckpoint("abc123")).rejects.toThrow(
-      "Git repository not initialized"
+      "Git repository not initialized",
     );
   });
 
   test("switchToBranch throws when not initialized", async () => {
     await expect(checkpointGit.switchToBranch("some-branch")).rejects.toThrow(
-      "Git repository not initialized"
+      "Git repository not initialized",
     );
   });
 
@@ -349,6 +335,6 @@ describe("CheckpointGit", () => {
     const lastCommit = await new Response(proc.stdout).text();
 
     expect(lastCommit).toContain("Marker commit");
-    expect(lastCommit).toContain(firstCommit!.substring(0, 7));
+    expect(lastCommit).toContain(firstCommit?.substring(0, 7));
   });
 });

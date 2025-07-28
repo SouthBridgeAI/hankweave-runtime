@@ -1,32 +1,24 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { PhaseId, RunId, SessionId } from "../../server/branded-types.js";
 import { StateManager } from "../../server/state-manager.js";
-import { RunId, PhaseId, SessionId } from "../../server/branded-types.js";
 import type * as ST from "../../server/state-types.js";
 import { Logger } from "../../server/utils.js";
 
 // Test directory setup
 const TEST_DIR = path.join(__dirname, "test-rollback-validation");
-const TEST_LANGTON_DIR = path.join(TEST_DIR, ".langton");
+const TEST_TADPOLE_DIR = path.join(TEST_DIR, ".tadpole");
 
 // Mock logger
 class MockLogger extends Logger {
   logs: Array<{ message: string; level: string }> = [];
 
-  constructor(logFile: string) {
-    super(logFile);
-  }
-
   log(message: string, level: "info" | "error" | "debug" = "info"): void {
     this.logs.push({ message, level });
   }
 
-  logSocketTraffic(
-    socketLogFile: string,
-    direction: "in" | "out",
-    data: unknown
-  ): void {
+  logSocketTraffic(_socketLogFile: string, _direction: "in" | "out", _data: unknown): void {
     // Mock implementation
   }
 }
@@ -37,13 +29,13 @@ describe("Rollback Command Validation", () => {
 
   beforeEach(async () => {
     // Create test directory
-    await fs.promises.mkdir(TEST_LANGTON_DIR, { recursive: true });
+    await fs.promises.mkdir(TEST_TADPOLE_DIR, { recursive: true });
 
     // Create mock logger
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_LANGTON_DIR, mockLogger);
+    stateManager = new StateManager(TEST_TADPOLE_DIR, mockLogger);
     await stateManager.initialize();
   });
 
@@ -111,13 +103,13 @@ describe("Rollback Command Validation", () => {
       // Verify phase is running
       const currentPhase = stateManager.getCurrentlyRunningPhase();
       expect(currentPhase).not.toBeNull();
-      expect(currentPhase!.status).toBe("running");
+      expect(currentPhase?.status).toBe("running");
 
       // This test validates the concept - in the actual server,
       // the rollback command handler would check this condition
-      expect(currentPhase!.status).not.toBe("completed");
-      expect(currentPhase!.status).not.toBe("failed");
-      expect(currentPhase!.status).not.toBe("skipped");
+      expect(currentPhase?.status).not.toBe("completed");
+      expect(currentPhase?.status).not.toBe("failed");
+      expect(currentPhase?.status).not.toBe("skipped");
     });
 
     test("should allow rollback after phase completes", async () => {
@@ -182,7 +174,7 @@ describe("Rollback Command Validation", () => {
 
       const run = stateManager.getCurrentRun();
       expect(run).not.toBeNull();
-      expect(run!.phases[0].status).toBe("completed");
+      expect(run?.phases[0].status).toBe("completed");
     });
   });
 
@@ -343,8 +335,6 @@ describe("Rollback Command Validation", () => {
       const run = stateManager.getCurrentRun();
       expect(run?.phases[0].status).toBe("failed");
     });
-
-
   });
 
   describe("checkpoint type validation", () => {
@@ -532,7 +522,7 @@ describe("Rollback Command Validation", () => {
       // Now should have current run
       const newCurrentRun = stateManager.getCurrentRun();
       expect(newCurrentRun).not.toBeNull();
-      expect(newCurrentRun!.runId).toBe(runId);
+      expect(newCurrentRun?.runId).toBe(runId);
     });
   });
 });

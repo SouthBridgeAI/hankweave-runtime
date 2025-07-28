@@ -1,5 +1,5 @@
 /**
- * Error severity levels for Langton server.
+ * Error severity levels for Tadpole server.
  */
 export enum ErrorSeverity {
   /** Fatal error - requires server shutdown */
@@ -15,7 +15,7 @@ export enum ErrorSeverity {
 /**
  * Custom error classes for different severity levels.
  */
-export class LangtonError extends Error {
+export class TadpoleError extends Error {
   constructor(
     message: string,
     public readonly severity: ErrorSeverity,
@@ -23,25 +23,25 @@ export class LangtonError extends Error {
     public readonly context?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = "LangtonError";
+    this.name = "TadpoleError";
   }
 }
 
-export class FatalError extends LangtonError {
+export class FatalError extends TadpoleError {
   constructor(message: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.FATAL, "FATAL_ERROR", context);
     this.name = "FatalError";
   }
 }
 
-export class PhaseError extends LangtonError {
+export class PhaseError extends TadpoleError {
   constructor(message: string, phaseId: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.PHASE, "PHASE_ERROR", { ...context, phaseId });
     this.name = "PhaseError";
   }
 }
 
-export class OperationError extends LangtonError {
+export class OperationError extends TadpoleError {
   constructor(message: string, operation: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.OPERATION, "OPERATION_ERROR", {
       ...context,
@@ -51,7 +51,7 @@ export class OperationError extends LangtonError {
   }
 }
 
-export class APITimeoutError extends LangtonError {
+export class APITimeoutError extends TadpoleError {
   constructor(phaseId: string, context?: Record<string, unknown>) {
     super("Claude API request timed out", ErrorSeverity.PHASE, "API_TIMEOUT_ERROR", {
       ...context,

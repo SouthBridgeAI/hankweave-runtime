@@ -37,7 +37,7 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
 
   test("tool uses reported via WebSocket for each phase", () => {
     for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);

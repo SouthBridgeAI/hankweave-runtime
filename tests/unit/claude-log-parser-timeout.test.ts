@@ -2,13 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import type {
-  AssistantMessage,
-  ResultMessage,
-} from "../../types/claude-session-schema.js";
-import { logMessageSchema } from "../../types/claude-session-schema.js";
 import { calculateCost } from "../../server/config.js";
 import type { TokenUsage } from "../../server/types.js";
+import type { AssistantMessage, ResultMessage } from "../../types/claude-session-schema.js";
+import { logMessageSchema } from "../../types/claude-session-schema.js";
 
 // Local helper for testing log parsing - replaces the removed loadPhaseStateFromLog
 function parseLogForTesting(
@@ -18,7 +15,7 @@ function parseLogForTesting(
     output: number;
     inputCache: number;
     cacheRead: number;
-  }
+  },
 ): {
   sessionId: string | null;
   success: boolean;
@@ -66,8 +63,7 @@ function parseLogForTesting(
           if (entry.usage) {
             tokens.inputTokens = entry.usage.input_tokens || 0;
             tokens.outputTokens = entry.usage.output_tokens || 0;
-            tokens.cacheCreationTokens =
-              entry.usage.cache_creation_input_tokens || 0;
+            tokens.cacheCreationTokens = entry.usage.cache_creation_input_tokens || 0;
             tokens.cacheReadTokens = entry.usage.cache_read_input_tokens || 0;
           }
 
@@ -79,11 +75,7 @@ function parseLogForTesting(
         }
 
         // Only use assistant message usage if we haven't found result usage yet
-        if (
-          entry.type === "assistant" &&
-          entry.message.usage &&
-          !tokens._totalCost
-        ) {
+        if (entry.type === "assistant" && entry.message.usage && !tokens._totalCost) {
           // Claude reports cumulative usage, so we take the last one
           const usage = entry.message.usage;
           tokens.inputTokens = usage.input_tokens || 0;
@@ -161,7 +153,7 @@ describe("Claude Log Parser - Timeout Detection", () => {
         },
       };
 
-      fs.writeFileSync(logPath, JSON.stringify(timeoutMessage) + "\n");
+      fs.writeFileSync(logPath, `${JSON.stringify(timeoutMessage)}\n`);
 
       parser.start();
 
@@ -172,7 +164,7 @@ describe("Claude Log Parser - Timeout Detection", () => {
 
       expect(messages).toHaveLength(1);
       expect(messages[0]).not.toBeNull();
-      const content = messages[0]!.message.content;
+      const content = messages[0]?.message.content;
       const textContent = Array.isArray(content)
         ? content.find((item) => item.type === "text")?.text
         : content;
@@ -208,7 +200,7 @@ describe("Claude Log Parser - Timeout Detection", () => {
         },
       };
 
-      fs.writeFileSync(logPath, JSON.stringify(timeoutResult) + "\n");
+      fs.writeFileSync(logPath, `${JSON.stringify(timeoutResult)}\n`);
 
       parser.start();
 
@@ -219,85 +211,84 @@ describe("Claude Log Parser - Timeout Detection", () => {
 
       expect(results).toHaveLength(1);
       expect(results[0]).not.toBeNull();
-      expect(results[0]!.subtype).toBe("error");
-      expect(results[0]!.result).toBe("API Error: Request timed out.");
+      expect(results[0]?.subtype).toBe("error");
+      expect(results[0]?.result).toBe("API Error: Request timed out.");
     });
   });
 
   describe("Loading phase state with timeout", () => {
     test("should correctly load state from log with timeout error", () => {
       // Create a log file with init, assistant messages, and timeout result
-      const logContent =
-        [
-          JSON.stringify({
-            type: "system",
-            subtype: "init",
-            cwd: "/test",
-            session_id: "374bf5fd-dc81-4fe4-bb06-a92b30c79227",
-            tools: ["Read", "Write"],
-            mcp_servers: [],
+      const logContent = `${[
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          cwd: "/test",
+          session_id: "374bf5fd-dc81-4fe4-bb06-a92b30c79227",
+          tools: ["Read", "Write"],
+          mcp_servers: [],
+          model: "claude-3-opus-20240229",
+          permissionMode: "bypassPermissions",
+          apiKeySource: "ANTHROPIC_API_KEY",
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            id: "msg_01234",
+            type: "message",
+            role: "assistant",
             model: "claude-3-opus-20240229",
-            permissionMode: "bypassPermissions",
-            apiKeySource: "ANTHROPIC_API_KEY",
-          }),
-          JSON.stringify({
-            type: "assistant",
-            message: {
-              id: "msg_01234",
-              type: "message",
-              role: "assistant",
-              model: "claude-3-opus-20240229",
-              content: [
-                {
-                  type: "text",
-                  text: "Working on the task...",
-                },
-              ],
-              usage: {
-                input_tokens: 100,
-                output_tokens: 50,
-                cache_creation_input_tokens: 10,
-                cache_read_input_tokens: 20,
+            content: [
+              {
+                type: "text",
+                text: "Working on the task...",
               },
-              stop_reason: "end_turn",
-              stop_sequence: null,
-            },
-          }),
-          JSON.stringify({
-            type: "assistant",
-            message: {
-              id: "msg_01235",
-              type: "message",
-              role: "assistant",
-              model: "claude-3-opus-20240229",
-              content: [
-                {
-                  type: "text",
-                  text: "API Error: Request timed out.",
-                },
-              ],
-              stop_reason: "end_turn",
-              stop_sequence: null,
-            },
-          }),
-          JSON.stringify({
-            type: "result",
-            subtype: "error",
-            is_error: true,
-            duration_ms: 1253987,
-            duration_api_ms: 414469,
-            num_turns: 2,
-            result: "API Error: Request timed out.",
-            session_id: "374bf5fd-dc81-4fe4-bb06-a92b30c79227",
-            total_cost_usd: 0.05,
+            ],
             usage: {
               input_tokens: 100,
               output_tokens: 50,
               cache_creation_input_tokens: 10,
               cache_read_input_tokens: 20,
             },
-          }),
-        ].join("\n") + "\n"; // Add trailing newline
+            stop_reason: "end_turn",
+            stop_sequence: null,
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            id: "msg_01235",
+            type: "message",
+            role: "assistant",
+            model: "claude-3-opus-20240229",
+            content: [
+              {
+                type: "text",
+                text: "API Error: Request timed out.",
+              },
+            ],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+          },
+        }),
+        JSON.stringify({
+          type: "result",
+          subtype: "error",
+          is_error: true,
+          duration_ms: 1253987,
+          duration_api_ms: 414469,
+          num_turns: 2,
+          result: "API Error: Request timed out.",
+          session_id: "374bf5fd-dc81-4fe4-bb06-a92b30c79227",
+          total_cost_usd: 0.05,
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 20,
+          },
+        }),
+      ].join("\n")}\n`; // Add trailing newline
 
       fs.writeFileSync(logPath, logContent);
 

@@ -11,7 +11,7 @@ const colors = {
   gray: "\x1b[90m",
 };
 
-console.log(`\n${colors.blue}=== Langton Test Sanity Check ===${colors.reset}\n`);
+console.log(`\n${colors.blue}=== Tadpole Test Sanity Check ===${colors.reset}\n`);
 
 // Get current directory info
 const cwd = process.cwd();
@@ -22,7 +22,7 @@ let isCorrectDir = false;
 if (fs.existsSync("package.json")) {
   try {
     const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-    isCorrectDir = pkg.name === "langton-runner";
+    isCorrectDir = pkg.name === "tadpole";
     console.log(`Package name: ${colors.yellow}${pkg.name}${colors.reset}`);
   } catch (_e) {
     console.log(`${colors.red}Error reading package.json${colors.reset}`);
@@ -30,8 +30,8 @@ if (fs.existsSync("package.json")) {
 }
 
 if (!isCorrectDir) {
-  console.log(`\n${colors.red}❌ Not in langton-runner root directory!${colors.reset}`);
-  console.log(`Expected to find package.json with name: "langton-runner"`);
+  console.log(`\n${colors.red}❌ Not in tadpole root directory!${colors.reset}`);
+  console.log(`Expected to find package.json with name: "tadpole"`);
   process.exit(1);
 }
 
@@ -101,7 +101,7 @@ console.log(
 );
 
 // Check for existing server
-const lockFilePath = path.join(testAreaPath, ".langton/server.lock");
+const lockFilePath = path.join(testAreaPath, ".tadpole/server.lock");
 if (fs.existsSync(lockFilePath)) {
   console.log(`\n${colors.red}⚠ Lock file exists!${colors.reset} Server may be running`);
   console.log(`Lock file: ${lockFilePath}`);

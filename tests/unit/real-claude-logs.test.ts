@@ -1,16 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import { logMessageSchema } from "../../types/claude-session-schema.js";
-import type {
-  AssistantMessage,
-  LogMessage,
-  ResultMessage,
-  SystemMessage,
-} from "../../types/claude-session-schema.js";
 import { calculateCost } from "../../server/config.js";
 import type { TokenUsage } from "../../server/types.js";
+import type { AssistantMessage, ResultMessage } from "../../types/claude-session-schema.js";
+import { logMessageSchema } from "../../types/claude-session-schema.js";
 
 // Local helper for testing log parsing - replaces the removed loadPhaseStateFromLog
 function parseLogForTesting(
@@ -20,7 +15,7 @@ function parseLogForTesting(
     output: number;
     inputCache: number;
     cacheRead: number;
-  }
+  },
 ): {
   sessionId: string | null;
   success: boolean;
@@ -68,8 +63,7 @@ function parseLogForTesting(
           if (entry.usage) {
             tokens.inputTokens = entry.usage.input_tokens || 0;
             tokens.outputTokens = entry.usage.output_tokens || 0;
-            tokens.cacheCreationTokens =
-              entry.usage.cache_creation_input_tokens || 0;
+            tokens.cacheCreationTokens = entry.usage.cache_creation_input_tokens || 0;
             tokens.cacheReadTokens = entry.usage.cache_read_input_tokens || 0;
           }
 
@@ -81,11 +75,7 @@ function parseLogForTesting(
         }
 
         // Only use assistant message usage if we haven't found result usage yet
-        if (
-          entry.type === "assistant" &&
-          entry.message.usage &&
-          !tokens._totalCost
-        ) {
+        if (entry.type === "assistant" && entry.message.usage && !tokens._totalCost) {
           // Claude reports cumulative usage, so we take the last one
           const usage = entry.message.usage;
           tokens.inputTokens = usage.input_tokens || 0;
@@ -118,10 +108,7 @@ function parseLogForTesting(
 }
 
 describe("Real Claude Logs Validation", () => {
-  const testLogsBaseDir = path.join(
-    import.meta.dir,
-    "../test-data/claude-logs"
-  );
+  const testLogsBaseDir = path.join(import.meta.dir, "../test-data/claude-logs");
 
   // Auto-discover all .jsonl files in test-claude-logs directory
   function findAllLogFiles(dir: string): string[] {
@@ -151,19 +138,14 @@ describe("Real Claude Logs Validation", () => {
   const logFiles = findAllLogFiles(testLogsBaseDir);
 
   // Helper to get relative path for better test names
-  const getRelativePath = (fullPath: string) =>
-    path.relative(testLogsBaseDir, fullPath);
+  const getRelativePath = (fullPath: string) => path.relative(testLogsBaseDir, fullPath);
 
   // Log discovered files at test startup
   if (logFiles.length > 0) {
-    console.log(
-      `\nDiscovered ${logFiles.length} log files in test-claude-logs:`
-    );
+    console.log(`\nDiscovered ${logFiles.length} log files in test-claude-logs:`);
     logFiles.forEach((file) => {
       const size = fs.statSync(file).size;
-      console.log(
-        `  - ${getRelativePath(file)} (${(size / 1024 / 1024).toFixed(2)} MB)`
-      );
+      console.log(`  - ${getRelativePath(file)} (${(size / 1024 / 1024).toFixed(2)} MB)`);
     });
   } else {
     console.log("\nNo log files found in test-claude-logs directory");
@@ -216,12 +198,12 @@ describe("Real Claude Logs Validation", () => {
 
         expect(validCount).toBeGreaterThan(0);
         expect(invalidCount).toBe(0); // All entries should be valid
-      }
+      },
     );
 
     test.each(logFiles.map((f) => [getRelativePath(f), f]))(
       "should have required message types in %s",
-      (relativePath, logPath) => {
+      (_relativePath, logPath) => {
         const content = fs.readFileSync(logPath, "utf-8");
         const lines = content.split("\n").filter((line) => line.trim());
 
@@ -252,14 +234,14 @@ describe("Real Claude Logs Validation", () => {
         expect(hasInit).toBe(true); // Should have initialization
         expect(hasResult).toBe(true); // Should have result
         expect(messageTypes.size).toBeGreaterThan(1); // Should have multiple message types
-      }
+      },
     );
   });
 
   describe("Session data extraction", () => {
     test.each(logFiles.map((f) => [getRelativePath(f), f]))(
       "should extract session ID from %s",
-      (relativePath, logPath) => {
+      (_relativePath, logPath) => {
         const content = fs.readFileSync(logPath, "utf-8");
         const lines = content.split("\n").filter((line) => line.trim());
 
@@ -270,11 +252,7 @@ describe("Real Claude Logs Validation", () => {
             const parsed = JSON.parse(line);
             const result = logMessageSchema.safeParse(parsed);
 
-            if (
-              result.success &&
-              result.data.type === "system" &&
-              result.data.subtype === "init"
-            ) {
+            if (result.success && result.data.type === "system" && result.data.subtype === "init") {
               sessionId = result.data.session_id;
               break;
             }
@@ -285,14 +263,14 @@ describe("Real Claude Logs Validation", () => {
 
         expect(sessionId).toBeTruthy();
         expect(sessionId).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
         );
-      }
+      },
     );
 
     test.each(logFiles.map((f) => [getRelativePath(f), f]))(
       "should calculate costs from %s",
-      (relativePath, logPath) => {
+      (_relativePath, logPath) => {
         const state = parseLogForTesting(logPath, {
           input: 3,
           output: 15,
@@ -304,7 +282,7 @@ describe("Real Claude Logs Validation", () => {
         expect(state.cost).toBeGreaterThanOrEqual(0);
         expect(state.tokens.inputTokens).toBeGreaterThanOrEqual(0);
         expect(state.tokens.outputTokens).toBeGreaterThanOrEqual(0);
-      }
+      },
     );
   });
 
@@ -317,7 +295,7 @@ describe("Real Claude Logs Validation", () => {
 
     test.each(timeoutLogs.map((f) => [getRelativePath(f), f]))(
       "should detect timeout error in %s",
-      (relativePath, logPath) => {
+      (_relativePath, logPath) => {
         const content = fs.readFileSync(logPath, "utf-8");
         const lines = content.split("\n").filter((line) => line.trim());
 
@@ -341,9 +319,7 @@ describe("Real Claude Logs Validation", () => {
 
                 if (Array.isArray(content)) {
                   hasTimeoutText = content.some(
-                    (item) =>
-                      item.type === "text" &&
-                      item.text === "API Error: Request timed out."
+                    (item) => item.type === "text" && item.text === "API Error: Request timed out.",
                   );
                 } else if (typeof content === "string") {
                   hasTimeoutText = content === "API Error: Request timed out.";
@@ -356,10 +332,7 @@ describe("Real Claude Logs Validation", () => {
               }
 
               // Check result message for timeout
-              if (
-                msg.type === "result" &&
-                msg.result === "API Error: Request timed out."
-              ) {
+              if (msg.type === "result" && msg.result === "API Error: Request timed out.") {
                 foundTimeoutInResult = true;
                 resultMessage = msg;
               }
@@ -375,12 +348,12 @@ describe("Real Claude Logs Validation", () => {
         expect(resultMessage).toBeTruthy();
         // Can be either "error" subtype or "success" with is_error=true
         expect(resultMessage?.is_error).toBe(true);
-      }
+      },
     );
 
     test.each(timeoutLogs.map((f) => [getRelativePath(f), f]))(
       "should parse timeout phase state correctly for %s",
-      (relativePath, logPath) => {
+      (_relativePath, logPath) => {
         const state = parseLogForTesting(logPath, {
           input: 3,
           output: 15,
@@ -393,7 +366,7 @@ describe("Real Claude Logs Validation", () => {
         expect(state.cost).toBeGreaterThan(0); // Should have some cost
         expect(state.tokens.inputTokens).toBeGreaterThanOrEqual(0);
         expect(state.tokens.outputTokens).toBeGreaterThanOrEqual(0);
-      }
+      },
     );
   });
 
@@ -402,40 +375,37 @@ describe("Real Claude Logs Validation", () => {
     const firstLog = logFiles[0];
     const firstLogName = firstLog ? getRelativePath(firstLog) : "no logs found";
 
-    test.skipIf(!firstLog)(
-      `should parse ${firstLogName} in real-time`,
-      async () => {
-        const logPath = firstLog;
-        const messages = {
-          system: 0,
-          assistant: 0,
-          user: 0,
-          result: 0,
-        };
+    test.skipIf(!firstLog)(`should parse ${firstLogName} in real-time`, async () => {
+      const logPath = firstLog;
+      const messages = {
+        system: 0,
+        assistant: 0,
+        user: 0,
+        result: 0,
+      };
 
-        const parser = new ClaudeLogParser({
-          logPath,
-          phaseId: "phase-1",
-          parsingInterval: 50,
-          onSystemMessage: () => messages.system++,
-          onAssistantMessage: () => messages.assistant++,
-          onResultMessage: () => messages.result++,
-        });
+      const parser = new ClaudeLogParser({
+        logPath,
+        phaseId: "phase-1",
+        parsingInterval: 50,
+        onSystemMessage: () => messages.system++,
+        onAssistantMessage: () => messages.assistant++,
+        onResultMessage: () => messages.result++,
+      });
 
-        // Since we're reading an existing file, the parser should immediately
-        // read all messages on the first parse
-        parser.start();
+      // Since we're reading an existing file, the parser should immediately
+      // read all messages on the first parse
+      parser.start();
 
-        // Wait for parsing
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      // Wait for parsing
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-        parser.stop();
+      parser.stop();
 
-        expect(messages.system).toBeGreaterThan(0);
-        expect(messages.assistant).toBeGreaterThan(0);
-        expect(messages.result).toBeGreaterThan(0);
-      }
-    );
+      expect(messages.system).toBeGreaterThan(0);
+      expect(messages.assistant).toBeGreaterThan(0);
+      expect(messages.result).toBeGreaterThan(0);
+    });
 
     // Find logs that have thinking content
     const logsWithThinking = logFiles.filter((logPath) => {
@@ -443,87 +413,71 @@ describe("Real Claude Logs Validation", () => {
       return content.includes('"type":"thinking"');
     });
 
-    test.skipIf(logsWithThinking.length === 0)(
-      "should handle thinking content in messages",
-      () => {
-        const logPath = logsWithThinking[0] || logFiles[0];
-        const content = fs.readFileSync(logPath, "utf-8");
-        const lines = content.split("\n").filter((line) => line.trim());
+    test.skipIf(logsWithThinking.length === 0)("should handle thinking content in messages", () => {
+      const logPath = logsWithThinking[0] || logFiles[0];
+      const content = fs.readFileSync(logPath, "utf-8");
+      const lines = content.split("\n").filter((line) => line.trim());
 
-        let foundThinking = false;
+      let foundThinking = false;
 
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            const result = logMessageSchema.safeParse(parsed);
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+          const result = logMessageSchema.safeParse(parsed);
 
-            if (result.success && result.data.type === "assistant") {
-              const msgContent = result.data.message.content;
-              if (Array.isArray(msgContent)) {
-                const hasThinking = msgContent.some(
-                  (item) => item.type === "thinking"
-                );
-                if (hasThinking) {
-                  foundThinking = true;
-                  break;
-                }
+          if (result.success && result.data.type === "assistant") {
+            const msgContent = result.data.message.content;
+            if (Array.isArray(msgContent)) {
+              const hasThinking = msgContent.some((item) => item.type === "thinking");
+              if (hasThinking) {
+                foundThinking = true;
+                break;
               }
             }
-          } catch {
-            // Skip invalid lines
           }
+        } catch {
+          // Skip invalid lines
         }
-
-        expect(foundThinking).toBe(true);
       }
-    );
+
+      expect(foundThinking).toBe(true);
+    });
   });
 
   describe("Token usage tracking", () => {
-    test.skipIf(logFiles.length === 0)(
-      "should track cumulative token usage",
-      () => {
-        const logPath = logFiles[0];
-        const content = fs.readFileSync(logPath, "utf-8");
-        const lines = content.split("\n").filter((line) => line.trim());
+    test.skipIf(logFiles.length === 0)("should track cumulative token usage", () => {
+      const logPath = logFiles[0];
+      const content = fs.readFileSync(logPath, "utf-8");
+      const lines = content.split("\n").filter((line) => line.trim());
 
-        let lastInputTokens = 0;
-        let lastOutputTokens = 0;
-        let messageCount = 0;
+      let lastInputTokens = 0;
+      let lastOutputTokens = 0;
+      let messageCount = 0;
 
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            const result = logMessageSchema.safeParse(parsed);
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+          const result = logMessageSchema.safeParse(parsed);
 
-            if (
-              result.success &&
-              result.data.type === "assistant" &&
-              result.data.message.usage
-            ) {
-              const usage = result.data.message.usage;
+          if (result.success && result.data.type === "assistant" && result.data.message.usage) {
+            const usage = result.data.message.usage;
 
-              // Tokens should generally increase (cumulative)
-              if (messageCount > 0) {
-                expect(usage.input_tokens).toBeGreaterThanOrEqual(
-                  lastInputTokens
-                );
-                expect(usage.output_tokens).toBeGreaterThanOrEqual(
-                  lastOutputTokens
-                );
-              }
-
-              lastInputTokens = usage.input_tokens || 0;
-              lastOutputTokens = usage.output_tokens || 0;
-              messageCount++;
+            // Tokens should generally increase (cumulative)
+            if (messageCount > 0) {
+              expect(usage.input_tokens).toBeGreaterThanOrEqual(lastInputTokens);
+              expect(usage.output_tokens).toBeGreaterThanOrEqual(lastOutputTokens);
             }
-          } catch {
-            // Skip invalid lines
-          }
-        }
 
-        expect(messageCount).toBeGreaterThan(0);
+            lastInputTokens = usage.input_tokens || 0;
+            lastOutputTokens = usage.output_tokens || 0;
+            messageCount++;
+          }
+        } catch {
+          // Skip invalid lines
+        }
       }
-    );
+
+      expect(messageCount).toBeGreaterThan(0);
+    });
   });
 });

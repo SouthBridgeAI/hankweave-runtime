@@ -1,7 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.0.6/schema.json",
   "files": {
-    "includes": ["server/**/*", "tests/e2e/**/*", "types/**/*"]
+    "includes": [
+      "server/**/*",
+      "tests/e2e/**/*",
+      "tests/utils/**/*",
+      "tests/unit/**/*",
+      "types/**/*"
+    ]
   },
   "linter": {
     "enabled": true,

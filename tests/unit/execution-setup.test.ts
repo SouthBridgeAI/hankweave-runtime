@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,7 +6,7 @@ import { setupExecutionEnvironment } from "../../server/execution-setup.js";
 import { rimrafSimple } from "../utils/test-helpers.js";
 
 describe("Execution Setup - startNew flag", () => {
-  const TEST_BASE_DIR = path.join(os.tmpdir(), "langton-execution-setup-test");
+  const TEST_BASE_DIR = path.join(os.tmpdir(), "tadpole-execution-setup-test");
   const DATA_SOURCE_DIR = path.join(TEST_BASE_DIR, "data-source");
   const EXECUTION_DIR = path.join(TEST_BASE_DIR, "execution");
 
@@ -17,7 +17,10 @@ describe("Execution Setup - startNew flag", () => {
     // Create some dummy files in data source
     await fs.promises.writeFile(path.join(DATA_SOURCE_DIR, "test.txt"), "test content");
     await fs.promises.mkdir(path.join(DATA_SOURCE_DIR, "subdir"), { recursive: true });
-    await fs.promises.writeFile(path.join(DATA_SOURCE_DIR, "subdir", "nested.txt"), "nested content");
+    await fs.promises.writeFile(
+      path.join(DATA_SOURCE_DIR, "subdir", "nested.txt"),
+      "nested content",
+    );
   });
 
   afterEach(async () => {
@@ -31,8 +34,8 @@ describe("Execution Setup - startNew flag", () => {
     // Clean up test directories
     await rimrafSimple(TEST_BASE_DIR);
 
-    // Also clean up any executions created in ~/.langton-executions
-    const executionRoot = path.join(os.homedir(), ".langton-executions");
+    // Also clean up any executions created in ~/.tadpole-executions
+    const executionRoot = path.join(os.homedir(), ".tadpole-executions");
     if (fs.existsSync(executionRoot) && dataHash) {
       const dirs = await fs.promises.readdir(executionRoot);
       // Only clean up test executions (those with our test data hash)
@@ -56,7 +59,7 @@ describe("Execution Setup - startNew flag", () => {
       expect(result.isResuming).toBe(false);
       expect(result.executionPath).toBe(EXECUTION_DIR);
       expect(fs.existsSync(EXECUTION_DIR)).toBe(true);
-      expect(fs.existsSync(path.join(EXECUTION_DIR, ".langton", "execution-meta.json"))).toBe(true);
+      expect(fs.existsSync(path.join(EXECUTION_DIR, ".tadpole", "execution-meta.json"))).toBe(true);
     });
 
     it("should use empty directory with --start-new", async () => {
@@ -84,14 +87,14 @@ describe("Execution Setup - startNew flag", () => {
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: EXECUTION_DIR,
           startNew: true,
-        })
+        }),
       ).rejects.toThrow(/Cannot use --start-new with non-empty execution directory/);
     });
 
     it("should resume existing execution without --start-new", async () => {
       // First create an execution directory with metadata
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".langton");
+      const metaDir = path.join(EXECUTION_DIR, ".tadpole");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       // Calculate data hash for consistency
@@ -186,18 +189,18 @@ describe("Execution Setup - startNew flag", () => {
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: EXECUTION_DIR,
           startNew: true,
-        })
+        }),
       ).rejects.toThrow(/Cannot use --start-new with non-empty execution directory/);
     });
 
     it("should create valid execution metadata with --start-new", async () => {
-      const result = await setupExecutionEnvironment({
+      const _result = await setupExecutionEnvironment({
         readOnlySourceDataPath: DATA_SOURCE_DIR,
         executionPath: EXECUTION_DIR,
         startNew: true,
       });
 
-      const metaPath = path.join(EXECUTION_DIR, ".langton", "execution-meta.json");
+      const metaPath = path.join(EXECUTION_DIR, ".tadpole", "execution-meta.json");
       const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
 
       expect(meta.version).toBe("1.0.0");
@@ -209,7 +212,7 @@ describe("Execution Setup - startNew flag", () => {
     });
 
     it("should create data link/copy in new execution", async () => {
-      const result = await setupExecutionEnvironment({
+      const _result = await setupExecutionEnvironment({
         readOnlySourceDataPath: DATA_SOURCE_DIR,
         executionPath: EXECUTION_DIR,
         startNew: true,
@@ -222,7 +225,10 @@ describe("Execution Setup - startNew flag", () => {
       const testContent = await fs.promises.readFile(path.join(dataPath, "test.txt"), "utf-8");
       expect(testContent).toBe("test content");
 
-      const nestedContent = await fs.promises.readFile(path.join(dataPath, "subdir", "nested.txt"), "utf-8");
+      const nestedContent = await fs.promises.readFile(
+        path.join(dataPath, "subdir", "nested.txt"),
+        "utf-8",
+      );
       expect(nestedContent).toBe("nested content");
     });
   });
@@ -232,7 +238,7 @@ describe("Execution Setup - startNew flag", () => {
       await expect(
         setupExecutionEnvironment({
           readOnlySourceDataPath: "/non/existent/path",
-        })
+        }),
       ).rejects.toThrow("Data source not found");
     });
 
@@ -243,25 +249,31 @@ describe("Execution Setup - startNew flag", () => {
       await expect(
         setupExecutionEnvironment({
           readOnlySourceDataPath: filePath,
-        })
+        }),
       ).rejects.toThrow("Data source is not a directory");
     });
   });
 
   describe("nested execution prevention", () => {
     it("should prevent creating execution inside another execution directory", async () => {
-      const nestedPath = path.join(os.homedir(), ".langton-executions", "existing-exec", "data", "nested");
+      const nestedPath = path.join(
+        os.homedir(),
+        ".tadpole-executions",
+        "existing-exec",
+        "data",
+        "nested",
+      );
       await fs.promises.mkdir(nestedPath, { recursive: true });
 
       await expect(
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: nestedPath,
-        })
+        }),
       ).rejects.toThrow("Cannot create execution inside another execution directory");
 
       // Clean up
-      await rimrafSimple(path.join(os.homedir(), ".langton-executions", "existing-exec"));
+      await rimrafSimple(path.join(os.homedir(), ".tadpole-executions", "existing-exec"));
     });
 
     it("should prevent using data source as execution directory", async () => {
@@ -269,7 +281,7 @@ describe("Execution Setup - startNew flag", () => {
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: DATA_SOURCE_DIR,
-        })
+        }),
       ).rejects.toThrow("Execution directory cannot be the same as data source");
     });
   });
@@ -278,7 +290,7 @@ describe("Execution Setup - startNew flag", () => {
     it("should throw error when resuming with different data source", async () => {
       // Create execution directory with metadata for different data
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".langton");
+      const metaDir = path.join(EXECUTION_DIR, ".tadpole");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       const meta = {
@@ -300,7 +312,7 @@ describe("Execution Setup - startNew flag", () => {
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: EXECUTION_DIR,
-        })
+        }),
       ).rejects.toThrow(/Data source mismatch/);
     });
   });
@@ -319,19 +331,16 @@ describe("Execution Setup - startNew flag", () => {
       // Verify files were actually copied
       const testContent = await fs.promises.readFile(
         path.join(EXECUTION_DIR, "data", "test.txt"),
-        "utf-8"
+        "utf-8",
       );
       expect(testContent).toBe("test content");
 
       // Modify the copy and verify original is unchanged
-      await fs.promises.writeFile(
-        path.join(EXECUTION_DIR, "data", "test.txt"),
-        "modified content"
-      );
+      await fs.promises.writeFile(path.join(EXECUTION_DIR, "data", "test.txt"), "modified content");
 
       const originalContent = await fs.promises.readFile(
         path.join(DATA_SOURCE_DIR, "test.txt"),
-        "utf-8"
+        "utf-8",
       );
       expect(originalContent).toBe("test content");
     });
@@ -343,7 +352,7 @@ describe("Execution Setup - startNew flag", () => {
       await fs.promises.writeFile(targetFile, "symlink target content");
       await fs.promises.symlink(targetFile, symlinkFile);
 
-      const result = await setupExecutionEnvironment({
+      const _result = await setupExecutionEnvironment({
         readOnlySourceDataPath: DATA_SOURCE_DIR,
         executionPath: EXECUTION_DIR,
         useSymlink: false,
@@ -363,32 +372,32 @@ describe("Execution Setup - startNew flag", () => {
       const { hashDataDirectory } = await import("../../server/data-hasher.js");
       const dataHash = await hashDataDirectory(DATA_SOURCE_DIR, 30000);
 
-      const executionRoot = path.join(os.homedir(), ".langton-executions");
+      const executionRoot = path.join(os.homedir(), ".tadpole-executions");
 
       // Create older execution
       const olderDir = path.join(executionRoot, `1000000-old-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(olderDir, { recursive: true });
-      await fs.promises.mkdir(path.join(olderDir, ".langton"), { recursive: true });
+      await fs.promises.mkdir(path.join(olderDir, ".tadpole"), { recursive: true });
       await fs.promises.writeFile(
-        path.join(olderDir, ".langton", "execution-meta.json"),
+        path.join(olderDir, ".tadpole", "execution-meta.json"),
         JSON.stringify({
           version: "1.0.0",
           dataHash,
           lastUsed: new Date(Date.now() - 10000).toISOString(),
-        })
+        }),
       );
 
       // Create newer execution
       const newerDir = path.join(executionRoot, `2000000-new-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(newerDir, { recursive: true });
-      await fs.promises.mkdir(path.join(newerDir, ".langton"), { recursive: true });
+      await fs.promises.mkdir(path.join(newerDir, ".tadpole"), { recursive: true });
       await fs.promises.writeFile(
-        path.join(newerDir, ".langton", "execution-meta.json"),
+        path.join(newerDir, ".tadpole", "execution-meta.json"),
         JSON.stringify({
           version: "1.0.0",
           dataHash,
           lastUsed: new Date().toISOString(),
-        })
+        }),
       );
 
       // Should resume the newer one
@@ -411,7 +420,7 @@ describe("Execution Setup - startNew flag", () => {
 
       // Create execution with old timestamps
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".langton");
+      const metaDir = path.join(EXECUTION_DIR, ".tadpole");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       const { hashDataDirectory } = await import("../../server/data-hasher.js");
@@ -427,11 +436,11 @@ describe("Execution Setup - startNew flag", () => {
           linkType: "symlink",
           createdAt: createdTime,
           lastUsed: createdTime,
-        })
+        }),
       );
 
       const beforeTime = Date.now();
-      const result = await setupExecutionEnvironment({
+      const _result = await setupExecutionEnvironment({
         readOnlySourceDataPath: DATA_SOURCE_DIR,
         executionPath: EXECUTION_DIR,
       });
@@ -439,7 +448,7 @@ describe("Execution Setup - startNew flag", () => {
 
       // Read updated metadata
       const updatedMeta = JSON.parse(
-        await fs.promises.readFile(path.join(metaDir, "execution-meta.json"), "utf-8")
+        await fs.promises.readFile(path.join(metaDir, "execution-meta.json"), "utf-8"),
       );
 
       // createdAt should be preserved
@@ -481,21 +490,19 @@ describe("Execution Setup - startNew flag", () => {
       });
 
       // Should resolve to real path
-      expect(result.meta.readOnlySourceResolvedDataPath).toBe(
-        await fs.promises.realpath(realPath)
-      );
+      expect(result.meta.readOnlySourceResolvedDataPath).toBe(await fs.promises.realpath(realPath));
     });
   });
 
   describe("error handling during setup", () => {
     it("should handle errors during metadata write gracefully", async () => {
-      // Create execution directory but make .langton read-only
+      // Create execution directory but make .tadpole read-only
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const langtonDir = path.join(EXECUTION_DIR, ".langton");
-      await fs.promises.mkdir(langtonDir, { recursive: true });
+      const tadpoleDir = path.join(EXECUTION_DIR, ".tadpole");
+      await fs.promises.mkdir(tadpoleDir, { recursive: true });
 
       // Make directory read-only
-      await fs.promises.chmod(langtonDir, 0o444);
+      await fs.promises.chmod(tadpoleDir, 0o444);
 
       try {
         await setupExecutionEnvironment({
@@ -510,7 +517,7 @@ describe("Execution Setup - startNew flag", () => {
         expect(error).toBeTruthy();
       } finally {
         // Restore permissions for cleanup
-        await fs.promises.chmod(langtonDir, 0o755);
+        await fs.promises.chmod(tadpoleDir, 0o755);
       }
     });
   });
@@ -523,10 +530,7 @@ describe("Execution Setup - startNew flag", () => {
 
       // Create many files
       for (let i = 0; i < 100; i++) {
-        await fs.promises.writeFile(
-          path.join(largeDir, `file-${i}.txt`),
-          "x".repeat(1000)
-        );
+        await fs.promises.writeFile(path.join(largeDir, `file-${i}.txt`), "x".repeat(1000));
       }
 
       // This should complete with a short timeout (hash will be partial)
@@ -550,7 +554,7 @@ describe("Execution Setup - startNew flag", () => {
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: filePath,
-        })
+        }),
       ).rejects.toThrow("Execution path is not a directory");
     });
   });

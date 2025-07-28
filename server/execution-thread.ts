@@ -4,12 +4,12 @@
 
 import {
   isTerminalPhaseStatus,
-  type LangtonState,
   type PhaseExecution,
   type PhaseId,
   type Run,
   type RunId,
   type SessionId,
+  type TadpoleState,
 } from "./state-types.js";
 import type { PhaseConfig } from "./types.js";
 import type { Logger } from "./utils.js";
@@ -72,7 +72,7 @@ export interface ExecutionThread {
 /**
  * Analyze execution history to build a unified thread with all metadata.
  *
- * @param state - The complete Langton state
+ * @param state - The complete Tadpole state
  * @param phaseConfigs - Phase configuration array
  * @param checkpointData - Map of SHA to git checkpoint data (optional)
  * @param targetRunId - Specific run to analyze (defaults to latest)
@@ -80,7 +80,7 @@ export interface ExecutionThread {
  * @returns Complete execution thread with all metadata preserved
  */
 export async function analyzeExecutionThread(
-  state: LangtonState,
+  state: TadpoleState,
   phaseConfigs: PhaseConfig[],
   checkpointData?: Map<string, { message: string; timestamp: string; branch: string }>,
   targetRunId?: RunId,

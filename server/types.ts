@@ -100,7 +100,7 @@ export type WorkspaceSetupItem =
     };
 
 /**
- * Configuration for a single phase in the Langton workflow.
+ * Configuration for a single phase in the Tadpole workflow.
  * A phase represents a discrete task for Claude to perform, with its own
  * prompt, model settings, and optional file watching.
  */
@@ -160,7 +160,7 @@ export interface PhaseConfig {
 /**
  * Information for creating a checkpoint commit in the shadow git repository.
  *
- * The checkpoint system creates a shadow git repo in `.langton/checkpoints/` that tracks
+ * The checkpoint system creates a shadow git repo in `.tadpole/checkpoints/` that tracks
  * files matching the `checkpointAndWatch` patterns. Each checkpoint creates a commit
  * with detailed metadata about the phase state.
  */
@@ -174,7 +174,7 @@ export interface CheckpointInfo {
   /** Human-readable name of the phase */
   phaseName: string;
 
-  /** Unique identifier for this Langton server run */
+  /** Unique identifier for this Tadpole server run */
   runId: string;
 
   /** ISO timestamp when the checkpoint was created */

@@ -14,7 +14,7 @@ export function runTokenUsageTests(testState: TestState, testDir: string) {
 
   for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
     test(`${phaseId} token usage events match log messages`, () => {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);

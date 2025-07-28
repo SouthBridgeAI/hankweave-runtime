@@ -1,6 +1,6 @@
-# Understanding the Langton Execution Model
+# Understanding the Tadpole Execution Model
 
-This guide explains how Langton's execution model works, including the relationships between executions, data directories, symlinks, runs, and phases.
+This guide explains how Tadpole's execution model works, including the relationships between executions, data directories, symlinks, runs, and phases.
 
 ## Core Concepts Hierarchy
 
@@ -9,7 +9,7 @@ Data Source (Your Project)
     ↓
 Execution Directory (Isolated Environment)
     ├── data/ → symlink to Data Source
-    └── .langton/
+    └── .tadpole/
         ├── execution-meta.json
         └── state.json
             └── Runs[]
@@ -25,7 +25,7 @@ Your original project directory containing:
 - Any other project assets
 
 **Key Properties:**
-- **Read-only**: Never modified by Langton
+- **Read-only**: Never modified by Tadpole
 - **Location**: Can be anywhere on your filesystem
 - **Identification**: Hashed to create a unique fingerprint
 
@@ -45,10 +45,10 @@ Where:
 
 ## 2. Execution Directory
 
-An isolated workspace where Langton operates:
+An isolated workspace where Tadpole operates:
 
 ```
-~/.langton-executions/<timestamp>-<random>-<hash_prefix>/
+~/.tadpole-executions/<timestamp>-<random>-<hash_prefix>/
 ```
 
 ### Execution Directory Naming
@@ -232,9 +232,9 @@ find_executions(data_path):
 ### 1. Single Data, Multiple Executions
 ```
 /my-project/ (data)
-    → ~/.langton-executions/exec-1/ (approach A)
-    → ~/.langton-executions/exec-2/ (approach B)
-    → ~/.langton-executions/exec-3/ (approach C)
+    → ~/.tadpole-executions/exec-1/ (approach A)
+    → ~/.tadpole-executions/exec-2/ (approach B)
+    → ~/.tadpole-executions/exec-3/ (approach C)
 ```
 
 ### 2. Execution Lifecycle
@@ -283,7 +283,7 @@ bun run server --data=/path/to/project --copy
 ### Execution Space Usage
 Monitor with:
 ```bash
-du -sh ~/.langton-executions/*
+du -sh ~/.tadpole-executions/*
 ```
 
 Clean old executions:

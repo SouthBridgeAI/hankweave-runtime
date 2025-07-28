@@ -1,11 +1,11 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import { rmSync } from "node:fs";
+import * as path from "node:path";
 import { PhaseId, RunId, SessionId } from "../../server/branded-types";
 import { StateManager } from "../../server/state-manager";
-import { Logger } from "../../server/utils";
 import type { PhaseConfig } from "../../server/types";
-import * as fs from "fs";
-import * as path from "path";
-import { rmSync } from "fs";
+import { Logger } from "../../server/utils";
 
 describe("Rollback State Management", () => {
   let stateManager: StateManager;
@@ -121,9 +121,11 @@ describe("Rollback State Management", () => {
       // Verify checkpoint is stored
       const phase = getPhaseInRun(runId, PhaseId("phase-1"));
       expect(phase).toBeDefined();
-      expect("workspaceSetupCheckpoint" in phase!).toBe(true);
-      if ("workspaceSetupCheckpoint" in phase!) {
-        expect(phase.workspaceSetupCheckpoint).toBe(workspaceSha);
+      if (phase) {
+        expect("workspaceSetupCheckpoint" in phase).toBe(true);
+        if ("workspaceSetupCheckpoint" in phase) {
+          expect(phase.workspaceSetupCheckpoint).toBe(workspaceSha);
+        }
       }
 
       // Complete the phase - need to go through all states
@@ -223,10 +225,7 @@ describe("Rollback State Management", () => {
       // Verify error checkpoint
       const failedPhase = getPhaseInRun(runId, PhaseId("phase-1"));
       expect(failedPhase?.status).toBe("failed");
-      if (
-        failedPhase?.status === "failed" &&
-        "errorCheckpoint" in failedPhase
-      ) {
+      if (failedPhase?.status === "failed" && "errorCheckpoint" in failedPhase) {
         expect(failedPhase.errorCheckpoint).toBe("error123");
       }
 
@@ -256,10 +255,7 @@ describe("Rollback State Management", () => {
       // Verify skip checkpoint
       const skippedPhase = getPhaseInRun(runId, PhaseId("phase-2"));
       expect(skippedPhase?.status).toBe("skipped");
-      if (
-        skippedPhase?.status === "skipped" &&
-        "skipCheckpoint" in skippedPhase
-      ) {
+      if (skippedPhase?.status === "skipped" && "skipCheckpoint" in skippedPhase) {
         expect(skippedPhase.skipCheckpoint).toBe("skip456");
       }
     });
@@ -373,12 +369,8 @@ describe("Rollback State Management", () => {
       expect(run2?.startingConditions.type).toBe("continuation");
       if (run2?.startingConditions.type === "continuation") {
         expect(run2.startingConditions.source.runId).toBe(runId1);
-        expect(run2.startingConditions.source.afterPhase).toBe(
-          PhaseId("phase-1")
-        );
-        expect(run2.startingConditions.source.checkpointSha).toBe(
-          "completed123"
-        );
+        expect(run2.startingConditions.source.afterPhase).toBe(PhaseId("phase-1"));
+        expect(run2.startingConditions.source.checkpointSha).toBe("completed123");
         expect(run2.startingConditions.reason).toBe("rollback");
       }
     });

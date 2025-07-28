@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { AssistantMessage, ResultMessage } from "../../types/claude-session-schema.js";
 import { APITimeoutError, ErrorSeverity } from "../../server/error-types.js";
+import type { AssistantMessage, ResultMessage } from "../../types/claude-session-schema.js";
 
 describe("API Timeout Detection", () => {
   describe("APITimeoutError", () => {
@@ -43,8 +43,8 @@ describe("API Timeout Detection", () => {
 
       // Extract text content
       const content = assistantMessage.message.content;
-      const textContent = Array.isArray(content) 
-        ? content.find(item => item.type === "text" && "text" in item)?.text
+      const textContent = Array.isArray(content)
+        ? content.find((item) => item.type === "text" && "text" in item)?.text
         : content;
 
       expect(textContent).toBe("API Error: Request timed out.");
@@ -93,8 +93,8 @@ describe("API Timeout Detection", () => {
       };
 
       const content = normalMessage.message.content;
-      const textContent = Array.isArray(content) 
-        ? content.find(item => item.type === "text" && "text" in item)?.text
+      const textContent = Array.isArray(content)
+        ? content.find((item) => item.type === "text" && "text" in item)?.text
         : content;
 
       expect(textContent).not.toBe("API Error: Request timed out.");
@@ -115,10 +115,10 @@ describe("API Timeout Detection", () => {
     test("exact match for timeout message", () => {
       const exactTimeoutMessage = "API Error: Request timed out.";
       const similarButDifferent = [
-        "API Error: Request timed out",  // missing period
-        "API Error: Request timed out!",  // different punctuation
-        "API error: request timed out.",  // different case
-        "Error: Request timed out.",      // missing API
+        "API Error: Request timed out", // missing period
+        "API Error: Request timed out!", // different punctuation
+        "API error: request timed out.", // different case
+        "Error: Request timed out.", // missing API
         "API Error: Connection timed out.", // different error
       ];
 

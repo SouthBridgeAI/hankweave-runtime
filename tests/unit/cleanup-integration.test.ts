@@ -1,20 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import {
+  type CleanupIntegrationResult,
   executeTestCleanup,
   isCleanupNeeded,
   logCleanupResults,
-  type CleanupIntegrationResult,
 } from "../utils/cleanup-integration.js";
 
 describe("Cleanup Integration Utility", () => {
-  const testRoot = path.join(
-    process.cwd(),
-    "tests/unit/test-cleanup-integration"
-  );
-  const executionRoot = path.join(testRoot, ".langton-executions");
+  const testRoot = path.join(process.cwd(), "tests/unit/test-cleanup-integration");
+  const executionRoot = path.join(testRoot, ".tadpole-executions");
   const dataSourcePath = path.join(testRoot, "test-data");
   const testExecutionDir = path.join(executionRoot, "test-execution-123");
 
@@ -25,10 +21,7 @@ describe("Cleanup Integration Utility", () => {
     await fs.promises.mkdir(testExecutionDir, { recursive: true });
 
     // Create some test data files
-    await fs.promises.writeFile(
-      path.join(dataSourcePath, "test.txt"),
-      "test content"
-    );
+    await fs.promises.writeFile(path.join(dataSourcePath, "test.txt"), "test content");
   });
 
   afterEach(async () => {
@@ -50,9 +43,9 @@ describe("Cleanup Integration Utility", () => {
     });
 
     test("returns true when execution directory exists", async () => {
-      // Create .langton directory in execution
-      const langtonDir = path.join(testExecutionDir, ".langton");
-      await fs.promises.mkdir(langtonDir, { recursive: true });
+      // Create .tadpole directory in execution
+      const tadpoleDir = path.join(testExecutionDir, ".tadpole");
+      await fs.promises.mkdir(tadpoleDir, { recursive: true });
 
       expect(isCleanupNeeded(testExecutionDir)).toBe(true);
     });
@@ -65,8 +58,8 @@ describe("Cleanup Integration Utility", () => {
     });
 
     test("checks both execution and test directories", async () => {
-      const langtonDir = path.join(testExecutionDir, ".langton");
-      await fs.promises.mkdir(langtonDir, { recursive: true });
+      const tadpoleDir = path.join(testExecutionDir, ".tadpole");
+      await fs.promises.mkdir(tadpoleDir, { recursive: true });
 
       const testDir = path.join(testRoot, "some-test-dir");
       await fs.promises.mkdir(testDir, { recursive: true });
@@ -89,8 +82,8 @@ describe("Cleanup Integration Utility", () => {
 
     test("cleans up execution directory by path", async () => {
       // Create execution directory with metadata
-      const langtonDir = path.join(testExecutionDir, ".langton");
-      await fs.promises.mkdir(langtonDir, { recursive: true });
+      const tadpoleDir = path.join(testExecutionDir, ".tadpole");
+      await fs.promises.mkdir(tadpoleDir, { recursive: true });
 
       const meta = {
         version: "1.0.0",
@@ -102,8 +95,8 @@ describe("Cleanup Integration Utility", () => {
         lastUsed: new Date().toISOString(),
       };
       await fs.promises.writeFile(
-        path.join(langtonDir, "execution-meta.json"),
-        JSON.stringify(meta, null, 2)
+        path.join(tadpoleDir, "execution-meta.json"),
+        JSON.stringify(meta, null, 2),
       );
 
       const result = await executeTestCleanup({
@@ -119,10 +112,7 @@ describe("Cleanup Integration Utility", () => {
     test("cleans up test directory when provided", async () => {
       const testDir = path.join(testRoot, "test-artifacts");
       await fs.promises.mkdir(testDir, { recursive: true });
-      await fs.promises.writeFile(
-        path.join(testDir, "artifact.txt"),
-        "test artifact"
-      );
+      await fs.promises.writeFile(path.join(testDir, "artifact.txt"), "test artifact");
 
       const result = await executeTestCleanup({
         testDir,
@@ -169,7 +159,7 @@ describe("Cleanup Integration Utility", () => {
 
         // Restore permissions for cleanup
         await fs.promises.chmod(protectedDir, 0o755);
-      } catch (error) {
+      } catch (_error) {
         // Skip test if chmod isn't supported
         console.log("Skipping read-only test - chmod not supported");
       }
@@ -183,7 +173,7 @@ describe("Cleanup Integration Utility", () => {
 
     beforeEach(() => {
       consoleOutput = [];
-      console.log = (...args: any[]) => {
+      console.log = (...args: unknown[]) => {
         consoleOutput.push(args.join(" "));
       };
     });

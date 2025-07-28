@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { UnifiedFileResolver } from "../../server/file-resolver";
-import * as fs from "fs";
-import * as path from "path";
 
 describe("UnifiedFileResolver", () => {
   let tempDir: string;
@@ -34,10 +34,7 @@ describe("UnifiedFileResolver", () => {
     // Create test files
     await fs.promises.writeFile(path.join(tempDir, "include.txt"), "included");
     await fs.promises.writeFile(path.join(tempDir, "ignore.txt"), "ignored");
-    await fs.promises.writeFile(
-      path.join(tempDir, ".gitignore"),
-      "ignore.txt\n"
-    );
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "ignore.txt\n");
 
     const files = await resolver.resolveFiles(tempDir, ["*.txt"]);
 
@@ -50,19 +47,13 @@ describe("UnifiedFileResolver", () => {
     await fs.promises.mkdir(path.join(tempDir, "src"), { recursive: true });
     await fs.promises.writeFile(path.join(tempDir, "root.txt"), "root");
     await fs.promises.writeFile(path.join(tempDir, "src", "src.txt"), "src");
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "ignore.txt"),
-      "ignored"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "ignore.txt"), "ignored");
 
     // Root gitignore
     await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "*.log\n");
 
     // Nested gitignore
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", ".gitignore"),
-      "ignore.txt\n"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", ".gitignore"), "ignore.txt\n");
 
     const files = await resolver.resolveFiles(tempDir, ["**/*.txt"]);
 
@@ -72,20 +63,11 @@ describe("UnifiedFileResolver", () => {
   test("handles negation patterns", async () => {
     // Create test files
     await fs.promises.mkdir(path.join(tempDir, "build"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, "build", "output.js"),
-      "output"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "build", "important.js"),
-      "important"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "build", "output.js"), "output");
+    await fs.promises.writeFile(path.join(tempDir, "build", "important.js"), "important");
 
     // Gitignore with negation
-    await fs.promises.writeFile(
-      path.join(tempDir, ".gitignore"),
-      "build/\n!build/important.js\n"
-    );
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "build/\n!build/important.js\n");
 
     const files = await resolver.resolveFiles(tempDir, ["**/*.js"]);
 
@@ -96,10 +78,7 @@ describe("UnifiedFileResolver", () => {
   test("ignores .git directory by default", async () => {
     // Create .git directory
     await fs.promises.mkdir(path.join(tempDir, ".git"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, ".git", "config"),
-      "git config"
-    );
+    await fs.promises.writeFile(path.join(tempDir, ".git", "config"), "git config");
     await fs.promises.writeFile(path.join(tempDir, "file.txt"), "content");
 
     const files = await resolver.resolveFiles(tempDir, ["**/*"]);
@@ -121,10 +100,7 @@ describe("UnifiedFileResolver", () => {
   test("caches gitignore rules", async () => {
     // Create test file and gitignore
     await fs.promises.writeFile(path.join(tempDir, "file.txt"), "content");
-    await fs.promises.writeFile(
-      path.join(tempDir, ".gitignore"),
-      "ignore.txt\n"
-    );
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "ignore.txt\n");
 
     // First call
     const files1 = await resolver.resolveFiles(tempDir, ["*.txt"]);
@@ -153,7 +129,7 @@ describe("UnifiedFileResolver", () => {
     await fs.promises.writeFile(path.join(tempDir, "ignore.txt"), "ignored");
     await fs.promises.writeFile(
       path.join(tempDir, ".gitignore"),
-      "# This is a comment\nignore.txt\n# Another comment\n"
+      "# This is a comment\nignore.txt\n# Another comment\n",
     );
 
     const files = await resolver.resolveFiles(tempDir, ["*.txt"]);

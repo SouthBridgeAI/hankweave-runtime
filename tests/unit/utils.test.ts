@@ -1,9 +1,9 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { escapeShellArg, buildFileTree } from "../../server/utils";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import { rmSync } from "node:fs";
+import * as path from "node:path";
 import type { FileNode } from "../../server/types";
-import * as fs from "fs";
-import * as path from "path";
-import { rmSync } from "fs";
+import { buildFileTree, escapeShellArg } from "../../server/utils";
 
 describe("escapeShellArg", () => {
   test("escapes single quotes correctly", () => {
@@ -47,11 +47,7 @@ describe("buildFileTree", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-filetree-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-test-filetree-${Date.now()}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
   });
 
@@ -84,14 +80,8 @@ describe("buildFileTree", () => {
     await fs.promises.mkdir(path.join(tempDir, "src", "utils"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "index.ts"),
-      "export {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "utils", "helper.ts"),
-      "export {}"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "index.ts"), "export {}");
+    await fs.promises.writeFile(path.join(tempDir, "src", "utils", "helper.ts"), "export {}");
 
     const tree = await buildFileTree(tempDir, "**/*.ts");
 
@@ -102,9 +92,7 @@ describe("buildFileTree", () => {
     expect(srcNode?.children).toBeDefined();
 
     // Check index.ts in src
-    const indexFile = srcNode?.children?.find(
-      (child) => child.name === "index.ts"
-    );
+    const indexFile = srcNode?.children?.find((child) => child.name === "index.ts");
     expect(indexFile).toBeDefined();
     expect(indexFile?.isDirectory).toBe(false);
 
@@ -114,9 +102,7 @@ describe("buildFileTree", () => {
     expect(utilsDir?.isDirectory).toBe(true);
 
     // Check helper.ts in utils
-    const helperFile = utilsDir?.children?.find(
-      (child) => child.name === "helper.ts"
-    );
+    const helperFile = utilsDir?.children?.find((child) => child.name === "helper.ts");
     expect(helperFile).toBeDefined();
     expect(helperFile?.isDirectory).toBe(false);
   });
@@ -149,19 +135,14 @@ describe("buildFileTree", () => {
 
   test("marks directories with isDirectory flag", async () => {
     await fs.promises.mkdir(path.join(tempDir, "dir"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, "dir", "file.txt"),
-      "content"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "dir", "file.txt"), "content");
 
     const tree = await buildFileTree(tempDir, "**/*.txt");
 
     const dirNode = tree.find((node) => node.name === "dir");
     expect(dirNode?.isDirectory).toBe(true);
 
-    const fileInDir = dirNode?.children?.find(
-      (child) => child.name === "file.txt"
-    );
+    const fileInDir = dirNode?.children?.find((child) => child.name === "file.txt");
     expect(fileInDir?.isDirectory).toBe(false);
   });
 
@@ -173,10 +154,7 @@ describe("buildFileTree", () => {
   test("handles files at root level", async () => {
     await fs.promises.writeFile(path.join(tempDir, "root.txt"), "root");
     await fs.promises.mkdir(path.join(tempDir, "dir"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, "dir", "nested.txt"),
-      "nested"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "dir", "nested.txt"), "nested");
 
     const tree = await buildFileTree(tempDir, "**/*.txt");
 
@@ -189,9 +167,7 @@ describe("buildFileTree", () => {
     expect(dirNode).toBeDefined();
     expect(dirNode?.isDirectory).toBe(true);
 
-    const nestedFile = dirNode?.children?.find(
-      (child) => child.name === "nested.txt"
-    );
+    const nestedFile = dirNode?.children?.find((child) => child.name === "nested.txt");
     expect(nestedFile).toBeDefined();
     expect(nestedFile?.isDirectory).toBe(false);
   });

@@ -1,8 +1,8 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { Logger, generateId, isError, toError } from "../../server/utils";
-import * as fs from "fs";
-import * as path from "path";
-import { rmSync } from "fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import { rmSync } from "node:fs";
+import * as path from "node:path";
+import { generateId, isError, Logger, toError } from "../../server/utils";
 
 describe("Logger", () => {
   let tempDir: string;
@@ -10,11 +10,7 @@ describe("Logger", () => {
   let logger: Logger;
 
   beforeEach(async () => {
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-logger-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-test-logger-${Date.now()}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
     logPath = path.join(tempDir, "test.log");
     logger = new Logger(logPath);

@@ -1,13 +1,13 @@
-# Langton Runner
+# Tadpole Runner
 
-Langton Runner is a powerful orchestration server designed to manage and execute complex, multi-step AI workflows using the Claude AI. It provides a robust, stateful environment that transforms large, ambiguous tasks into a structured sequence of manageable "phases". Through its WebSocket-based protocol, it offers real-time monitoring, interactive control, and a suite of advanced features that enable sophisticated AI-driven development and automation.
+Tadpole Runner is a powerful orchestration server designed to manage and execute complex, multi-step AI workflows using the Claude AI. It provides a robust, stateful environment that transforms large, ambiguous tasks into a structured sequence of manageable "phases". Through its WebSocket-based protocol, it offers real-time monitoring, interactive control, and a suite of advanced features that enable sophisticated AI-driven development and automation.
 
-## What is Langton Runner?
+## What is Tadpole Runner?
 
-At its core, Langton Runner is a bridge between your development environment and the Claude AI. It allows you to define a structured workflow in a simple JSON configuration file, and then it manages the entire lifecycle of executing that workflow. It goes far beyond simply running a series of prompts by providing a rich set of features that address the challenges of stateful, long-running AI tasks:
+At its core, Tadpole Runner is a bridge between your development environment and the Claude AI. It allows you to define a structured workflow in a simple JSON configuration file, and then it manages the entire lifecycle of executing that workflow. It goes far beyond simply running a series of prompts by providing a rich set of features that address the challenges of stateful, long-running AI tasks:
 
--   **Execution Isolation**: Langton runs in isolated execution directories, keeping your original project untouched. Your data is accessed via a symlink at `<execution-dir>/data/`, ensuring clean rollbacks and enabling multiple execution tracking.
--   **State Persistence**: The server meticulously records every action, decision, and outcome in the execution's `.langton` directory. This means you can stop the server and resume your workflow later, with all history and context perfectly preserved.
+-   **Execution Isolation**: Tadpole runs in isolated execution directories, keeping your original project untouched. Your data is accessed via a symlink at `<execution-dir>/data/`, ensuring clean rollbacks and enabling multiple execution tracking.
+-   **State Persistence**: The server meticulously records every action, decision, and outcome in the execution's `.tadpole` directory. This means you can stop the server and resume your workflow later, with all history and context perfectly preserved.
 -   **Rollback System**: A shadow git repo automatically checkpoints your execution state at key moments. This allows you to instantly revert to any point in the execution history, making it easy to explore different approaches or recover from errors.
 -   **Cost Tracking**: Get real-time feedback on token usage and associated costs for each phase, helping you manage your budget and optimize your prompts.
 -   **File Tracking**: Specify which files Claude should pay attention to. The server will monitor these files for changes, stream updates to you in real-time, and include them in checkpoints.
@@ -18,7 +18,7 @@ At its core, Langton Runner is a bridge between your development environment and
 
 ### Prerequisites
 
-To use Langton Runner, you'll need a few things set up in your development environment:
+To use Tadpole Runner, you'll need a few things set up in your development environment:
 
 1.  **[Bun](https://bun.sh)** (v1.0.0 or later): A fast, all-in-one JavaScript runtime and toolkit.
 2.  **Git**: Required for the powerful checkpoint and rollback functionality.
@@ -29,7 +29,7 @@ To use Langton Runner, you'll need a few things set up in your development envir
 ```bash
 # 1. Clone the repository to your local machine
 git clone <repository-url>
-cd langton-runner
+cd tadpole
 
 # 2. Install all necessary dependencies using Bun
 bun install
@@ -104,10 +104,10 @@ When you run in TUI mode, you'll see a live stream of events and can control the
 
 ## Novel Architectural Aspects
 
-Langton Runner incorporates several advanced design patterns to provide its powerful feature set:
+Tadpole Runner incorporates several advanced design patterns to provide its powerful feature set:
 
 -   **Fire-and-Forget State Management**: The server uses an event-sourcing-inspired model where state changes are queued and processed asynchronously. This decouples components and ensures that state is always persisted atomically and safely.
--   **Shadow Git Repository**: By maintaining its own git repository in the `.langton` folder, the server can provide powerful versioning and rollback features without ever interfering with your project's own git history.
+-   **Shadow Git Repository**: By maintaining its own git repository in the `.tadpole` folder, the server can provide powerful versioning and rollback features without ever interfering with your project's own git history.
 -   **Granular Phase States**: The server tracks each phase through a seven-stage lifecycle (`preparing`, `starting`, `initializing`, `running`, `completed`, `failed`, `skipped`). This provides extremely precise state tracking and error reporting.
 
 ## Documentation
@@ -120,7 +120,7 @@ Comprehensive documentation is available in the `documentation/` directory:
 -   **[Phase System](documentation/phase-system.md)** - Understanding phases, runs, and execution threads
 -   **[Running the Server](documentation/running-the-server.md)** - Installation, setup, and command-line options
 -   **[Server Protocol](documentation/server-protocol.md)** - WebSocket protocol reference for client developers
--   **[Langton Folder Structure](documentation/langton-folder-structure.md)** - Understanding the `.langton` directory
+-   **[Tadpole Folder Structure](documentation/tadpole-folder-structure.md)** - Understanding the `.tadpole` directory
 
 ## Important Considerations
 
@@ -131,5 +131,5 @@ Comprehensive documentation is available in the `documentation/` directory:
 ## Troubleshooting
 
 -   **Configuration Issues?** Run `bun run validate --config=<your-config>.json` to get a detailed analysis of your setup before you start a run.
--   **Need to Start Over?** If you want a completely clean slate, you can stop the server and safely delete the entire `.langton` directory. For a less destructive reset, consider the `bun server/index.ts --cleanup` command.
+-   **Need to Start Over?** If you want a completely clean slate, you can stop the server and safely delete the entire `.tadpole` directory. For a less destructive reset, consider the `bun server/index.ts --cleanup` command.
 -   **How to Rollback?** In the Basic TUI, simply press `[r]` to open the interactive rollback menu. If you're using a programmatic client, send the `rollback.toLastSuccess` or `rollback.toCheckpoint` command.

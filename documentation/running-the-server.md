@@ -1,8 +1,8 @@
-# Running the Langton Server
+# Running the Tadpole Server
 
 ## Installation and Setup
 
-Getting the Langton Runner up and running involves a few prerequisites and a simple setup process.
+Getting the Tadpole Runner up and running involves a few prerequisites and a simple setup process.
 
 ### Prerequisites
 
@@ -40,7 +40,7 @@ Once the prerequisites are met, setting up the project is straightforward:
 ```bash
 # 1. Clone the repository to your local machine
 git clone <repository-url>
-cd langton-runner
+cd tadpole
 
 # 2. Install all necessary dependencies using Bun
 bun install
@@ -84,12 +84,12 @@ The server's behavior can be fine-tuned with the following command-line flags:
     -   **Default**: `phases.json`
     -   **Example**: `bun run server --config=workflows/my-project/phases.json`
 
--   **`--data=<path>`**: Path to your data/project directory. Langton will create an isolated execution environment with your data accessible at `<execution-dir>/data/`.
+-   **`--data=<path>`**: Path to your data/project directory. Tadpole will create an isolated execution environment with your data accessible at `<execution-dir>/data/`.
     -   **Default**: Current directory
     -   **Example**: `bun run server --data=/path/to/project`
 
 -   **`--execution=<path>`**: Resume work in a specific execution directory instead of auto-detecting.
-    -   **Example**: `bun run server --execution=~/.langton-executions/1234-abc`
+    -   **Example**: `bun run server --execution=~/.tadpole-executions/1234-abc`
 
 -   **`--start-new`**: Force creation of a new execution directory, ignoring any existing executions for the same data.
     -   **Example**: `bun run server --data=/path/to/project --start-new`
@@ -122,12 +122,12 @@ The server's behavior can be fine-tuned with the following command-line flags:
 
 ## Execution Isolation
 
-Langton Runner uses execution isolation to keep your project data safe and enable advanced features like clean rollbacks and multiple execution tracking.
+Tadpole Runner uses execution isolation to keep your project data safe and enable advanced features like clean rollbacks and multiple execution tracking.
 
 ### How It Works
 
-Instead of running directly in your project directory, Langton:
-1. Creates an isolated execution directory (e.g., `~/.langton-executions/1234-abc/`)
+Instead of running directly in your project directory, Tadpole:
+1. Creates an isolated execution directory (e.g., `~/.tadpole-executions/1234-abc/`)
 2. Links your project data via a symlink at `<execution-dir>/data/`
 3. Runs all operations within this execution environment
 4. Keeps all generated files, logs, and state separate from your original project
@@ -142,12 +142,12 @@ Instead of running directly in your project directory, Langton:
 ### Execution Directory Structure
 
 ```
-~/.langton-executions/
+~/.tadpole-executions/
 └── 1737123456789-abc-d4f5e6/       # Execution directory
     ├── data/ → /path/to/your/project  # Symlink to your data
     ├── generated-docs/                # Files created by Claude
     ├── backend/                       # Workspace setup files
-    └── .langton/                      # Langton metadata
+    └── .tadpole/                      # Tadpole metadata
         ├── execution-meta.json
         ├── state.json
         └── checkpoints/
@@ -166,7 +166,7 @@ bun run server --data=/path/to/project
 bun run server --data=/path/to/project --start-new
 
 # Resume specific execution
-bun run server --execution=~/.langton-executions/1234-abc
+bun run server --execution=~/.tadpole-executions/1234-abc
 
 # Clean up latest execution
 bun run server --cleanup --data=/path/to/project
@@ -271,9 +271,9 @@ For more iterative or exploratory work:
 ### Debugging and Recovery
 
 When a phase fails:
-1.  The server preserves the complete state in `.langton/state.json`.
+1.  The server preserves the complete state in `.tadpole/state.json`.
 2.  Restart the server; it will load the previous state.
-3.  Examine the logs in `.langton/runs/<runId>/` to diagnose the issue.
+3.  Examine the logs in `.tadpole/runs/<runId>/` to diagnose the issue.
 4.  Use rollback commands to revert to a known good state before retrying.
 5.  If you wish to start completely fresh, use the `bun server/index.ts --cleanup` command.
 
@@ -287,12 +287,6 @@ When a phase fails:
 | "Git not available" | Git not installed | Install Git (checkpointing will be disabled) |
 | "Port already in use" | Another server running | Change port with `--port` or kill other process |
 | "State corrupted" | Disk error or crash during write | Server will auto-recover from backup |
-
-**Debug Mode:**
-For verbose logging, set the `DEBUG` environment variable:
-```bash
-DEBUG=langton:* bun run server
-```
 
 **Performance Tuning:**
 - **Large Projects**: Use specific glob patterns in `trackedFiles` to avoid tracking unnecessary files

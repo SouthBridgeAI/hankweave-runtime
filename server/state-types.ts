@@ -1,5 +1,5 @@
 // ============================================================================
-// Langton State Management Types
+// Tadpole State Management Types
 // ============================================================================
 
 import type { PhaseId, RunId, SessionId } from "./branded-types.js";
@@ -109,7 +109,7 @@ export interface InitializingPhase extends BasePhase {
 
   /**
    * Path to Claude's JSONL log file.
-   * Relative to .langton directory.
+   * Relative to .tadpole directory.
    * Example: "runs/1234-abc/phase-research-claude.log"
    *
    * Used by: Log parser, debugging, cleanup
@@ -390,7 +390,7 @@ export interface Run {
 
   /**
    * Absolute path where run files are stored.
-   * Example: "/project/.langton/runs/1234-abc"
+   * Example: "/project/.tadpole/runs/1234-abc"
    *
    * Used by: Log file storage, cleanup operations
    * Edge case: Folder might not exist if run failed early
@@ -502,15 +502,15 @@ export type StartingConditions =
 // ============================================================================
 
 /**
- * Root state object for Langton.
- * Stored in .langton/state.json.
+ * Root state object for Tadpole.
+ * Stored in .tadpole/state.json.
  *
  * Design decisions:
  * - Single file instead of per-run for simplicity
  * - No version field per user request
  * - No denormalized costs - computed when needed
  */
-export interface LangtonState {
+export interface TadpoleState {
   /**
    * All runs, newest first.
    * Append-only - runs are never removed from history.
@@ -820,7 +820,7 @@ export type StateTransition =
 // ============================================================================
 
 /**
- * Central state management for Langton.
+ * Central state management for Tadpole.
  * All state modifications go through this interface.
  *
  * Implementation notes:
@@ -850,7 +850,7 @@ export interface StateManager {
    *
    * Usage: const { runs, currentRunId } = stateManager.getState();
    */
-  getState(): Readonly<LangtonState>;
+  getState(): Readonly<TadpoleState>;
 
   // ===== State Modifications =====
 

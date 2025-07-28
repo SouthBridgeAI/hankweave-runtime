@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 export async function runCheckpointExclusionTests(testDir: string) {
-  const checkpointDir = path.join(testDir, ".langton/checkpoints");
+  const checkpointDir = path.join(testDir, ".tadpole/checkpoints");
   const gitDir = path.join(checkpointDir, ".git");
 
   test("checkpoint system excludes non-tracked files", async () => {
@@ -12,8 +12,8 @@ export async function runCheckpointExclusionTests(testDir: string) {
     // Create some files that shouldn't be tracked
     fs.writeFileSync(path.join(testDir, "untracked.txt"), "should not be in git");
     fs.writeFileSync(path.join(testDir, "notes/untracked.log"), "also not tracked");
-    fs.mkdirSync(path.join(testDir, ".langton/temp"), { recursive: true });
-    fs.writeFileSync(path.join(testDir, ".langton/temp/file.txt"), "internal file");
+    fs.mkdirSync(path.join(testDir, ".tadpole/temp"), { recursive: true });
+    fs.writeFileSync(path.join(testDir, ".tadpole/temp/file.txt"), "internal file");
 
     // Check git status shows them as untracked
     const gitStatus = execSync("git status --porcelain", {
@@ -31,7 +31,7 @@ export async function runCheckpointExclusionTests(testDir: string) {
     // notes/untracked.log is UN-excluded by "!notes/**/*" but not added to git yet
     expect(gitStatus).toContain("?? notes/untracked.log");
 
-    // .langton directory should never be tracked
+    // .tadpole directory should never be tracked
     const gitFiles = execSync("git ls-files", {
       cwd: testDir,
       env: {
@@ -42,7 +42,7 @@ export async function runCheckpointExclusionTests(testDir: string) {
       encoding: "utf-8",
     });
 
-    expect(gitFiles).not.toContain(".langton/");
+    expect(gitFiles).not.toContain(".tadpole/");
   });
 
   test("checkpoint commits include proper metadata", async () => {

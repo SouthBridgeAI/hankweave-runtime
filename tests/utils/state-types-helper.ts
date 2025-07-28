@@ -10,7 +10,7 @@ export interface TestRun {
   runFolder: string;
   gitBranch: string;
   serverPid: number;
-  startingConditions: any;
+  startingConditions: { type: string; [key: string]: unknown };
 }
 
 export interface TestPhaseExecution {
@@ -24,9 +24,4 @@ export interface TestPhaseExecution {
   claudeSessionId?: string;
   previousSessionId?: string;
   startTime: string;
-}
-
-export interface TestLangtonState {
-  runs: TestRun[];
-  currentRunId: string | null;
 }

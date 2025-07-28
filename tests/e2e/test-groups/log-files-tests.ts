@@ -5,7 +5,7 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runLogFilesTests(testDir: string) {
   // Find the run folder - there should be exactly one
-  const runsDir = path.join(testDir, ".langton/runs");
+  const runsDir = path.join(testDir, ".tadpole/runs");
   let runFolder = "";
 
   if (fs.existsSync(runsDir)) {
@@ -17,7 +17,7 @@ export function runLogFilesTests(testDir: string) {
 
   for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
     describe(`${phaseId} logs`, () => {
-      // Logs are now in .langton/runs/{runId}/phase-{phaseId}-claude.log
+      // Logs are now in .tadpole/runs/{runId}/phase-{phaseId}-claude.log
       const logPath = path.join(runFolder, `${phaseId}-claude.log`);
 
       test(`log file exists`, () => {

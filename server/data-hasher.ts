@@ -96,7 +96,7 @@ export async function hashDataDirectory(
  * Find existing execution directories for a data hash
  */
 export async function findExecutionDirs(dataHash: string): Promise<string[]> {
-  const executionRoot = path.join(os.homedir(), ".langton-executions");
+  const executionRoot = path.join(os.homedir(), ".tadpole-executions");
   if (!fs.existsSync(executionRoot)) return [];
 
   const dirs: string[] = [];
@@ -105,7 +105,7 @@ export async function findExecutionDirs(dataHash: string): Promise<string[]> {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const metaPath = path.join(executionRoot, entry.name, ".langton", "execution-meta.json");
+    const metaPath = path.join(executionRoot, entry.name, ".tadpole", "execution-meta.json");
     try {
       const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
       if (meta.dataHash === dataHash) {

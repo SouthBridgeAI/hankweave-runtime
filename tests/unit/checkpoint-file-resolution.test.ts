@@ -1,29 +1,21 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { CheckpointGit } from "../../server/checkpoint-git.js";
 import { Logger } from "../../server/utils.js";
 
 // Test directory setup
-const TEST_DIR = path.join(__dirname, "test-checkpoint-files");
+const _TEST_DIR = path.join(__dirname, "test-checkpoint-files");
 
 // Mock logger
 class MockLogger extends Logger {
   logs: Array<{ message: string; level: string }> = [];
 
-  constructor(logFile: string) {
-    super(logFile);
-  }
-
   log(message: string, level: "info" | "error" | "debug" = "info"): void {
     this.logs.push({ message, level });
   }
 
-  logSocketTraffic(
-    socketLogFile: string,
-    direction: "in" | "out",
-    data: unknown
-  ): void {
+  logSocketTraffic(_socketLogFile: string, _direction: "in" | "out", _data: unknown): void {
     // Mock implementation
   }
 }
@@ -35,11 +27,7 @@ describe("Checkpoint File Resolution", () => {
 
   beforeEach(async () => {
     // Create a temporary directory for testing
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-file-resolution-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-file-resolution-${Date.now()}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
 
     // Create mock logger
@@ -86,18 +74,9 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.mkdir(path.join(tempDir, "src"), { recursive: true });
     await fs.promises.mkdir(path.join(tempDir, "docs"), { recursive: true });
 
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "main.ts"),
-      "export {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "utils.js"),
-      "module.exports = {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "docs", "README.md"),
-      "# Docs"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "main.ts"), "export {}");
+    await fs.promises.writeFile(path.join(tempDir, "src", "utils.js"), "module.exports = {}");
+    await fs.promises.writeFile(path.join(tempDir, "docs", "README.md"), "# Docs");
     await fs.promises.writeFile(path.join(tempDir, "package.json"), "{}");
 
     // Add patterns incrementally (simulating multiple phases)
@@ -129,19 +108,13 @@ describe("Checkpoint File Resolution", () => {
 
   test("should respect gitignore rules", async () => {
     // Create .gitignore
-    await fs.promises.writeFile(
-      path.join(tempDir, ".gitignore"),
-      "node_modules/\n*.log\n.env\n"
-    );
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "node_modules/\n*.log\n.env\n");
 
     // Create files that should be ignored
     await fs.promises.mkdir(path.join(tempDir, "node_modules"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "node_modules", "package.json"),
-      "{}"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "node_modules", "package.json"), "{}");
     await fs.promises.writeFile(path.join(tempDir, "debug.log"), "log content");
     await fs.promises.writeFile(path.join(tempDir, ".env"), "SECRET=value");
 
@@ -178,14 +151,8 @@ describe("Checkpoint File Resolution", () => {
   test("should handle pattern overlaps correctly", async () => {
     // Create test files
     await fs.promises.mkdir(path.join(tempDir, "src"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "main.ts"),
-      "export {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "utils.ts"),
-      "export {}"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "main.ts"), "export {}");
+    await fs.promises.writeFile(path.join(tempDir, "src", "utils.ts"), "export {}");
     await fs.promises.writeFile(path.join(tempDir, "test.ts"), "test");
 
     // Add overlapping patterns
@@ -242,16 +209,13 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    let trackedFiles = await new Response(proc.stdout).text();
+    const trackedFiles = await new Response(proc.stdout).text();
     expect(trackedFiles).toContain("file1.txt");
     expect(trackedFiles).toContain("file2.txt");
 
     // Add a new file and modify existing
     await fs.promises.writeFile(path.join(tempDir, "file3.txt"), "content 3");
-    await fs.promises.writeFile(
-      path.join(tempDir, "file1.txt"),
-      "modified content 1"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "file1.txt"), "modified content 1");
 
     // Second commit should only include new/changed files
     const commit2 = await checkpointGit.commit("Second commit");
@@ -285,30 +249,18 @@ describe("Checkpoint File Resolution", () => {
     });
 
     // Create files at various levels
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "index.ts"),
-      "export {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "components", "Button.tsx"),
-      "export {}"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "index.ts"), "export {}");
+    await fs.promises.writeFile(path.join(tempDir, "src", "components", "Button.tsx"), "export {}");
     await fs.promises.writeFile(
       path.join(tempDir, "src", "components", "ui", "Modal.tsx"),
-      "export {}"
+      "export {}",
     );
     await fs.promises.writeFile(
       path.join(tempDir, "src", "utils", "helpers", "format.ts"),
-      "export {}"
+      "export {}",
     );
-    await fs.promises.writeFile(
-      path.join(tempDir, "tests", "unit", "test.spec.ts"),
-      "test"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "docs", "api", "README.md"),
-      "# API"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "tests", "unit", "test.spec.ts"), "test");
+    await fs.promises.writeFile(path.join(tempDir, "docs", "api", "README.md"), "# API");
     await fs.promises.writeFile(path.join(tempDir, "package.json"), "{}");
 
     // Add nested patterns
@@ -374,22 +326,10 @@ describe("Checkpoint File Resolution", () => {
 
   test("should handle special characters in filenames", async () => {
     // Create files with special characters
-    await fs.promises.writeFile(
-      path.join(tempDir, "file with spaces.txt"),
-      "content"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "file-with-dashes.txt"),
-      "content"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "file_with_underscores.txt"),
-      "content"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "file.with.dots.txt"),
-      "content"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "file with spaces.txt"), "content");
+    await fs.promises.writeFile(path.join(tempDir, "file-with-dashes.txt"), "content");
+    await fs.promises.writeFile(path.join(tempDir, "file_with_underscores.txt"), "content");
+    await fs.promises.writeFile(path.join(tempDir, "file.with.dots.txt"), "content");
 
     await checkpointGit.addPatterns(["*.txt"]);
 
@@ -444,13 +384,10 @@ describe("Checkpoint File Resolution", () => {
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(
-      ["git", "diff", "--name-only", `${commit1}..${commit2}`],
-      {
-        cwd: tempDir,
-        env: { ...process.env, ...gitEnv },
-      }
-    );
+    const proc = Bun.spawn(["git", "diff", "--name-only", `${commit1}..${commit2}`], {
+      cwd: tempDir,
+      env: { ...process.env, ...gitEnv },
+    });
     const changedFiles = await new Response(proc.stdout).text();
     expect(changedFiles).toContain("new.py");
     expect(changedFiles).not.toContain("test.ts");

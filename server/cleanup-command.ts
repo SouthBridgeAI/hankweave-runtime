@@ -66,11 +66,11 @@ export class CleanupCommand {
       }
 
       // Display what will be removed
-      console.log("🧹 Langton Cleanup Tool\n");
+      console.log("🧹 Tadpole Cleanup Tool\n");
       console.log("The following execution directory will be removed:\n");
 
       for (const dir of dirsToRemove) {
-        const metaPath = path.join(dir, ".langton", "execution-meta.json");
+        const metaPath = path.join(dir, ".tadpole", "execution-meta.json");
         try {
           const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
           console.log(`📁 ${dir}`);
@@ -125,7 +125,7 @@ export class CleanupCommand {
           }
 
           // Check for running server
-          const lockFile = path.join(dir, ".langton", "server.lock");
+          const lockFile = path.join(dir, ".tadpole", "server.lock");
           if (fs.existsSync(lockFile)) {
             result.errors.push(`Cannot remove ${dir}: Server is running`);
             console.log(`❌ Skipped (server running): ${dir}`);

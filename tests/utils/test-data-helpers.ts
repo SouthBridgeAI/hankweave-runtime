@@ -64,8 +64,7 @@ export function calculateCostFromUsage(usage: UsageData): number {
   const inputCost = ((usage.input_tokens || 0) / 1_000_000) * costs.input;
   const cacheCreationCost =
     ((usage.cache_creation_input_tokens || 0) / 1_000_000) * costs.inputCache;
-  const cacheReadCost =
-    ((usage.cache_read_input_tokens || 0) / 1_000_000) * costs.cacheRead;
+  const cacheReadCost = ((usage.cache_read_input_tokens || 0) / 1_000_000) * costs.cacheRead;
   const outputCost = ((usage.output_tokens || 0) / 1_000_000) * costs.output;
 
   return inputCost + cacheCreationCost + cacheReadCost + outputCost;

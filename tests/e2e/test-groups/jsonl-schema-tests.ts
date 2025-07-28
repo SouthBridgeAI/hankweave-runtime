@@ -6,7 +6,7 @@ import { colors } from "../../utils/test-helpers.js";
 export function runJSONLSchemaTests(testDir: string) {
   for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
     test(`${phaseId} JSONL has valid schema`, () => {
-      const logPath = path.join(testDir, `.langton/logs/log-${phaseId}.jsonl`);
+      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const lines = logContent.split("\n").filter((l) => l.trim());

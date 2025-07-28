@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 
-test("Langton tests are standalone scripts", () => {
+test("Tadpole tests are standalone scripts", () => {
   console.log("\n");
   console.log("ℹ️  Tadpole tests are not written as Bun test files.");
   console.log("They are standalone E2E scripts that test the full server.");

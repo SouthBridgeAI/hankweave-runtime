@@ -1,8 +1,8 @@
-# Langton Server Protocol
+# Tadpole Server Protocol
 
 ## Overview
 
-The Langton server operates on a WebSocket-based protocol designed for real-time, bidirectional communication between the server and a client. This approach enables a highly interactive and transparent experience, allowing clients to monitor Claude's activity, control the execution flow, and receive immediate updates on file system changes and state transitions.
+The Tadpole server operates on a WebSocket-based protocol designed for real-time, bidirectional communication between the server and a client. This approach enables a highly interactive and transparent experience, allowing clients to monitor Claude's activity, control the execution flow, and receive immediate updates on file system changes and state transitions.
 
 The server runs on port 7777 by default. All messages exchanged are JSON-encoded and adhere to a strict schema, ensuring type safety and predictable interactions.
 
@@ -14,7 +14,7 @@ The connection model is designed for simplicity and state consistency:
 
 - **Automatic Shutdown**: To ensure clean resource management and prevent orphaned processes, the server is designed to shut down gracefully when its client disconnects. This ties the server's lifecycle directly to the client's session.
 
-- **Lock File**: On startup, the server creates a lock file at `.langton/server.lock`. This file contains the server's process ID (PID) and the current run ID. This mechanism prevents multiple server instances from running in the same project directory, which would otherwise lead to state corruption and race conditions. The lock file also includes a heartbeat timestamp, allowing the server to detect and clean up stale locks from crashed previous sessions.
+- **Lock File**: On startup, the server creates a lock file at `.tadpole/server.lock`. This file contains the server's process ID (PID) and the current run ID. This mechanism prevents multiple server instances from running in the same project directory, which would otherwise lead to state corruption and race conditions. The lock file also includes a heartbeat timestamp, allowing the server to detect and clean up stale locks from crashed previous sessions.
 
 ### Connection Flow Diagram
 ```
@@ -226,14 +226,14 @@ The initial handshake event, sent once a client connects successfully. It provid
   "type": "server.ready",
   "data": {
     "serverVersion": "1.0.0",
-    "executionPath": "/home/.langton-executions/1234-abc",
-    "dataPath": "/home/.langton-executions/1234-abc/data"
+    "executionPath": "/home/.tadpole-executions/1234-abc",
+    "dataPath": "/home/.tadpole-executions/1234-abc/data"
   }
 }
 ```
 
 **Note**: Prior to execution isolation, this event included `projectPath`. This has been replaced with:
-- `executionPath`: Where the server operates and all Langton artifacts are stored
+- `executionPath`: Where the server operates and all Tadpole artifacts are stored
 - `dataPath`: Where the user's original data is accessible (via symlink or copy)
 
 #### `state.snapshot`
