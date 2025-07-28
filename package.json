@@ -1,5 +1,5 @@
 {
-  "name": "langton-runner",
+  "name": "tapole",
   "module": "index.ts",
   "type": "module",
   "scripts": {
