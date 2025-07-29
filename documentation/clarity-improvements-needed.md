@@ -21,6 +21,12 @@ After reviewing the Tadpole Runner documentation, here are areas that need more 
 ### Protocol Updates
 - WebSocket protocol updated to reflect `executionPath` and `dataPath` instead of `projectPath`
 - Server ready event documentation updated
+- Tool result tracking feature documented with new `tool.result` event
+
+### Tool Execution Tracking
+- New `tool.result` event type added to protocol
+- Real-time tool execution results with timing and truncation
+- Correlation between tool invocations and results via `toolUseId`
 
 ## 1. Technical Concepts Not Explained
 

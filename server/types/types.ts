@@ -249,6 +249,9 @@ export interface ServerConfig {
 
   /** Time limit for hashing directories in milliseconds (default: 5000) */
   dataHashTimeLimit: number;
+
+  /** Maximum length for tool result content before truncation (default: 2500) */
+  toolResultTruncateLength: number;
 }
 
 // ============================================================================
@@ -451,6 +454,34 @@ export interface TokenUsageEvent {
     cacheReadTokens: number;
     /** Cost for this specific message in dollars */
     totalCost: number;
+  };
+}
+
+/**
+ * Tool execution result notification.
+ * Emitted when a tool completes execution with its result.
+ */
+export interface ToolResultEvent {
+  id: EventId;
+  timestamp: string;
+  type: "tool.result";
+  data: {
+    /** Phase that executed this tool */
+    phaseId: string;
+    /** Tool use ID for correlation */
+    toolUseId: string;
+    /** Name of the tool that was executed */
+    toolName: string;
+    /** Truncated result content */
+    result: string;
+    /** Whether the result was truncated */
+    truncated: boolean;
+    /** Original result length before truncation */
+    originalLength: number;
+    /** Execution time in milliseconds */
+    executionTimeMs: number;
+    /** Whether the tool execution resulted in an error */
+    isError: boolean;
   };
 }
 
@@ -678,6 +709,7 @@ export type ServerEvent =
   | PhaseCompletedEvent
   | AssistantActionEvent
   | TokenUsageEvent
+  | ToolResultEvent
   | FileUpdatedEvent
   | FileTreeUpdatedEvent
   | ErrorEvent

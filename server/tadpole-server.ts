@@ -20,7 +20,9 @@ import type {
   SystemMessage,
   TextContent,
   ThinkingContent,
+  ToolResultContent,
   ToolUseContent,
+  UserMessage,
 } from "./types/claude-session-schema.js";
 import { APITimeoutError, ErrorSeverity } from "./types/error-types.js";
 import {
@@ -93,6 +95,16 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private stateManager: StateManager;
   private currentRunId: RunId | null = null;
   private heartbeatInterval?: NodeJS.Timeout;
+
+  // Track pending tool uses for result matching
+  private pendingToolUses: Map<
+    string,
+    {
+      toolName: string;
+      timestamp: number;
+      phaseId: string;
+    }
+  > = new Map();
 
   // Temporary state during phase execution
   private watchedPatterns: string[] = [];
@@ -1006,6 +1018,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         parsingInterval: this.config.logParsingInterval,
         onSystemMessage: (msg) => this.handleSystemMessage(msg, phase.id),
         onAssistantMessage: (msg) => this.handleAssistantMessage(msg, phase.id),
+        onUserMessage: (msg) => this.handleUserMessage(msg, phase.id),
         onResultMessage: (msg) => this.handleResultMessage(msg, phase.id),
       });
 
@@ -1328,6 +1341,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       } else if (item.type === "tool_use") {
         const toolItem = item as ToolUseContent;
 
+        // Track this tool use for result matching
+        this.pendingToolUses.set(toolItem.id, {
+          toolName: toolItem.name,
+          timestamp: Date.now(),
+          phaseId,
+        });
+
         // Handle file-related tool calls
         const fileTools: ToolName[] = ["Read", "Write", "Edit", "MultiEdit"];
         if (fileTools.includes(toolItem.name as ToolName)) {
@@ -1443,6 +1463,78 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             totalCost: finalCost,
           },
         } as TokenUsageEvent);
+      }
+    }
+  }
+
+  private handleUserMessage(msg: UserMessage, _phaseId: string): void {
+    // Process tool results from user messages
+    const content = msg.message.content;
+    const contentArray = Array.isArray(content) ? content : [];
+
+    for (const item of contentArray) {
+      if (item.type === "tool_result") {
+        const toolResult = item as ToolResultContent;
+
+        // Find the corresponding tool use
+        const toolUse = this.pendingToolUses.get(toolResult.tool_use_id);
+        if (!toolUse) {
+          this.logger.log(
+            `Tool result without matching tool use: ${toolResult.tool_use_id}`,
+            "info",
+          );
+          continue;
+        }
+
+        // Calculate execution time
+        const executionTimeMs = Date.now() - toolUse.timestamp;
+
+        // Extract result content
+        let resultText = "";
+        let isError = false;
+
+        if (typeof toolResult.content === "string") {
+          resultText = toolResult.content;
+        } else if (Array.isArray(toolResult.content)) {
+          resultText = toolResult.content
+            .filter((c) => c.type === "text")
+            .map((c) => c.text)
+            .join("\n");
+        } else if (toolResult.content && typeof toolResult.content === "object") {
+          // Check if it's an error result
+          if ("is_error" in toolResult.content) {
+            isError = toolResult.content.is_error === true;
+          }
+          resultText = JSON.stringify(toolResult.content, null, 2);
+        }
+
+        // Truncate result based on configuration
+        const originalLength = resultText.length;
+        const truncateLength = this.config.toolResultTruncateLength;
+        const truncated = resultText.length > truncateLength;
+        if (truncated) {
+          resultText = `${resultText.substring(0, truncateLength)}...`;
+        }
+
+        // Send tool result event
+        this.sendEvent({
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "tool.result",
+          data: {
+            phaseId: toolUse.phaseId,
+            toolUseId: toolResult.tool_use_id,
+            toolName: toolUse.toolName,
+            result: resultText,
+            truncated,
+            originalLength,
+            executionTimeMs,
+            isError,
+          },
+        } as import("./types/types.js").ToolResultEvent);
+
+        // Clean up tracked tool use
+        this.pendingToolUses.delete(toolResult.tool_use_id);
       }
     }
   }
@@ -2855,6 +2947,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.isForceStopping = false;
     this.isSkippingPhase = false; // Reset skip flag after phase completion
     this.resultMessageReceived = false; // Reset result message flag
+
+    // Clear any pending tool uses
+    this.pendingToolUses.clear();
   }
 
   private async runCommand(command: string, workingDir: string): Promise<void> {

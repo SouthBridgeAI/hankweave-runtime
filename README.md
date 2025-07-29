@@ -11,6 +11,7 @@ At its core, Tadpole Runner is a bridge between your development environment and
 -   **State Persistence**: The server meticulously records every action, decision, and outcome in the execution's `.tadpole` directory. This means you can stop the server and resume your workflow later, with all history and context perfectly preserved.
 -   **Rollback System**: A shadow git repo automatically checkpoints your execution state at key moments. This allows you to instantly revert to any point in the execution history, making it easy to explore different approaches or recover from errors.
 -   **Cost Tracking**: Get real-time feedback on token usage and associated costs for each phase, helping you manage your budget and optimize your prompts.
+-   **Tool Result Tracking**: Monitor Claude's tool executions in real-time with detailed results, execution timing, and automatic truncation of large outputs.
 -   **File Tracking**: Specify which files Claude should pay attention to. The server will monitor these files for changes, stream updates to you in real-time, and include them in checkpoints.
 -   **Session Continuity**: Build complex, multi-turn conversations with Claude. A phase can be configured to "continue" from the previous one, inheriting the full conversational context.
 -   **Workspace Setup**: Automate the preparation of your development environment. Before a phase starts, the server can copy template files or run shell commands (like `npm install`), ensuring Claude has everything it needs to get started.

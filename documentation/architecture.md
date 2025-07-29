@@ -64,7 +64,7 @@ The server is composed of several distinct, yet interconnected, modules.
 ### Process & Log Management
 
 -   **`server/claude-process-manager.ts`**: This class is responsible for the entire lifecycle of the Claude CLI subprocess. It handles spawning the process with the correct arguments and environment variables, creating and managing log streams, and ensuring the process is properly monitored and cleaned up.
--   **`server/claude-log-parser.ts`**: A real-time parser for Claude's JSONL output. It reads new lines from the log file as they are written, validates them against a schema, and emits typed events for different message types (system, assistant, result), which the main server then processes.
+-   **`server/claude-log-parser.ts`**: A real-time parser for Claude's JSONL output. It reads new lines from the log file as they are written, validates them against a schema, and emits typed events for different message types (system, assistant, user, result), which the main server then processes. It now includes parsing of tool results from user messages, enabling detailed tracking of tool execution outcomes.
 
 ### Checkpoint & File System
 
@@ -82,9 +82,10 @@ The server is composed of several distinct, yet interconnected, modules.
 
 1.  **Command Reception**: A client sends a `phase.start` command over WebSocket. The `TadpoleServer` receives it and calls its internal `startPhase` method.
 2.  **Phase Initialization**: `startPhase` orchestrates the setup, which includes running `workspaceSetup` commands, creating a `workspace-setup` checkpoint via `CheckpointGit`, and finally using `ClaudeProcessManager` to spawn the Claude CLI process.
-3.  **Log Processing**: As the Claude process runs, it writes JSONL logs to a file. The `ClaudeLogParser` tails this file, parses new lines, and emits events (e.g., for an assistant message).
-4.  **State Updates**: The `TadpoleServer` listens for these parser events. Upon receiving one, it creates a corresponding `StateTransition` object (e.g., `CostsIncremented`) and sends it to the `StateManager`. The `StateManager` validates, applies, and persists the change.
-5.  **Client Notification**: The `TadpoleServer` also transforms the parser event into a WebSocket protocol event (e.g., `assistant.action`) and sends it to the client.
+3.  **Log Processing**: As the Claude process runs, it writes JSONL logs to a file. The `ClaudeLogParser` tails this file, parses new lines, and emits events (e.g., for an assistant message, tool use, or tool result).
+4.  **Tool Result Tracking**: When Claude uses a tool, the server tracks the invocation. When the tool completes, Claude logs the result in a user message. The server correlates these results with their invocations, calculates execution time, and sends detailed `tool.result` events to the client.
+5.  **State Updates**: The `TadpoleServer` listens for these parser events. Upon receiving one, it creates a corresponding `StateTransition` object (e.g., `CostsIncremented`) and sends it to the `StateManager`. The `StateManager` validates, applies, and persists the change.
+6.  **Client Notification**: The `TadpoleServer` also transforms the parser event into a WebSocket protocol event (e.g., `assistant.action`, `tool.result`) and sends it to the client.
 
 ### The State Transition Flow
 

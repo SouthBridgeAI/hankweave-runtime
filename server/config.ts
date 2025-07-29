@@ -177,6 +177,7 @@ export const DEFAULT_CONFIG: Omit<
   logParsingInterval: 1000, // Check for new log entries every second
   autostart: true, // Default to current behavior
   dataHashTimeLimit: 5000, // 5 seconds for directory hashing
+  toolResultTruncateLength: 2500, // Default truncation length for tool results
 };
 
 // ============================================================================

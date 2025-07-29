@@ -4,6 +4,7 @@ import {
   logMessageSchema,
   type ResultMessage,
   type SystemMessage,
+  type UserMessage,
 } from "./types/claude-session-schema.js";
 
 /**
@@ -18,6 +19,8 @@ export interface ClaudeLogParserOptions {
   onSystemMessage?: (msg: SystemMessage) => void;
   /** Callback for assistant messages (Claude's responses) */
   onAssistantMessage?: (msg: AssistantMessage) => void;
+  /** Callback for user messages (tool results) */
+  onUserMessage?: (msg: UserMessage) => void;
   /** Callback for result messages (success/error) */
   onResultMessage?: (msg: ResultMessage) => void;
   /** How often to check for new log entries (milliseconds) */
@@ -66,7 +69,7 @@ export class ClaudeLogParser {
    * Force an immediate parse of the log file.
    * Useful when we need to ensure all messages are processed before process termination.
    */
-  parseNow(): void {
+  public parseNow(): void {
     this.parseLogFile();
   }
 
@@ -121,6 +124,12 @@ export class ClaudeLogParser {
         case "assistant":
           if (this.options.onAssistantMessage) {
             this.options.onAssistantMessage(message);
+          }
+          break;
+
+        case "user":
+          if (this.options.onUserMessage) {
+            this.options.onUserMessage(message);
           }
           break;
 

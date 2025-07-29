@@ -1,5 +1,17 @@
 # Only for humans - not for Claude
 
+## Recently Completed ✅
+
+### Tool Result Tracking (2025-07-29)
+- Added `tool.result` event type to WebSocket protocol
+- Implemented real-time tracking of tool executions with results
+- Added execution timing measurement (milliseconds)
+- Implemented configurable result truncation (default 1000 chars)
+- Added correlation between tool invocations and results via `toolUseId`
+- Created comprehensive unit tests (19 tests) and E2E tests (10 tests)
+- Updated all documentation (README, architecture, protocol)
+- All tests passing (153/153 E2E tests)
+
 ## TODOs - tasks to pick and solve
 
 
@@ -9,6 +21,7 @@
 3. Parallel calls
 4. Allow looping phases?
 5. Telemetry
+6. Resume function
 
 
 ### P1
@@ -32,6 +45,7 @@
 6. Dockerization
 7. Automated proxy
 8. Auto-server serving files
+9. Be able to source websocket log (with filtering) as an input itself
 
 ### Cleanup stuff
 

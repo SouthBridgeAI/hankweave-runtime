@@ -55,6 +55,7 @@ import { runStateConsistencyTests } from "./test-groups/state-consistency-tests.
 import { runStateSnapshotTests } from "./test-groups/state-snapshot-tests.js";
 import { runTemplateVariableTests } from "./test-groups/template-variable-tests.js";
 import { runTokenUsageTests } from "./test-groups/token-usage-tests.js";
+import { runToolResultTests } from "./test-groups/tool-result-tests.js";
 import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
 import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js";
 
@@ -566,6 +567,10 @@ describe("Tadpole E2E Test", () => {
 
   describe("Tool Usage", () => {
     runToolUsageTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
+  });
+
+  describe("Tool Results", () => {
+    runToolResultTests(testState);
   });
 
   describe("State Snapshot", () => {

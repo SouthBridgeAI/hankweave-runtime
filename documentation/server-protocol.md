@@ -314,6 +314,35 @@ A real-time stream of Claude's actions, parsed from its log output. This provide
 }
 ```
 
+#### `tool.result`
+Provides detailed information about the completion of a tool execution, including the result, execution time, and whether it was successful. This event is correlated with the original tool use via `toolUseId`.
+
+```json
+{
+  "id": "evt-006",
+  "timestamp": "2025-01-19T10:01:05Z",
+  "type": "tool.result",
+  "data": {
+    "phaseId": "phase-1",
+    "toolUseId": "toolu_01ABC123XYZ",
+    "toolName": "Read",
+    "result": "const app = express();\n// ... file content ...",
+    "truncated": false,
+    "originalLength": 1024,
+    "executionTimeMs": 45,
+    "isError": false
+  }
+}
+```
+
+**Fields:**
+- `toolUseId`: Unique identifier that correlates with the tool invocation
+- `result`: The tool's output (may be truncated for large results)
+- `truncated`: Whether the result was truncated
+- `originalLength`: Original size of the result before truncation
+- `executionTimeMs`: Time taken to execute the tool in milliseconds
+- `isError`: Whether the tool execution resulted in an error
+
 #### `token.usage`
 Provides a real-time update on token consumption and associated costs after each interaction with the Claude API that reports usage.
 

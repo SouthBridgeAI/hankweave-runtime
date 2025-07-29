@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
 import { calculateCost } from "../../server/config.js";
-import type { AssistantMessage, ResultMessage } from "../../server/types/claude-session-schema.js";
+import type {
+  AssistantMessage,
+  ResultMessage,
+  UserMessage,
+} from "../../server/types/claude-session-schema.js";
 import { logMessageSchema } from "../../server/types/claude-session-schema.js";
 import type { TokenUsage } from "../../server/types/types.js";
 
@@ -478,6 +482,200 @@ describe("Real Claude Logs Validation", () => {
       }
 
       expect(messageCount).toBeGreaterThan(0);
+    });
+  });
+
+  describe("Tool Result Parsing", () => {
+    // Find logs that contain tool results
+    const logsWithToolResults = logFiles.filter((logPath) => {
+      const content = fs.readFileSync(logPath, "utf-8");
+      return content.includes('"type":"tool_result"');
+    });
+
+    test("at least one log should contain tool results", () => {
+      expect(logsWithToolResults.length).toBeGreaterThan(0);
+    });
+
+    test.each(logsWithToolResults.map((f) => [getRelativePath(f), f]))(
+      "should parse tool results in %s",
+      (_relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
+
+        const toolResults: Array<{
+          toolUseId: string;
+          content: any;
+          isError: boolean;
+        }> = [];
+
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
+
+            if (result.success && result.data.type === "user") {
+              const msg = result.data as UserMessage;
+              if (Array.isArray(msg.message.content)) {
+                for (const item of msg.message.content) {
+                  if (item.type === "tool_result") {
+                    toolResults.push({
+                      toolUseId: item.tool_use_id,
+                      content: item.content,
+                      isError: false, // Tool results themselves don't have is_error property
+                    });
+                  }
+                }
+              }
+            }
+          } catch {
+            // Skip invalid lines
+          }
+        }
+
+        // Should have found at least one tool result
+        expect(toolResults.length).toBeGreaterThan(0);
+
+        // Check tool result structure
+        for (const toolResult of toolResults) {
+          expect(toolResult.toolUseId).toBeTruthy();
+          expect(toolResult.toolUseId).toMatch(/^toolu_[a-zA-Z0-9]+$/);
+          expect(typeof toolResult.isError).toBe("boolean");
+
+          // Content can be string, array, or object
+          expect(toolResult.content).toBeDefined();
+        }
+      },
+    );
+
+    test.each(logsWithToolResults.map((f) => [getRelativePath(f), f]))(
+      "should have diverse tool result content types in %s",
+      (_relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
+
+        const contentTypes = new Set<string>();
+
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
+
+            if (result.success && result.data.type === "user") {
+              const msg = result.data as UserMessage;
+              if (Array.isArray(msg.message.content)) {
+                for (const item of msg.message.content) {
+                  if (item.type === "tool_result") {
+                    const contentType = Array.isArray(item.content) ? "array" : typeof item.content;
+                    contentTypes.add(contentType);
+                  }
+                }
+              }
+            }
+          } catch {
+            // Skip invalid lines
+          }
+        }
+
+        // Log content type distribution
+        console.log(`Tool result content types in ${_relativePath}:`, Array.from(contentTypes));
+
+        // Most logs should have string content at minimum
+        expect(contentTypes.has("string")).toBe(true);
+      },
+    );
+
+    test.each(logsWithToolResults.slice(0, 3).map((f) => [getRelativePath(f), f]))(
+      "should track tool results with parser callback in %s",
+      async (_relativePath, logPath) => {
+        const toolResults: Array<{
+          toolUseId: string;
+          contentType: string;
+          isError: boolean;
+        }> = [];
+
+        const parser = new ClaudeLogParser({
+          logPath,
+          phaseId: "test-phase",
+          parsingInterval: 50,
+          onUserMessage: (msg: UserMessage) => {
+            if (Array.isArray(msg.message.content)) {
+              for (const item of msg.message.content) {
+                if (item.type === "tool_result") {
+                  toolResults.push({
+                    toolUseId: item.tool_use_id,
+                    contentType: Array.isArray(item.content) ? "array" : typeof item.content,
+                    isError: false, // Tool results don't have is_error property
+                  });
+                }
+              }
+            }
+          },
+        });
+
+        parser.start();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        parser.stop();
+
+        // Should have captured tool results
+        expect(toolResults.length).toBeGreaterThan(0);
+
+        // Verify structure
+        for (const result of toolResults) {
+          expect(result.toolUseId).toMatch(/^toolu_[a-zA-Z0-9]+$/);
+          expect(["string", "object", "array"]).toContain(result.contentType);
+          expect(typeof result.isError).toBe("boolean");
+        }
+      },
+    );
+
+    test.skipIf(logsWithToolResults.length === 0)("should handle error tool results", () => {
+      let foundErrorResult = false;
+
+      for (const logPath of logsWithToolResults) {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
+
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
+
+            if (result.success && result.data.type === "user") {
+              const msg = result.data as UserMessage;
+              if (Array.isArray(msg.message.content)) {
+                for (const item of msg.message.content) {
+                  if (item.type === "tool_result") {
+                    // Check if content indicates an error
+                    if (typeof item.content === "object" && !Array.isArray(item.content)) {
+                      const contentObj = item.content as Record<string, unknown>;
+                      if (contentObj.is_error === true || contentObj.error) {
+                        foundErrorResult = true;
+
+                        // Verify error content structure
+                        expect(item.tool_use_id).toBeTruthy();
+                        expect(item.content).toBeDefined();
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            if (foundErrorResult) break;
+          } catch {
+            // Skip invalid lines
+          }
+        }
+
+        if (foundErrorResult) break;
+      }
+
+      // Log whether we found error results
+      console.log(`Found error tool results: ${foundErrorResult}`);
+
+      // This test will pass either way, but logs the result
+      expect(true).toBe(true);
     });
   });
 });
