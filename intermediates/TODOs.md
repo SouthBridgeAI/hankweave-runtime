@@ -22,6 +22,7 @@
 4. Allow looping phases?
 5. Telemetry
 6. Resume function
+7. Check if we're close to end of tokens and allow for an `any more?` style exhaustiveness push
 
 
 ### P1
