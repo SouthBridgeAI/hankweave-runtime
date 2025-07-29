@@ -3,6 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { minimatch } from "minimatch";
+import { EventId, PhaseId, RunId, SessionId } from "./branded-types.js";
+import { CheckpointGit } from "./checkpoint-git.js";
+import { ClaudeLogParser } from "./claude-log-parser.js";
+import { ClaudeProcessManager } from "./claude-process-manager.js";
 import type {
   AssistantMessage,
   ResultMessage,
@@ -10,11 +14,7 @@ import type {
   TextContent,
   ThinkingContent,
   ToolUseContent,
-} from "../types/claude-session-schema.js";
-import { EventId, PhaseId, RunId, SessionId } from "./branded-types.js";
-import { CheckpointGit } from "./checkpoint-git.js";
-import { ClaudeLogParser } from "./claude-log-parser.js";
-import { ClaudeProcessManager } from "./claude-process-manager.js";
+} from "./claude-types/claude-session-schema.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { APITimeoutError, ErrorSeverity } from "./error-types.js";

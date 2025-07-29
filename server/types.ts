@@ -1,6 +1,6 @@
 import type { z } from "zod";
-import type { logMessageSchema } from "../types/claude-session-schema.js";
 import type { EventId, PhaseId } from "./branded-types.js";
+import type { logMessageSchema } from "./claude-types/claude-session-schema.js";
 import type { ErrorSeverity } from "./error-types.js";
 import type { PhaseExecution } from "./state-types.js";
 

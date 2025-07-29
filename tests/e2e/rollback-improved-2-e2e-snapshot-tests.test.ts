@@ -1061,7 +1061,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
           .filter((content) => content !== "");
 
         const hasWordsworthInMessages = assistantMessages.some((content) =>
-          content.includes("wordsworth")
+          content.includes("wordsworth"),
         );
 
         if (hasWordsworthInMessages) {
@@ -1110,7 +1110,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
         const dataSourceInExecution = path.join(
           firstSnapshot.directory,
           "read_only_data_source",
-          "poem_guides.txt"
+          "poem_guides.txt",
         );
         const dataSourceExists = fs.existsSync(dataSourceInExecution);
         console.log(`Data source file linked at ${dataSourceInExecution}: ${dataSourceExists}`);

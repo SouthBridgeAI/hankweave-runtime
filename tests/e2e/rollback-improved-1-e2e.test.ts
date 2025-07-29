@@ -932,7 +932,7 @@ describe("Comprehensive Rollback E2E Test", () => {
         .filter((content) => content !== "");
 
       const hasWordsworthInMessages = assistantMessages.some((content) =>
-        content.includes("wordsworth")
+        content.includes("wordsworth"),
       );
 
       // Check generated poem files in snapshots for Wordsworth mentions
@@ -944,10 +944,9 @@ describe("Comprehensive Rollback E2E Test", () => {
         const files = fs.readdirSync(snapshot1NotesDir);
         for (const file of files) {
           if (file.endsWith(".txt") || file.endsWith(".md")) {
-            const content = fs.readFileSync(
-              path.join(snapshot1NotesDir, file),
-              "utf-8"
-            ).toLowerCase();
+            const content = fs
+              .readFileSync(path.join(snapshot1NotesDir, file), "utf-8")
+              .toLowerCase();
             if (content.includes("wordsworth")) {
               hasWordsworthInFiles = true;
               break;
@@ -963,10 +962,9 @@ describe("Comprehensive Rollback E2E Test", () => {
           const files = fs.readdirSync(snapshot3NotesDir);
           for (const file of files) {
             if (file.endsWith(".txt") || file.endsWith(".md")) {
-            const content = fs.readFileSync(
-              path.join(snapshot3NotesDir, file),
-              "utf-8"
-            ).toLowerCase();
+              const content = fs
+                .readFileSync(path.join(snapshot3NotesDir, file), "utf-8")
+                .toLowerCase();
               if (content.includes("wordsworth")) {
                 hasWordsworthInFiles = true;
                 break;
@@ -980,7 +978,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       const dataSourceInExecution = path.join(
         testSnapshots[0].directory,
         "read_only_data_source",
-        "poem_guides.txt"
+        "poem_guides.txt",
       );
       expect(fs.existsSync(dataSourceInExecution)).toBe(true);
 
