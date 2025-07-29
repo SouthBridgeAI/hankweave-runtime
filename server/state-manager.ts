@@ -1,14 +1,14 @@
 // server/state-manager.ts
 import fs from "node:fs";
 import path from "node:path";
-import type { PhaseId, RunId } from "./branded-types.js";
 import type { CheckpointGit } from "./checkpoint-git.js";
 import { analyzeExecutionThread, type ExecutionThread } from "./execution-thread.js";
 import { MetadataValidationError, validateTransitionMetadata } from "./state-transition-guards.js";
-import type * as ST from "./state-types.js";
-import { getPhaseCost, isTerminalPhaseStatus, PhaseTransitions } from "./state-types.js";
 import { type StateManagerEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import type { PhaseConfig } from "./types.js";
+import type { PhaseId, RunId } from "./types/branded-types.js";
+import type * as ST from "./types/state-types.js";
+import { getPhaseCost, isTerminalPhaseStatus, PhaseTransitions } from "./types/state-types.js";
+import type { PhaseConfig } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
 // Error types for state management

@@ -5,8 +5,8 @@ import {
   analyzeExecutionThread,
   findContinuationSessionId,
 } from "../../server/execution-thread.js";
-import type { PhaseId, RunId, SessionId, TadpoleState } from "../../server/state-types.js";
-import type { PhaseConfig } from "../../server/types.js";
+import type { PhaseId, RunId, SessionId, TadpoleState } from "../../server/types/state-types.js";
+import type { PhaseConfig } from "../../server/types/types.js";
 import type { Logger } from "../../server/utils.js";
 
 // Test data and utilities

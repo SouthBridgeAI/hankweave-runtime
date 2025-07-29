@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
-import { PhaseId, RunId } from "../../server/branded-types.js";
 import { StateManager } from "../../server/state-manager.js";
-import type { PhaseConfig } from "../../server/types.js";
+import { PhaseId, RunId } from "../../server/types/branded-types.js";
+import type { PhaseConfig } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
 import { createCompletedPhase, StateBuilder } from "../utils/mock-builders.js";
 

@@ -2,13 +2,10 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import type {
-  AssistantMessage,
-  ResultMessage,
-} from "../../server/claude-types/claude-session-schema.js";
-import { logMessageSchema } from "../../server/claude-types/claude-session-schema.js";
 import { calculateCost } from "../../server/config.js";
-import type { TokenUsage } from "../../server/types.js";
+import type { AssistantMessage, ResultMessage } from "../../server/types/claude-session-schema.js";
+import { logMessageSchema } from "../../server/types/claude-session-schema.js";
+import type { TokenUsage } from "../../server/types/types.js";
 
 // Local helper for testing log parsing - replaces the removed loadPhaseStateFromLog
 function parseLogForTesting(

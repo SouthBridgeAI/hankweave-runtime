@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import type { PhaseStartedEvent, ServerEvent, StateSnapshotEvent } from "../../../server/types.js";
+import type {
+  PhaseStartedEvent,
+  ServerEvent,
+  StateSnapshotEvent,
+} from "../../../server/types/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {

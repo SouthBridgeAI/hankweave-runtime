@@ -5,7 +5,7 @@ import type {
   PhaseCompletedEvent,
   ServerEvent,
   StateSnapshotEvent,
-} from "../../../server/types.js";
+} from "../../../server/types/types.js";
 import { parseJSONL } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 

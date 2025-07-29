@@ -4,7 +4,7 @@ import {
   logMessageSchema,
   type ResultMessage,
   type SystemMessage,
-} from "./claude-types/claude-session-schema.js";
+} from "./types/claude-session-schema.js";
 
 /**
  * Configuration options for Claude log parser.

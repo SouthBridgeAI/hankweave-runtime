@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PhaseId } from "./branded-types.js";
+import { PhaseId } from "./types/branded-types.js";
 
 const phaseIdSchema = z.string().transform((id) => PhaseId(id));
 

@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import type { TadpoleState } from "../../server/state-types.js";
+import type { TadpoleState } from "../../server/types/state-types.js";
 
 export function assertPhaseCompleted(state: TadpoleState, phaseId: string): void {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);

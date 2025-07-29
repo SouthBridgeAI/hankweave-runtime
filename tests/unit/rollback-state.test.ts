@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
-import { PhaseId, RunId, SessionId } from "../../server/branded-types";
 import { StateManager } from "../../server/state-manager";
-import type { PhaseConfig } from "../../server/types";
+import { PhaseId, RunId, SessionId } from "../../server/types/branded-types";
+import type { PhaseConfig } from "../../server/types/types";
 import { Logger } from "../../server/utils";
 
 describe("Rollback State Management", () => {

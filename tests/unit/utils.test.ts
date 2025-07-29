@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
-import type { FileNode } from "../../server/types";
+import type { FileNode } from "../../server/types/types";
 import { buildFileTree, escapeShellArg } from "../../server/utils";
 
 describe("escapeShellArg", () => {

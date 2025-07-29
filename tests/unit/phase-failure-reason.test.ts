@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { EventId } from "../../server/branded-types.js";
-import type { FailureReason, PhaseCompletedEvent } from "../../server/types.js";
+import { EventId } from "../../server/types/branded-types.js";
+import type { FailureReason, PhaseCompletedEvent } from "../../server/types/types.js";
 
 describe("Phase Failure Reason", () => {
   describe("FailureReason type", () => {

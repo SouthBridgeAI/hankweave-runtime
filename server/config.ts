@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { PhaseId } from "./branded-types.js";
-import type { PhaseConfig, ServerConfig } from "./types.js";
+import { PhaseId } from "./types/branded-types.js";
+import type { PhaseConfig, ServerConfig } from "./types/types.js";
 
 // ============================================================================
 // Constants

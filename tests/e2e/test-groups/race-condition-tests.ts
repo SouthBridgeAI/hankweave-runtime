@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
-import { PhaseId } from "../../../server/branded-types.js";
-import type { PhaseCompletedEvent, PhaseStartedEvent, ServerEvent } from "../../../server/types.js";
+import { PhaseId } from "../../../server/types/branded-types.js";
+import type {
+  PhaseCompletedEvent,
+  PhaseStartedEvent,
+  ServerEvent,
+} from "../../../server/types/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {

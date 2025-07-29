@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  AssistantMessage,
-  ResultMessage,
-} from "../../server/claude-types/claude-session-schema.js";
-import { APITimeoutError, ErrorSeverity } from "../../server/error-types.js";
+import type { AssistantMessage, ResultMessage } from "../../server/types/claude-session-schema.js";
+import { APITimeoutError, ErrorSeverity } from "../../server/types/error-types.js";
 
 describe("API Timeout Detection", () => {
   describe("APITimeoutError", () => {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { FileTreeUpdatedEvent, FileUpdatedEvent } from "../../../server/types.js";
+import type { FileTreeUpdatedEvent, FileUpdatedEvent } from "../../../server/types/types.js";
 import { extractPathsFromTree } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 

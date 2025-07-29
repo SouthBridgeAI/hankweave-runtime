@@ -1,5 +1,5 @@
-import { PhaseId, type RunId, SessionId } from "../../server/branded-types.js";
-import type * as ST from "../../server/state-types.js";
+import { PhaseId, type RunId, SessionId } from "../../server/types/branded-types.js";
+import type * as ST from "../../server/types/state-types.js";
 
 export class StateBuilder {
   private state: ST.TadpoleState = {

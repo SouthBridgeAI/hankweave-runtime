@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PhaseId } from "../../server/branded-types";
 import {
   calculateCost,
   DEFAULT_CONFIG,
   loadPhaseConfig,
   validatePhaseConfig,
 } from "../../server/config";
-import type { ModelName, PhaseConfig } from "../../server/types";
+import { PhaseId } from "../../server/types/branded-types";
+import type { ModelName, PhaseConfig } from "../../server/types/types";
 
 describe("calculateCost", () => {
   const costs = DEFAULT_CONFIG.costsPerMTok;

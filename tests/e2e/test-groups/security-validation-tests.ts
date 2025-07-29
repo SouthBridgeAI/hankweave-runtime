@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ServerEvent } from "../../../server/types.js";
+import type { ServerEvent } from "../../../server/types/types.js";
 
 interface TestState {
   events: ServerEvent[];

@@ -2,8 +2,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { logMessageSchema } from "../server/claude-types/claude-session-schema.js";
-import type { LogMessage, AssistantMessage, SystemMessage, UserMessage, ResultMessage } from "../server/claude-types/claude-session-schema.js";
+import { logMessageSchema } from "../server/types/claude-session-schema.js";
+import type { LogMessage, AssistantMessage, SystemMessage, UserMessage, ResultMessage } from "../server/types/claude-session-schema.js";
 import { z } from "zod";
 
 // Color codes for terminal output

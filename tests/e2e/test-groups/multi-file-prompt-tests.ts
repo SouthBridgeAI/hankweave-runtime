@@ -5,7 +5,7 @@ import type {
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-} from "../../../server/types.js";
+} from "../../../server/types/types.js";
 
 interface TestState {
   events: ServerEvent[];

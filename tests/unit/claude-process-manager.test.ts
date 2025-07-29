@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
-import type { PhaseId } from "../../server/branded-types";
 import { ClaudeLogParser } from "../../server/claude-log-parser";
 import { ClaudeProcessManager } from "../../server/claude-process-manager";
-import type { PhaseConfig } from "../../server/types";
+import type { PhaseId } from "../../server/types/branded-types";
+import type { PhaseConfig } from "../../server/types/types";
 import { Logger } from "../../server/utils";
 
 describe("ClaudeProcessManager", () => {

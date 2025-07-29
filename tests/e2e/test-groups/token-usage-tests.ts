@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { TokenUsageEvent } from "../../../server/types.js";
+import type { TokenUsageEvent } from "../../../server/types/types.js";
 import { parseJSONL } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 

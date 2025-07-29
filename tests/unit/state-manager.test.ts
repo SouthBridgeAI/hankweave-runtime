@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { PhaseId, RunId, SessionId } from "../../server/branded-types.js";
 import {
   InvalidTransitionError,
   PersistenceError,
   StateManager,
 } from "../../server/state-manager.js";
-import type * as ST from "../../server/state-types.js";
+import { PhaseId, RunId, SessionId } from "../../server/types/branded-types.js";
+import type * as ST from "../../server/types/state-types.js";
 import { Logger } from "../../server/utils.js";
 
 // Test directory setup

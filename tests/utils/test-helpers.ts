@@ -1,13 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { TadpoleState } from "../../server/state-types.js";
+import type { TadpoleState } from "../../server/types/state-types.js";
 import type {
   ClientCommand,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-} from "../../server/types.js";
+} from "../../server/types/types.js";
 
 // ============================================================================
 // Colors for terminal output

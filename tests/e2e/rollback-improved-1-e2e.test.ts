@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PhaseId } from "../../server/branded-types.js";
+import { PhaseId } from "../../server/types/branded-types.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
@@ -12,7 +12,7 @@ import type {
   RollbackCompletedEvent,
   ServerEvent,
   ServerIdleEvent,
-} from "../../server/types.js";
+} from "../../server/types/types.js";
 import { generateId } from "../../server/utils.js";
 import {
   colors,

@@ -3,10 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { minimatch } from "minimatch";
-import { EventId, PhaseId, RunId, SessionId } from "./branded-types.js";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
+import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
+import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
+import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
+import { fileResolver } from "./file-resolver.js";
+import { StateManager } from "./state-manager.js";
+import type { ToolInputMap, ToolName } from "./tool-types.js";
+import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
+import { EventId, PhaseId, RunId, SessionId } from "./types/branded-types.js";
 import type {
   AssistantMessage,
   ResultMessage,
@@ -14,16 +21,13 @@ import type {
   TextContent,
   ThinkingContent,
   ToolUseContent,
-} from "./claude-types/claude-session-schema.js";
-import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
-import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
-import { APITimeoutError, ErrorSeverity } from "./error-types.js";
-import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
-import { fileResolver } from "./file-resolver.js";
-import { StateManager } from "./state-manager.js";
-import { isTerminalPhaseStatus, type PhaseExecution, type PhaseStatus } from "./state-types.js";
-import type { ToolInputMap, ToolName } from "./tool-types.js";
-import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
+} from "./types/claude-session-schema.js";
+import { APITimeoutError, ErrorSeverity } from "./types/error-types.js";
+import {
+  isTerminalPhaseStatus,
+  type PhaseExecution,
+  type PhaseStatus,
+} from "./types/state-types.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
@@ -42,8 +46,8 @@ import type {
   StateSnapshotEvent,
   TokenUsage,
   TokenUsageEvent,
-} from "./types.js";
-import { isSyntheticTimeout } from "./types.js";
+} from "./types/types.js";
+import { isSyntheticTimeout } from "./types/types.js";
 import {
   assertNever,
   buildFileTree,
@@ -363,7 +367,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           reason: "startup",
           message: "Server ready. Waiting for commands (autostart disabled).",
         },
-      } as import("./types.js").ServerIdleEvent);
+      } as import("./types/types.js").ServerIdleEvent);
     }
   }
 
@@ -534,7 +538,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
    * Start a new run and create necessary infrastructure
    */
   private async startNewRun(
-    startingConditions?: import("./state-types.js").StartingConditions,
+    startingConditions?: import("./types/state-types.js").StartingConditions,
   ): Promise<void> {
     const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
     const runFolder = path.join(this.config.executionPath, ".tadpole", "runs", runId);
@@ -1602,7 +1606,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             reason: "phase-completed",
             message: `Phase ${phaseId} ${finalStatus}. Use 'phase.next' to continue.`,
           },
-        } as import("./types.js").ServerIdleEvent);
+        } as import("./types/types.js").ServerIdleEvent);
       }
     } else if (finalStatus === "failed" && !this.isShuttingDown) {
       if (this.phaseFailureReason?.retriable) {
@@ -1837,7 +1841,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             reason: "all-phases-completed",
             message: "All phases completed. Server remains active.",
           },
-        } as import("./types.js").ServerIdleEvent);
+        } as import("./types/types.js").ServerIdleEvent);
       }
       return;
     }
@@ -1937,7 +1941,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const checkpoints: import("./types.js").CheckpointQueryInfo[] = [];
+    const checkpoints: import("./types/types.js").CheckpointQueryInfo[] = [];
 
     for (const phase of targetRun.phases) {
       const phaseConfig = this.config.phases.find((p) => p.id === phase.phaseId);
@@ -2001,7 +2005,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         checkpoints,
         currentBranch: targetRun.gitBranch,
       },
-    } as import("./types.js").CheckpointListEvent);
+    } as import("./types/types.js").CheckpointListEvent);
   }
 
   /**
@@ -2554,7 +2558,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         checkpointType,
         phasesToProcess: phasesToProcess.map((tp) => tp.phase.phaseId),
       },
-    } as import("./types.js").RollbackStartedEvent);
+    } as import("./types/types.js").RollbackStartedEvent);
 
     // 4. Process each phase (they're already in reverse order)
     let currentStep = 0;
@@ -2573,7 +2577,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           totalSteps,
           message: `Rolling back through ${threadPhase.phase.phaseId}`,
         },
-      } as import("./types.js").RollbackProgressEvent);
+      } as import("./types/types.js").RollbackProgressEvent);
 
       // Get the last checkpoint for this phase
       const checkpoint = this.getLastCheckpointForPhase(threadPhase.phase);
@@ -2594,7 +2598,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             checkpointType: checkpoint.type,
             message: `Reset to ${threadPhase.phase.phaseId} ${checkpoint.type} checkpoint`,
           },
-        } as import("./types.js").RollbackPhaseCheckpointEvent);
+        } as import("./types/types.js").RollbackPhaseCheckpointEvent);
       }
 
       // Clean up workspace directories from this phase
@@ -2612,7 +2616,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         totalSteps,
         message: `Applying final checkpoint`,
       },
-    } as import("./types.js").RollbackProgressEvent);
+    } as import("./types/types.js").RollbackProgressEvent);
 
     if (this.checkpointGit) {
       await this.checkpointGit.resetToCheckpoint(targetSha);
@@ -2629,7 +2633,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         checkpointType,
         message: `Reset to target checkpoint ${targetThreadPhase.phase.phaseId} (${checkpointType})`,
       },
-    } as import("./types.js").RollbackPhaseCheckpointEvent);
+    } as import("./types/types.js").RollbackPhaseCheckpointEvent);
 
     // 6. Complete current run
     const currentRun = this.stateManager.getCurrentRun();
@@ -2694,7 +2698,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         checkpointType,
         autoRestart,
       },
-    } as import("./types.js").RollbackCompletedEvent);
+    } as import("./types/types.js").RollbackCompletedEvent);
 
     // 12. Send state snapshot
     await this.sendStateSnapshot();
@@ -2765,7 +2769,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         directories,
         status: "started",
       },
-    } as import("./types.js").RollbackWorkspaceCleanupEvent);
+    } as import("./types/types.js").RollbackWorkspaceCleanupEvent);
 
     const successfulCleanups: string[] = [];
     const failedCleanups: { directory: string; error: string }[] = [];
@@ -2806,7 +2810,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           failedCleanups,
           error: failedCleanups.map((f) => `${f.directory}: ${f.error}`).join(", "),
         },
-      } as import("./types.js").RollbackWorkspaceCleanupEvent);
+      } as import("./types/types.js").RollbackWorkspaceCleanupEvent);
     } else {
       // Complete success
       this.sendEvent({
@@ -2821,7 +2825,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           successfulCleanups,
           failedCleanups: [],
         },
-      } as import("./types.js").RollbackWorkspaceCleanupEvent);
+      } as import("./types/types.js").RollbackWorkspaceCleanupEvent);
     }
   }
 

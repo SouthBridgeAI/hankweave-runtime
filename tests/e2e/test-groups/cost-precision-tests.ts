@@ -3,7 +3,7 @@ import type {
   PhaseCompletedEvent,
   StateSnapshotEvent,
   TokenUsageEvent,
-} from "../../../server/types.js";
+} from "../../../server/types/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {

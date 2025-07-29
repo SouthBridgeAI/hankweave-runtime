@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileResolver } from "./file-resolver.js";
-import type { FileNode } from "./types.js";
+import type { FileNode } from "./types/types.js";
 
 // ============================================================================
 // ID Generation

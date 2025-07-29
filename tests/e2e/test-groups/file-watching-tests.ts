@@ -5,7 +5,7 @@ import type {
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-} from "../../../server/types.js";
+} from "../../../server/types/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 import { colors } from "../../utils/test-helpers.js";
 

@@ -4,8 +4,8 @@ import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PhaseId, RunId } from "../../server/branded-types";
-import type { Run, TadpoleState } from "../../server/state-types";
+import { PhaseId, RunId } from "../../server/types/branded-types";
+import type { Run, TadpoleState } from "../../server/types/state-types";
 import type {
   AssistantActionEvent,
   CheckpointListEvent,
@@ -15,7 +15,7 @@ import type {
   RollbackProgressEvent,
   RollbackStartedEvent,
   ServerEvent,
-} from "../../server/types";
+} from "../../server/types/types";
 
 // --- Test Configuration ---
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");

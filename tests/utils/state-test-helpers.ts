@@ -1,8 +1,8 @@
 import path from "node:path";
-import { PhaseId } from "../../server/branded-types.js";
 import { StateManager } from "../../server/state-manager.js";
-import type { PhaseStatus, TadpoleState } from "../../server/state-types.js";
-import type { PhaseConfig } from "../../server/types.js";
+import { PhaseId } from "../../server/types/branded-types.js";
+import type { PhaseStatus, TadpoleState } from "../../server/types/state-types.js";
+import type { PhaseConfig } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
 
 export function waitForPhaseStatus(

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { ErrorEvent, FileUpdatedEvent, ServerEvent } from "../../../server/types.js";
+import type { ErrorEvent, FileUpdatedEvent, ServerEvent } from "../../../server/types/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {

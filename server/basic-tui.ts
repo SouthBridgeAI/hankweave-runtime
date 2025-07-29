@@ -5,7 +5,7 @@ import type {
   NextPhaseCommand,
   ServerEvent,
   SkipPhaseCommand,
-} from "./types.js";
+} from "./types/types.js";
 import { generateId } from "./utils.js";
 
 /**

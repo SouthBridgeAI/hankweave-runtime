@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { PhaseCompletedEvent, PhaseStartedEvent } from "../../../server/types.js";
+import type { PhaseCompletedEvent, PhaseStartedEvent } from "../../../server/types/types.js";
 
 interface TestState {
   phase1Started: PhaseStartedEvent | null;

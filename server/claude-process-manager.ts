@@ -4,7 +4,7 @@ import path from "node:path";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import type { PhaseConfig } from "./types.js";
+import type { PhaseConfig } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
 
 /**

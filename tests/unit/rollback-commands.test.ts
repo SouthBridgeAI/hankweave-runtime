@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { PhaseId } from "../../server/branded-types";
 import { clientCommandSchema } from "../../server/command-schemas";
+import { PhaseId } from "../../server/types/branded-types";
 
 describe("Rollback Command Schemas", () => {
   describe("checkpoint.list command", () => {

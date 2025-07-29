@@ -77,7 +77,7 @@ import type {
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-} from "../../server/types.js";
+} from "../../server/types/types.js";
 
 // Server configuration - Updated for execution isolation
 const serverConfig: ServerConfig = {

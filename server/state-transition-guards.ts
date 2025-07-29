@@ -1,6 +1,6 @@
-import type { SessionId } from "./branded-types.js";
-import type { PhaseStatus } from "./state-types.js";
-import type { FailureReason } from "./types.js";
+import type { SessionId } from "./types/branded-types.js";
+import type { PhaseStatus } from "./types/state-types.js";
+import type { FailureReason } from "./types/types.js";
 
 // Type guard functions to ensure metadata has required fields for specific transitions
 

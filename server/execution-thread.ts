@@ -10,8 +10,8 @@ import {
   type RunId,
   type SessionId,
   type TadpoleState,
-} from "./state-types.js";
-import type { PhaseConfig } from "./types.js";
+} from "./types/state-types.js";
+import type { PhaseConfig } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
 // ============================================================================

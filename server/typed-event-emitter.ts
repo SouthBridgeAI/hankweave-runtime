@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
-import type { PhaseId, RunId } from "./branded-types.js";
-import type { PhaseStatus, StateTransition } from "./state-types.js";
-import type { ServerEvent } from "./types.js";
+import type { PhaseId, RunId } from "./types/branded-types.js";
+import type { PhaseStatus, StateTransition } from "./types/state-types.js";
+import type { ServerEvent } from "./types/types.js";
 
 /**
  * Type-safe wrapper around Node's EventEmitter.
