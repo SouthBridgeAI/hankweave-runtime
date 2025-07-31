@@ -16,10 +16,30 @@ interface ProxyResponse {
   body?: string | ReadableStream;
 }
 
+function obfuscateHeaders(headers: Record<string, string>): Record<string, string> {
+  const obfuscated = { ...headers };
+
+  // Obfuscate sensitive headers
+  const sensitiveHeaders = ["authorization", "x-api-key", "api-key", "auth-token"];
+
+  for (const key of Object.keys(obfuscated)) {
+    if (sensitiveHeaders.includes(key.toLowerCase())) {
+      const value = obfuscated[key];
+      if (value && value.length > 8) {
+        obfuscated[key] = `${value.substring(0, 4)}***${value.substring(value.length - 4)}`;
+      } else {
+        obfuscated[key] = "***";
+      }
+    }
+  }
+
+  return obfuscated;
+}
+
 function logRequest(req: ProxyRequest): void {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${req.method} ${req.url}`);
-  console.log(`Headers:`, JSON.stringify(req.headers, null, 2));
+  console.log(`Headers:`, JSON.stringify(obfuscateHeaders(req.headers), null, 2));
   if (req.body) {
     const truncatedBody =
       req.body.length > 500 ? req.body.substring(0, 500) + "...[truncated]" : req.body;
