@@ -90,13 +90,26 @@ function startProxy(): Promise<void> {
     proxy.stdout?.on("data", (data) => {
       const text = data.toString();
       output += text;
+      
+      // Log proxy output with prefix
+      text.split('\n').forEach((line: string) => {
+        if (line.trim()) {
+          console.log(`[PROXY] ${line}`);
+        }
+      });
+      
       if (text.includes("Claude API Proxy running")) {
         resolve();
       }
     });
 
     proxy.stderr?.on("data", (data) => {
-      console.error(`Proxy stderr: ${data}`);
+      const text = data.toString();
+      text.split('\n').forEach((line: string) => {
+        if (line.trim()) {
+          console.error(`[PROXY ERROR] ${line}`);
+        }
+      });
     });
 
     proxy.on("error", (error) => {
@@ -127,9 +140,27 @@ function startServer(): void {
     "bun",
     ["server/index.ts", "--basic", `--anthropic-base-url=${PROXY_URL}`],
     {
-      stdio: "inherit",
+      stdio: ["inherit", "pipe", "pipe"],
     }
   );
+
+  server.stdout?.on("data", (data) => {
+    const text = data.toString();
+    text.split('\n').forEach((line: string) => {
+      if (line.trim()) {
+        console.log(`[SERVER] ${line}`);
+      }
+    });
+  });
+
+  server.stderr?.on("data", (data) => {
+    const text = data.toString();
+    text.split('\n').forEach((line: string) => {
+      if (line.trim()) {
+        console.error(`[SERVER ERROR] ${line}`);
+      }
+    });
+  });
 
   processes.server = server;
 

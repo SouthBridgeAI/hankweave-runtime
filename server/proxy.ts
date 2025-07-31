@@ -22,9 +22,7 @@ function logRequest(req: ProxyRequest): void {
   console.log(`Headers:`, JSON.stringify(req.headers, null, 2));
   if (req.body) {
     const truncatedBody =
-      req.body.length > 500
-        ? req.body.substring(0, 500) + "...[truncated]"
-        : req.body;
+      req.body.length > 500 ? req.body.substring(0, 500) + "...[truncated]" : req.body;
     console.log(`Body:`, truncatedBody);
   }
   console.log("---");
@@ -94,9 +92,7 @@ const _server = Bun.serve({
       });
 
       const body =
-        request.method !== "GET" && request.method !== "HEAD"
-          ? await request.text()
-          : undefined;
+        request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined;
 
       const proxyReq: ProxyRequest = {
         method: request.method,
