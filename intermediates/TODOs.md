@@ -14,6 +14,9 @@
 
 ## TODOs - tasks to pick and solve
 
+# Bugs
+1. The execution thread module has some dead code
+
 
 ## Finish tasks
 1. Data directory OR file

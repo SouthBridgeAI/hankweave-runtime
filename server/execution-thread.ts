@@ -221,7 +221,7 @@ export async function analyzeExecutionThread(
   let nextPhaseId: PhaseId | null = null;
 
   // Don't suggest next phase if the current run failed
-  if (startRun.status === "failed") {
+  if (startRun.status === "failed") { // TODO
     nextPhaseId = null;
   } else if (!hasRunningPhase && phases.length > 0) {
     const latestPhase = phases[0];
@@ -232,7 +232,7 @@ export async function analyzeExecutionThread(
       const { afterPhase, checkpointSha } = startRun.startingConditions.source;
 
       // Check if this continuation is from a workspace-setup checkpoint
-      if (afterPhase && phases.length === 0) {
+      if (afterPhase && phases.length === 0) { // TODO
         // No phases executed yet in continuation run
         // Check if the continuation is from workspace-setup
         const sourceRun = state.runs.find(
