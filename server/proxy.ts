@@ -1,10 +1,13 @@
 #!/usr/bin/env bun
 
+import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
+
 interface LLMProxyRequest {
   method: string;
   url: string;
   headers: Record<string, string>;
   body?: string;
+  claudeRequestData?: ClaudeApiRequest;
 }
 
 interface LLMProxyResponse {
@@ -69,24 +72,15 @@ class HttpTransport implements LLMTransport {
 // =============================================================================
 
 class LoggingMiddleware implements LLMProxyMiddleware {
-  private obfuscateHeaders(
-    headers: Record<string, string>
-  ): Record<string, string> {
+  private obfuscateHeaders(headers: Record<string, string>): Record<string, string> {
     const obfuscated = { ...headers };
-    const sensitiveHeaders = [
-      "authorization",
-      "x-api-key",
-      "api-key",
-      "auth-token",
-    ];
+    const sensitiveHeaders = ["authorization", "x-api-key", "api-key", "auth-token"];
 
     for (const key of Object.keys(obfuscated)) {
       if (sensitiveHeaders.some((h) => h.toLowerCase() === key.toLowerCase())) {
         const value = obfuscated[key];
         if (value && value.length > 8) {
-          obfuscated[key] = `${value.substring(0, 4)}***${value.substring(
-            value.length - 4
-          )}`;
+          obfuscated[key] = `${value.substring(0, 4)}***${value.substring(value.length - 4)}`;
         } else {
           obfuscated[key] = "***";
         }
@@ -99,15 +93,10 @@ class LoggingMiddleware implements LLMProxyMiddleware {
   async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${req.method} ${req.url}`);
-    console.log(
-      `Headers:`,
-      JSON.stringify(this.obfuscateHeaders(req.headers), null, 2)
-    );
+    console.log(`Headers:`, JSON.stringify(this.obfuscateHeaders(req.headers), null, 2));
     if (req.body) {
       const truncatedBody =
-        req.body.length > 500
-          ? req.body.substring(0, 500) + "...[truncated]"
-          : req.body;
+        req.body.length > 500 ? req.body.substring(0, 500) + "...[truncated]" : req.body;
       console.log(`Body:`, req.body);
     }
     console.log("---");
@@ -132,7 +121,7 @@ class LLMProxy {
 
   constructor(
     public transport: LLMTransport,
-    middleware: LLMProxyMiddleware[] = []
+    middleware: LLMProxyMiddleware[] = [],
   ) {
     this.middleware = middleware;
   }
@@ -150,15 +139,24 @@ class LLMProxy {
       });
 
       const body =
-        request.method !== "GET" && request.method !== "HEAD"
-          ? await request.text()
-          : undefined;
+        request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined;
+
+      let claudeRequestData: ClaudeApiRequest | undefined;
+      try {
+        if (body) {
+          const parsedBody = JSON.parse(body);
+          claudeRequestData = claudeApiRequestSchema.parse(parsedBody);
+        }
+      } catch (error) {
+        console.error("Error parsing Claude API request data:", error);
+      }
 
       let proxyReq: LLMProxyRequest = {
         method: request.method,
         url: pathname,
         headers,
         body,
+        claudeRequestData,
       };
 
       // Apply request middleware
@@ -239,17 +237,14 @@ class BunProxyRunner {
 }
 
 function createPassthroughProxy(
-  {
-    proxyToUrl,
-    enableLogging,
-  }: {
-    proxyToUrl: string;
-    enableLogging: boolean;
-  } = { proxyToUrl: "https://api.anthropic.com", enableLogging: true }
+  { proxyToUrl, enableLogging }: { proxyToUrl: string; enableLogging: boolean } = {
+    proxyToUrl: "https://api.anthropic.com",
+    enableLogging: true,
+  },
 ): LLMProxy {
   return new LLMProxy(
     new HttpTransport(proxyToUrl),
-    enableLogging ? [new LoggingMiddleware()] : []
+    enableLogging ? [new LoggingMiddleware()] : [],
   );
 }
 
