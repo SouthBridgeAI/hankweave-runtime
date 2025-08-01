@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
-import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
+import {
+  type ClaudeApiRequest,
+  claudeApiRequestSchema,
+} from "./types/claude-session-schema";
 
 interface LLMProxyRequest {
   method: string;
@@ -72,15 +75,24 @@ class HttpTransport implements LLMTransport {
 // =============================================================================
 
 class LoggingMiddleware implements LLMProxyMiddleware {
-  private obfuscateHeaders(headers: Record<string, string>): Record<string, string> {
+  private obfuscateHeaders(
+    headers: Record<string, string>
+  ): Record<string, string> {
     const obfuscated = { ...headers };
-    const sensitiveHeaders = ["authorization", "x-api-key", "api-key", "auth-token"];
+    const sensitiveHeaders = [
+      "authorization",
+      "x-api-key",
+      "api-key",
+      "auth-token",
+    ];
 
     for (const key of Object.keys(obfuscated)) {
       if (sensitiveHeaders.some((h) => h.toLowerCase() === key.toLowerCase())) {
         const value = obfuscated[key];
         if (value && value.length > 8) {
-          obfuscated[key] = `${value.substring(0, 4)}***${value.substring(value.length - 4)}`;
+          obfuscated[key] = `${value.substring(0, 4)}***${value.substring(
+            value.length - 4
+          )}`;
         } else {
           obfuscated[key] = "***";
         }
@@ -93,11 +105,26 @@ class LoggingMiddleware implements LLMProxyMiddleware {
   async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${req.method} ${req.url}`);
-    console.log(`Headers:`, JSON.stringify(this.obfuscateHeaders(req.headers), null, 2));
+    console.log(
+      `Headers:`,
+      JSON.stringify(this.obfuscateHeaders(req.headers), null, 2)
+    );
+
     if (req.body) {
-      const truncatedBody =
-        req.body.length > 500 ? req.body.substring(0, 500) + "...[truncated]" : req.body;
-      console.log(`Body:`, req.body);
+      if (req.claudeRequestData) {
+        const { model, max_tokens, stream } = req.claudeRequestData;
+        const messageCount = req.claudeRequestData.messages?.length || 0;
+        console.log(
+          `Claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`
+        );
+        console.log("system:", req.claudeRequestData.system);
+      } else {
+        const truncatedBody =
+          req.body.length > 500
+            ? `${req.body.substring(0, 500)}...[truncated]`
+            : req.body;
+        console.log(`Body:`, truncatedBody);
+      }
     }
     console.log("---");
     return req;
@@ -121,7 +148,7 @@ class LLMProxy {
 
   constructor(
     public transport: LLMTransport,
-    middleware: LLMProxyMiddleware[] = [],
+    middleware: LLMProxyMiddleware[] = []
   ) {
     this.middleware = middleware;
   }
@@ -139,16 +166,27 @@ class LLMProxy {
       });
 
       const body =
-        request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined;
+        request.method !== "GET" && request.method !== "HEAD"
+          ? await request.text()
+          : undefined;
 
       let claudeRequestData: ClaudeApiRequest | undefined;
-      try {
-        if (body) {
-          const parsedBody = JSON.parse(body);
-          claudeRequestData = claudeApiRequestSchema.parse(parsedBody);
+
+      if (body) {
+        try {
+          // let's go for a gentle parse here - never know what might come in
+          const { success, data } = claudeApiRequestSchema.safeParse(
+            JSON.parse(body)
+          );
+          if (!success) {
+            console.warn("Unrecognizable Claude API request body:", body);
+          } else {
+            claudeRequestData = data;
+          }
+        } catch (error) {
+          // just in case the body is not valid JSON or smth
+          console.warn("Failed to parse Claude API request body:", body, error);
         }
-      } catch (error) {
-        console.error("Error parsing Claude API request data:", error);
       }
 
       let proxyReq: LLMProxyRequest = {
@@ -237,14 +275,17 @@ class BunProxyRunner {
 }
 
 function createPassthroughProxy(
-  { proxyToUrl, enableLogging }: { proxyToUrl: string; enableLogging: boolean } = {
+  {
+    proxyToUrl,
+    enableLogging,
+  }: { proxyToUrl: string; enableLogging: boolean } = {
     proxyToUrl: "https://api.anthropic.com",
     enableLogging: true,
-  },
+  }
 ): LLMProxy {
   return new LLMProxy(
     new HttpTransport(proxyToUrl),
-    enableLogging ? [new LoggingMiddleware()] : [],
+    enableLogging ? [new LoggingMiddleware()] : []
   );
 }
 

@@ -338,11 +338,26 @@ const cacheControlSchema = z.object({
 /**
  * API request message content with cache control
  */
-const apiMessageContentSchema = z.object({
-  type: z.literal("text"),
-  text: z.string(),
-  cache_control: cacheControlSchema.optional(),
-});
+const apiMessageContentSchema = z.union([
+  z.object({
+    type: z.literal("text"),
+    text: z.string(),
+    cache_control: cacheControlSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("tool_use"),
+    id: z.string(),
+    name: toolNameSchema,
+    input: z.record(z.unknown()).optional(),
+    cache_control: cacheControlSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("tool_result"),
+    tool_use_id: z.string(),
+    content: z.union([z.string(), z.record(z.unknown())]),
+    cache_control: cacheControlSchema.optional(),
+  }),
+]);
 
 /**
  * API request message schema
