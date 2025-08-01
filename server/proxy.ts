@@ -214,13 +214,6 @@ class LLMProxy {
         }
       }
 
-      if (proxyRes.body instanceof ReadableStream) {
-        return new Response(proxyRes.body, {
-          status: proxyRes.status,
-          headers: proxyRes.headers,
-        });
-      }
-
       return new Response(proxyRes.body, {
         status: proxyRes.status,
         headers: proxyRes.headers,
