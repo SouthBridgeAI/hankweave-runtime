@@ -16,8 +16,6 @@
     "test:e2e:cleanup": "./tests/utils/cleanup-test.sh",
     "pre-test": "bun run test:e2e:check && bun run pre-test:cleanup",
     "pre-test:cleanup": "rm -rf tests/test-area && mkdir -p tests/test-area && rm -rf tests/test-results && mkdir -p tests/test-results && echo '✅ Test area and results cleaned'",
-    "proxy": "bun server/proxy.ts",
-    "with-proxy": "bun scripts/run-with-proxy.ts",
     "cleanup": "echo 'Error: --cleanup requires --config' && exit 1",
     "cleanup:example": "bun server/index.ts --cleanup --config=phases.json",
     "cleanup:force": "bun server/index.ts --cleanup --config=phases.json -y"

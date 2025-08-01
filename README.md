@@ -97,16 +97,6 @@ bun run server:basic
 
 When you run in TUI mode, you'll see a live stream of events and can control the flow with keyboard shortcuts like `[n]` to advance to the next phase.
 
-### 3.1 Initial experiments with for passthrough proxy
-
-You can try poor man's passthrough proxy using
-
-```bash
-bun run with-proxy
-```
-
-This starts a passthrough proxy that logs requests and forwards them to Claude and runs `server:basic`
-
 ### 4. Using Different Data Sources
 
 You can provide either a directory or a single file as your data source:
