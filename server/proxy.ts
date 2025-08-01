@@ -75,43 +75,16 @@ class HttpTransport implements LLMTransport {
 // =============================================================================
 
 class LoggingMiddleware implements LLMProxyMiddleware {
-  private obfuscateHeaders(
-    headers: Record<string, string>
-  ): Record<string, string> {
-    const obfuscated = { ...headers };
-    const sensitiveHeaders = [
-      "authorization",
-      "x-api-key",
-      "api-key",
-      "auth-token",
-    ];
-
-    for (const key of Object.keys(obfuscated)) {
-      if (sensitiveHeaders.some((h) => h.toLowerCase() === key.toLowerCase())) {
-        const value = obfuscated[key];
-        if (value && value.length > 8) {
-          obfuscated[key] = `${value.substring(0, 4)}***${value.substring(
-            value.length - 4
-          )}`;
-        } else {
-          obfuscated[key] = "***";
-        }
-      }
-    }
-
-    return obfuscated;
-  }
-
   async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${req.method} ${req.url}`);
+    console.log(`🔀 [${timestamp}] ${req.method} ${req.url}`);
 
     if (req.body) {
       if (req.claudeRequestData) {
         const { model, max_tokens, stream } = req.claudeRequestData;
         const messageCount = req.claudeRequestData.messages?.length || 0;
         console.log(
-          `[${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`
+          `🔀 [${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`
         );
       } else {
         const truncatedBody =
@@ -127,7 +100,7 @@ class LoggingMiddleware implements LLMProxyMiddleware {
 
   async processResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] Response: ${res.status}`);
+    console.log(`🔀 [${timestamp}] Response: ${res.status}`);
     console.log("---");
     return res;
   }
@@ -219,6 +192,21 @@ class LLMProxy {
   }
 }
 
+export function createPassthroughProxy(
+  {
+    proxyToUrl,
+    enableLogging,
+  }: { proxyToUrl: string; enableLogging: boolean } = {
+    proxyToUrl: "https://api.anthropic.com",
+    enableLogging: true,
+  }
+): LLMProxy {
+  return new LLMProxy(
+    new HttpTransport(proxyToUrl),
+    enableLogging ? [new LoggingMiddleware()] : []
+  );
+}
+
 // =============================================================================
 // Proxy Runner
 // =============================================================================
@@ -226,14 +214,27 @@ class LLMProxy {
 export class BunProxyRunner {
   private server?: Bun.Server;
 
-  constructor(private proxy: LLMProxy, private port: number) {}
+  constructor(
+    private proxy: "passthrough",
+    private port: number,
+    private proxyToUrl: string
+  ) {}
 
   get proxyUrl(): string {
     return `http://localhost:${this.port}`;
   }
 
   start(): string {
-    const proxy = this.proxy;
+    if (this.proxy !== "passthrough") {
+      throw new Error(
+        "Unsupported proxy type. Only 'passthrough' is supported."
+      );
+    }
+
+    const proxy = createPassthroughProxy({
+      proxyToUrl: this.proxyToUrl,
+      enableLogging: true,
+    });
 
     this.server = Bun.serve({
       port: this.port,
@@ -268,28 +269,3 @@ export class BunProxyRunner {
     }
   }
 }
-
-export function createPassthroughProxy(
-  {
-    proxyToUrl,
-    enableLogging,
-  }: { proxyToUrl: string; enableLogging: boolean } = {
-    proxyToUrl: "https://api.anthropic.com",
-    enableLogging: true,
-  }
-): LLMProxy {
-  return new LLMProxy(
-    new HttpTransport(proxyToUrl),
-    enableLogging ? [new LoggingMiddleware()] : []
-  );
-}
-
-// const proxyRunner = new BunProxyRunner(createPassthroughProxy());
-// proxyRunner.start();
-
-// // Graceful shutdown
-// process.on("SIGINT", () => {
-//   console.log("\n🔄 Shutting down proxy...");
-//   proxyRunner.stop();
-//   process.exit(0);
-// });

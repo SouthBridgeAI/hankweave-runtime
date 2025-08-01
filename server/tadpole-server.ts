@@ -250,11 +250,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Start proxy server first
     this.logger.log(`Starting proxy server on port ${this.proxyPort}`);
     this.proxyRunner = new BunProxyRunner(
-      createPassthroughProxy({
-        proxyToUrl: this.config.anthropicBaseURL || "https://api.anthropic.com",
-        enableLogging: true,
-      }),
-      this.proxyPort
+      "passthrough",
+      this.proxyPort,
+      this.config.anthropicBaseURL || "https://api.anthropic.com"
     );
     this.proxyRunner.start();
 
