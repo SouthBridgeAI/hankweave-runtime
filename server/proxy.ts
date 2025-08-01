@@ -105,19 +105,14 @@ class LoggingMiddleware implements LLMProxyMiddleware {
   async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${req.method} ${req.url}`);
-    console.log(
-      `Headers:`,
-      JSON.stringify(this.obfuscateHeaders(req.headers), null, 2)
-    );
 
     if (req.body) {
       if (req.claudeRequestData) {
         const { model, max_tokens, stream } = req.claudeRequestData;
         const messageCount = req.claudeRequestData.messages?.length || 0;
         console.log(
-          `Claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`
+          `[${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`
         );
-        console.log("system:", req.claudeRequestData.system);
       } else {
         const truncatedBody =
           req.body.length > 500
@@ -133,7 +128,6 @@ class LoggingMiddleware implements LLMProxyMiddleware {
   async processResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] Response: ${res.status}`);
-    console.log(`Headers:`, JSON.stringify(res.headers, null, 2));
     console.log("---");
     return res;
   }
@@ -229,16 +223,20 @@ class LLMProxy {
 // Proxy Runner
 // =============================================================================
 
-class BunProxyRunner {
+export class BunProxyRunner {
   private server?: Bun.Server;
 
-  constructor(private proxy: LLMProxy) {}
+  constructor(private proxy: LLMProxy, private port: number) {}
 
-  start(port: number = 5555): void {
+  get proxyUrl(): string {
+    return `http://localhost:${this.port}`;
+  }
+
+  start(): string {
     const proxy = this.proxy;
 
     this.server = Bun.serve({
-      port,
+      port: this.port,
       async fetch(request: Request): Promise<Response> {
         const url = new URL(request.url);
         const pathname = url.pathname + url.search;
@@ -255,8 +253,12 @@ class BunProxyRunner {
       },
     });
 
-    console.log(`🚀 Generic Proxy running on port ${port}`);
-    console.log(`   Health check: http://localhost:${port}/health`);
+    const proxyUrl = `http://localhost:${this.port}`;
+
+    console.log(`🚀 LLM Proxy running on port ${this.port}`);
+    console.log(`   Health check: ${proxyUrl}/health`);
+
+    return proxyUrl;
   }
 
   stop(): void {
@@ -267,7 +269,7 @@ class BunProxyRunner {
   }
 }
 
-function createPassthroughProxy(
+export function createPassthroughProxy(
   {
     proxyToUrl,
     enableLogging,
@@ -282,12 +284,12 @@ function createPassthroughProxy(
   );
 }
 
-const proxyRunner = new BunProxyRunner(createPassthroughProxy());
-proxyRunner.start(5555);
+// const proxyRunner = new BunProxyRunner(createPassthroughProxy());
+// proxyRunner.start();
 
-// Graceful shutdown
-process.on("SIGINT", () => {
-  console.log("\n🔄 Shutting down proxy...");
-  proxyRunner.stop();
-  process.exit(0);
-});
+// // Graceful shutdown
+// process.on("SIGINT", () => {
+//   console.log("\n🔄 Shutting down proxy...");
+//   proxyRunner.stop();
+//   process.exit(0);
+// });
