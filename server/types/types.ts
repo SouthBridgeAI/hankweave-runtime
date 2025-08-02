@@ -252,6 +252,9 @@ export interface ServerConfig {
 
   /** Maximum length for tool result content before truncation (default: 2500) */
   toolResultTruncateLength: number;
+
+  /** Optional model override for all phases (ignores per-phase model settings) */
+  modelOverride?: ModelName;
 }
 
 // ============================================================================

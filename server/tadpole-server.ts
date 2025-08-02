@@ -1028,6 +1028,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.logger,
         this.logParser,
         this.config.anthropicBaseURL,
+        this.config.modelOverride,
       );
 
       // Set up event handlers
