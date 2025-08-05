@@ -112,6 +112,40 @@ class LoggingMiddleware extends LLMProxyMiddleware {
   override async processResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
     const timestamp = new Date().toISOString();
     console.log(`🔀 [${timestamp}] Response: ${res.status}`);
+
+    // If the response body is a stream, consume and re-emit it
+    if (res.body instanceof ReadableStream) {
+      const reader = res.body.getReader();
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              // Log the chunk data
+              const chunk = new TextDecoder().decode(value);
+              console.log(`🔀 [${timestamp}] Stream chunk:`, chunk);
+
+              // Re-emit the chunk
+              controller.enqueue(value);
+            }
+            controller.close();
+          } catch (error) {
+            console.error(`🔀 [${timestamp}] Stream error:`, error);
+            controller.error(error);
+          }
+        },
+      });
+
+      res.body = stream;
+    } else if (typeof res.body === "string") {
+      // Log string response body
+      const truncatedBody =
+        res.body.length > 500 ? `${res.body.substring(0, 500)}...[truncated]` : res.body;
+      console.log(`🔀 [${timestamp}] Response body:`, truncatedBody);
+    }
+
     console.log("---");
     return res;
   }
