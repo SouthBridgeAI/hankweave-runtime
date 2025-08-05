@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { createPassthroughProxy } from "../../server/proxy";
+import { createPassthroughProxy, DoubleMaxTokens } from "../../server/proxy";
 
 // Mock fetch globally for tests
 const originalFetch = globalThis.fetch;
@@ -81,5 +81,67 @@ describe("Passthrough LLM Proxy", () => {
     const response = await proxy.processRequest(request, "/v1/messages");
     expect(response.status).toBe(200);
     expect(response.body).toBe(mockStream);
+  });
+});
+
+describe("DoubleMaxTokens Middleware", () => {
+  test("doubles max_tokens when present in claudeRequestData", async () => {
+    const middleware = new DoubleMaxTokens();
+    const originalMaxTokens = 100;
+    const originalBody = {
+      model: "claude-3-sonnet-20240229",
+      messages: [{ role: "user" as const, content: "Hello" }],
+      max_tokens: originalMaxTokens,
+    };
+
+    const result = await middleware.processRequest({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(originalBody),
+      claudeRequestData: originalBody,
+    });
+
+    expect(result.claudeRequestData?.max_tokens).toBe(originalMaxTokens * 2);
+    expect(result.body).toBe(
+      JSON.stringify(Object.assign({}, originalBody, { max_tokens: originalMaxTokens * 2 })),
+    );
+  });
+
+  test("handles requests without max_tokens gracefully", async () => {
+    const middleware = new DoubleMaxTokens();
+
+    const mockRequest = {
+      method: "POST",
+      url: "/v1/messages",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-3-sonnet-20240229",
+        messages: [{ role: "user" as const, content: "Hello" }],
+      }),
+      claudeRequestData: {
+        model: "claude-3-sonnet-20240229",
+        messages: [{ role: "user" as const, content: "Hello" }],
+      },
+    };
+
+    const result = await middleware.processRequest(mockRequest);
+
+    expect(result).toEqual(mockRequest);
+  });
+
+  test("handles requests without claudeRequestData gracefully", async () => {
+    const middleware = new DoubleMaxTokens();
+
+    const mockRequest = {
+      method: "POST",
+      url: "/v1/messages",
+      headers: { "content-type": "application/json" },
+      body: "some non-claude data",
+    };
+
+    const result = await middleware.processRequest(mockRequest);
+
+    expect(result).toEqual(mockRequest);
   });
 });

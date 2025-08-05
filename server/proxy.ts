@@ -1,9 +1,6 @@
 #!/usr/bin/env bun
 
-import {
-  type ClaudeApiRequest,
-  claudeApiRequestSchema,
-} from "./types/claude-session-schema";
+import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
 
 interface LLMProxyRequest {
   method: string;
@@ -84,13 +81,11 @@ class LoggingMiddleware implements LLMProxyMiddleware {
         const { model, max_tokens, stream } = req.claudeRequestData;
         const messageCount = req.claudeRequestData.messages?.length || 0;
         console.log(
-          `🔀 [${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`
+          `🔀 [${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`,
         );
       } else {
         const truncatedBody =
-          req.body.length > 500
-            ? `${req.body.substring(0, 500)}...[truncated]`
-            : req.body;
+          req.body.length > 500 ? `${req.body.substring(0, 500)}...[truncated]` : req.body;
         console.log(`Body:`, truncatedBody);
       }
     }
@@ -115,7 +110,7 @@ export class DoubleMaxTokens implements LLMProxyMiddleware {
       req.claudeRequestData.max_tokens = originalMaxTokens * 2;
 
       console.log(
-        `🔢 MaxTokens doubled: ${originalMaxTokens} → ${req.claudeRequestData.max_tokens}`
+        `🔢 MaxTokens doubled: ${originalMaxTokens} → ${req.claudeRequestData.max_tokens}`,
       );
 
       // Update the body with the modified request data
@@ -135,7 +130,7 @@ class LLMProxy {
 
   constructor(
     public transport: LLMTransport,
-    middleware: LLMProxyMiddleware[] = []
+    middleware: LLMProxyMiddleware[] = [],
   ) {
     this.middleware = middleware;
   }
@@ -153,18 +148,14 @@ class LLMProxy {
       });
 
       const body =
-        request.method !== "GET" && request.method !== "HEAD"
-          ? await request.text()
-          : undefined;
+        request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined;
 
       let claudeRequestData: ClaudeApiRequest | undefined;
 
       if (body) {
         try {
           // let's go for a gentle parse here - never know what might come in
-          const { success, data } = claudeApiRequestSchema.safeParse(
-            JSON.parse(body)
-          );
+          const { success, data } = claudeApiRequestSchema.safeParse(JSON.parse(body));
           if (!success) {
             console.warn("Unrecognizable Claude API request body:", body);
           } else {
@@ -213,13 +204,10 @@ class LLMProxy {
 }
 
 export function createPassthroughProxy(
-  {
-    proxyToUrl,
-    enableLogging,
-  }: { proxyToUrl: string; enableLogging: boolean } = {
+  { proxyToUrl, enableLogging }: { proxyToUrl: string; enableLogging: boolean } = {
     proxyToUrl: "https://api.anthropic.com",
     enableLogging: true,
-  }
+  },
 ): LLMProxy {
   const middleware = [...(enableLogging ? [new LoggingMiddleware()] : [])];
 
@@ -236,7 +224,7 @@ export class BunProxyRunner {
   constructor(
     private proxy: "passthrough",
     private port: number,
-    private proxyToUrl: string
+    private proxyToUrl: string,
   ) {}
 
   get proxyUrl(): string {
@@ -245,9 +233,7 @@ export class BunProxyRunner {
 
   start(): string {
     if (this.proxy !== "passthrough") {
-      throw new Error(
-        "Unsupported proxy type. Only 'passthrough' is supported."
-      );
+      throw new Error("Unsupported proxy type. Only 'passthrough' is supported.");
     }
 
     const proxy = createPassthroughProxy({
