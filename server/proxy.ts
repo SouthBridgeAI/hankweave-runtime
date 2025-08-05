@@ -20,9 +20,25 @@ interface LLMTransport {
   forward(request: LLMProxyRequest): Promise<LLMProxyResponse>;
 }
 
-interface LLMProxyMiddleware {
-  processRequest?(request: LLMProxyRequest): Promise<LLMProxyRequest>;
-  processResponse?(response: LLMProxyResponse): Promise<LLMProxyResponse>;
+abstract class LLMProxyMiddleware {
+  protected async handleRequest(request: LLMProxyRequest): Promise<LLMProxyRequest> {
+    return request;
+  }
+  protected async handleResponse(response: LLMProxyResponse): Promise<LLMProxyResponse> {
+    return response;
+  }
+
+  public async processRequest(request: LLMProxyRequest): Promise<LLMProxyRequest> {
+    const r = await this.handleRequest(request);
+    if (r.claudeRequestData) {
+      // Update in case claudeRequestData was modified
+      r.body = JSON.stringify(r.claudeRequestData);
+    }
+    return r;
+  }
+  public async processResponse(response: LLMProxyResponse): Promise<LLMProxyResponse> {
+    return this.handleResponse(response);
+  }
 }
 
 class HttpTransport implements LLMTransport {
@@ -71,8 +87,8 @@ class HttpTransport implements LLMTransport {
 // Built-in Middleware
 // =============================================================================
 
-class LoggingMiddleware implements LLMProxyMiddleware {
-  async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
+class LoggingMiddleware extends LLMProxyMiddleware {
+  override async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     const timestamp = new Date().toISOString();
     console.log(`🔀 [${timestamp}] ${req.method} ${req.url}`);
 
@@ -93,7 +109,7 @@ class LoggingMiddleware implements LLMProxyMiddleware {
     return req;
   }
 
-  async processResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
+  override async processResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
     const timestamp = new Date().toISOString();
     console.log(`🔀 [${timestamp}] Response: ${res.status}`);
     console.log("---");
@@ -103,20 +119,12 @@ class LoggingMiddleware implements LLMProxyMiddleware {
 
 // sample middleware that actually does something
 
-export class DoubleMaxTokens implements LLMProxyMiddleware {
-  async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
+export class DoubleMaxTokens extends LLMProxyMiddleware {
+  override async handleRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     if (req.claudeRequestData?.max_tokens) {
       const originalMaxTokens = req.claudeRequestData.max_tokens;
       req.claudeRequestData.max_tokens = originalMaxTokens * 2;
-
-      console.log(
-        `🔢 MaxTokens doubled: ${originalMaxTokens} → ${req.claudeRequestData.max_tokens}`,
-      );
-
-      // Update the body with the modified request data
-      req.body = JSON.stringify(req.claudeRequestData);
     }
-
     return req;
   }
 }
@@ -179,6 +187,10 @@ class LLMProxy {
       for (const middleware of this.middleware) {
         if (middleware.processRequest) {
           proxyReq = await middleware.processRequest(proxyReq);
+          if (proxyReq.claudeRequestData) {
+            // Update body if claudeRequestData was modified
+            proxyReq.body = JSON.stringify(proxyReq.claudeRequestData);
+          }
         }
       }
 
