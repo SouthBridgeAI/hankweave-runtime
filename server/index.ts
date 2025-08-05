@@ -29,6 +29,7 @@ async function main() {
     /^--copy$/,
     /^--anthropic-base-url=.+$/,
     /^--port=\d+$/,
+    /^--model=(sonnet|opus)$/,
     /^--help$/,
     /^-h$/,
   ];
@@ -54,6 +55,10 @@ async function main() {
     .find((arg) => arg.startsWith("--anthropic-base-url="))
     ?.split("=")[1];
   const port = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
+  const modelOverride = args.find((arg) => arg.startsWith("--model="))?.split("=")[1] as
+    | "sonnet"
+    | "opus"
+    | undefined;
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
@@ -73,6 +78,7 @@ Options:
   --cleanup                 Clean up execution directories
   -y                        Skip confirmation prompts
   --no-autostart            Don't automatically start phases
+  --model=<sonnet|opus>     Override model for all phases (ignores per-phase settings)
   --anthropic-base-url=<url> Custom Anthropic API base URL
   --help, -h                Show this help message
 
@@ -110,6 +116,12 @@ Examples:
 
   # Clean up all executions for a data directory
   bun server/index.ts --cleanup --data=/path/to/project
+
+  # Override all phase models to use Opus
+  bun server/index.ts --model=opus
+
+  # Run in basic TUI mode with Sonnet override
+  bun server/index.ts --basic --model=sonnet
 `);
     process.exit(0);
   }
@@ -252,6 +264,7 @@ Examples:
       // Optional config (will use defaults if not provided)
       ...(anthropicBaseURL && { anthropicBaseURL }),
       ...(port && { port: parseInt(port, 10) }),
+      ...(modelOverride && { modelOverride }),
       autostart: !noAutostart,
     };
 

@@ -1042,6 +1042,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.logger,
         this.logParser,
         this.proxyRunner?.proxyUrl,
+        this.config.modelOverride,
       );
 
       // Set up event handlers

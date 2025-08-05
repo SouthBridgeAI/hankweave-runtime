@@ -21,6 +21,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseURL?: string,
+    private modelOverride?: import("./types/types.js").ModelName,
   ) {
     super();
   }
@@ -135,17 +136,25 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
    * Build command line arguments for Claude CLI.
    */
   private buildClaudeArgs(phase: PhaseConfig, previousSessionId: string | null): string[] {
+    // Use model override if provided, otherwise use phase model
+    const model = this.modelOverride || phase.model;
+
     const args = [
       "--verbose",
       "--dangerously-skip-permissions",
       "--model",
-      phase.model,
+      model,
       "--permission-mode",
       "bypassPermissions",
       "-p",
       "--output-format",
       "stream-json",
     ];
+
+    // Log model usage
+    if (this.modelOverride) {
+      this.logger.log(`Using model override: ${model} (phase config specified: ${phase.model})`);
+    }
 
     if (phase.continuationMode === "continue-previous" && previousSessionId) {
       args.push("-c", "--resume", previousSessionId);
