@@ -101,6 +101,26 @@ class LoggingMiddleware implements LLMProxyMiddleware {
   }
 }
 
+// sample middleware that actually does something
+
+export class DoubleMaxTokens implements LLMProxyMiddleware {
+  async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
+    if (req.claudeRequestData?.max_tokens) {
+      const originalMaxTokens = req.claudeRequestData.max_tokens;
+      req.claudeRequestData.max_tokens = originalMaxTokens * 2;
+
+      console.log(
+        `🔢 MaxTokens doubled: ${originalMaxTokens} → ${req.claudeRequestData.max_tokens}`,
+      );
+
+      // Update the body with the modified request data
+      req.body = JSON.stringify(req.claudeRequestData);
+    }
+
+    return req;
+  }
+}
+
 // =============================================================================
 // Proxy Class
 // =============================================================================
@@ -189,10 +209,12 @@ export function createPassthroughProxy(
     enableLogging: true,
   },
 ): LLMProxy {
-  return new LLMProxy(
-    new HttpTransport(proxyToUrl),
-    enableLogging ? [new LoggingMiddleware()] : [],
-  );
+  const middleware = [
+    new MaxTokensDoubleMiddleware(),
+    ...(enableLogging ? [new LoggingMiddleware()] : []),
+  ];
+
+  return new LLMProxy(new HttpTransport(proxyToUrl), middleware);
 }
 
 // =============================================================================
