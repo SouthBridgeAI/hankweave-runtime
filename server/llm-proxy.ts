@@ -96,7 +96,7 @@ class LoggingMiddleware extends LLMProxyMiddleware {
     super();
   }
 
-  override async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
+  override async handleRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     const timestamp = new Date().toISOString();
     const requestMessage = `🔀 [${timestamp}] ${req.method} ${req.url}`;
 
@@ -120,7 +120,7 @@ class LoggingMiddleware extends LLMProxyMiddleware {
     return req;
   }
 
-  override async processResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
+  override async handleResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
     this.logger.log(`🔀 [${new Date().toISOString()}] Response: ${res.status}`);
     this.logger.log("---");
     return res;
@@ -198,10 +198,6 @@ class LLMProxy {
       for (const middleware of this.middleware) {
         if (middleware.processRequest) {
           proxyReq = await middleware.processRequest(proxyReq);
-          if (proxyReq.claudeRequestData) {
-            // Update body if claudeRequestData was modified
-            proxyReq.body = JSON.stringify(proxyReq.claudeRequestData);
-          }
         }
       }
 
