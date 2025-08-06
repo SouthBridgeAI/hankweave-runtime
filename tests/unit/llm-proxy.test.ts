@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { createPassthroughProxy, DoubleMaxTokens } from "../../server/llm-proxy";
+import {
+  createPassthroughProxy,
+  DoubleMaxTokens,
+} from "../../server/llm-proxy";
 import type { Logger } from "../../server/utils";
 
 // Mock fetch globally for tests
@@ -10,7 +13,6 @@ const mockFetch = mock();
 const mockLoggerLog = mock();
 const mockLogger = {
   log: mockLoggerLog,
-  logSocketTraffic: mock(), // Not used in proxy tests but required by Logger interface
 } as unknown as Logger;
 
 beforeEach(() => {
@@ -64,7 +66,7 @@ describe("Passthrough LLM Proxy", () => {
         method: "POST",
         headers: expect.objectContaining(requestHeaders),
         body: requestBody,
-      }),
+      })
     );
   });
 
@@ -116,8 +118,7 @@ describe("Passthrough LLM Proxy", () => {
 
     // Verify logger was called multiple times (middleware logging + transport logging)
     expect(mockLoggerLog).toHaveBeenCalled();
-    const callCount = mockLoggerLog.mock.calls.length;
-    expect(callCount).toBeGreaterThan(0);
+    expect(mockLoggerLog.mock.calls.length).toBeGreaterThan(0);
   });
 });
 
@@ -141,7 +142,9 @@ describe("DoubleMaxTokens Middleware", () => {
 
     expect(result.claudeRequestData?.max_tokens).toBe(originalMaxTokens * 2);
     expect(result.body).toBe(
-      JSON.stringify(Object.assign({}, originalBody, { max_tokens: originalMaxTokens * 2 })),
+      JSON.stringify(
+        Object.assign({}, originalBody, { max_tokens: originalMaxTokens * 2 })
+      )
     );
   });
 
