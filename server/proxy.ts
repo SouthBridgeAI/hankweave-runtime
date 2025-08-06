@@ -100,13 +100,6 @@ class LoggingMiddleware extends LLMProxyMiddleware {
     const timestamp = new Date().toISOString();
     const requestMessage = `🔀 [${timestamp}] ${req.method} ${req.url}`;
 
-    // Log headers
-    const headers = Object.entries(req.headers)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join("\n");
-
-    this.logger.log(headers);
-
     this.logger.log(requestMessage);
 
     if (req.body) {
