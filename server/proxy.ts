@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
+import type { Logger } from "./utils.js";
 
 interface LLMProxyRequest {
   method: string;
@@ -42,12 +43,15 @@ abstract class LLMProxyMiddleware {
 }
 
 class HttpTransport implements LLMTransport {
-  constructor(private baseUrl: string) {}
+  constructor(
+    private baseUrl: string,
+    public logger: Logger,
+  ) {}
 
   async forward(req: LLMProxyRequest): Promise<LLMProxyResponse> {
     const targetUrl = `${this.baseUrl}${req.url}`;
 
-    console.log(`🔄 Forwarding ${req.method} to ${targetUrl}`);
+    this.logger.log(`🔄 Forwarding ${req.method} to ${targetUrl}`);
 
     try {
       const forwardHeaders = { ...req.headers };
@@ -60,7 +64,7 @@ class HttpTransport implements LLMTransport {
         body: req.body,
       });
 
-      console.log(`📥 Response: ${response.status}`);
+      this.logger.log(`📥 Response: ${response.status}`);
 
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
@@ -77,7 +81,7 @@ class HttpTransport implements LLMTransport {
         body: isStreaming ? response.body || undefined : await response.text(),
       };
     } catch (error) {
-      console.error(`❌ Fetch error to ${targetUrl}:`, error);
+      this.logger.log(`❌ Fetch error to ${targetUrl}: ${error}`, "error");
       throw error;
     }
   }
@@ -88,65 +92,44 @@ class HttpTransport implements LLMTransport {
 // =============================================================================
 
 class LoggingMiddleware extends LLMProxyMiddleware {
+  constructor(private logger: Logger) {
+    super();
+  }
+
   override async processRequest(req: LLMProxyRequest): Promise<LLMProxyRequest> {
     const timestamp = new Date().toISOString();
-    console.log(`🔀 [${timestamp}] ${req.method} ${req.url}`);
+    const requestMessage = `🔀 [${timestamp}] ${req.method} ${req.url}`;
+
+    // Log headers
+    const headers = Object.entries(req.headers)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join("\n");
+
+    this.logger.log(headers);
+
+    this.logger.log(requestMessage);
 
     if (req.body) {
       if (req.claudeRequestData) {
         const { model, max_tokens, stream } = req.claudeRequestData;
         const messageCount = req.claudeRequestData.messages?.length || 0;
-        console.log(
-          `🔀 [${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`,
-        );
+        const claudeMessage = `🔀 [${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`;
+        this.logger.log(claudeMessage);
       } else {
         const truncatedBody =
           req.body.length > 500 ? `${req.body.substring(0, 500)}...[truncated]` : req.body;
-        console.log(`Body:`, truncatedBody);
+        const bodyMessage = `Body: ${truncatedBody}`;
+        this.logger.log(bodyMessage);
       }
     }
-    console.log("---");
+
+    this.logger.log("---");
     return req;
   }
 
   override async processResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
-    const timestamp = new Date().toISOString();
-    console.log(`🔀 [${timestamp}] Response: ${res.status}`);
-
-    // If the response body is a stream, consume and re-emit it
-    if (res.body instanceof ReadableStream) {
-      const reader = res.body.getReader();
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              // Log the chunk data
-              const chunk = new TextDecoder().decode(value);
-              console.log(`🔀 [${timestamp}] Stream chunk:`, chunk);
-
-              // Re-emit the chunk
-              controller.enqueue(value);
-            }
-            controller.close();
-          } catch (error) {
-            console.error(`🔀 [${timestamp}] Stream error:`, error);
-            controller.error(error);
-          }
-        },
-      });
-
-      res.body = stream;
-    } else if (typeof res.body === "string") {
-      // Log string response body
-      const truncatedBody =
-        res.body.length > 500 ? `${res.body.substring(0, 500)}...[truncated]` : res.body;
-      console.log(`🔀 [${timestamp}] Response body:`, truncatedBody);
-    }
-
-    console.log("---");
+    this.logger.log(`🔀 [${new Date().toISOString()}] Response: ${res.status}`);
+    this.logger.log("---");
     return res;
   }
 }
@@ -173,6 +156,7 @@ class LLMProxy {
   constructor(
     public transport: LLMTransport,
     middleware: LLMProxyMiddleware[] = [],
+    private logger: Logger,
   ) {
     this.middleware = middleware;
   }
@@ -199,13 +183,13 @@ class LLMProxy {
           // let's go for a gentle parse here - never know what might come in
           const { success, data } = claudeApiRequestSchema.safeParse(JSON.parse(body));
           if (!success) {
-            console.warn("Unrecognizable Claude API request body:", body);
+            this.logger.log(`Unrecognizable Claude API request body: ${body}`, "debug");
           } else {
             claudeRequestData = data;
           }
         } catch (error) {
-          // just in case the body is not valid JSON or smth
-          console.warn("Failed to parse Claude API request body:", body, error);
+          // just in case the body is not valid JSON or something
+          this.logger.log(`Failed to parse Claude API request body: ${body} - ${error}`, "debug");
         }
       }
 
@@ -243,21 +227,24 @@ class LLMProxy {
         headers: proxyRes.headers,
       });
     } catch (error) {
-      console.error("Proxy processing error:", error);
+      this.logger.log(`Proxy processing error: ${error}`, "error");
       return new Response("Proxy Error", { status: 500 });
     }
   }
 }
 
-export function createPassthroughProxy(
-  { proxyToUrl, enableLogging }: { proxyToUrl: string; enableLogging: boolean } = {
-    proxyToUrl: "https://api.anthropic.com",
-    enableLogging: true,
-  },
-): LLMProxy {
-  const middleware = [...(enableLogging ? [new LoggingMiddleware()] : [])];
-
-  return new LLMProxy(new HttpTransport(proxyToUrl), middleware);
+export function createPassthroughProxy({
+  proxyToUrl,
+  logger,
+}: {
+  proxyToUrl: string;
+  logger: Logger;
+}): LLMProxy {
+  return new LLMProxy(
+    new HttpTransport(proxyToUrl, logger),
+    [new LoggingMiddleware(logger)],
+    logger,
+  );
 }
 
 // =============================================================================
@@ -271,6 +258,7 @@ export class BunProxyRunner {
     private proxy: "passthrough",
     private port: number,
     private proxyToUrl: string,
+    private logger: Logger,
   ) {}
 
   get proxyUrl(): string {
@@ -284,7 +272,7 @@ export class BunProxyRunner {
 
     const proxy = createPassthroughProxy({
       proxyToUrl: this.proxyToUrl,
-      enableLogging: true,
+      logger: this.logger,
     });
 
     this.server = Bun.serve({

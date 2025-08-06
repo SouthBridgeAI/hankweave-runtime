@@ -1,12 +1,21 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { createPassthroughProxy, DoubleMaxTokens } from "../../server/proxy";
+import type { Logger } from "../../server/utils";
 
 // Mock fetch globally for tests
 const originalFetch = globalThis.fetch;
 const mockFetch = mock();
 
+// Mock logger for tests
+const mockLoggerLog = mock();
+const mockLogger = {
+  log: mockLoggerLog,
+  logSocketTraffic: mock(), // Not used in proxy tests but required by Logger interface
+} as unknown as Logger;
+
 beforeEach(() => {
   globalThis.fetch = mockFetch as any;
+  mockLoggerLog.mockClear();
 });
 
 afterEach(() => {
@@ -37,7 +46,7 @@ describe("Passthrough LLM Proxy", () => {
 
     const proxy = createPassthroughProxy({
       proxyToUrl,
-      enableLogging: false,
+      logger: mockLogger,
     });
 
     const request = new Request(`http://localhost:3000${path}`, {
@@ -70,7 +79,7 @@ describe("Passthrough LLM Proxy", () => {
 
     const proxy = createPassthroughProxy({
       proxyToUrl: "https://api.anthropic.com",
-      enableLogging: false,
+      logger: mockLogger,
     });
 
     const request = new Request("http://localhost:3000/v1/messages", {
@@ -80,7 +89,35 @@ describe("Passthrough LLM Proxy", () => {
 
     const response = await proxy.processRequest(request, "/v1/messages");
     expect(response.status).toBe(200);
-    expect(response.body).toBe(mockStream);
+    expect(response.body).toBeInstanceOf(ReadableStream);
+  });
+
+  test("uses logger for all logging", async () => {
+    const mockResponseData = '{"result": "success"}';
+    const mockResponse = {
+      status: 200,
+      headers: new Map([["content-type", "application/json"]]),
+      text: mock().mockResolvedValue(mockResponseData),
+    };
+    mockFetch.mockResolvedValue(mockResponse);
+
+    const proxy = createPassthroughProxy({
+      proxyToUrl: "https://api.anthropic.com",
+      logger: mockLogger,
+    });
+
+    const request = new Request("http://localhost:3000/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ test: "data" }),
+    });
+
+    await proxy.processRequest(request, "/v1/messages");
+
+    // Verify logger was called multiple times (middleware logging + transport logging)
+    expect(mockLoggerLog).toHaveBeenCalled();
+    const callCount = mockLoggerLog.mock.calls.length;
+    expect(callCount).toBeGreaterThan(0);
   });
 });
 

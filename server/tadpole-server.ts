@@ -236,6 +236,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       "passthrough",
       this.proxyPort,
       this.config.anthropicBaseURL || "https://api.anthropic.com",
+      this.logger,
     );
     this.proxyRunner.start();
 
