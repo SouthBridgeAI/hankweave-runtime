@@ -504,7 +504,7 @@ describe("Real Claude Logs Validation", () => {
 
         const toolResults: Array<{
           toolUseId: string;
-          content: any;
+          content: unknown; // Tool result content can have various shapes
           isError: boolean;
         }> = [];
 

@@ -11,7 +11,6 @@ import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { StateManager } from "./state-manager.js";
-import type { ToolInputMap, ToolName } from "./types/tool-types.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { EventId, PhaseId, RunId, SessionId } from "./types/branded-types.js";
 import type {
@@ -30,6 +29,7 @@ import {
   type PhaseExecution,
   type PhaseStatus,
 } from "./types/state-types.js";
+import type { ToolInputMap, ToolName } from "./types/tool-types.js";
 import type {
   AssistantActionEvent,
   CheckpointInfo,
