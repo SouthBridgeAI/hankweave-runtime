@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,7 +50,7 @@ const runTests = async (config: ServerConfig, tests: () => Promise<void>) => {
 };
 
 describe("LLM proxy", () => {
-  beforeAll(() => {
+  beforeEach(() => {
     // Create temporary directory
     const tempDir = mkdtempSync(path.join(tmpdir(), "tadpole-test-"));
     configPath = path.join(tempDir, "phases.json");
