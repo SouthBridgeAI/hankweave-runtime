@@ -2,12 +2,54 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { startServer, cleanupTest, TestWSClient } from "../utils/test-helpers.js";
+import {
+  startServer,
+  cleanupTest,
+  TestWSClient,
+  ServerConfig,
+} from "../utils/test-helpers.js";
 import type { ChildProcess } from "node:child_process";
 
 let configPath: string | undefined;
 
-describe("Server Integration", () => {
+const runTests = async (config: ServerConfig, tests: () => Promise<void>) => {
+  const tempDir = path.dirname(configPath!);
+  let serverProcess: ChildProcess | null = null;
+  let client: TestWSClient | null = null;
+
+  try {
+    // Start the server using the helper function
+    serverProcess = startServer(config);
+
+    // Create a WebSocket client to test connection
+    client = new TestWSClient();
+
+    // Give server a moment to start
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // Try to connect - this will throw if server isn't running
+    await client.connect(7777);
+
+    // Wait for server.ready event to confirm it's fully started
+    await client.waitForEvent("server.ready", 10000);
+
+    console.log("✓ Server started successfully and is ready");
+
+    await tests();
+  } finally {
+    // Clean up
+    await cleanupTest({
+      testDir: tempDir,
+      testRunDir: tempDir,
+      serverProcess,
+      client,
+      events: client?.getEvents() || [],
+      gracefulShutdown: true,
+    });
+  }
+};
+
+describe("LLM proxy", () => {
   beforeAll(() => {
     // Create temporary directory
     const tempDir = mkdtempSync(path.join(tmpdir(), "tadpole-test-"));
@@ -55,47 +97,26 @@ describe("Server Integration", () => {
     );
   });
 
-  test("server runs ok", async () => {
+  test("runs on 5555 by default", async (done) => {
     expect(configPath).toBeDefined();
-    
+
     const tempDir = path.dirname(configPath!);
-    let serverProcess: ChildProcess | null = null;
-    let client: TestWSClient | null = null;
-    
-    try {
-      // Start the server using the helper function
-      serverProcess = startServer({
+
+    await runTests(
+      {
         testRunDir: tempDir,
         phasesConfig: configPath!,
         port: 7777,
         testMode: "integration",
         cwd: tempDir,
-      });
-      
-      // Create a WebSocket client to test connection
-      client = new TestWSClient();
-      
-      // Give server a moment to start
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Try to connect - this will throw if server isn't running
-      await client.connect(7777);
-      
-      // Wait for server.ready event to confirm it's fully started
-      await client.waitForEvent("server.ready", 10000);
-      
-      console.log("✓ Server started successfully and is ready");
-      
-    } finally {
-      // Clean up
-      await cleanupTest({
-        testDir: tempDir,
-        testRunDir: tempDir,
-        serverProcess,
-        client,
-        events: client?.getEvents() || [],
-        gracefulShutdown: true,
-      });
-    }
+      },
+      async () => {
+        // Check that proxy is running on port 5555
+        const healthResponse = await fetch("http://localhost:5555/health");
+        expect(healthResponse.ok).toBe(true);
+        expect(await healthResponse.text()).toBe("Tadpole Proxy OK");
+        done();
+      }
+    );
   }, 30000);
 });
