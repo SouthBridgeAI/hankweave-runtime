@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import {
-  createPassthroughProxy,
-  DoubleMaxTokens,
-} from "../../server/llm-proxy";
+import { createPassthroughProxy, DoubleMaxTokens } from "../../server/llm-proxy";
 import type { Logger } from "../../server/utils";
 
 // Mock fetch globally for tests
@@ -66,7 +63,7 @@ describe("Passthrough LLM Proxy", () => {
         method: "POST",
         headers: expect.objectContaining(requestHeaders),
         body: requestBody,
-      })
+      }),
     );
   });
 
@@ -142,9 +139,7 @@ describe("DoubleMaxTokens Middleware", () => {
 
     expect(result.claudeRequestData?.max_tokens).toBe(originalMaxTokens * 2);
     expect(result.body).toBe(
-      JSON.stringify(
-        Object.assign({}, originalBody, { max_tokens: originalMaxTokens * 2 })
-      )
+      JSON.stringify(Object.assign({}, originalBody, { max_tokens: originalMaxTokens * 2 })),
     );
   });
 

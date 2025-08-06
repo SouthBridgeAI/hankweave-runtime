@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { startServer, cleanupTest, TestWSClient } from "../utils/test-helpers.js";
+import type { ChildProcess } from "node:child_process";
 
 let configPath: string | undefined;
 
@@ -54,45 +55,47 @@ describe("Server Integration", () => {
     );
   });
 
-  test("server/index runs in basic TUI mode", (done) => {
+  test("server runs ok", async () => {
     expect(configPath).toBeDefined();
-
-    const serverPath = path.resolve(__dirname, "../../server/index.ts");
-
-    const child = spawn(
-      "bun",
-      [serverPath, "--basic", `--config=${configPath}`],
-      {
-        stdio: ["pipe", "pipe", "pipe"],
-      }
-    );
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    child.on("close", (code) => {
-      expect(code).toBe(0);
-
-      // Check that help output contains the basic mode option
-
-      expect(stdout).toContain("Running in basic TUI mode");
-
-      console.log("stdout:", stdout);
-
-      done();
-    });
-
-    // Set a timeout to prevent hanging tests
-    setTimeout(() => {
-      // child.kill();
-    }, 5000);
-  });
+    
+    const tempDir = path.dirname(configPath!);
+    let serverProcess: ChildProcess | null = null;
+    let client: TestWSClient | null = null;
+    
+    try {
+      // Start the server using the helper function
+      serverProcess = startServer({
+        testRunDir: tempDir,
+        phasesConfig: configPath!,
+        port: 7777,
+        testMode: "integration",
+        cwd: tempDir,
+      });
+      
+      // Create a WebSocket client to test connection
+      client = new TestWSClient();
+      
+      // Give server a moment to start
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Try to connect - this will throw if server isn't running
+      await client.connect(7777);
+      
+      // Wait for server.ready event to confirm it's fully started
+      await client.waitForEvent("server.ready", 10000);
+      
+      console.log("✓ Server started successfully and is ready");
+      
+    } finally {
+      // Clean up
+      await cleanupTest({
+        testDir: tempDir,
+        testRunDir: tempDir,
+        serverProcess,
+        client,
+        events: client?.getEvents() || [],
+        gracefulShutdown: true,
+      });
+    }
+  }, 30000);
 });
