@@ -119,4 +119,63 @@ describe("LLM proxy", () => {
       }
     );
   }, 30000);
+
+  test("does not run proxy when withoutProxy is true", async (done) => {
+    expect(configPath).toBeDefined();
+
+    const tempDir = path.dirname(configPath!);
+
+    await runTests(
+      {
+        testRunDir: tempDir,
+        phasesConfig: configPath!,
+        port: 7777,
+        testMode: "integration",
+        cwd: tempDir,
+        withoutProxy: true,
+      },
+      async () => {
+        // Check that proxy is NOT running on port 5555
+        try {
+          await fetch("http://localhost:5555/health");
+          // If we get here, the proxy is running when it shouldn't be
+          expect.unreachable(
+            "Proxy should not be running when withoutProxy is true"
+          );
+        } catch (error) {
+          // This is expected - the proxy should not be running
+          expect(error).toBeDefined();
+          done();
+        }
+      }
+    );
+  }, 30000);
+
+  test("runs proxy on custom port when proxyPort is specified", async (done) => {
+    expect(configPath).toBeDefined();
+
+    const tempDir = path.dirname(configPath!);
+    const customProxyPort = 9999;
+
+    await runTests(
+      {
+        testRunDir: tempDir,
+        phasesConfig: configPath!,
+        port: 7777,
+        testMode: "integration",
+        cwd: tempDir,
+        proxyPort: customProxyPort,
+      },
+      async () => {
+        // Check that proxy is running on the custom port
+        const healthResponse = await fetch(
+          `http://localhost:${customProxyPort}/health`
+        );
+        expect(healthResponse.ok).toBe(true);
+        expect(await healthResponse.text()).toBe("Tadpole Proxy OK");
+
+        done();
+      }
+    );
+  }, 30000);
 });
