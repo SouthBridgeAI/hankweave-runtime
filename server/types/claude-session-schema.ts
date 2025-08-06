@@ -33,8 +33,8 @@ const modelSchema = z
 // Permission mode for Claude Code
 const permissionModeSchema = z.enum(["bypassPermissions", "requestPermissions"]);
 
-// API key source
-const apiKeySourceSchema = z.enum(["ANTHROPIC_API_KEY", "env"]);
+// API key source - accepts known values and "none" for cases where API key is configured differently
+const apiKeySourceSchema = z.enum(["ANTHROPIC_API_KEY", "env", "none"]);
 
 /**
  * System Message Schema

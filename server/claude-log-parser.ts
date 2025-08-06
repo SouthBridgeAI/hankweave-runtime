@@ -107,8 +107,20 @@ export class ClaudeLogParser {
 
   private parseLogLine(line: string): void {
     try {
-      const result = logMessageSchema.safeParse(JSON.parse(line));
+      const parsed = JSON.parse(line);
+      const result = logMessageSchema.safeParse(parsed);
       if (!result.success) {
+        // Log validation failures for debugging - especially important for system init messages
+        if (parsed.type === "system" && parsed.subtype === "init") {
+          console.error(
+            `[ClaudeLogParser] Failed to parse system init message for phase ${this.options.phaseId}:`,
+            result.error.format(),
+          );
+          console.error(
+            `[ClaudeLogParser] Message that failed validation:`,
+            JSON.stringify(parsed, null, 2),
+          );
+        }
         return; // Skip invalid messages
       }
 
