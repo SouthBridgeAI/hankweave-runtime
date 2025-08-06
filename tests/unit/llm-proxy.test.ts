@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { createPassthroughProxy, DoubleMaxTokens } from "../../server/proxy";
+import { createPassthroughProxy, DoubleMaxTokens } from "../../server/llm-proxy";
 import type { Logger } from "../../server/utils";
 
 // Mock fetch globally for tests
