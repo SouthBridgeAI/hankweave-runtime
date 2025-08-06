@@ -1,9 +1,6 @@
 #!/usr/bin/env bun
 
-import {
-  type ClaudeApiRequest,
-  claudeApiRequestSchema,
-} from "./types/claude-session-schema";
+import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
 import type { Logger } from "./utils.js";
 
 interface LLMProxyRequest {
@@ -29,44 +26,39 @@ interface LLMTransport {
 abstract class LLMProxyMiddleware {
   protected async handleRequest(
     request: LLMProxyRequestWithoutBody,
-    body?: string
+    body?: string,
   ): Promise<LLMProxyRequestWithoutBody> {
     return request;
   }
-  protected async handleResponse(
-    response: LLMProxyResponse
-  ): Promise<LLMProxyResponse> {
+  protected async handleResponse(response: LLMProxyResponse): Promise<LLMProxyResponse> {
     return response;
   }
 
-  public async processRequest(
-    request: LLMProxyRequest
-  ): Promise<LLMProxyRequest> {
+  public async processRequest(request: LLMProxyRequest): Promise<LLMProxyRequest> {
     // let's make sure we can't modify body and Claude request data in different ways
     // middleware can only modify underlying claudeRequestData (when present)
     // any change to the to object will be synced back to the body
     const { body, ...requestWithoutBody } = request;
     const r = await this.handleRequest(requestWithoutBody, body);
     return Object.assign({}, r, {
-      body: r.claudeRequestData
-        ? JSON.stringify(r.claudeRequestData)
-        : request.body,
+      body: r.claudeRequestData ? JSON.stringify(r.claudeRequestData) : request.body,
     });
   }
-  public async processResponse(
-    response: LLMProxyResponse
-  ): Promise<LLMProxyResponse> {
+  public async processResponse(response: LLMProxyResponse): Promise<LLMProxyResponse> {
     return this.handleResponse(response);
   }
 }
 
 class HttpTransport implements LLMTransport {
-  constructor(private baseUrl: string, public logger: Logger) {}
+  constructor(
+    private baseUrl: string,
+    public logger: Logger,
+  ) {}
 
   async forward(req: LLMProxyRequest): Promise<LLMProxyResponse> {
     const targetUrl = `${this.baseUrl}${req.url}`;
 
-    this.logger.log(`🔄 Forwarding ${req.method} to ${targetUrl}`);
+    this.logger.log(`[PROXY-HTTP-TRANSPORT] Forwarding ${req.method} request to ${targetUrl}`);
 
     try {
       const forwardHeaders = { ...req.headers };
@@ -79,7 +71,7 @@ class HttpTransport implements LLMTransport {
         body: req.body,
       });
 
-      this.logger.log(`📥 Response: ${response.status}`);
+      this.logger.log(`[PROXY-HTTP-TRANSPORT] Received response with status ${response.status}`);
 
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
@@ -96,7 +88,10 @@ class HttpTransport implements LLMTransport {
         body: isStreaming ? response.body || undefined : await response.text(),
       };
     } catch (error) {
-      this.logger.log(`❌ Fetch error to ${targetUrl}: ${error}`, "error");
+      this.logger.log(
+        `[PROXY-HTTP-TRANSPORT] Failed to fetch from ${targetUrl}: ${error}`,
+        "error",
+      );
       throw error;
     }
   }
@@ -113,24 +108,20 @@ class LoggingMiddleware extends LLMProxyMiddleware {
 
   override async handleRequest(
     req: LLMProxyRequestWithoutBody,
-    body?: string
+    body?: string,
   ): Promise<LLMProxyRequest> {
-    const timestamp = new Date().toISOString();
-    const requestMessage = `🔀 [${timestamp}] ${req.method} ${req.url}`;
-
-    this.logger.log(requestMessage);
+    this.logger.log(`[LOGGING-MIDDLEWARE] Received request ${req.method} ${req.url}`);
 
     if (body) {
       if (req.claudeRequestData) {
         const { model, max_tokens, stream } = req.claudeRequestData;
         const messageCount = req.claudeRequestData.messages?.length || 0;
-        const claudeMessage = `🔀 [${timestamp}] claude Request: model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`;
-        this.logger.log(claudeMessage);
+        this.logger.log(
+          `[LOGGING-MIDDLEWARE] Claude request - model=${model}, messages=${messageCount}, max_tokens=${max_tokens}, stream=${stream}`,
+        );
       } else {
-        const truncatedBody =
-          body.length > 500 ? `${body.substring(0, 500)}...[truncated]` : body;
-        const bodyMessage = `Body: ${truncatedBody}`;
-        this.logger.log(bodyMessage);
+        const truncatedBody = body.length > 500 ? `${body.substring(0, 500)}...[truncated]` : body;
+        this.logger.log(`[LOGGING-MIDDLEWARE] Request body: ${truncatedBody}`);
       }
     }
 
@@ -138,10 +129,8 @@ class LoggingMiddleware extends LLMProxyMiddleware {
     return req;
   }
 
-  override async handleResponse(
-    res: LLMProxyResponse
-  ): Promise<LLMProxyResponse> {
-    this.logger.log(`🔀 [${new Date().toISOString()}] Response: ${res.status}`);
+  override async handleResponse(res: LLMProxyResponse): Promise<LLMProxyResponse> {
+    this.logger.log(`[LOGGING-MIDDLEWARE] Response status: ${res.status}`);
     this.logger.log("---");
     return res;
   }
@@ -169,7 +158,7 @@ class LLMProxy {
   constructor(
     public transport: LLMTransport,
     middleware: LLMProxyMiddleware[] = [],
-    private logger: Logger
+    private logger: Logger,
   ) {
     this.middleware = middleware;
   }
@@ -187,31 +176,24 @@ class LLMProxy {
       });
 
       const body =
-        request.method !== "GET" && request.method !== "HEAD"
-          ? await request.text()
-          : undefined;
+        request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined;
 
       let claudeRequestData: ClaudeApiRequest | undefined;
 
       if (body) {
         try {
           // let's go for a gentle parse here - never know what might come in
-          const { success, data } = claudeApiRequestSchema.safeParse(
-            JSON.parse(body)
-          );
+          const { success, data } = claudeApiRequestSchema.safeParse(JSON.parse(body));
           if (!success) {
-            this.logger.log(
-              `Unrecognizable Claude API request body: ${body}`,
-              "debug"
-            );
+            this.logger.log(`[LLM-PROXY] Unrecognizable Claude API request body: ${body}`, "debug");
           } else {
             claudeRequestData = data;
           }
         } catch (error) {
           // just in case the body is not valid JSON or something
           this.logger.log(
-            `Failed to parse Claude API request body: ${body} - ${error}`,
-            "debug"
+            `[LLM-PROXY] Failed to parse Claude API request body: ${body} - ${error}`,
+            "debug",
           );
         }
       }
@@ -246,7 +228,7 @@ class LLMProxy {
         headers: proxyRes.headers,
       });
     } catch (error) {
-      this.logger.log(`Proxy processing error: ${error}`, "error");
+      this.logger.log(`[LLM-PROXY] Request processing error: ${error}`, "error");
       return new Response("Proxy Error", { status: 500 });
     }
   }
@@ -262,7 +244,7 @@ export function createPassthroughProxy({
   return new LLMProxy(
     new HttpTransport(proxyToUrl, logger),
     [new LoggingMiddleware(logger)],
-    logger
+    logger,
   );
 }
 
@@ -277,7 +259,7 @@ export class BunProxyRunner {
     private proxy: "passthrough",
     private port: number,
     private proxyToUrl: string,
-    private logger: Logger
+    private logger: Logger,
   ) {}
 
   get proxyUrl(): string {
@@ -286,9 +268,7 @@ export class BunProxyRunner {
 
   start(): string {
     if (this.proxy !== "passthrough") {
-      throw new Error(
-        "Unsupported proxy type. Only 'passthrough' is supported."
-      );
+      throw new Error("Unsupported proxy type. Only 'passthrough' is supported.");
     }
 
     const proxy = createPassthroughProxy({
@@ -316,7 +296,7 @@ export class BunProxyRunner {
 
     const proxyUrl = `http://localhost:${this.port}`;
 
-    console.log(`🚀 LLM Proxy running on port ${this.port}`);
+    console.log(`BunProxyRunner: LLM Proxy server started on port ${this.port}`);
     console.log(`   Health check: ${proxyUrl}/health`);
 
     return proxyUrl;
@@ -325,7 +305,7 @@ export class BunProxyRunner {
   stop(): void {
     if (this.server) {
       this.server.stop();
-      console.log("🛑 Proxy server stopped");
+      console.log("BunProxyRunner: Proxy server stopped");
     }
   }
 }
