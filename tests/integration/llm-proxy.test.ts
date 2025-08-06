@@ -143,7 +143,7 @@ describe("LLM proxy", () => {
         await new Promise((resolve) => setTimeout(resolve, 15000));
 
         // Check if server log contains the logging middleware message
-        const logPath = path.join(executionDir, ".tadpole/logs/server.log");
+        const logPath = path.join(executionDir!, ".tadpole/logs/server.log");
         expect(readFileSync(logPath, "utf-8")).toContain(
           "[LOGGING-MIDDLEWARE] Received request"
         );
