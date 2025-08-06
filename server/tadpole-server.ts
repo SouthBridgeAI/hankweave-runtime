@@ -94,7 +94,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   // Proxy server
   private proxyRunner: BunProxyRunner | null = null;
-  private proxyPort: number = 5555;
 
   // State management
   private stateManager: StateManager;
@@ -232,10 +231,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Start proxy server first (if not disabled)
     if (!this.config.withoutProxy) {
-      this.logger.log(`Starting proxy server on port ${this.proxyPort}`);
+      this.logger.log(`Starting proxy server on port ${this.config.proxyPort}`);
       this.proxyRunner = new BunProxyRunner(
         "passthrough",
-        this.proxyPort,
+        this.config.proxyPort,
         this.config.anthropicBaseURL || "https://api.anthropic.com",
         this.logger,
       );

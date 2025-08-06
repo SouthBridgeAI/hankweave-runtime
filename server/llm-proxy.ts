@@ -284,7 +284,7 @@ export class BunProxyRunner {
 
         // Health check endpoint
         if (pathname === "/health" || pathname === "/") {
-          return new Response("Generic Proxy OK", {
+          return new Response("Tadpole Proxy OK", {
             status: 200,
             headers: { "Content-Type": "text/plain" },
           });
