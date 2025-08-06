@@ -75,13 +75,17 @@ export class BasicTUI {
     const port = this.server.config?.port || 7777;
     const url = `ws://localhost:${port}`;
 
-    console.log(`${COLORS.dim}${SYMBOLS.pipe} Connecting to ${url}...${COLORS.reset}`);
+    console.log(
+      `${COLORS.dim}${SYMBOLS.pipe} Connecting to ${url}...${COLORS.reset}`
+    );
 
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
       this.isConnected = true;
-      console.log(`${COLORS.green}${SYMBOLS.check} Connected to server${COLORS.reset}`);
+      console.log(
+        `${COLORS.green}${SYMBOLS.check} Connected to server${COLORS.reset}`
+      );
     };
 
     this.ws.onmessage = (event) => {
@@ -91,28 +95,42 @@ export class BasicTUI {
       } catch (error) {
         console.error(
           `${COLORS.red}${SYMBOLS.cross} Failed to parse server message:${COLORS.reset}`,
-          error,
+          error
         );
       }
     };
 
     this.ws.onerror = (error) => {
-      console.error(`${COLORS.red}${SYMBOLS.cross} WebSocket error:${COLORS.reset}`, error);
+      console.error(
+        `${COLORS.red}${SYMBOLS.cross} WebSocket error:${COLORS.reset}`,
+        error
+      );
     };
 
     this.ws.onclose = () => {
       this.isConnected = false;
-      console.log(`${COLORS.dim}${SYMBOLS.pipe} Disconnected from server${COLORS.reset}`);
+      console.log(
+        `${COLORS.dim}${SYMBOLS.pipe} Disconnected from server${COLORS.reset}`
+      );
       // Server shutdown will handle process exit
     };
   }
 
   private formatTimestamp(timestamp: string): string {
-    return `${COLORS.dim}[${new Date(timestamp).toLocaleTimeString()}]${COLORS.reset}`;
+    return `${COLORS.dim}[${new Date(timestamp).toLocaleTimeString()}]${
+      COLORS.reset
+    }`;
   }
 
-  private drawBox(title: string, content: string[], color: string = COLORS.white): void {
-    const maxLength = Math.max(title.length, ...content.map((line) => this.stripAnsi(line).length));
+  private drawBox(
+    title: string,
+    content: string[],
+    color: string = COLORS.white
+  ): void {
+    const maxLength = Math.max(
+      title.length,
+      ...content.map((line) => this.stripAnsi(line).length)
+    );
     const boxWidth = maxLength + 4;
 
     // Top border
@@ -121,7 +139,11 @@ export class BasicTUI {
     // Title
     const titlePadding = Math.floor((boxWidth - 2 - title.length) / 2);
     console.log(
-      `${color}│${" ".repeat(titlePadding)}${COLORS.bold}${title}${COLORS.reset}${color}${" ".repeat(boxWidth - 2 - titlePadding - title.length)}│${COLORS.reset}`,
+      `${color}│${" ".repeat(titlePadding)}${COLORS.bold}${title}${
+        COLORS.reset
+      }${color}${" ".repeat(boxWidth - 2 - titlePadding - title.length)}│${
+        COLORS.reset
+      }`
     );
 
     // Separator
@@ -131,7 +153,9 @@ export class BasicTUI {
     for (const line of content) {
       const strippedLength = this.stripAnsi(line).length;
       const padding = boxWidth - 2 - strippedLength;
-      console.log(`${color}│ ${line}${" ".repeat(padding - 1)}${color}│${COLORS.reset}`);
+      console.log(
+        `${color}│ ${line}${" ".repeat(padding - 1)}${color}│${COLORS.reset}`
+      );
     }
 
     // Bottom border
@@ -139,7 +163,9 @@ export class BasicTUI {
   }
 
   private stripAnsi(str: string): string {
-    return str.replace(/\x1b\[[0-9;]*m/g, "");
+    // ANSI escape sequences need control characters - this is intentional
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Required for ANSI stripping
+    return str.replace(/\u001b\[[0-9;]*m/g, "");
   }
 
   private async handleServerEvent(event: ServerEvent): Promise<void> {
@@ -147,40 +173,52 @@ export class BasicTUI {
 
     switch (event.type) {
       case "server.ready":
-        console.log(`\n${timestamp} ${COLORS.green}${COLORS.bold}Server Ready${COLORS.reset}`);
         console.log(
-          `${COLORS.dim}  ${SYMBOLS.arrow} Version: ${event.data.serverVersion}${COLORS.reset}`,
+          `\n${timestamp} ${COLORS.green}${COLORS.bold}Server Ready${COLORS.reset}`
         );
         console.log(
-          `${COLORS.dim}  ${SYMBOLS.arrow} Execution: ${event.data.executionPath}${COLORS.reset}`,
+          `${COLORS.dim}  ${SYMBOLS.arrow} Version: ${event.data.serverVersion}${COLORS.reset}`
+        );
+        console.log(
+          `${COLORS.dim}  ${SYMBOLS.arrow} Execution: ${event.data.executionPath}${COLORS.reset}`
         );
         break;
 
       case "state.snapshot": {
-        console.log(`\n${timestamp} ${COLORS.blue}State Snapshot${COLORS.reset}`);
+        console.log(
+          `\n${timestamp} ${COLORS.blue}State Snapshot${COLORS.reset}`
+        );
         if (event.data.recentFileAccess) {
           console.log(
-            `${COLORS.dim}  ${SYMBOLS.arrow} Recent file: ${event.data.recentFileAccess.path}${COLORS.reset}`,
+            `${COLORS.dim}  ${SYMBOLS.arrow} Recent file: ${event.data.recentFileAccess.path}${COLORS.reset}`
           );
         }
         console.log(
-          `  ${SYMBOLS.arrow} Total cost: ${COLORS.yellow}$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
+          `  ${SYMBOLS.arrow} Total cost: ${
+            COLORS.yellow
+          }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`
         );
         break;
       }
 
       case "phase.started": {
-        console.log(`\n${timestamp} ${COLORS.cyan}${COLORS.bold}Phase Started${COLORS.reset}`);
+        console.log(
+          `\n${timestamp} ${COLORS.cyan}${COLORS.bold}Phase Started${COLORS.reset}`
+        );
         this.drawBox(
           event.data.phaseName,
           [
             `Session: ${COLORS.dim}${event.data.sessionId}${COLORS.reset}`,
             ...(event.data.previousSessionId
-              ? [`Continuing from: ${COLORS.dim}${event.data.previousSessionId}${COLORS.reset}`]
+              ? [
+                  `Continuing from: ${COLORS.dim}${event.data.previousSessionId}${COLORS.reset}`,
+                ]
               : []),
-            ...(event.data.phaseDescription ? [`${event.data.phaseDescription}`] : []),
+            ...(event.data.phaseDescription
+              ? [`${event.data.phaseDescription}`]
+              : []),
           ],
-          COLORS.cyan,
+          COLORS.cyan
         );
         break;
       }
@@ -189,21 +227,29 @@ export class BasicTUI {
         const status = event.data.success ? COLORS.green : COLORS.red;
         const statusSymbol = event.data.success ? SYMBOLS.check : SYMBOLS.cross;
         console.log(
-          `\n${timestamp} ${status}${COLORS.bold}Phase Completed${COLORS.reset} ${status}${statusSymbol}${COLORS.reset}`,
+          `\n${timestamp} ${status}${COLORS.bold}Phase Completed${COLORS.reset} ${status}${statusSymbol}${COLORS.reset}`
         );
 
         const details = [
           `Cost: ${COLORS.yellow}$${event.data.cost.toFixed(4)}${COLORS.reset}`,
-          `Duration: ${COLORS.dim}${(event.data.duration / 1000).toFixed(1)}s${COLORS.reset}`,
+          `Duration: ${COLORS.dim}${(event.data.duration / 1000).toFixed(1)}s${
+            COLORS.reset
+          }`,
         ];
 
         if (!event.data.success && event.data.failureReason) {
           details.push(
-            `Failure: ${COLORS.red}${event.data.failureReason.type}${COLORS.reset} (retriable: ${event.data.failureReason.retriable ? COLORS.green + "yes" : COLORS.red + "no"}${COLORS.reset})`,
+            `Failure: ${COLORS.red}${event.data.failureReason.type}${
+              COLORS.reset
+            } (retriable: ${
+              event.data.failureReason.retriable
+                ? `${COLORS.green}yes`
+                : `${COLORS.red}no`
+            }${COLORS.reset})`
           );
           if (event.data.failureReason.message) {
             details.push(
-              `Message: ${COLORS.dim}${event.data.failureReason.message}${COLORS.reset}`,
+              `Message: ${COLORS.dim}${event.data.failureReason.message}${COLORS.reset}`
             );
           }
         }
@@ -221,18 +267,28 @@ export class BasicTUI {
             console.log(`  ${SYMBOLS.pipe} ${line}`);
           }
         } else if (event.data.action === "thinking") {
-          console.log(`\n${timestamp} ${COLORS.gray}${COLORS.italic}Thinking${COLORS.reset}`);
+          console.log(
+            `\n${timestamp} ${COLORS.gray}${COLORS.italic}Thinking${COLORS.reset}`
+          );
           // Split thinking by newlines and indent with gray
           const lines = event.data.content.split("\n");
           for (const line of lines) {
-            console.log(`${COLORS.gray}${COLORS.italic}  ${SYMBOLS.pipe} ${line}${COLORS.reset}`);
+            console.log(
+              `${COLORS.gray}${COLORS.italic}  ${SYMBOLS.pipe} ${line}${COLORS.reset}`
+            );
           }
         } else if (event.data.action === "tool_use") {
           const toolColor = this.getToolColor(event.data.toolName || "unknown");
-          console.log(`\n${timestamp} ${toolColor}Tool Use: ${event.data.toolName}${COLORS.reset}`);
+          console.log(
+            `\n${timestamp} ${toolColor}Tool Use: ${event.data.toolName}${COLORS.reset}`
+          );
           if (event.data.toolInput) {
             console.log(
-              `${COLORS.dim}  ${SYMBOLS.arrow} Input: ${JSON.stringify(event.data.toolInput, null, 2).replace(/\n/g, "\n    ")}${COLORS.reset}`,
+              `${COLORS.dim}  ${SYMBOLS.arrow} Input: ${JSON.stringify(
+                event.data.toolInput,
+                null,
+                2
+              ).replace(/\n/g, "\n    ")}${COLORS.reset}`
             );
           }
         }
@@ -243,48 +299,61 @@ export class BasicTUI {
         const toolColor = this.getToolColor(event.data.toolName);
         const statusColor = event.data.isError ? COLORS.red : COLORS.green;
         console.log(
-          `\n${timestamp} ${toolColor}Tool Result: ${event.data.toolName}${COLORS.reset} ${statusColor}[${event.data.executionTimeMs}ms]${COLORS.reset}`,
+          `\n${timestamp} ${toolColor}Tool Result: ${event.data.toolName}${COLORS.reset} ${statusColor}[${event.data.executionTimeMs}ms]${COLORS.reset}`
         );
 
         // For file read/write operations, show full content unless it's creation/write
         const shouldTruncate =
-          ["Write", "Create"].includes(event.data.toolName) && event.data.result.length > 500;
+          ["Write", "Create"].includes(event.data.toolName) &&
+          event.data.result.length > 500;
 
         if (shouldTruncate) {
           console.log(
-            `${COLORS.dim}  ${SYMBOLS.arrow} Result: ${event.data.result.substring(0, 200)}...${COLORS.reset}`,
+            `${COLORS.dim}  ${
+              SYMBOLS.arrow
+            } Result: ${event.data.result.substring(0, 200)}...${COLORS.reset}`
           );
           console.log(
-            `${COLORS.dim}  ${SYMBOLS.arrow} (Truncated ${event.data.originalLength} bytes to 200 chars)${COLORS.reset}`,
+            `${COLORS.dim}  ${SYMBOLS.arrow} (Truncated ${event.data.originalLength} bytes to 200 chars)${COLORS.reset}`
           );
         } else {
           // Show full result with proper indentation
           const resultLines = event.data.result.split("\n");
           if (resultLines.length === 1) {
             console.log(
-              `${COLORS.dim}  ${SYMBOLS.arrow} Result: ${event.data.result}${COLORS.reset}`,
+              `${COLORS.dim}  ${SYMBOLS.arrow} Result: ${event.data.result}${COLORS.reset}`
             );
           } else {
-            console.log(`${COLORS.dim}  ${SYMBOLS.arrow} Result:${COLORS.reset}`);
+            console.log(
+              `${COLORS.dim}  ${SYMBOLS.arrow} Result:${COLORS.reset}`
+            );
             for (const line of resultLines) {
-              console.log(`${COLORS.dim}    ${SYMBOLS.pipe} ${line}${COLORS.reset}`);
+              console.log(
+                `${COLORS.dim}    ${SYMBOLS.pipe} ${line}${COLORS.reset}`
+              );
             }
           }
         }
 
         if (event.data.isError) {
-          console.log(`${COLORS.red}  ${SYMBOLS.cross} Tool execution failed${COLORS.reset}`);
+          console.log(
+            `${COLORS.red}  ${SYMBOLS.cross} Tool execution failed${COLORS.reset}`
+          );
         }
         break;
       }
 
       case "token.usage": {
-        console.log(`\n${timestamp} ${COLORS.yellow}Token Usage${COLORS.reset}`);
         console.log(
-          `  ${SYMBOLS.arrow} Input: ${event.data.inputTokens}, Output: ${event.data.outputTokens}`,
+          `\n${timestamp} ${COLORS.yellow}Token Usage${COLORS.reset}`
         );
         console.log(
-          `  ${SYMBOLS.arrow} Cost: ${COLORS.yellow}$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
+          `  ${SYMBOLS.arrow} Input: ${event.data.inputTokens}, Output: ${event.data.outputTokens}`
+        );
+        console.log(
+          `  ${SYMBOLS.arrow} Cost: ${
+            COLORS.yellow
+          }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`
         );
         break;
       }
@@ -294,23 +363,25 @@ export class BasicTUI {
           event.data.action === "created"
             ? COLORS.green
             : event.data.action === "deleted"
-              ? COLORS.red
-              : COLORS.yellow;
+            ? COLORS.red
+            : COLORS.yellow;
         console.log(
-          `\n${timestamp} ${actionColor}File ${event.data.action}${COLORS.reset}: ${COLORS.bold}${event.data.path}${COLORS.reset}`,
+          `\n${timestamp} ${actionColor}File ${event.data.action}${COLORS.reset}: ${COLORS.bold}${event.data.path}${COLORS.reset}`
         );
         break;
       }
 
       case "filetree.updated": {
         console.log(
-          `\n${timestamp} ${COLORS.magenta}File Tree Updated${COLORS.reset} (${event.data.tree.length} root items)`,
+          `\n${timestamp} ${COLORS.magenta}File Tree Updated${COLORS.reset} (${event.data.tree.length} root items)`
         );
         break;
       }
 
       case "error": {
-        console.log(`\n${timestamp} ${COLORS.red}${COLORS.bold}Error${COLORS.reset}`);
+        console.log(
+          `\n${timestamp} ${COLORS.red}${COLORS.bold}Error${COLORS.reset}`
+        );
         this.drawBox(
           "Error Details",
           [
@@ -320,16 +391,18 @@ export class BasicTUI {
               : []),
             ...(event.data.phase ? [`Phase: ${event.data.phase}`] : []),
             ...(event.data.code ? [`Code: ${event.data.code}`] : []),
-            `Fatal: ${event.data.fatal ? COLORS.red + "yes" : COLORS.green + "no"}${COLORS.reset}`,
+            `Fatal: ${
+              event.data.fatal ? `${COLORS.red}yes` : `${COLORS.green}no`
+            }${COLORS.reset}`,
           ],
-          COLORS.red,
+          COLORS.red
         );
         break;
       }
 
       case "incomplete.phase": {
         console.log(
-          `\n${timestamp} ${COLORS.yellow}${COLORS.bold}Incomplete Phase Detected${COLORS.reset}`,
+          `\n${timestamp} ${COLORS.yellow}${COLORS.bold}Incomplete Phase Detected${COLORS.reset}`
         );
         console.log(`  ${SYMBOLS.arrow} Phase: ${event.data.phaseName}`);
         console.log(`  ${SYMBOLS.arrow} ${event.data.message}`);
@@ -337,7 +410,9 @@ export class BasicTUI {
       }
 
       case "info": {
-        console.log(`\n${timestamp} ${COLORS.blue}Info${COLORS.reset}: ${event.data.message}`);
+        console.log(
+          `\n${timestamp} ${COLORS.blue}Info${COLORS.reset}: ${event.data.message}`
+        );
         break;
       }
 
@@ -359,7 +434,7 @@ export class BasicTUI {
         } else {
           // Regular display mode
           console.log(
-            `\n${timestamp} ${COLORS.magenta}Checkpoints${COLORS.reset} in run ${event.data.runId}:`,
+            `\n${timestamp} ${COLORS.magenta}Checkpoints${COLORS.reset} in run ${event.data.runId}:`
           );
 
           if (event.data.checkpoints.length === 0) {
@@ -369,9 +444,13 @@ export class BasicTUI {
               "Available Checkpoints",
               event.data.checkpoints.map(
                 (cp, index) =>
-                  `[${COLORS.bold}${index + 1}${COLORS.reset}] ${cp.phaseName} ${COLORS.dim}(${cp.checkpointType})${COLORS.reset} ${COLORS.gray}${cp.sha.substring(0, 7)}${COLORS.reset}`,
+                  `[${COLORS.bold}${index + 1}${COLORS.reset}] ${
+                    cp.phaseName
+                  } ${COLORS.dim}(${cp.checkpointType})${COLORS.reset} ${
+                    COLORS.gray
+                  }${cp.sha.substring(0, 7)}${COLORS.reset}`
               ),
-              COLORS.magenta,
+              COLORS.magenta
             );
           }
         }
@@ -379,24 +458,38 @@ export class BasicTUI {
       }
 
       case "rollback.started": {
-        console.log(`\n${timestamp} ${COLORS.yellow}${COLORS.bold}Rollback Started${COLORS.reset}`);
-        console.log(`  ${SYMBOLS.arrow} From: ${event.data.fromPhase} (run ${event.data.fromRun})`);
-        console.log(`  ${SYMBOLS.arrow} To: ${event.data.toPhase} (${event.data.checkpointType})`);
-        console.log(`  ${SYMBOLS.arrow} Processing ${event.data.phasesToProcess.length} phases`);
+        console.log(
+          `\n${timestamp} ${COLORS.yellow}${COLORS.bold}Rollback Started${COLORS.reset}`
+        );
+        console.log(
+          `  ${SYMBOLS.arrow} From: ${event.data.fromPhase} (run ${event.data.fromRun})`
+        );
+        console.log(
+          `  ${SYMBOLS.arrow} To: ${event.data.toPhase} (${event.data.checkpointType})`
+        );
+        console.log(
+          `  ${SYMBOLS.arrow} Processing ${event.data.phasesToProcess.length} phases`
+        );
         break;
       }
 
       case "rollback.progress": {
-        const progress = Math.floor((event.data.currentStep / event.data.totalSteps) * 20);
-        const progressBar = `[${"█".repeat(progress)}${" ".repeat(20 - progress)}]`;
+        const progress = Math.floor(
+          (event.data.currentStep / event.data.totalSteps) * 20
+        );
+        const progressBar = `[${"█".repeat(progress)}${" ".repeat(
+          20 - progress
+        )}]`;
         console.log(
-          `\r${COLORS.yellow}Rollback Progress${COLORS.reset} ${progressBar} ${event.data.currentStep}/${event.data.totalSteps} - ${event.data.message}`,
+          `\r${COLORS.yellow}Rollback Progress${COLORS.reset} ${progressBar} ${event.data.currentStep}/${event.data.totalSteps} - ${event.data.message}`
         );
         break;
       }
 
       case "rollback.phaseCheckpoint": {
-        console.log(`\n${timestamp} ${COLORS.cyan}Checkpoint Applied${COLORS.reset}`);
+        console.log(
+          `\n${timestamp} ${COLORS.cyan}Checkpoint Applied${COLORS.reset}`
+        );
         console.log(`  ${SYMBOLS.arrow} ${event.data.message}`);
         break;
       }
@@ -406,21 +499,28 @@ export class BasicTUI {
           event.data.status === "completed"
             ? COLORS.green
             : event.data.status === "failed"
-              ? COLORS.red
-              : event.data.status === "partial"
-                ? COLORS.yellow
-                : COLORS.blue;
+            ? COLORS.red
+            : event.data.status === "partial"
+            ? COLORS.yellow
+            : COLORS.blue;
         console.log(
-          `\n${timestamp} ${statusColor}Workspace Cleanup: ${event.data.status}${COLORS.reset}`,
+          `\n${timestamp} ${statusColor}Workspace Cleanup: ${event.data.status}${COLORS.reset}`
         );
         console.log(`  ${SYMBOLS.arrow} Phase: ${event.data.phaseName}`);
-        if (event.data.successfulCleanups && event.data.successfulCleanups.length > 0) {
-          console.log(`  ${SYMBOLS.check} Cleaned: ${event.data.successfulCleanups.join(", ")}`);
+        if (
+          event.data.successfulCleanups &&
+          event.data.successfulCleanups.length > 0
+        ) {
+          console.log(
+            `  ${SYMBOLS.check} Cleaned: ${event.data.successfulCleanups.join(
+              ", "
+            )}`
+          );
         }
         if (event.data.failedCleanups && event.data.failedCleanups.length > 0) {
           for (const failure of event.data.failedCleanups) {
             console.log(
-              `  ${COLORS.red}${SYMBOLS.cross} Failed: ${failure.directory} - ${failure.error}${COLORS.reset}`,
+              `  ${COLORS.red}${SYMBOLS.cross} Failed: ${failure.directory} - ${failure.error}${COLORS.reset}`
             );
           }
         }
@@ -429,7 +529,7 @@ export class BasicTUI {
 
       case "rollback.completed": {
         console.log(
-          `\n${timestamp} ${COLORS.green}${COLORS.bold}Rollback Completed${COLORS.reset}`,
+          `\n${timestamp} ${COLORS.green}${COLORS.bold}Rollback Completed${COLORS.reset}`
         );
         this.drawBox(
           "Rollback Summary",
@@ -437,21 +537,29 @@ export class BasicTUI {
             `From run: ${event.data.fromRun}`,
             `To run: ${event.data.toRun}`,
             `Phase: ${event.data.phaseName} (${event.data.checkpointType})`,
-            `Checkpoint: ${COLORS.gray}${event.data.checkpoint.substring(0, 7)}${COLORS.reset}`,
+            `Checkpoint: ${COLORS.gray}${event.data.checkpoint.substring(
+              0,
+              7
+            )}${COLORS.reset}`,
           ],
-          COLORS.green,
+          COLORS.green
         );
         break;
       }
 
-      default:
+      default: {
         // Show all unknown events for debugging
+        // Cast to a generic event structure for debugging
+        const unknownEvent = event as { type: string; data?: unknown };
         console.log(
-          `\n${timestamp} ${COLORS.gray}Unknown Event: ${(event as any).type}${COLORS.reset}`,
+          `\n${timestamp} ${COLORS.gray}Unknown Event: ${unknownEvent.type}${COLORS.reset}`
         );
         console.log(
-          `${COLORS.dim}${JSON.stringify("data" in event ? (event as any).data : {}, null, 2)}${COLORS.reset}`,
+          `${COLORS.dim}${JSON.stringify(unknownEvent.data ?? {}, null, 2)}${
+            COLORS.reset
+          }`
         );
+      }
     }
   }
 
@@ -481,7 +589,9 @@ export class BasicTUI {
 
   private sendCommand(command: ClientCommand): void {
     if (!this.isConnected || !this.ws) {
-      console.error(`${COLORS.red}${SYMBOLS.cross} Not connected to server${COLORS.reset}`);
+      console.error(
+        `${COLORS.red}${SYMBOLS.cross} Not connected to server${COLORS.reset}`
+      );
       return;
     }
 
@@ -504,7 +614,9 @@ export class BasicTUI {
     process.stdin.on("data", async (key: string) => {
       switch (key) {
         case "n":
-          console.log(`\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next phase...${COLORS.reset}`);
+          console.log(
+            `\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next phase...${COLORS.reset}`
+          );
           this.sendCommand({
             id: generateId(),
             type: "phase.next",
@@ -513,7 +625,7 @@ export class BasicTUI {
 
         case "s":
           console.log(
-            `\n${COLORS.yellow}${SYMBOLS.arrow} Skipping current phase...${COLORS.reset}`,
+            `\n${COLORS.yellow}${SYMBOLS.arrow} Skipping current phase...${COLORS.reset}`
           );
           this.sendCommand({
             id: generateId(),
@@ -523,7 +635,7 @@ export class BasicTUI {
 
         case "f":
           console.log(
-            `\n${COLORS.red}${SYMBOLS.arrow} Force stopping current phase...${COLORS.reset}`,
+            `\n${COLORS.red}${SYMBOLS.arrow} Force stopping current phase...${COLORS.reset}`
           );
           this.sendCommand({
             id: generateId(),
@@ -534,7 +646,7 @@ export class BasicTUI {
 
         case "l":
           console.log(
-            `\n${COLORS.magenta}${SYMBOLS.arrow} Requesting checkpoint list...${COLORS.reset}`,
+            `\n${COLORS.magenta}${SYMBOLS.arrow} Requesting checkpoint list...${COLORS.reset}`
           );
           this.sendCommand({
             id: generateId(),
@@ -548,7 +660,9 @@ export class BasicTUI {
 
         case "q":
         case "\u0003": // Ctrl+C
-          console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Shutting down...${COLORS.reset}`);
+          console.log(
+            `\n${COLORS.dim}${SYMBOLS.arrow} Shutting down...${COLORS.reset}`
+          );
           if (this.ws) {
             this.ws.close();
           }
@@ -562,9 +676,15 @@ export class BasicTUI {
    * Show interactive rollback menu
    */
   private async showRollbackMenu(): Promise<void> {
-    console.log(`\n${COLORS.yellow}${COLORS.bold}Rollback Options${COLORS.reset}`);
-    console.log(`  ${COLORS.cyan}[1]${COLORS.reset} Rollback to last successful phase`);
-    console.log(`  ${COLORS.cyan}[2]${COLORS.reset} List checkpoints and select`);
+    console.log(
+      `\n${COLORS.yellow}${COLORS.bold}Rollback Options${COLORS.reset}`
+    );
+    console.log(
+      `  ${COLORS.cyan}[1]${COLORS.reset} Rollback to last successful phase`
+    );
+    console.log(
+      `  ${COLORS.cyan}[2]${COLORS.reset} List checkpoints and select`
+    );
     console.log(`  ${COLORS.cyan}[c]${COLORS.reset} Cancel`);
 
     const response = await this.waitForKey();
@@ -587,11 +707,15 @@ export class BasicTUI {
           id: generateId(),
           type: "checkpoint.list",
         });
-        console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Fetching checkpoints...${COLORS.reset}`);
+        console.log(
+          `\n${COLORS.dim}${SYMBOLS.arrow} Fetching checkpoints...${COLORS.reset}`
+        );
         break;
 
       case "c":
-        console.log(`\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`);
+        console.log(
+          `\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`
+        );
         break;
     }
   }
@@ -599,8 +723,13 @@ export class BasicTUI {
   /**
    * Confirm rollback with effects
    */
-  private async confirmAndRollback(target: string, action: () => Promise<void>): Promise<void> {
-    console.log(`\n${COLORS.yellow}${COLORS.bold}Rollback Confirmation${COLORS.reset}`);
+  private async confirmAndRollback(
+    target: string,
+    action: () => Promise<void>
+  ): Promise<void> {
+    console.log(
+      `\n${COLORS.yellow}${COLORS.bold}Rollback Confirmation${COLORS.reset}`
+    );
     this.drawBox(
       `Rollback to: ${target}`,
       [
@@ -612,7 +741,7 @@ export class BasicTUI {
         "",
         `Continue? ${COLORS.cyan}(y/N)${COLORS.reset}:`,
       ],
-      COLORS.yellow,
+      COLORS.yellow
     );
 
     const response = await this.waitForKey();
@@ -620,29 +749,35 @@ export class BasicTUI {
     if (response === "y" || response === "Y") {
       await action();
     } else {
-      console.log(`\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`);
+      console.log(
+        `\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`
+      );
     }
   }
 
   /**
    * Show interactive checkpoint selection menu
    */
-  private async showCheckpointSelection(data: CheckpointListEvent["data"]): Promise<void> {
+  private async showCheckpointSelection(
+    data: CheckpointListEvent["data"]
+  ): Promise<void> {
     if (data.checkpoints.length === 0) {
       console.log(
-        `\n${COLORS.red}${SYMBOLS.cross} No checkpoints found in current run${COLORS.reset}`,
+        `\n${COLORS.red}${SYMBOLS.cross} No checkpoints found in current run${COLORS.reset}`
       );
       return;
     }
 
     console.log(
-      `\n${COLORS.magenta}${COLORS.bold}Select Checkpoint${COLORS.reset} (run ${data.runId}):`,
+      `\n${COLORS.magenta}${COLORS.bold}Select Checkpoint${COLORS.reset} (run ${data.runId}):`
     );
 
     const checkpointLines = data.checkpoints.flatMap((cp, index) => {
       const timestamp = new Date(cp.timestamp).toLocaleTimeString();
       return [
-        `${COLORS.cyan}[${index + 1}]${COLORS.reset} ${COLORS.bold}${cp.phaseName}${COLORS.reset} - ${cp.checkpointType} (${timestamp})`,
+        `${COLORS.cyan}[${index + 1}]${COLORS.reset} ${COLORS.bold}${
+          cp.phaseName
+        }${COLORS.reset} - ${cp.checkpointType} (${timestamp})`,
         `    SHA: ${COLORS.gray}${cp.sha.substring(0, 7)}...${COLORS.reset}`,
       ];
     });
@@ -655,13 +790,21 @@ export class BasicTUI {
     const response = await this.waitForKey();
 
     if (response === "c" || response === "C") {
-      console.log(`\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`);
+      console.log(
+        `\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`
+      );
       return;
     }
 
     const choice = parseInt(response, 10);
-    if (Number.isNaN(choice) || choice < 1 || choice > data.checkpoints.length) {
-      console.log(`\n${COLORS.red}${SYMBOLS.cross} Invalid selection${COLORS.reset}`);
+    if (
+      Number.isNaN(choice) ||
+      choice < 1 ||
+      choice > data.checkpoints.length
+    ) {
+      console.log(
+        `\n${COLORS.red}${SYMBOLS.cross} Invalid selection${COLORS.reset}`
+      );
       return;
     }
 

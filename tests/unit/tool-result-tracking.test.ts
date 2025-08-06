@@ -435,7 +435,7 @@ describe("Tool Result Tracking", () => {
       if (Array.isArray(toolResult.content)) {
         resultText = toolResult.content
           .filter((c: { type: string }) => c.type === "text")
-          .map((c: any) => c.text || "")
+          .map((c: { type: string; text?: string }) => c.text || "")
           .join("\n");
       }
 
