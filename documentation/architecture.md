@@ -124,6 +124,8 @@ The state transition process is designed to be robust and atomic:
          └────────────────┘
 ```
 
+**Note:** missing from the diagram above is LLMProxy server that TadpoleServer starts by default. This proxy is a simple passthrough at the moment.
+
 ## Key Architectural Decisions
 
 ### Shadow Git Repository
