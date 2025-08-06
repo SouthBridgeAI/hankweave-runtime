@@ -30,6 +30,7 @@ async function main() {
     /^--anthropic-base-url=.+$/,
     /^--port=\d+$/,
     /^--model=(sonnet|opus)$/,
+    /^--without-proxy$/,
     /^--help$/,
     /^-h$/,
   ];
@@ -59,6 +60,7 @@ async function main() {
     | "sonnet"
     | "opus"
     | undefined;
+  const withoutProxy = args.includes("--without-proxy");
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
@@ -80,6 +82,7 @@ Options:
   --no-autostart            Don't automatically start phases
   --model=<sonnet|opus>     Override model for all phases (ignores per-phase settings)
   --anthropic-base-url=<url> Custom Anthropic API base URL
+  --without-proxy           Disable the proxy server
   --help, -h                Show this help message
 
 Execution Isolation:
@@ -266,6 +269,7 @@ Examples:
       ...(port && { port: parseInt(port, 10) }),
       ...(modelOverride && { modelOverride }),
       autostart: !noAutostart,
+      withoutProxy,
     };
 
     const server = new TadpoleServer(serverConfig);
