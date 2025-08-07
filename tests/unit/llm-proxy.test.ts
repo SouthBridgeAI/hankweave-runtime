@@ -13,7 +13,7 @@ const mockLogger = {
 } as unknown as Logger;
 
 beforeEach(() => {
-  globalThis.fetch = mockFetch as any;
+  globalThis.fetch = mockFetch as typeof fetch;
   mockLoggerLog.mockClear();
 });
 

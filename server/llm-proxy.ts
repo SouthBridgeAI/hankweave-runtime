@@ -61,7 +61,7 @@ abstract class LLMProxyMiddleware {
    */
   protected async handleRequest(
     request: LLMProxyRequestWithoutBody,
-    body?: string,
+    _body?: string,
   ): Promise<LLMProxyRequestWithoutBody> {
     return request;
   }
