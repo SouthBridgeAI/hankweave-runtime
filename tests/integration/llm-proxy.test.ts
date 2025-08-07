@@ -118,24 +118,27 @@ describe("LLM proxy", () => {
     );
   });
 
-  test("runs on 5555 by default", async (done) => {
+  test("runs on server port + 1 by default", async (done) => {
     expect(configPath).toBeDefined();
 
     const tempDir = path.dirname(configPath!);
+    const port = 7777;
 
     await runTests(
       {
         testRunDir: tempDir,
         phasesConfig: configPath!,
-        port: 7777,
+        port,
         testMode: "integration",
         cwd: tempDir,
       },
       async (executionDir) => {
         expect(executionDir).toBeDefined();
 
-        // Check that proxy is running on port 5555
-        const healthResponse = await fetch("http://localhost:5555/health");
+        // Check that proxy is running on (server port + 1)
+        const healthResponse = await fetch(
+          `http://localhost:${port + 1}/health`
+        );
         expect(healthResponse.ok).toBe(true);
         expect(await healthResponse.text()).toBe("Tadpole Proxy OK");
 
@@ -157,20 +160,20 @@ describe("LLM proxy", () => {
     expect(configPath).toBeDefined();
 
     const tempDir = path.dirname(configPath!);
-
+    const port = 7777;
     await runTests(
       {
         testRunDir: tempDir,
         phasesConfig: configPath!,
-        port: 7777,
+        port,
         testMode: "integration",
         cwd: tempDir,
         withoutProxy: true,
       },
       async () => {
-        // Check that proxy is NOT running on port 5555
+        // Check that proxy is NOT running on (server port + 1)
         try {
-          await fetch("http://localhost:5555/health");
+          await fetch(`http://localhost:${port + 1}/health`);
           // If we get here, the proxy is running when it shouldn't be
           expect.unreachable(
             "Proxy should not be running when withoutProxy is true"
@@ -181,34 +184,6 @@ describe("LLM proxy", () => {
 
           done();
         }
-      }
-    );
-  }, 30000);
-
-  test("runs proxy on custom port when proxyPort is specified", async (done) => {
-    expect(configPath).toBeDefined();
-
-    const tempDir = path.dirname(configPath!);
-    const customProxyPort = 9999;
-
-    await runTests(
-      {
-        testRunDir: tempDir,
-        phasesConfig: configPath!,
-        port: 7777,
-        testMode: "integration",
-        cwd: tempDir,
-        proxyPort: customProxyPort,
-      },
-      async () => {
-        // Check that proxy is running on the custom port
-        const healthResponse = await fetch(
-          `http://localhost:${customProxyPort}/health`
-        );
-        expect(healthResponse.ok).toBe(true);
-        expect(await healthResponse.text()).toBe("Tadpole Proxy OK");
-
-        done();
       }
     );
   }, 30000);

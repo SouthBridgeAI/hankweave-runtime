@@ -258,9 +258,6 @@ export interface ServerConfig {
 
   /** Whether to disable the proxy server (default: false) */
   withoutProxy: boolean;
-
-  /** Port for the proxy server (default: 5555) */
-  proxyPort: number;
 }
 
 // ============================================================================

@@ -231,16 +231,17 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Start proxy server first (if not disabled)
     if (!this.config.withoutProxy) {
-      this.logger.log(`Starting proxy server on port ${this.config.proxyPort}`);
+      const proxyPort = this.config.port + 1;
+      this.logger.log(`Starting proxy server on port ${proxyPort}`);
       this.proxyRunner = new BunProxyRunner(
         "passthrough",
-        this.config.proxyPort,
+        proxyPort,
         this.config.anthropicBaseURL || "https://api.anthropic.com",
         this.logger,
       );
       this.proxyRunner.start();
     } else {
-      this.logger.log("Proxy server disabled via --without-proxy flag");
+      this.logger.log("Proxy server disabled");
     }
 
     // Initialize checkpoint system (checks for existing .tadpole)

@@ -411,7 +411,6 @@ export interface ServerConfig {
   useExecutionFlag?: boolean; // Whether to use --execution flag
   startNew?: boolean; // Force new execution
   withoutProxy?: boolean; // Run server without proxy
-  proxyPort?: number; // Port for proxy if applicable
 }
 
 export function startServer(config: ServerConfig): ChildProcess {
@@ -436,11 +435,6 @@ export function startServer(config: ServerConfig): ChildProcess {
   // Run without proxy if specified
   if (config.withoutProxy) {
     args.push(`--without-proxy`);
-  }
-
-  // Add proxy port if specified
-  if (config.proxyPort) {
-    args.push(`--proxy-port=${config.proxyPort}`);
   }
 
   // Add --data flag if using execution isolation

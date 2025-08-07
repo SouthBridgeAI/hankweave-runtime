@@ -29,7 +29,6 @@ async function main() {
     /^--copy$/,
     /^--anthropic-base-url=.+$/,
     /^--port=\d+$/,
-    /^--proxy-port=\d+$/,
     /^--model=(sonnet|opus)$/,
     /^--without-proxy$/,
     /^--help$/,
@@ -57,7 +56,6 @@ async function main() {
     .find((arg) => arg.startsWith("--anthropic-base-url="))
     ?.split("=")[1];
   const port = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
-  const proxyPort = args.find((arg) => arg.startsWith("--proxy-port="))?.split("=")[1];
   const modelOverride = args.find((arg) => arg.startsWith("--model="))?.split("=")[1] as
     | "sonnet"
     | "opus"
@@ -77,7 +75,6 @@ Options:
   --start-new               Force creation of a new execution directory
   --copy                    Copy data instead of symlinking (for compatibility)
   --port=<port>             WebSocket server port (default: 7777)
-  --proxy-port=<port>       Proxy server port (default: 5555)
   --basic, -b               Run in basic TUI mode
   --validate, -v            Validate configuration without running
   --cleanup                 Clean up execution directories
@@ -270,7 +267,6 @@ Examples:
       // Optional config (will use defaults if not provided)
       ...(anthropicBaseURL && { anthropicBaseURL }),
       ...(port && { port: parseInt(port, 10) }),
-      ...(proxyPort && { proxyPort: parseInt(proxyPort, 10) }),
       ...(modelOverride && { modelOverride }),
       autostart: !noAutostart,
       withoutProxy,
