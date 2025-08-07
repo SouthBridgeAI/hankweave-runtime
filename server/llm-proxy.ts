@@ -280,6 +280,20 @@ class LLMProxy {
   }
 
   /**
+   * Remove a specific middleware instance from the pipeline
+   * @param middleware - Middleware instance to remove
+   * @returns True if middleware was found and removed, false otherwise
+   */
+  removeMiddleware(middleware: LLMProxyMiddleware): boolean {
+    const index = this.middleware.indexOf(middleware);
+    if (index === -1) {
+      return false;
+    }
+    this.middleware.splice(index, 1);
+    return true;
+  }
+
+  /**
    * Process an incoming HTTP request through the proxy pipeline
    * @param request - The incoming HTTP request
    * @param pathname - URL pathname and query parameters
