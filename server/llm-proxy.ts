@@ -4,7 +4,7 @@ import type { Logger } from "./utils.js";
 /**
  * Represents an incoming request to the LLM proxy
  */
-interface LLMProxyRequest {
+export interface LLMProxyRequest {
   /** HTTP method (GET, POST, etc.) */
   method: string;
   /** Request URL path and query parameters */
@@ -25,7 +25,7 @@ type LLMProxyRequestWithoutBody = Omit<LLMProxyRequest, "body">;
 /**
  * Represents a response from the LLM proxy
  */
-interface LLMProxyResponse {
+export interface LLMProxyResponse {
   /** HTTP status code */
   status: number;
   /** Response headers as key-value pairs */
@@ -37,7 +37,7 @@ interface LLMProxyResponse {
 /**
  * Interface for transport layers that handle forwarding requests to the target LLM service
  */
-interface LLMTransport {
+export interface LLMTransport {
   /**
    * Forward a proxy request to the target service
    * @param request - The request to forward
@@ -254,7 +254,7 @@ export class DoubleMaxTokens extends LLMProxyMiddleware {
  * 4. Apply response middleware in order
  * 5. Return final Response
  */
-class LLMProxy {
+export class LLMProxy {
   private middleware: LLMProxyMiddleware[] = [];
 
   /**
