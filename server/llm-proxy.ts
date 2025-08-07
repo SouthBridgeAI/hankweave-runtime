@@ -262,14 +262,28 @@ export class LLMProxy {
    * @param transport - Transport layer for forwarding requests
    * @param middleware - Array of middleware to apply
    * @param logger - Logger instance for debugging
+   * @param logMiddlewareCalls - Whether to log middleware calls (default: false)
    */
   constructor(
     public transport: LLMTransport,
     middleware: LLMProxyMiddleware[] = [],
     private logger: Logger,
+    private logMiddlewareCalls: boolean = false,
   ) {
     this.middleware = middleware;
   }
+
+  /**
+   * Log the LLM proxy request for debugging
+   * @param request - The LLM proxy request to log
+   */
+  logLLMProxyRequest = (request: LLMProxyRequest) => {
+    const content = request.claudeRequestData
+      ? JSON.stringify(request.claudeRequestData, null, 2)
+      : request.body || "";
+
+    this.logger.log(`[LLM-PROXY] ${request.method} ${request.url}\n\n${content}`, "debug");
+  };
 
   /**
    * Add middleware to the processing pipeline
@@ -341,7 +355,20 @@ export class LLMProxy {
       // Apply request middleware
       for (const middleware of this.middleware) {
         if (middleware.processRequest) {
+          const middlewareName = middleware.constructor.name;
+
+          if (this.logMiddlewareCalls) {
+            this.logger.log(`[LLM-PROXY] Applying request middleware: ${middlewareName}`);
+            this.logLLMProxyRequest(proxyReq);
+          }
+
           proxyReq = await middleware.processRequest(proxyReq);
+
+          if (this.logMiddlewareCalls) {
+            // TODO: maybe show diff here instead of dumping the whole request payload?
+            this.logger.log(`[LLM-PROXY] ${middlewareName} middleware applied`);
+            this.logLLMProxyRequest(proxyReq);
+          }
         }
       }
 
@@ -351,7 +378,21 @@ export class LLMProxy {
       // Apply response middleware
       for (const middleware of this.middleware) {
         if (middleware.processResponse) {
+          const middlewareName = middleware.constructor.name;
+
+          // TODO: figure out how to log response body
+
+          if (this.logMiddlewareCalls) {
+            this.logger.log(`[LLM-PROXY] Applying response middleware: ${middlewareName}`);
+          }
+
           proxyRes = await middleware.processResponse(proxyRes);
+
+          if (this.logMiddlewareCalls) {
+            this.logger.log(
+              `[LLM-PROXY] After ${middlewareName} response middleware - status: ${proxyRes.status}`,
+            );
+          }
         }
       }
 
