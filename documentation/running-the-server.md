@@ -112,10 +112,6 @@ The server's behavior can be fine-tuned with the following command-line flags:
 
 -   **`--anthropic-base-url=<url>`**: Allows you to route Claude API requests through a custom endpoint, such as a proxy or a corporate gateway.
 
--   **`--proxy-port=<port>`**: Sets the port for the built-in LLM proxy server.
-    -   **Default**: `5555`
-    -   **Example**: `bun run server --proxy-port=6000`
-
 -   **`--without-proxy`**: Disables the built-in LLM proxy server entirely. The proxy is normally started alongside the main server to handle API request routing.
     -   **Example**: `bun run server --without-proxy`
 
