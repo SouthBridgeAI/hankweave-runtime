@@ -410,6 +410,7 @@ export interface ServerConfig {
   executionDir?: string; // Explicit execution directory
   useExecutionFlag?: boolean; // Whether to use --execution flag
   startNew?: boolean; // Force new execution
+  withoutProxy?: boolean; // Run server without proxy
 }
 
 export function startServer(config: ServerConfig): ChildProcess {
@@ -430,6 +431,11 @@ export function startServer(config: ServerConfig): ChildProcess {
 
   // Build command arguments
   const args = [serverPath, `--config=${config.phasesConfig}`, `--port=${config.port}`];
+
+  // Run without proxy if specified
+  if (config.withoutProxy) {
+    args.push(`--without-proxy`);
+  }
 
   // Add --data flag if using execution isolation
   if (config.useDataFlag && config.dataSourceDir) {

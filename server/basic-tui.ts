@@ -121,7 +121,9 @@ export class BasicTUI {
     // Title
     const titlePadding = Math.floor((boxWidth - 2 - title.length) / 2);
     console.log(
-      `${color}│${" ".repeat(titlePadding)}${COLORS.bold}${title}${COLORS.reset}${color}${" ".repeat(boxWidth - 2 - titlePadding - title.length)}│${COLORS.reset}`,
+      `${color}│${" ".repeat(titlePadding)}${COLORS.bold}${title}${
+        COLORS.reset
+      }${color}${" ".repeat(boxWidth - 2 - titlePadding - title.length)}│${COLORS.reset}`,
     );
 
     // Separator
@@ -166,7 +168,9 @@ export class BasicTUI {
           );
         }
         console.log(
-          `  ${SYMBOLS.arrow} Total cost: ${COLORS.yellow}$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
+          `  ${SYMBOLS.arrow} Total cost: ${
+            COLORS.yellow
+          }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
         );
         break;
       }
@@ -201,7 +205,9 @@ export class BasicTUI {
 
         if (!event.data.success && event.data.failureReason) {
           details.push(
-            `Failure: ${COLORS.red}${event.data.failureReason.type}${COLORS.reset} (retriable: ${event.data.failureReason.retriable ? `${COLORS.green}yes` : `${COLORS.red}no`}${COLORS.reset})`,
+            `Failure: ${COLORS.red}${event.data.failureReason.type}${COLORS.reset} (retriable: ${
+              event.data.failureReason.retriable ? `${COLORS.green}yes` : `${COLORS.red}no`
+            }${COLORS.reset})`,
           );
           if (event.data.failureReason.message) {
             details.push(
@@ -234,7 +240,11 @@ export class BasicTUI {
           console.log(`\n${timestamp} ${toolColor}Tool Use: ${event.data.toolName}${COLORS.reset}`);
           if (event.data.toolInput) {
             console.log(
-              `${COLORS.dim}  ${SYMBOLS.arrow} Input: ${JSON.stringify(event.data.toolInput, null, 2).replace(/\n/g, "\n    ")}${COLORS.reset}`,
+              `${COLORS.dim}  ${SYMBOLS.arrow} Input: ${JSON.stringify(
+                event.data.toolInput,
+                null,
+                2,
+              ).replace(/\n/g, "\n    ")}${COLORS.reset}`,
             );
           }
         }
@@ -254,7 +264,9 @@ export class BasicTUI {
 
         if (shouldTruncate) {
           console.log(
-            `${COLORS.dim}  ${SYMBOLS.arrow} Result: ${event.data.result.substring(0, 200)}...${COLORS.reset}`,
+            `${COLORS.dim}  ${
+              SYMBOLS.arrow
+            } Result: ${event.data.result.substring(0, 200)}...${COLORS.reset}`,
           );
           console.log(
             `${COLORS.dim}  ${SYMBOLS.arrow} (Truncated ${event.data.originalLength} bytes to 200 chars)${COLORS.reset}`,
@@ -286,7 +298,9 @@ export class BasicTUI {
           `  ${SYMBOLS.arrow} Input: ${event.data.inputTokens}, Output: ${event.data.outputTokens}`,
         );
         console.log(
-          `  ${SYMBOLS.arrow} Cost: ${COLORS.yellow}$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
+          `  ${SYMBOLS.arrow} Cost: ${
+            COLORS.yellow
+          }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
         );
         break;
       }
@@ -371,7 +385,11 @@ export class BasicTUI {
               "Available Checkpoints",
               event.data.checkpoints.map(
                 (cp, index) =>
-                  `[${COLORS.bold}${index + 1}${COLORS.reset}] ${cp.phaseName} ${COLORS.dim}(${cp.checkpointType})${COLORS.reset} ${COLORS.gray}${cp.sha.substring(0, 7)}${COLORS.reset}`,
+                  `[${COLORS.bold}${index + 1}${COLORS.reset}] ${
+                    cp.phaseName
+                  } ${COLORS.dim}(${cp.checkpointType})${COLORS.reset} ${
+                    COLORS.gray
+                  }${cp.sha.substring(0, 7)}${COLORS.reset}`,
               ),
               COLORS.magenta,
             );
@@ -647,7 +665,9 @@ export class BasicTUI {
     const checkpointLines = data.checkpoints.flatMap((cp, index) => {
       const timestamp = new Date(cp.timestamp).toLocaleTimeString();
       return [
-        `${COLORS.cyan}[${index + 1}]${COLORS.reset} ${COLORS.bold}${cp.phaseName}${COLORS.reset} - ${cp.checkpointType} (${timestamp})`,
+        `${COLORS.cyan}[${index + 1}]${COLORS.reset} ${COLORS.bold}${
+          cp.phaseName
+        }${COLORS.reset} - ${cp.checkpointType} (${timestamp})`,
         `    SHA: ${COLORS.gray}${cp.sha.substring(0, 7)}...${COLORS.reset}`,
       ];
     });

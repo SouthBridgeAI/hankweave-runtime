@@ -324,6 +324,90 @@ export const sessionMetadataSchema = z.object({
   model: modelSchema,
 });
 
+// ============================================================================
+// Claude API Request Schema
+// ============================================================================
+
+/**
+ * Cache control configuration for message content
+ */
+const cacheControlSchema = z.object({
+  type: z.literal("ephemeral"),
+});
+
+/**
+ * API request message content with cache control
+ */
+const apiMessageContentSchema = z.union([
+  z.object({
+    type: z.literal("text"),
+    text: z.string(),
+    cache_control: cacheControlSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("tool_use"),
+    id: z.string(),
+    name: toolNameSchema,
+    input: z.record(z.unknown()).optional(),
+    cache_control: cacheControlSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("tool_result"),
+    tool_use_id: z.string(),
+    content: z.union([z.string(), z.record(z.unknown())]),
+    cache_control: cacheControlSchema.optional(),
+  }),
+]);
+
+/**
+ * API request message schema
+ */
+const apiMessageSchema = z.object({
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.union([z.string(), z.array(apiMessageContentSchema)]),
+});
+
+/**
+ * API request system message schema
+ */
+const apiSystemMessageSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+  cache_control: cacheControlSchema.optional(),
+});
+
+/**
+ * Tool definition schema for API requests
+ */
+const apiToolSchema = z.object({
+  name: toolNameSchema,
+  description: z.string(),
+  input_schema: z.record(z.unknown()),
+});
+
+/**
+ * Metadata schema for API requests
+ */
+const apiMetadataSchema = z
+  .object({
+    user_id: z.string(),
+  })
+  .passthrough();
+
+/**
+ * Claude API request payload schema
+ */
+export const claudeApiRequestSchema = z.object({
+  model: modelSchema,
+  messages: z.array(apiMessageSchema),
+  temperature: z.number().min(0).max(2).optional(),
+  system: z.array(apiSystemMessageSchema).optional(),
+  tools: z.array(apiToolSchema).optional(),
+  metadata: apiMetadataSchema.optional(),
+  max_tokens: z.number().int().positive().optional(),
+  stream: z.boolean().optional(),
+});
+
 // Export type definitions for TypeScript usage
 export type SystemMessage = z.infer<typeof systemMessageSchema>;
 export type AssistantMessage = z.infer<typeof assistantMessageSchema>;
@@ -338,3 +422,11 @@ export type ToolUseContent = z.infer<typeof toolUseContentSchema>;
 export type TextContent = z.infer<typeof textContentSchema>;
 export type ThinkingContent = z.infer<typeof thinkingContentSchema>;
 export type ToolResultContent = z.infer<typeof toolResultContentSchema>;
+
+// API request types
+export type ClaudeApiRequest = z.infer<typeof claudeApiRequestSchema>;
+export type ApiMessage = z.infer<typeof apiMessageSchema>;
+export type ApiMessageContent = z.infer<typeof apiMessageContentSchema>;
+export type ApiSystemMessage = z.infer<typeof apiSystemMessageSchema>;
+export type ApiTool = z.infer<typeof apiToolSchema>;
+export type CacheControl = z.infer<typeof cacheControlSchema>;

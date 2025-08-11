@@ -10,6 +10,7 @@ import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
+import { BunProxyRunner } from "./llm-proxy.js";
 import { StateManager } from "./state-manager.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { EventId, PhaseId, RunId, SessionId } from "./types/branded-types.js";
@@ -90,6 +91,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private client: ServerWebSocket<ClientData> | null = null;
   public readonly config: ServerConfig;
   private logger: Logger;
+
+  // Proxy server
+  private proxyRunner: BunProxyRunner | null = null;
 
   // State management
   private stateManager: StateManager;
@@ -224,6 +228,21 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(
       `Starting Tadpole Server v${this.config.version} in ${this.config.executionPath}`,
     );
+
+    // Start proxy server first (if not disabled)
+    if (!this.config.withoutProxy) {
+      const proxyPort = this.config.port + 1;
+      this.logger.log(`Starting proxy server on port ${proxyPort}`);
+      this.proxyRunner = new BunProxyRunner(
+        "passthrough",
+        proxyPort,
+        this.config.anthropicBaseURL || "https://api.anthropic.com",
+        this.logger,
+      );
+      this.proxyRunner.start();
+    } else {
+      this.logger.log("Proxy server disabled");
+    }
 
     // Initialize checkpoint system (checks for existing .tadpole)
     await this.initializeCheckpoints();
@@ -1027,7 +1046,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.config.executionPath,
         this.logger,
         this.logParser,
-        this.config.anthropicBaseURL,
+        this.proxyRunner?.proxyUrl,
         this.config.modelOverride,
       );
 
@@ -3210,6 +3229,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (this.server) {
       this.server.stop();
       this.server = null;
+    }
+
+    // Stop proxy server
+    if (this.proxyRunner) {
+      this.proxyRunner.stop();
+      this.proxyRunner = null;
     }
 
     if (fs.existsSync(this.config.lockFile)) {

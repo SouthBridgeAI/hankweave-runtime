@@ -112,6 +112,9 @@ The server's behavior can be fine-tuned with the following command-line flags:
 
 -   **`--anthropic-base-url=<url>`**: Allows you to route Claude API requests through a custom endpoint, such as a proxy or a corporate gateway.
 
+-   **`--without-proxy`**: Disables the built-in LLM proxy server entirely. The proxy is normally started alongside the main server to handle API request routing.
+    -   **Example**: `bun run server --without-proxy`
+
 #### Maintenance Options
 
 -   **`--cleanup`**: Cleans up execution directories. When used with `--data`, removes the latest execution for that data source. When used with `--execution`, removes that specific execution directory.

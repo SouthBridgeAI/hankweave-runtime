@@ -255,6 +255,9 @@ export interface ServerConfig {
 
   /** Optional model override for all phases (ignores per-phase model settings) */
   modelOverride?: ModelName;
+
+  /** Whether to disable the proxy server (default: false) */
+  withoutProxy: boolean;
 }
 
 // ============================================================================
