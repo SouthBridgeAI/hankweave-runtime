@@ -24,7 +24,11 @@ Let's go with Chronicler for now.
     1. File changes
     2. Content or type of packet in event log with count (e.g. next trigger is when this happens n times)
     3. Phase state thresholds
-6. Chronicler parameters
+6. Start conditions (what triggers this chronicler to start operating or listening for triggers?) - could be a combination of
+   1. Phase start
+   2. Time delay
+   3. Or a custom trigger for start after which the trigger for execution runs
+7. Chronicler parameters
     1. Debounce
     2. prompts
     3. AI call params (temp, model, output length)
@@ -37,7 +41,7 @@ Let's go with Chronicler for now.
         2. Single-shot (single call, no chat history)
     7. Output filename and location (placed into .tadpole/chronicles)
     8. Name
-
+8. The response type of events from chroniclers so that their results can also be folded into the socket. This might be start, stop, trigger, etc, and also the responses (streaming and not streaming).
 
 
 
