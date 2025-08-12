@@ -682,5 +682,3 @@ This design stays faithful to your event-driven, append-only architecture and le
 - generateText/streamText (with smoothStream) for narration,
 - transformations and streaming are opt-in per watcher,
 - nothing blocks or mutates the core loop.
-
-Happy to provide a PR stub with watcher-manager.ts, types, and a starter files-index watcher if you want to iterate from there.
