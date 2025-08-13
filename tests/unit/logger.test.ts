@@ -59,8 +59,12 @@ describe("Logger", () => {
     logger.logSocketTraffic(socketLogPath, "in", data);
 
     const socketLogContent = fs.readFileSync(socketLogPath, "utf-8");
-    expect(socketLogContent).toContain("[IN]");
-    expect(socketLogContent).toContain(JSON.stringify(data));
+    const logEntry = JSON.parse(socketLogContent.trim());
+
+    expect(logEntry.direction).toBe("in");
+    expect(logEntry.message).toEqual(data);
+    expect(logEntry.metadata.size).toBe(JSON.stringify(data).length);
+    expect(logEntry.loggedAt).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
   });
 
   test("logSocketTraffic handles out direction", () => {
@@ -70,8 +74,12 @@ describe("Logger", () => {
     logger.logSocketTraffic(socketLogPath, "out", data);
 
     const socketLogContent = fs.readFileSync(socketLogPath, "utf-8");
-    expect(socketLogContent).toContain("[OUT]");
-    expect(socketLogContent).toContain(JSON.stringify(data));
+    const logEntry = JSON.parse(socketLogContent.trim());
+
+    expect(logEntry.direction).toBe("out");
+    expect(logEntry.message).toEqual(data);
+    expect(logEntry.metadata.size).toBe(JSON.stringify(data).length);
+    expect(logEntry.loggedAt).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
   });
 
   test("appends to existing log files", () => {

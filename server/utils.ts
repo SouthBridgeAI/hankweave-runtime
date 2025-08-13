@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileResolver } from "./file-resolver.js";
 import type { FileNode } from "./types/types.js";
+import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
+import type { ClientCommand, ServerEvent } from "./types/types.js";
 
 // ============================================================================
 // ID Generation
@@ -39,16 +41,48 @@ export class Logger {
     }
   }
 
-  logSocketTraffic(socketLogFile: string, direction: "in" | "out", data: unknown): void {
-    const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] [${direction.toUpperCase()}] ${JSON.stringify(data)}\n`;
+  /**
+   * Log WebSocket traffic as JSONL (JSON Lines format).
+   * Each line is a complete JSON object representing a WebSocket message.
+   *
+   * @param socketLogFile - Path to the websocket log file
+   * @param direction - Whether this is an incoming or outgoing message
+   * @param data - The actual WebSocket message (ClientCommand or ServerEvent)
+   */
+  logWebSocketMessage(socketLogFile: string, direction: "in" | "out", data: ClientCommand | ServerEvent): void {
+    try {
+      // Create the log entry with minimal wrapper
+      const logEntry: WebSocketLogEntry = {
+        loggedAt: new Date().toISOString(),
+        direction,
+        message: data,
+        metadata: {
+          // Calculate message size
+          size: JSON.stringify(data).length,
+        }
+      };
 
-    const logsDir = path.dirname(socketLogFile);
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
+      // Write as a single line of JSON (JSONL format)
+      const logLine = JSON.stringify(logEntry) + "\n";
+
+      const logsDir = path.dirname(socketLogFile);
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+
+      fs.appendFileSync(socketLogFile, logLine);
+    } catch (error) {
+      // If we can't log to file, at least log the error
+      console.error(`Failed to log WebSocket message: ${error}`);
     }
+  }
 
-    fs.appendFileSync(socketLogFile, logLine);
+  /**
+   * @deprecated Use logWebSocketMessage instead
+   */
+  logSocketTraffic(socketLogFile: string, direction: "in" | "out", data: unknown): void {
+    // For backward compatibility, convert to new format
+    this.logWebSocketMessage(socketLogFile, direction, data as ClientCommand | ServerEvent);
   }
 }
 

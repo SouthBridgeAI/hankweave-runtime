@@ -43,7 +43,13 @@ export async function runResourceCleanupTests(testDir: string) {
       // Last line should be complete (not truncated)
       if (lines.length > 0) {
         const lastLine = JSON.parse(lines[lines.length - 1]);
-        expect(lastLine).toHaveProperty("type");
+        // Different log files have different formats
+        // Claude logs have "type", WebSocket logs have "message.type"
+        const hasValidStructure =
+          lastLine.type !== undefined ||
+          (lastLine.message && lastLine.message.type !== undefined) ||
+          (lastLine.loggedAt && lastLine.direction && lastLine.message);
+        expect(hasValidStructure).toBe(true);
       }
     });
   });
