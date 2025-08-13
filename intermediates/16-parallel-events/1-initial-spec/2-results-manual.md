@@ -43,29 +43,6 @@ Let's go with Chronicler for now.
     8. Name
 8. The response type of events from chroniclers so that their results can also be folded into the socket. This might be start, stop, trigger, etc, and also the responses (streaming and not streaming).
 
-
-
-
-## Questions
-
-1. What events happen with the underlying agent that isn't par of the tadpoleserver event stream?
-2. How do we define filters and triggers? Will we have to build our own DSL? We want something that appropriately balances simplicity and configurability. Some options are:
-    1. Simple JSON-based config in the config file (Simple but might need our own DSL).
-    2. Some kind of existing system for doing this like a query language that we can just use.
-    3. The chroniclers are proper full typescript files (high configurability) that are loaded in. Somewhat unsafe, hard to enforce good patterns, but you can do whatever you want.
-3. We need some kind of watcher that isn't too heavy that can watch the stream, do the filtering and the triggering and start the Chronicler runs appropriately. How do we architect this? What properties do we want out of it?
-4. Should we use some kind of db for this? Maybe integrated sqlite? Does it allow for triggers out when things change, or does that need to be implemented through polling?
-    1. Here's an example of how it might function through a db:
-        1. the tadpole server event logs go into one table - or one per phase.
-        2. Each chroniclers filter and trigger are queries into the db.
-        3. Each chronicler gets its own output table into the db, as well as a chat history (for ones that want to do turn by turn chat instead of run with a new prompt every time.
-        4. The chronicler output table is for each chronicler for each phase its run in. This can be structured data or a wrapped object for pure text.
-5. An alternative is to use jsonl files. This might make things simpler and easier, and also allow for the core agent in each phase to make use of the chronicler outputs if it wants to.
-
-
-
-
-
 ## Patterns and concerns (unverified, might change)
 
 - Backpressure: batch windows and max concurrency protect the core process. Watchers must never await inside TadpoleServer.sendEvent; they are entirely decoupled.
@@ -142,3 +119,20 @@ Specific Use Cases and Applications
     Feeding Data to Future Phases: "It can also be really helpful to the agentic loop itself, right? Which might be one of those things where that's data that you can feed back into a future phase as part of the execution." [11:27]
 
     Structured Event Source Extraction: "Take the agent stream itself and use that as an event source extractor... take what the agent itself is doing, discovering, and then pull it out as structured data, but in a way that's accessible later." [13:38] This is to get maximum efficiency from expensive data reads. [14:04]
+
+
+## Questions
+
+1. What events happen with the underlying agent that isn't par of the tadpoleserver event stream?
+2. How do we define filters and triggers? Will we have to build our own DSL? We want something that appropriately balances simplicity and configurability. Some options are:
+    1. Simple JSON-based config in the config file (Simple but might need our own DSL).
+    2. Some kind of existing system for doing this like a query language that we can just use.
+    3. The chroniclers are proper full typescript files (high configurability) that are loaded in. Somewhat unsafe, hard to enforce good patterns, but you can do whatever you want.
+3. We need some kind of watcher that isn't too heavy that can watch the stream, do the filtering and the triggering and start the Chronicler runs appropriately. How do we architect this? What properties do we want out of it?
+4. Should we use some kind of db for this? Maybe integrated sqlite? Does it allow for triggers out when things change, or does that need to be implemented through polling?
+    1. Here's an example of how it might function through a db:
+        1. the tadpole server event logs go into one table - or one per phase.
+        2. Each chroniclers filter and trigger are queries into the db.
+        3. Each chronicler gets its own output table into the db, as well as a chat history (for ones that want to do turn by turn chat instead of run with a new prompt every time.
+        4. The chronicler output table is for each chronicler for each phase its run in. This can be structured data or a wrapped object for pure text.
+5. An alternative is to use jsonl files. This might make things simpler and easier, and also allow for the core agent in each phase to make use of the chronicler outputs if it wants to.

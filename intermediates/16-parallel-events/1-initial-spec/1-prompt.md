@@ -19,7 +19,3 @@ So we need to build something that allows us to express as text and config (like
 6. Which file(s) to write the results to. Perhaps we can write to a single jsonl, and read it in later.
 7. Streaming and how that will be implemented.
 8. Perhaps a JSONSchema for the type of data to force the model to output, or it can just be text.
-
-What's a good name for these things? Watchers? Reporters?
-
-What do you see from the code? What other things should be implement or be concerned about? What are the best patterns to use here? Perhaps we can think of event sourcing as a pattern?
