@@ -37,7 +37,7 @@ cd tadpole
 bun install
 
 # 3. Test your system
-bun test tests/e2e/happy-path.e2e.test.ts
+bun test ./tests/e2e/happy-path-e2e.test.ts
 ```
 
 ## Quick Start
