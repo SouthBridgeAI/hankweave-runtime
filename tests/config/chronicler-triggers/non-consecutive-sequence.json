@@ -1,0 +1,36 @@
+{
+  "id": "non-consecutive-sequence",
+  "name": "Non-Consecutive Sequence Detector",
+  "description": "Detects phase start followed by completion, even with events in between",
+  "trigger": {
+    "type": "sequence",
+    "interestFilter": {
+      "on": [
+        "phase.started",
+        "phase.completed"
+      ]
+    },
+    "pattern": [
+      {
+        "type": "phase.started",
+        "conditions": []
+      },
+      {
+        "type": "phase.completed",
+        "conditions": []
+      }
+    ],
+    "options": {
+      "consecutive": false
+    }
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "promptTemplate": "Phase lifecycle detected: {{events}}",
+  "model": "sonnet",
+  "output": {
+    "format": "json",
+    "file": "phase-lifecycle.jsonl"
+  }
+}

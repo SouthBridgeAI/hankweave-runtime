@@ -1,11 +1,12 @@
+import type { ServerEvent } from "../schemas/event-schemas.js";
 import type {
   ChroniclerTrigger,
   EventTrigger,
   PatternStep,
   SequenceTrigger,
 } from "../types/chronicler-types.js";
-import type { ServerEvent } from "../types/types.js";
 import { evaluateConditions } from "./condition-evaluator.js";
+import type { Logger } from "../utils.js";
 
 /**
  * Base class for trigger engines
@@ -20,8 +21,14 @@ export abstract class TriggerEngine {
  * Stateless - evaluates each event independently
  */
 export class EventTriggerEngine extends TriggerEngine {
-  constructor(private trigger: EventTrigger) {
+  private triggerId: string;
+
+  constructor(
+    private trigger: EventTrigger,
+    private logger?: Logger,
+  ) {
     super();
+    this.triggerId = `EventTrigger-${trigger.on.join(',')}`;
   }
 
   processEvent(event: ServerEvent): { matched: boolean; events: ServerEvent[] } {
@@ -32,13 +39,26 @@ export class EventTriggerEngine extends TriggerEngine {
 
     // Check conditions if any
     if (this.trigger.conditions && this.trigger.conditions.length > 0) {
+      this.logger?.log(
+        `[${this.triggerId}] Checking ${this.trigger.conditions.length} conditions for ${event.type}`,
+        'debug'
+      );
+
       const conditionsMet = evaluateConditions(this.trigger.conditions, event.data);
       if (!conditionsMet) {
+        this.logger?.log(
+          `[${this.triggerId}] Conditions not met for ${event.type}`,
+          'debug'
+        );
         return { matched: false, events: [] };
       }
     }
 
     // Event matches
+    this.logger?.log(
+      `[${this.triggerId}] MATCHED ${event.type}`,
+      'debug'
+    );
     return { matched: true, events: [event] };
   }
 
@@ -55,9 +75,14 @@ export class SequenceTriggerEngine extends TriggerEngine {
   private eventHistory: ServerEvent[] = [];
   private lastTriggerEventId: string | null = null;
   private maxHistorySize = 1000; // Prevent unbounded memory growth
+  private triggerId: string;
 
-  constructor(private trigger: SequenceTrigger) {
+  constructor(
+    private trigger: SequenceTrigger,
+    private logger?: Logger,
+  ) {
     super();
+    this.triggerId = `SequenceTrigger-${trigger.pattern.length}steps`;
   }
 
   processEvent(event: ServerEvent): { matched: boolean; events: ServerEvent[] } {
@@ -67,7 +92,12 @@ export class SequenceTriggerEngine extends TriggerEngine {
 
       // Trim history if too large
       if (this.eventHistory.length > this.maxHistorySize) {
+        const beforeSize = this.eventHistory.length;
         this.eventHistory = this.eventHistory.slice(-this.maxHistorySize);
+        this.logger?.log(
+          `[${this.triggerId}] Trimmed history from ${beforeSize} to ${this.maxHistorySize} events`,
+          'debug'
+        );
       }
     }
 
@@ -85,6 +115,10 @@ export class SequenceTriggerEngine extends TriggerEngine {
     const matchResult = this.checkPatternMatch(searchWindow);
 
     if (matchResult.matched) {
+      this.logger?.log(
+        `[${this.triggerId}] PATTERN MATCHED with ${matchResult.events.length} events`,
+        'info'
+      );
       // Update last trigger position
       this.lastTriggerEventId = matchResult.events[matchResult.events.length - 1].id;
       return matchResult;
@@ -194,12 +228,12 @@ export class SequenceTriggerEngine extends TriggerEngine {
 /**
  * Factory function to create the appropriate trigger engine
  */
-export function createTriggerEngine(trigger: ChroniclerTrigger): TriggerEngine {
+export function createTriggerEngine(trigger: ChroniclerTrigger, logger?: Logger): TriggerEngine {
   switch (trigger.type) {
     case "event":
-      return new EventTriggerEngine(trigger);
+      return new EventTriggerEngine(trigger, logger);
     case "sequence":
-      return new SequenceTriggerEngine(trigger);
+      return new SequenceTriggerEngine(trigger, logger);
     default: {
       const exhaustiveCheck: never = trigger;
       // This should never happen due to exhaustive check, but TypeScript needs it
