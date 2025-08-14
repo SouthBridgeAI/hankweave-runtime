@@ -5,8 +5,8 @@ import type {
   PatternStep,
   SequenceTrigger,
 } from "../types/chronicler-types.js";
-import { evaluateConditions } from "./condition-evaluator.js";
 import type { Logger } from "../utils.js";
+import { evaluateConditions } from "./condition-evaluator.js";
 
 /**
  * Base class for trigger engines
@@ -28,7 +28,7 @@ export class EventTriggerEngine extends TriggerEngine {
     private logger?: Logger,
   ) {
     super();
-    this.triggerId = `EventTrigger-${trigger.on.join(',')}`;
+    this.triggerId = `EventTrigger-${trigger.on.join(",")}`;
   }
 
   processEvent(event: ServerEvent): { matched: boolean; events: ServerEvent[] } {
@@ -41,24 +41,18 @@ export class EventTriggerEngine extends TriggerEngine {
     if (this.trigger.conditions && this.trigger.conditions.length > 0) {
       this.logger?.log(
         `[${this.triggerId}] Checking ${this.trigger.conditions.length} conditions for ${event.type}`,
-        'debug'
+        "debug",
       );
 
       const conditionsMet = evaluateConditions(this.trigger.conditions, event.data);
       if (!conditionsMet) {
-        this.logger?.log(
-          `[${this.triggerId}] Conditions not met for ${event.type}`,
-          'debug'
-        );
+        this.logger?.log(`[${this.triggerId}] Conditions not met for ${event.type}`, "debug");
         return { matched: false, events: [] };
       }
     }
 
     // Event matches
-    this.logger?.log(
-      `[${this.triggerId}] MATCHED ${event.type}`,
-      'debug'
-    );
+    this.logger?.log(`[${this.triggerId}] MATCHED ${event.type}`, "debug");
     return { matched: true, events: [event] };
   }
 
@@ -96,7 +90,7 @@ export class SequenceTriggerEngine extends TriggerEngine {
         this.eventHistory = this.eventHistory.slice(-this.maxHistorySize);
         this.logger?.log(
           `[${this.triggerId}] Trimmed history from ${beforeSize} to ${this.maxHistorySize} events`,
-          'debug'
+          "debug",
         );
       }
     }
@@ -117,7 +111,7 @@ export class SequenceTriggerEngine extends TriggerEngine {
     if (matchResult.matched) {
       this.logger?.log(
         `[${this.triggerId}] PATTERN MATCHED with ${matchResult.events.length} events`,
-        'info'
+        "info",
       );
       // Update last trigger position
       this.lastTriggerEventId = matchResult.events[matchResult.events.length - 1].id;

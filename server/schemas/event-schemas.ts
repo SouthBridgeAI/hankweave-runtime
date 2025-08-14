@@ -375,6 +375,101 @@ export const rollbackCompletedEventSchema = baseEventSchema.extend({
 });
 
 // ============================================================================
+// Client Command Schemas
+// ============================================================================
+
+export const startPhaseCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("phase.start"),
+  data: z.object({
+    phaseId: z.string(),
+    skipPreCommands: z.boolean().optional(),
+  }),
+});
+
+export const nextPhaseCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("phase.next"),
+});
+
+export const skipPhaseCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("phase.skip"),
+});
+
+export const redoPhaseCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("phase.redo"),
+});
+
+export const shutdownCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("server.shutdown"),
+});
+
+export const forceStopCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("phase.forceStop"),
+  data: z
+    .object({
+      reason: z.string().optional(),
+    })
+    .optional(),
+});
+
+export const listCheckpointsCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("checkpoint.list"),
+  data: z
+    .object({
+      runId: z.string().optional(),
+    })
+    .optional(),
+});
+
+export const rollbackToCheckpointCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("rollback.toCheckpoint"),
+  data: z.object({
+    checkpointSha: z.string(),
+    autoRestart: z.boolean().optional(),
+  }),
+});
+
+export const rollbackToPhaseCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("rollback.toPhase"),
+  data: z.object({
+    phaseId: z.string(),
+    checkpointType: z.enum(["start", "end", "workspace-setup", "completed", "error", "skipped"]),
+    autoRestart: z.boolean().optional(),
+  }),
+});
+
+export const rollbackToLastSuccessCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("rollback.toLastSuccess"),
+  data: z
+    .object({
+      autoRestart: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const clientCommandSchema = z.discriminatedUnion("type", [
+  startPhaseCommandSchema,
+  nextPhaseCommandSchema,
+  skipPhaseCommandSchema,
+  redoPhaseCommandSchema,
+  shutdownCommandSchema,
+  forceStopCommandSchema,
+  listCheckpointsCommandSchema,
+  rollbackToCheckpointCommandSchema,
+  rollbackToPhaseCommandSchema,
+  rollbackToLastSuccessCommandSchema,
+]);
+
+// ============================================================================
 // Master Discriminated Union
 // ============================================================================
 
@@ -428,8 +523,22 @@ export type RollbackWorkspaceCleanupEvent = z.infer<typeof rollbackWorkspaceClea
 export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
 export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
 
+// Export client command types
+export type ClientCommand = z.infer<typeof clientCommandSchema>;
+export type StartPhaseCommand = z.infer<typeof startPhaseCommandSchema>;
+export type NextPhaseCommand = z.infer<typeof nextPhaseCommandSchema>;
+export type SkipPhaseCommand = z.infer<typeof skipPhaseCommandSchema>;
+export type RedoPhaseCommand = z.infer<typeof redoPhaseCommandSchema>;
+export type ShutdownCommand = z.infer<typeof shutdownCommandSchema>;
+export type ForceStopCommand = z.infer<typeof forceStopCommandSchema>;
+export type ListCheckpointsCommand = z.infer<typeof listCheckpointsCommandSchema>;
+export type RollbackToCheckpointCommand = z.infer<typeof rollbackToCheckpointCommandSchema>;
+export type RollbackToPhaseCommand = z.infer<typeof rollbackToPhaseCommandSchema>;
+export type RollbackToLastSuccessCommand = z.infer<typeof rollbackToLastSuccessCommandSchema>;
+
 // Export type helpers
 export type ServerEventType = ServerEvent["type"];
+export type ClientCommandType = ClientCommand["type"];
 
 // Export additional types that are used elsewhere
 export type ProcessExit = z.infer<typeof processExitSchema>;
