@@ -58,6 +58,7 @@ import { runTokenUsageTests } from "./test-groups/token-usage-tests.js";
 import { runToolResultTests } from "./test-groups/tool-result-tests.js";
 import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
 import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js";
+import { runWebSocketLoggingTests } from "./test-groups/websocket-logging-tests.js";
 
 // Test configuration
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
@@ -527,6 +528,10 @@ describe("Tadpole E2E Test", () => {
 
   describe("WebSocket Events", () => {
     runWebSocketEventsTests(testState);
+  });
+
+  describe("WebSocket Logging", () => {
+    runWebSocketLoggingTests(testState);
   });
 
   describe("Cost Tracking", () => {

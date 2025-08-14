@@ -1,0 +1,57 @@
+{
+  "id": "error-detector",
+  "name": "Error Pattern Detector",
+  "description": "Detects when the agent encounters repeated errors",
+  "trigger": {
+    "type": "sequence",
+    "interestFilter": {
+      "on": [
+        "tool.result"
+      ]
+    },
+    "pattern": [
+      {
+        "type": "tool.result",
+        "conditions": [
+          {
+            "operator": "equals",
+            "path": "isError",
+            "value": true
+          }
+        ]
+      },
+      {
+        "type": "tool.result",
+        "conditions": [
+          {
+            "operator": "equals",
+            "path": "isError",
+            "value": true
+          }
+        ]
+      },
+      {
+        "type": "tool.result",
+        "conditions": [
+          {
+            "operator": "equals",
+            "path": "isError",
+            "value": true
+          }
+        ]
+      }
+    ],
+    "options": {
+      "consecutive": true
+    }
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "promptTemplate": "The agent has encountered 3 consecutive errors. Analyze the pattern and suggest what might be going wrong:\n\n{{events}}\n\nProvide:\n1. Common cause analysis\n2. Suggested fixes\n3. Whether the agent should continue or needs intervention",
+  "model": "sonnet",
+  "output": {
+    "format": "json",
+    "file": "error-patterns.jsonl"
+  }
+}

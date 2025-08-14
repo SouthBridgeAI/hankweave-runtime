@@ -11,6 +11,20 @@ import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { BunProxyRunner } from "./llm-proxy.js";
+// Import event types from new schema file
+import type {
+  AssistantActionEvent,
+  ErrorEvent,
+  FileTreeUpdatedEvent,
+  FileUpdatedEvent,
+  InfoEvent,
+  PhaseCompletedEvent,
+  PhaseStartedEvent,
+  ServerEvent,
+  ServerReadyEvent,
+  StateSnapshotEvent,
+  TokenUsageEvent,
+} from "./schemas/event-schemas.js";
 import { StateManager } from "./state-manager.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { EventId, PhaseId, RunId, SessionId } from "./types/branded-types.js";
@@ -31,24 +45,15 @@ import {
   type PhaseStatus,
 } from "./types/state-types.js";
 import type { ToolInputMap, ToolName } from "./types/tool-types.js";
+
+// Import remaining types from old file
 import type {
-  AssistantActionEvent,
   CheckpointInfo,
   ClaudeLogMessage,
-  ErrorEvent,
   FailureReason,
-  FileTreeUpdatedEvent,
-  FileUpdatedEvent,
-  InfoEvent,
-  PhaseCompletedEvent,
   PhaseConfig,
-  PhaseStartedEvent,
   ServerConfig,
-  ServerEvent,
-  ServerReadyEvent,
-  StateSnapshotEvent,
   TokenUsage,
-  TokenUsageEvent,
 } from "./types/types.js";
 import { isSyntheticTimeout } from "./types/types.js";
 import {

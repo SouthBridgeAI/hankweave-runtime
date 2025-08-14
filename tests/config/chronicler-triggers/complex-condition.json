@@ -1,0 +1,32 @@
+{
+  "id": "complex-condition",
+  "name": "Complex Condition Matcher",
+  "description": "Tests multiple AND conditions with different operators",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action"
+    ],
+    "conditions": [
+      {
+        "operator": "equals",
+        "path": "action",
+        "value": "tool_use"
+      },
+      {
+        "operator": "equals",
+        "path": "toolName",
+        "value": "Bash"
+      }
+    ]
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "promptTemplate": "Bash tool usage detected: {{events}}",
+  "model": "sonnet",
+  "output": {
+    "format": "json",
+    "file": "bash-commands.jsonl"
+  }
+}

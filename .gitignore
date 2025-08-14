@@ -1,5 +1,8 @@
 # Based on https://raw.githubusercontent.com/github/gitignore/main/Node.gitignore
 
+# Generated files
+server/config-validation/event-schemas.generated.ts
+
 # Langton
 workflows
 

@@ -1,8 +1,6 @@
 import type { z } from "zod";
-import type { EventId, PhaseId } from "./branded-types.js";
+import type { PhaseId } from "./branded-types.js";
 import type { logMessageSchema } from "./claude-session-schema.js";
-import type { ErrorSeverity } from "./error-types.js";
-import type { PhaseExecution } from "./state-types.js";
 
 // ============================================================================
 // Model Types
@@ -13,30 +11,14 @@ export type ModelName = "sonnet" | "opus";
 export type ContinuationMode = "fresh" | "continue-previous";
 
 // ============================================================================
-// Process Exit Types
+// Process Exit Types (moved to schemas)
 // ============================================================================
-
-export type ProcessExit =
-  | { type: "success" }
-  | { type: "error"; code: number }
-  | { type: "killed"; signal: NodeJS.Signals };
+// ProcessExit is now defined in server/schemas/event-schemas.ts
 
 // ============================================================================
-// Failure Reason Types
+// Failure Reason Types (moved to schemas)
 // ============================================================================
-
-/**
- * Represents the reason for a phase failure with retry eligibility information.
- * Used to communicate to clients whether they should consider retrying a failed phase.
- */
-export interface FailureReason {
-  /** The type of failure that occurred */
-  type: "timeout" | "rate-limit" | "api-error" | "unknown";
-  /** Whether this failure is considered retriable */
-  retriable: boolean;
-  /** Optional human-readable message about the failure */
-  message?: string;
-}
+// FailureReason is now defined in server/schemas/event-schemas.ts
 
 // ============================================================================
 // Message ID Types
@@ -279,458 +261,83 @@ export interface TokenUsage {
   cacheReadTokens: number;
 }
 
-/**
- * Runtime state of an active phase - discriminated union based on execution status.
- * Makes impossible states unrepresentable (e.g., having sessionId without being running).
- */
-
-/**
- * Represents a file or directory in the watched file tree.
- * Used to send file structure updates to clients.
- */
-export type FileNode =
-  | {
-      /** File or directory name */
-      name: string;
-      /** Relative path from project root */
-      path: string;
-      /** This is a directory */
-      isDirectory: true;
-      /** Child nodes (always present for directories) */
-      children: FileNode[];
-    }
-  | {
-      /** File or directory name */
-      name: string;
-      /** Relative path from project root */
-      path: string;
-      /** This is a file */
-      isDirectory: false;
-      /** Last modified time (ISO string) - always present for files */
-      lastModified: string;
-      /** Empty array for files */
-      children: FileNode[];
-    };
-
 // ============================================================================
-// Server -> Client Events
+// Synthetic Message Types
 // ============================================================================
 
 /**
- * Sent immediately after client connection to indicate server is ready.
- * Contains basic server information for client compatibility checks.
+ * Synthetic timeout message structure.
+ * Claude sends these special messages when API requests time out.
+ * They have a specific structure that needs special handling.
  */
-export interface ServerReadyEvent {
-  /** Unique ID for this event instance */
-  id: EventId;
-  /** ISO 8601 timestamp of when the event was created */
-  timestamp: string;
-  /** Event type identifier for client-side routing */
-  type: "server.ready";
-  data: {
-    /** Server version for compatibility checking */
-    serverVersion: string;
-    /** Where server/git/logs operate */
-    executionPath: string;
-    /** Where user data is accessible (data/ subdirectory) */
-    dataPath: string;
+export interface SyntheticTimeoutMessage {
+  type: "assistant";
+  message: {
+    id: string;
+    type: "message";
+    role: "assistant";
+    model: "<synthetic>";
+    content: "API Error: Request timed out.";
+    usage?: never;
+    stop_reason: null;
+    stop_sequence: null;
   };
 }
 
 /**
- * Comprehensive state snapshot sent after connection and on major state changes.
- * Allows clients to sync with server state after connection or reconnection.
+ * Type guard to check if an assistant message is a synthetic timeout.
+ * These messages need special handling as they indicate API failures.
  */
-export interface StateSnapshotEvent {
-  id: EventId;
-  timestamp: string;
-  type: "state.snapshot";
-  data: {
-    /** Currently executing phase, undefined if idle */
-    currentPhase: PhaseExecution | undefined;
-    /** List of all terminal phases (completed, failed, skipped) in this session */
-    completedPhases: PhaseExecution[];
-    /** Current file tree structure (if watching files) */
-    fileTree: FileNode[];
-    /** Total accumulated cost across all phases in dollars */
-    totalCost: number;
-    /** Total time since server start in milliseconds */
-    totalTime: number;
-    /** Most recently accessed file information */
-    recentFileAccess?:
-      | {
-          path: string;
-          content: string;
-          timestamp: Date;
-        }
-      | undefined;
-    /** Whether the server is currently performing a rollback */
-    isRollingBack: boolean;
-  };
+export function isSyntheticTimeout(msg: ClaudeLogMessage): msg is SyntheticTimeoutMessage {
+  return (
+    msg.type === "assistant" &&
+    msg.message.model === "<synthetic>" &&
+    msg.message.content === "API Error: Request timed out."
+  );
 }
-
-/**
- * Emitted when a phase begins execution.
- * Indicates Claude process has been spawned and prompt has been sent.
- */
-export interface PhaseStartedEvent {
-  id: EventId;
-  timestamp: string;
-  type: "phase.started";
-  data: {
-    /** ID of the phase that started */
-    phaseId: string;
-    /** Human-readable phase name */
-    phaseName: string;
-    /** Optional phase description */
-    phaseDescription?: string;
-    /** Claude session ID for this execution */
-    sessionId: string;
-    /** Previous session ID if continuing from another phase */
-    previousSessionId?: string;
-    /** ISO 8601 timestamp of phase start */
-    startTime: string;
-  };
-}
-
-/**
- * Emitted when a phase finishes execution.
- * Includes success status, costs, and timing information.
- */
-export interface PhaseCompletedEvent {
-  id: EventId;
-  timestamp: string;
-  type: "phase.completed";
-  data: {
-    /** ID of the completed phase */
-    phaseId: string;
-    /** Whether the phase completed successfully */
-    success: boolean;
-    /** Total cost for this phase in dollars */
-    cost: number;
-    /** Execution time in milliseconds */
-    duration: number;
-    /** Process exit status */
-    exitStatus: ProcessExit;
-    /** Optional failure reason for unsuccessful phases */
-    failureReason?: FailureReason;
-  };
-}
-
-/**
- * Real-time stream of Claude's actions during phase execution.
- * Parsed from Claude's JSON log output.
- */
-export interface AssistantActionEvent {
-  id: EventId;
-  timestamp: string;
-  type: "assistant.action";
-  data: {
-    /** Phase this action belongs to */
-    phaseId: string;
-    /** Type of action Claude is performing */
-    action: "thinking" | "message" | "tool_use";
-    /** Content of the action (text for messages, empty for tool use) */
-    content: string;
-    /** Name of tool being used (only for tool_use actions) */
-    toolName?: string; // Allow any tool name, not just known ones
-    /** Tool parameters (only for tool_use actions) */
-    toolInput?: Record<string, unknown>;
-  };
-}
-
-/**
- * Token usage update for cost tracking.
- * Emitted after each Claude message with usage information.
- */
-export interface TokenUsageEvent {
-  id: EventId;
-  timestamp: string;
-  type: "token.usage";
-  data: {
-    /** Phase that consumed these tokens */
-    phaseId: string;
-    /** Number of input tokens processed */
-    inputTokens: number;
-    /** Number of output tokens generated */
-    outputTokens: number;
-    /** Tokens used to create cache */
-    cacheCreationTokens: number;
-    /** Tokens read from cache */
-    cacheReadTokens: number;
-    /** Cost for this specific message in dollars */
-    totalCost: number;
-  };
-}
-
-/**
- * Tool execution result notification.
- * Emitted when a tool completes execution with its result.
- */
-export interface ToolResultEvent {
-  id: EventId;
-  timestamp: string;
-  type: "tool.result";
-  data: {
-    /** Phase that executed this tool */
-    phaseId: string;
-    /** Tool use ID for correlation */
-    toolUseId: string;
-    /** Name of the tool that was executed */
-    toolName: string;
-    /** Truncated result content */
-    result: string;
-    /** Whether the result was truncated */
-    truncated: boolean;
-    /** Original result length before truncation */
-    originalLength: number;
-    /** Execution time in milliseconds */
-    executionTimeMs: number;
-    /** Whether the tool execution resulted in an error */
-    isError: boolean;
-  };
-}
-
-/**
- * File change notification for watched files.
- * Only emitted for files matching the phase's watch pattern.
- */
-export interface FileUpdatedEvent {
-  id: EventId;
-  timestamp: string;
-  type: "file.updated";
-  data: {
-    /** Relative path from project root */
-    path: string;
-    /** Just the filename */
-    filename: string;
-    /** File contents (empty for deletions) */
-    content: string;
-    /** Type of file system change */
-    action: "created" | "modified" | "deleted";
-  };
-}
-
-/**
- * Complete file tree structure update.
- * Sent after file changes to provide updated directory structure.
- */
-export interface FileTreeUpdatedEvent {
-  id: EventId;
-  timestamp: string;
-  type: "filetree.updated";
-  data: {
-    /** Root nodes of the file tree */
-    tree: FileNode[];
-  };
-}
-
-/**
- * Error notification for both fatal and non-fatal errors.
- * Fatal errors will trigger server shutdown.
- */
-export interface ErrorEvent {
-  id: EventId;
-  timestamp: string;
-  type: "error";
-  data: {
-    /** Human-readable error message */
-    message: string;
-    /** Phase ID where error occurred (if applicable) */
-    phase?: string;
-    /** If true, server will shutdown after this error */
-    fatal: boolean;
-    /** Error severity level */
-    severity?: ErrorSeverity;
-    /** Additional error context */
-    context?: string;
-    /** Optional error code for specific error types */
-    code?: string;
-  };
-}
-
-/**
- * Notification of incomplete phase from previous session.
- * Helps users recover from interrupted workflows.
- */
-export interface IncompletePhaseEvent {
-  id: EventId;
-  timestamp: string;
-  type: "incomplete.phase";
-  data: {
-    /** ID of the incomplete phase */
-    phaseId: string;
-    /** Human-readable phase name */
-    phaseName: string;
-    /** Suggested action message */
-    message: string;
-  };
-}
-
-/**
- * General informational messages.
- * Used for non-error status updates.
- */
-export interface InfoEvent {
-  id: EventId;
-  timestamp: string;
-  type: "info";
-  data: {
-    /** Informational message */
-    message: string;
-  };
-}
-
-/**
- * Server idle notification
- */
-export interface ServerIdleEvent {
-  id: EventId;
-  timestamp: string;
-  type: "server.idle";
-  data: {
-    reason: "startup" | "phase-completed" | "all-phases-completed";
-    message: string;
-  };
-}
-
-/**
- * Checkpoint information for query responses
- */
-export interface CheckpointQueryInfo {
-  phaseId: PhaseId;
-  phaseName: string;
-  checkpointType: "workspace-setup" | "completed" | "error" | "skipped";
-  sha: string;
-  status: import("./state-types.js").PhaseStatus;
-  timestamp: string;
-}
-
-/**
- * Response to checkpoint.list command
- */
-export interface CheckpointListEvent {
-  id: EventId;
-  timestamp: string;
-  type: "checkpoint.list";
-  data: {
-    runId: string;
-    checkpoints: CheckpointQueryInfo[];
-    currentBranch: string;
-  };
-}
-
-/**
- * Rollback started notification
- */
-export interface RollbackStartedEvent {
-  id: EventId;
-  timestamp: string;
-  type: "rollback.started";
-  data: {
-    fromRun: string;
-    fromPhase: string;
-    toPhase: string;
-    toCheckpoint: string;
-    checkpointType: string;
-    phasesToProcess: string[]; // Phases we'll roll back through
-  };
-}
-
-/**
- * Rollback phase checkpoint notification
- */
-export interface RollbackPhaseCheckpointEvent {
-  id: EventId;
-  timestamp: string;
-  type: "rollback.phaseCheckpoint";
-  data: {
-    phaseId: string;
-    phaseName: string;
-    checkpoint: string;
-    checkpointType: string;
-    message: string; // e.g., "Reset to phase-2 completion checkpoint"
-  };
-}
-
-/**
- * Rollback workspace cleanup notification
- */
-export interface RollbackWorkspaceCleanupEvent {
-  id: EventId;
-  timestamp: string;
-  type: "rollback.workspaceCleanup";
-  data: {
-    phaseId: string;
-    phaseName: string;
-    directories: string[];
-    status: "started" | "completed" | "failed" | "partial";
-    successfulCleanups?: string[];
-    failedCleanups?: { directory: string; error: string }[];
-    error?: string; // Overall error message
-  };
-}
-
-/**
- * Rollback progress notification
- */
-export interface RollbackProgressEvent {
-  id: EventId;
-  timestamp: string;
-  type: "rollback.progress";
-  data: {
-    currentStep: number;
-    totalSteps: number;
-    message: string; // Human-readable progress message
-  };
-}
-
-/**
- * Rollback completed notification
- */
-export interface RollbackCompletedEvent {
-  id: EventId;
-  timestamp: string;
-  type: "rollback.completed";
-  data: {
-    fromRun: string;
-    toRun: string;
-    checkpoint: string;
-    phaseId: string;
-    phaseName: string;
-    checkpointType: string;
-    autoRestart: boolean;
-  };
-}
-
-/**
- * Discriminated union of all server-to-client event types.
- * Use this instead of the generic ServerEvent interface for better type safety.
- * TypeScript will automatically narrow the type based on the `type` field.
- */
-export type ServerEvent =
-  | ServerReadyEvent
-  | StateSnapshotEvent
-  | PhaseStartedEvent
-  | PhaseCompletedEvent
-  | AssistantActionEvent
-  | TokenUsageEvent
-  | ToolResultEvent
-  | FileUpdatedEvent
-  | FileTreeUpdatedEvent
-  | ErrorEvent
-  | IncompletePhaseEvent
-  | InfoEvent
-  | ServerIdleEvent
-  | CheckpointListEvent
-  | RollbackStartedEvent
-  | RollbackPhaseCheckpointEvent
-  | RollbackWorkspaceCleanupEvent
-  | RollbackProgressEvent
-  | RollbackCompletedEvent;
 
 // ============================================================================
-// Client -> Server Commands
+// Claude Log Types (from claude-session-schema)
+// ============================================================================
+
+export type ClaudeLogMessage = z.infer<typeof logMessageSchema>;
+
+// ============================================================================
+// Re-export types from schemas for backward compatibility
+// ============================================================================
+
+export type {
+  AssistantActionEvent,
+  CheckpointListEvent,
+  // Data types used in events
+  CheckpointQueryInfo,
+  ErrorEvent,
+  FailureReason,
+  FileNode,
+  FileTreeUpdatedEvent,
+  FileUpdatedEvent,
+  IncompletePhaseEvent,
+  InfoEvent,
+  PhaseCompletedEvent,
+  PhaseExecution,
+  PhaseStartedEvent,
+  ProcessExit,
+  RollbackCompletedEvent,
+  RollbackPhaseCheckpointEvent,
+  RollbackProgressEvent,
+  RollbackStartedEvent,
+  RollbackWorkspaceCleanupEvent,
+  ServerEvent,
+  ServerIdleEvent,
+  // Event types
+  ServerReadyEvent,
+  StateSnapshotEvent,
+  TokenUsageEvent,
+  ToolResultEvent,
+} from "../schemas/event-schemas.js";
+
+// ============================================================================
+// Client -> Server Commands (keeping these here for now)
 // ============================================================================
 
 /**
@@ -867,44 +474,3 @@ export type ClientCommand =
   | RollbackToCheckpointCommand
   | RollbackToPhaseCommand
   | RollbackToLastSuccessCommand;
-
-// ============================================================================
-// Synthetic Message Types
-// ============================================================================
-
-/**
- * Synthetic timeout message structure.
- * Claude sends these special messages when API requests time out.
- * They have a specific structure that needs special handling.
- */
-export interface SyntheticTimeoutMessage {
-  type: "assistant";
-  message: {
-    id: string;
-    type: "message";
-    role: "assistant";
-    model: "<synthetic>";
-    content: "API Error: Request timed out.";
-    usage?: never;
-    stop_reason: null;
-    stop_sequence: null;
-  };
-}
-
-/**
- * Type guard to check if an assistant message is a synthetic timeout.
- * These messages need special handling as they indicate API failures.
- */
-export function isSyntheticTimeout(msg: ClaudeLogMessage): msg is SyntheticTimeoutMessage {
-  return (
-    msg.type === "assistant" &&
-    msg.message.model === "<synthetic>" &&
-    msg.message.content === "API Error: Request timed out."
-  );
-}
-
-// ============================================================================
-// Claude Log Types (from claude-session-schema)
-// ============================================================================
-
-export type ClaudeLogMessage = z.infer<typeof logMessageSchema>;

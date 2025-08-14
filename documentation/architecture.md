@@ -61,6 +61,11 @@ The server is composed of several distinct, yet interconnected, modules.
 -   **`server/state-types.ts`**: This file is crucial for the system's type safety. It defines the TypeScript interfaces for the entire state tree, including the `TadpoleState`, `Run`, and the `PhaseExecution` discriminated union, which models the seven distinct states of a phase's lifecycle.
 -   **`server/execution-thread.ts`**: This module contains the logic for analyzing the execution history. Its primary export, `analyzeExecutionThread`, is a powerful function that traverses the potentially branching history of runs to construct a single, logical "thread" of execution, which is used to determine the next phase to run.
 
+### Event System & Validation
+
+-   **`server/schemas/event-schemas.ts`**: The single source of truth for all server event definitions. This file uses Zod schemas to define the structure and validation rules for all 19 server event types. TypeScript types are automatically inferred from these schemas, ensuring perfect consistency between runtime validation and compile-time type checking. The file exports both the schemas and the inferred types, including a discriminated union `ServerEvent` type for type-safe event handling.
+-   **`server/types/types.ts`**: Contains non-event TypeScript types and interfaces used throughout the system, such as `PhaseConfig`, `ServerConfig`, and command types. Event types are re-exported from the schemas file for backward compatibility.
+
 ### Process & Log Management
 
 -   **`server/claude-process-manager.ts`**: This class is responsible for the entire lifecycle of the Claude CLI subprocess. It handles spawning the process with the correct arguments and environment variables, creating and managing log streams, and ensuring the process is properly monitored and cleaned up.

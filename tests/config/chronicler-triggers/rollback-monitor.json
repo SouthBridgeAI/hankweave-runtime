@@ -1,0 +1,37 @@
+{
+  "id": "rollback-monitor",
+  "name": "Rollback Activity Monitor",
+  "description": "Monitors and documents rollback operations",
+  "trigger": {
+    "type": "sequence",
+    "interestFilter": {
+      "on": [
+        "rollback.started",
+        "rollback.phaseCheckpoint",
+        "rollback.workspaceCleanup",
+        "rollback.progress",
+        "rollback.completed"
+      ]
+    },
+    "pattern": [
+      {
+        "type": "rollback.started"
+      },
+      {
+        "type": "rollback.completed"
+      }
+    ],
+    "options": {
+      "consecutive": false
+    }
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "promptTemplate": "A rollback operation has completed. Analyze the rollback sequence:\n\n{{events}}\n\nProvide:\n1. Summary of what was rolled back\n2. Reason for the rollback (if apparent)\n3. Success/failure of the rollback\n4. Impact on the project state\n5. Recommendations for moving forward",
+  "model": "sonnet",
+  "output": {
+    "format": "json",
+    "file": "rollback-analysis.jsonl"
+  }
+}

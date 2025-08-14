@@ -266,22 +266,27 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
         const events: ServerEvent[] = [];
         let checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
 
-        // Parse websocket.log file from snapshot
+        // Parse websocket.log file from snapshot (NEW JSONL format)
         if (fs.existsSync(websocketLogPath)) {
           try {
             const logContent = await fs.promises.readFile(websocketLogPath, "utf-8");
-            const logLines = logContent.trim().split("\n");
+            const logLines = logContent
+              .trim()
+              .split("\n")
+              .filter((line) => line.trim());
 
             for (const line of logLines) {
-              // Parse format: [timestamp] [OUT] {json}
-              const match = line.match(/^\[.*?\] \[OUT\] (.+)$/);
-              if (match) {
-                try {
-                  const event = JSON.parse(match[1]) as ServerEvent;
+              try {
+                // Parse JSONL format
+                const logEntry = JSON.parse(line);
+
+                // Filter for outgoing messages (server events)
+                if (logEntry.direction === "out" && logEntry.message) {
+                  const event = logEntry.message as ServerEvent;
                   events.push(event);
-                } catch (_parseError) {
-                  // Skip malformed JSON lines
                 }
+              } catch (_parseError) {
+                // Skip malformed JSON lines
               }
             }
 

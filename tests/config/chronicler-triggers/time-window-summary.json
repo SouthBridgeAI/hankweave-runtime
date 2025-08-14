@@ -1,0 +1,25 @@
+{
+  "id": "time-window-summary",
+  "name": "Time Window Summary",
+  "description": "Creates summaries every 10 seconds",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action",
+      "tool.result",
+      "phase.started",
+      "phase.completed"
+    ],
+    "conditions": []
+  },
+  "execution": {
+    "strategy": "timeWindow",
+    "milliseconds": 10000
+  },
+  "promptTemplate": "Summarize the activity in this 10-second window: {{events}}",
+  "model": "sonnet",
+  "output": {
+    "format": "text",
+    "file": "time-window-summaries.log"
+  }
+}

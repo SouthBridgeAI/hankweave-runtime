@@ -130,7 +130,9 @@ describe("buildFileTree", () => {
     // Type assertion since we verified it's not a directory
     const file = fileNode as FileNode & { isDirectory: false };
     expect(file.lastModified).toBeDefined();
-    expect(new Date(file.lastModified).getTime()).toBeGreaterThan(0);
+    if (file.lastModified) {
+      expect(new Date(file.lastModified).getTime()).toBeGreaterThan(0);
+    }
   });
 
   test("marks directories with isDirectory flag", async () => {

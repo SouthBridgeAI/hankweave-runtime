@@ -1,18 +1,8 @@
 # Only for humans - not for Claude
 
-## Recently Completed ✅
-
-### Tool Result Tracking (2025-07-29)
-- Added `tool.result` event type to WebSocket protocol
-- Implemented real-time tracking of tool executions with results
-- Added execution timing measurement (milliseconds)
-- Implemented configurable result truncation (default 1000 chars)
-- Added correlation between tool invocations and results via `toolUseId`
-- Created comprehensive unit tests (19 tests) and E2E tests (10 tests)
-- Updated all documentation (README, architecture, protocol)
-- All tests passing (153/153 E2E tests)
-
 ## TODOs - tasks to pick and solve
+
+1. Move the working dir INSIDE another folder so claude can't see .tadpole?
 
 # Bugs
 1. The execution thread module has some dead code

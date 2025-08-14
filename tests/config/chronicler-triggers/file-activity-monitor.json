@@ -1,0 +1,31 @@
+{
+  "id": "file-activity-monitor",
+  "name": "File Activity Monitor",
+  "description": "Tracks file creation and modification patterns",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "file.updated"
+    ],
+    "conditions": [
+      {
+        "operator": "in",
+        "path": "action",
+        "value": [
+          "created",
+          "modified"
+        ]
+      }
+    ]
+  },
+  "execution": {
+    "strategy": "count",
+    "threshold": 5
+  },
+  "promptTemplate": "Analyze the file activity patterns from these events:\n\n{{events}}\n\nProvide insights on:\n1. What types of files are being created/modified\n2. The apparent structure or architecture being built\n3. Any potential issues or improvements in the file organization",
+  "model": "sonnet",
+  "output": {
+    "format": "json",
+    "file": "file-activity.jsonl"
+  }
+}

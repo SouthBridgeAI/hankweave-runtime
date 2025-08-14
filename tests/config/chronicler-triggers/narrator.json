@@ -1,0 +1,23 @@
+{
+  "id": "narrator",
+  "name": "Activity Narrator",
+  "description": "Provides human-readable summaries of agent activities",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action",
+      "tool.result"
+    ],
+    "conditions": []
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 3000
+  },
+  "promptTemplate": "Summarize the following agent activities in a conversational, human-readable way. Focus on what the agent is trying to accomplish:\n\n{{events}}\n\nProvide a brief, clear summary of what happened.",
+  "model": "sonnet",
+  "output": {
+    "format": "text",
+    "file": "narrator.log"
+  }
+}

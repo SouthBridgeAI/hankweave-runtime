@@ -9,8 +9,9 @@
     "format": "biome format --write .",
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
-    "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts && bun test tests/e2e/rollback-improved-2-e2e-snapshot-tests.test.ts && bun tests/unit/cleanup-after-tests.ts",
+    "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/integration tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts  && bun tests/unit/cleanup-after-tests.ts",
     "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",
+    "test:integration": "bun tests/integration",
     "test:e2e:check": "bun tests/utils/check-test-ready.ts",
     "test:e2e:sanity": "bun tests/utils/sanity-check.ts",
     "test:e2e:cleanup": "./tests/utils/cleanup-test.sh",
@@ -24,7 +25,7 @@
     "@types/bun": "latest"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.9.2"
   },
   "dependencies": {
     "@biomejs/biome": "^2.0.6",

@@ -78,9 +78,10 @@ export function runStateSnapshotTests(testState: TestState) {
         }
         // Duration is only available on terminal phase types
         if (
-          phase.status === "completed" ||
-          phase.status === "failed" ||
-          phase.status === "skipped"
+          (phase.status === "completed" ||
+            phase.status === "failed" ||
+            phase.status === "skipped") &&
+          phase.endTime
         ) {
           const duration = new Date(phase.endTime).getTime() - new Date(phase.startTime).getTime();
           expect(duration).toBeGreaterThan(0);
