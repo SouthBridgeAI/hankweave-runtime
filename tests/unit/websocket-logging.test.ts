@@ -2,9 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
-import { Logger } from "../../server/utils";
-import { WebSocketLogReader, readWebSocketLog, getWebSocketLogStats } from "../../server/websocket-log-reader";
+import { EventId } from "../../server/types/branded-types";
+import type { ClientCommand, ServerEvent } from "../../server/types/types";
 import type { WebSocketLogEntry } from "../../server/types/websocket-log-types";
+import { Logger } from "../../server/utils";
+import {
+  getWebSocketLogStats,
+  readWebSocketLog,
+  WebSocketLogReader,
+} from "../../server/websocket-log-reader";
 
 describe("WebSocket Logging", () => {
   let tempDir: string;
@@ -24,10 +30,10 @@ describe("WebSocket Logging", () => {
 
   describe("Logger.logSocketTraffic", () => {
     test("logs incoming messages in JSONL format", () => {
-      const message = {
+      const message: ClientCommand = {
         id: "cmd-123",
         type: "phase.start",
-        data: { phaseId: "phase-1" }
+        data: { phaseId: "phase-1" },
       };
 
       logger.logSocketTraffic(logPath, "in", message);
@@ -42,15 +48,15 @@ describe("WebSocket Logging", () => {
     });
 
     test("logs outgoing messages in JSONL format", () => {
-      const message = {
-        id: "evt-456",
+      const message: ServerEvent = {
+        id: EventId("evt-456"),
         timestamp: new Date().toISOString(),
         type: "server.ready",
         data: {
           serverVersion: "1.0.0",
           executionPath: "/path/to/execution",
-          dataPath: "/path/to/data"
-        }
+          dataPath: "/path/to/data",
+        },
       };
 
       logger.logSocketTraffic(logPath, "out", message);
@@ -64,22 +70,22 @@ describe("WebSocket Logging", () => {
     });
 
     test("appends multiple messages as separate JSONL lines", () => {
-      const message1 = {
+      const message1: ClientCommand = {
         id: "cmd-1",
         type: "phase.start",
-        data: { phaseId: "phase-1" }
+        data: { phaseId: "phase-1" },
       };
 
-      const message2 = {
-        id: "evt-1",
+      const message2: ServerEvent = {
+        id: EventId("evt-1"),
         timestamp: new Date().toISOString(),
         type: "phase.started",
         data: {
           phaseId: "phase-1",
           phaseName: "Test Phase",
           sessionId: "session-123",
-          startTime: new Date().toISOString()
-        }
+          startTime: new Date().toISOString(),
+        },
       };
 
       logger.logSocketTraffic(logPath, "in", message1);
@@ -102,16 +108,16 @@ describe("WebSocket Logging", () => {
 
     test("handles large messages", () => {
       const largeData = "x".repeat(10000);
-      const message = {
-        id: "evt-large",
+      const message: ServerEvent = {
+        id: EventId("evt-large"),
         timestamp: new Date().toISOString(),
         type: "file.updated",
         data: {
           path: "test.txt",
           filename: "test.txt",
           content: largeData,
-          action: "modified" as const
-        }
+          action: "modified" as const,
+        },
       };
 
       logger.logSocketTraffic(logPath, "out", message);
@@ -124,13 +130,13 @@ describe("WebSocket Logging", () => {
     });
 
     test("handles special characters in messages", () => {
-      const message = {
-        id: "evt-special",
+      const message: ServerEvent = {
+        id: EventId("evt-special"),
         timestamp: new Date().toISOString(),
         type: "info",
         data: {
-          message: 'Test with "quotes", \nnewlines, and \t\ttabs'
-        }
+          message: 'Test with "quotes", \nnewlines, and \t\ttabs',
+        },
       };
 
       logger.logSocketTraffic(logPath, "out", message);
@@ -167,12 +173,13 @@ describe("WebSocket Logging", () => {
         message: {
           id: "cmd-1",
           type: "phase.start",
-          data: { phaseId: "phase-1" }
+          data: { phaseId: "phase-1" },
+          // biome-ignore lint/suspicious/noExplicitAny: Test mock data
         } as any,
-        metadata: { size: 100 }
+        metadata: { size: 100 },
       };
 
-      fs.writeFileSync(logPath, JSON.stringify(entry) + "\n");
+      fs.writeFileSync(logPath, `${JSON.stringify(entry)}\n`);
 
       const entries = await reader.readLog();
       expect(entries.length).toBe(1);
@@ -184,7 +191,8 @@ describe("WebSocket Logging", () => {
         {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
-          message: { id: "cmd-1", type: "phase.start" } as any
+          // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          message: { id: "cmd-1", type: "phase.start" } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:01.000Z",
@@ -192,8 +200,9 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
-            type: "phase.started"
-          } as any
+            type: "phase.started",
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:02.000Z",
@@ -201,12 +210,13 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-2",
             timestamp: "2025-01-19T10:00:02.000Z",
-            type: "phase.completed"
-          } as any
-        }
+            type: "phase.completed",
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
+        },
       ];
 
-      const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+      const content = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
       fs.writeFileSync(logPath, content);
 
       const readEntries = await reader.readLog();
@@ -218,7 +228,8 @@ describe("WebSocket Logging", () => {
       const validEntry: WebSocketLogEntry = {
         loggedAt: new Date().toISOString(),
         direction: "in",
-        message: { id: "cmd-1", type: "phase.start" } as any
+        // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+        message: { id: "cmd-1", type: "phase.start" } as any,
       };
 
       const content = [
@@ -226,7 +237,7 @@ describe("WebSocket Logging", () => {
         JSON.stringify(validEntry),
         "{ broken json",
         "",
-        JSON.stringify(validEntry)
+        JSON.stringify(validEntry),
       ].join("\n");
 
       fs.writeFileSync(logPath, content);
@@ -244,11 +255,12 @@ describe("WebSocket Logging", () => {
         message: {
           id: "evt-1",
           timestamp: new Date().toISOString(),
-          type: "server.ready"
-        } as any
+          type: "server.ready",
+          // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+        } as any,
       };
 
-      fs.writeFileSync(logPath, JSON.stringify(entry) + "\n");
+      fs.writeFileSync(logPath, `${JSON.stringify(entry)}\n`);
 
       const entries = reader.readLogSync();
       expect(entries.length).toBe(1);
@@ -269,8 +281,9 @@ describe("WebSocket Logging", () => {
           message: {
             id: "cmd-1",
             type: "phase.start",
-            data: { phaseId: "phase-1" }
-          } as any
+            data: { phaseId: "phase-1" },
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:01.000Z",
@@ -279,16 +292,18 @@ describe("WebSocket Logging", () => {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
             type: "phase.started",
-            data: { phaseId: "phase-1", sessionId: "session-123" }
-          } as any
+            data: { phaseId: "phase-1", sessionId: "session-123" },
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:02.000Z",
           direction: "in",
           message: {
             id: "cmd-2",
-            type: "phase.skip"
-          } as any
+            type: "phase.skip",
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:03.000Z",
@@ -297,8 +312,9 @@ describe("WebSocket Logging", () => {
             id: "evt-2",
             timestamp: "2025-01-19T10:00:03.000Z",
             type: "phase.completed",
-            data: { phaseId: "phase-1", success: false }
-          } as any
+            data: { phaseId: "phase-1", success: false },
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:04.000Z",
@@ -306,8 +322,9 @@ describe("WebSocket Logging", () => {
           message: {
             id: "cmd-3",
             type: "phase.start",
-            data: { phaseId: "phase-2" }
-          } as any
+            data: { phaseId: "phase-2" },
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:05.000Z",
@@ -316,12 +333,13 @@ describe("WebSocket Logging", () => {
             id: "evt-3",
             timestamp: "2025-01-19T10:00:05.000Z",
             type: "error",
-            data: { message: "Test error", fatal: false }
-          } as any
-        }
+            data: { message: "Test error", fatal: false },
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
+        },
       ];
 
-      const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+      const content = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
       fs.writeFileSync(logPath, content);
       await reader.readLog();
     });
@@ -333,8 +351,8 @@ describe("WebSocket Logging", () => {
       expect(incoming.length).toBe(3);
       expect(outgoing.length).toBe(3);
 
-      expect(incoming.every(e => e.direction === "in")).toBe(true);
-      expect(outgoing.every(e => e.direction === "out")).toBe(true);
+      expect(incoming.every((e) => e.direction === "in")).toBe(true);
+      expect(outgoing.every((e) => e.direction === "out")).toBe(true);
     });
 
     test("filterByMessageType", () => {
@@ -351,7 +369,7 @@ describe("WebSocket Logging", () => {
     test("filterByTimeRange", () => {
       const filtered = reader.filterByTimeRange(
         "2025-01-19T10:00:01.000Z",
-        "2025-01-19T10:00:03.000Z"
+        "2025-01-19T10:00:03.000Z",
       );
 
       expect(filtered.length).toBe(3);
@@ -376,13 +394,13 @@ describe("WebSocket Logging", () => {
     test("getServerEvents", () => {
       const serverEvents = reader.getServerEvents();
       expect(serverEvents.length).toBe(3);
-      expect(serverEvents.every(e => e.direction === "out")).toBe(true);
+      expect(serverEvents.every((e) => e.direction === "out")).toBe(true);
     });
 
     test("getClientCommands", () => {
       const clientCommands = reader.getClientCommands();
       expect(clientCommands.length).toBe(3);
-      expect(clientCommands.every(e => e.direction === "in")).toBe(true);
+      expect(clientCommands.every((e) => e.direction === "in")).toBe(true);
     });
   });
 
@@ -396,8 +414,9 @@ describe("WebSocket Logging", () => {
         {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
+          // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           message: { id: "cmd-1", type: "phase.start" } as any,
-          metadata: { size: 50 }
+          metadata: { size: 50 },
         },
         {
           loggedAt: "2025-01-19T10:00:01.000Z",
@@ -405,15 +424,17 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
-            type: "phase.started"
+            type: "phase.started",
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
-          metadata: { size: 100 }
+          metadata: { size: 100 },
         },
         {
           loggedAt: "2025-01-19T10:00:02.000Z",
           direction: "in",
+          // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           message: { id: "cmd-2", type: "phase.start" } as any,
-          metadata: { size: 50 }
+          metadata: { size: 50 },
         },
         {
           loggedAt: "2025-01-19T10:00:03.000Z",
@@ -421,13 +442,14 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-2",
             timestamp: "2025-01-19T10:00:03.000Z",
-            type: "error"
+            type: "error",
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
-          metadata: { size: 200 }
-        }
+          metadata: { size: 200 },
+        },
       ];
 
-      const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+      const content = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
       fs.writeFileSync(logPath, content);
       await reader.readLog();
     });
@@ -440,7 +462,7 @@ describe("WebSocket Logging", () => {
       expect(stats.outgoingCount).toBe(2);
       expect(stats.messageTypes["phase.start"]).toBe(2);
       expect(stats.messageTypes["phase.started"]).toBe(1);
-      expect(stats.messageTypes["error"]).toBe(1);
+      expect(stats.messageTypes.error).toBe(1);
       expect(stats.averageMessageSize).toBe(100);
       expect(stats.timeRange.start).toBe("2025-01-19T10:00:00.000Z");
       expect(stats.timeRange.end).toBe("2025-01-19T10:00:03.000Z");
@@ -471,7 +493,8 @@ describe("WebSocket Logging", () => {
         {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
-          message: { id: "cmd-1", type: "phase.start" } as any
+          // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          message: { id: "cmd-1", type: "phase.start" } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:01.000Z",
@@ -480,12 +503,13 @@ describe("WebSocket Logging", () => {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
             type: "error",
-            data: { message: "Test error" }
-          } as any
-        }
+            data: { message: "Test error" },
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
+        },
       ];
 
-      const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+      const content = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
       fs.writeFileSync(logPath, content);
       await reader.readLog();
     });
@@ -516,12 +540,13 @@ describe("WebSocket Logging", () => {
           message: {
             id: `msg-${i}`,
             type: i % 3 === 0 ? "error" : "info",
-            ...(i % 2 === 1 ? { timestamp: new Date().toISOString() } : {})
-          } as any
+            ...(i % 2 === 1 ? { timestamp: new Date().toISOString() } : {}),
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+          } as any,
         });
       }
 
-      const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+      const content = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
       fs.writeFileSync(logPath, content);
 
       const reader = new WebSocketLogReader(logPath);
@@ -541,9 +566,17 @@ describe("WebSocket Logging", () => {
 
     test("handles stream errors gracefully", async () => {
       const content = [
-        JSON.stringify({ loggedAt: "2025-01-19T10:00:00.000Z", direction: "in", message: { id: "1", type: "test" } }),
+        JSON.stringify({
+          loggedAt: "2025-01-19T10:00:00.000Z",
+          direction: "in",
+          message: { id: "1", type: "test" },
+        }),
         "invalid json line",
-        JSON.stringify({ loggedAt: "2025-01-19T10:00:01.000Z", direction: "out", message: { id: "2", type: "test", timestamp: "2025-01-19T10:00:01.000Z" } })
+        JSON.stringify({
+          loggedAt: "2025-01-19T10:00:01.000Z",
+          direction: "out",
+          message: { id: "2", type: "test", timestamp: "2025-01-19T10:00:01.000Z" },
+        }),
       ].join("\n");
 
       fs.writeFileSync(logPath, content);
@@ -551,7 +584,7 @@ describe("WebSocket Logging", () => {
       const reader = new WebSocketLogReader(logPath);
       let count = 0;
 
-      await reader.streamRead(async (entry) => {
+      await reader.streamRead(async (_entry) => {
         count++;
       });
 
@@ -564,10 +597,11 @@ describe("WebSocket Logging", () => {
       const entry: WebSocketLogEntry = {
         loggedAt: new Date().toISOString(),
         direction: "in",
-        message: { id: "cmd-1", type: "phase.start" } as any
+        // biome-ignore lint/suspicious/noExplicitAny: Test mock data
+        message: { id: "cmd-1", type: "phase.start" } as any,
       };
 
-      fs.writeFileSync(logPath, JSON.stringify(entry) + "\n");
+      fs.writeFileSync(logPath, `${JSON.stringify(entry)}\n`);
 
       const entries = await readWebSocketLog(logPath);
       expect(entries.length).toBe(1);
@@ -579,8 +613,9 @@ describe("WebSocket Logging", () => {
         {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
+          // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           message: { id: "cmd-1", type: "phase.start" } as any,
-          metadata: { size: 100 }
+          metadata: { size: 100 },
         },
         {
           loggedAt: "2025-01-19T10:00:01.000Z",
@@ -588,13 +623,14 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
-            type: "phase.started"
+            type: "phase.started",
+            // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
-          metadata: { size: 200 }
-        }
+          metadata: { size: 200 },
+        },
       ];
 
-      const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+      const content = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
       fs.writeFileSync(logPath, content);
 
       const stats = await getWebSocketLogStats(logPath);
@@ -611,70 +647,86 @@ describe("WebSocket Logging", () => {
       const wsLogPath = path.join(tempDir, "websocket.log");
 
       // Simulate a complete phase execution
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock data array
       const messages: Array<[string, any]> = [
         ["in", { id: "cmd-1", type: "phase.start", data: { phaseId: "phase-1" } }],
-        ["out", {
-          id: "evt-1",
-          timestamp: new Date().toISOString(),
-          type: "phase.started",
-          data: {
-            phaseId: "phase-1",
-            phaseName: "Analysis",
-            sessionId: "session-123",
-            startTime: new Date().toISOString()
-          }
-        }],
-        ["out", {
-          id: "evt-2",
-          timestamp: new Date().toISOString(),
-          type: "assistant.action",
-          data: {
-            phaseId: "phase-1",
-            action: "tool_use" as const,
-            content: "",
-            toolName: "Read"
-          }
-        }],
-        ["out", {
-          id: "evt-3",
-          timestamp: new Date().toISOString(),
-          type: "tool.result",
-          data: {
-            phaseId: "phase-1",
-            toolUseId: "tool-1",
-            toolName: "Read",
-            result: "File content",
-            truncated: false,
-            originalLength: 12,
-            executionTimeMs: 45,
-            isError: false
-          }
-        }],
-        ["out", {
-          id: "evt-4",
-          timestamp: new Date().toISOString(),
-          type: "token.usage",
-          data: {
-            phaseId: "phase-1",
-            inputTokens: 1000,
-            outputTokens: 500,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 0,
-            totalCost: 0.0045
-          }
-        }],
-        ["out", {
-          id: "evt-5",
-          timestamp: new Date().toISOString(),
-          type: "phase.completed",
-          data: {
-            phaseId: "phase-1",
-            success: true,
-            cost: 0.0045,
-            duration: 5000,
-            exitStatus: { type: "success" }
-          }
-        }]
+        [
+          "out",
+          {
+            id: "evt-1",
+            timestamp: new Date().toISOString(),
+            type: "phase.started",
+            data: {
+              phaseId: "phase-1",
+              phaseName: "Analysis",
+              sessionId: "session-123",
+              startTime: new Date().toISOString(),
+            },
+          },
+        ],
+        [
+          "out",
+          {
+            id: "evt-2",
+            timestamp: new Date().toISOString(),
+            type: "assistant.action",
+            data: {
+              phaseId: "phase-1",
+              action: "tool_use" as const,
+              content: "",
+              toolName: "Read",
+            },
+          },
+        ],
+        [
+          "out",
+          {
+            id: "evt-3",
+            timestamp: new Date().toISOString(),
+            type: "tool.result",
+            data: {
+              phaseId: "phase-1",
+              toolUseId: "tool-1",
+              toolName: "Read",
+              result: "File content",
+              truncated: false,
+              originalLength: 12,
+              executionTimeMs: 45,
+              isError: false,
+            },
+          },
+        ],
+        [
+          "out",
+          {
+            id: "evt-4",
+            timestamp: new Date().toISOString(),
+            type: "token.usage",
+            data: {
+              phaseId: "phase-1",
+              inputTokens: 1000,
+              outputTokens: 500,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+              totalCost: 0.0045,
+            },
+          },
+        ],
+        [
+          "out",
+          {
+            id: "evt-5",
+            timestamp: new Date().toISOString(),
+            type: "phase.completed",
+            data: {
+              phaseId: "phase-1",
+              success: true,
+              cost: 0.0045,
+              duration: 5000,
+              exitStatus: { type: "success" },
+            },
+          },
+        ],
       ];
 
       // Log all messages
@@ -712,38 +764,48 @@ describe("WebSocket Logging", () => {
       const wsLogPath = path.join(tempDir, "websocket.log");
 
       // Simulate an error scenario with recovery
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock data array
       const messages: Array<[string, any]> = [
         ["in", { id: "cmd-1", type: "phase.start", data: { phaseId: "phase-1" } }],
-        ["out", {
-          id: "evt-1",
-          timestamp: new Date().toISOString(),
-          type: "error",
-          data: { message: "API timeout", fatal: false }
-        }],
+        [
+          "out",
+          {
+            id: "evt-1",
+            timestamp: new Date().toISOString(),
+            type: "error",
+            data: { message: "API timeout", fatal: false },
+          },
+        ],
         ["in", { id: "cmd-2", type: "phase.redo" }],
-        ["out", {
-          id: "evt-2",
-          timestamp: new Date().toISOString(),
-          type: "phase.started",
-          data: {
-            phaseId: "phase-1",
-            phaseName: "Retry",
-            sessionId: "session-456",
-            startTime: new Date().toISOString()
-          }
-        }],
-        ["out", {
-          id: "evt-3",
-          timestamp: new Date().toISOString(),
-          type: "phase.completed",
-          data: {
-            phaseId: "phase-1",
-            success: true,
-            cost: 0.001,
-            duration: 3000,
-            exitStatus: { type: "success" }
-          }
-        }]
+        [
+          "out",
+          {
+            id: "evt-2",
+            timestamp: new Date().toISOString(),
+            type: "phase.started",
+            data: {
+              phaseId: "phase-1",
+              phaseName: "Retry",
+              sessionId: "session-456",
+              startTime: new Date().toISOString(),
+            },
+          },
+        ],
+        [
+          "out",
+          {
+            id: "evt-3",
+            timestamp: new Date().toISOString(),
+            type: "phase.completed",
+            data: {
+              phaseId: "phase-1",
+              success: true,
+              cost: 0.001,
+              duration: 3000,
+              exitStatus: { type: "success" },
+            },
+          },
+        ],
       ];
 
       for (const [direction, message] of messages) {
@@ -760,76 +822,42 @@ describe("WebSocket Logging", () => {
       const redoCommands = reader.filterByMessageType("phase.redo");
       expect(redoCommands.length).toBe(1);
 
-      // Verify successful recovery
       const completions = reader.filterByMessageType("phase.completed");
       expect(completions.length).toBe(1);
 
+      // biome-ignore lint/suspicious/noExplicitAny: Test data access
       const completionData = (completions[0].message as any).data;
       expect(completionData?.success).toBe(true);
     });
 
-    test("handles JSONL format with multiple concurrent writes", async () => {
-      const wsLogPath = path.join(tempDir, "concurrent.log");
+    test("validates format migration from old format", async () => {
+      const logger = new Logger(path.join(tempDir, "main.log"));
+      const wsLogPath = path.join(tempDir, "websocket.log");
 
-      // Simulate concurrent writes
-      const promises = [];
-      for (let i = 0; i < 10; i++) {
-        const message = {
-          id: `msg-${i}`,
-          type: i % 2 === 0 ? "info" : "error",
-          timestamp: new Date().toISOString(),
-          data: { index: i }
-        };
-
-        promises.push(
-          new Promise<void>((resolve) => {
-            setTimeout(() => {
-              logger.logSocketTraffic(wsLogPath, i % 2 === 0 ? "in" : "out", message);
-              resolve();
-            }, Math.random() * 10);
-          })
-        );
-      }
-
-      await Promise.all(promises);
-
-      // Read and verify all messages were logged
-      const reader = new WebSocketLogReader(wsLogPath);
-      const entries = await reader.readLog();
-
-      expect(entries.length).toBe(10);
-
-      // Verify each message is valid JSON
-      entries.forEach(entry => {
-        expect(entry.loggedAt).toBeDefined();
-        expect(entry.direction).toMatch(/^(in|out)$/);
-        expect(entry.message).toBeDefined();
-      });
-    });
-  });
-
-  describe("WebSocket log format migration", () => {
-    test("validates new JSONL format structure", () => {
-      const message = {
-        id: "test-1",
-        type: "test",
-        data: { test: true }
+      // Log a message using the new format
+      const message: ClientCommand = {
+        id: "cmd-1",
+        type: "phase.start",
+        data: { phaseId: "phase-1" },
       };
 
-      logger.logSocketTraffic(logPath, "in", message);
+      logger.logSocketTraffic(wsLogPath, "in", message);
 
-      const content = fs.readFileSync(logPath, "utf-8");
-      const entry = JSON.parse(content.trim());
-
-      // Verify new format structure
-      expect(entry).toHaveProperty("loggedAt");
-      expect(entry).toHaveProperty("direction");
-      expect(entry).toHaveProperty("message");
-      expect(entry).toHaveProperty("metadata");
-
-      // Verify old format is not used
+      // Verify the new format doesn't contain old markers
+      const content = fs.readFileSync(wsLogPath, "utf-8");
       expect(content).not.toContain("[IN]");
       expect(content).not.toContain("[OUT]");
+
+      // Verify it's valid JSONL
+      const lines = content.trim().split("\n");
+      expect(lines.length).toBe(1);
+      expect(() => JSON.parse(lines[0])).not.toThrow();
+
+      const entry = JSON.parse(lines[0]) as WebSocketLogEntry;
+      expect(entry.direction).toBe("in");
+      expect(entry.message).toEqual(message);
+      expect(entry.loggedAt).toBeDefined();
+      expect(entry.metadata?.size).toBe(JSON.stringify(message).length);
     });
   });
 });

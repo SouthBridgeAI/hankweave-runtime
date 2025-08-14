@@ -270,7 +270,10 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
         if (fs.existsSync(websocketLogPath)) {
           try {
             const logContent = await fs.promises.readFile(websocketLogPath, "utf-8");
-            const logLines = logContent.trim().split("\n").filter(line => line.trim());
+            const logLines = logContent
+              .trim()
+              .split("\n")
+              .filter((line) => line.trim());
 
             for (const line of logLines) {
               try {

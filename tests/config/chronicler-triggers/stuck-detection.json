@@ -1,0 +1,68 @@
+{
+  "id": "stuck-detection",
+  "name": "Stuck Agent Detector",
+  "description": "Detects when the agent might be stuck in a loop or making no progress",
+  "trigger": {
+    "type": "sequence",
+    "interestFilter": {
+      "on": [
+        "assistant.action",
+        "tool.result"
+      ]
+    },
+    "pattern": [
+      {
+        "type": "assistant.action",
+        "conditions": [
+          {
+            "operator": "equals",
+            "path": "action",
+            "value": "tool_use"
+          }
+        ]
+      },
+      {
+        "type": "tool.result",
+        "conditions": [
+          {
+            "operator": "contains",
+            "path": "result",
+            "value": "does not match"
+          }
+        ]
+      },
+      {
+        "type": "assistant.action",
+        "conditions": [
+          {
+            "operator": "equals",
+            "path": "action",
+            "value": "tool_use"
+          }
+        ]
+      },
+      {
+        "type": "tool.result",
+        "conditions": [
+          {
+            "operator": "contains",
+            "path": "result",
+            "value": "does not match"
+          }
+        ]
+      }
+    ],
+    "options": {
+      "consecutive": true
+    }
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "promptTemplate": "The agent appears to be stuck - it has made multiple failed attempts with similar errors:\n\n{{events}}\n\nAnalyze:\n1. What is the agent trying to do?\n2. Why are the attempts failing?\n3. Is this a pattern that suggests the agent is stuck?\n4. Suggested intervention or fix\n5. Should the phase be terminated?",
+  "model": "sonnet",
+  "output": {
+    "format": "json",
+    "file": "stuck-detection.jsonl"
+  }
+}

@@ -1,18 +1,25 @@
 import { expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { WebSocketLogReader } from "../../../server/websocket-log-reader.js";
+import type {
+  ErrorEvent,
+  PhaseCompletedEvent,
+  PhaseStartedEvent,
+  ServerEvent,
+} from "../../../server/types/types.js";
 import type { WebSocketLogEntry } from "../../../server/types/websocket-log-types.js";
+import { WebSocketLogReader } from "../../../server/websocket-log-reader.js";
 
 interface TestState {
   executionPath?: string;
-  events: any[];
-  phase1Started: any;
-  phase1Completed: any;
-  phase2Started: any;
-  phase2Completed: any;
-  phase3Started: any;
-  phase3Completed: any;
+  events: ServerEvent[];
+  phase1Started: PhaseStartedEvent | null;
+  phase1Completed: PhaseCompletedEvent | null;
+  phase2Started: PhaseStartedEvent | null;
+  phase2Completed: PhaseCompletedEvent | null;
+  phase3Started: PhaseStartedEvent | null;
+  phase3Completed: PhaseCompletedEvent | null;
+  errorEvents: ErrorEvent[];
 }
 
 export function runWebSocketLoggingTests(testState: TestState): void {
@@ -37,7 +44,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     expect(entries.length).toBeGreaterThan(0);
 
     // Each entry should be valid
-    entries.forEach(entry => {
+    entries.forEach((entry) => {
       expect(entry).toHaveProperty("loggedAt");
       expect(entry).toHaveProperty("direction");
       expect(entry).toHaveProperty("message");
@@ -66,7 +73,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const phaseStartCommands = reader.filterByMessageType("phase.start");
     // May have phase.start commands if not using autostart
     if (phaseStartCommands.length > 0) {
-      phaseStartCommands.forEach(cmd => {
+      phaseStartCommands.forEach((cmd) => {
         expect(cmd.direction).toBe("in");
         expect(cmd.message.type).toBe("phase.start");
       });
@@ -82,7 +89,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const phaseStartedEvents = reader.filterByMessageType("phase.started");
     expect(phaseStartedEvents.length).toBe(3); // 3 phases
 
-    phaseStartedEvents.forEach(event => {
+    phaseStartedEvents.forEach((event) => {
       expect(event.direction).toBe("out");
       expect(event.message.type).toBe("phase.started");
     });
@@ -91,7 +98,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const phaseCompletedEvents = reader.filterByMessageType("phase.completed");
     expect(phaseCompletedEvents.length).toBe(3); // 3 phases
 
-    phaseCompletedEvents.forEach(event => {
+    phaseCompletedEvents.forEach((event) => {
       expect(event.direction).toBe("out");
       expect(event.message.type).toBe("phase.completed");
     });
@@ -124,10 +131,12 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const phaseStartedEvents = reader.filterByMessageType("phase.started");
     const sessionIds = new Set<string>();
 
-    phaseStartedEvents.forEach(event => {
-      const data = (event.message as any).data;
-      if (data?.sessionId) {
-        sessionIds.add(data.sessionId);
+    phaseStartedEvents.forEach((event) => {
+      if (event.message.type === "phase.started") {
+        const data = event.message.data;
+        if (data?.sessionId) {
+          sessionIds.add(data.sessionId);
+        }
       }
     });
 
@@ -135,7 +144,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     expect(sessionIds.size).toBeGreaterThan(0);
 
     // Check messages for each session
-    sessionIds.forEach(sessionId => {
+    sessionIds.forEach((sessionId) => {
       const sessionMessages = reader.getSessionMessages(sessionId);
       expect(sessionMessages.length).toBeGreaterThan(0);
     });
@@ -149,7 +158,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const assistantActions = reader.filterByMessageType("assistant.action");
     expect(assistantActions.length).toBeGreaterThan(0);
 
-    assistantActions.forEach(action => {
+    assistantActions.forEach((action) => {
       expect(action.direction).toBe("out");
       expect(action.message.type).toBe("assistant.action");
     });
@@ -163,7 +172,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const tokenUsageEvents = reader.filterByMessageType("token.usage");
     expect(tokenUsageEvents.length).toBeGreaterThan(0);
 
-    tokenUsageEvents.forEach(event => {
+    tokenUsageEvents.forEach((event) => {
       expect(event.direction).toBe("out");
       expect(event.message.type).toBe("token.usage");
     });
@@ -178,14 +187,16 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     // Tool results are expected in this test
     expect(toolResultEvents.length).toBeGreaterThan(0);
 
-    toolResultEvents.forEach(event => {
+    toolResultEvents.forEach((event) => {
       expect(event.direction).toBe("out");
       expect(event.message.type).toBe("tool.result");
 
-      const data = (event.message as any).data;
-      expect(data).toHaveProperty("toolUseId");
-      expect(data).toHaveProperty("toolName");
-      expect(data).toHaveProperty("executionTimeMs");
+      if (event.message.type === "tool.result") {
+        const data = event.message.data;
+        expect(data).toHaveProperty("toolUseId");
+        expect(data).toHaveProperty("toolName");
+        expect(data).toHaveProperty("executionTimeMs");
+      }
     });
   });
 
@@ -198,14 +209,16 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     // File updates are expected when Claude creates files
     expect(fileUpdatedEvents.length).toBeGreaterThan(0);
 
-    fileUpdatedEvents.forEach(event => {
+    fileUpdatedEvents.forEach((event) => {
       expect(event.direction).toBe("out");
       expect(event.message.type).toBe("file.updated");
 
-      const data = (event.message as any).data;
-      expect(data).toHaveProperty("path");
-      expect(data).toHaveProperty("action");
-      expect(["created", "modified", "deleted"]).toContain(data.action);
+      if (event.message.type === "file.updated") {
+        const data = event.message.data;
+        expect(data).toHaveProperty("path");
+        expect(data).toHaveProperty("action");
+        expect(["created", "modified", "deleted"]).toContain(data.action);
+      }
     });
   });
 
@@ -221,7 +234,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
 
     // Check some entries have metadata
     const entries = reader.getEntries();
-    const entriesWithMetadata = entries.filter(e => e.metadata?.size);
+    const entriesWithMetadata = entries.filter((e) => e.metadata?.size);
     expect(entriesWithMetadata.length).toBeGreaterThan(0);
   });
 
@@ -258,8 +271,8 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     expect(stats.timeRange.end).toBeDefined();
 
     if (stats.timeRange.start && stats.timeRange.end) {
-      const duration = new Date(stats.timeRange.end).getTime() -
-                      new Date(stats.timeRange.start).getTime();
+      const duration =
+        new Date(stats.timeRange.end).getTime() - new Date(stats.timeRange.start).getTime();
       expect(duration).toBeGreaterThan(0);
     }
   });
@@ -273,12 +286,12 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const serverEvents = reader.getServerEvents();
 
     // All client commands should be incoming
-    clientCommands.forEach(cmd => {
+    clientCommands.forEach((cmd) => {
       expect(cmd.direction).toBe("in");
     });
 
     // All server events should be outgoing
-    serverEvents.forEach(event => {
+    serverEvents.forEach((event) => {
       expect(event.direction).toBe("out");
     });
 
@@ -293,7 +306,10 @@ export function runWebSocketLoggingTests(testState: TestState): void {
 
     // Export phase 1 messages
     const phase1Messages = reader.getPhaseMessages("phase-1");
-    const exportPath = path.join(testState.executionPath!, ".tadpole/logs/phase-1-export.jsonl");
+    if (!testState.executionPath) {
+      throw new Error("Execution path not available");
+    }
+    const exportPath = path.join(testState.executionPath, ".tadpole/logs/phase-1-export.jsonl");
 
     reader.exportToFile(phase1Messages, exportPath);
 
@@ -307,7 +323,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     expect(exportedLines.length).toBe(phase1Messages.length);
 
     // Each line should be valid JSON
-    exportedLines.forEach(line => {
+    exportedLines.forEach((line) => {
       const entry = JSON.parse(line) as WebSocketLogEntry;
       expect(entry).toHaveProperty("loggedAt");
       expect(entry).toHaveProperty("direction");
@@ -342,28 +358,33 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     await reader.readLog();
 
     // For each phase, verify the expected message flow
-    ["phase-1", "phase-2", "phase-3"].forEach(phaseId => {
+    ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
       const phaseMessages = reader.getPhaseMessages(phaseId);
 
       // Should have phase.started
-      const started = phaseMessages.find(m =>
-        m.message.type === "phase.started" &&
-        (m.message as any).data?.phaseId === phaseId
-      );
+      const started = phaseMessages.find((m) => {
+        if (m.message.type === "phase.started") {
+          return m.message.data?.phaseId === phaseId;
+        }
+        return false;
+      });
       expect(started).toBeDefined();
 
       // Should have phase.completed
-      const completed = phaseMessages.find(m =>
-        m.message.type === "phase.completed" &&
-        (m.message as any).data?.phaseId === phaseId
-      );
+      const completed = phaseMessages.find((m) => {
+        if (m.message.type === "phase.completed") {
+          return m.message.data?.phaseId === phaseId;
+        }
+        return false;
+      });
       expect(completed).toBeDefined();
 
       // Should have some activity between start and complete
-      const activityMessages = phaseMessages.filter(m =>
-        m.message.type === "assistant.action" ||
-        m.message.type === "token.usage" ||
-        m.message.type === "tool.result"
+      const activityMessages = phaseMessages.filter(
+        (m) =>
+          m.message.type === "assistant.action" ||
+          m.message.type === "token.usage" ||
+          m.message.type === "tool.result",
       );
       expect(activityMessages.length).toBeGreaterThan(0);
     });
@@ -379,7 +400,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
 
     // Should be valid JSONL (each line is valid JSON)
     const lines = content.trim().split("\n");
-    lines.forEach(line => {
+    lines.forEach((line) => {
       expect(() => JSON.parse(line)).not.toThrow();
     });
   });

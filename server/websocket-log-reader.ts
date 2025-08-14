@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import readline from "node:readline";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
-import { isServerEvent, isClientCommand, getMessageType } from "./types/websocket-log-types.js";
+import { getMessageType, isClientCommand, isServerEvent } from "./types/websocket-log-types.js";
 
 /**
  * Utility class for reading and analyzing WebSocket JSONL logs.
@@ -31,7 +31,7 @@ export class WebSocketLogReader {
     const fileStream = fs.createReadStream(this.filePath);
     const rl = readline.createInterface({
       input: fileStream,
-      crlfDelay: Infinity // Handle Windows line endings
+      crlfDelay: Infinity, // Handle Windows line endings
     });
 
     for await (const line of rl) {
@@ -59,8 +59,8 @@ export class WebSocketLogReader {
     }
 
     this.entries = [];
-    const content = fs.readFileSync(this.filePath, 'utf-8');
-    const lines = content.split('\n');
+    const content = fs.readFileSync(this.filePath, "utf-8");
+    const lines = content.split("\n");
 
     for (const line of lines) {
       if (line.trim()) {
@@ -89,7 +89,7 @@ export class WebSocketLogReader {
    * @param direction - "in" for client->server, "out" for server->client
    */
   filterByDirection(direction: "in" | "out"): WebSocketLogEntry[] {
-    return this.entries.filter(entry => entry.direction === direction);
+    return this.entries.filter((entry) => entry.direction === direction);
   }
 
   /**
@@ -98,7 +98,7 @@ export class WebSocketLogReader {
    * @param messageType - The type field of the WebSocket message
    */
   filterByMessageType(messageType: string): WebSocketLogEntry[] {
-    return this.entries.filter(entry => getMessageType(entry.message) === messageType);
+    return this.entries.filter((entry) => getMessageType(entry.message) === messageType);
   }
 
   /**
@@ -108,10 +108,10 @@ export class WebSocketLogReader {
    * @param endTime - ISO string or Date object for end of range
    */
   filterByTimeRange(startTime: string | Date, endTime: string | Date): WebSocketLogEntry[] {
-    const start = typeof startTime === 'string' ? new Date(startTime) : startTime;
-    const end = typeof endTime === 'string' ? new Date(endTime) : endTime;
+    const start = typeof startTime === "string" ? new Date(startTime) : startTime;
+    const end = typeof endTime === "string" ? new Date(endTime) : endTime;
 
-    return this.entries.filter(entry => {
+    return this.entries.filter((entry) => {
       const entryTime = new Date(entry.loggedAt);
       return entryTime >= start && entryTime <= end;
     });
@@ -123,10 +123,10 @@ export class WebSocketLogReader {
    * @param phaseId - The phase ID to filter by
    */
   getPhaseMessages(phaseId: string): WebSocketLogEntry[] {
-    return this.entries.filter(entry => {
+    return this.entries.filter((entry) => {
       // Check if message has a data property
-      if ('data' in entry.message && entry.message.data) {
-        const data = entry.message.data as any;
+      if ("data" in entry.message && entry.message.data) {
+        const data = entry.message.data as Record<string, unknown>;
         return data.phaseId === phaseId;
       }
       return false;
@@ -139,10 +139,10 @@ export class WebSocketLogReader {
    * @param sessionId - The session ID to filter by
    */
   getSessionMessages(sessionId: string): WebSocketLogEntry[] {
-    return this.entries.filter(entry => {
+    return this.entries.filter((entry) => {
       // Check if message has a data property
-      if ('data' in entry.message && entry.message.data) {
-        const data = entry.message.data as any;
+      if ("data" in entry.message && entry.message.data) {
+        const data = entry.message.data as Record<string, unknown>;
         return data.sessionId === sessionId;
       }
       return false;
@@ -153,8 +153,8 @@ export class WebSocketLogReader {
    * Get all server events (outgoing messages).
    */
   getServerEvents(): WebSocketLogEntry[] {
-    return this.entries.filter(entry =>
-      entry.direction === "out" && isServerEvent(entry.message)
+    return this.entries.filter(
+      (entry) => entry.direction === "out" && isServerEvent(entry.message),
     );
   }
 
@@ -162,8 +162,8 @@ export class WebSocketLogReader {
    * Get all client commands (incoming messages).
    */
   getClientCommands(): WebSocketLogEntry[] {
-    return this.entries.filter(entry =>
-      entry.direction === "in" && isClientCommand(entry.message)
+    return this.entries.filter(
+      (entry) => entry.direction === "in" && isClientCommand(entry.message),
     );
   }
 
@@ -189,7 +189,7 @@ export class WebSocketLogReader {
 
     const timeRange = {
       start: this.entries.length > 0 ? this.entries[0].loggedAt : null,
-      end: this.entries.length > 0 ? this.entries[this.entries.length - 1].loggedAt : null
+      end: this.entries.length > 0 ? this.entries[this.entries.length - 1].loggedAt : null,
     };
 
     return {
@@ -198,7 +198,7 @@ export class WebSocketLogReader {
       outgoingCount: this.filterByDirection("out").length,
       messageTypes,
       averageMessageSize: this.entries.length > 0 ? Math.round(totalSize / this.entries.length) : 0,
-      timeRange
+      timeRange,
     };
   }
 
@@ -209,8 +209,8 @@ export class WebSocketLogReader {
    * @param outputPath - Path to the output file
    */
   exportToFile(entries: WebSocketLogEntry[], outputPath: string): void {
-    const lines = entries.map(entry => JSON.stringify(entry));
-    fs.writeFileSync(outputPath, lines.join('\n') + '\n');
+    const lines = entries.map((entry) => JSON.stringify(entry));
+    fs.writeFileSync(outputPath, `${lines.join("\n")}\n`);
   }
 
   /**
@@ -226,7 +226,7 @@ export class WebSocketLogReader {
     const fileStream = fs.createReadStream(this.filePath);
     const rl = readline.createInterface({
       input: fileStream,
-      crlfDelay: Infinity
+      crlfDelay: Infinity,
     });
 
     for await (const line of rl) {
@@ -258,7 +258,9 @@ export async function readWebSocketLog(filePath: string): Promise<WebSocketLogEn
  *
  * @param filePath - Path to the JSONL log file
  */
-export async function getWebSocketLogStats(filePath: string): Promise<ReturnType<WebSocketLogReader['getStatistics']>> {
+export async function getWebSocketLogStats(
+  filePath: string,
+): Promise<ReturnType<WebSocketLogReader["getStatistics"]>> {
   const reader = new WebSocketLogReader(filePath);
   await reader.readLog();
   return reader.getStatistics();

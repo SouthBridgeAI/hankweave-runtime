@@ -1,9 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileResolver } from "./file-resolver.js";
-import type { FileNode } from "./types/types.js";
+import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
-import type { ClientCommand, ServerEvent } from "./types/types.js";
 
 // ============================================================================
 // ID Generation
@@ -49,7 +48,11 @@ export class Logger {
    * @param direction - Whether this is an incoming or outgoing message
    * @param data - The actual WebSocket message (ClientCommand or ServerEvent)
    */
-  logWebSocketMessage(socketLogFile: string, direction: "in" | "out", data: ClientCommand | ServerEvent): void {
+  logWebSocketMessage(
+    socketLogFile: string,
+    direction: "in" | "out",
+    data: ClientCommand | ServerEvent,
+  ): void {
     try {
       // Create the log entry with minimal wrapper
       const logEntry: WebSocketLogEntry = {
@@ -59,11 +62,11 @@ export class Logger {
         metadata: {
           // Calculate message size
           size: JSON.stringify(data).length,
-        }
+        },
       };
 
       // Write as a single line of JSON (JSONL format)
-      const logLine = JSON.stringify(logEntry) + "\n";
+      const logLine = `${JSON.stringify(logEntry)}\n`;
 
       const logsDir = path.dirname(socketLogFile);
       if (!fs.existsSync(logsDir)) {

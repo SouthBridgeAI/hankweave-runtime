@@ -33,14 +33,14 @@ export interface WebSocketLogEntry {
  * Helper type guard to check if a message is a ServerEvent
  */
 export function isServerEvent(message: ClientCommand | ServerEvent): message is ServerEvent {
-  return 'timestamp' in message;
+  return "timestamp" in message;
 }
 
 /**
  * Helper type guard to check if a message is a ClientCommand
  */
 export function isClientCommand(message: ClientCommand | ServerEvent): message is ClientCommand {
-  return !('timestamp' in message);
+  return !("timestamp" in message);
 }
 
 /**
@@ -53,19 +53,21 @@ export function getMessageType(message: ClientCommand | ServerEvent): string {
 /**
  * Extract relevant context from a message for quick reference
  */
-export function extractMessageContext(message: ClientCommand | ServerEvent): Record<string, unknown> {
+export function extractMessageContext(
+  message: ClientCommand | ServerEvent,
+): Record<string, unknown> {
   const context: Record<string, unknown> = {};
 
   // Extract phase ID if present
-  if ('data' in message && message.data) {
-    const data = message.data as any;
-    if ('phaseId' in data) {
+  if ("data" in message && message.data) {
+    const data = message.data as Record<string, unknown>;
+    if ("phaseId" in data) {
       context.phaseId = data.phaseId;
     }
-    if ('sessionId' in data) {
+    if ("sessionId" in data) {
       context.sessionId = data.sessionId;
     }
-    if ('runId' in data) {
+    if ("runId" in data) {
       context.runId = data.runId;
     }
   }
