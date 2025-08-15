@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@biomejs/biome": "^2.0.6",
+    "ai": "^5.0.14",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",
     "minimatch": "^10.0.1",
