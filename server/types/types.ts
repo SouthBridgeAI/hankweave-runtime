@@ -186,6 +186,12 @@ export interface ServerConfig {
   /** Path to general server log file */
   serverLogFile: string;
 
+  /** Current working directory for the server process */
+  cwd: string;
+
+  /** Output directory for generated files. Will be scoped to cwd */
+  outputDirectory: string;
+
   // Execution paths (from ExecutionSetup)
   /** Original data location (for reference only) */
   readOnlySourceDataPath: string;

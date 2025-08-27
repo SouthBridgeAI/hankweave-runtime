@@ -95,6 +95,13 @@ const workspaceSetupItemSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+const phaseOutputSchema = z
+  .object({
+    // An array of glob strings representing phase output files to copy
+    copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
+  })
+  .strict();
+
 const phaseConfigSchema = z
   .object({
     id: z
@@ -129,6 +136,7 @@ const phaseConfigSchema = z
     description: z.string().optional(),
     trackedFiles: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
+    output: phaseOutputSchema.optional(),
   })
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
@@ -150,10 +158,11 @@ const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one p
  * Default server configuration values.
  * Can be overridden by passing config to TadpoleServer constructor.
  *
- * Note: execution paths and phases must be provided by the user.
+ * Note: execution paths and phases must be provided by the user, as well as cwd
  */
 export const DEFAULT_CONFIG: Omit<
   ServerConfig,
+  | "cwd"
   | "readOnlySourceDataPath"
   | "executionPath"
   | "dataPathInExecutionDir"
@@ -165,6 +174,7 @@ export const DEFAULT_CONFIG: Omit<
 > = {
   port: 7777,
   version: "1.0.0",
+  outputDirectory: "tadpole-results",
   lockFile: ".tadpole/server.lock",
   socketLogFile: ".tadpole/logs/websocket.log",
   serverLogFile: ".tadpole/logs/server.log",
