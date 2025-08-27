@@ -137,6 +137,11 @@ export interface PhaseConfig {
 
   /** Optional environment variables to set for the Claude process */
   env?: Record<string, string>;
+
+  /** Optional output files to copy after phase completion */
+  output?: {
+    copy: string[];
+  };
 }
 
 /**
