@@ -93,6 +93,8 @@ const serverConfig: ServerConfig = {
   startNew: true, // Force new execution for tests
 };
 
+const tadpoleResultsDir = path.join(serverConfig.cwd, "tadpole-results/");
+
 // ============================================================================
 // Test State - Shared across all tests
 // ============================================================================
@@ -157,6 +159,11 @@ async function setupAndRunPhases(): Promise<void> {
   }
   if (!fs.existsSync(TEST_RUN_DIR)) {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
+  }
+
+  // Clean up tadpole-results directory if it exists
+  if (fs.existsSync(tadpoleResultsDir)) {
+    fs.rmSync(tadpoleResultsDir, { recursive: true, force: true });
   }
 
   // Start server with execution isolation
@@ -395,6 +402,11 @@ async function runFullCleanup(): Promise<void> {
   // Use the cleanup integration to clean execution directory
   console.log(`\n${colors.blue}Running cleanup integration...${colors.reset}`);
 
+  // Clean up tadpole-results directory if it exists
+  if (fs.existsSync(tadpoleResultsDir)) {
+    fs.rmSync(tadpoleResultsDir, { recursive: true, force: true });
+  }
+
   const cleanupResult = await executeTestCleanup({
     executionPath: testState.executionPath,
     dataSourcePath: DATA_SOURCE_FILE,
@@ -430,6 +442,18 @@ await setupAndRunPhases();
 describe("Tadpole E2E Test", () => {
   describe("Phase Execution", () => {
     runPhaseExecutionTests(testState);
+  });
+
+  describe("Tadpole results", () => {
+    it("should contain favorite_poem.txt", () => {
+      expect(fs.existsSync(path.join(tadpoleResultsDir, "notes", "favorite_poem.txt"))).toBe(true);
+    });
+
+    it("should contain second_favorite_poem.txt", () => {
+      expect(fs.existsSync(path.join(tadpoleResultsDir, "notes", "second_favorite_poem.txt"))).toBe(
+        true,
+      );
+    });
   });
 
   describe("Wordsworth Content Validation", () => {

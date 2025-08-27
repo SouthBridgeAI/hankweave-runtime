@@ -2,10 +2,7 @@
   {
     "id": "phase-1",
     "name": "Phase 1: TestPhase1",
-    "promptFile": [
-      "./phase1Prompt1.md",
-      "./phase1Prompt2.md"
-    ],
+    "promptFile": ["./phase1Prompt1.md", "./phase1Prompt2.md"],
     "model": "sonnet",
     "continuationMode": "fresh",
     "workspaceSetup": [
@@ -23,10 +20,10 @@
       "./noTodosPrompt.md"
     ],
     "description": "Write three pick one",
-    "trackedFiles": [
-      "notes/**/*",
-      "*.md"
-    ]
+    "trackedFiles": ["notes/**/*", "*.md"],
+    "output": {
+      "copy": ["notes/favorite_poem.txt"]
+    }
   },
   {
     "id": "phase-2",
@@ -34,13 +31,12 @@
     "promptText": "Can you put your second favorite of the poems you just made into the notes folder as '<%PROJECT_DIR%>/notes/second_favorite_poem.txt'?",
     "model": "sonnet",
     "continuationMode": "continue-previous",
-    "appendSystemPromptFile": [
-      "./noTodosPrompt.md"
-    ],
+    "appendSystemPromptFile": ["./noTodosPrompt.md"],
     "description": "Write one more",
-    "trackedFiles": [
-      "notes/**/*"
-    ]
+    "trackedFiles": ["notes/**/*"],
+    "output": {
+      "copy": ["notes/second_favorite_poem.txt"]
+    }
   },
   {
     "id": "phase-3",
@@ -65,9 +61,7 @@
     ],
     "continuationMode": "fresh",
     "description": "Convert poems to code",
-    "appendSystemPromptFile": [
-      "./noTodosPrompt.md"
-    ],
+    "appendSystemPromptFile": ["./noTodosPrompt.md"],
     "trackedFiles": [
       "typescript_code/src/**/*.ts",
       "typescript_code/package.json"
