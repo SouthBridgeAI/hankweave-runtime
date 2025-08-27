@@ -294,21 +294,21 @@ export function formatSize(bytes: number): string {
 }
 
 export async function copyFiles(
-  cwd: string,
+  sourceDirectory: string,
   filesToCopy: string[],
   destinationDirectory: string,
 ): Promise<void> {
   await fs.promises.mkdir(destinationDirectory, { recursive: true });
 
   // Resolve glob patterns from within the execution directory
-  const files = await fileResolver.resolveFiles(cwd, filesToCopy);
+  const files = await fileResolver.resolveFiles(sourceDirectory, filesToCopy);
 
   if (files.length === 0) {
     return;
   }
 
   for (const file of files) {
-    const sourcePath = path.join(cwd, file);
+    const sourcePath = path.join(sourceDirectory, file);
     const destPath = path.join(destinationDirectory, file);
 
     // Ensure the destination subdirectory exists

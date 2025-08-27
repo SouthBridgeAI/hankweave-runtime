@@ -47,11 +47,7 @@ describe("buildFileTree", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-filetree-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-test-filetree-${Date.now()}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
   });
 
@@ -84,14 +80,8 @@ describe("buildFileTree", () => {
     await fs.promises.mkdir(path.join(tempDir, "src", "utils"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "index.ts"),
-      "export {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "utils", "helper.ts"),
-      "export {}"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "index.ts"), "export {}");
+    await fs.promises.writeFile(path.join(tempDir, "src", "utils", "helper.ts"), "export {}");
 
     const tree = await buildFileTree(tempDir, "**/*.ts");
 
@@ -102,9 +92,7 @@ describe("buildFileTree", () => {
     expect(srcNode?.children).toBeDefined();
 
     // Check index.ts in src
-    const indexFile = srcNode?.children?.find(
-      (child) => child.name === "index.ts"
-    );
+    const indexFile = srcNode?.children?.find((child) => child.name === "index.ts");
     expect(indexFile).toBeDefined();
     expect(indexFile?.isDirectory).toBe(false);
 
@@ -114,9 +102,7 @@ describe("buildFileTree", () => {
     expect(utilsDir?.isDirectory).toBe(true);
 
     // Check helper.ts in utils
-    const helperFile = utilsDir?.children?.find(
-      (child) => child.name === "helper.ts"
-    );
+    const helperFile = utilsDir?.children?.find((child) => child.name === "helper.ts");
     expect(helperFile).toBeDefined();
     expect(helperFile?.isDirectory).toBe(false);
   });
@@ -151,19 +137,14 @@ describe("buildFileTree", () => {
 
   test("marks directories with isDirectory flag", async () => {
     await fs.promises.mkdir(path.join(tempDir, "dir"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, "dir", "file.txt"),
-      "content"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "dir", "file.txt"), "content");
 
     const tree = await buildFileTree(tempDir, "**/*.txt");
 
     const dirNode = tree.find((node) => node.name === "dir");
     expect(dirNode?.isDirectory).toBe(true);
 
-    const fileInDir = dirNode?.children?.find(
-      (child) => child.name === "file.txt"
-    );
+    const fileInDir = dirNode?.children?.find((child) => child.name === "file.txt");
     expect(fileInDir?.isDirectory).toBe(false);
   });
 
@@ -175,10 +156,7 @@ describe("buildFileTree", () => {
   test("handles files at root level", async () => {
     await fs.promises.writeFile(path.join(tempDir, "root.txt"), "root");
     await fs.promises.mkdir(path.join(tempDir, "dir"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, "dir", "nested.txt"),
-      "nested"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "dir", "nested.txt"), "nested");
 
     const tree = await buildFileTree(tempDir, "**/*.txt");
 
@@ -191,9 +169,7 @@ describe("buildFileTree", () => {
     expect(dirNode).toBeDefined();
     expect(dirNode?.isDirectory).toBe(true);
 
-    const nestedFile = dirNode?.children?.find(
-      (child) => child.name === "nested.txt"
-    );
+    const nestedFile = dirNode?.children?.find((child) => child.name === "nested.txt");
     expect(nestedFile).toBeDefined();
     expect(nestedFile?.isDirectory).toBe(false);
   });
@@ -205,16 +181,8 @@ describe("copyFiles", () => {
 
   beforeEach(async () => {
     const timestamp = Date.now();
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-copyfiles-src-${timestamp}`
-    );
-    destDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-copyfiles-dest-${timestamp}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-test-copyfiles-src-${timestamp}`);
+    destDir = path.resolve("tests", "test-area", `temp-test-copyfiles-dest-${timestamp}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
   });
 
@@ -228,10 +196,7 @@ describe("copyFiles", () => {
 
     await copyFiles(tempDir, ["test.txt"], destDir);
 
-    const copiedContent = await fs.promises.readFile(
-      path.join(destDir, "test.txt"),
-      "utf-8"
-    );
+    const copiedContent = await fs.promises.readFile(path.join(destDir, "test.txt"), "utf-8");
     expect(copiedContent).toBe("test content");
   });
 
@@ -241,14 +206,8 @@ describe("copyFiles", () => {
 
     await copyFiles(tempDir, ["*.txt"], destDir);
 
-    const content1 = await fs.promises.readFile(
-      path.join(destDir, "file1.txt"),
-      "utf-8"
-    );
-    const content2 = await fs.promises.readFile(
-      path.join(destDir, "file2.txt"),
-      "utf-8"
-    );
+    const content1 = await fs.promises.readFile(path.join(destDir, "file1.txt"), "utf-8");
+    const content2 = await fs.promises.readFile(path.join(destDir, "file2.txt"), "utf-8");
     expect(content1).toBe("content1");
     expect(content2).toBe("content2");
   });
@@ -257,24 +216,21 @@ describe("copyFiles", () => {
     await fs.promises.mkdir(path.join(tempDir, "nested", "deep"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "nested", "file.txt"),
-      "nested content"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "nested", "file.txt"), "nested content");
     await fs.promises.writeFile(
       path.join(tempDir, "nested", "deep", "deep-file.txt"),
-      "deep content"
+      "deep content",
     );
 
     await copyFiles(tempDir, ["**/*.txt"], destDir);
 
     const nestedContent = await fs.promises.readFile(
       path.join(destDir, "nested", "file.txt"),
-      "utf-8"
+      "utf-8",
     );
     const deepContent = await fs.promises.readFile(
       path.join(destDir, "nested", "deep", "deep-file.txt"),
-      "utf-8"
+      "utf-8",
     );
     expect(nestedContent).toBe("nested content");
     expect(deepContent).toBe("deep content");
@@ -289,10 +245,7 @@ describe("copyFiles", () => {
     await copyFiles(tempDir, ["test.txt"], destDir);
 
     expect(fs.existsSync(destDir)).toBe(true);
-    const copiedContent = await fs.promises.readFile(
-      path.join(destDir, "test.txt"),
-      "utf-8"
-    );
+    const copiedContent = await fs.promises.readFile(path.join(destDir, "test.txt"), "utf-8");
     expect(copiedContent).toBe("content");
   });
 
@@ -320,24 +273,21 @@ describe("copyFiles", () => {
     await fs.promises.mkdir(path.join(tempDir, "source-dir", "subdir"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "source-dir", "file.txt"),
-      "dir content"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "source-dir", "file.txt"), "dir content");
     await fs.promises.writeFile(
       path.join(tempDir, "source-dir", "subdir", "nested.txt"),
-      "nested dir content"
+      "nested dir content",
     );
 
     await copyFiles(tempDir, ["source-dir/**"], destDir);
 
     const dirContent = await fs.promises.readFile(
       path.join(destDir, "source-dir", "file.txt"),
-      "utf-8"
+      "utf-8",
     );
     const nestedDirContent = await fs.promises.readFile(
       path.join(destDir, "source-dir", "subdir", "nested.txt"),
-      "utf-8"
+      "utf-8",
     );
     expect(dirContent).toBe("dir content");
     expect(nestedDirContent).toBe("nested dir content");
@@ -345,24 +295,15 @@ describe("copyFiles", () => {
 
   test("handles mixed files and directories", async () => {
     await fs.promises.mkdir(path.join(tempDir, "dir"), { recursive: true });
-    await fs.promises.writeFile(
-      path.join(tempDir, "root-file.txt"),
-      "root content"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "dir", "dir-file.txt"),
-      "dir content"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "root-file.txt"), "root content");
+    await fs.promises.writeFile(path.join(tempDir, "dir", "dir-file.txt"), "dir content");
 
     await copyFiles(tempDir, ["**/*.txt"], destDir);
 
-    const rootContent = await fs.promises.readFile(
-      path.join(destDir, "root-file.txt"),
-      "utf-8"
-    );
+    const rootContent = await fs.promises.readFile(path.join(destDir, "root-file.txt"), "utf-8");
     const dirContent = await fs.promises.readFile(
       path.join(destDir, "dir", "dir-file.txt"),
-      "utf-8"
+      "utf-8",
     );
     expect(rootContent).toBe("root content");
     expect(dirContent).toBe("dir content");
@@ -372,16 +313,13 @@ describe("copyFiles", () => {
     await fs.promises.mkdir(path.join(tempDir, "a", "b", "c"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "a", "b", "c", "deep.txt"),
-      "deep content"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "a", "b", "c", "deep.txt"), "deep content");
 
     await copyFiles(tempDir, ["**/*.txt"], destDir);
 
     const deepContent = await fs.promises.readFile(
       path.join(destDir, "a", "b", "c", "deep.txt"),
-      "utf-8"
+      "utf-8",
     );
     expect(deepContent).toBe("deep content");
 
@@ -393,20 +331,14 @@ describe("copyFiles", () => {
   test("respects .gitignore rules", async () => {
     await fs.promises.writeFile(path.join(tempDir, "include.txt"), "included");
     await fs.promises.writeFile(path.join(tempDir, "ignore.txt"), "ignored");
-    await fs.promises.writeFile(
-      path.join(tempDir, ".gitignore"),
-      "ignore.txt\n"
-    );
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "ignore.txt\n");
 
     await copyFiles(tempDir, ["*.txt"], destDir);
 
     expect(fs.existsSync(path.join(destDir, "include.txt"))).toBe(true);
     expect(fs.existsSync(path.join(destDir, "ignore.txt"))).toBe(false);
 
-    const content = await fs.promises.readFile(
-      path.join(destDir, "include.txt"),
-      "utf-8"
-    );
+    const content = await fs.promises.readFile(path.join(destDir, "include.txt"), "utf-8");
     expect(content).toBe("included");
   });
 
@@ -414,16 +346,10 @@ describe("copyFiles", () => {
     await fs.promises.mkdir(path.join(tempDir, "src"), { recursive: true });
     await fs.promises.writeFile(path.join(tempDir, "root.txt"), "root");
     await fs.promises.writeFile(path.join(tempDir, "src", "src.txt"), "src");
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "ignore.txt"),
-      "ignored"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "ignore.txt"), "ignored");
 
     await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "*.log\n");
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", ".gitignore"),
-      "ignore.txt\n"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", ".gitignore"), "ignore.txt\n");
 
     await copyFiles(tempDir, ["**/*.txt"], destDir);
 
