@@ -59,6 +59,7 @@ import { isSyntheticTimeout } from "./types/types.js";
 import {
   assertNever,
   buildFileTree,
+  copyFiles,
   escapeShellArg,
   generateId,
   Logger,
@@ -1705,6 +1706,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Send state snapshot
     await this.sendStateSnapshot();
+
+    // Copy output files if specified
+    if (finalStatus === "completed" && this.currentPhase.phase.output) {
+      copyFiles(
+        this.config.executionPath,
+        this.currentPhase.phase.output.copy,
+        path.join(this.config.cwd, this.config.outputDirectory),
+      );
+    }
 
     // Clean up - now happens after state is persisted
     this.cleanupCurrentPhase();
