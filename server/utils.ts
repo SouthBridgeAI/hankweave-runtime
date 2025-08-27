@@ -292,3 +292,29 @@ export function formatSize(bytes: number): string {
 
   return `${(bytes / k ** i).toFixed(1)} ${units[i]}`;
 }
+
+export async function copyFiles(
+  cwd: string,
+  filesToCopy: string[],
+  destinationDirectory: string,
+): Promise<void> {
+  await fs.promises.mkdir(destinationDirectory, { recursive: true });
+
+  // Resolve glob patterns from within the execution directory
+  const files = await fileResolver.resolveFiles(cwd, filesToCopy);
+
+  if (files.length === 0) {
+    return;
+  }
+
+  for (const file of files) {
+    const sourcePath = path.join(cwd, file);
+    const destPath = path.join(destinationDirectory, file);
+
+    // Ensure the destination subdirectory exists
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+
+    // Using fs.cp for robust recursive copying
+    await fs.promises.cp(sourcePath, destPath, { recursive: true });
+  }
+}
