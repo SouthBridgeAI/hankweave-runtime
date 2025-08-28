@@ -51,7 +51,7 @@ export class Logger {
   logWebSocketMessage(
     socketLogFile: string,
     direction: "in" | "out",
-    data: ClientCommand | ServerEvent,
+    data: ClientCommand | ServerEvent
   ): void {
     try {
       // Create the log entry with minimal wrapper
@@ -83,9 +83,17 @@ export class Logger {
   /**
    * @deprecated Use logWebSocketMessage instead
    */
-  logSocketTraffic(socketLogFile: string, direction: "in" | "out", data: unknown): void {
+  logSocketTraffic(
+    socketLogFile: string,
+    direction: "in" | "out",
+    data: unknown
+  ): void {
     // For backward compatibility, convert to new format
-    this.logWebSocketMessage(socketLogFile, direction, data as ClientCommand | ServerEvent);
+    this.logWebSocketMessage(
+      socketLogFile,
+      direction,
+      data as ClientCommand | ServerEvent
+    );
   }
 }
 
@@ -104,12 +112,17 @@ export class Logger {
  * @param pattern - Glob pattern to match files
  * @returns Root nodes of the file tree
  */
-export async function buildFileTree(projectPath: string, pattern: string): Promise<FileNode[]> {
+export async function buildFileTree(
+  projectPath: string,
+  pattern: string
+): Promise<FileNode[]> {
   const tree: FileNode[] = [];
 
   try {
     // Use unified file resolver to respect gitignore
-    const resolvedFiles = await fileResolver.resolveFiles(projectPath, [pattern]);
+    const resolvedFiles = await fileResolver.resolveFiles(projectPath, [
+      pattern,
+    ]);
 
     // Get file metadata for each resolved file
     const files = await Promise.all(
@@ -122,7 +135,7 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
           content,
           lastModified: stats.mtime.toISOString(),
         };
-      }),
+      })
     );
 
     const dirMap = new Map<string, FileNode>();
@@ -132,7 +145,9 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
 
     for (const file of files) {
       // Normalize path to remove leading "./"
-      const normalizedPath = file.path.startsWith("./") ? file.path.slice(2) : file.path;
+      const normalizedPath = file.path.startsWith("./")
+        ? file.path.slice(2)
+        : file.path;
       const parts = normalizedPath.split(path.sep);
       let currentPath = "";
       let parent: FileNode | null = null;
@@ -245,7 +260,7 @@ export function assertNever(x: never): never {
  */
 export async function getDirectorySize(
   dirPath: string,
-  timeoutMs = 30000, // Preserve timeout feature from cleanup folder
+  timeoutMs = 30000 // Preserve timeout feature from cleanup folder
 ): Promise<number> {
   let totalSize = 0;
   const startTime = Date.now();
@@ -253,7 +268,9 @@ export async function getDirectorySize(
   async function walkDir(currentPath: string): Promise<void> {
     // Check timeout
     if (Date.now() - startTime > timeoutMs) {
-      throw new Error(`Directory size calculation timed out after ${timeoutMs}ms`);
+      throw new Error(
+        `Directory size calculation timed out after ${timeoutMs}ms`
+      );
     }
 
     const entries = await fs.promises.readdir(currentPath, {
@@ -297,9 +314,12 @@ export async function copyFiles(
   sourceDirectory: string,
   filesToCopy: string[],
   destinationDirectory: string,
-  logger: Logger,
+  logger: Logger
 ): Promise<void> {
-  logger.log(`Copying files from ${sourceDirectory} to ${destinationDirectory}`, "debug");
+  logger.log(
+    `Copying files from ${sourceDirectory} to ${destinationDirectory}`,
+    "debug"
+  );
 
   await fs.promises.mkdir(destinationDirectory, { recursive: true });
 
@@ -318,6 +338,11 @@ export async function copyFiles(
     const destPath = path.join(destinationDirectory, file);
 
     logger.log(`Copying ${sourcePath} to ${destPath}`, "debug");
+
+    if (!fs.existsSync(sourcePath)) {
+      logger.log(`Source file ${sourcePath} does not exist`, "info");
+      continue;
+    }
 
     // Ensure the destination subdirectory exists
     await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
