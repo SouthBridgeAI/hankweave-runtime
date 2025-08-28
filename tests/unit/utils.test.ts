@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
 import type { FileNode } from "../../server/types/types";
-import { buildFileTree, copyFiles, escapeShellArg } from "../../server/utils";
+import { buildFileTree, copyFiles, escapeShellArg, Logger } from "../../server/utils";
 
 describe("escapeShellArg", () => {
   test("escapes single quotes correctly", () => {
@@ -175,15 +175,30 @@ describe("buildFileTree", () => {
   });
 });
 
+// Mock logger
+class MockLogger extends Logger {
+  logs: Array<{ message: string; level: string }> = [];
+
+  log(message: string, level: "info" | "error" | "debug" = "info"): void {
+    this.logs.push({ message, level });
+  }
+
+  logSocketTraffic(_socketLogFile: string, _direction: "in" | "out", _data: unknown): void {
+    // Mock implementation
+  }
+}
+
 describe("copyFiles", () => {
   let tempDir: string;
   let destDir: string;
+  let mockLogger: MockLogger;
 
   beforeEach(async () => {
     const timestamp = Date.now();
     tempDir = path.resolve("tests", "test-area", `temp-test-copyfiles-src-${timestamp}`);
     destDir = path.resolve("tests", "test-area", `temp-test-copyfiles-dest-${timestamp}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
+    mockLogger = new MockLogger("");
   });
 
   afterEach(() => {
@@ -194,7 +209,7 @@ describe("copyFiles", () => {
   test("copies single file to destination", async () => {
     await fs.promises.writeFile(path.join(tempDir, "test.txt"), "test content");
 
-    await copyFiles(tempDir, ["test.txt"], destDir);
+    await copyFiles(tempDir, ["test.txt"], destDir, mockLogger);
 
     const copiedContent = await fs.promises.readFile(path.join(destDir, "test.txt"), "utf-8");
     expect(copiedContent).toBe("test content");
@@ -204,7 +219,7 @@ describe("copyFiles", () => {
     await fs.promises.writeFile(path.join(tempDir, "file1.txt"), "content1");
     await fs.promises.writeFile(path.join(tempDir, "file2.txt"), "content2");
 
-    await copyFiles(tempDir, ["*.txt"], destDir);
+    await copyFiles(tempDir, ["*.txt"], destDir, mockLogger);
 
     const content1 = await fs.promises.readFile(path.join(destDir, "file1.txt"), "utf-8");
     const content2 = await fs.promises.readFile(path.join(destDir, "file2.txt"), "utf-8");
@@ -222,7 +237,7 @@ describe("copyFiles", () => {
       "deep content",
     );
 
-    await copyFiles(tempDir, ["**/*.txt"], destDir);
+    await copyFiles(tempDir, ["**/*.txt"], destDir, mockLogger);
 
     const nestedContent = await fs.promises.readFile(
       path.join(destDir, "nested", "file.txt"),
@@ -242,7 +257,7 @@ describe("copyFiles", () => {
     rmSync(destDir, { recursive: true, force: true });
     expect(fs.existsSync(destDir)).toBe(false);
 
-    await copyFiles(tempDir, ["test.txt"], destDir);
+    await copyFiles(tempDir, ["test.txt"], destDir, mockLogger);
 
     expect(fs.existsSync(destDir)).toBe(true);
     const copiedContent = await fs.promises.readFile(path.join(destDir, "test.txt"), "utf-8");
@@ -254,7 +269,7 @@ describe("copyFiles", () => {
     await fs.promises.writeFile(path.join(tempDir, "file.ts"), "ts content");
     await fs.promises.writeFile(path.join(tempDir, "readme.md"), "md content");
 
-    await copyFiles(tempDir, ["*.js", "*.ts"], destDir);
+    await copyFiles(tempDir, ["*.js", "*.ts"], destDir, mockLogger);
 
     expect(fs.existsSync(path.join(destDir, "file.js"))).toBe(true);
     expect(fs.existsSync(path.join(destDir, "file.ts"))).toBe(true);
@@ -264,7 +279,7 @@ describe("copyFiles", () => {
   test("handles empty file list gracefully", async () => {
     await fs.promises.writeFile(path.join(tempDir, "ignored.txt"), "content");
 
-    await copyFiles(tempDir, ["*.nonexistent"], destDir);
+    await copyFiles(tempDir, ["*.nonexistent"], destDir, mockLogger);
 
     expect(fs.existsSync(path.join(destDir, "ignored.txt"))).toBe(false);
   });
@@ -279,7 +294,7 @@ describe("copyFiles", () => {
       "nested dir content",
     );
 
-    await copyFiles(tempDir, ["source-dir/**"], destDir);
+    await copyFiles(tempDir, ["source-dir/**"], destDir, mockLogger);
 
     const dirContent = await fs.promises.readFile(
       path.join(destDir, "source-dir", "file.txt"),
@@ -298,7 +313,7 @@ describe("copyFiles", () => {
     await fs.promises.writeFile(path.join(tempDir, "root-file.txt"), "root content");
     await fs.promises.writeFile(path.join(tempDir, "dir", "dir-file.txt"), "dir content");
 
-    await copyFiles(tempDir, ["**/*.txt"], destDir);
+    await copyFiles(tempDir, ["**/*.txt"], destDir, mockLogger);
 
     const rootContent = await fs.promises.readFile(path.join(destDir, "root-file.txt"), "utf-8");
     const dirContent = await fs.promises.readFile(
@@ -315,7 +330,7 @@ describe("copyFiles", () => {
     });
     await fs.promises.writeFile(path.join(tempDir, "a", "b", "c", "deep.txt"), "deep content");
 
-    await copyFiles(tempDir, ["**/*.txt"], destDir);
+    await copyFiles(tempDir, ["**/*.txt"], destDir, mockLogger);
 
     const deepContent = await fs.promises.readFile(
       path.join(destDir, "a", "b", "c", "deep.txt"),
@@ -333,7 +348,7 @@ describe("copyFiles", () => {
     await fs.promises.writeFile(path.join(tempDir, "ignore.txt"), "ignored");
     await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "ignore.txt\n");
 
-    await copyFiles(tempDir, ["*.txt"], destDir);
+    await copyFiles(tempDir, ["*.txt"], destDir, mockLogger);
 
     expect(fs.existsSync(path.join(destDir, "include.txt"))).toBe(true);
     expect(fs.existsSync(path.join(destDir, "ignore.txt"))).toBe(false);
@@ -351,7 +366,7 @@ describe("copyFiles", () => {
     await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "*.log\n");
     await fs.promises.writeFile(path.join(tempDir, "src", ".gitignore"), "ignore.txt\n");
 
-    await copyFiles(tempDir, ["**/*.txt"], destDir);
+    await copyFiles(tempDir, ["**/*.txt"], destDir, mockLogger);
 
     expect(fs.existsSync(path.join(destDir, "root.txt"))).toBe(true);
     expect(fs.existsSync(path.join(destDir, "src", "src.txt"))).toBe(true);

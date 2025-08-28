@@ -1709,11 +1709,19 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Copy output files if specified
     if (finalStatus === "completed" && this.currentPhase.phase.output) {
-      copyFiles(
-        this.config.executionPath,
-        this.currentPhase.phase.output.copy,
-        path.join(this.config.cwd, this.config.outputDirectory),
-      );
+      try {
+        await copyFiles(
+          this.config.executionPath,
+          this.currentPhase.phase.output.copy,
+          path.join(this.config.cwd, this.config.outputDirectory),
+          this.logger,
+        );
+      } catch (error) {
+        this.logger.log(
+          `Failed to copy output files of the phase ${this.currentPhase.phase.id}: ${error}`,
+          "error",
+        );
+      }
     }
 
     // Clean up - now happens after state is persisted

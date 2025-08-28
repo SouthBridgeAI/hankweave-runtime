@@ -297,19 +297,27 @@ export async function copyFiles(
   sourceDirectory: string,
   filesToCopy: string[],
   destinationDirectory: string,
+  logger: Logger,
 ): Promise<void> {
+  logger.log(`Copying files from ${sourceDirectory} to ${destinationDirectory}`, "debug");
+
   await fs.promises.mkdir(destinationDirectory, { recursive: true });
 
   // Resolve glob patterns from within the execution directory
   const files = await fileResolver.resolveFiles(sourceDirectory, filesToCopy);
 
   if (files.length === 0) {
+    logger.log("No files matched the copy globs.", "debug");
     return;
   }
+
+  logger.log(`Resolved files: ${files.join(", ")}`, "debug");
 
   for (const file of files) {
     const sourcePath = path.join(sourceDirectory, file);
     const destPath = path.join(destinationDirectory, file);
+
+    logger.log(`Copying ${sourcePath} to ${destPath}`, "debug");
 
     // Ensure the destination subdirectory exists
     await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
