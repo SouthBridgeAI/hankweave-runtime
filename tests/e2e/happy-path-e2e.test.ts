@@ -454,6 +454,20 @@ describe("Tadpole E2E Test", () => {
         true,
       );
     });
+
+    it("should have executed beforeCopy command for phase-1", () => {
+      if (!testState.executionPath) {
+        throw new Error("Execution path not available");
+      }
+
+      // Check that the beforeCopy command created the log file in the execution directory
+      const beforeCopyLogPath = path.join(testState.executionPath, "notes", "beforecopy_log.txt");
+      expect(fs.existsSync(beforeCopyLogPath)).toBe(true);
+
+      // Check the content of the log file
+      const logContent = fs.readFileSync(beforeCopyLogPath, "utf-8");
+      expect(logContent).toContain("Before copy command executed for phase-1");
+    });
   });
 
   describe("Wordsworth Content Validation", () => {

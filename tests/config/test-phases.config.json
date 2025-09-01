@@ -22,7 +22,8 @@
     "description": "Write three pick one",
     "trackedFiles": ["notes/**/*", "*.md"],
     "output": {
-      "copy": ["notes/favorite_poem.txt"]
+      "copy": ["notes/favorite_poem.txt"],
+      "beforeCopy": "echo 'Before copy command executed for phase-1' >> notes/beforecopy_log.txt"
     }
   },
   {

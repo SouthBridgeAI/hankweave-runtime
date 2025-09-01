@@ -1707,9 +1707,22 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Send state snapshot
     await this.sendStateSnapshot();
 
-    // Copy output files if specified
     if (finalStatus === "completed" && this.currentPhase.phase.output) {
       try {
+        if (this.currentPhase.phase.output.beforeCopy) {
+          // Run beforeCopy command if specified
+          // TODO: give this another look
+          // stuffing both copy and before copy into one try-catch assuming that
+          // copyFiles might not make sense if beforeCopy fails so we bail early here
+          this.logger.log(
+            `Running beforeCopy command for phase ${this.currentPhase.phase.id}: ${this.currentPhase.phase.output.beforeCopy}`,
+          );
+          await this.runCommand(
+            this.currentPhase.phase.output.beforeCopy,
+            this.config.executionPath,
+          );
+          this.logger.log(`Completed beforeCopy command for phase ${this.currentPhase.phase.id}`);
+        }
         await copyFiles(
           this.config.executionPath,
           this.currentPhase.phase.output.copy,
