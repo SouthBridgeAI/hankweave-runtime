@@ -23,7 +23,15 @@
     "trackedFiles": ["notes/**/*", "*.md"],
     "output": {
       "copy": ["notes/favorite_poem.txt"],
-      "beforeCopy": "echo 'Before copy command executed for phase-1' >> notes/beforecopy_log.txt"
+      "beforeCopy": [
+        {
+          "type": "command",
+          "command": {
+            "run": "echo 'Before copy command executed for phase-1' >> notes/beforecopy_log.txt",
+            "workingDirectory": "project"
+          }
+        }
+      ]
     }
   },
   {

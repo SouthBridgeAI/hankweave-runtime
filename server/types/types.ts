@@ -46,6 +46,33 @@ export type CheckpointStatus = (typeof CHECKPOINT_STATUS)[keyof typeof CHECKPOIN
 // Server Configuration
 // ============================================================================
 
+type ShellCommandWorkingDirectory = "project";
+type WorkspaceShellCommandWorkingDirectory = ShellCommandWorkingDirectory | "lastCopied";
+
+export type ShellCommand = {
+  /** Type of setup operation */
+  type: "command";
+  /** For command operations */
+  command: {
+    /** Shell command to execute */
+    run: string;
+    /** Working directory for command execution (default: "project") */
+    workingDirectory: ShellCommandWorkingDirectory;
+  };
+};
+
+export type WorkspaceShellCommand = {
+  /** Type of setup operation */
+  type: "command";
+  /** For command operations */
+  command: {
+    /** Shell command to execute */
+    run: string;
+    /** Working directory for command execution (default: "project") */
+    workingDirectory: WorkspaceShellCommandWorkingDirectory;
+  };
+};
+
 /**
  * Workspace setup operation - either copy files/directories or run commands.
  */
@@ -69,17 +96,7 @@ export type WorkspaceSetupItem =
         to: string;
       };
     }
-  | {
-      /** Type of setup operation */
-      type: "command";
-      /** For command operations */
-      command: {
-        /** Shell command to execute */
-        run: string;
-        /** Working directory for command execution (default: "project") */
-        workingDirectory: "project" | "lastCopied";
-      };
-    };
+  | WorkspaceShellCommand;
 
 /**
  * Configuration for a single phase in the Tadpole workflow.
@@ -141,7 +158,7 @@ export interface PhaseConfig {
   /** Optional output files to copy after phase completion */
   output?: {
     copy: string[];
-    beforeCopy?: string;
+    beforeCopy?: ShellCommand[];
   };
 }
 

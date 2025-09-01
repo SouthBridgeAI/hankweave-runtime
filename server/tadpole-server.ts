@@ -1709,19 +1709,31 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     if (finalStatus === "completed" && this.currentPhase.phase.output) {
       try {
-        if (this.currentPhase.phase.output.beforeCopy) {
-          // Run beforeCopy command if specified
+        if (
+          this.currentPhase.phase.output.beforeCopy &&
+          this.currentPhase.phase.output.beforeCopy.length > 0
+        ) {
+          // Run beforeCopy commands if specified
           // TODO: give this another look
           // stuffing both copy and before copy into one try-catch assuming that
           // copyFiles might not make sense if beforeCopy fails so we bail early here
           this.logger.log(
-            `Running beforeCopy command for phase ${this.currentPhase.phase.id}: ${this.currentPhase.phase.output.beforeCopy}`,
+            `Running ${this.currentPhase.phase.output.beforeCopy.length} beforeCopy command(s) for phase ${this.currentPhase.phase.id}`,
           );
-          await this.runCommand(
-            this.currentPhase.phase.output.beforeCopy,
-            this.config.executionPath,
+
+          for (const [index, command] of this.currentPhase.phase.output.beforeCopy.entries()) {
+            this.logger.log(
+              `Running beforeCopy command ${index + 1}/${
+                this.currentPhase.phase.output.beforeCopy.length
+              }: ${command.command.run}`,
+            );
+            await this.runCommand(command.command.run, this.config.executionPath);
+            this.logger.log(`Completed beforeCopy command ${index + 1}: ${command.command.run}`);
+          }
+
+          this.logger.log(
+            `Completed all beforeCopy commands for phase ${this.currentPhase.phase.id}`,
           );
-          this.logger.log(`Completed beforeCopy command for phase ${this.currentPhase.phase.id}`);
         }
         await copyFiles(
           this.config.executionPath,

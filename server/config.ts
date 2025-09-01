@@ -78,6 +78,29 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
 // Configuration Schema
 // ============================================================================
 
+const shellCommandWorkingDirectory = ["project"] as const;
+
+// when running workspace setup commands, it's useful to have "lastCopied" option
+// to coordinate with copy commands
+const workspaceSetupCommandWorkingDirectory = [
+  ...shellCommandWorkingDirectory,
+  "lastCopied",
+] as const;
+
+const shellCommandSchema = z.object({
+  type: z.literal("command"),
+  command: z.object({
+    run: z.string().min(1, "Command cannot be empty"),
+    workingDirectory: z.enum(shellCommandWorkingDirectory).optional().default("project"),
+  }),
+});
+
+const workspaceShellCommandSchema = shellCommandSchema.extend({
+  command: shellCommandSchema.shape.command.extend({
+    workingDirectory: z.enum(workspaceSetupCommandWorkingDirectory).optional().default("project"),
+  }),
+});
+
 const workspaceSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("copy"),
@@ -86,13 +109,7 @@ const workspaceSetupItemSchema = z.discriminatedUnion("type", [
       to: z.string().min(1, "Target path cannot be empty"),
     }),
   }),
-  z.object({
-    type: z.literal("command"),
-    command: z.object({
-      run: z.string().min(1, "Command cannot be empty"),
-      workingDirectory: z.enum(["project", "lastCopied"]).optional().default("project"),
-    }),
-  }),
+  workspaceShellCommandSchema,
 ]);
 
 const phaseOutputSchema = z
@@ -100,7 +117,7 @@ const phaseOutputSchema = z
     // An array of glob strings representing phase output files to copy
     copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
     // Optional shell commands to run before copying files. Cwd is executionPath
-    beforeCopy: z.string().optional(),
+    beforeCopy: z.array(shellCommandSchema).optional(),
   })
   .strict();
 
