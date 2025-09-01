@@ -56,7 +56,19 @@ Create a file named `phases.json` in your project root:
     "promptFile": "prompts/1-analyze.md",
     "model": "sonnet",
     "continuationMode": "fresh",
-    "trackedFiles": ["src/**/*.ts", "analysis.md"]
+    "trackedFiles": ["src/**/*.ts", "analysis.md"],
+    "output": {
+      "beforeCopy": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mv analysis.md $(date +%Y_%m_%d)_analysis.md",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "copy": ["*_analysis.md"]
+    }
   },
   {
     "id": "phase-2-implementation",
