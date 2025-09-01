@@ -10,9 +10,10 @@ This guide covers all the ways you can configure phases in Tadpole Runner, from 
 5. [Workspace Setup](#workspace-setup)
 6. [File Tracking](#file-tracking)
 7. [Environment Variables](#environment-variables)
-8. [Complete Examples](#complete-examples)
-9. [Best Practices](#best-practices)
-10. [Common Patterns](#common-patterns)
+8. [Output Configuration](#output-configuration)
+9. [Complete Examples](#complete-examples)
+10. [Best Practices](#best-practices)
+11. [Common Patterns](#common-patterns)
 
 ## Basic Phase Structure
 
@@ -293,6 +294,110 @@ Claude will see these as:
 - `GITHUB_TOKEN=ghp_xxxxx`
 - `API_ENDPOINT=https://api.example.com`
 
+## Output Configuration
+
+Tadpole can automatically copy files from the execution directory to a `tadpole-results` directory in your project root. This makes it easy to access the output of your phases without navigating to the execution directory.
+
+### Basic Output Configuration
+
+Add an `output` section to your phase configuration:
+
+```json
+{
+  "id": "analyze",
+  "name": "Code Analysis", 
+  "promptFile": "./prompts/analyze.md",
+  "model": "sonnet",
+  "continuationMode": "fresh",
+  "trackedFiles": ["analysis.md"],
+  "output": {
+    "copy": ["analysis.md"]
+  }
+}
+```
+
+This will copy `analysis.md` from the execution directory to `tadpole-results/analysis.md` when the phase completes successfully.
+
+### Pre-copy Commands
+
+You can run shell commands before copying files using the `beforeCopy` array:
+
+```json
+{
+  "output": {
+    "beforeCopy": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mv analysis.md $(date +%Y_%m_%d)_analysis.md"
+        }
+      }
+    ],
+    "copy": ["*_analysis.md"]
+  }
+}
+```
+
+This example renames the analysis file with a timestamp before copying it.
+
+### Copy Patterns
+
+The `copy` array supports glob patterns for flexible file selection:
+
+```json
+{
+  "output": {
+    "copy": [
+      "*.md",                    // All markdown files
+      "reports/**/*",            // Everything in reports directory
+      "src/**/*.{ts,js}",        // TypeScript and JavaScript files in src
+      "!src/**/*.test.*"         // Exclude test files
+    ]
+  }
+}
+```
+
+### Output File Lifecycle
+
+1. Phase executes and modifies files in the execution directory
+2. Phase completes successfully
+3. `beforeCopy` commands run (if specified)
+4. Files matching `copy` patterns are copied to `tadpole-results/`
+5. Files accumulate in `tadpole-results/` across multiple phases
+
+### Complete Output Example
+
+```json
+{
+  "id": "documentation-phase",
+  "name": "Generate Documentation",
+  "promptFile": "./prompts/generate-docs.md",
+  "model": "sonnet", 
+  "continuationMode": "fresh",
+  "trackedFiles": ["docs/**/*.md", "README.md"],
+  "output": {
+    "beforeCopy": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p versioned-docs/$(date +%Y-%m-%d)"
+        }
+      },
+      {
+        "type": "command", 
+        "command": {
+          "run": "cp -r docs/* versioned-docs/$(date +%Y-%m-%d)/"
+        }
+      }
+    ],
+    "copy": [
+      "versioned-docs/**/*",
+      "README.md"
+    ]
+  }
+}
+```
+
 ## Complete Examples
 
 ### Example 1: Simple Analysis Phase
@@ -303,7 +408,10 @@ Claude will see these as:
   "model": "sonnet",
   "continuationMode": "fresh",
   "promptFile": "./prompts/analyze.md",
-  "trackedFiles": ["analysis.md"]
+  "trackedFiles": ["analysis.md"],
+  "output": {
+    "copy": ["analysis.md"]
+  }
 }
 ```
 
