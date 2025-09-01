@@ -9,6 +9,7 @@ Data Source (Your Project or File)
     ↓
 Execution Directory (Isolated Environment)
     ├── read_only_data_source/ → symlink to Data Source or containing linked file
+    ├── tadpole-results/ ← output files copied back to your project
     └── .tadpole/
         ├── execution-meta.json
         └── state.json
@@ -335,3 +336,37 @@ Please read the requirements from <%DATA_DIR%> and create a project plan in <%EX
 ```
 
 This works consistently whether your data source is a file or directory.
+
+## Output Files and Results Directory
+
+Tadpole can automatically copy files from the execution directory back to your project through the **tadpole-results** mechanism.
+
+### Results Directory Location
+
+Output files are copied to:
+```
+<your_project_root>/tadpole-results/
+```
+
+This directory is automatically created and contains accumulated output from successful phases.
+
+### Output File Flow
+
+```
+Phase Execution → beforeCopy commands → copy patterns → tadpole-results/
+```
+
+1. **Phase executes** in the isolated execution directory
+2. **beforeCopy commands** run to prepare files (optional)  
+3. **Copy patterns** match files to copy
+4. **Files are copied** to `tadpole-results/` in your project root
+5. **Results accumulate** across multiple phases
+
+### Results vs Execution Directory
+
+| Location | Purpose | Persistence |
+|----------|---------|-------------|
+| `~/.tadpole-executions/<id>/` | Isolated workspace | Temporary |
+| `<project>/tadpole-results/` | User-accessible output | Persistent |
+
+The tadpole-results directory provides a clean interface to access phase outputs without navigating temporary execution directories.
