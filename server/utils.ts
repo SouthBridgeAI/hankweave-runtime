@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import glob from "fast-glob";
 import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
@@ -51,7 +52,7 @@ export class Logger {
   logWebSocketMessage(
     socketLogFile: string,
     direction: "in" | "out",
-    data: ClientCommand | ServerEvent
+    data: ClientCommand | ServerEvent,
   ): void {
     try {
       // Create the log entry with minimal wrapper
@@ -83,17 +84,9 @@ export class Logger {
   /**
    * @deprecated Use logWebSocketMessage instead
    */
-  logSocketTraffic(
-    socketLogFile: string,
-    direction: "in" | "out",
-    data: unknown
-  ): void {
+  logSocketTraffic(socketLogFile: string, direction: "in" | "out", data: unknown): void {
     // For backward compatibility, convert to new format
-    this.logWebSocketMessage(
-      socketLogFile,
-      direction,
-      data as ClientCommand | ServerEvent
-    );
+    this.logWebSocketMessage(socketLogFile, direction, data as ClientCommand | ServerEvent);
   }
 }
 
@@ -112,17 +105,12 @@ export class Logger {
  * @param pattern - Glob pattern to match files
  * @returns Root nodes of the file tree
  */
-export async function buildFileTree(
-  projectPath: string,
-  pattern: string
-): Promise<FileNode[]> {
+export async function buildFileTree(projectPath: string, pattern: string): Promise<FileNode[]> {
   const tree: FileNode[] = [];
 
   try {
     // Use unified file resolver to respect gitignore
-    const resolvedFiles = await fileResolver.resolveFiles(projectPath, [
-      pattern,
-    ]);
+    const resolvedFiles = await fileResolver.resolveFiles(projectPath, [pattern]);
 
     // Get file metadata for each resolved file
     const files = await Promise.all(
@@ -135,7 +123,7 @@ export async function buildFileTree(
           content,
           lastModified: stats.mtime.toISOString(),
         };
-      })
+      }),
     );
 
     const dirMap = new Map<string, FileNode>();
@@ -145,9 +133,7 @@ export async function buildFileTree(
 
     for (const file of files) {
       // Normalize path to remove leading "./"
-      const normalizedPath = file.path.startsWith("./")
-        ? file.path.slice(2)
-        : file.path;
+      const normalizedPath = file.path.startsWith("./") ? file.path.slice(2) : file.path;
       const parts = normalizedPath.split(path.sep);
       let currentPath = "";
       let parent: FileNode | null = null;
@@ -260,7 +246,7 @@ export function assertNever(x: never): never {
  */
 export async function getDirectorySize(
   dirPath: string,
-  timeoutMs = 30000 // Preserve timeout feature from cleanup folder
+  timeoutMs = 30000, // Preserve timeout feature from cleanup folder
 ): Promise<number> {
   let totalSize = 0;
   const startTime = Date.now();
@@ -268,9 +254,7 @@ export async function getDirectorySize(
   async function walkDir(currentPath: string): Promise<void> {
     // Check timeout
     if (Date.now() - startTime > timeoutMs) {
-      throw new Error(
-        `Directory size calculation timed out after ${timeoutMs}ms`
-      );
+      throw new Error(`Directory size calculation timed out after ${timeoutMs}ms`);
     }
 
     const entries = await fs.promises.readdir(currentPath, {
@@ -310,44 +294,73 @@ export function formatSize(bytes: number): string {
   return `${(bytes / k ** i).toFixed(1)} ${units[i]}`;
 }
 
+/**
+ * Copy files from a source directory to a destination directory using glob patterns.
+ *
+ * This function uses fast-glob directly to resolve file patterns without respecting
+ * .gitignore rules (unlike UnifiedFileResolver), ensuring all matching files are copied regardless of git ignore status.
+ *
+ * @param sourceDirectory - The source directory path from which to copy files
+ * @param filesToCopy - Array of glob patterns to match files for copying (e.g., `["*.txt"]`)
+ * @param destinationDirectory - The destination directory path where files will be copied
+ * @param logger - Logger instance for debug and info messages
+ * @returns Promise that resolves when all files have been copied
+ *
+ */
 export async function copyFiles(
   sourceDirectory: string,
   filesToCopy: string[],
   destinationDirectory: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> {
+  // Log the copy operation with source, destination, and glob patterns
   logger.log(
-    `Copying files from ${sourceDirectory} to ${destinationDirectory}`,
-    "debug"
+    `Copying files from ${sourceDirectory} to ${destinationDirectory} using globs ${filesToCopy.join(
+      ", ",
+    )}`,
+    "debug",
   );
 
+  // Ensure destination directory exists before starting copy operations
   await fs.promises.mkdir(destinationDirectory, { recursive: true });
 
-  // Resolve glob patterns from within the execution directory
-  const files = await fileResolver.resolveFiles(sourceDirectory, filesToCopy);
+  // Use fast-glob directly to resolve patterns without gitignore filtering
+  // This ensures all matching files are found, regardless of .gitignore rules
+  const files = await glob(filesToCopy, {
+    cwd: sourceDirectory, // Set working directory for glob patterns
+    dot: true, // Include hidden files (files starting with .)
+    onlyFiles: false, // Include directories in results for recursive copying
+  });
 
+  // Early return if no files match the provided glob patterns
   if (files.length === 0) {
     logger.log("No files matched the copy globs.", "debug");
     return;
   }
 
+  // Log all resolved files for debugging purposes
   logger.log(`Resolved files: ${files.join(", ")}`, "debug");
 
+  // Process each matched file/directory
   for (const file of files) {
+    // Build absolute paths for source and destination
     const sourcePath = path.join(sourceDirectory, file);
     const destPath = path.join(destinationDirectory, file);
 
     logger.log(`Copying ${sourcePath} to ${destPath}`, "debug");
 
+    // Skip files that don't exist (edge case handling)
     if (!fs.existsSync(sourcePath)) {
       logger.log(`Source file ${sourcePath} does not exist`, "info");
       continue;
     }
 
-    // Ensure the destination subdirectory exists
+    // Create parent directories in destination if they don't exist
+    // This preserves the directory structure from source
     await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
 
-    // Using fs.cp for robust recursive copying
+    // Copy the file or directory recursively using Node.js built-in fs.cp
+    // The recursive option handles both files and directories uniformly
     await fs.promises.cp(sourcePath, destPath, { recursive: true });
   }
 }
