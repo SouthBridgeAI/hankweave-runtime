@@ -57,7 +57,7 @@ export type ShellCommand = {
     /** Shell command to execute */
     run: string;
     /** Working directory for command execution (default: "project") */
-    workingDirectory: ShellCommandWorkingDirectory;
+    workingDirectory?: ShellCommandWorkingDirectory;
   };
 };
 
@@ -69,7 +69,7 @@ export type WorkspaceShellCommand = {
     /** Shell command to execute */
     run: string;
     /** Working directory for command execution (default: "project") */
-    workingDirectory: WorkspaceShellCommandWorkingDirectory;
+    workingDirectory?: WorkspaceShellCommandWorkingDirectory;
   };
 };
 

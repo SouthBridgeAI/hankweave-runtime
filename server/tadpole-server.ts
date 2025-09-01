@@ -53,7 +53,9 @@ import type {
   FailureReason,
   PhaseConfig,
   ServerConfig,
+  ShellCommand,
   TokenUsage,
+  WorkspaceShellCommand,
 } from "./types/types.js";
 import { isSyntheticTimeout } from "./types/types.js";
 import {
@@ -751,12 +753,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             lastCopiedPath = targetPath;
             this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
           } else if (item.type === "command" && item.command) {
-            const workingDir =
+            await this.runCommand(item, lastCopiedPath || undefined);
+            const resolvedWorkingDir =
               item.command.workingDirectory === "lastCopied" && lastCopiedPath
                 ? lastCopiedPath
                 : this.config.executionPath;
-            await this.runCommand(item.command.run, workingDir);
-            this.logger.log(`Ran command in ${workingDir}: ${item.command.run}`);
+            this.logger.log(`Ran command in ${resolvedWorkingDir}: ${item.command.run}`);
           }
         } catch (error) {
           const errorMessage = toError(error).message;
@@ -1727,7 +1729,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
                 this.currentPhase.phase.output.beforeCopy.length
               }: ${command.command.run}`,
             );
-            await this.runCommand(command.command.run, this.config.executionPath);
+            await this.runCommand(command);
             this.logger.log(`Completed beforeCopy command ${index + 1}: ${command.command.run}`);
           }
 
@@ -3020,9 +3022,26 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.pendingToolUses.clear();
   }
 
-  private async runCommand(command: string, workingDir: string): Promise<void> {
+  private async runCommand(
+    shellCommand: ShellCommand | WorkspaceShellCommand,
+    lastCopiedPath?: string,
+  ): Promise<void> {
+    // Handle working directory resolution
+    let workingDir: string;
+    if (shellCommand.command.workingDirectory === "lastCopied") {
+      if (lastCopiedPath) {
+        workingDir = lastCopiedPath;
+      } else {
+        // Fallback to executionPath if lastCopiedPath not provided
+        workingDir = this.config.executionPath;
+      }
+    } else {
+      // Default to executionPath for "project"
+      workingDir = this.config.executionPath;
+    }
+
     return new Promise((resolve, reject) => {
-      const proc = spawn(command, {
+      const proc = spawn(shellCommand.command.run, {
         shell: true,
         cwd: workingDir,
       });
@@ -3060,8 +3079,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Copy using cp command with recursive flag
-    const cpCommand = `cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`;
-    await this.runCommand(cpCommand, this.config.executionPath);
+    await this.runCommand({
+      type: "command",
+      command: {
+        run: `cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`,
+      },
+    });
   }
 
   // ============================================================================
