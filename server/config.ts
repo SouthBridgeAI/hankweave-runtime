@@ -99,6 +99,8 @@ const phaseOutputSchema = z
   .object({
     // An array of glob strings representing phase output files to copy
     copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
+    // Optional shell commands to run before copying files. Cwd is executionPath
+    beforeCopy: z.string().optional(),
   })
   .strict();
 

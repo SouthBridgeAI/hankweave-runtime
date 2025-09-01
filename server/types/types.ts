@@ -141,6 +141,7 @@ export interface PhaseConfig {
   /** Optional output files to copy after phase completion */
   output?: {
     copy: string[];
+    beforeCopy?: string;
   };
 }
 
