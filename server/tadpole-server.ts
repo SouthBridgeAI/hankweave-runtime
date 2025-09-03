@@ -1710,15 +1710,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     await this.sendStateSnapshot();
 
     if (finalStatus === "completed" && this.currentPhase.phase.output) {
+      // did we make it past beforeCopy command maze alive?
+      let beforeCopySuccess = false;
       try {
         if (
           this.currentPhase.phase.output.beforeCopy &&
           this.currentPhase.phase.output.beforeCopy.length > 0
         ) {
           // Run beforeCopy commands if specified
-          // TODO: give this another look
-          // stuffing both copy and before copy into one try-catch assuming that
-          // copyFiles might not make sense if beforeCopy fails so we bail early here
           this.logger.log(
             `Running ${this.currentPhase.phase.output.beforeCopy.length} beforeCopy command(s) for phase ${this.currentPhase.phase.id}`,
           );
@@ -1730,12 +1729,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
               }: ${command.command.run}`,
             );
             await this.runCommand(command);
-            this.logger.log(`Completed beforeCopy command ${index + 1}: ${command.command.run}`);
           }
 
           this.logger.log(
             `Completed all beforeCopy commands for phase ${this.currentPhase.phase.id}`,
           );
+          beforeCopySuccess = true;
         }
         await copyFiles(
           this.config.executionPath,
@@ -1744,9 +1743,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           this.logger,
         );
       } catch (error) {
-        this.logger.log(
-          `Failed to copy output files of the phase ${this.currentPhase.phase.id}: ${error}`,
-          "error",
+        await this.handleError(
+          error instanceof Error ? error : new Error(String(error)),
+          beforeCopySuccess ? "phaseOutputCopyFiles" : "phaseOutputBeforeCopy",
         );
       }
     }
