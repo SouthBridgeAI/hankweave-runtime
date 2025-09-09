@@ -322,7 +322,9 @@ This will copy `analysis.md` from the execution directory to `tadpole-results/an
 
 ### Before-copy Commands
 
-You can run shell commands before copying files in each output group using the `beforeCopy` array:
+You can run shell commands before copying files in each output group using the `beforeCopy` array. These are especially useful when you need to rename files before copying them to the `tadpole-results` in the directory where you run tadpole. 
+
+**Please note**: if one of the `beforeCopy` commands fails, the whole copy group fails and nothing is copied to `tadpole-results` for this specific group. Tadpole will however attempt to run remaining copy groups.
 
 ```json
 {
