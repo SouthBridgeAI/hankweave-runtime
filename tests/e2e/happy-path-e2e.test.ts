@@ -449,9 +449,9 @@ describe("Tadpole E2E Test", () => {
       expect(fs.existsSync(path.join(tadpoleResultsDir, "notes", "favorite_poem.txt"))).toBe(true);
     });
 
-    it("should contain second_favorite_poem.txt", () => {
+    it("should NOT contain second_favorite_poem.txt because beforeCopy fails", () => {
       expect(fs.existsSync(path.join(tadpoleResultsDir, "notes", "second_favorite_poem.txt"))).toBe(
-        true,
+        false,
       );
     });
 
