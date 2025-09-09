@@ -57,7 +57,7 @@ Create a file named `phases.json` in your project root:
     "model": "sonnet",
     "continuationMode": "fresh",
     "trackedFiles": ["src/**/*.ts", "analysis.md"],
-    "output": [
+    "outputFiles": [
       {
         "beforeCopy": [
           {
