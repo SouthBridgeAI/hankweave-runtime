@@ -155,11 +155,13 @@ export interface PhaseConfig {
   /** Optional environment variables to set for the Claude process */
   env?: Record<string, string>;
 
-  /** Optional output files to copy after phase completion */
+  /** Optional output copy steps to run after phase completion: files to copy out from a completed phase, with optional pre-copy commands. */
   output?: {
+    /** Glob patterns to copy from execution directory to output directory */
     copy: string[];
+    /** Optional commands to run before copying (run in executionPath) */
     beforeCopy?: ShellCommand[];
-  };
+  }[];
 }
 
 /**

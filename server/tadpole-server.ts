@@ -1710,43 +1710,47 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     await this.sendStateSnapshot();
 
     if (finalStatus === "completed" && this.currentPhase.phase.output) {
-      // did we make it past beforeCopy command maze alive?
-      let beforeCopySuccess = false;
-      try {
-        if (
-          this.currentPhase.phase.output.beforeCopy &&
-          this.currentPhase.phase.output.beforeCopy.length > 0
-        ) {
-          // Run beforeCopy commands if specified
-          this.logger.log(
-            `Running ${this.currentPhase.phase.output.beforeCopy.length} beforeCopy command(s) for phase ${this.currentPhase.phase.id}`,
-          );
-
-          for (const [index, command] of this.currentPhase.phase.output.beforeCopy.entries()) {
+      for (const [groupIndex, outItem] of this.currentPhase.phase.output.entries()) {
+        let beforeCopySuccess = false;
+        try {
+          if (outItem.beforeCopy && outItem.beforeCopy.length > 0) {
             this.logger.log(
-              `Running beforeCopy command ${index + 1}/${
-                this.currentPhase.phase.output.beforeCopy.length
-              }: ${command.command.run}`,
+              `Running ${outItem.beforeCopy.length} beforeCopy command(s) for phase ${
+                this.currentPhase.phase.id
+              } (group ${groupIndex + 1})`,
             );
-            await this.runCommand(command);
+
+            for (const [index, command] of outItem.beforeCopy.entries()) {
+              this.logger.log(
+                `Running beforeCopy command ${index + 1}/${
+                  outItem.beforeCopy.length
+                }: ${command.command.run}`,
+              );
+              await this.runCommand(command);
+            }
+
+            this.logger.log(
+              `Completed all beforeCopy commands for phase ${
+                this.currentPhase.phase.id
+              } (group ${groupIndex + 1})`,
+            );
           }
 
-          this.logger.log(
-            `Completed all beforeCopy commands for phase ${this.currentPhase.phase.id}`,
-          );
           beforeCopySuccess = true;
+
+          await copyFiles(
+            this.config.executionPath,
+            outItem.copy,
+            path.join(this.config.cwd, this.config.outputDirectory),
+            this.logger,
+          );
+        } catch (error) {
+          await this.handleError(
+            error instanceof Error ? error : new Error(String(error)),
+            beforeCopySuccess ? "phaseOutputCopyFiles" : "phaseOutputBeforeCopy",
+          );
+          // Continue to next output group
         }
-        await copyFiles(
-          this.config.executionPath,
-          this.currentPhase.phase.output.copy,
-          path.join(this.config.cwd, this.config.outputDirectory),
-          this.logger,
-        );
-      } catch (error) {
-        await this.handleError(
-          error instanceof Error ? error : new Error(String(error)),
-          beforeCopySuccess ? "phaseOutputCopyFiles" : "phaseOutputBeforeCopy",
-        );
       }
     }
 

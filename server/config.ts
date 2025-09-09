@@ -112,7 +112,8 @@ const workspaceSetupItemSchema = z.discriminatedUnion("type", [
   workspaceShellCommandSchema,
 ]);
 
-const phaseOutputSchema = z
+// Output copy item schema (array of these under phase.output)
+const phaseOutputItemSchema = z
   .object({
     // An array of glob strings representing phase output files to copy
     copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
@@ -120,6 +121,8 @@ const phaseOutputSchema = z
     beforeCopy: z.array(shellCommandSchema).optional(),
   })
   .strict();
+
+const phaseOutputSchema = z.array(phaseOutputItemSchema).optional();
 
 const phaseConfigSchema = z
   .object({
@@ -155,7 +158,7 @@ const phaseConfigSchema = z
     description: z.string().optional(),
     trackedFiles: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
-    output: phaseOutputSchema.optional(),
+    output: phaseOutputSchema,
   })
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
