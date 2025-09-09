@@ -58,7 +58,7 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
       const phaseName = phaseData?.name || "unnamed";
 
       if (phaseIndex !== undefined) {
-        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles, env.`;
+        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles, env, outputFiles.`;
       } else {
         errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
       }
@@ -112,7 +112,7 @@ const workspaceSetupItemSchema = z.discriminatedUnion("type", [
   workspaceShellCommandSchema,
 ]);
 
-// Output copy item schema (array of these under phase.output)
+// Output copy item schema (array of these under phase.outputFiles)
 const phaseOutputItemSchema = z
   .object({
     // An array of glob strings representing phase output files to copy
@@ -158,7 +158,7 @@ const phaseConfigSchema = z
     description: z.string().optional(),
     trackedFiles: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
-    output: phaseOutputSchema,
+    outputFiles: phaseOutputSchema,
   })
   .strict()
   .refine((data) => data.promptFile || data.promptText, {

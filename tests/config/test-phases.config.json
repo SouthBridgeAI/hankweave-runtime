@@ -21,7 +21,7 @@
     ],
     "description": "Write three pick one",
     "trackedFiles": ["notes/**/*", "*.md"],
-    "output": [
+    "outputFiles": [
       {
         "copy": ["notes/favorite_poem.txt"],
         "beforeCopy": [
@@ -45,7 +45,7 @@
     "appendSystemPromptFile": ["./noTodosPrompt.md"],
     "description": "Write one more",
     "trackedFiles": ["notes/**/*"],
-    "output": [
+    "outputFiles": [
       {
         "copy": ["notes/second_favorite_poem.txt"],
         "beforeCopy": [

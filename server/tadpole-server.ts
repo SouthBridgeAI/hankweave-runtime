@@ -1709,8 +1709,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Send state snapshot
     await this.sendStateSnapshot();
 
-    if (finalStatus === "completed" && this.currentPhase.phase.output) {
-      for (const [groupIndex, outItem] of this.currentPhase.phase.output.entries()) {
+    if (finalStatus === "completed" && this.currentPhase.phase.outputFiles) {
+      for (const [groupIndex, outItem] of this.currentPhase.phase.outputFiles.entries()) {
         let beforeCopySuccess = false;
         try {
           if (outItem.beforeCopy && outItem.beforeCopy.length > 0) {
