@@ -6,7 +6,7 @@ The `.tadpole` folder, created within the execution directory (not your project 
 
 With execution isolation, the `.tadpole` folder lives in the execution directory (e.g., `~/.tadpole-executions/1234-abc/.tadpole/`), keeping all Tadpole artifacts separate from your original project data.
 
-**Note**: While the `.tadpole` folder stays in the isolated execution directory, Tadpole can copy output files to a `tadpole-results/` directory in your original project directory when phases have `output` configuration. This provides easy access to phase results without navigating to temporary execution directories.
+**Note**: While the `.tadpole` folder stays in the isolated execution directory, Tadpole can copy output files to a `tadpole-results/` directory in your original project directory when phases have `outputFiles` configuration. This provides easy access to phase results without navigating to temporary execution directories.
 
 ## Directory Structure
 

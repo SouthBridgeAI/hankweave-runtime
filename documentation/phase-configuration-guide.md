@@ -300,7 +300,7 @@ Tadpole can automatically copy files from the execution directory to a `tadpole-
 
 ### Basic Output Configuration
 
-Add an `output` array to your phase configuration (one or more copy groups):
+Add an `outputFiles` array to your phase configuration (one or more copy groups):
 
 ```json
 {
@@ -310,7 +310,7 @@ Add an `output` array to your phase configuration (one or more copy groups):
   "model": "sonnet",
   "continuationMode": "fresh",
   "trackedFiles": ["analysis.md"],
-  "output": [
+  "outputFiles": [
     {
       "copy": ["analysis.md"]
     }
@@ -326,7 +326,7 @@ You can run shell commands before copying files in each output group using the `
 
 ```json
 {
-  "output": [
+  "outputFiles": [
     {
       "beforeCopy": [
         {
@@ -350,7 +350,7 @@ The `copy` array supports glob patterns for flexible file selection:
 
 ```json
 {
-  "output": [
+  "outputFiles": [
     {
       "copy": [
         "*.md",                    // All markdown files
@@ -381,7 +381,7 @@ The `copy` array supports glob patterns for flexible file selection:
   "model": "sonnet", 
   "continuationMode": "fresh",
   "trackedFiles": ["docs/**/*.md", "README.md"],
-  "output": [
+  "outputFiles": [
     {
       "beforeCopy": [
         {
@@ -417,7 +417,7 @@ The `copy` array supports glob patterns for flexible file selection:
   "continuationMode": "fresh",
   "promptFile": "./prompts/analyze.md",
   "trackedFiles": ["analysis.md"],
-  "output": [
+  "outputFiles": [
     {
       "copy": ["analysis.md"]
     }
