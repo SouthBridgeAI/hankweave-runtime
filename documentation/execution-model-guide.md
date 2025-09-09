@@ -359,7 +359,7 @@ Phase Execution → beforeCopy commands → copy patterns → tadpole-results/
 1. **Phase executes** in the isolated execution directory
 2. **beforeCopy commands** run to prepare files (optional)  
 3. **Copy patterns** match files to copy
-4. **Files are copied** to `tadpole-results/` in your project root
+4. **Files are copied** to `tadpole-results/` where you run the command from
 5. **Results accumulate** across multiple phases
 
 ### Results vs Execution Directory

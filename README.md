@@ -46,7 +46,7 @@ Let's walk through a simple two-phase workflow.
 
 ### 1. Create a Phase Configuration
 
-Create a file named `phases.json` in your project root:
+Create a file named `phases.json` where you run the command from:
 
 ```json
 [
