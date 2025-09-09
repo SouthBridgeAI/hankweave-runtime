@@ -300,7 +300,7 @@ Tadpole can automatically copy files from the execution directory to a `tadpole-
 
 ### Basic Output Configuration
 
-Add an `output` section to your phase configuration:
+Add an `output` array to your phase configuration (one or more copy groups):
 
 ```json
 {
@@ -310,31 +310,35 @@ Add an `output` section to your phase configuration:
   "model": "sonnet",
   "continuationMode": "fresh",
   "trackedFiles": ["analysis.md"],
-  "output": {
-    "copy": ["analysis.md"]
-  }
+  "output": [
+    {
+      "copy": ["analysis.md"]
+    }
+  ]
 }
 ```
 
 This will copy `analysis.md` from the execution directory to `tadpole-results/analysis.md` when the phase completes successfully.
 
-### Pre-copy Commands
+### Before-copy Commands
 
-You can run shell commands before copying files using the `beforeCopy` array:
+You can run shell commands before copying files in each output group using the `beforeCopy` array:
 
 ```json
 {
-  "output": {
-    "beforeCopy": [
-      {
-        "type": "command",
-        "command": {
-          "run": "mv analysis.md $(date +%Y_%m_%d)_analysis.md"
+  "output": [
+    {
+      "beforeCopy": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mv analysis.md $(date +%Y_%m_%d)_analysis.md"
+          }
         }
-      }
-    ],
-    "copy": ["*_analysis.md"]
-  }
+      ],
+      "copy": ["*_analysis.md"]
+    }
+  ]
 }
 ```
 
@@ -346,14 +350,16 @@ The `copy` array supports glob patterns for flexible file selection:
 
 ```json
 {
-  "output": {
-    "copy": [
-      "*.md",                    // All markdown files
-      "reports/**/*",            // Everything in reports directory
-      "src/**/*.{ts,js}",        // TypeScript and JavaScript files in src
-      "!src/**/*.test.*"         // Exclude test files
-    ]
-  }
+  "output": [
+    {
+      "copy": [
+        "*.md",                    // All markdown files
+        "reports/**/*",            // Everything in reports directory
+        "src/**/*.{ts,js}",        // TypeScript and JavaScript files in src
+        "!src/**/*.test.*"         // Exclude test files
+      ]
+    }
+  ]
 }
 ```
 
@@ -361,8 +367,8 @@ The `copy` array supports glob patterns for flexible file selection:
 
 1. Phase executes and modifies files in the execution directory
 2. Phase completes successfully
-3. `beforeCopy` commands run (if specified)
-4. Files matching `copy` patterns are copied to `tadpole-results/`
+3. For each output group, `beforeCopy` commands run (if specified)
+4. Files matching each group's `copy` patterns are copied to `tadpole-results/`
 5. Files accumulate in `tadpole-results/` across multiple phases
 
 ### Complete Output Example
@@ -375,26 +381,28 @@ The `copy` array supports glob patterns for flexible file selection:
   "model": "sonnet", 
   "continuationMode": "fresh",
   "trackedFiles": ["docs/**/*.md", "README.md"],
-  "output": {
-    "beforeCopy": [
-      {
-        "type": "command",
-        "command": {
-          "run": "mkdir -p versioned-docs/$(date +%Y-%m-%d)"
+  "output": [
+    {
+      "beforeCopy": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p versioned-docs/$(date +%Y-%m-%d)"
+          }
+        },
+        {
+          "type": "command", 
+          "command": {
+            "run": "cp -r docs/* versioned-docs/$(date +%Y-%m-%d)/"
+          }
         }
-      },
-      {
-        "type": "command", 
-        "command": {
-          "run": "cp -r docs/* versioned-docs/$(date +%Y-%m-%d)/"
-        }
-      }
-    ],
-    "copy": [
-      "versioned-docs/**/*",
-      "README.md"
-    ]
-  }
+      ],
+      "copy": [
+        "versioned-docs/**/*",
+        "README.md"
+      ]
+    }
+  ]
 }
 ```
 
@@ -409,9 +417,11 @@ The `copy` array supports glob patterns for flexible file selection:
   "continuationMode": "fresh",
   "promptFile": "./prompts/analyze.md",
   "trackedFiles": ["analysis.md"],
-  "output": {
-    "copy": ["analysis.md"]
-  }
+  "output": [
+    {
+      "copy": ["analysis.md"]
+    }
+  ]
 }
 ```
 
