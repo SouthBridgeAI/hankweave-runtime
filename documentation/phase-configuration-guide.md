@@ -232,7 +232,7 @@ A complete setup sequence:
 ```
 
 ### Working Directory Options
-- `"project"`: Run in the project root
+- `"project"`: Run in the project root (where you run the command from)
 - `"lastCopied"`: Run in the destination of the last copy operation
 
 ## File Tracking
@@ -296,7 +296,7 @@ Claude will see these as:
 
 ## Output Configuration
 
-Tadpole can automatically copy files from the execution directory to a `tadpole-results` directory in your project root. This makes it easy to access the output of your phases without navigating to the execution directory.
+Tadpole can automatically copy files from the execution directory to a `tadpole-results` directory where you run the command from. This makes it easy to access the output of your phases without navigating to the execution directory.
 
 ### Basic Output Configuration
 

@@ -155,7 +155,7 @@ This powerful feature allows phases to configure their own environment. The serv
       "type": "copy",
       "copy": {
         "from": "./templates/react-app",  // Absolute or relative to config file
-        "to": "frontend"                  // Relative to project root
+        "to": "frontend"                  // Relative to project root (where you run the command from)
       }
     }
     ```
@@ -163,7 +163,7 @@ This powerful feature allows phases to configure their own environment. The serv
 2.  **Command Execution**: Runs arbitrary shell commands. This is often used for installing dependencies (`npm install`) or running build scripts.
     - Commands are executed using the system's default shell
     - Working directory can be:
-      - `"project"`: The project root directory
+      - `"project"`: The project root directory (where you run the command from)
       - `"lastCopied"`: The destination of the most recent copy operation
     - Commands run sequentially - if one fails, subsequent commands are skipped
     - There's no timeout by default - ensure commands complete in reasonable time
