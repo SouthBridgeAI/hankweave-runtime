@@ -108,6 +108,18 @@ export class CheckpointGit {
   }
 
   /**
+   * Get the current branch name
+   * @returns The current branch name or undefined if not initialized
+   */
+  public async getCurrentBranch(): Promise<string | undefined> {
+    if (!this.git) {
+      return undefined;
+    }
+    const b = await this.git.branch();
+    return b.current;
+  }
+
+  /**
    * Add patterns to track
    */
   async addPatterns(patterns: string[]): Promise<void> {
@@ -155,8 +167,7 @@ export class CheckpointGit {
     // Always use the branch from options if provided
     if (options?.branch) {
       // Remember current branch to switch back later
-      const currentBranchInfo = await this.git.branch();
-      originalBranch = currentBranchInfo.current;
+      originalBranch = await this.getCurrentBranch();
       this.logger.log(
         `[CHECKPOINT-COMMIT] Current branch: ${originalBranch}, switching to: ${options.branch}`,
       );
@@ -174,65 +185,82 @@ export class CheckpointGit {
       }
     }
 
-    // Get resolved files to add
-    const files = await this.getTrackedFiles();
-    this.logger.log(`[CHECKPOINT-COMMIT] Resolved ${files.length} files to track`);
-    if (files.length > 0) {
+    let commitSha: string | null = null;
+    try {
+      // Get resolved files to add
+      const files = await this.getTrackedFiles();
+      this.logger.log(`[CHECKPOINT-COMMIT] Resolved ${files.length} files to track`);
+      if (files.length > 0) {
+        this.logger.log(
+          `[CHECKPOINT-COMMIT] First few files: ${files
+            .slice(0, 5)
+            .join(", ")}${files.length > 5 ? "..." : ""}`,
+        );
+      }
+
+      // Check working directory status before reset
+      const statusBefore = await this.git.status();
       this.logger.log(
-        `[CHECKPOINT-COMMIT] First few files: ${files.slice(0, 5).join(", ")}${
-          files.length > 5 ? "..." : ""
-        }`,
+        `[CHECKPOINT-COMMIT] Status before reset - modified: ${statusBefore.modified.length}, not_added: ${statusBefore.not_added.length}`,
       );
-    }
 
-    // Check working directory status before reset
-    const statusBefore = await this.git.status();
-    this.logger.log(
-      `[CHECKPOINT-COMMIT] Status before reset - modified: ${statusBefore.modified.length}, not_added: ${statusBefore.not_added.length}`,
-    );
+      // IMPORTANT: Only reset the INDEX, not the working directory
+      // Using 'mixed' reset (default) to only affect the index
+      this.logger.log(
+        `[CHECKPOINT-COMMIT] Resetting index (mixed mode - working directory unchanged)`,
+      );
+      await this.git.reset(["--mixed", "HEAD"]);
 
-    // IMPORTANT: Only reset the INDEX, not the working directory
-    // Using 'mixed' reset (default) to only affect the index
-    this.logger.log(
-      `[CHECKPOINT-COMMIT] Resetting index (mixed mode - working directory unchanged)`,
-    );
-    await this.git.reset(["--mixed", "HEAD"]);
+      // Check status after reset to confirm working directory unchanged
+      const statusAfter = await this.git.status();
+      this.logger.log(
+        `[CHECKPOINT-COMMIT] Status after reset - modified: ${statusAfter.modified.length}, not_added: ${statusAfter.not_added.length}`,
+      );
 
-    // Check status after reset to confirm working directory unchanged
-    const statusAfter = await this.git.status();
-    this.logger.log(
-      `[CHECKPOINT-COMMIT] Status after reset - modified: ${statusAfter.modified.length}, not_added: ${statusAfter.not_added.length}`,
-    );
+      // Explicitly add each resolved file
+      if (files.length > 0) {
+        // Add files in batches to avoid command line length limits
+        const batchSize = 100;
+        for (let i = 0; i < files.length; i += batchSize) {
+          const batch = files.slice(i, i + batchSize);
+          try {
+            // Use force add to override any gitignore rules
+            this.logger.log(
+              `[CHECKPOINT-COMMIT] Adding batch ${
+                Math.floor(i / batchSize) + 1
+              }/${Math.ceil(files.length / batchSize)} (${batch.length} files)`,
+            );
+            await this.git.raw(["add", "-f", ...batch]);
+          } catch (error) {
+            this.logger.log(
+              `[CHECKPOINT-COMMIT] Error adding files to checkpoint: ${error}`,
+              "error",
+            );
+          }
+        }
+      }
 
-    // Explicitly add each resolved file
-    if (files.length > 0) {
-      // Add files in batches to avoid command line length limits
-      const batchSize = 100;
-      for (let i = 0; i < files.length; i += batchSize) {
-        const batch = files.slice(i, i + batchSize);
+      // Always create commit, even if empty (for semantic consistency)
+      this.logger.log(`[CHECKPOINT-COMMIT] Creating commit`);
+      const result = await this.git.commit(message, { "--allow-empty": null });
+
+      commitSha = result.commit || null;
+      this.logger.log(`[CHECKPOINT-COMMIT] Commit complete: ${commitSha}`);
+    } finally {
+      // If we switched branches for the commit, switch back
+      if (options?.branch && originalBranch && originalBranch !== options.branch) {
         try {
-          // Use force add to override any gitignore rules
+          await this.git.checkout(originalBranch);
+          this.logger.log(`[CHECKPOINT-COMMIT] Restored original branch: ${originalBranch}`);
+        } catch (err) {
           this.logger.log(
-            `[CHECKPOINT-COMMIT] Adding batch ${
-              Math.floor(i / batchSize) + 1
-            }/${Math.ceil(files.length / batchSize)} (${batch.length} files)`,
-          );
-          await this.git.raw(["add", "-f", ...batch]);
-        } catch (error) {
-          this.logger.log(
-            `[CHECKPOINT-COMMIT] Error adding files to checkpoint: ${error}`,
+            `[CHECKPOINT-COMMIT] Failed to restore original branch (${originalBranch}): ${err}`,
             "error",
           );
         }
       }
     }
 
-    // Always create commit, even if empty (for semantic consistency)
-    this.logger.log(`[CHECKPOINT-COMMIT] Creating commit`);
-    const result = await this.git.commit(message, { "--allow-empty": null });
-
-    const commitSha = result.commit || null;
-    this.logger.log(`[CHECKPOINT-COMMIT] Commit complete: ${commitSha}`);
     return commitSha;
   }
 
@@ -276,7 +304,8 @@ export class CheckpointGit {
     }
 
     try {
-      const log = await this.git.log(["--format=%H"]);
+      // Include commits from all branches and use parsed output
+      const log = await this.git.log(["--all"]);
       return new Set(log.all.map((commit) => commit.hash));
     } catch (error) {
       this.logger.log(`Failed to get checkpoint SHAs: ${error}`, "error");
@@ -303,6 +332,41 @@ export class CheckpointGit {
     try {
       // Get all branches to check each one
       const branches = await this.git.branch();
+      // Priority-sort branches so shared commits prefer main/master labeling
+      const branchNames = branches.all.slice();
+      const priority = (name: string) => (name === "main" || name === "master" ? 0 : 1);
+      branchNames.sort((a, b) => {
+        const pa = priority(a);
+        const pb = priority(b);
+        if (pa !== pb) return pa - pb;
+        return a.localeCompare(b);
+      });
+
+      // Build membership: sha -> set of branches containing it
+      const membership = new Map<string, Set<string>>();
+      // Store commit data (message/timestamp) by sha
+      const commitData = new Map<string, { message: string; timestamp: string }>();
+
+      for (const branch of branchNames) {
+        try {
+          const log = await this.git.log([branch]);
+          for (const commit of log.all) {
+            if (!membership.has(commit.hash)) {
+              membership.set(commit.hash, new Set());
+              // Record data once
+              commitData.set(commit.hash, {
+                message: commit.message,
+                timestamp: commit.date,
+              });
+            }
+            membership.get(commit.hash)!.add(branch);
+          }
+        } catch (error) {
+          this.logger.log(`Could not get log for branch ${branch}: ${error}`, "debug");
+        }
+      }
+
+      // Build final list, choosing a primary branch by priority order
       const allCheckpoints: Array<{
         sha: string;
         message: string;
@@ -310,29 +374,19 @@ export class CheckpointGit {
         branch: string;
       }> = [];
 
-      // Get commits from all branches
-      for (const branch of branches.all) {
-        try {
-          const log = await this.git.log([branch, "--format=%H|%s|%aI"]);
-
-          for (const commit of log.all) {
-            // Parse the custom format: hash|subject|authorDate
-            const [sha, message, timestamp] = commit.hash.split("|");
-
-            // Skip if we already have this commit from another branch
-            if (!allCheckpoints.some((c) => c.sha === sha)) {
-              allCheckpoints.push({
-                sha: sha || commit.hash,
-                message: message || commit.message,
-                timestamp: timestamp || commit.date,
-                branch,
-              });
-            }
-          }
-        } catch (error) {
-          // Branch might not have any commits yet
-          this.logger.log(`Could not get log for branch ${branch}: ${error}`, "debug");
+      for (const [sha, data] of commitData.entries()) {
+        const branchesForCommit = membership.get(sha);
+        let primaryBranch = "";
+        if (branchesForCommit && branchesForCommit.size > 0) {
+          // Choose earliest by branchNames order
+          primaryBranch = branchNames.find((b) => branchesForCommit.has(b)) || "";
         }
+        allCheckpoints.push({
+          sha,
+          message: data.message,
+          timestamp: data.timestamp,
+          branch: primaryBranch,
+        });
       }
 
       // Sort by timestamp descending (newest first)
