@@ -336,12 +336,12 @@ describe("CheckpointGit", () => {
     const c1 = await checkpointGit.commit("main: first");
 
     // sleep a bit to get nicer timestamps
-    await sleep(500);
+    await sleep(1000);
 
     await fs.promises.writeFile(mainFile, "two");
     const c2 = await checkpointGit.commit("main: second");
 
-    await sleep(500);
+    await sleep(1000);
 
     // Two commits on run branch
     const featureFile1 = path.join(tempDir, "feature1.txt");
@@ -350,7 +350,7 @@ describe("CheckpointGit", () => {
       branch: "run-1757489464604-eicnq",
     });
 
-    await sleep(500);
+    await sleep(1000);
 
     const featureFile2 = path.join(tempDir, "feature2.txt");
     await fs.promises.writeFile(featureFile2, "f2");
