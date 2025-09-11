@@ -63,15 +63,15 @@ An isolated workspace where Tadpole operates:
 ### Execution Directory Naming
 
 ```
-E_name = T_ms + "-" + R_36(5) + "-" + H_6
+E_name = T_ms + "-" + R_36(4) + "-" + H_6
 ```
 
 Where:
 - `T_ms` = timestamp in milliseconds since epoch
-- `R_36(5)` = 5-character random string (base 36)
+- `R_36(4)` = 4-character random string (base 36)
 - `H_6` = first 6 characters of data hash
 
-**Example**: `1737123456789-abc12-d4f5e6`
+**Example**: `1737123456789-abc1-d4f5e6`
 
 ## 3. Data Access via Symlinks
 
@@ -129,7 +129,7 @@ Run = {
 ### Run ID Generation
 
 ```
-RunId = T_ms + "-" + R_36(7)
+RunId = T_ms + "-" + R_36(5)
 ```
 
 ## 5. Phases
