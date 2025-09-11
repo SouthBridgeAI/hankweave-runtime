@@ -1,16 +1,10 @@
-import {
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
 import { CheckpointGit } from "../../server/checkpoint-git";
 import { Logger } from "../../server/utils";
+import { sleep } from "../utils/test-helpers";
 
 describe("CheckpointGit", () => {
   let tempDir: string;
@@ -30,11 +24,7 @@ describe("CheckpointGit", () => {
 
   beforeEach(async () => {
     // Create a temporary directory for testing with absolute path
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-checkpoint-${Date.now()}`
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-test-checkpoint-${Date.now()}`);
     await fs.promises.mkdir(tempDir, { recursive: true });
 
     // Create a mock logger
@@ -214,14 +204,8 @@ describe("CheckpointGit", () => {
     await fs.promises.mkdir(path.join(tempDir, "src", "utils"), {
       recursive: true,
     });
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "components", "Button.tsx"),
-      "export {}"
-    );
-    await fs.promises.writeFile(
-      path.join(tempDir, "src", "utils", "helper.ts"),
-      "export {}"
-    );
+    await fs.promises.writeFile(path.join(tempDir, "src", "components", "Button.tsx"), "export {}");
+    await fs.promises.writeFile(path.join(tempDir, "src", "utils", "helper.ts"), "export {}");
     await fs.promises.writeFile(path.join(tempDir, "README.md"), "# Test");
 
     // Add patterns
@@ -329,14 +313,14 @@ describe("CheckpointGit", () => {
     await checkpointGit.initialize();
 
     // Try to reset to non-existent SHA
-    await expect(
-      checkpointGit.resetToCheckpoint("nonexistent123")
-    ).rejects.toThrow("Checkpoint nonexistent123 not found in repository");
+    await expect(checkpointGit.resetToCheckpoint("nonexistent123")).rejects.toThrow(
+      "Checkpoint nonexistent123 not found in repository",
+    );
   });
 
   test("resetToCheckpoint throws when not initialized", async () => {
     await expect(checkpointGit.resetToCheckpoint("abc123")).rejects.toThrow(
-      "Git repository not initialized"
+      "Git repository not initialized",
     );
   });
 
@@ -351,8 +335,13 @@ describe("CheckpointGit", () => {
     await fs.promises.writeFile(mainFile, "one");
     const c1 = await checkpointGit.commit("main: first");
 
+    // sleep a bit to get nicer timestamps
+    await sleep(500);
+
     await fs.promises.writeFile(mainFile, "two");
     const c2 = await checkpointGit.commit("main: second");
+
+    await sleep(500);
 
     // Two commits on run branch
     const featureFile1 = path.join(tempDir, "feature1.txt");
@@ -360,6 +349,8 @@ describe("CheckpointGit", () => {
     const f1 = await checkpointGit.commit("feature: first", {
       branch: "run-1757489464604-eicnq",
     });
+
+    await sleep(500);
 
     const featureFile2 = path.join(tempDir, "feature2.txt");
     await fs.promises.writeFile(featureFile2, "f2");
@@ -379,37 +370,22 @@ describe("CheckpointGit", () => {
     // Expect initial empty commit + 4 real commits = 5 total
     expect(checkpoints.length).toBe(5);
 
-    // Ensure messages from all commits are present
-    const messages = checkpoints.map((c) => c.message);
-    expect(messages).toContain("Initial checkpoint setup");
-    expect(messages).toContain("main: first");
-    expect(messages).toContain("main: second");
-    expect(messages).toContain("feature: first");
-    expect(messages).toContain("feature: second");
-
-    // Verify branch attribution for each known commit
-    const byMessage = new Map(
-      checkpoints.map((cp) => [cp.message, cp] as const)
-    );
-    expect(byMessage.get("Initial checkpoint setup")?.branch).toBe("main");
-    expect(byMessage.get("main: first")?.branch).toBe("main");
-    expect(byMessage.get("main: second")?.branch).toBe("main");
-    expect(byMessage.get("feature: first")?.branch).toBe(
-      "run-1757489464604-eicnq"
-    );
-    expect(byMessage.get("feature: second")?.branch).toBe(
-      "run-1757489464604-eicnq"
-    );
-
-    // Overall ordering should be descending by timestamp (newest first)
-    const times = checkpoints.map((c) => Date.parse(c.timestamp));
-    const sorted = [...times].sort((a, b) => b - a);
-    expect(times).toEqual(sorted);
+    // Most recent commits first, check branches too
+    expect(checkpoints[0].message).toBe("feature: second");
+    expect(checkpoints[0].branch).toBe("run-1757489464604-eicnq");
+    expect(checkpoints[1].message).toBe("feature: first");
+    expect(checkpoints[1].branch).toBe("run-1757489464604-eicnq");
+    expect(checkpoints[2].message).toBe("main: second");
+    expect(checkpoints[2].branch).toBe("main");
+    expect(checkpoints[3].message).toBe("main: first");
+    expect(checkpoints[3].branch).toBe("main");
+    expect(checkpoints[4].message).toBe("Initial checkpoint setup");
+    expect(checkpoints[4].branch).toBe("main");
   });
 
   test("switchToBranch throws when not initialized", async () => {
     await expect(checkpointGit.switchToBranch("some-branch")).rejects.toThrow(
-      "Git repository not initialized"
+      "Git repository not initialized",
     );
   });
 

@@ -330,43 +330,10 @@ export class CheckpointGit {
     }
 
     try {
-      // Get all branches to check each one
       const branches = await this.git.branch();
-      // Priority-sort branches so shared commits prefer main/master labeling
-      const branchNames = branches.all.slice();
-      const priority = (name: string) => (name === "main" || name === "master" ? 0 : 1);
-      branchNames.sort((a, b) => {
-        const pa = priority(a);
-        const pb = priority(b);
-        if (pa !== pb) return pa - pb;
-        return a.localeCompare(b);
-      });
 
-      // Build membership: sha -> set of branches containing it
-      const membership = new Map<string, Set<string>>();
-      // Store commit data (message/timestamp) by sha
-      const commitData = new Map<string, { message: string; timestamp: string }>();
-
-      for (const branch of branchNames) {
-        try {
-          const log = await this.git.log([branch]);
-          for (const commit of log.all) {
-            if (!membership.has(commit.hash)) {
-              membership.set(commit.hash, new Set());
-              // Record data once
-              commitData.set(commit.hash, {
-                message: commit.message,
-                timestamp: commit.date,
-              });
-            }
-            membership.get(commit.hash)!.add(branch);
-          }
-        } catch (error) {
-          this.logger.log(`Could not get log for branch ${branch}: ${error}`, "debug");
-        }
-      }
-
-      // Build final list, choosing a primary branch by priority order
+      // Gather commits from all branches, de-duplicated by SHA.
+      const seen = new Set<string>();
       const allCheckpoints: Array<{
         sha: string;
         message: string;
@@ -374,19 +341,23 @@ export class CheckpointGit {
         branch: string;
       }> = [];
 
-      for (const [sha, data] of commitData.entries()) {
-        const branchesForCommit = membership.get(sha);
-        let primaryBranch = "";
-        if (branchesForCommit && branchesForCommit.size > 0) {
-          // Choose earliest by branchNames order
-          primaryBranch = branchNames.find((b) => branchesForCommit.has(b)) || "";
+      for (const branch of branches.all) {
+        try {
+          const log = await this.git.log([branch]);
+          for (const commit of log.all) {
+            if (seen.has(commit.hash)) continue;
+            seen.add(commit.hash);
+            allCheckpoints.push({
+              sha: commit.hash,
+              message: commit.message,
+              timestamp: commit.date,
+              branch,
+            });
+          }
+        } catch (error) {
+          // Branch might not have any commits yet
+          this.logger.log(`Could not get log for branch ${branch}: ${error}`, "debug");
         }
-        allCheckpoints.push({
-          sha,
-          message: data.message,
-          timestamp: data.timestamp,
-          branch: primaryBranch,
-        });
       }
 
       // Sort by timestamp descending (newest first)
