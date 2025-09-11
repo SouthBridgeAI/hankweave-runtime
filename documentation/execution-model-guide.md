@@ -9,7 +9,6 @@ Data Source (Your Project or File)
     ↓
 Execution Directory (Isolated Environment)
     ├── read_only_data_source/ → symlink to Data Source or containing linked file
-    ├── tadpole-results/ ← output files copied back to your project
     └── .tadpole/
         ├── execution-meta.json
         └── state.json
