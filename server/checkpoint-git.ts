@@ -152,7 +152,10 @@ export class CheckpointGit {
   }
 
   /**
-   * Create a checkpoint commit
+   * Create a checkpoint commit. If branch is specified, switch to that branch for the commit and then switch back to the original branch.
+   * @param message Commit message for the checkpoint
+   * @param options Optional parameters, including branch name
+   * @returns The commit SHA of the new checkpoint or null if commit failed
    */
   async commit(message: string, options?: { branch?: string }): Promise<string | null> {
     if (!this.git) return null;
