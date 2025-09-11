@@ -415,10 +415,10 @@ describe("CheckpointGit", () => {
 
     // Should include initial + all four commits
     // We don't assert exact size as there is an initial empty commit; just inclusion
-    expect(shas.has(m1!)).toBe(true);
-    expect(shas.has(m2!)).toBe(true);
-    expect(shas.has(f1!)).toBe(true);
-    expect(shas.has(f2!)).toBe(true);
+    expect(m1 && shas.has(m1)).toBe(true);
+    expect(m2 && shas.has(m2)).toBe(true);
+    expect(f1 && shas.has(f1)).toBe(true);
+    expect(f2 && shas.has(f2)).toBe(true);
   });
 
   test("initialize detects and reuses existing repository", async () => {
