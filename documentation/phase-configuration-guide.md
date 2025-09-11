@@ -370,7 +370,7 @@ The `copy` array supports glob patterns for flexible file selection:
 1. Phase executes and modifies files in the execution directory
 2. Phase completes successfully
 3. For each output group, `beforeCopy` commands run (if specified)
-4. Files matching each group's `copy` patterns are copied to `tadpole-results/`
+4. Files matching each group's `copy` patterns are copied to `tadpole-results/`. Subdirectories are recreated recursively inside `tadpole-results/` if needed.
 5. Files accumulate in `tadpole-results/` across multiple phases
 
 ### Complete Output Example
