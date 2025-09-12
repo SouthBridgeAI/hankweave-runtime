@@ -3191,9 +3191,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.logger.log(`[CHECKPOINT-DEBUG] Using branch: ${branchName}`);
 
       // Create checkpoint on run-specific branch
-      const commitHash = await this.checkpointGit.commit(commitMessage, {
-        branch: branchName,
-      });
+      await this.checkpointGit.switchToBranch(branchName);
+      const commitHash = await this.checkpointGit.commit(commitMessage);
 
       this.logger.log(`[CHECKPOINT-DEBUG] Checkpoint commit returned: ${commitHash}`);
 

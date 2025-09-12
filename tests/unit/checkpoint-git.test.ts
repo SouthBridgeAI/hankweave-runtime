@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import * as path from "node:path";
 import { CheckpointGit } from "../../server/checkpoint-git";
 import { Logger } from "../../server/utils";
+import { sleep } from "../utils/test-helpers";
 
 describe("CheckpointGit", () => {
   let tempDir: string;
@@ -173,6 +174,26 @@ describe("CheckpointGit", () => {
     expect(branches).toContain("test-branch");
   });
 
+  test("commit with branch option restores original branch", async () => {
+    await checkpointGit.initialize();
+
+    // Determine original branch (should be main on fresh repo)
+    const originalBranch = await checkpointGit.getCurrentBranch();
+    expect(originalBranch).toBe("main");
+
+    // Make a change and commit on a feature branch
+    await fs.promises.writeFile(path.join(tempDir, "b.txt"), "b1");
+    await checkpointGit.addPatterns(["*.txt"]);
+    const sha = await checkpointGit.commit("feature commit", {
+      branch: "feature-x",
+    });
+    expect(sha).toBeTruthy();
+
+    const currentAfter = await checkpointGit.getCurrentBranch();
+    // This expectation will FAIL with current implementation, confirming the issue
+    expect(currentAfter.trim()).toBe(originalBranch);
+  });
+
   test("handles complex patterns correctly", async () => {
     await checkpointGit.initialize();
 
@@ -303,10 +324,101 @@ describe("CheckpointGit", () => {
     );
   });
 
+  test("getAllCheckpoints returns full history across branches", async () => {
+    await checkpointGit.initialize();
+
+    // Track txt files
+    await checkpointGit.addPatterns(["*.txt"]);
+
+    // Two commits on main
+    const mainFile = path.join(tempDir, "main.txt");
+    await fs.promises.writeFile(mainFile, "one");
+    const c1 = await checkpointGit.commit("main: first");
+
+    // sleep a bit to get nicer timestamps
+    await sleep(1000);
+
+    await fs.promises.writeFile(mainFile, "two");
+    const c2 = await checkpointGit.commit("main: second");
+
+    await sleep(1000);
+
+    // Two commits on run branch
+    const featureFile1 = path.join(tempDir, "feature1.txt");
+    await fs.promises.writeFile(featureFile1, "f1");
+    const f1 = await checkpointGit.commit("feature: first", {
+      branch: "run-1757489464604-eicnq",
+    });
+
+    await sleep(1000);
+
+    const featureFile2 = path.join(tempDir, "feature2.txt");
+    await fs.promises.writeFile(featureFile2, "f2");
+    const f2 = await checkpointGit.commit("feature: second", {
+      branch: "run-1757489464604-eicnq",
+    });
+
+    // Sanity: hashes should exist
+    expect(c1).toBeTruthy();
+    expect(c2).toBeTruthy();
+    expect(f1).toBeTruthy();
+    expect(f2).toBeTruthy();
+
+    // Now fetch all checkpoints
+    const checkpoints = await checkpointGit.getAllCheckpoints();
+
+    // Expect initial empty commit + 4 real commits = 5 total
+    expect(checkpoints.length).toBe(5);
+
+    // Most recent commits first, check branches too
+    expect(checkpoints[0].message).toBe("feature: second");
+    expect(checkpoints[0].branch).toBe("run-1757489464604-eicnq");
+    expect(checkpoints[1].message).toBe("feature: first");
+    expect(checkpoints[1].branch).toBe("run-1757489464604-eicnq");
+    expect(checkpoints[2].message).toBe("main: second");
+    expect(checkpoints[2].branch).toBe("main");
+    expect(checkpoints[3].message).toBe("main: first");
+    expect(checkpoints[3].branch).toBe("main");
+    expect(checkpoints[4].message).toBe("Initial checkpoint setup");
+    expect(checkpoints[4].branch).toBe("main");
+  });
+
   test("switchToBranch throws when not initialized", async () => {
     await expect(checkpointGit.switchToBranch("some-branch")).rejects.toThrow(
       "Git repository not initialized",
     );
+  });
+
+  test("getAllCheckpointShas returns SHAs across branches", async () => {
+    await checkpointGit.initialize();
+
+    // Track txt files
+    await checkpointGit.addPatterns(["*.txt"]);
+
+    // Two commits on main
+    await fs.promises.writeFile(path.join(tempDir, "m.txt"), "m1");
+    const m1 = await checkpointGit.commit("m1");
+    await fs.promises.writeFile(path.join(tempDir, "m.txt"), "m2");
+    const m2 = await checkpointGit.commit("m2");
+
+    // Two commits on feature branch
+    await fs.promises.writeFile(path.join(tempDir, "f1.txt"), "f1");
+    const f1 = await checkpointGit.commit("f1", { branch: "feat-a" });
+    await fs.promises.writeFile(path.join(tempDir, "f2.txt"), "f2");
+    const f2 = await checkpointGit.commit("f2", { branch: "feat-a" });
+
+    // Sanity
+    expect(m1 && m2 && f1 && f2).toBeTruthy();
+
+    // Collect SHAs via API
+    const shas = await checkpointGit.getAllCheckpointShas();
+
+    // Should include initial + all four commits
+    // We don't assert exact size as there is an initial empty commit; just inclusion
+    expect(m1 && shas.has(m1)).toBe(true);
+    expect(m2 && shas.has(m2)).toBe(true);
+    expect(f1 && shas.has(f1)).toBe(true);
+    expect(f2 && shas.has(f2)).toBe(true);
   });
 
   test("initialize detects and reuses existing repository", async () => {
