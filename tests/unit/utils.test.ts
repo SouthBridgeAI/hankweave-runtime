@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
 import type { FileNode } from "../../server/types/types";
-import { buildFileTree, escapeShellArg } from "../../server/utils";
+import { buildFileTree, copyFiles, escapeShellArg, Logger } from "../../server/utils";
 
 describe("escapeShellArg", () => {
   test("escapes single quotes correctly", () => {
@@ -172,5 +172,143 @@ describe("buildFileTree", () => {
     const nestedFile = dirNode?.children?.find((child) => child.name === "nested.txt");
     expect(nestedFile).toBeDefined();
     expect(nestedFile?.isDirectory).toBe(false);
+  });
+});
+
+// Mock logger
+class MockLogger extends Logger {
+  logs: Array<{ message: string; level: string }> = [];
+
+  log(message: string, level: "info" | "error" | "debug" = "info"): void {
+    this.logs.push({ message, level });
+  }
+
+  logSocketTraffic(_socketLogFile: string, _direction: "in" | "out", _data: unknown): void {
+    // Mock implementation
+  }
+}
+
+describe("copyFiles", () => {
+  let tempDir: string;
+  let destDir: string;
+  let mockLogger: MockLogger;
+
+  beforeEach(async () => {
+    const timestamp = Date.now();
+    tempDir = path.resolve("tests", "test-area", `temp-test-copyfiles-src-${timestamp}`);
+    destDir = path.resolve("tests", "test-area", `temp-test-copyfiles-dest-${timestamp}`);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+    mockLogger = new MockLogger("");
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(destDir, { recursive: true, force: true });
+  });
+
+  test("copies single file to destination", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "test.txt"), "test content");
+
+    await copyFiles(tempDir, ["test.txt"], destDir, mockLogger);
+
+    expect(await fs.promises.readFile(path.join(destDir, "test.txt"), "utf-8")).toBe(
+      "test content",
+    );
+  });
+
+  test("copies multiple files", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "file1.txt"), "content1");
+    await fs.promises.writeFile(path.join(tempDir, "file2.txt"), "content2");
+
+    await copyFiles(tempDir, ["*.txt"], destDir, mockLogger);
+
+    expect(await fs.promises.readFile(path.join(destDir, "file1.txt"), "utf-8")).toBe("content1");
+    expect(await fs.promises.readFile(path.join(destDir, "file2.txt"), "utf-8")).toBe("content2");
+  });
+
+  test("preserves directory structure", async () => {
+    await fs.promises.mkdir(path.join(tempDir, "nested", "deep"), {
+      recursive: true,
+    });
+    await fs.promises.writeFile(path.join(tempDir, "nested", "file.txt"), "nested content");
+    await fs.promises.writeFile(
+      path.join(tempDir, "nested", "deep", "deep-file.txt"),
+      "deep content",
+    );
+
+    await copyFiles(tempDir, ["**/*.txt"], destDir, mockLogger);
+
+    expect(await fs.promises.readFile(path.join(destDir, "nested", "file.txt"), "utf-8")).toBe(
+      "nested content",
+    );
+    expect(
+      await fs.promises.readFile(path.join(destDir, "nested", "deep", "deep-file.txt"), "utf-8"),
+    ).toBe("deep content");
+  });
+
+  test("creates destination directory if it doesn't exist", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "test.txt"), "content");
+
+    rmSync(destDir, { recursive: true, force: true });
+    expect(fs.existsSync(destDir)).toBe(false);
+
+    await copyFiles(tempDir, ["test.txt"], destDir, mockLogger);
+
+    expect(fs.existsSync(destDir)).toBe(true);
+    expect(await fs.promises.readFile(path.join(destDir, "test.txt"), "utf-8")).toBe("content");
+  });
+
+  test("handles glob patterns correctly", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "file.js"), "js content");
+    await fs.promises.writeFile(path.join(tempDir, "file.ts"), "ts content");
+    await fs.promises.writeFile(path.join(tempDir, "readme.md"), "md content");
+
+    await copyFiles(tempDir, ["*.js", "*.ts"], destDir, mockLogger);
+
+    expect(fs.existsSync(path.join(destDir, "file.js"))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, "file.ts"))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, "readme.md"))).toBe(false);
+  });
+
+  test("handles empty file list gracefully", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "ignored.txt"), "content");
+
+    await copyFiles(tempDir, ["*.nonexistent"], destDir, mockLogger);
+
+    expect(fs.existsSync(path.join(destDir, "ignored.txt"))).toBe(false);
+  });
+
+  test("copies directories recursively", async () => {
+    await fs.promises.mkdir(path.join(tempDir, "source-dir", "subdir"), {
+      recursive: true,
+    });
+    await fs.promises.writeFile(path.join(tempDir, "source-dir", "file.txt"), "dir content");
+    await fs.promises.writeFile(
+      path.join(tempDir, "source-dir", "subdir", "nested.txt"),
+      "nested dir content",
+    );
+
+    await copyFiles(tempDir, ["source-dir/**"], destDir, mockLogger);
+
+    expect(await fs.promises.readFile(path.join(destDir, "source-dir", "file.txt"), "utf-8")).toBe(
+      "dir content",
+    );
+    expect(
+      await fs.promises.readFile(path.join(destDir, "source-dir", "subdir", "nested.txt"), "utf-8"),
+    ).toBe("nested dir content");
+  });
+
+  test("ignores .gitignore rules and copies all matching files", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "include.txt"), "included");
+    await fs.promises.writeFile(path.join(tempDir, "ignore.txt"), "ignored");
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "ignore.txt\n");
+
+    await copyFiles(tempDir, ["*.txt"], destDir, mockLogger);
+
+    expect(fs.existsSync(path.join(destDir, "include.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, "ignore.txt"))).toBe(true);
+
+    expect(await fs.promises.readFile(path.join(destDir, "include.txt"), "utf-8")).toBe("included");
+    expect(await fs.promises.readFile(path.join(destDir, "ignore.txt"), "utf-8")).toBe("ignored");
   });
 });

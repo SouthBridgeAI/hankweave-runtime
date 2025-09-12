@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import glob from "fast-glob";
 import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
@@ -291,4 +292,75 @@ export function formatSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
   return `${(bytes / k ** i).toFixed(1)} ${units[i]}`;
+}
+
+/**
+ * Copy files from a source directory to a destination directory using glob patterns.
+ *
+ * This function uses fast-glob directly to resolve file patterns without respecting
+ * .gitignore rules (unlike UnifiedFileResolver), ensuring all matching files are copied regardless of git ignore status.
+ *
+ * @param sourceDirectory - The source directory path from which to copy files
+ * @param filesToCopy - Array of glob patterns to match files for copying (e.g., `["*.txt"]`)
+ * @param destinationDirectory - The destination directory path where files will be copied
+ * @param logger - Logger instance for debug and info messages
+ * @returns Promise that resolves when all files have been copied
+ *
+ */
+export async function copyFiles(
+  sourceDirectory: string,
+  filesToCopy: string[],
+  destinationDirectory: string,
+  logger: Logger,
+): Promise<void> {
+  // Log the copy operation with source, destination, and glob patterns
+  logger.log(
+    `Copying files from ${sourceDirectory} to ${destinationDirectory} using globs ${filesToCopy.join(
+      ", ",
+    )}`,
+    "debug",
+  );
+
+  // Ensure destination directory exists before starting copy operations
+  await fs.promises.mkdir(destinationDirectory, { recursive: true });
+
+  // Use fast-glob directly to resolve patterns without gitignore filtering
+  // This ensures all matching files are found, regardless of .gitignore rules
+  const files = await glob(filesToCopy, {
+    cwd: sourceDirectory, // Set working directory for glob patterns
+    dot: true, // Include hidden files (files starting with .)
+    onlyFiles: false, // Include directories in results for recursive copying
+  });
+
+  // Early return if no files match the provided glob patterns
+  if (files.length === 0) {
+    logger.log("No files matched the copy globs.", "debug");
+    return;
+  }
+
+  // Log all resolved files for debugging purposes
+  logger.log(`Resolved files: ${files.join(", ")}`, "debug");
+
+  // Process each matched file/directory
+  for (const file of files) {
+    // Build absolute paths for source and destination
+    const sourcePath = path.join(sourceDirectory, file);
+    const destPath = path.join(destinationDirectory, file);
+
+    logger.log(`Copying ${sourcePath} to ${destPath}`, "debug");
+
+    // Skip files that don't exist (edge case handling)
+    if (!fs.existsSync(sourcePath)) {
+      logger.log(`Source file ${sourcePath} does not exist`, "info");
+      continue;
+    }
+
+    // Create parent directories in destination if they don't exist
+    // This preserves the directory structure from source
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+
+    // Copy the file or directory recursively using Node.js built-in fs.cp
+    // The recursive option handles both files and directories uniformly
+    await fs.promises.cp(sourcePath, destPath, { recursive: true });
+  }
 }

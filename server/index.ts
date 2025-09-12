@@ -252,6 +252,9 @@ Examples:
 
     // Create server configuration by merging ExecutionSetup with other config
     const serverConfig = {
+      // This is where tadpole is running
+      cwd: originalCwd,
+
       // Required execution properties from ExecutionSetup
       readOnlySourceDataPath: executionSetup.readOnlySourceDataPath,
       executionPath: executionSetup.executionPath,

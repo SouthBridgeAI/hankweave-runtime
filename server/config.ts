@@ -58,7 +58,7 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
       const phaseName = phaseData?.name || "unnamed";
 
       if (phaseIndex !== undefined) {
-        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles, env.`;
+        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles, env, outputFiles.`;
       } else {
         errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
       }
@@ -78,6 +78,29 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
 // Configuration Schema
 // ============================================================================
 
+const shellCommandWorkingDirectory = ["project"] as const;
+
+// when running workspace setup commands, it's useful to have "lastCopied" option
+// to coordinate with copy commands
+const workspaceSetupCommandWorkingDirectory = [
+  ...shellCommandWorkingDirectory,
+  "lastCopied",
+] as const;
+
+const shellCommandSchema = z.object({
+  type: z.literal("command"),
+  command: z.object({
+    run: z.string().min(1, "Command cannot be empty"),
+    workingDirectory: z.enum(shellCommandWorkingDirectory).optional().default("project"),
+  }),
+});
+
+const workspaceShellCommandSchema = shellCommandSchema.extend({
+  command: shellCommandSchema.shape.command.extend({
+    workingDirectory: z.enum(workspaceSetupCommandWorkingDirectory).optional().default("project"),
+  }),
+});
+
 const workspaceSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("copy"),
@@ -86,14 +109,20 @@ const workspaceSetupItemSchema = z.discriminatedUnion("type", [
       to: z.string().min(1, "Target path cannot be empty"),
     }),
   }),
-  z.object({
-    type: z.literal("command"),
-    command: z.object({
-      run: z.string().min(1, "Command cannot be empty"),
-      workingDirectory: z.enum(["project", "lastCopied"]).optional().default("project"),
-    }),
-  }),
+  workspaceShellCommandSchema,
 ]);
+
+// Output copy item schema (array of these under phase.outputFiles)
+const phaseOutputItemSchema = z
+  .object({
+    // An array of glob strings representing phase output files to copy
+    copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
+    // Optional shell commands to run before copying files. Cwd is executionPath
+    beforeCopy: z.array(shellCommandSchema).optional(),
+  })
+  .strict();
+
+const phaseOutputSchema = z.array(phaseOutputItemSchema).optional();
 
 const phaseConfigSchema = z
   .object({
@@ -129,6 +158,7 @@ const phaseConfigSchema = z
     description: z.string().optional(),
     trackedFiles: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
+    outputFiles: phaseOutputSchema,
   })
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
@@ -150,10 +180,11 @@ const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one p
  * Default server configuration values.
  * Can be overridden by passing config to TadpoleServer constructor.
  *
- * Note: execution paths and phases must be provided by the user.
+ * Note: execution paths and phases must be provided by the user, as well as cwd
  */
 export const DEFAULT_CONFIG: Omit<
   ServerConfig,
+  | "cwd"
   | "readOnlySourceDataPath"
   | "executionPath"
   | "dataPathInExecutionDir"
@@ -165,6 +196,7 @@ export const DEFAULT_CONFIG: Omit<
 > = {
   port: 7777,
   version: "1.0.0",
+  outputDirectory: "tadpole-results",
   lockFile: ".tadpole/server.lock",
   socketLogFile: ".tadpole/logs/websocket.log",
   serverLogFile: ".tadpole/logs/server.log",

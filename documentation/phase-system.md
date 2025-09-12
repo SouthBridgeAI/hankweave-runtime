@@ -152,18 +152,24 @@ Each transition is triggered by specific events:
 
 This powerful feature allows phases to configure their own environment. The server executes these steps in order:
 
-1. **Copy Operations**: Copies files or entire directories. A common use is to copy a starter template into the workspace.
+1.  **Copy Operations**: Copies files or entire directories. A common use is to copy a starter template into the workspace.
+    ```json
+    {
+      "type": "copy",
+      "copy": {
+        "from": "./templates/react-app",  // Absolute or relative to config file
+        "to": "frontend"                  // Relative to project root (where you run the command from)
+      }
+    }
+    ```
 
-   ```json
-   {
-     "type": "copy",
-     "copy": {
-       "from": "./templates/react-app",  // Absolute or relative to config file
-       "to": "frontend"                  // Relative to project root
-     }
-   }
-   ```
-1. **Command Execution**: Runs arbitrary shell commands. This is often used for installing dependencies (`npm install`) or running build scripts.
+2.  **Command Execution**: Runs arbitrary shell commands. This is often used for installing dependencies (`npm install`) or running build scripts.
+    - Commands are executed using the system's default shell
+    - Working directory can be:
+      - `"project"`: The project root directory (where you run the command from)
+      - `"lastCopied"`: The destination of the most recent copy operation
+    - Commands run sequentially - if one fails, subsequent commands are skipped
+    - There's no timeout by default - ensure commands complete in reasonable time
 
    - Commands are executed using the system's default shell
    - Working directory can be:

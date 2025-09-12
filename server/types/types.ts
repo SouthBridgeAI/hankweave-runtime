@@ -46,6 +46,33 @@ export type CheckpointStatus = (typeof CHECKPOINT_STATUS)[keyof typeof CHECKPOIN
 // Server Configuration
 // ============================================================================
 
+type ShellCommandWorkingDirectory = "project";
+type WorkspaceShellCommandWorkingDirectory = ShellCommandWorkingDirectory | "lastCopied";
+
+export type ShellCommand = {
+  /** Type of setup operation */
+  type: "command";
+  /** For command operations */
+  command: {
+    /** Shell command to execute */
+    run: string;
+    /** Working directory for command execution (default: "project") */
+    workingDirectory?: ShellCommandWorkingDirectory;
+  };
+};
+
+export type WorkspaceShellCommand = {
+  /** Type of setup operation */
+  type: "command";
+  /** For command operations */
+  command: {
+    /** Shell command to execute */
+    run: string;
+    /** Working directory for command execution (default: "project") */
+    workingDirectory?: WorkspaceShellCommandWorkingDirectory;
+  };
+};
+
 /**
  * Workspace setup operation - either copy files/directories or run commands.
  */
@@ -69,17 +96,7 @@ export type WorkspaceSetupItem =
         to: string;
       };
     }
-  | {
-      /** Type of setup operation */
-      type: "command";
-      /** For command operations */
-      command: {
-        /** Shell command to execute */
-        run: string;
-        /** Working directory for command execution (default: "project") */
-        workingDirectory: "project" | "lastCopied";
-      };
-    };
+  | WorkspaceShellCommand;
 
 /**
  * Configuration for a single phase in the Tadpole workflow.
@@ -137,6 +154,14 @@ export interface PhaseConfig {
 
   /** Optional environment variables to set for the Claude process */
   env?: Record<string, string>;
+
+  /** Optional output copy steps to run after phase completion: files to copy out from a completed phase, with optional pre-copy commands. */
+  outputFiles?: {
+    /** Glob patterns to copy from execution directory to output directory */
+    copy: string[];
+    /** Optional commands to run before copying (run in executionPath) */
+    beforeCopy?: ShellCommand[];
+  }[];
 }
 
 /**
@@ -185,6 +210,12 @@ export interface ServerConfig {
 
   /** Path to general server log file */
   serverLogFile: string;
+
+  /** Current working directory for the server process */
+  cwd: string;
+
+  /** Output directory for generated files. Will be scoped to cwd */
+  outputDirectory: string;
 
   // Execution paths (from ExecutionSetup)
   /** Original data location (for reference only) */

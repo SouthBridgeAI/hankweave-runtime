@@ -185,3 +185,6 @@ dist
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Default tadpole output directory
+tadpole-results/
