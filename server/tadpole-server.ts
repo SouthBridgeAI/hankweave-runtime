@@ -8,10 +8,7 @@ import { ClaudeLogParser } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
-import {
-  analyzeExecutionThread,
-  findContinuationSessionId,
-} from "./execution-thread.js";
+import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { BunProxyRunner } from "./llm-proxy.js";
 // Import event types from new schema file
@@ -29,10 +26,7 @@ import type {
   TokenUsageEvent,
 } from "./schemas/event-schemas.js";
 import { StateManager } from "./state-manager.js";
-import {
-  type ServerInternalEvents,
-  TypedEventEmitter,
-} from "./typed-event-emitter.js";
+import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { EventId, PhaseId, RunId, SessionId } from "./types/branded-types.js";
 import type {
   AssistantMessage,
@@ -170,7 +164,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     config: Omit<ServerConfig, keyof typeof DEFAULT_CONFIG> &
       Partial<Pick<ServerConfig, keyof typeof DEFAULT_CONFIG>> & {
         phases: PhaseConfig[];
-      }
+      },
   ) {
     super();
     this.config = {
@@ -179,18 +173,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     } as ServerConfig;
 
     // Update logger to use execution path
-    this.logger = new Logger(
-      path.join(this.config.executionPath, this.config.serverLogFile)
-    );
+    this.logger = new Logger(path.join(this.config.executionPath, this.config.serverLogFile));
     this.serverStartTime = new Date();
 
     // Initialize state manager with execution path
     const tadpoleDir = path.join(this.config.executionPath, ".tadpole");
-    this.stateManager = new StateManager(
-      tadpoleDir,
-      this.logger,
-      this.config.phases
-    );
+    this.stateManager = new StateManager(tadpoleDir, this.logger, this.config.phases);
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -201,9 +189,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // State is already saved when we get here
       const phase = this.stateManager.getCurrentlyRunningPhase();
       if (phase && "claudeSessionId" in phase) {
-        const phaseConfig = this.config.phases.find(
-          (p) => p.id === data.phaseId
-        );
+        const phaseConfig = this.config.phases.find((p) => p.id === data.phaseId);
         if (phaseConfig) {
           this.sendEvent({
             id: EventId(generateId()),
@@ -214,10 +200,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
               phaseName: phaseConfig.name,
               phaseDescription: phaseConfig.description,
               sessionId: phase.claudeSessionId,
-              previousSessionId:
-                "previousSessionId" in phase
-                  ? phase.previousSessionId
-                  : undefined,
+              previousSessionId: "previousSessionId" in phase ? phase.previousSessionId : undefined,
               startTime: phase.startTime,
             },
           } as PhaseStartedEvent);
@@ -251,7 +234,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
    */
   async start(): Promise<void> {
     this.logger.log(
-      `Starting Tadpole Server v${this.config.version} in ${this.config.executionPath}`
+      `Starting Tadpole Server v${this.config.version} in ${this.config.executionPath}`,
     );
 
     // Start proxy server first (if not disabled)
@@ -262,7 +245,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         "passthrough",
         proxyPort,
         this.config.anthropicBaseURL || "https://api.anthropic.com",
-        this.logger
+        this.logger,
       );
       this.proxyRunner.start();
     } else {
@@ -282,14 +265,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // Parse lock file for enhanced data
       try {
         const lockInfo = JSON.parse(lockData);
-        const heartbeatAge =
-          Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
+        const heartbeatAge = Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
 
         if (heartbeatAge > 120000) {
           // 2 minutes
-          this.logger.log(
-            `Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`
-          );
+          this.logger.log(`Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`);
           fs.unlinkSync(this.config.lockFile);
 
           // Mark the run as crashed
@@ -313,14 +293,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             this.logger.log(`Recovering run ${this.currentRunId}`);
           } else {
             throw new Error(
-              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`
+              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`,
             );
           }
         }
       } catch (_e) {
         // Old format lock file - just PID
         throw new Error(
-          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`
+          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`,
         );
       }
     }
@@ -328,18 +308,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // let see if execution thread from state manager has previously failed
     const thread = await this.stateManager.getExecutionThread();
 
-    if (thread && thread.failed) {
-      // this.currentRunId = thread.runId;
-      // console.log(">>>>>>>>>>>>>>>>>>>>>", this.stateManager.getCurrentRun());
-      console.log(">>>>>>>>>>>>>>>>> run ID iz", thread.runId);
-      console.log(
-        ">>>>>>>>>>>>>>>>> current run iz",
-        this.stateManager.getCurrentRun()
-      );
-      throw new Error(" --- thread FAILED --- ");
-      // if (this.checkpointGit) {
-      //   throw new Error(" --- thread FAILED --- ");
-      // }
+    if (thread?.failed) {
+      await this.rollbackToLastSuccess(true);
     }
 
     // Start a new run if needed
@@ -356,14 +326,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           try {
             await this.checkpointGit.switchToBranch(currentRun.gitBranch);
           } catch (error) {
-            this.logger.log(
-              `Failed to switch to run branch: ${error}`,
-              "error"
-            );
+            this.logger.log(`Failed to switch to run branch: ${error}`, "error");
           }
         } else {
           this.logger.log(
-            `Fresh run ${currentRun.runId} - branch will be created on first checkpoint`
+            `Fresh run ${currentRun.runId} - branch will be created on first checkpoint`,
           );
         }
       }
@@ -396,10 +363,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.shutdown("uncaughtException");
     });
     process.on("unhandledRejection", (reason, promise) => {
-      this.logger.log(
-        `Unhandled rejection at: ${promise}, reason: ${reason}`,
-        "error"
-      );
+      this.logger.log(`Unhandled rejection at: ${promise}, reason: ${reason}`, "error");
       this.shutdown("unhandledRejection");
     });
   }
@@ -453,10 +417,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private handleMessage(
-    ws: ServerWebSocket<ClientData>,
-    message: string | Buffer
-  ): void {
+  private handleMessage(ws: ServerWebSocket<ClientData>, message: string | Buffer): void {
     try {
       ws.data.lastActivity = new Date();
 
@@ -464,10 +425,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       const result = clientCommandSchema.safeParse(parsed);
 
       if (!result.success) {
-        this.logger.log(
-          `Invalid client command: ${result.error.message}`,
-          "error"
-        );
+        this.logger.log(`Invalid client command: ${result.error.message}`, "error");
         this.sendEvent({
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
@@ -480,17 +438,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         return;
       }
 
-      this.logger.logSocketTraffic(
-        this.config.socketLogFile,
-        "in",
-        result.data
-      );
+      this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
       this.handleCommand(result.data);
     } catch (error) {
-      this.logger.log(
-        `Error parsing command: ${toError(error).message}`,
-        "error"
-      );
+      this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
     }
   }
 
@@ -513,8 +464,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message:
-            "Cannot execute state-modifying commands while rollback is in progress",
+          message: "Cannot execute state-modifying commands while rollback is in progress",
           context: `Attempted command: ${command.type}`,
           phase: this.currentPhase?.phase.id,
           fatal: false,
@@ -527,10 +477,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     switch (command.type) {
       case "phase.start": {
-        await this.startPhase(
-          command.data.phaseId,
-          command.data.skipPreCommands
-        );
+        await this.startPhase(command.data.phaseId, command.data.skipPreCommands);
         break;
       }
 
@@ -561,7 +508,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       case "rollback.toCheckpoint":
         await this.rollbackToCheckpoint(
           command.data.checkpointSha,
-          command.data.autoRestart ?? false
+          command.data.autoRestart ?? false,
         );
         break;
 
@@ -569,7 +516,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         await this.rollbackToPhase(
           command.data.phaseId,
           command.data.checkpointType,
-          command.data.autoRestart ?? false
+          command.data.autoRestart ?? false,
         );
         break;
 
@@ -599,9 +546,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   private async sendStateSnapshot(): Promise<void> {
     const totalCost = this.stateManager.getTotalCost();
-    const totalTime = this.serverStartTime
-      ? Date.now() - this.serverStartTime.getTime()
-      : 0;
+    const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
 
     // Get terminal phases using execution thread
     const terminalPhases = await this.getTerminalPhasesForSnapshot();
@@ -639,17 +584,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
    * Start a new run and create necessary infrastructure
    */
   private async startNewRun(
-    startingConditions?: import("./types/state-types.js").StartingConditions
+    startingConditions?: import("./types/state-types.js").StartingConditions,
   ): Promise<void> {
-    const runId = RunId(
-      `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
-    );
-    const runFolder = path.join(
-      this.config.executionPath,
-      ".tadpole",
-      "runs",
-      runId
-    );
+    const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+    const runFolder = path.join(this.config.executionPath, ".tadpole", "runs", runId);
 
     // Create run folder
     await fs.promises.mkdir(runFolder, { recursive: true });
@@ -731,16 +669,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
    * 6. Send phase.started event
    * 7. Spawn Claude process with prompt
    */
-  private async startPhase(
-    phaseId: PhaseId,
-    skipPreCommands?: boolean
-  ): Promise<void> {
+  private async startPhase(phaseId: PhaseId, skipPreCommands?: boolean): Promise<void> {
     const phase = this.config.phases.find((p) => p.id === phaseId);
     if (!phase) {
       await this.handleError(
         new Error(`Unknown phase: ${phaseId}`),
         "startPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -753,7 +688,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error(`Phase already running: ${currentPhase.phaseId}`),
         "startPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -761,14 +696,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Check if this phase was already attempted in current run
     const currentRun = this.stateManager.getCurrentRun();
     if (currentRun) {
-      const previousAttempt = currentRun.phases.find(
-        (p) => p.phaseId === phaseId
-      );
+      const previousAttempt = currentRun.phases.find((p) => p.phaseId === phaseId);
       if (previousAttempt && isTerminalPhaseStatus(previousAttempt.status)) {
         // Phase was already attempted and finished - start new run
-        this.logger.log(
-          `Phase ${phaseId} was already attempted in current run, starting new run`
-        );
+        this.logger.log(`Phase ${phaseId} was already attempted in current run, starting new run`);
 
         // Complete current run
         this.stateManager.transition({
@@ -794,11 +725,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Create phase started transition (fire-and-forget)
 
     if (!this.currentRunId) {
-      await this.handleError(
-        new Error("No active run"),
-        "startPhase",
-        ErrorSeverity.FATAL
-      );
+      await this.handleError(new Error("No active run"), "startPhase", ErrorSeverity.FATAL);
       return;
     }
 
@@ -815,7 +742,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("No active run during phase start"),
         "startPhase",
-        ErrorSeverity.FATAL
+        ErrorSeverity.FATAL,
       );
       return;
     }
@@ -828,10 +755,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       for (const [index, item] of phase.workspaceSetup.entries()) {
         try {
           if (item.type === "copy" && item.copy) {
-            const targetPath = path.join(
-              this.config.executionPath,
-              item.copy.to
-            );
+            const targetPath = path.join(this.config.executionPath, item.copy.to);
             await this.copyPath(item.copy.from, targetPath);
             lastCopiedPath = targetPath;
             this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
@@ -841,16 +765,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
               item.command.workingDirectory === "lastCopied" && lastCopiedPath
                 ? lastCopiedPath
                 : this.config.executionPath;
-            this.logger.log(
-              `Ran command in ${resolvedWorkingDir}: ${item.command.run}`
-            );
+            this.logger.log(`Ran command in ${resolvedWorkingDir}: ${item.command.run}`);
           }
         } catch (error) {
           const errorMessage = toError(error).message;
-          this.logger.log(
-            `Workspace setup failed at item ${index + 1}: ${errorMessage}`,
-            "error"
-          );
+          this.logger.log(`Workspace setup failed at item ${index + 1}: ${errorMessage}`, "error");
 
           // Set failure reason with detailed information
           this.phaseFailureReason = {
@@ -883,9 +802,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             type: "error",
             data: {
               message: `Workspace setup failed: ${errorMessage}`,
-              context: `Phase ${phase.id} - ${item.type} operation (item ${
-                index + 1
-              })`,
+              context: `Phase ${phase.id} - ${item.type} operation (item ${index + 1})`,
               phase: phase.id,
               fatal: true,
               severity: ErrorSeverity.FATAL,
@@ -897,7 +814,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           await this.handleError(
             toError(error),
             `Workspace setup item ${index + 1}`,
-            ErrorSeverity.FATAL
+            ErrorSeverity.FATAL,
           );
           return;
         }
@@ -917,9 +834,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Add checkpoint patterns - accumulate from all phases up to current
     // This ensures resume functionality works correctly
-    const currentPhaseIndex = this.config.phases.findIndex(
-      (p) => p.id === phase.id
-    );
+    const currentPhaseIndex = this.config.phases.findIndex((p) => p.id === phase.id);
     if (currentPhaseIndex >= 0) {
       // Accumulate patterns from all phases up to and including current
       for (let i = 0; i <= currentPhaseIndex; i++) {
@@ -930,11 +845,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Create checkpoint after workspace setup if we have workspace setup
-      if (
-        !skipPreCommands &&
-        phase.workspaceSetup &&
-        this.checkpointingEnabled
-      ) {
+      if (!skipPreCommands && phase.workspaceSetup && this.checkpointingEnabled) {
         await this.createCheckpoint({
           status: "workspace-setup",
           phaseId: phase.id,
@@ -956,19 +867,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.config.phases,
         undefined, // No checkpoint data needed for session lookup
         undefined, // Use latest run
-        this.logger
+        this.logger,
       );
 
-      const sessionId = findContinuationSessionId(
-        thread,
-        phase.id,
-        this.config.phases
-      );
+      const sessionId = findContinuationSessionId(thread, phase.id, this.config.phases);
       previousSessionId = sessionId;
 
       if (previousSessionId) {
         this.logger.log(
-          `Phase ${phase.id} will continue from previous session: ${previousSessionId}`
+          `Phase ${phase.id} will continue from previous session: ${previousSessionId}`,
         );
 
         // Send info event about continuation
@@ -1033,9 +940,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.currentPhase = {
       status: "initializing",
       phase,
-      previousSessionId: previousSessionId
-        ? SessionId(previousSessionId)
-        : undefined, // Store for phase.started event
+      previousSessionId: previousSessionId ? SessionId(previousSessionId) : undefined, // Store for phase.started event
       startTime: new Date(),
       phaseCost: 0,
       phaseTokens: {
@@ -1060,7 +965,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // Use the unified file resolver to get files respecting gitignore
       const resolvedFiles = await fileResolver.resolveFiles(
         this.config.executionPath,
-        phase.trackedFiles
+        phase.trackedFiles,
       );
 
       // Get file contents for each resolved file
@@ -1074,7 +979,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             content,
             lastModified: stats.mtime.toISOString(),
           };
-        })
+        }),
       );
 
       // Only send events if we have files
@@ -1095,9 +1000,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
         // Store most recent file
         const mostRecent = files.reduce((latest, file) =>
-          new Date(file.lastModified) > new Date(latest.lastModified)
-            ? file
-            : latest
+          new Date(file.lastModified) > new Date(latest.lastModified) ? file : latest,
         );
         this.recentFileAccess = {
           path: mostRecent.path,
@@ -1126,7 +1029,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
    */
   private async startClaudeProcess(
     phase: PhaseConfig,
-    previousSessionId: string | null
+    previousSessionId: string | null,
   ): Promise<void> {
     try {
       // Get run folder from state
@@ -1159,7 +1062,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.logger,
         this.logParser,
         this.proxyRunner?.proxyUrl,
-        this.config.modelOverride
+        this.config.modelOverride,
       );
 
       // Set up event handlers
@@ -1168,19 +1071,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       });
 
       this.processManager.on("error", (error: Error) => {
-        this.handleError(
-          error,
-          `Claude process for phase ${phase.id}`,
-          ErrorSeverity.FATAL
-        );
+        this.handleError(error, `Claude process for phase ${phase.id}`, ErrorSeverity.FATAL);
       });
 
       // Spawn process with custom log path
-      const _logPathResult = await this.processManager.spawn(
-        phase,
-        previousSessionId,
-        logPath
-      );
+      const _logPathResult = await this.processManager.spawn(phase, previousSessionId, logPath);
 
       // Transition to initializing (fire-and-forget)
       if (!this.currentRunId) {
@@ -1282,9 +1177,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       };
 
       // Log the session ID update
-      this.logger.log(
-        `Claude started phase ${phaseId} with session ID: ${msg.session_id}`
-      );
+      this.logger.log(`Claude started phase ${phaseId} with session ID: ${msg.session_id}`);
 
       // Send existing info event
       this.sendEvent({
@@ -1301,12 +1194,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private handleAssistantMessage(msg: AssistantMessage, phaseId: string): void {
     // Track that we've received an assistant message
     if (this.currentRunId) {
-      const currentPhase = this.stateManager.getPhaseInCurrentRun(
-        PhaseId(phaseId)
-      );
+      const currentPhase = this.stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
       const currentCount =
         currentPhase && "assistantMessageCount" in currentPhase
-          ? currentPhase.assistantMessageCount ?? 0
+          ? (currentPhase.assistantMessageCount ?? 0)
           : 0;
 
       this.stateManager.transition({
@@ -1321,10 +1212,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Use type guard to check for synthetic timeout messages
     if (isSyntheticTimeout(msg as ClaudeLogMessage)) {
-      this.logger.log(
-        `API timeout detected in synthetic message for phase ${phaseId}`,
-        "error"
-      );
+      this.logger.log(`API timeout detected in synthetic message for phase ${phaseId}`, "error");
 
       const timeoutError = new APITimeoutError(phaseId, {
         message: "API Error: Request timed out.",
@@ -1376,10 +1264,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.currentPhase.phaseCost += costDelta;
         this.currentPhase.phaseTokens.inputTokens += usageDelta.inputTokens;
         this.currentPhase.phaseTokens.outputTokens += usageDelta.outputTokens;
-        this.currentPhase.phaseTokens.cacheCreationTokens +=
-          usageDelta.cacheCreationTokens;
-        this.currentPhase.phaseTokens.cacheReadTokens +=
-          usageDelta.cacheReadTokens;
+        this.currentPhase.phaseTokens.cacheCreationTokens += usageDelta.cacheCreationTokens;
+        this.currentPhase.phaseTokens.cacheReadTokens += usageDelta.cacheReadTokens;
       }
 
       // Fire cost INCREMENT transition (fire-and-forget)
@@ -1398,10 +1284,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
       this.logger.log(
         `Phase ${phaseId} token update - Call cost: $${costDelta.toFixed(
-          4
+          4,
         )}, Running total: $${this.currentPhase?.phaseCost.toFixed(4) || 0} ` +
           `(${usageDelta.inputTokens} in, ${usageDelta.outputTokens} out, ` +
-          `${usageDelta.cacheCreationTokens} cache create, ${usageDelta.cacheReadTokens} cache read)`
+          `${usageDelta.cacheCreationTokens} cache create, ${usageDelta.cacheReadTokens} cache read)`,
       );
 
       // Send token.usage event with the delta cost
@@ -1501,14 +1387,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         const fileTools: ToolName[] = ["Read", "Write", "Edit", "MultiEdit"];
         if (fileTools.includes(toolItem.name as ToolName)) {
           // Call async function without awaiting to avoid blocking
-          this.handleFileToolCall(
-            toolItem.name as ToolName,
-            toolItem.input
-          ).catch((err) => {
+          this.handleFileToolCall(toolItem.name as ToolName, toolItem.input).catch((err) => {
             this.handleError(
               toError(err),
               `handleFileToolCall(${toolItem.name})`,
-              ErrorSeverity.OPERATION
+              ErrorSeverity.OPERATION,
             );
           });
         }
@@ -1539,10 +1422,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Check for API timeout in result (can be error subtype OR success with is_error=true)
     if (msg.result === "API Error: Request timed out." && msg.is_error) {
-      this.logger.log(
-        `API timeout detected in result message for phase ${phaseId}`,
-        "error"
-      );
+      this.logger.log(`API timeout detected in result message for phase ${phaseId}`, "error");
 
       const timeoutError = new APITimeoutError(phaseId, {
         message: msg.result,
@@ -1586,19 +1466,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           cacheReadTokens: msg.usage.cache_read_input_tokens || 0,
         };
 
-        const finalCost =
-          msg.total_cost_usd ||
-          calculateCost(finalUsage, this.config.costsPerMTok);
+        const finalCost = msg.total_cost_usd || calculateCost(finalUsage, this.config.costsPerMTok);
 
         const accumulatedCost = this.currentPhase?.phaseCost || 0; // Still useful for logging
         if (Math.abs(accumulatedCost - finalCost) > 0.0001) {
           this.logger.log(
-            `Phase ${phaseId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(
-              4
-            )}, ` +
-              `Final: $${finalCost.toFixed(
-                4
-              )} (using final from result message)`
+            `Phase ${phaseId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(4)}, ` +
+              `Final: $${finalCost.toFixed(4)} (using final from result message)`,
           );
         }
 
@@ -1642,7 +1516,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         if (!toolUse) {
           this.logger.log(
             `Tool result without matching tool use: ${toolResult.tool_use_id}`,
-            "info"
+            "info",
           );
           continue;
         }
@@ -1661,10 +1535,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             .filter((c) => c.type === "text")
             .map((c) => c.text)
             .join("\n");
-        } else if (
-          toolResult.content &&
-          typeof toolResult.content === "object"
-        ) {
+        } else if (toolResult.content && typeof toolResult.content === "object") {
           // Check if it's an error result
           if ("is_error" in toolResult.content) {
             isError = toolResult.content.is_error === true;
@@ -1711,23 +1582,17 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const wasSkipped = this.isSkippingPhase;
 
     // Now get the phase from state manager to ensure we have the latest status
-    const currentPhase = this.stateManager.getPhaseInCurrentRun(
-      PhaseId(phaseId)
-    );
+    const currentPhase = this.stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
     if (!currentPhase || isTerminalPhaseStatus(currentPhase.status)) return;
 
     // Get current status before any transitions
     const currentStatus = currentPhase.status;
 
     // Wait for 2x the log parsing interval to ensure log parser catches up with final messages
-    await new Promise((resolve) =>
-      setTimeout(resolve, this.config.logParsingInterval * 2)
-    );
+    await new Promise((resolve) => setTimeout(resolve, this.config.logParsingInterval * 2));
 
     // Re-fetch the specific phase after potential transition to completing
-    const updatedPhase = this.stateManager.getPhaseInCurrentRun(
-      PhaseId(phaseId)
-    );
+    const updatedPhase = this.stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
     if (!updatedPhase) return;
 
     // Determine final status based on the actual phase outcome
@@ -1754,8 +1619,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           finalStatus === "completed"
             ? "completed"
             : finalStatus === "skipped"
-            ? "skipped"
-            : "error";
+              ? "skipped"
+              : "error";
 
         const commitInfo = await this.createCheckpoint({
           status: checkpointType,
@@ -1814,19 +1679,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     await this.stateManager.waitForPendingTransitions();
 
     // Get the final persisted state for the phase
-    const finalPhaseState = this.stateManager.getPhaseInCurrentRun(
-      PhaseId(phaseId)
-    );
+    const finalPhaseState = this.stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
 
     // Authoritatively get the cost from the final state object
     let finalCost = 0;
     if (finalPhaseState) {
       if (finalPhaseState.status === "completed") {
         finalCost = finalPhaseState.finalCost;
-      } else if (
-        finalPhaseState.status === "failed" ||
-        finalPhaseState.status === "skipped"
-      ) {
+      } else if (finalPhaseState.status === "failed" || finalPhaseState.status === "skipped") {
         finalCost = finalPhaseState.partialCost;
       }
     }
@@ -1847,10 +1707,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           finalStatus === "skipped"
             ? { type: "error", code: exitCode }
             : exitCode === 0
-            ? { type: "success" }
-            : { type: "error", code: exitCode },
-        failureReason:
-          finalStatus === "failed" ? this.phaseFailureReason : undefined,
+              ? { type: "success" }
+              : { type: "error", code: exitCode },
+        failureReason: finalStatus === "failed" ? this.phaseFailureReason : undefined,
       },
     } as PhaseCompletedEvent);
 
@@ -1858,26 +1717,21 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     await this.sendStateSnapshot();
 
     if (finalStatus === "completed" && this.currentPhase.phase.outputFiles) {
-      for (const [
-        groupIndex,
-        outItem,
-      ] of this.currentPhase.phase.outputFiles.entries()) {
+      for (const [groupIndex, outItem] of this.currentPhase.phase.outputFiles.entries()) {
         let beforeCopySuccess = false;
         try {
           if (outItem.beforeCopy && outItem.beforeCopy.length > 0) {
             this.logger.log(
-              `Running ${
-                outItem.beforeCopy.length
-              } beforeCopy command(s) for phase ${
+              `Running ${outItem.beforeCopy.length} beforeCopy command(s) for phase ${
                 this.currentPhase.phase.id
-              } (group ${groupIndex + 1})`
+              } (group ${groupIndex + 1})`,
             );
 
             for (const [index, command] of outItem.beforeCopy.entries()) {
               this.logger.log(
                 `Running beforeCopy command ${index + 1}/${
                   outItem.beforeCopy.length
-                }: ${command.command.run}`
+                }: ${command.command.run}`,
               );
               await this.runCommand(command);
             }
@@ -1885,7 +1739,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             this.logger.log(
               `Completed all beforeCopy commands for phase ${
                 this.currentPhase.phase.id
-              } (group ${groupIndex + 1})`
+              } (group ${groupIndex + 1})`,
             );
           }
 
@@ -1895,12 +1749,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             this.config.executionPath,
             outItem.copy,
             path.join(this.config.cwd, this.config.outputDirectory),
-            this.logger
+            this.logger,
           );
         } catch (error) {
           await this.handleError(
             new Error(`Copy group ${groupIndex} failed with: ${String(error)}`),
-            beforeCopySuccess ? "phaseOutputCopyFiles" : "phaseOutputBeforeCopy"
+            beforeCopySuccess ? "phaseOutputCopyFiles" : "phaseOutputBeforeCopy",
           );
           // Continue to next output group
         }
@@ -1911,10 +1765,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.cleanupCurrentPhase();
 
     // Handle next steps
-    if (
-      (finalStatus === "completed" || finalStatus === "skipped") &&
-      !this.isShuttingDown
-    ) {
+    if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
       if (this.config.autostart) {
         await this.autoStartNextPhase();
       } else {
@@ -1931,9 +1782,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     } else if (finalStatus === "failed" && !this.isShuttingDown) {
       if (this.phaseFailureReason?.retriable) {
-        this.logger.log(
-          `Phase failed with retriable error. Server remains active.`
-        );
+        this.logger.log(`Phase failed with retriable error. Server remains active.`);
       } else {
         // Non-retriable failure - shut down run
         if (this.currentRunId) {
@@ -1955,7 +1804,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   private async handleFileToolCall<T extends ToolName>(
     toolName: T,
-    toolInput: Record<string, unknown> | undefined
+    toolInput: Record<string, unknown> | undefined,
   ): Promise<void> {
     if (this.watchedPatterns.length === 0) return;
 
@@ -2021,10 +1870,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         try {
           content = fs.readFileSync(fullPath, "utf-8");
         } catch (error) {
-          this.logger.log(
-            `Error reading file ${filePath}: ${toError(error).message}`,
-            "error"
-          );
+          this.logger.log(`Error reading file ${filePath}: ${toError(error).message}`, "error");
           return;
         }
       }
@@ -2059,9 +1905,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Build file tree for all watched patterns
     const allTrees = await Promise.all(
-      this.watchedPatterns.map((pattern) =>
-        buildFileTree(this.config.executionPath, pattern)
-      )
+      this.watchedPatterns.map((pattern) => buildFileTree(this.config.executionPath, pattern)),
     );
 
     // Merge all trees into one
@@ -2085,12 +1929,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private async handleError(
     error: Error,
     context: string,
-    severity: ErrorSeverity = ErrorSeverity.OPERATION
+    severity: ErrorSeverity = ErrorSeverity.OPERATION,
   ): Promise<void> {
     // Always log
     this.logger.log(
       `[${severity}] ${context}: ${error.message}`,
-      severity === ErrorSeverity.FATAL ? "error" : "info"
+      severity === ErrorSeverity.FATAL ? "error" : "info",
     );
 
     // Always send to client
@@ -2131,20 +1975,16 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const thread = await this.stateManager.getExecutionThread();
 
     this.logger.log(
-      `[autoStartNextPhase] Called - hasRunningPhase: ${thread.hasRunningPhase}, isShuttingDown: ${this.isShuttingDown}`
+      `[autoStartNextPhase] Called - hasRunningPhase: ${thread.hasRunningPhase}, isShuttingDown: ${this.isShuttingDown}`,
     );
 
     if (thread.hasRunningPhase || this.isShuttingDown) {
-      this.logger.log(
-        `[autoStartNextPhase] Returning early - phase running or shutting down`
-      );
+      this.logger.log(`[autoStartNextPhase] Returning early - phase running or shutting down`);
       return; // Phase already running or shutting down
     }
 
     const nextPhaseId = thread.nextPhaseId;
-    this.logger.log(
-      `[autoStartNextPhase] ExecutionThread returned nextPhaseId: ${nextPhaseId}`
-    );
+    this.logger.log(`[autoStartNextPhase] ExecutionThread returned nextPhaseId: ${nextPhaseId}`);
 
     if (!nextPhaseId) {
       this.logger.log("[autoStartNextPhase] No more phases to run");
@@ -2189,7 +2029,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("Cannot start next phase while current phase is running"),
         "startNextPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -2197,15 +2037,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const nextPhaseId = thread.nextPhaseId;
 
     if (nextPhaseId) {
-      this.logger.log(
-        `[startNextPhase] Advancing to next phase: ${nextPhaseId}`
-      );
+      this.logger.log(`[startNextPhase] Advancing to next phase: ${nextPhaseId}`);
       await this.startPhase(nextPhaseId);
     } else {
       await this.handleError(
         new Error("No more phases to run"),
         "startNextPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
     }
   }
@@ -2215,7 +2053,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("No phase is currently running"),
         "skipCurrentPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -2235,7 +2073,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.handleError(
         new Error("Cannot redo while phase is running"),
         "redoCurrentPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
       return;
     }
@@ -2243,15 +2081,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (thread.phases.length > 0) {
       // Redo the most recently executed phase, whatever its status
       const lastAttemptedPhase = thread.phases[0];
-      this.logger.log(
-        `[redoCurrentPhase] Redoing last phase: ${lastAttemptedPhase.phase.phaseId}`
-      );
+      this.logger.log(`[redoCurrentPhase] Redoing last phase: ${lastAttemptedPhase.phase.phaseId}`);
       await this.startPhase(lastAttemptedPhase.phase.phaseId);
     } else {
       await this.handleError(
         new Error("No phase has been run yet to redo."),
         "redoCurrentPhase",
-        ErrorSeverity.OPERATION
+        ErrorSeverity.OPERATION,
       );
     }
   }
@@ -2280,16 +2116,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const checkpoints: import("./types/types.js").CheckpointQueryInfo[] = [];
 
     for (const phase of targetRun.phases) {
-      const phaseConfig = this.config.phases.find(
-        (p) => p.id === phase.phaseId
-      );
+      const phaseConfig = this.config.phases.find((p) => p.id === phase.phaseId);
       const phaseName = phaseConfig?.name || phase.phaseId;
 
       // Workspace setup checkpoint
-      if (
-        "workspaceSetupCheckpoint" in phase &&
-        phase.workspaceSetupCheckpoint
-      ) {
+      if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
         checkpoints.push({
           phaseId: phase.phaseId,
           phaseName,
@@ -2313,11 +2144,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Error checkpoint
-      if (
-        phase.status === "failed" &&
-        "errorCheckpoint" in phase &&
-        phase.errorCheckpoint
-      ) {
+      if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
         checkpoints.push({
           phaseId: phase.phaseId,
           phaseName,
@@ -2329,11 +2156,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Skip checkpoint
-      if (
-        phase.status === "skipped" &&
-        "skipCheckpoint" in phase &&
-        phase.skipCheckpoint
-      ) {
+      if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
         checkpoints.push({
           phaseId: phase.phaseId,
           phaseName,
@@ -2375,11 +2198,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    this.logger.log(
-      `Force stopping phase ${currentPhase.phaseId}: ${
-        reason || "user request"
-      }`
-    );
+    this.logger.log(`Force stopping phase ${currentPhase.phaseId}: ${reason || "user request"}`);
 
     // Set the force stopping flag
     this.isForceStopping = true;
@@ -2431,10 +2250,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   /**
    * Rollback to a specific checkpoint SHA (supports partial matching)
    */
-  private async rollbackToCheckpoint(
-    sha: string,
-    autoRestart: boolean
-  ): Promise<void> {
+  private async rollbackToCheckpoint(sha: string, autoRestart: boolean): Promise<void> {
     // Check if phase is running
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
@@ -2443,8 +2259,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message:
-            "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
+          message: "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
           phase: currentPhase.phaseId,
           fatal: false,
         },
@@ -2458,7 +2273,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.config.phases,
       undefined, // No checkpoint validation needed for search
       undefined, // Use latest run
-      this.logger
+      this.logger,
     );
 
     // Find all matching checkpoints across the thread
@@ -2473,10 +2288,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       const phase = threadPhase.phase;
 
       // Check workspace setup checkpoint
-      if (
-        "workspaceSetupCheckpoint" in phase &&
-        phase.workspaceSetupCheckpoint
-      ) {
+      if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
         if (phase.workspaceSetupCheckpoint.startsWith(sha)) {
           matches.push({
             threadPhase,
@@ -2500,11 +2312,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Check error checkpoint
-      if (
-        phase.status === "failed" &&
-        "errorCheckpoint" in phase &&
-        phase.errorCheckpoint
-      ) {
+      if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
         if (phase.errorCheckpoint.startsWith(sha)) {
           matches.push({
             threadPhase,
@@ -2516,11 +2324,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Check skip checkpoint
-      if (
-        phase.status === "skipped" &&
-        "skipCheckpoint" in phase &&
-        phase.skipCheckpoint
-      ) {
+      if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
         if (phase.skipCheckpoint.startsWith(sha)) {
           matches.push({
             threadPhase,
@@ -2550,9 +2354,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // Ambiguous SHA - provide helpful error message
       const matchDetails = matches
         .map((m) => {
-          const phaseConfig = this.config.phases.find(
-            (p) => p.id === m.threadPhase.phase.phaseId
-          );
+          const phaseConfig = this.config.phases.find((p) => p.id === m.threadPhase.phase.phaseId);
           const phaseName = phaseConfig?.name || m.threadPhase.phase.phaseId;
           return `  - ${m.fullSha.substring(0, 7)}... (${phaseName} - ${
             m.checkpointType
@@ -2579,7 +2381,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       match.phaseIndex,
       match.fullSha,
       match.checkpointType,
-      autoRestart
+      autoRestart,
     );
   }
 
@@ -2588,14 +2390,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
    */
   private async rollbackToPhase(
     phaseId: PhaseId,
-    checkpointType:
-      | "start"
-      | "end"
-      | "workspace-setup"
-      | "completed"
-      | "error"
-      | "skipped",
-    autoRestart: boolean
+    checkpointType: "start" | "end" | "workspace-setup" | "completed" | "error" | "skipped",
+    autoRestart: boolean,
   ): Promise<void> {
     // Check if phase is running
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
@@ -2605,8 +2401,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message:
-            "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
+          message: "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
           phase: currentPhase.phaseId,
           fatal: false,
         },
@@ -2620,12 +2415,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.config.phases,
       undefined, // No checkpoint validation needed for search
       undefined, // Use latest run
-      this.logger
+      this.logger,
     );
 
     // Find the phase in the thread
-    let targetThreadPhase: import("./execution-thread.js").ThreadPhase | null =
-      null;
+    let targetThreadPhase: import("./execution-thread.js").ThreadPhase | null = null;
     let targetPhaseIndex = -1;
 
     for (let i = 0; i < thread.phases.length; i++) {
@@ -2652,26 +2446,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const targetPhase = targetThreadPhase.phase;
 
     // Resolve checkpoint type aliases
-    let actualCheckpointType:
-      | "workspace-setup"
-      | "completed"
-      | "error"
-      | "skipped"
-      | undefined;
+    let actualCheckpointType: "workspace-setup" | "completed" | "error" | "skipped" | undefined;
     let sha: string | null = null;
 
     if (checkpointType === "start") {
       // Find first checkpoint in phase
-      if (
-        "workspaceSetupCheckpoint" in targetPhase &&
-        targetPhase.workspaceSetupCheckpoint
-      ) {
+      if ("workspaceSetupCheckpoint" in targetPhase && targetPhase.workspaceSetupCheckpoint) {
         sha = targetPhase.workspaceSetupCheckpoint;
         actualCheckpointType = "workspace-setup";
-      } else if (
-        targetPhase.status === "completed" &&
-        targetPhase.completionCheckpoint
-      ) {
+      } else if (targetPhase.status === "completed" && targetPhase.completionCheckpoint) {
         sha = targetPhase.completionCheckpoint;
         actualCheckpointType = "completed";
       } else if (
@@ -2691,10 +2474,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     } else if (checkpointType === "end") {
       // Find last checkpoint in phase based on status
-      if (
-        targetPhase.status === "completed" &&
-        targetPhase.completionCheckpoint
-      ) {
+      if (targetPhase.status === "completed" && targetPhase.completionCheckpoint) {
         sha = targetPhase.completionCheckpoint;
         actualCheckpointType = "completed";
       } else if (
@@ -2735,10 +2515,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
               : null;
           break;
         case "completed":
-          sha =
-            targetPhase.status === "completed"
-              ? targetPhase.completionCheckpoint
-              : null;
+          sha = targetPhase.status === "completed" ? targetPhase.completionCheckpoint : null;
           break;
         case "error":
           sha =
@@ -2768,13 +2545,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    await this.executeRollback(
-      thread,
-      targetPhaseIndex,
-      sha,
-      actualCheckpointType,
-      autoRestart
-    );
+    await this.executeRollback(thread, targetPhaseIndex, sha, actualCheckpointType, autoRestart);
   }
 
   /**
@@ -2789,8 +2560,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message:
-            "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
+          message: "Cannot rollback while phase is running. Use 'phase.forceStop' first.",
           phase: currentPhase.phaseId,
           fatal: false,
         },
@@ -2804,7 +2574,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.config.phases,
       undefined, // No checkpoint validation needed for search
       undefined, // Use latest run
-      this.logger
+      this.logger,
     );
 
     // Find last completed phase in the thread
@@ -2825,7 +2595,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           lastCompletedIndex,
           lastCompleted.phase.completionCheckpoint,
           "completed",
-          autoRestart
+          autoRestart,
         );
         return;
       }
@@ -2840,10 +2610,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       const threadPhase = thread.phases[i];
       const phase = threadPhase.phase;
 
-      if (
-        "workspaceSetupCheckpoint" in phase &&
-        phase.workspaceSetupCheckpoint
-      ) {
+      if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.workspaceSetupCheckpoint;
         firstCheckpointType = "workspace-setup";
@@ -2851,37 +2618,25 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.completionCheckpoint;
         firstCheckpointType = "completed";
-      } else if (
-        phase.status === "failed" &&
-        "errorCheckpoint" in phase &&
-        phase.errorCheckpoint
-      ) {
+      } else if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.errorCheckpoint;
         firstCheckpointType = "error";
-      } else if (
-        phase.status === "skipped" &&
-        "skipCheckpoint" in phase &&
-        phase.skipCheckpoint
-      ) {
+      } else if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.skipCheckpoint;
         firstCheckpointType = "skipped";
       }
     }
 
-    if (
-      firstCheckpointIndex >= 0 &&
-      firstCheckpointSha &&
-      firstCheckpointType
-    ) {
+    if (firstCheckpointIndex >= 0 && firstCheckpointSha && firstCheckpointType) {
       this.logger.log("No successful phases found, rolling back to start");
       await this.executeRollback(
         thread,
         firstCheckpointIndex,
         firstCheckpointSha,
         firstCheckpointType,
-        autoRestart
+        autoRestart,
       );
     } else {
       this.sendEvent({
@@ -2904,21 +2659,19 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     targetPhaseIndex: number,
     sha: string,
     checkpointType: string,
-    autoRestart: boolean
+    autoRestart: boolean,
   ): Promise<void> {
     const targetThreadPhase = thread.phases[targetPhaseIndex];
     if (!targetThreadPhase) {
       throw new Error(`Invalid target phase index: ${targetPhaseIndex}`);
     }
 
-    const phaseConfig = this.config.phases.find(
-      (p) => p.id === targetThreadPhase.phase.phaseId
-    );
+    const phaseConfig = this.config.phases.find((p) => p.id === targetThreadPhase.phase.phaseId);
     const phaseName = phaseConfig?.name || targetThreadPhase.phase.phaseId;
 
     this.logger.log(
       `Starting phase-by-phase rollback to ${checkpointType} checkpoint ${sha} ` +
-        `in phase ${targetThreadPhase.phase.phaseId} (${phaseName})`
+        `in phase ${targetThreadPhase.phase.phaseId} (${phaseName})`,
     );
 
     // Set the rollback flag
@@ -2932,7 +2685,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       sha,
       checkpointType,
       phaseName,
-      autoRestart
+      autoRestart,
     ).finally(() => {
       this.isRollingBack = false;
     });
@@ -2947,7 +2700,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     targetSha: string,
     checkpointType: string,
     targetPhaseName: string,
-    autoRestart: boolean
+    autoRestart: boolean,
   ): Promise<void> {
     // 1. Clean up current phase state
     this.cleanupCurrentPhase();
@@ -2963,8 +2716,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // 3. Emit rollback started event
     const fromRun = thread.phases[0]?.runId || targetThreadPhase.runId;
-    const fromPhase =
-      thread.phases[0]?.phase.phaseId || targetThreadPhase.phase.phaseId;
+    const fromPhase = thread.phases[0]?.phase.phaseId || targetThreadPhase.phase.phaseId;
 
     this.sendEvent({
       id: EventId(generateId()),
@@ -3006,9 +2758,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         await this.checkpointGit.resetToCheckpoint(checkpoint.sha);
 
         // Emit checkpoint event
-        const phaseConfig = this.config.phases.find(
-          (p) => p.id === threadPhase.phase.phaseId
-        );
+        const phaseConfig = this.config.phases.find((p) => p.id === threadPhase.phase.phaseId);
         this.sendEvent({
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
@@ -3071,9 +2821,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // 8. Start new continuation run
     const afterPhase =
-      checkpointType === "workspace-setup"
-        ? null
-        : targetThreadPhase.phase.phaseId;
+      checkpointType === "workspace-setup" ? null : targetThreadPhase.phase.phaseId;
 
     await this.startNewRun({
       type: "continuation",
@@ -3087,13 +2835,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // 9. Restore checkpoint patterns
     const targetPhaseConfigIndex = this.config.phases.findIndex(
-      (p) => p.id === targetThreadPhase.phase.phaseId
+      (p) => p.id === targetThreadPhase.phase.phaseId,
     );
     if (targetPhaseConfigIndex >= 0) {
       const includeTarget = checkpointType === "workspace-setup";
-      const maxIndex = includeTarget
-        ? targetPhaseConfigIndex
-        : targetPhaseConfigIndex - 1;
+      const maxIndex = includeTarget ? targetPhaseConfigIndex : targetPhaseConfigIndex - 1;
 
       for (let i = 0; i <= maxIndex; i++) {
         const phase = this.config.phases[i];
@@ -3133,7 +2879,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (autoRestart && this.config.autostart) {
       const nextPhase = await this.stateManager.getNextPhaseToExecute();
       if (nextPhase) {
-        await this.startPhase(nextPhase);
+        await this.startPhase(nextPhase, checkpointType === "workspace-setup");
       }
     }
   }
@@ -3141,25 +2887,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   /**
    * Get the last checkpoint for a phase
    */
-  private getLastCheckpointForPhase(
-    phase: PhaseExecution
-  ): { sha: string; type: string } | null {
+  private getLastCheckpointForPhase(phase: PhaseExecution): { sha: string; type: string } | null {
     // Priority: completed > error > skipped > workspace-setup
     if (phase.status === "completed" && phase.completionCheckpoint) {
       return { sha: phase.completionCheckpoint, type: "completed" };
     }
-    if (
-      phase.status === "failed" &&
-      "errorCheckpoint" in phase &&
-      phase.errorCheckpoint
-    ) {
+    if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
       return { sha: phase.errorCheckpoint, type: "error" };
     }
-    if (
-      phase.status === "skipped" &&
-      "skipCheckpoint" in phase &&
-      phase.skipCheckpoint
-    ) {
+    if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
       return { sha: phase.skipCheckpoint, type: "skipped" };
     }
     if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint) {
@@ -3187,9 +2923,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   /**
    * Clean up workspace directories created by a phase
    */
-  private async cleanupPhaseWorkspaceDirectories(
-    phase: PhaseExecution
-  ): Promise<void> {
+  private async cleanupPhaseWorkspaceDirectories(phase: PhaseExecution): Promise<void> {
     const directories = this.getWorkspaceSetupDirectories(phase.phaseId);
     if (directories.length === 0) return;
 
@@ -3226,10 +2960,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         }
       } catch (error) {
         const errorMessage = toError(error).message;
-        this.logger.log(
-          `Failed to remove workspace directory ${dir}: ${errorMessage}`,
-          "error"
-        );
+        this.logger.log(`Failed to remove workspace directory ${dir}: ${errorMessage}`, "error");
         failedCleanups.push({ directory: dir, error: errorMessage });
       }
     }
@@ -3249,9 +2980,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           status,
           successfulCleanups,
           failedCleanups,
-          error: failedCleanups
-            .map((f) => `${f.directory}: ${f.error}`)
-            .join(", "),
+          error: failedCleanups.map((f) => `${f.directory}: ${f.error}`).join(", "),
         },
       } as import("./types/types.js").RollbackWorkspaceCleanupEvent);
     } else {
@@ -3287,9 +3016,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // Ensure log stream is closed
       this.processManager
         .closeLogStream()
-        .catch((err) =>
-          this.logger.log(`Error closing log stream: ${err}`, "error")
-        );
+        .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
       this.processManager = undefined;
     }
 
@@ -3307,7 +3034,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   private async runCommand(
     shellCommand: ShellCommand | WorkspaceShellCommand | string,
-    lastCopiedPath?: string
+    lastCopiedPath?: string,
   ): Promise<void> {
     // Handle working directory resolution
     let workingDir: string;
@@ -3361,9 +3088,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const targetParent = path.dirname(to);
     const parentStats = await fs.promises.stat(targetParent).catch(() => null);
     if (!parentStats || !parentStats.isDirectory()) {
-      throw new Error(
-        `Target parent directory does not exist: ${targetParent}`
-      );
+      throw new Error(`Target parent directory does not exist: ${targetParent}`);
     }
 
     // Check if target already exists
@@ -3373,9 +3098,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Copy using cp command with recursive flag
-    await this.runCommand(
-      `cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`
-    );
+    await this.runCommand(`cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`);
   }
 
   // ============================================================================
@@ -3394,10 +3117,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Initialize checkpoint git
-    this.checkpointGit = new CheckpointGit(
-      this.config.executionPath,
-      this.logger
-    );
+    this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
     await this.checkpointGit.initialize();
 
     // Provide checkpoint git to state manager for git operations
@@ -3428,10 +3148,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize repository on first tracked patterns
     if (!this.checkpointGit) {
-      this.checkpointGit = new CheckpointGit(
-        this.config.executionPath,
-        this.logger
-      );
+      this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
       await this.checkpointGit.initialize();
     }
 
@@ -3443,24 +3160,20 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   /**
    * Create a checkpoint commit
    */
-  private async createCheckpoint(
-    info: CheckpointInfo
-  ): Promise<string | undefined> {
+  private async createCheckpoint(info: CheckpointInfo): Promise<string | undefined> {
     if (!this.checkpointingEnabled || !this.checkpointGit) {
       this.logger.log(
         `[CHECKPOINT-DEBUG] Checkpoint creation skipped - enabled: ${
           this.checkpointingEnabled
-        }, git: ${!!this.checkpointGit}`
+        }, git: ${!!this.checkpointGit}`,
       );
       return;
     }
 
     this.logger.log(
-      `[CHECKPOINT-DEBUG] Creating checkpoint for phase ${info.phaseId} with status ${info.status}`
+      `[CHECKPOINT-DEBUG] Creating checkpoint for phase ${info.phaseId} with status ${info.status}`,
     );
-    this.logger.log(
-      `[CHECKPOINT-DEBUG] Checkpoint info: ${JSON.stringify(info)}`
-    );
+    this.logger.log(`[CHECKPOINT-DEBUG] Checkpoint info: ${JSON.stringify(info)}`);
 
     try {
       // Format commit message
@@ -3488,13 +3201,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.checkpointGit.switchToBranch(branchName);
       const commitHash = await this.checkpointGit.commit(commitMessage);
 
-      this.logger.log(
-        `[CHECKPOINT-DEBUG] Checkpoint commit returned: ${commitHash}`
-      );
+      this.logger.log(`[CHECKPOINT-DEBUG] Checkpoint commit returned: ${commitHash}`);
 
       if (commitHash) {
         this.logger.log(
-          `[CHECKPOINT-DEBUG] Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`
+          `[CHECKPOINT-DEBUG] Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`,
         );
 
         // Fire checkpoint created transition to store SHA in state
@@ -3502,13 +3213,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           info.status === "workspace-setup"
             ? "workspace-setup"
             : info.status === "completed"
-            ? "completed"
-            : info.status === "error"
-            ? "error"
-            : "skipped";
+              ? "completed"
+              : info.status === "error"
+                ? "error"
+                : "skipped";
 
         this.logger.log(
-          `[CHECKPOINT-DEBUG] Firing CheckpointCreated transition with type: ${checkpointType}`
+          `[CHECKPOINT-DEBUG] Firing CheckpointCreated transition with type: ${checkpointType}`,
         );
 
         if (this.currentRunId) {
@@ -3526,16 +3237,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
         return commitHash;
       } else {
-        this.logger.log(
-          `[CHECKPOINT-DEBUG] No commit hash returned from checkpoint.commit()`
-        );
+        this.logger.log(`[CHECKPOINT-DEBUG] No commit hash returned from checkpoint.commit()`);
       }
     } catch (error) {
       // Handle disk full or other git errors
       this.logger.log(
         `[CHECKPOINT-DEBUG] Checkpoint failed: ${toError(error).message}. ` +
           "Disabling checkpointing for this session.",
-        "error"
+        "error",
       );
       this.checkpointingEnabled = false;
     }
@@ -3561,11 +3270,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.isShuttingDown = true;
 
     // Create exit checkpoint if not shutting down normally (all phases completed)
-    if (
-      reason !== "all phases completed" &&
-      this.checkpointingEnabled &&
-      this.currentPhase
-    ) {
+    if (reason !== "all phases completed" && this.checkpointingEnabled && this.currentPhase) {
       await this.createCheckpoint({
         status: "exit",
         phaseId: this.currentPhase.phase.id,
