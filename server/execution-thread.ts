@@ -74,13 +74,6 @@ export class ExecutionThread {
         phase.runStatus === "crashed"
     );
   }
-
-  get runId(): RunId | null {
-    // TODO: figure out if this is the best way to tap into run ID
-    // is there a reason for ExecutionThread to NOT have explicit run ID prop
-    // set during construction?
-    return this.phases.length > 0 ? this.phases[0].runId : null;
-  }
 }
 
 // ============================================================================
