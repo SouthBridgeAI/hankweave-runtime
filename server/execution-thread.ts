@@ -63,7 +63,7 @@ export class ExecutionThread {
     public phases: ThreadPhase[] = [],
     public totalRuns: number = 0,
     public hasRunningPhase: boolean = false,
-    public nextPhaseId: PhaseId | null = null
+    public nextPhaseId: PhaseId | null = null,
   ) {}
 
   get failed(): boolean {
@@ -71,7 +71,7 @@ export class ExecutionThread {
       (phase) =>
         phase.phase.status === "failed" ||
         phase.runStatus === "failed" ||
-        phase.runStatus === "crashed"
+        phase.runStatus === "crashed",
     );
   }
 }
@@ -93,17 +93,12 @@ export class ExecutionThread {
 export async function analyzeExecutionThread(
   state: TadpoleState,
   phaseConfigs: PhaseConfig[],
-  checkpointData?: Map<
-    string,
-    { message: string; timestamp: string; branch: string }
-  >,
+  checkpointData?: Map<string, { message: string; timestamp: string; branch: string }>,
   targetRunId?: RunId,
-  logger?: Logger
+  logger?: Logger,
 ): Promise<ExecutionThread> {
   // Find starting run
-  const startRun = targetRunId
-    ? state.runs.find((r) => r.runId === targetRunId)
-    : state.runs[0]; // Latest run is first
+  const startRun = targetRunId ? state.runs.find((r) => r.runId === targetRunId) : state.runs[0]; // Latest run is first
 
   if (!startRun) {
     logger?.log("No runs found for execution thread analysis", "debug");
@@ -126,7 +121,7 @@ export async function analyzeExecutionThread(
     logger?.log(
       `Processing run ${currentRun.runId} (status: ${currentRun.status}, ` +
         `phases: ${currentRun.phases.length}, including up to index ${untilPhase})`,
-      "debug"
+      "debug",
     );
 
     // Process phases in this run (backwards, from untilPhase to 0)
@@ -143,9 +138,7 @@ export async function analyzeExecutionThread(
 
       // Extract continuation session ID if present
       const continuationSessionId: SessionId | null =
-        "previousSessionId" in phase && phase.previousSessionId
-          ? phase.previousSessionId
-          : null;
+        "previousSessionId" in phase && phase.previousSessionId ? phase.previousSessionId : null;
 
       // Build the thread phase entry with all metadata
       const threadPhase: ThreadPhase = {
@@ -176,10 +169,7 @@ export async function analyzeExecutionThread(
       // Find parent run
       const parentRun = state.runs.find((r: Run) => r.runId === parentRunId);
       if (!parentRun) {
-        logger?.log(
-          `Parent run ${parentRunId} not found, ending chain`,
-          "info"
-        );
+        logger?.log(`Parent run ${parentRunId} not found, ending chain`, "info");
         break;
       }
 
@@ -190,13 +180,13 @@ export async function analyzeExecutionThread(
       } else {
         // Find the phase in parent run
         const afterPhaseIndex = parentRun.phases.findIndex(
-          (p: PhaseExecution) => p.phaseId === afterPhase
+          (p: PhaseExecution) => p.phaseId === afterPhase,
         );
 
         if (afterPhaseIndex === -1) {
           logger?.log(
             `Phase ${afterPhase} not found in parent run ${parentRunId}, including all phases`,
-            "info"
+            "info",
           );
           untilPhase = parentRun.phases.length - 1;
         } else {
@@ -211,14 +201,14 @@ export async function analyzeExecutionThread(
             untilPhase = afterPhaseIndex - 1;
             logger?.log(
               `Workspace setup continuation for ${afterPhase}, excluding it from parent`,
-              "debug"
+              "debug",
             );
           } else {
             // Normal continuation - include up to and including afterPhase
             untilPhase = afterPhaseIndex;
             logger?.log(
               `Normal continuation after ${afterPhase}, including phases up to index ${afterPhaseIndex}`,
-              "debug"
+              "debug",
             );
           }
         }
@@ -261,12 +251,10 @@ export async function analyzeExecutionThread(
                 type: "continuation";
                 source: { runId: RunId };
               }
-            ).source.runId
+            ).source.runId,
         );
         if (sourceRun) {
-          const sourcePhase = sourceRun.phases.find(
-            (p) => p.phaseId === afterPhase
-          );
+          const sourcePhase = sourceRun.phases.find((p) => p.phaseId === afterPhase);
           if (
             sourcePhase &&
             "workspaceSetupCheckpoint" in sourcePhase &&
@@ -281,9 +269,7 @@ export async function analyzeExecutionThread(
 
     // If not workspace-setup continuation, find next phase in config
     if (!nextPhaseId) {
-      const phaseConfigIndex = phaseConfigs.findIndex(
-        (c) => c.id === latestPhase.phase.phaseId
-      );
+      const phaseConfigIndex = phaseConfigs.findIndex((c) => c.id === latestPhase.phase.phaseId);
       if (phaseConfigIndex >= 0 && phaseConfigIndex < phaseConfigs.length - 1) {
         nextPhaseId = phaseConfigs[phaseConfigIndex + 1].id as PhaseId;
       }
@@ -295,9 +281,7 @@ export async function analyzeExecutionThread(
 
       if (!afterPhase) {
         // Continuation from beginning
-        nextPhaseId = phaseConfigs[0]?.id
-          ? (phaseConfigs[0].id as PhaseId)
-          : null;
+        nextPhaseId = phaseConfigs[0]?.id ? (phaseConfigs[0].id as PhaseId) : null;
       } else {
         // Check if it's a workspace-setup continuation
         const sourceRun = state.runs.find(
@@ -308,12 +292,10 @@ export async function analyzeExecutionThread(
                 type: "continuation";
                 source: { runId: RunId };
               }
-            ).source.runId
+            ).source.runId,
         );
         if (sourceRun) {
-          const sourcePhase = sourceRun.phases.find(
-            (p) => p.phaseId === afterPhase
-          );
+          const sourcePhase = sourceRun.phases.find((p) => p.phaseId === afterPhase);
           if (
             sourcePhase &&
             "workspaceSetupCheckpoint" in sourcePhase &&
@@ -323,9 +305,7 @@ export async function analyzeExecutionThread(
             nextPhaseId = afterPhase;
           } else {
             // Normal continuation - run next phase after afterPhase
-            const phaseIndex = phaseConfigs.findIndex(
-              (c) => c.id === afterPhase
-            );
+            const phaseIndex = phaseConfigs.findIndex((c) => c.id === afterPhase);
             if (phaseIndex >= 0 && phaseIndex < phaseConfigs.length - 1) {
               nextPhaseId = phaseConfigs[phaseIndex + 1].id as PhaseId;
             }
@@ -334,9 +314,7 @@ export async function analyzeExecutionThread(
       }
     } else {
       // Fresh run - start with first phase
-      nextPhaseId = phaseConfigs[0]?.id
-        ? (phaseConfigs[0].id as PhaseId)
-        : null;
+      nextPhaseId = phaseConfigs[0]?.id ? (phaseConfigs[0].id as PhaseId) : null;
     }
   }
 
@@ -344,15 +322,10 @@ export async function analyzeExecutionThread(
     `Built execution thread: ${phases.length} phases across ${
       runIndex + 1
     } runs, next phase: ${nextPhaseId || "none"}`,
-    "debug"
+    "debug",
   );
 
-  return new ExecutionThread(
-    phases,
-    runIndex + 1,
-    hasRunningPhase,
-    nextPhaseId
-  );
+  return new ExecutionThread(phases, runIndex + 1, hasRunningPhase, nextPhaseId);
 }
 
 /**
@@ -361,10 +334,7 @@ export async function analyzeExecutionThread(
  */
 function buildCheckpointInfo(
   phase: PhaseExecution,
-  checkpointData?: Map<
-    string,
-    { message: string; timestamp: string; branch: string }
-  >
+  checkpointData?: Map<string, { message: string; timestamp: string; branch: string }>,
 ): CheckpointInfo[] {
   const checkpoints: CheckpointInfo[] = [];
 
@@ -392,19 +362,11 @@ function buildCheckpointInfo(
     addCheckpoint("completed", phase.completionCheckpoint);
   }
 
-  if (
-    phase.status === "failed" &&
-    "errorCheckpoint" in phase &&
-    phase.errorCheckpoint
-  ) {
+  if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
     addCheckpoint("error", phase.errorCheckpoint);
   }
 
-  if (
-    phase.status === "skipped" &&
-    "skipCheckpoint" in phase &&
-    phase.skipCheckpoint
-  ) {
+  if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
     addCheckpoint("skipped", phase.skipCheckpoint);
   }
 
@@ -429,7 +391,7 @@ export function getNextPhaseId(thread: ExecutionThread): PhaseId | null {
 export function findContinuationSessionId(
   thread: ExecutionThread,
   phaseId: PhaseId,
-  phaseConfigs: PhaseConfig[]
+  phaseConfigs: PhaseConfig[],
 ): SessionId | null {
   const phaseConfig = phaseConfigs.find((c) => c.id === phaseId);
 
