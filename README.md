@@ -46,7 +46,7 @@ Let's walk through a simple two-phase workflow.
 
 ### 1. Create a Phase Configuration
 
-Create a file named `phases.json` in your project root:
+Create a file named `phases.json` where you run the command from:
 
 ```json
 [
@@ -56,7 +56,21 @@ Create a file named `phases.json` in your project root:
     "promptFile": "prompts/1-analyze.md",
     "model": "sonnet",
     "continuationMode": "fresh",
-    "trackedFiles": ["src/**/*.ts", "analysis.md"]
+    "trackedFiles": ["src/**/*.ts", "analysis.md"],
+    "outputFiles": [
+      {
+        "beforeCopy": [
+          {
+            "type": "command",
+            "command": {
+              "run": "mv analysis.md $(date +%Y_%m_%d)_analysis.md",
+              "workingDirectory": "project"
+            }
+          }
+        ],
+        "copy": ["*_analysis.md"]
+      }
+    ]
   },
   {
     "id": "phase-2-implementation",

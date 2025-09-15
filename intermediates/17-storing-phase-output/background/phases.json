@@ -1,0 +1,18 @@
+[
+  {
+    "id": "phase-1-analysis",
+    "name": "Phase 1: Initial Analysis",
+    "promptFile": "prompts/1-analyze.md",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "trackedFiles": ["src/**/*.ts", "analysis.md"]
+  },
+  {
+    "id": "phase-2-implementation",
+    "name": "Phase 2: Implementation",
+    "promptFile": "prompts/2-implement.md",
+    "model": "sonnet",
+    "continuationMode": "continue-previous",
+    "trackedFiles": ["src/**/*.ts"]
+  }
+]

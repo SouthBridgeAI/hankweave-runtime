@@ -801,3 +801,12 @@ export async function phaseExistsInCurrentRun(testDir: string, phaseId: string):
 
   return currentRun.phases.some((p) => p.phaseId === phaseId);
 }
+
+/**
+ * Sleep for a given number of milliseconds.
+ * @param ms Milliseconds to sleep
+ * @returns Promise that resolves after the specified time
+ */
+export async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
