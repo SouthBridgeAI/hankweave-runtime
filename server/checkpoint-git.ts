@@ -275,7 +275,7 @@ export class CheckpointGit {
   }
 
   /**
-   * Switch to a specific branch
+   * Switch to a specific branch, creating it if it doesn't exist
    */
   async switchToBranch(branchName: string): Promise<void> {
     if (!this.git) {
@@ -288,12 +288,14 @@ export class CheckpointGit {
         await this.git.checkout(branchName);
         this.logger.log(`Switched to existing branch: ${branchName}`);
       } else {
-        // Branch doesn't exist - this is expected for fresh runs
-        // The branch will be created on the first checkpoint commit
-        this.logger.log(`Branch ${branchName} not found - will be created on first checkpoint`);
+        // Create new branch from current HEAD
+        this.logger.log(`Creating new branch: ${branchName}`);
+        await this.git.checkoutLocalBranch(branchName);
+        this.logger.log(`Created and switched to new branch: ${branchName}`);
       }
     } catch (error) {
       this.logger.log(`Failed to switch branch: ${error}`, "error");
+      throw error;
     }
   }
 
