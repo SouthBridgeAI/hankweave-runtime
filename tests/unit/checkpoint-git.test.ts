@@ -190,8 +190,8 @@ describe("CheckpointGit", () => {
     expect(sha).toBeTruthy();
 
     const currentAfter = await checkpointGit.getCurrentBranch();
-    // This expectation will FAIL with current implementation, confirming the issue
-    expect(currentAfter.trim()).toBe(originalBranch);
+    // Should restore original branch after commit with branch option
+    expect(currentAfter).toBe("main");
   });
 
   test("handles complex patterns correctly", async () => {
@@ -260,13 +260,13 @@ describe("CheckpointGit", () => {
     expect(currentBranch.trim()).toBe("test-branch");
   });
 
-  test("switchToBranch logs warning for non-existent branch", async () => {
+  test("switchToBranch creates new branch if it doesn't exist", async () => {
     await checkpointGit.initialize();
 
-    // Try to switch to non-existent branch
-    await checkpointGit.switchToBranch("non-existent-branch");
+    // Try to switch to non-existent branch - should create it
+    await checkpointGit.switchToBranch("new-feature-branch");
 
-    // Should still be on main branch
+    // Should now be on the new branch
     const gitEnv = {
       GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
       GIT_WORK_TREE: tempDir,
@@ -277,7 +277,15 @@ describe("CheckpointGit", () => {
       env: { ...process.env, ...gitEnv },
     });
     const currentBranch = await new Response(proc.stdout).text();
-    expect(currentBranch.trim()).toBe("main");
+    expect(currentBranch.trim()).toBe("new-feature-branch");
+
+    // Verify the branch exists in the list
+    const proc2 = Bun.spawn(["git", "branch"], {
+      cwd: tempDir,
+      env: { ...process.env, ...gitEnv },
+    });
+    const branches = await new Response(proc2.stdout).text();
+    expect(branches).toContain("new-feature-branch");
   });
 
   test("resetToCheckpoint resets to specific commit", async () => {
@@ -387,6 +395,25 @@ describe("CheckpointGit", () => {
     await expect(checkpointGit.switchToBranch("some-branch")).rejects.toThrow(
       "Git repository not initialized",
     );
+  });
+
+  test("switchToBranch can switch back and forth between branches", async () => {
+    await checkpointGit.initialize();
+
+    // Create and switch to a new branch
+    await checkpointGit.switchToBranch("feature-x");
+    let currentBranch = await checkpointGit.getCurrentBranch();
+    expect(currentBranch).toBe("feature-x");
+
+    // Switch back to main
+    await checkpointGit.switchToBranch("main");
+    currentBranch = await checkpointGit.getCurrentBranch();
+    expect(currentBranch).toBe("main");
+
+    // Switch back to feature-x (existing branch)
+    await checkpointGit.switchToBranch("feature-x");
+    currentBranch = await checkpointGit.getCurrentBranch();
+    expect(currentBranch).toBe("feature-x");
   });
 
   test("getAllCheckpointShas returns SHAs across branches", async () => {
