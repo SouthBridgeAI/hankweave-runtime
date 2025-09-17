@@ -36,6 +36,8 @@ export class CheckpointGit {
     if (repoExists) {
       // Repository exists - just set up git instance
       this.git = simpleGit(this.executionPath, {
+        // Disable parallel processes to avoid lock contention
+        maxConcurrentProcesses: 1,
         config: [
           `core.worktree=${this.executionPath}`,
           `core.gitdir=${path.join(this.checkpointPath, ".git")}`,
@@ -72,6 +74,8 @@ export class CheckpointGit {
 
     // Initialize git with proper environment
     this.git = simpleGit(this.executionPath, {
+      // Disable parallel processes to avoid lock contention
+      maxConcurrentProcesses: 1,
       config: [
         `core.worktree=${this.executionPath}`,
         `core.gitdir=${path.join(this.checkpointPath, ".git")}`,
