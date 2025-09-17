@@ -300,7 +300,7 @@ describe("CheckpointGit", () => {
     // Create second commit
     const file2 = path.join(tempDir, "file2.txt");
     await fs.promises.writeFile(file2, "content 2");
-    const _commit2 = await checkpointGit.commit("Second commit");
+    await checkpointGit.commit("Second commit");
 
     // Verify both files exist
     expect(fs.existsSync(file1)).toBe(true);
@@ -475,5 +475,47 @@ describe("CheckpointGit", () => {
 
     expect(lastCommit).toContain("Marker commit");
     expect(lastCommit).toContain(firstCommit?.substring(0, 7));
+  });
+
+  test("handles concurrent git operations gracefully", async () => {
+    await checkpointGit.initialize();
+    await checkpointGit.addPatterns(["*.txt"]);
+
+    // Run multiple commit operations in parallel to trigger race condition
+    // This simulates what happens during abrupt termination where git operations overlap
+    const parallelCommits = [];
+    for (let i = 0; i < 5; i++) {
+      // Modify files and commit in parallel without waiting
+      const commitOp = (async () => {
+        // Each operation modifies a file and tries to commit
+        await fs.promises.writeFile(
+          path.join(tempDir, `test${i}.txt`),
+          `modified content ${i} - ${Date.now()}`,
+        );
+        return checkpointGit.commit(`Parallel commit ${i}`);
+      })();
+      parallelCommits.push(commitOp);
+    }
+
+    // Wait for all operations to complete
+    const results = await Promise.allSettled(parallelCommits);
+
+    // Count successes and failures
+    let failureCount = 0;
+    let indexLockErrors = 0;
+
+    results.forEach((result) => {
+      if (result.status === "rejected") {
+        failureCount++;
+        const errorMessage = result.reason?.message || String(result.reason);
+        if (errorMessage.includes("index.lock")) {
+          indexLockErrors++;
+        }
+      }
+    });
+
+    // All operations should succeed with serialization
+    expect(failureCount).toBe(0);
+    expect(indexLockErrors).toBe(0);
   });
 });
