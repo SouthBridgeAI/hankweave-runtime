@@ -305,15 +305,16 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // let see if execution thread from state manager has previously failed
     const thread = await this.stateManager.getExecutionThread();
 
     if (thread?.failed) {
-      await this.rollbackToLastSuccess(true);
+      // let see if execution thread from state manager has previously failed
+      this.logger.log("Execution thread failed, rolling back...", "error");
+      await this.rollbackToLastSuccess(this.config.autostart);
     }
 
     // Start a new run if needed
-    if (!this.currentRunId) {
+    if (!thread?.failed && !this.currentRunId) {
       await this.startNewRun();
 
       // Now switch to the new run's branch if we have checkpoints
@@ -682,6 +683,21 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     this.logger.log(`Starting phase: ${phase.name}`);
 
+    // pull existing history for the phase and see if we had run workspace setup for it
+    // git seems the best source of workspace setup related info
+    const phaseHistory = await this.stateManager.getPhaseHistory(phase.id);
+    let workspaceSetupCheckpoint: string | undefined;
+    for (const entry of phaseHistory) {
+      if ("workspaceSetupCheckpoint" in entry.phase && entry.phase.workspaceSetupCheckpoint) {
+        workspaceSetupCheckpoint = entry.phase.workspaceSetupCheckpoint;
+        break;
+      }
+    }
+
+    if (workspaceSetupCheckpoint) {
+      this.logger.log(`Found existing workspace setup checkpoint: ${workspaceSetupCheckpoint}`);
+    }
+
     // Check if phase already running via state manager (single source of truth)
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
@@ -747,8 +763,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    // Run workspace setup operations if configured
-    if (!skipPreCommands && phase.workspaceSetup) {
+    // Run workspace setup operations if configured and we don't ask for explicit skip
+    // and there is no existing workspace setup checkpoint for this phase
+    if (!skipPreCommands && !workspaceSetupCheckpoint && phase.workspaceSetup) {
       this.logger.log(`Running workspace setup for phase: ${phase.name}`);
       let lastCopiedPath: string | null = null;
 
@@ -756,6 +773,20 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         try {
           if (item.type === "copy" && item.copy) {
             const targetPath = path.join(this.config.executionPath, item.copy.to);
+            this.logger.log(`Copying ${item.copy.from} to ${targetPath}`);
+            // Check if target path already exists
+            if (fs.existsSync(targetPath)) {
+              this.logger.log(
+                `Warning: Target path already exists: ${targetPath}. Removing it before copying.`,
+              );
+              // TODO: let's discuss if this is too controversial
+              // Remove the existing directory/file recursively
+              await fs.promises.rm(targetPath, {
+                recursive: true,
+              });
+              this.logger.log(`Removed existing path: ${targetPath}`);
+            }
+
             await this.copyPath(item.copy.from, targetPath);
             lastCopiedPath = targetPath;
             this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
@@ -769,7 +800,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           }
         } catch (error) {
           const errorMessage = toError(error).message;
-          this.logger.log(`Workspace setup failed at item ${index + 1}: ${errorMessage}`, "error");
+          this.logger.log(
+            `Workspace setup failed at item ${index + 1} (${JSON.stringify(
+              item,
+            )}): ${errorMessage}`,
+            "error",
+          );
 
           // Set failure reason with detailed information
           this.phaseFailureReason = {
@@ -829,6 +865,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         phaseId: phase.id,
         from: "preparing",
         to: "starting",
+        metadata: {
+          checkpointSha: workspaceSetupCheckpoint,
+        },
       },
     });
 
@@ -2589,6 +2628,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (lastCompletedIndex >= 0) {
       const lastCompleted = thread.phases[lastCompletedIndex];
       if (lastCompleted.phase.status === "completed") {
+        this.logger.log(
+          `Found last successfully completed thread phase to rollback to: ${JSON.stringify(
+            lastCompleted,
+          )}`,
+        );
+
         // Rollback to last successful phase
         await this.executeRollback(
           thread,
@@ -2600,6 +2645,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         return;
       }
     }
+
+    this.logger.log(
+      "Did not find any successful phase to rollback to. Going to look for a checkpoint in the thread.",
+    );
 
     // No successful phases - find the first checkpoint in the thread
     let firstCheckpointIndex = -1;
@@ -2614,23 +2663,26 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.workspaceSetupCheckpoint;
         firstCheckpointType = "workspace-setup";
+        this.logger.log(`Found workspace setup checkpoint in phase ${phase.phaseId}`);
       } else if (phase.status === "completed" && phase.completionCheckpoint) {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.completionCheckpoint;
         firstCheckpointType = "completed";
+        this.logger.log(`Found completion checkpoint in phase ${phase.phaseId}`);
       } else if (phase.status === "failed" && "errorCheckpoint" in phase && phase.errorCheckpoint) {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.errorCheckpoint;
         firstCheckpointType = "error";
+        this.logger.log(`Found error checkpoint in phase ${phase.phaseId}`);
       } else if (phase.status === "skipped" && "skipCheckpoint" in phase && phase.skipCheckpoint) {
         firstCheckpointIndex = i;
         firstCheckpointSha = phase.skipCheckpoint;
         firstCheckpointType = "skipped";
+        this.logger.log(`Found skipped checkpoint in phase ${phase.phaseId}`);
       }
     }
 
     if (firstCheckpointIndex >= 0 && firstCheckpointSha && firstCheckpointType) {
-      this.logger.log("No successful phases found, rolling back to start");
       await this.executeRollback(
         thread,
         firstCheckpointIndex,
@@ -2639,6 +2691,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         autoRestart,
       );
     } else {
+      this.logger.log("No checkpoints found in execution history", "error");
       this.sendEvent({
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
@@ -2876,6 +2929,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     await this.sendStateSnapshot();
 
     // 12. Auto-restart if requested
+    // TODO: figure out if this needs to be cleaned up
+    // if we pass explicit autoRestart: true, should we ignore config.autostart?
     if (autoRestart && this.config.autostart) {
       const nextPhase = await this.stateManager.getNextPhaseToExecute();
       if (nextPhase) {
