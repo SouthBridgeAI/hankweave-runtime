@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,17 +25,12 @@ const DEFAULT_LOG_PREFIX = "[tadpole-server]";
  * Launches the tadpole server in basic mode using the same command as `bun run server:basic`.
  */
 export async function launchBasicServer(
-  options: LaunchServerOptions = {}
+  options: LaunchServerOptions = {},
 ): Promise<LaunchedServer> {
   const cwd = options.cwd ?? DEFAULT_CWD;
   const env = { ...process.env, ...options.env };
   const logPrefix = options.logPrefix ?? DEFAULT_LOG_PREFIX;
-  const args = [
-    "server/index.ts",
-    "--basic",
-    "--port=8889",
-    ...(options.args ?? []),
-  ];
+  const args = ["server/index.ts", "--basic", "--port=8889", ...(options.args ?? [])];
   const child = spawn("bun", args, {
     cwd,
     env,
@@ -46,9 +41,7 @@ export async function launchBasicServer(
     const text = data.toString();
     text
       .split(/\r?\n/)
-      .filter(
-        (line, index, lines) => line.length > 0 || index < lines.length - 1
-      )
+      .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
       .forEach((line) => {
         console.log(`${logPrefix} ${line}`);
       });
@@ -58,9 +51,7 @@ export async function launchBasicServer(
     const text = data.toString();
     text
       .split(/\r?\n/)
-      .filter(
-        (line, index, lines) => line.length > 0 || index < lines.length - 1
-      )
+      .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
       .forEach((line) => {
         console.error(`${logPrefix} ${line}`);
       });
