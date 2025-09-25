@@ -122,6 +122,43 @@ describe("Passthrough LLM Proxy", () => {
     );
   });
 
+  test("preserves unknown fields when forwarding", async () => {
+    const mockResponseData = '{"result": "success"}';
+    const mockResponse = {
+      status: 200,
+      headers: new Map([["content-type", "application/json"]]),
+      text: mock().mockResolvedValue(mockResponseData),
+    };
+    mockFetch.mockResolvedValue(mockResponse);
+
+    const proxy = createPassthroughProxy({
+      proxyToUrl: "https://api.anthropic.com",
+      logger: mockLogger,
+    });
+
+    const requestBodyObject = {
+      model: "claude-3-sonnet-20240229",
+      messages: [{ role: "user" as const, content: "Hello" }],
+      max_tokens: 100,
+      experimental_feature: {
+        enabled: true,
+        reason: "test",
+      },
+    };
+
+    const request = new Request("http://localhost:3000/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBodyObject),
+    });
+
+    await proxy.processRequest(request, "/v1/messages");
+
+    const forwardedBody = mockFetch.mock.calls[0]?.[1]?.body as string | undefined;
+    expect(forwardedBody).toBeDefined();
+    expect(JSON.parse(forwardedBody ?? "{}")).toEqual(requestBodyObject);
+  });
+
   test("proxy processes streaming responses", async () => {
     const mockStream = new ReadableStream();
     const mockResponse = {
