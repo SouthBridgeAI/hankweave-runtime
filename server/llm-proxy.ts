@@ -335,7 +335,9 @@ export class LLMProxy {
       if (body) {
         try {
           // let's go for a gentle parse here - never know what might come in
-          const { success, data } = claudeApiRequestSchema.safeParse(JSON.parse(body));
+          const { success, data } = claudeApiRequestSchema
+            .passthrough()
+            .safeParse(JSON.parse(body));
           if (!success) {
             this.logger.log(`[LLM-PROXY] Unrecognizable Claude API request body: ${body}`, "debug");
           } else {
