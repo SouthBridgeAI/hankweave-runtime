@@ -446,8 +446,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private handleClose(_ws: ServerWebSocket<ClientData>): void {
+  private handleClose(ws: ServerWebSocket<ClientData>): void {
+    if (this.client !== ws) {
+      this.logger.log("Ignoring disconnect from non-active WebSocket client");
+      return;
+    }
+
     this.logger.log("Client disconnected - shutting down server");
+    // Clear reference before initiating shutdown so re-entrant close handlers do nothing
+    this.client = null;
     this.shutdown("client disconnect");
   }
 
