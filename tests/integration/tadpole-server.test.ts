@@ -198,4 +198,97 @@ describe("TadpoleServer", () => {
     client2.close();
     client3.close();
   });
+
+  it("supports handshake protocol with different modes", async () => {
+    // Connect first client requesting read-write access
+    const client1 = new WebSocket(serverUrl);
+    await new Promise<void>((resolve) => {
+      client1.onopen = () => resolve();
+    });
+
+    // Perform handshake for client 1 (read-write)
+    const handshake1Promise = new Promise<any>((resolve) => {
+      client1.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "handshake.response") {
+          resolve(data);
+        }
+      };
+    });
+
+    client1.send(
+      JSON.stringify({
+        type: "handshake",
+        data: { mode: "readandwrite" },
+      })
+    );
+
+    const handshakeResponse1 = await handshake1Promise;
+    expect(handshakeResponse1.data.mode).toBe("readandwrite");
+    expect(handshakeResponse1.data.clientId).toBeDefined();
+
+    // Connect second client requesting read-write access (should also get readandwrite)
+    const client2 = new WebSocket(serverUrl);
+    await new Promise<void>((resolve) => {
+      client2.onopen = () => resolve();
+    });
+
+    // Perform handshake for client 2 (should also get write access)
+    const handshake2Promise = new Promise<any>((resolve) => {
+      client2.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "handshake.response") {
+          resolve(data);
+        }
+      };
+    });
+
+    client2.send(
+      JSON.stringify({
+        type: "handshake",
+        data: { mode: "readandwrite" },
+      })
+    );
+
+    const handshakeResponse2 = await handshake2Promise;
+    expect(handshakeResponse2.data.mode).toBe("readandwrite"); // Multiple clients can have write access
+    expect(handshakeResponse2.data.clientId).toBeDefined();
+
+    // Connect third client requesting readonly access
+    const client3 = new WebSocket(serverUrl);
+    await new Promise<void>((resolve) => {
+      client3.onopen = () => resolve();
+    });
+
+    // Perform handshake for client 3 (readonly)
+    const handshake3Promise = new Promise<any>((resolve) => {
+      client3.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "handshake.response") {
+          resolve(data);
+        }
+      };
+    });
+
+    client3.send(
+      JSON.stringify({
+        type: "handshake",
+        data: { mode: "readonly" },
+      })
+    );
+
+    const handshakeResponse3 = await handshake3Promise;
+    expect(handshakeResponse3.data.mode).toBe("readonly");
+    expect(handshakeResponse3.data.clientId).toBeDefined();
+
+    // All clients should stay connected after handshake
+    expect(client1.readyState).toBe(WebSocket.OPEN);
+    expect(client2.readyState).toBe(WebSocket.OPEN);
+    expect(client3.readyState).toBe(WebSocket.OPEN);
+
+    // Clean up
+    client1.close();
+    client2.close();
+    client3.close();
+  });
 });

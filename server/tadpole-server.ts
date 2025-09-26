@@ -82,15 +82,47 @@ enum ClientMode {
 }
 
 /**
+ * Handshake request sent by client to establish connection mode
+ */
+interface HandshakeRequest {
+  type: "handshake";
+  data: {
+    mode: ClientMode;
+    clientId?: string; // Optional for reconnection
+    lastEventId?: string; // For resuming from specific point
+  };
+}
+
+/**
+ * Handshake response sent by server after processing request
+ */
+interface HandshakeResponse {
+  type: "handshake.response";
+  data: {
+    clientId: string;
+    mode: ClientMode; // Granted mode (may differ from requested)
+    eventHistory: ServerEvent[];
+  };
+}
+
+/**
  * Client metadata stored with each WebSocket connection.
  * Provides connection tracking and activity monitoring.
  */
-interface ClientData {
-  id: string;
-  connectionTime: Date;
-  lastActivity: Date;
-  mode: ClientMode;
-}
+type ClientData =
+  | {
+      id: string;
+      connectionTime: Date;
+      lastActivity: Date;
+      handshakeComplete: false;
+    }
+  | {
+      id: string;
+      connectionTime: Date;
+      lastActivity: Date;
+      mode: ClientMode;
+      handshakeComplete: true;
+    };
 
 /**
  * Main server class that orchestrates Claude phases.
@@ -384,13 +416,61 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       id: clientId,
       connectionTime: now,
       lastActivity: now,
-      mode: ClientMode.READANDWRITE, // Default to read-write for now (handshake can change this)
+      handshakeComplete: false,
     };
 
     this.clients.set(clientId, ws);
 
-    // Send initial state
-    this.sendEvent({
+    // Wait for handshake before sending events
+    // Handshake will send initial state and handle autostart
+    this.logger.log(`Client ${clientId} waiting for handshake`);
+  }
+
+  private async handleHandshake(
+    ws: ServerWebSocket<ClientData>,
+    request: HandshakeRequest,
+  ): Promise<void> {
+    const { mode, clientId } = request.data;
+
+    // Assign or validate client ID
+    const finalClientId = clientId || ws.data.id;
+
+    // Grant the requested mode (no restrictions)
+    const grantedMode = mode;
+    this.logger.log(`Client ${finalClientId} granted ${grantedMode} access`);
+
+    // Update client data
+    ws.data = {
+      ...ws.data,
+      id: finalClientId,
+      mode: grantedMode,
+      handshakeComplete: true,
+    };
+
+    // Update client in registry if ID changed
+    if (finalClientId !== ws.data.id) {
+      this.clients.delete(ws.data.id);
+      this.clients.set(finalClientId, ws);
+    }
+
+    // Get event history (for now, empty array - we'll implement event journal later)
+    const eventHistory: ServerEvent[] = [];
+
+    // Send handshake response
+    const response: HandshakeResponse = {
+      type: "handshake.response",
+      data: {
+        clientId: finalClientId,
+        mode: grantedMode,
+        eventHistory: eventHistory,
+      },
+    };
+
+    ws.send(JSON.stringify(response));
+    this.logger.log(`Handshake complete for client ${finalClientId} (${grantedMode})`);
+
+    // Send initial events now that handshake is complete
+    this.sendEventToClient(ws, {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "server.ready",
@@ -401,13 +481,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as ServerReadyEvent);
 
-    this.sendStateSnapshot();
-
-    // Only auto-start if enabled
-    if (this.config.autostart) {
+    // Handle autostart logic (only if this is the first write client)
+    if (grantedMode === ClientMode.READANDWRITE && this.config.autostart) {
       this.autoStartNextPhase();
-    } else {
-      this.sendEvent({
+    } else if (!this.config.autostart) {
+      this.sendEventToClient(ws, {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "server.idle",
@@ -424,11 +502,32 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       ws.data.lastActivity = new Date();
 
       const parsed = JSON.parse(message.toString());
+
+      // Check for handshake first
+      if (parsed.type === "handshake") {
+        this.handleHandshake(ws, parsed as HandshakeRequest);
+        return;
+      }
+
+      // Require handshake completion for all other messages
+      if (!ws.data.handshakeComplete) {
+        this.sendEventToClient(ws, {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "error",
+          data: {
+            message: "Handshake required before sending commands",
+            fatal: false,
+          },
+        } as ErrorEvent);
+        return;
+      }
+
       const result = clientCommandSchema.safeParse(parsed);
 
       if (!result.success) {
         this.logger.log(`Invalid client command: ${result.error.message}`, "error");
-        this.sendEvent({
+        this.sendEventToClient(ws, {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "error",
@@ -440,6 +539,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         return;
       }
 
+      // All clients can execute any command
+      // const command = result.data;
       this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
       this.handleCommand(result.data);
     } catch (error) {
@@ -545,8 +646,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private sendEvent(event: ServerEvent): void {
     if (this.clients.size === 0) return;
 
-    // Broadcast to all connected clients
+    // Broadcast to all connected clients that have completed handshake
     for (const [clientId, client] of this.clients) {
+      // Only send events to clients that have completed handshake
+      if (!client.data.handshakeComplete) continue;
+
       try {
         this.logger.logSocketTraffic(this.config.socketLogFile, "out", event);
         client.send(JSON.stringify(event));
@@ -559,6 +663,17 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Emit for tests and basic TUI
     this.emit("event", event);
+  }
+
+  private sendEventToClient(ws: ServerWebSocket<ClientData>, event: ServerEvent): void {
+    try {
+      this.logger.logSocketTraffic(this.config.socketLogFile, "out", event);
+      ws.send(JSON.stringify(event));
+    } catch (error) {
+      this.logger.log(`Failed to send event to client ${ws.data.id}: ${error}`, "error");
+      // Remove disconnected client
+      this.clients.delete(ws.data.id);
+    }
   }
 
   private async sendStateSnapshot(): Promise<void> {
