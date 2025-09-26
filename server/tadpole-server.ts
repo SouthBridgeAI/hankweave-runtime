@@ -60,7 +60,7 @@ import type {
   WorkspaceShellCommand,
 } from "./types/types.js";
 // Import remaining types from old file
-import { ClientMode, isSyntheticTimeout } from "./types/types.js";
+import { isSyntheticTimeout } from "./types/types.js";
 import {
   assertNever,
   buildFileTree,
@@ -435,10 +435,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as ServerReadyEvent);
 
+    // TODO: figure out if this should be only sent after handshake
+    // Send initial state snapshot to the newly connected client
+    await this.sendStateSnapshot(ws);
+
     // Handle autostart logic (only if this is the first write client)
-    if (grantedMode === ClientMode.READANDWRITE && this.config.autostart) {
+    if (this.config.autostart) {
       this.autoStartNextPhase();
-    } else if (!this.config.autostart) {
+    } else {
       this.sendEventToClient(ws, {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
@@ -709,7 +713,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private async sendStateSnapshot(): Promise<void> {
+  private async sendStateSnapshot(client?: ServerWebSocket<ClientData>): Promise<void> {
     const totalCost = this.stateManager.getTotalCost();
     const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
 
@@ -719,12 +723,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Get the currently executing phase
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
 
-    this.sendEvent({
+    const stateSnapshotEvent: StateSnapshotEvent = {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "state.snapshot",
       data: {
-        currentPhase,
+        currentPhase: currentPhase || undefined,
         completedPhases: terminalPhases,
         fileTree: [],
         totalCost,
@@ -732,7 +736,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         recentFileAccess: this.recentFileAccess,
         isRollingBack: this.isRollingBack,
       },
-    } as StateSnapshotEvent);
+    };
+
+    if (client) {
+      // Send to specific client
+      this.sendEventToClient(client, stateSnapshotEvent);
+    } else {
+      // Send to all clients (default behavior)
+      this.sendEvent(stateSnapshotEvent);
+    }
   }
 
   // Get terminal phases for snapshot - returns all terminal phases (completed, failed, skipped)
