@@ -35,6 +35,7 @@ const TEST_RUN_DIR = path.join(
 interface ClientSetupResult {
   client: WebSocket;
   clientId: string;
+  handshakeResponse?: any;
 }
 
 type ClientMode = "readonly" | "readandwrite";
@@ -46,9 +47,10 @@ async function setupClient(
     performHandshake?: boolean;
     mode?: ClientMode;
     timeout?: number;
+    sendPreviousEvents?: boolean;
   } = {}
 ): Promise<ClientSetupResult> {
-  const { performHandshake = true, mode = "readandwrite", timeout = 5000 } = options;
+  const { performHandshake = true, mode = "readandwrite", timeout = 5000, sendPreviousEvents } = options;
 
   // Connect client
   const client = new WebSocket(serverUrl);
@@ -79,10 +81,15 @@ async function setupClient(
     setTimeout(() => reject(new Error("Handshake timeout")), timeout);
   });
 
+  const handshakeData: any = { mode };
+  if (sendPreviousEvents !== undefined) {
+    handshakeData.sendPreviousEvents = sendPreviousEvents;
+  }
+
   client.send(
     JSON.stringify({
       type: "handshake",
-      data: { mode },
+      data: handshakeData,
     })
   );
 
@@ -95,6 +102,7 @@ async function setupClient(
   return {
     client,
     clientId: handshakeResponse.data.clientId,
+    handshakeResponse,
   };
 }
 
@@ -401,5 +409,168 @@ describe("TadpoleServer", () => {
 
     // Clean up
     clients.forEach(client => client.close());
+  });
+
+  it("sends no event history by default", async () => {
+    // Connect client without requesting event history
+    const { handshakeResponse } = await setupClient(serverUrl, { mode: "readonly" });
+
+    // Verify handshake response
+    expect(handshakeResponse.type).toBe("handshake.response");
+    expect(handshakeResponse.data.eventHistory).toBeDefined();
+    expect(handshakeResponse.data.eventHistory).toHaveLength(0);
+
+    // Clean up
+    handshakeResponse.client?.close();
+  });
+
+  it("sends no event history when sendPreviousEvents is false", async () => {
+    // Connect client explicitly not requesting event history
+    const { handshakeResponse } = await setupClient(serverUrl, {
+      mode: "readonly",
+      sendPreviousEvents: false
+    });
+
+    // Verify handshake response
+    expect(handshakeResponse.type).toBe("handshake.response");
+    expect(handshakeResponse.data.eventHistory).toBeDefined();
+    expect(handshakeResponse.data.eventHistory).toHaveLength(0);
+
+    // Clean up
+    handshakeResponse.client?.close();
+  });
+
+  it("sends event history when sendPreviousEvents is true", async () => {
+    // First, connect a client and generate some events by sending ping commands
+    const { client: firstClient } = await setupClient(serverUrl, { mode: "readandwrite" });
+
+    // Generate some events by sending ping commands
+    firstClient.send(JSON.stringify({
+      id: "test-ping-1",
+      type: "ping",
+    }));
+
+    firstClient.send(JSON.stringify({
+      id: "test-ping-2",
+      type: "ping.broadcast",
+    }));
+
+    // Wait a bit for events to be processed and stored
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Now connect a second client requesting event history
+    const { handshakeResponse } = await setupClient(serverUrl, {
+      mode: "readonly",
+      sendPreviousEvents: true
+    });
+
+    // Verify handshake response contains event history
+    expect(handshakeResponse.type).toBe("handshake.response");
+    expect(handshakeResponse.data.eventHistory).toBeDefined();
+    expect(Array.isArray(handshakeResponse.data.eventHistory)).toBe(true);
+
+    // Should have multiple events (server.ready, state.snapshot, pong events, etc.)
+    expect(handshakeResponse.data.eventHistory.length).toBeGreaterThan(0);
+
+    // Verify structure of events in history
+    for (const event of handshakeResponse.data.eventHistory) {
+      expect(event).toHaveProperty('id');
+      expect(event).toHaveProperty('timestamp');
+      expect(event).toHaveProperty('type');
+      expect(event).toHaveProperty('data');
+    }
+
+    // Look for specific event types we expect
+    const eventTypes = handshakeResponse.data.eventHistory.map((e: any) => e.type);
+    expect(eventTypes).toContain("server.ready");
+    expect(eventTypes).toContain("state.snapshot");
+
+    // Clean up
+    firstClient.close();
+    handshakeResponse.client?.close();
+  });
+
+  it("multiple clients can request different event history settings", async () => {
+    // Generate some events first
+    const { client: eventClient } = await setupClient(serverUrl, { mode: "readandwrite" });
+
+    eventClient.send(JSON.stringify({
+      id: "setup-ping",
+      type: "ping",
+    }));
+
+    // Wait for events to be processed
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Connect one client without event history
+    const { handshakeResponse: response1 } = await setupClient(serverUrl, {
+      mode: "readonly",
+      sendPreviousEvents: false
+    });
+
+    // Connect another client with event history
+    const { handshakeResponse: response2 } = await setupClient(serverUrl, {
+      mode: "readonly",
+      sendPreviousEvents: true
+    });
+
+    // First client should have no history
+    expect(response1.data.eventHistory).toHaveLength(0);
+
+    // Second client should have history
+    expect(response2.data.eventHistory.length).toBeGreaterThan(0);
+
+    // Clean up
+    eventClient.close();
+    response1.client?.close();
+    response2.client?.close();
+  });
+
+  it("event history contains events in chronological order", async () => {
+    // Generate a sequence of events
+    const { client: eventClient } = await setupClient(serverUrl, { mode: "readandwrite" });
+
+    // Send multiple ping commands with delays to ensure ordering
+    eventClient.send(JSON.stringify({
+      id: "ping-1",
+      type: "ping",
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    eventClient.send(JSON.stringify({
+      id: "ping-2",
+      type: "ping",
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    eventClient.send(JSON.stringify({
+      id: "ping-3",
+      type: "ping.broadcast",
+    }));
+
+    // Wait for all events to be processed
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Connect client requesting full history
+    const { handshakeResponse } = await setupClient(serverUrl, {
+      mode: "readonly",
+      sendPreviousEvents: true
+    });
+
+    const eventHistory = handshakeResponse.data.eventHistory;
+    expect(eventHistory.length).toBeGreaterThan(0);
+
+    // Verify events are in chronological order (timestamps should be increasing)
+    for (let i = 1; i < eventHistory.length; i++) {
+      const prevTimestamp = new Date(eventHistory[i - 1].timestamp).getTime();
+      const currTimestamp = new Date(eventHistory[i].timestamp).getTime();
+      expect(currTimestamp).toBeGreaterThanOrEqual(prevTimestamp);
+    }
+
+    // Clean up
+    eventClient.close();
+    handshakeResponse.client?.close();
   });
 });

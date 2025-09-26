@@ -8,6 +8,7 @@ import { ClaudeLogParser } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
+import { EventJournal } from "./event-journal.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { BunProxyRunner } from "./llm-proxy.js";
@@ -102,6 +103,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private currentRunId: RunId | null = null;
   private heartbeatInterval?: NodeJS.Timeout;
 
+  // Event Journal for multi-client support
+  private eventJournal: EventJournal;
+
   // Track pending tool uses for result matching
   private pendingToolUses: Map<
     string,
@@ -175,6 +179,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Initialize state manager with execution path
     const tadpoleDir = path.join(this.config.executionPath, ".tadpole");
     this.stateManager = new StateManager(tadpoleDir, this.logger, this.config.phases);
+
+    // Initialize Event Journal
+    this.eventJournal = new EventJournal(this.config.eventJournalMaxSize);
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -384,7 +391,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     ws: ServerWebSocket<ClientData>,
     request: HandshakeRequest,
   ): Promise<void> {
-    const { mode, clientId } = request.data;
+    const { mode, clientId, sendPreviousEvents = false } = request.data;
 
     // Assign or validate client ID
     const finalClientId = clientId || ws.data.id;
@@ -407,8 +414,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.clients.set(finalClientId, ws);
     }
 
-    // Get event history (for now, empty array - we'll implement event journal later)
-    const eventHistory: ServerEvent[] = [];
+    // Get event history from journal for client synchronization
+    const eventHistory = sendPreviousEvents ? this.eventJournal.getAllEvents() : [];
+
+    this.logger.log(
+      `Sending ${eventHistory.length} events to client ${finalClientId}` +
+        (sendPreviousEvents ? " (full history)" : " (no history)"),
+    );
 
     // Send handshake response
     const response: HandshakeResponse = {
@@ -424,7 +436,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(`Handshake complete for client ${finalClientId} (${grantedMode})`);
 
     // Send initial events now that handshake is complete
-    this.sendEventToClient(ws, {
+    const serverReadyEvent: ServerReadyEvent = {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "server.ready",
@@ -433,7 +445,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         executionPath: this.config.executionPath,
         dataPath: this.config.dataPathInExecutionDir,
       },
-    } as ServerReadyEvent);
+    };
+
+    // Store in journal and send to the client
+    this.eventJournal.append(serverReadyEvent);
+    this.sendEventToClient(ws, serverReadyEvent);
 
     // TODO: figure out if this should be only sent after handshake
     // Send initial state snapshot to the newly connected client
@@ -443,7 +459,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (this.config.autostart) {
       this.autoStartNextPhase();
     } else {
-      this.sendEventToClient(ws, {
+      const serverIdleEvent = {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "server.idle",
@@ -451,7 +467,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           reason: "startup",
           message: "Server ready. Waiting for commands (autostart disabled).",
         },
-      } as import("./types/types.js").ServerIdleEvent);
+      } as import("./types/types.js").ServerIdleEvent;
+
+      // Store in journal and send to the client
+      this.eventJournal.append(serverIdleEvent);
+      this.sendEventToClient(ws, serverIdleEvent);
     }
   }
 
@@ -633,7 +653,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.clients.delete(sender.data.id);
       }
 
-      // Also emit for tests and basic TUI
+      // Store in event journal and emit for tests and basic TUI
+      this.eventJournal.append(pongEvent);
       this.emit("event", pongEvent);
     } else {
       this.logger.log("Ping command received but no valid sender provided", "error");
@@ -671,8 +692,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // Also emit for tests and basic TUI
-    this.emit("event", {
+    // Store a single event in journal and emit for tests and basic TUI
+    const broadcastPongEvent: PongEvent = {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "pong",
@@ -681,7 +702,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         timestamp: new Date().toISOString(),
         clientId: senderClientId, // Use sender's client ID
       },
-    } as PongEvent);
+    };
+
+    this.eventJournal.append(broadcastPongEvent);
+    this.emit("event", broadcastPongEvent);
   }
 
   // ============================================================================
@@ -689,7 +713,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
 
   private sendEvent(event: ServerEvent): void {
-    if (this.clients.size === 0) return;
+    // Store in journal first
+    this.eventJournal.append(event);
+
+    if (this.clients.size === 0) {
+      // Still store events even with no clients connected
+      // Emit for tests and basic TUI
+      this.emit("event", event);
+      return;
+    }
 
     // Broadcast to all connected clients that have completed handshake
     for (const [_, client] of this.clients) {
@@ -739,7 +771,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     if (client) {
-      // Send to specific client
+      // Send to specific client and store in journal
+      this.eventJournal.append(stateSnapshotEvent);
       this.sendEventToClient(client, stateSnapshotEvent);
     } else {
       // Send to all clients (default behavior)

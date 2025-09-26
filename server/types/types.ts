@@ -31,7 +31,7 @@ export interface HandshakeRequest {
   data: {
     mode: ClientMode;
     clientId?: string; // Optional for reconnection
-    lastEventId?: string; // For resuming from specific point
+    sendPreviousEvents?: boolean; // Whether to send event history (defaults to false)
   };
 }
 
@@ -327,6 +327,9 @@ export interface ServerConfig {
 
   /** Whether to disable the proxy server (default: false) */
   withoutProxy: boolean;
+
+  /** Maximum number of events to keep in the event journal (default: 10000) */
+  eventJournalMaxSize: number;
 }
 
 // ============================================================================
