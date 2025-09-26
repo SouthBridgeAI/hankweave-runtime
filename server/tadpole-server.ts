@@ -74,19 +74,29 @@ import {
  */
 
 /**
+ * Client access modes for different capabilities
+ */
+enum ClientMode {
+  READONLY = "readonly",
+  READANDWRITE = "readandwrite",
+}
+
+/**
  * Client metadata stored with each WebSocket connection.
  * Provides connection tracking and activity monitoring.
  */
 interface ClientData {
+  id: string;
   connectionTime: Date;
   lastActivity: Date;
+  mode: ClientMode;
 }
 
 /**
  * Main server class that orchestrates Claude phases.
  *
  * Responsibilities:
- * - WebSocket server management (single client)
+ * - WebSocket server management (multiple clients)
  * - Phase execution and lifecycle
  * - Claude process management
  * - File watching and change detection
@@ -96,7 +106,7 @@ interface ClientData {
  */
 export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private server: Server | null = null;
-  private client: ServerWebSocket<ClientData> | null = null;
+  private clients: Map<string, ServerWebSocket<ClientData>> = new Map();
   public readonly config: ServerConfig;
   private logger: Logger;
 
@@ -366,19 +376,18 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
 
   private handleConnection(ws: ServerWebSocket<ClientData>): void {
-    if (this.client) {
-      this.logger.log("Rejecting connection - already have a client");
-      ws.close(1008, "Server already has a client");
-      return;
-    }
+    const clientId = generateId();
+    this.logger.log(`Client ${clientId} connected`);
 
-    this.logger.log("Client connected");
     const now = new Date();
     ws.data = {
+      id: clientId,
       connectionTime: now,
       lastActivity: now,
+      mode: ClientMode.READANDWRITE, // Default to read-write for now (handshake can change this)
     };
-    this.client = ws;
+
+    this.clients.set(clientId, ws);
 
     // Send initial state
     this.sendEvent({
@@ -438,9 +447,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private handleClose(_ws: ServerWebSocket<ClientData>): void {
-    this.logger.log("Client disconnected - shutting down server");
-    this.shutdown("client disconnect");
+  private handleClose(ws: ServerWebSocket<ClientData>): void {
+    const clientId = ws.data.id;
+    this.logger.log(`Client ${clientId} disconnected`);
+
+    // Remove client from the map
+    this.clients.delete(clientId);
+
+    // For now, keep server running even with no clients (test expects this)
+    // In future, this could be configurable behavior
   }
 
   // ============================================================================
@@ -528,10 +543,19 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
 
   private sendEvent(event: ServerEvent): void {
-    if (!this.client) return;
+    if (this.clients.size === 0) return;
 
-    this.logger.logSocketTraffic(this.config.socketLogFile, "out", event);
-    this.client.send(JSON.stringify(event));
+    // Broadcast to all connected clients
+    for (const [clientId, client] of this.clients) {
+      try {
+        this.logger.logSocketTraffic(this.config.socketLogFile, "out", event);
+        client.send(JSON.stringify(event));
+      } catch (error) {
+        this.logger.log(`Failed to send event to client ${clientId}: ${error}`, "error");
+        // Remove disconnected client
+        this.clients.delete(clientId);
+      }
+    }
 
     // Emit for tests and basic TUI
     this.emit("event", event);
@@ -3304,10 +3328,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.heartbeatInterval = undefined;
     }
 
-    if (this.client) {
-      this.client.close();
-      this.client = null;
+    // Close all connected clients
+    for (const [clientId, client] of this.clients) {
+      try {
+        client.close();
+      } catch (error) {
+        this.logger.log(`Error closing client ${clientId}: ${error}`, "error");
+      }
     }
+    this.clients.clear();
 
     if (this.server) {
       this.server.stop();
