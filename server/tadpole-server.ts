@@ -20,6 +20,7 @@ import type {
   InfoEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
+  PongEvent,
   ServerEvent,
   ServerReadyEvent,
   StateSnapshotEvent,
@@ -200,6 +201,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private readonly READ_ONLY_COMMANDS = new Set([
     "checkpoint.list",
     "server.shutdown", // Special case - always allowed
+    "ping",
+    "ping.broadcast",
   ]);
 
   constructor(
@@ -542,7 +545,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // All clients can execute any command
       // const command = result.data;
       this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
-      this.handleCommand(result.data);
+      this.handleCommand(result.data, ws);
     } catch (error) {
       this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
     }
@@ -563,7 +566,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // Command Processing
   // ============================================================================
 
-  async handleCommand(command: ClientCommand): Promise<void> {
+  async handleCommand(command: ClientCommand, sender?: ServerWebSocket<ClientData>): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
 
     // Check if command is blocked during rollback
@@ -633,10 +636,97 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         await this.rollbackToLastSuccess(command.data?.autoRestart ?? false);
         break;
 
+      case "ping":
+        this.handlePing(command.id, sender);
+        break;
+
+      case "ping.broadcast":
+        this.handlePingBroadcast(command.id, sender);
+        break;
+
       default:
         // This should never happen due to Zod validation
         assertNever(command);
     }
+  }
+
+  // ============================================================================
+  // Ping Commands (for testing)
+  // ============================================================================
+
+  private handlePing(commandId: string, sender?: ServerWebSocket<ClientData>): void {
+    this.logger.log(`Handling ping command: ${commandId}`);
+
+    // Send pong response only to the sender
+    if (sender?.data.handshakeComplete) {
+      const pongEvent: PongEvent = {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "pong",
+        data: {
+          message: "pong",
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      try {
+        this.logger.logSocketTraffic(this.config.socketLogFile, "out", pongEvent);
+        sender.send(JSON.stringify(pongEvent));
+      } catch (error) {
+        this.logger.log(`Failed to send pong to client ${sender.data.id}: ${error}`, "error");
+        // Remove disconnected client
+        this.clients.delete(sender.data.id);
+      }
+
+      // Also emit for tests and basic TUI
+      this.emit("event", pongEvent);
+    } else {
+      this.logger.log("Ping command received but no valid sender provided", "error");
+    }
+  }
+
+  private handlePingBroadcast(commandId: string, sender?: ServerWebSocket<ClientData>): void {
+    this.logger.log(`Handling ping.broadcast command: ${commandId}`);
+
+    const senderClientId = sender?.data.id || "unknown";
+
+    // Send pong response to all clients, including the sender's client ID
+    // For broadcast, we'll include a clientId to distinguish the sender
+    for (const [clientId, client] of this.clients) {
+      if (!client.data.handshakeComplete) continue;
+
+      try {
+        const pongEvent: PongEvent = {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "pong",
+          data: {
+            message: "pong",
+            timestamp: new Date().toISOString(),
+            clientId: senderClientId, // Include the sender's client ID in broadcast responses
+          },
+        };
+
+        this.logger.logSocketTraffic(this.config.socketLogFile, "out", pongEvent);
+        client.send(JSON.stringify(pongEvent));
+      } catch (error) {
+        this.logger.log(`Failed to send pong to client ${clientId}: ${error}`, "error");
+        // Remove disconnected client
+        this.clients.delete(clientId);
+      }
+    }
+
+    // Also emit for tests and basic TUI
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "pong",
+      data: {
+        message: "pong",
+        timestamp: new Date().toISOString(),
+        clientId: senderClientId, // Use sender's client ID
+      },
+    } as PongEvent);
   }
 
   // ============================================================================
@@ -647,18 +737,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (this.clients.size === 0) return;
 
     // Broadcast to all connected clients that have completed handshake
-    for (const [clientId, client] of this.clients) {
+    for (const [_, client] of this.clients) {
       // Only send events to clients that have completed handshake
       if (!client.data.handshakeComplete) continue;
-
-      try {
-        this.logger.logSocketTraffic(this.config.socketLogFile, "out", event);
-        client.send(JSON.stringify(event));
-      } catch (error) {
-        this.logger.log(`Failed to send event to client ${clientId}: ${error}`, "error");
-        // Remove disconnected client
-        this.clients.delete(clientId);
-      }
+      this.sendEventToClient(client, event);
     }
 
     // Emit for tests and basic TUI

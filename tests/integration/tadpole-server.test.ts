@@ -265,4 +265,273 @@ describe("TadpoleServer", () => {
     client2.close();
     client3.close();
   });
+
+  it("responds to ping command from single client", async () => {
+    // Connect and handshake client
+    const client = new WebSocket(serverUrl);
+    await new Promise<void>((resolve) => {
+      client.onopen = () => resolve();
+    });
+
+    // Perform handshake
+    const handshakePromise = new Promise<any>((resolve) => {
+      client.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "handshake.response") {
+          resolve(data);
+        }
+      };
+    });
+
+    client.send(
+      JSON.stringify({
+        type: "handshake",
+        data: { mode: "readandwrite" },
+      })
+    );
+
+    const handshakeResponse = await handshakePromise;
+    const clientId = handshakeResponse.data.clientId;
+
+    // Set up pong response listener
+    const pongPromise = new Promise<any>((resolve) => {
+      client.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "pong") {
+          resolve(data);
+        }
+      };
+    });
+
+    // Send ping command
+    client.send(
+      JSON.stringify({
+        id: "test-ping-1",
+        type: "ping",
+      })
+    );
+
+    // Wait for pong response
+    const pongResponse = await pongPromise;
+    expect(pongResponse.type).toBe("pong");
+    expect(pongResponse.data.message).toBe("pong");
+    expect(pongResponse.data.timestamp).toBeDefined();
+    expect(pongResponse.data.clientId).toBeUndefined(); // Regular ping doesn't include clientId
+
+    // Clean up
+    client.close();
+  });
+
+  it("responds to ping.broadcast command to all clients", async () => {
+    // Connect and handshake first client
+    const client1 = new WebSocket(serverUrl);
+    await new Promise<void>((resolve) => {
+      client1.onopen = () => resolve();
+    });
+
+    const handshake1Promise = new Promise<any>((resolve) => {
+      client1.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "handshake.response") {
+          resolve(data);
+        }
+      };
+    });
+
+    client1.send(
+      JSON.stringify({
+        type: "handshake",
+        data: { mode: "readandwrite" },
+      })
+    );
+
+    const handshakeResponse1 = await handshake1Promise;
+    const client1Id = handshakeResponse1.data.clientId;
+
+    // Connect and handshake second client
+    const client2 = new WebSocket(serverUrl);
+    await new Promise<void>((resolve) => {
+      client2.onopen = () => resolve();
+    });
+
+    const handshake2Promise = new Promise<any>((resolve) => {
+      client2.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "handshake.response") {
+          resolve(data);
+        }
+      };
+    });
+
+    client2.send(
+      JSON.stringify({
+        type: "handshake",
+        data: { mode: "readonly" },
+      })
+    );
+
+    const handshakeResponse2 = await handshake2Promise;
+    const client2Id = handshakeResponse2.data.clientId;
+
+    // Set up pong response listeners
+    const pongPromises = [
+      new Promise<any>((resolve) => {
+        client1.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "pong") {
+            resolve({ client: "client1", data });
+          }
+        };
+      }),
+      new Promise<any>((resolve) => {
+        client2.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "pong") {
+            resolve({ client: "client2", data });
+          }
+        };
+      }),
+    ];
+
+    // Send ping.broadcast command from client1
+    client1.send(
+      JSON.stringify({
+        id: "test-ping-broadcast-1",
+        type: "ping.broadcast",
+      })
+    );
+
+    // Wait for both pong responses
+    const pongResponses = await Promise.all(pongPromises);
+
+    // Both clients should receive pong responses
+    expect(pongResponses).toHaveLength(2);
+
+    for (const response of pongResponses) {
+      expect(response.data.type).toBe("pong");
+      expect(response.data.data.message).toBe("pong");
+      expect(response.data.data.timestamp).toBeDefined();
+      expect(response.data.data.clientId).toBe(client1Id); // Should include sender's client ID
+    }
+
+    // Clean up
+    client1.close();
+    client2.close();
+  });
+
+  it("handles ping commands with multiple clients correctly", async () => {
+    // Connect and handshake three clients
+    const clients: WebSocket[] = [];
+    const clientIds: string[] = [];
+
+    for (let i = 0; i < 3; i++) {
+      const client = new WebSocket(serverUrl);
+      await new Promise<void>((resolve) => {
+        client.onopen = () => resolve();
+      });
+
+      const handshakePromise = new Promise<any>((resolve) => {
+        client.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "handshake.response") {
+            resolve(data);
+          }
+        };
+      });
+
+      client.send(
+        JSON.stringify({
+          type: "handshake",
+          data: { mode: "readandwrite" },
+        })
+      );
+
+      const handshakeResponse = await handshakePromise;
+      clients.push(client);
+      clientIds.push(handshakeResponse.data.clientId);
+    }
+
+    // Test 1: Regular ping from client 0 - only client 0 should receive response
+    const pingPromise = new Promise<any[]>((resolve) => {
+      let responseCount = 0;
+      const responses: any[] = [];
+
+      clients.forEach((client, index) => {
+        client.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "pong") {
+            responses.push({ clientIndex: index, data });
+            responseCount++;
+
+            // For regular ping, only sender should get response
+            if (responseCount >= 1) {
+              resolve(responses);
+            }
+          }
+        };
+      });
+
+      // Set timeout to ensure we're not waiting forever
+      setTimeout(() => resolve(responses), 1000);
+    });
+
+    clients[0].send(
+      JSON.stringify({
+        id: "test-ping-multiple-1",
+        type: "ping",
+      })
+    );
+
+    const pingResponses = await pingPromise;
+
+    // Only one response should be received (by the sender)
+    expect(pingResponses).toHaveLength(1);
+    expect(pingResponses[0].clientIndex).toBe(0); // Should be client 0
+    expect(pingResponses[0].data.data.clientId).toBeUndefined(); // Regular ping doesn't include clientId
+
+    // Test 2: Broadcast ping from client 1 - all clients should receive response
+    const broadcastPromise = new Promise<any[]>((resolve) => {
+      let responseCount = 0;
+      const responses: any[] = [];
+
+      clients.forEach((client, index) => {
+        client.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "pong") {
+            responses.push({ clientIndex: index, data });
+            responseCount++;
+
+            // For broadcast, all clients should get response
+            if (responseCount >= 3) {
+              resolve(responses);
+            }
+          }
+        };
+      });
+
+      // Set timeout to ensure we're not waiting forever
+      setTimeout(() => resolve(responses), 1000);
+    });
+
+    clients[1].send(
+      JSON.stringify({
+        id: "test-ping-broadcast-multiple-1",
+        type: "ping.broadcast",
+      })
+    );
+
+    const broadcastResponses = await broadcastPromise;
+
+    // All three clients should receive responses
+    expect(broadcastResponses).toHaveLength(3);
+
+    // All responses should include the sender's client ID (client 1)
+    for (const response of broadcastResponses) {
+      expect(response.data.data.clientId).toBe(clientIds[1]); // Should be client 1's ID
+      expect(response.data.data.message).toBe("pong");
+    }
+
+    // Clean up
+    clients.forEach(client => client.close());
+  });
 });
