@@ -1,56 +1,114 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { TadpoleServer } from "../../server/tadpole-server.js";
+import { generateTestTimestamp } from "../utils/test-helpers.js";
+
+// Test configuration similar to e2e tests
+const TEST_ROOT = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "../.."
+);
+const EXECUTION_DIR = path.join(
+  TEST_ROOT,
+  "tests/test-area/tadpole-server-integration"
+);
+const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
+const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
+const PHASES_CONFIG = path.join(
+  TEST_ROOT,
+  "tests/config/test-phases.config.json"
+);
 
 // Create a minimal config
 const serverPort = 8889;
 const serverUrl = `ws://localhost:${serverPort}`;
 
-describe("TadpoleServer - Single Client Behavior", () => {
+// Generate timestamp for this test run
+const TEST_TIMESTAMP = generateTestTimestamp();
+const TEST_RUN_DIR = path.join(
+  TEST_RESULTS_DIR,
+  `server-integration-${TEST_TIMESTAMP}`
+);
+
+describe("TadpoleServer", () => {
   let server: TadpoleServer;
-  let tempDir: string;
 
   beforeEach(async () => {
-    // Create a temporary directory for the test
-    tempDir = path.join(os.tmpdir(), `tadpole-test-${Date.now()}`);
-    fs.mkdirSync(tempDir, { recursive: true });
+    // Clean up and create directories (similar to e2e test setup)
+    if (fs.existsSync(EXECUTION_DIR)) {
+      fs.rmSync(EXECUTION_DIR, { recursive: true, force: true });
+    }
+    fs.mkdirSync(EXECUTION_DIR, { recursive: true });
+
+    // Create test results directory for this run
+    fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
 
     // Create necessary subdirectories
-    const logsDir = path.join(tempDir, ".tadpole", "logs");
-    const dataDir = path.join(tempDir, "data");
+    const tadpoleDir = path.join(EXECUTION_DIR, ".tadpole");
+    const logsDir = path.join(tadpoleDir, "logs");
+    const checkpointsDir = path.join(tadpoleDir, "checkpoints");
+    const dataDir = path.join(EXECUTION_DIR, "read_only_data_source");
     fs.mkdirSync(logsDir, { recursive: true });
+    fs.mkdirSync(checkpointsDir, { recursive: true });
     fs.mkdirSync(dataDir, { recursive: true });
 
+    // Copy data source file if it exists
+    if (fs.existsSync(DATA_SOURCE_FILE)) {
+      fs.copyFileSync(DATA_SOURCE_FILE, path.join(dataDir, "poem_guides.txt"));
+    }
+
+    // Create state file with correct structure to avoid validation errors
+    const stateFile = path.join(tadpoleDir, "state.json");
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({ runs: [], currentRunId: null })
+    );
+
+    // Load phase configs if they exist
+    let phases = [];
+    if (fs.existsSync(PHASES_CONFIG)) {
+      try {
+        phases = JSON.parse(fs.readFileSync(PHASES_CONFIG, "utf-8"));
+      } catch (e) {
+        console.warn("Could not load phase configs:", e);
+      }
+    }
+
     server = new TadpoleServer({
+      autostart: false,
       port: serverPort,
-      cwd: tempDir,
-      executionPath: tempDir,
+      cwd: EXECUTION_DIR,
+      executionPath: EXECUTION_DIR,
       dataPathInExecutionDir: dataDir,
       readOnlySourceDataPath: dataDir,
-      dataHash: "test-hash",
+      dataHash: "test-hash-" + TEST_TIMESTAMP,
       isNewExecution: true,
       isResuming: false,
       linkType: "symlink",
-      phases: [],
+      phases: phases,
       socketLogFile: path.join(logsDir, "socket.jsonl"),
       serverLogFile: path.join(logsDir, "server.log"),
     });
     await server.start();
+
+    // Wait a bit for server to fully initialize
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   afterEach(async () => {
     if (server) {
-      await server.shutdown("test cleanup");
+      // Pass exitProcess: false to prevent the server from calling process.exit()
+      // This allows the test runner to continue running subsequent tests
+      await server.shutdown("test cleanup", false);
+      // Wait a bit for server to fully shut down
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    // Clean up temp directory
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
+    // Note: We keep the test results for debugging, but clean up execution directory
+    // The test-area directory will be cleaned up on next run
   });
 
-  test("server is running on expected port", async () => {
+  it("runs on expected port", async () => {
     // Try to connect to the server
     const client = new WebSocket(serverUrl);
 
@@ -65,5 +123,79 @@ describe("TadpoleServer - Single Client Behavior", () => {
 
     // Clean up
     client.close();
+  });
+
+  it("supports multiple connections", async () => {
+    // Connect first client
+    const client1 = new WebSocket(serverUrl);
+
+    const client1Connected = await new Promise<boolean>((resolve) => {
+      client1.onopen = () => resolve(true);
+      client1.onerror = () => resolve(false);
+      setTimeout(() => resolve(false), 5000);
+    });
+
+    expect(client1Connected).toBe(true);
+    expect(client1.readyState).toBe(WebSocket.OPEN);
+
+    // Try to connect second client
+    const client2 = new WebSocket(serverUrl);
+
+    const client2Result = await new Promise<string>((resolve) => {
+      client2.onopen = () => {
+        // Give it a moment to see if it stays connected
+        setTimeout(() => {
+          if (client2.readyState === WebSocket.OPEN) {
+            resolve("connected");
+          } else {
+            resolve("closed-after-open");
+          }
+        }, 100);
+      };
+      client2.onclose = () => resolve("rejected");
+      client2.onerror = () => resolve("error");
+      setTimeout(() => resolve("timeout"), 2000);
+    });
+
+    // Check if second client connects
+    console.log("Client 2 result:", client2Result);
+    console.log("Client 2 readyState:", client2.readyState);
+
+    // Try to connect third client
+    const client3 = new WebSocket(serverUrl);
+
+    const client3Result = await new Promise<string>((resolve) => {
+      client3.onopen = () => {
+        // Give it a moment to see if it stays connected
+        setTimeout(() => {
+          if (client3.readyState === WebSocket.OPEN) {
+            resolve("connected");
+          } else {
+            resolve("closed-after-open");
+          }
+        }, 100);
+      };
+      client3.onclose = () => resolve("rejected");
+      client3.onerror = () => resolve("error");
+      setTimeout(() => resolve("timeout"), 2000);
+    });
+
+    // Check results
+    console.log("Client 3 result:", client3Result);
+    console.log("Client 3 readyState:", client3.readyState);
+
+    // Now we accept multiple connections, all should be open
+    expect(client2Result).toBe("connected");
+    expect(client3Result).toBe("connected");
+
+    // All clients should stay connected
+    expect(client1.readyState).toBe(WebSocket.OPEN);
+    expect(client2.readyState).toBe(WebSocket.OPEN);
+    expect(client3.readyState).toBe(WebSocket.OPEN);
+
+    // Clean up
+    client1.close();
+    client2.close();
+    client3.close();
   });
 });
