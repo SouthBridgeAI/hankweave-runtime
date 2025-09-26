@@ -82,6 +82,16 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       })
       .optional(),
   }),
+
+  // Ping commands for testing
+  z.object({
+    id: z.string(),
+    type: z.literal("ping"),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("ping.broadcast"),
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
