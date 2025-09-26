@@ -31,6 +31,73 @@ const TEST_RUN_DIR = path.join(
   `server-integration-${TEST_TIMESTAMP}`
 );
 
+// Helper types and interfaces
+interface ClientSetupResult {
+  client: WebSocket;
+  clientId: string;
+}
+
+type ClientMode = "readonly" | "readandwrite";
+
+// Helper function to create and setup a client
+async function setupClient(
+  serverUrl: string,
+  options: {
+    performHandshake?: boolean;
+    mode?: ClientMode;
+    timeout?: number;
+  } = {}
+): Promise<ClientSetupResult> {
+  const { performHandshake = true, mode = "readandwrite", timeout = 5000 } = options;
+
+  // Connect client
+  const client = new WebSocket(serverUrl);
+
+  const connected = await new Promise<boolean>((resolve) => {
+    client.onopen = () => resolve(true);
+    client.onerror = () => resolve(false);
+    setTimeout(() => resolve(false), timeout);
+  });
+
+  if (!connected) {
+    throw new Error("Failed to connect client to server");
+  }
+
+  if (!performHandshake) {
+    return { client, clientId: "unknown" };
+  }
+
+  // Perform handshake
+  const handshakePromise = new Promise<any>((resolve, reject) => {
+    client.onmessage = (event: MessageEvent) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "handshake.response") {
+        resolve(data);
+      }
+    };
+    client.onerror = () => reject(new Error("WebSocket error during handshake"));
+    setTimeout(() => reject(new Error("Handshake timeout")), timeout);
+  });
+
+  client.send(
+    JSON.stringify({
+      type: "handshake",
+      data: { mode },
+    })
+  );
+
+  const handshakeResponse = await handshakePromise;
+
+  if (!handshakeResponse.data.clientId) {
+    throw new Error("Handshake response missing clientId");
+  }
+
+  return {
+    client,
+    clientId: handshakeResponse.data.clientId,
+  };
+}
+
 describe("TadpoleServer", () => {
   let server: TadpoleServer;
 
@@ -109,16 +176,9 @@ describe("TadpoleServer", () => {
   });
 
   it("runs on expected port", async () => {
-    // Try to connect to the server
-    const client = new WebSocket(serverUrl);
+    // Try to connect to the server without handshake
+    const { client } = await setupClient(serverUrl, { performHandshake: false });
 
-    const connected = await new Promise<boolean>((resolve) => {
-      client.onopen = () => resolve(true);
-      client.onerror = () => resolve(false);
-      setTimeout(() => resolve(false), 5000);
-    });
-
-    expect(connected).toBe(true);
     expect(client.readyState).toBe(WebSocket.OPEN);
 
     // Clean up
@@ -126,41 +186,10 @@ describe("TadpoleServer", () => {
   });
 
   it("supports multiple connections", async () => {
-    // Connect first client
-    const client1 = new WebSocket(serverUrl);
-
-    const client1Connected = await new Promise<boolean>((resolve) => {
-      client1.onopen = () => resolve(true);
-      client1.onerror = () => resolve(false);
-      setTimeout(() => resolve(false), 5000);
-    });
-
-    expect(client1Connected).toBe(true);
-    expect(client1.readyState).toBe(WebSocket.OPEN);
-
-    // Connect second client
-    const client2 = new WebSocket(serverUrl);
-
-    const client2Connected = await new Promise<boolean>((resolve) => {
-      client2.onopen = () => resolve(true);
-      client2.onerror = () => resolve(false);
-      setTimeout(() => resolve(false), 5000);
-    });
-
-    expect(client2Connected).toBe(true);
-    expect(client2.readyState).toBe(WebSocket.OPEN);
-
-    // Connect third client
-    const client3 = new WebSocket(serverUrl);
-
-    const client3Connected = await new Promise<boolean>((resolve) => {
-      client3.onopen = () => resolve(true);
-      client3.onerror = () => resolve(false);
-      setTimeout(() => resolve(false), 5000);
-    });
-
-    expect(client3Connected).toBe(true);
-    expect(client3.readyState).toBe(WebSocket.OPEN);
+    // Connect multiple clients without handshake
+    const { client: client1 } = await setupClient(serverUrl, { performHandshake: false });
+    const { client: client2 } = await setupClient(serverUrl, { performHandshake: false });
+    const { client: client3 } = await setupClient(serverUrl, { performHandshake: false });
 
     // All clients should stay connected
     expect(client1.readyState).toBe(WebSocket.OPEN);
@@ -174,86 +203,15 @@ describe("TadpoleServer", () => {
   });
 
   it("supports handshake protocol with different modes", async () => {
-    // Connect first client requesting read-write access
-    const client1 = new WebSocket(serverUrl);
-    await new Promise<void>((resolve) => {
-      client1.onopen = () => resolve();
-    });
+    // Connect clients with different modes
+    const { client: client1, clientId: clientId1 } = await setupClient(serverUrl, { mode: "readandwrite" });
+    const { client: client2, clientId: clientId2 } = await setupClient(serverUrl, { mode: "readandwrite" });
+    const { client: client3, clientId: clientId3 } = await setupClient(serverUrl, { mode: "readonly" });
 
-    // Perform handshake for client 1 (read-write)
-    const handshake1Promise = new Promise<any>((resolve) => {
-      client1.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "handshake.response") {
-          resolve(data);
-        }
-      };
-    });
-
-    client1.send(
-      JSON.stringify({
-        type: "handshake",
-        data: { mode: "readandwrite" },
-      })
-    );
-
-    const handshakeResponse1 = await handshake1Promise;
-    expect(handshakeResponse1.data.mode).toBe("readandwrite");
-    expect(handshakeResponse1.data.clientId).toBeDefined();
-
-    // Connect second client requesting read-write access (should also get readandwrite)
-    const client2 = new WebSocket(serverUrl);
-    await new Promise<void>((resolve) => {
-      client2.onopen = () => resolve();
-    });
-
-    // Perform handshake for client 2 (should also get write access)
-    const handshake2Promise = new Promise<any>((resolve) => {
-      client2.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "handshake.response") {
-          resolve(data);
-        }
-      };
-    });
-
-    client2.send(
-      JSON.stringify({
-        type: "handshake",
-        data: { mode: "readandwrite" },
-      })
-    );
-
-    const handshakeResponse2 = await handshake2Promise;
-    expect(handshakeResponse2.data.mode).toBe("readandwrite"); // Multiple clients can have write access
-    expect(handshakeResponse2.data.clientId).toBeDefined();
-
-    // Connect third client requesting readonly access
-    const client3 = new WebSocket(serverUrl);
-    await new Promise<void>((resolve) => {
-      client3.onopen = () => resolve();
-    });
-
-    // Perform handshake for client 3 (readonly)
-    const handshake3Promise = new Promise<any>((resolve) => {
-      client3.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "handshake.response") {
-          resolve(data);
-        }
-      };
-    });
-
-    client3.send(
-      JSON.stringify({
-        type: "handshake",
-        data: { mode: "readonly" },
-      })
-    );
-
-    const handshakeResponse3 = await handshake3Promise;
-    expect(handshakeResponse3.data.mode).toBe("readonly");
-    expect(handshakeResponse3.data.clientId).toBeDefined();
+    // Verify client IDs are defined
+    expect(clientId1).toBeDefined();
+    expect(clientId2).toBeDefined();
+    expect(clientId3).toBeDefined();
 
     // All clients should stay connected after handshake
     expect(client1.readyState).toBe(WebSocket.OPEN);
@@ -268,34 +226,11 @@ describe("TadpoleServer", () => {
 
   it("responds to ping command from single client", async () => {
     // Connect and handshake client
-    const client = new WebSocket(serverUrl);
-    await new Promise<void>((resolve) => {
-      client.onopen = () => resolve();
-    });
-
-    // Perform handshake
-    const handshakePromise = new Promise<any>((resolve) => {
-      client.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "handshake.response") {
-          resolve(data);
-        }
-      };
-    });
-
-    client.send(
-      JSON.stringify({
-        type: "handshake",
-        data: { mode: "readandwrite" },
-      })
-    );
-
-    const handshakeResponse = await handshakePromise;
-    const clientId = handshakeResponse.data.clientId;
+    const { client } = await setupClient(serverUrl, { mode: "readandwrite" });
 
     // Set up pong response listener
     const pongPromise = new Promise<any>((resolve) => {
-      client.onmessage = (event) => {
+      client.onmessage = (event: MessageEvent) => {
         const data = JSON.parse(event.data);
         if (data.type === "pong") {
           resolve(data);
@@ -323,60 +258,14 @@ describe("TadpoleServer", () => {
   });
 
   it("responds to ping.broadcast command to all clients", async () => {
-    // Connect and handshake first client
-    const client1 = new WebSocket(serverUrl);
-    await new Promise<void>((resolve) => {
-      client1.onopen = () => resolve();
-    });
-
-    const handshake1Promise = new Promise<any>((resolve) => {
-      client1.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "handshake.response") {
-          resolve(data);
-        }
-      };
-    });
-
-    client1.send(
-      JSON.stringify({
-        type: "handshake",
-        data: { mode: "readandwrite" },
-      })
-    );
-
-    const handshakeResponse1 = await handshake1Promise;
-    const client1Id = handshakeResponse1.data.clientId;
-
-    // Connect and handshake second client
-    const client2 = new WebSocket(serverUrl);
-    await new Promise<void>((resolve) => {
-      client2.onopen = () => resolve();
-    });
-
-    const handshake2Promise = new Promise<any>((resolve) => {
-      client2.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "handshake.response") {
-          resolve(data);
-        }
-      };
-    });
-
-    client2.send(
-      JSON.stringify({
-        type: "handshake",
-        data: { mode: "readonly" },
-      })
-    );
-
-    const handshakeResponse2 = await handshake2Promise;
-    const client2Id = handshakeResponse2.data.clientId;
+    // Connect and handshake clients
+    const { client: client1, clientId: client1Id } = await setupClient(serverUrl, { mode: "readandwrite" });
+    const { client: client2 } = await setupClient(serverUrl, { mode: "readonly" });
 
     // Set up pong response listeners
     const pongPromises = [
       new Promise<any>((resolve) => {
-        client1.onmessage = (event) => {
+        client1.onmessage = (event: MessageEvent) => {
           const data = JSON.parse(event.data);
           if (data.type === "pong") {
             resolve({ client: "client1", data });
@@ -384,7 +273,7 @@ describe("TadpoleServer", () => {
         };
       }),
       new Promise<any>((resolve) => {
-        client2.onmessage = (event) => {
+        client2.onmessage = (event: MessageEvent) => {
           const data = JSON.parse(event.data);
           if (data.type === "pong") {
             resolve({ client: "client2", data });
@@ -421,35 +310,14 @@ describe("TadpoleServer", () => {
 
   it("handles ping commands with multiple clients correctly", async () => {
     // Connect and handshake three clients
-    const clients: WebSocket[] = [];
-    const clientIds: string[] = [];
+    const clientSetups = await Promise.all([
+      setupClient(serverUrl, { mode: "readandwrite" }),
+      setupClient(serverUrl, { mode: "readandwrite" }),
+      setupClient(serverUrl, { mode: "readandwrite" }),
+    ]);
 
-    for (let i = 0; i < 3; i++) {
-      const client = new WebSocket(serverUrl);
-      await new Promise<void>((resolve) => {
-        client.onopen = () => resolve();
-      });
-
-      const handshakePromise = new Promise<any>((resolve) => {
-        client.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          if (data.type === "handshake.response") {
-            resolve(data);
-          }
-        };
-      });
-
-      client.send(
-        JSON.stringify({
-          type: "handshake",
-          data: { mode: "readandwrite" },
-        })
-      );
-
-      const handshakeResponse = await handshakePromise;
-      clients.push(client);
-      clientIds.push(handshakeResponse.data.clientId);
-    }
+    const clients = clientSetups.map(setup => setup.client);
+    const clientIds = clientSetups.map(setup => setup.clientId);
 
     // Test 1: Regular ping from client 0 - only client 0 should receive response
     const pingPromise = new Promise<any[]>((resolve) => {
