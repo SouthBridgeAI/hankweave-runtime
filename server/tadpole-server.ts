@@ -46,19 +46,21 @@ import {
   type PhaseStatus,
 } from "./types/state-types.js";
 import type { ToolInputMap, ToolName } from "./types/tool-types.js";
-
-// Import remaining types from old file
 import type {
   CheckpointInfo,
   ClaudeLogMessage,
+  ClientData,
   FailureReason,
+  HandshakeRequest,
+  HandshakeResponse,
   PhaseConfig,
   ServerConfig,
   ShellCommand,
   TokenUsage,
   WorkspaceShellCommand,
 } from "./types/types.js";
-import { isSyntheticTimeout } from "./types/types.js";
+// Import remaining types from old file
+import { ClientMode, isSyntheticTimeout } from "./types/types.js";
 import {
   assertNever,
   buildFileTree,
@@ -73,57 +75,6 @@ import {
  * This file is organized into logical sections for easier navigation.
  * Use `grep -A1 "// ====" tadpole-server.ts | grep "//"` to see all sections.
  */
-
-/**
- * Client access modes for different capabilities
- */
-enum ClientMode {
-  READONLY = "readonly",
-  READANDWRITE = "readandwrite",
-}
-
-/**
- * Handshake request sent by client to establish connection mode
- */
-interface HandshakeRequest {
-  type: "handshake";
-  data: {
-    mode: ClientMode;
-    clientId?: string; // Optional for reconnection
-    lastEventId?: string; // For resuming from specific point
-  };
-}
-
-/**
- * Handshake response sent by server after processing request
- */
-interface HandshakeResponse {
-  type: "handshake.response";
-  data: {
-    clientId: string;
-    mode: ClientMode; // Granted mode (may differ from requested)
-    eventHistory: ServerEvent[];
-  };
-}
-
-/**
- * Client metadata stored with each WebSocket connection.
- * Provides connection tracking and activity monitoring.
- */
-type ClientData =
-  | {
-      id: string;
-      connectionTime: Date;
-      lastActivity: Date;
-      handshakeComplete: false;
-    }
-  | {
-      id: string;
-      connectionTime: Date;
-      lastActivity: Date;
-      mode: ClientMode;
-      handshakeComplete: true;
-    };
 
 /**
  * Main server class that orchestrates Claude phases.
