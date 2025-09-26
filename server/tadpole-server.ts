@@ -3247,7 +3247,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // Shutdown & Cleanup
   // ============================================================================
 
-  async shutdown(reason: string): Promise<void> {
+  /**
+   * Shutdown the Tadpole server gracefully.
+   * @param reason - The reason for shutdown (e.g., "client request", "SIGINT", "test cleanup")
+   * @param exitProcess - Whether to exit the process after shutdown (default: true).
+   *                      Set to false in test environments to prevent the test runner from terminating.
+   */
+  async shutdown(reason: string, exitProcess = true): Promise<void> {
     if (this.isShuttingDown) {
       this.logger.log(`Shutdown already in progress, ignoring: ${reason}`);
       return;
@@ -3334,9 +3340,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // Ignore errors on second attempt
     }
 
-    // Small delay to ensure log is written
-    setTimeout(() => {
-      process.exit(0);
-    }, TIMEOUTS.PHASE_CLEANUP_DELAY_MS);
+    // Conditionally exit the process based on the exitProcess parameter
+    // In production, we want to exit the process after shutdown
+    // In tests, we don't want to exit to allow other tests to run
+    if (exitProcess) {
+      // Small delay to ensure log is written before process exits
+      setTimeout(() => {
+        process.exit(0);
+      }, TIMEOUTS.PHASE_CLEANUP_DELAY_MS);
+    }
   }
 }
