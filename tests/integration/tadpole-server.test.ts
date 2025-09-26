@@ -138,55 +138,29 @@ describe("TadpoleServer", () => {
     expect(client1Connected).toBe(true);
     expect(client1.readyState).toBe(WebSocket.OPEN);
 
-    // Try to connect second client
+    // Connect second client
     const client2 = new WebSocket(serverUrl);
 
-    const client2Result = await new Promise<string>((resolve) => {
-      client2.onopen = () => {
-        // Give it a moment to see if it stays connected
-        setTimeout(() => {
-          if (client2.readyState === WebSocket.OPEN) {
-            resolve("connected");
-          } else {
-            resolve("closed-after-open");
-          }
-        }, 100);
-      };
-      client2.onclose = () => resolve("rejected");
-      client2.onerror = () => resolve("error");
-      setTimeout(() => resolve("timeout"), 2000);
+    const client2Connected = await new Promise<boolean>((resolve) => {
+      client2.onopen = () => resolve(true);
+      client2.onerror = () => resolve(false);
+      setTimeout(() => resolve(false), 5000);
     });
 
-    // Check if second client connects
-    console.log("Client 2 result:", client2Result);
-    console.log("Client 2 readyState:", client2.readyState);
+    expect(client2Connected).toBe(true);
+    expect(client2.readyState).toBe(WebSocket.OPEN);
 
-    // Try to connect third client
+    // Connect third client
     const client3 = new WebSocket(serverUrl);
 
-    const client3Result = await new Promise<string>((resolve) => {
-      client3.onopen = () => {
-        // Give it a moment to see if it stays connected
-        setTimeout(() => {
-          if (client3.readyState === WebSocket.OPEN) {
-            resolve("connected");
-          } else {
-            resolve("closed-after-open");
-          }
-        }, 100);
-      };
-      client3.onclose = () => resolve("rejected");
-      client3.onerror = () => resolve("error");
-      setTimeout(() => resolve("timeout"), 2000);
+    const client3Connected = await new Promise<boolean>((resolve) => {
+      client3.onopen = () => resolve(true);
+      client3.onerror = () => resolve(false);
+      setTimeout(() => resolve(false), 5000);
     });
 
-    // Check results
-    console.log("Client 3 result:", client3Result);
-    console.log("Client 3 readyState:", client3.readyState);
-
-    // Now we accept multiple connections, all should be open
-    expect(client2Result).toBe("connected");
-    expect(client3Result).toBe("connected");
+    expect(client3Connected).toBe(true);
+    expect(client3.readyState).toBe(WebSocket.OPEN);
 
     // All clients should stay connected
     expect(client1.readyState).toBe(WebSocket.OPEN);
