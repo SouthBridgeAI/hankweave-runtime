@@ -682,7 +682,7 @@ describe("TadpoleServer", () => {
         id: "test-shutdown",
         type: "server.shutdown",
         data: {
-          reason: "test shutdown",
+          reason: "running integration test",
         },
       })
     );

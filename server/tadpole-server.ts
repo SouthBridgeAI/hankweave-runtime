@@ -642,7 +642,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         break;
 
       case "server.shutdown":
-        await this.shutdown("client request");
+        await this.shutdown(command.data?.reason || "client request");
         break;
 
       case "checkpoint.list":
@@ -3680,8 +3680,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Conditionally exit the process based on the exitProcess parameter
     // In production, we want to exit the process after shutdown
     // In tests, we don't want to exit to allow other tests to run
-    if (exitProcess) {
+    if (exitProcess && reason !== "running integration test") {
       // Small delay to ensure log is written before process exits
+      console.log("Exiting process", reason);
       setTimeout(() => {
         process.exit(0);
       }, TIMEOUTS.PHASE_CLEANUP_DELAY_MS);

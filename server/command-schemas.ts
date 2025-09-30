@@ -27,6 +27,11 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
     type: z.literal("server.shutdown"),
+    data: z
+      .object({
+        reason: z.string().optional(),
+      })
+      .optional(),
   }),
 
   // Query checkpoints
