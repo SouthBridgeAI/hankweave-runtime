@@ -179,11 +179,19 @@ describe("TadpoleServer", () => {
 
   afterEach(async () => {
     if (server) {
-      // Pass exitProcess: false to prevent the server from calling process.exit()
-      // This allows the test runner to continue running subsequent tests
-      await server.shutdown("test cleanup", false);
-      // Wait a bit for server to fully shut down
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        // Pass exitProcess: false to prevent the server from calling process.exit()
+        // This allows the test runner to continue running subsequent tests
+        await server.shutdown("test cleanup", false);
+        // Wait a bit for server to fully shut down
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } catch (error) {
+        // Server might already be shut down from a test
+        console.log(
+          "Server already shut down or error during shutdown:",
+          error
+        );
+      }
     }
     // Note: We keep the test results for debugging, but clean up execution directory
     // The test-area directory will be cleaned up on next run
@@ -658,6 +666,50 @@ describe("TadpoleServer", () => {
 
     // Clean up
     newClient.close();
+  });
+
+  it("shuts down when shutdown command is sent", async () => {
+    // Connect a client with readandwrite mode (shutdown requires write permissions)
+    const { client } = await setupClient(serverUrl, {
+      mode: "readandwrite",
+    });
+
+    expect(client.readyState).toBe(WebSocket.OPEN);
+
+    // Send shutdown command
+    client.send(
+      JSON.stringify({
+        id: "test-shutdown",
+        type: "server.shutdown",
+        data: {
+          reason: "test shutdown",
+        },
+      })
+    );
+
+    // Wait for server to shut down
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Try to connect a new client - this should fail since server is down
+    let connectionFailed = false;
+    try {
+      await setupClient(serverUrl, {
+        mode: "readandwrite",
+        timeout: 2000,
+      });
+    } catch (error) {
+      connectionFailed = true;
+    }
+
+    expect(connectionFailed).toBe(true);
+
+    // Clean up - close the original client if still open
+    if (client.readyState === WebSocket.OPEN) {
+      client.close();
+    }
+
+    // Mark server as null so afterEach doesn't try to shut it down again
+    server = null as any;
   });
 
   describe("Client Permissions", () => {
