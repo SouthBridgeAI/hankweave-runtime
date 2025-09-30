@@ -211,6 +211,7 @@ export const DEFAULT_CONFIG: Omit<
   dataHashTimeLimit: 5000, // 5 seconds for directory hashing
   toolResultTruncateLength: 2500, // Default truncation length for tool results
   withoutProxy: false, // Enable proxy by default
+  eventJournalMaxSize: 10000, // Maximum events to keep in journal
 };
 
 // ============================================================================

@@ -2,10 +2,13 @@ import type { TadpoleServer } from "./tadpole-server.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
+  HandshakeRequest,
+  HandshakeResponse,
   NextPhaseCommand,
   ServerEvent,
   SkipPhaseCommand,
 } from "./types/types.js";
+import { ClientMode } from "./types/types.js";
 import { generateId } from "./utils.js";
 
 // ANSI color codes for terminal formatting
@@ -63,6 +66,7 @@ const SYMBOLS = {
 export class BasicTUI {
   private ws: WebSocket | null = null;
   private isConnected = false;
+  private handshakeComplete = false;
   private checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
   private waitingForCheckpoints = false;
 
@@ -82,11 +86,21 @@ export class BasicTUI {
     this.ws.onopen = () => {
       this.isConnected = true;
       console.log(`${COLORS.green}${SYMBOLS.check} Connected to server${COLORS.reset}`);
+      this.performHandshake();
     };
 
     this.ws.onmessage = (event) => {
       try {
-        const serverEvent = JSON.parse(event.data) as ServerEvent;
+        const message = JSON.parse(event.data);
+
+        // Check if this is a handshake response
+        if (message.type === "handshake.response") {
+          this.handleHandshakeResponse(message as HandshakeResponse);
+          return;
+        }
+
+        // Handle regular server events
+        const serverEvent = message as ServerEvent;
         this.handleServerEvent(serverEvent);
       } catch (error) {
         console.error(
@@ -102,9 +116,32 @@ export class BasicTUI {
 
     this.ws.onclose = () => {
       this.isConnected = false;
+      this.handshakeComplete = false;
       console.log(`${COLORS.dim}${SYMBOLS.pipe} Disconnected from server${COLORS.reset}`);
       // Server shutdown will handle process exit
     };
+  }
+
+  private performHandshake(): void {
+    if (!this.ws) return;
+
+    const handshakeRequest: HandshakeRequest = {
+      type: "handshake",
+      data: {
+        mode: ClientMode.READANDWRITE, // TUI needs write access for commands
+        sendPreviousEvents: true, // Request event history for context
+      },
+    };
+
+    console.log(`${COLORS.dim}${SYMBOLS.pipe} Sending handshake...${COLORS.reset}`);
+    this.ws.send(JSON.stringify(handshakeRequest));
+  }
+
+  private handleHandshakeResponse(response: HandshakeResponse): void {
+    this.handshakeComplete = true;
+    console.log(
+      `${COLORS.green}${SYMBOLS.check} Handshake complete - Mode: ${response.data.mode}, Client ID: ${response.data.clientId}${COLORS.reset}`,
+    );
   }
 
   private formatTimestamp(timestamp: string): string {
@@ -505,6 +542,11 @@ export class BasicTUI {
   private sendCommand(command: ClientCommand): void {
     if (!this.isConnected || !this.ws) {
       console.error(`${COLORS.red}${SYMBOLS.cross} Not connected to server${COLORS.reset}`);
+      return;
+    }
+
+    if (!this.handshakeComplete) {
+      console.error(`${COLORS.red}${SYMBOLS.cross} Handshake not complete${COLORS.reset}`);
       return;
     }
 

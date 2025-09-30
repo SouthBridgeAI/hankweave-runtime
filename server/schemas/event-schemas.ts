@@ -270,6 +270,12 @@ export const rollbackCompletedEventDataSchema = z.object({
   autoRestart: z.boolean(),
 });
 
+export const pongEventDataSchema = z.object({
+  message: z.string(),
+  timestamp: z.string(),
+  clientId: z.string().optional(), // Only present in ping.broadcast responses
+});
+
 // ============================================================================
 // Full Event Schemas
 // ============================================================================
@@ -374,6 +380,11 @@ export const rollbackCompletedEventSchema = baseEventSchema.extend({
   data: rollbackCompletedEventDataSchema,
 });
 
+export const pongEventSchema = baseEventSchema.extend({
+  type: z.literal("pong"),
+  data: pongEventDataSchema,
+});
+
 // ============================================================================
 // Client Command Schemas
 // ============================================================================
@@ -456,6 +467,16 @@ export const rollbackToLastSuccessCommandSchema = z.object({
     .optional(),
 });
 
+export const pingCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("ping"),
+});
+
+export const pingBroadcastCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("ping.broadcast"),
+});
+
 export const clientCommandSchema = z.discriminatedUnion("type", [
   startPhaseCommandSchema,
   nextPhaseCommandSchema,
@@ -467,6 +488,8 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   rollbackToCheckpointCommandSchema,
   rollbackToPhaseCommandSchema,
   rollbackToLastSuccessCommandSchema,
+  pingCommandSchema,
+  pingBroadcastCommandSchema,
 ]);
 
 // ============================================================================
@@ -493,6 +516,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   rollbackWorkspaceCleanupEventSchema,
   rollbackProgressEventSchema,
   rollbackCompletedEventSchema,
+  pongEventSchema,
 ]);
 
 // ============================================================================
@@ -522,6 +546,7 @@ export type RollbackPhaseCheckpointEvent = z.infer<typeof rollbackPhaseCheckpoin
 export type RollbackWorkspaceCleanupEvent = z.infer<typeof rollbackWorkspaceCleanupEventSchema>;
 export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
 export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
+export type PongEvent = z.infer<typeof pongEventSchema>;
 
 // Export client command types
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
@@ -535,6 +560,8 @@ export type ListCheckpointsCommand = z.infer<typeof listCheckpointsCommandSchema
 export type RollbackToCheckpointCommand = z.infer<typeof rollbackToCheckpointCommandSchema>;
 export type RollbackToPhaseCommand = z.infer<typeof rollbackToPhaseCommandSchema>;
 export type RollbackToLastSuccessCommand = z.infer<typeof rollbackToLastSuccessCommandSchema>;
+export type PingCommand = z.infer<typeof pingCommandSchema>;
+export type PingBroadcastCommand = z.infer<typeof pingBroadcastCommandSchema>;
 
 // Export type helpers
 export type ServerEventType = ServerEvent["type"];
@@ -568,6 +595,7 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "rollback.workspaceCleanup": rollbackWorkspaceCleanupEventDataSchema,
   "rollback.progress": rollbackProgressEventDataSchema,
   "rollback.completed": rollbackCompletedEventDataSchema,
+  pong: pongEventDataSchema,
 };
 
 // List of all valid event types (for chronicler validation)

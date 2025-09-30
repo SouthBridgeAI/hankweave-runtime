@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { ServerEvent } from "../schemas/event-schemas.js";
 import type { PhaseId } from "./branded-types.js";
 import type { logMessageSchema } from "./claude-session-schema.js";
 
@@ -9,6 +10,61 @@ import type { logMessageSchema } from "./claude-session-schema.js";
 export type ModelName = "sonnet" | "opus";
 
 export type ContinuationMode = "fresh" | "continue-previous";
+
+// ============================================================================
+// WebSocket Client Types
+// ============================================================================
+
+/**
+ * Client access modes for different capabilities
+ */
+export enum ClientMode {
+  READONLY = "readonly",
+  READANDWRITE = "readandwrite",
+}
+
+/**
+ * Handshake request sent by client to establish connection mode
+ */
+export interface HandshakeRequest {
+  type: "handshake";
+  data: {
+    mode: ClientMode;
+    clientId?: string; // Optional for reconnection
+    sendPreviousEvents?: boolean; // Whether to send event history (defaults to false)
+  };
+}
+
+/**
+ * Handshake response sent by server after processing request
+ */
+export interface HandshakeResponse {
+  type: "handshake.response";
+  data: {
+    clientId: string;
+    mode: ClientMode; // Granted mode (may differ from requested)
+    eventHistory: ServerEvent[];
+  };
+}
+
+/**
+ * Client metadata stored with each WebSocket connection.
+ * Provides connection tracking and activity monitoring.
+ */
+export type ClientData =
+  | {
+      id: string;
+      connectionTime: Date;
+      lastActivity: Date;
+      handshakeComplete: false;
+    }
+  | {
+      id: string;
+      connectionTime: Date;
+      lastActivity: Date;
+      mode: ClientMode;
+      handshakeComplete: true;
+    };
 
 // ============================================================================
 // Process Exit Types (moved to schemas)
@@ -271,6 +327,9 @@ export interface ServerConfig {
 
   /** Whether to disable the proxy server (default: false) */
   withoutProxy: boolean;
+
+  /** Maximum number of events to keep in the event journal (default: 10000) */
+  eventJournalMaxSize: number;
 }
 
 // ============================================================================

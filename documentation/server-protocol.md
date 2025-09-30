@@ -270,10 +270,16 @@ Announces the beginning of a phase's execution, after workspace setup is complet
     "phaseId": "phase-1",
     "phaseName": "Initial Analysis",
     "sessionId": "session-uuid-123",
-    "startTime": "2025-01-19T10:00:10Z"
+    "startTime": "2025-01-19T10:00:10Z",
+    "metadata": {
+      "checkpointSha": "a1b2c3d"
+    }
   }
 }
 ```
+
+**Fields:**
+- `metadata.checkpointSha`: Optional. Present when resuming from an existing workspace setup checkpoint, indicating the Git SHA of the workspace state being reused.
 
 #### `phase.completed`
 Marks the end of a phase's execution, providing a summary of its outcome, cost, and duration.
@@ -429,6 +435,51 @@ Communicates an error to the client. The `fatal` flag indicates whether the serv
 #### Rollback Events (`rollback.started`, `rollback.progress`, etc.)
 A series of events that provide detailed, step-by-step feedback during a rollback operation, allowing the client to display a rich progress indicator to the user.
 
+## Resume Functionality
+
+The server provides robust resume functionality that allows execution to continue from previous sessions, even after failures or interruptions.
+
+### Workspace Setup Checkpoint Reuse
+
+When a phase is started, the server checks the phase's execution history for an existing `workspaceSetupCheckpoint`:
+
+1. **Checkpoint Discovery**: The server queries the state manager for all previous runs of the phase and searches for any entry containing a `workspaceSetupCheckpoint`
+2. **Automatic Skip**: If a checkpoint is found, workspace setup operations (file copies, commands) are automatically skipped, regardless of the `skipPreCommands` parameter
+3. **Resume from Checkpoint**: The phase resumes execution with the workspace already configured from the previous attempt
+
+This mechanism prevents expensive and time-consuming workspace setup operations from being repeated when resuming failed phases. It's particularly valuable for phases that copy large directories or perform complex setup operations.
+
+**Example Scenario:**
+```
+Run 1: Phase starts → Workspace setup (copies 5GB of data) → Phase fails during execution
+Run 2: Phase starts → Finds existing checkpoint → Skips workspace setup → Resumes immediately
+```
+
+### Automatic Failure Detection and Recovery
+
+On server startup (when a client connects), the server performs automatic failure detection:
+
+1. **Thread Analysis**: The server calls `getExecutionThread()` to analyze the complete execution history
+2. **Failure Check**: The `ExecutionThread.failed` property is checked, which returns true if any phase has:
+   - `phase.status === "failed"`
+   - `runStatus === "failed"`
+   - `runStatus === "crashed"`
+3. **Automatic Rollback**: If failure is detected, the server automatically invokes `rollbackToLastSuccess()` with the `autostart` configuration
+4. **Clean Restart**: After rollback, the server starts fresh from a known good state
+
+This ensures that resuming a session never begins from a corrupted or failed state. The workspace is automatically restored to the last successful checkpoint, allowing execution to proceed cleanly.
+
+### Checkpoint Types Used for Resume
+
+The resume functionality leverages different checkpoint types depending on the phase's state:
+
+- **Workspace Setup Checkpoint**: Created after workspace setup, before phase execution begins. Used to skip setup on resume.
+- **Completion Checkpoint**: Created after successful phase completion. Used as the primary rollback target.
+- **Error Checkpoint**: Created when a phase fails (if configured). Can be used as a fallback rollback target.
+- **Skip Checkpoint**: Created when a phase is skipped. Can be used as a fallback rollback target.
+
+The `rollbackToLastSuccess` operation prioritizes completion checkpoints but falls back to any available checkpoint (workspace-setup, error, or skipped) if no successful completions exist.
+
 ## Protocol Behavior
 
 ### Connection Lifecycle
@@ -436,7 +487,12 @@ The typical connection flow is designed to quickly synchronize the client with t
 1.  The client establishes a WebSocket connection.
 2.  The server immediately responds with a `server.ready` event.
 3.  This is followed by a comprehensive `state.snapshot` event.
-4.  If `autostart` is enabled, the server proceeds to start the first phase. Otherwise, it sends a `server.idle` event and waits for commands.
+4.  The server checks if the execution thread has previously failed by analyzing the execution history.
+5.  If a failure is detected, the server automatically triggers `rollbackToLastSuccess` to restore the workspace to a known good state before resuming.
+6.  If `autostart` is enabled, the server proceeds to start the next phase (after rollback if needed). Otherwise, it sends a `server.idle` event and waits for commands.
+
+**Automatic Failure Recovery:**
+When the server starts up, it analyzes the execution thread to detect if previous execution attempts failed. If `ExecutionThread.failed` is true (indicating phases with status "failed" or runStatus "failed"/"crashed"), the server automatically performs a rollback to the last successful checkpoint before starting any new work. This ensures that resuming a session never continues from a broken state.
 
 ### Command Processing
 The server processes commands sequentially to maintain state integrity. Most commands that modify state (e.g., starting or stopping a phase) are blocked during a rollback operation to prevent conflicts. Read-only queries like `checkpoint.list` are always permitted.
