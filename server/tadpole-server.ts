@@ -61,7 +61,7 @@ import type {
   WorkspaceShellCommand,
 } from "./types/types.js";
 // Import remaining types from old file
-import { isSyntheticTimeout } from "./types/types.js";
+import { ClientMode, isSyntheticTimeout } from "./types/types.js";
 import {
   assertNever,
   buildFileTree,
@@ -157,7 +157,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     "checkpoint.list",
     "server.shutdown", // Special case - always allowed
     "ping",
-    "ping.broadcast",
   ]);
 
   constructor(
@@ -549,12 +548,15 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // Command Processing
   // ============================================================================
 
-  async handleCommand(command: ClientCommand, sender?: ServerWebSocket<ClientData>): Promise<void> {
+  private async handleCommand(
+    command: ClientCommand,
+    sender: ServerWebSocket<ClientData>,
+  ): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
 
     // Check if command is blocked during rollback
     if (this.isRollingBack && !this.READ_ONLY_COMMANDS.has(command.type)) {
-      this.sendEvent({
+      this.sendEventToClient(sender, {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -568,6 +570,45 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         },
       } as ErrorEvent);
       return;
+    }
+
+    // Check if sender has permission for state-modifying commands
+    if (!this.READ_ONLY_COMMANDS.has(command.type)) {
+      // This is a state-modifying command
+      if (!sender.data.handshakeComplete) {
+        this.sendEventToClient(sender, {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "error",
+          data: {
+            message: "Cannot execute state-modifying commands without handshake",
+            context: `Attempted command: ${command.type}`,
+            phase: this.currentPhase?.phase.id,
+            fatal: false,
+            severity: ErrorSeverity.OPERATION,
+            code: "HANDSHAKE_REQUIRED",
+          },
+        } as ErrorEvent);
+        return;
+      }
+
+      // Check if sender has read-write mode
+      if (sender.data.mode === ClientMode.READONLY) {
+        this.sendEventToClient(sender, {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "error",
+          data: {
+            message: "Cannot execute state-modifying commands in read-only mode",
+            context: `Attempted command: ${command.type}`,
+            phase: this.currentPhase?.phase.id,
+            fatal: false,
+            severity: ErrorSeverity.OPERATION,
+            code: "INSUFFICIENT_PERMISSIONS",
+          },
+        } as ErrorEvent);
+        return;
+      }
     }
 
     switch (command.type) {

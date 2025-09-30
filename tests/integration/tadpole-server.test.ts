@@ -50,7 +50,12 @@ async function setupClient(
     sendPreviousEvents?: boolean;
   } = {}
 ): Promise<ClientSetupResult> {
-  const { performHandshake = true, mode = "readandwrite", timeout = 5000, sendPreviousEvents } = options;
+  const {
+    performHandshake = true,
+    mode = "readandwrite",
+    timeout = 5000,
+    sendPreviousEvents,
+  } = options;
 
   // Connect client
   const client = new WebSocket(serverUrl);
@@ -77,7 +82,8 @@ async function setupClient(
         resolve(data);
       }
     };
-    client.onerror = () => reject(new Error("WebSocket error during handshake"));
+    client.onerror = () =>
+      reject(new Error("WebSocket error during handshake"));
     setTimeout(() => reject(new Error("Handshake timeout")), timeout);
   });
 
@@ -185,7 +191,9 @@ describe("TadpoleServer", () => {
 
   it("runs on expected port", async () => {
     // Try to connect to the server without handshake
-    const { client } = await setupClient(serverUrl, { performHandshake: false });
+    const { client } = await setupClient(serverUrl, {
+      performHandshake: false,
+    });
 
     expect(client.readyState).toBe(WebSocket.OPEN);
 
@@ -195,9 +203,15 @@ describe("TadpoleServer", () => {
 
   it("supports multiple connections", async () => {
     // Connect multiple clients without handshake
-    const { client: client1 } = await setupClient(serverUrl, { performHandshake: false });
-    const { client: client2 } = await setupClient(serverUrl, { performHandshake: false });
-    const { client: client3 } = await setupClient(serverUrl, { performHandshake: false });
+    const { client: client1 } = await setupClient(serverUrl, {
+      performHandshake: false,
+    });
+    const { client: client2 } = await setupClient(serverUrl, {
+      performHandshake: false,
+    });
+    const { client: client3 } = await setupClient(serverUrl, {
+      performHandshake: false,
+    });
 
     // All clients should stay connected
     expect(client1.readyState).toBe(WebSocket.OPEN);
@@ -212,9 +226,18 @@ describe("TadpoleServer", () => {
 
   it("supports handshake protocol with different modes", async () => {
     // Connect clients with different modes
-    const { client: client1, clientId: clientId1 } = await setupClient(serverUrl, { mode: "readandwrite" });
-    const { client: client2, clientId: clientId2 } = await setupClient(serverUrl, { mode: "readandwrite" });
-    const { client: client3, clientId: clientId3 } = await setupClient(serverUrl, { mode: "readonly" });
+    const { client: client1, clientId: clientId1 } = await setupClient(
+      serverUrl,
+      { mode: "readandwrite" }
+    );
+    const { client: client2, clientId: clientId2 } = await setupClient(
+      serverUrl,
+      { mode: "readandwrite" }
+    );
+    const { client: client3, clientId: clientId3 } = await setupClient(
+      serverUrl,
+      { mode: "readonly" }
+    );
 
     // Verify client IDs are defined
     expect(clientId1).toBeDefined();
@@ -267,8 +290,13 @@ describe("TadpoleServer", () => {
 
   it("responds to ping.broadcast command to all clients", async () => {
     // Connect and handshake clients
-    const { client: client1, clientId: client1Id } = await setupClient(serverUrl, { mode: "readandwrite" });
-    const { client: client2 } = await setupClient(serverUrl, { mode: "readonly" });
+    const { client: client1, clientId: client1Id } = await setupClient(
+      serverUrl,
+      { mode: "readandwrite" }
+    );
+    const { client: client2 } = await setupClient(serverUrl, {
+      mode: "readonly",
+    });
 
     // Set up pong response listeners
     const pongPromises = [
@@ -324,8 +352,8 @@ describe("TadpoleServer", () => {
       setupClient(serverUrl, { mode: "readandwrite" }),
     ]);
 
-    const clients = clientSetups.map(setup => setup.client);
-    const clientIds = clientSetups.map(setup => setup.clientId);
+    const clients = clientSetups.map((setup) => setup.client);
+    const clientIds = clientSetups.map((setup) => setup.clientId);
 
     // Test 1: Regular ping from client 0 - only client 0 should receive response
     const pingPromise = new Promise<any[]>((resolve) => {
@@ -408,12 +436,14 @@ describe("TadpoleServer", () => {
     }
 
     // Clean up
-    clients.forEach(client => client.close());
+    clients.forEach((client) => client.close());
   });
 
   it("sends no event history by default", async () => {
     // Connect client without requesting event history
-    const { handshakeResponse } = await setupClient(serverUrl, { mode: "readonly" });
+    const { handshakeResponse } = await setupClient(serverUrl, {
+      mode: "readonly",
+    });
 
     // Verify handshake response
     expect(handshakeResponse.type).toBe("handshake.response");
@@ -428,7 +458,7 @@ describe("TadpoleServer", () => {
     // Connect client explicitly not requesting event history
     const { handshakeResponse } = await setupClient(serverUrl, {
       mode: "readonly",
-      sendPreviousEvents: false
+      sendPreviousEvents: false,
     });
 
     // Verify handshake response
@@ -442,26 +472,32 @@ describe("TadpoleServer", () => {
 
   it("sends event history when sendPreviousEvents is true", async () => {
     // First, connect a client and generate some events by sending ping commands
-    const { client: firstClient } = await setupClient(serverUrl, { mode: "readandwrite" });
+    const { client: firstClient } = await setupClient(serverUrl, {
+      mode: "readandwrite",
+    });
 
     // Generate some events by sending ping commands
-    firstClient.send(JSON.stringify({
-      id: "test-ping-1",
-      type: "ping",
-    }));
+    firstClient.send(
+      JSON.stringify({
+        id: "test-ping-1",
+        type: "ping",
+      })
+    );
 
-    firstClient.send(JSON.stringify({
-      id: "test-ping-2",
-      type: "ping.broadcast",
-    }));
+    firstClient.send(
+      JSON.stringify({
+        id: "test-ping-2",
+        type: "ping.broadcast",
+      })
+    );
 
     // Wait a bit for events to be processed and stored
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Now connect a second client requesting event history
     const { handshakeResponse } = await setupClient(serverUrl, {
       mode: "readonly",
-      sendPreviousEvents: true
+      sendPreviousEvents: true,
     });
 
     // Verify handshake response contains event history
@@ -474,14 +510,16 @@ describe("TadpoleServer", () => {
 
     // Verify structure of events in history
     for (const event of handshakeResponse.data.eventHistory) {
-      expect(event).toHaveProperty('id');
-      expect(event).toHaveProperty('timestamp');
-      expect(event).toHaveProperty('type');
-      expect(event).toHaveProperty('data');
+      expect(event).toHaveProperty("id");
+      expect(event).toHaveProperty("timestamp");
+      expect(event).toHaveProperty("type");
+      expect(event).toHaveProperty("data");
     }
 
     // Look for specific event types we expect
-    const eventTypes = handshakeResponse.data.eventHistory.map((e: any) => e.type);
+    const eventTypes = handshakeResponse.data.eventHistory.map(
+      (e: any) => e.type
+    );
     expect(eventTypes).toContain("server.ready");
     expect(eventTypes).toContain("state.snapshot");
 
@@ -492,26 +530,30 @@ describe("TadpoleServer", () => {
 
   it("multiple clients can request different event history settings", async () => {
     // Generate some events first
-    const { client: eventClient } = await setupClient(serverUrl, { mode: "readandwrite" });
+    const { client: eventClient } = await setupClient(serverUrl, {
+      mode: "readandwrite",
+    });
 
-    eventClient.send(JSON.stringify({
-      id: "setup-ping",
-      type: "ping",
-    }));
+    eventClient.send(
+      JSON.stringify({
+        id: "setup-ping",
+        type: "ping",
+      })
+    );
 
     // Wait for events to be processed
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Connect one client without event history
     const { handshakeResponse: response1 } = await setupClient(serverUrl, {
       mode: "readonly",
-      sendPreviousEvents: false
+      sendPreviousEvents: false,
     });
 
     // Connect another client with event history
     const { handshakeResponse: response2 } = await setupClient(serverUrl, {
       mode: "readonly",
-      sendPreviousEvents: true
+      sendPreviousEvents: true,
     });
 
     // First client should have no history
@@ -528,35 +570,43 @@ describe("TadpoleServer", () => {
 
   it("event history contains events in chronological order", async () => {
     // Generate a sequence of events
-    const { client: eventClient } = await setupClient(serverUrl, { mode: "readandwrite" });
+    const { client: eventClient } = await setupClient(serverUrl, {
+      mode: "readandwrite",
+    });
 
     // Send multiple ping commands with delays to ensure ordering
-    eventClient.send(JSON.stringify({
-      id: "ping-1",
-      type: "ping",
-    }));
+    eventClient.send(
+      JSON.stringify({
+        id: "ping-1",
+        type: "ping",
+      })
+    );
 
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    eventClient.send(JSON.stringify({
-      id: "ping-2",
-      type: "ping",
-    }));
+    eventClient.send(
+      JSON.stringify({
+        id: "ping-2",
+        type: "ping",
+      })
+    );
 
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    eventClient.send(JSON.stringify({
-      id: "ping-3",
-      type: "ping.broadcast",
-    }));
+    eventClient.send(
+      JSON.stringify({
+        id: "ping-3",
+        type: "ping.broadcast",
+      })
+    );
 
     // Wait for all events to be processed
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Connect client requesting full history
     const { handshakeResponse } = await setupClient(serverUrl, {
       mode: "readonly",
-      sendPreviousEvents: true
+      sendPreviousEvents: true,
     });
 
     const eventHistory = handshakeResponse.data.eventHistory;
@@ -572,5 +622,226 @@ describe("TadpoleServer", () => {
     // Clean up
     eventClient.close();
     handshakeResponse.client?.close();
+  });
+
+  describe("Client Permissions", () => {
+    it("readonly client can execute read-only commands (ping)", async () => {
+      const { client } = await setupClient(serverUrl, { mode: "readonly" });
+
+      // Set up message listener for pong response
+      const pongPromise = new Promise<any>((resolve) => {
+        client.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "pong") {
+            resolve(data);
+          }
+        };
+        setTimeout(() => resolve(null), 2000);
+      });
+
+      // Send ping command (read-only)
+      client.send(
+        JSON.stringify({
+          id: "test-readonly-ping",
+          type: "ping",
+        })
+      );
+
+      const pongResponse = await pongPromise;
+      expect(pongResponse).not.toBeNull();
+      expect(pongResponse.type).toBe("pong");
+
+      // Clean up
+      client.close();
+    });
+
+    it("readonly client cannot execute state-modifying commands (ping.broadcast)", async () => {
+      const { client } = await setupClient(serverUrl, { mode: "readonly" });
+
+      // Set up message listener for error response
+      const errorPromise = new Promise<any>((resolve) => {
+        client.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "error") {
+            resolve(data);
+          }
+        };
+        setTimeout(() => resolve(null), 2000);
+      });
+
+      // Try to send ping.broadcast command (state-modifying)
+      client.send(
+        JSON.stringify({
+          id: "test-readonly-ping-broadcast",
+          type: "ping.broadcast",
+        })
+      );
+
+      const errorResponse = await errorPromise;
+      expect(errorResponse).not.toBeNull();
+      expect(errorResponse.type).toBe("error");
+      expect(errorResponse.data.message).toContain("read-only mode");
+      expect(errorResponse.data.code).toBe("INSUFFICIENT_PERMISSIONS");
+
+      // Clean up
+      client.close();
+    });
+
+    it("readandwrite client can execute state-modifying commands (ping.broadcast)", async () => {
+      const { client } = await setupClient(serverUrl, { mode: "readandwrite" });
+
+      // Set up message listener - ping.broadcast won't return a direct response, but shouldn't error
+      const responsePromise = new Promise<any>((resolve) => {
+        const messages: any[] = [];
+        client.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data);
+          messages.push(data);
+          // Should not get insufficient permissions error
+          if (data.type === "error") {
+            resolve(data);
+          }
+        };
+        // Resolve after timeout if no error (command accepted)
+        setTimeout(
+          () =>
+            resolve(
+              messages.length > 0
+                ? messages[messages.length - 1]
+                : { accepted: true }
+            ),
+          2000
+        );
+      });
+
+      // Send ping.broadcast command (state-modifying)
+      client.send(
+        JSON.stringify({
+          id: "test-readwrite-ping-broadcast",
+          type: "ping.broadcast",
+        })
+      );
+
+      const response = await responsePromise;
+      // Should not get insufficient permissions error
+      if (response.type === "error") {
+        expect(response.data.code).not.toBe("INSUFFICIENT_PERMISSIONS");
+      }
+
+      // Clean up
+      client.close();
+    });
+
+    it("client without handshake cannot execute any commands", async () => {
+      const { client } = await setupClient(serverUrl, {
+        performHandshake: false,
+      });
+
+      // Set up message listener for error response
+      const errorPromise = new Promise<any>((resolve) => {
+        client.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "error") {
+            resolve(data);
+          }
+        };
+        setTimeout(() => resolve(null), 2000);
+      });
+
+      // Try to send a command without handshake
+      client.send(
+        JSON.stringify({
+          id: "test-no-handshake",
+          type: "ping",
+        })
+      );
+
+      const errorResponse = await errorPromise;
+      expect(errorResponse).not.toBeNull();
+      expect(errorResponse.type).toBe("error");
+      expect(errorResponse.data.message).toContain("Handshake required");
+
+      // Clean up
+      client.close();
+    });
+
+    it("permission errors are sent only to the offending client, not broadcast", async () => {
+      // Connect multiple clients
+      const { client: readonlyClient } = await setupClient(serverUrl, {
+        mode: "readonly",
+      });
+      const { client: readwriteClient1 } = await setupClient(serverUrl, {
+        mode: "readandwrite",
+      });
+      const { client: readwriteClient2 } = await setupClient(serverUrl, {
+        mode: "readandwrite",
+      });
+
+      // Track messages received by each client
+      const readonlyMessages: any[] = [];
+      const readwriteMessages1: any[] = [];
+      const readwriteMessages2: any[] = [];
+
+      readonlyClient.onmessage = (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        readonlyMessages.push(data);
+      };
+
+      readwriteClient1.onmessage = (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        readwriteMessages1.push(data);
+      };
+
+      readwriteClient2.onmessage = (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        readwriteMessages2.push(data);
+      };
+
+      // Wait for error to be received
+      const errorPromise = new Promise<void>((resolve) => {
+        readonlyClient.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data);
+          readonlyMessages.push(data);
+          if (data.type === "error") {
+            resolve();
+          }
+        };
+        setTimeout(() => resolve(), 2000);
+      });
+
+      // Have readonly client attempt a state-modifying command
+      readonlyClient.send(
+        JSON.stringify({
+          id: "test-broadcast-error",
+          type: "ping.broadcast",
+        })
+      );
+
+      // Wait for error to be processed
+      await errorPromise;
+
+      // Give other clients time to potentially receive the error (they shouldn't)
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Readonly client should have received an error
+      const readonlyErrors = readonlyMessages.filter((m) => m.type === "error");
+      expect(readonlyErrors.length).toBeGreaterThan(0);
+      expect(readonlyErrors[0].data.code).toBe("INSUFFICIENT_PERMISSIONS");
+
+      // Other clients should NOT have received the error
+      const readwrite1Errors = readwriteMessages1.filter(
+        (m) => m.type === "error"
+      );
+      const readwrite2Errors = readwriteMessages2.filter(
+        (m) => m.type === "error"
+      );
+
+      expect(readwrite1Errors.length).toBe(0);
+      expect(readwrite2Errors.length).toBe(0);
+
+      // Clean up
+      readonlyClient.close();
+      readwriteClient1.close();
+      readwriteClient2.close();
+    });
   });
 });
