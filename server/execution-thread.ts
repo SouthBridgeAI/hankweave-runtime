@@ -58,11 +58,22 @@ export interface ThreadPhase {
 /**
  * Complete execution thread
  */
-export interface ExecutionThread {
-  phases: ThreadPhase[]; // Ordered latest first
-  totalRuns: number; // How many runs we traversed
-  hasRunningPhase: boolean; // Quick check if anything is running
-  nextPhaseId: PhaseId | null; // What phase should execute next, null if none
+export class ExecutionThread {
+  constructor(
+    public phases: ThreadPhase[] = [],
+    public totalRuns: number = 0,
+    public hasRunningPhase: boolean = false,
+    public nextPhaseId: PhaseId | null = null,
+  ) {}
+
+  get failed(): boolean {
+    return this.phases.some(
+      (phase) =>
+        phase.phase.status === "failed" ||
+        phase.runStatus === "failed" ||
+        phase.runStatus === "crashed",
+    );
+  }
 }
 
 // ============================================================================
@@ -91,12 +102,7 @@ export async function analyzeExecutionThread(
 
   if (!startRun) {
     logger?.log("No runs found for execution thread analysis", "debug");
-    return {
-      phases: [],
-      totalRuns: 0,
-      hasRunningPhase: false,
-      nextPhaseId: null,
-    };
+    return new ExecutionThread([], 0, false, null);
   }
 
   // Initialize thread building
@@ -319,12 +325,7 @@ export async function analyzeExecutionThread(
     "debug",
   );
 
-  return {
-    phases,
-    totalRuns: runIndex + 1,
-    hasRunningPhase,
-    nextPhaseId,
-  };
+  return new ExecutionThread(phases, runIndex + 1, hasRunningPhase, nextPhaseId);
 }
 
 /**
