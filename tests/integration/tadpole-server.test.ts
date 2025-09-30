@@ -624,6 +624,42 @@ describe("TadpoleServer", () => {
     handshakeResponse.client?.close();
   });
 
+  it("does not shutdown after last client disconnects", async () => {
+    // Connect multiple clients
+    const { client: client1 } = await setupClient(serverUrl, {
+      mode: "readandwrite",
+    });
+    const { client: client2 } = await setupClient(serverUrl, {
+      mode: "readonly",
+    });
+    const { client: client3 } = await setupClient(serverUrl, {
+      mode: "readandwrite",
+    });
+
+    // Verify all clients are connected
+    expect(client1.readyState).toBe(WebSocket.OPEN);
+    expect(client2.readyState).toBe(WebSocket.OPEN);
+    expect(client3.readyState).toBe(WebSocket.OPEN);
+
+    // Disconnect all clients
+    client1.close();
+    client2.close();
+    client3.close();
+
+    // Wait to ensure any potential shutdown logic would have triggered
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Try to connect a new client - this should succeed if server is still running
+    const { client: newClient } = await setupClient(serverUrl, {
+      mode: "readandwrite",
+    });
+
+    expect(newClient.readyState).toBe(WebSocket.OPEN);
+
+    // Clean up
+    newClient.close();
+  });
+
   describe("Client Permissions", () => {
     it("readonly client can execute read-only commands (ping)", async () => {
       const { client } = await setupClient(serverUrl, { mode: "readonly" });
