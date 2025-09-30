@@ -556,6 +556,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Check if command is blocked during rollback
     if (this.isRollingBack && !this.READ_ONLY_COMMANDS.has(command.type)) {
+      this.logger.log(
+        `Client ${sender.data.id} attempted state-modifying command while rollback is in progress`,
+        "error",
+      );
       this.sendEventToClient(sender, {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
@@ -576,6 +580,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (!this.READ_ONLY_COMMANDS.has(command.type)) {
       // This is a state-modifying command
       if (!sender.data.handshakeComplete) {
+        this.logger.log(
+          `Client ${sender.data.id} attempted state-modifying command without handshake`,
+          "error",
+        );
         this.sendEventToClient(sender, {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
@@ -594,6 +602,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // Check if sender has read-write mode
       if (sender.data.mode === ClientMode.READONLY) {
+        this.logger.log(
+          `Client ${sender.data.id} attempted state-modifying command in read-only mode`,
+          "error",
+        );
         this.sendEventToClient(sender, {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
