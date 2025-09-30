@@ -147,10 +147,16 @@ class HttpTransport implements LLMTransport {
         responseHeaders["content-type"]?.includes("text/event-stream") ||
         responseHeaders["transfer-encoding"] === "chunked";
 
+      const responseBody = isStreaming ? response.body || undefined : await response.text();
+
+      if (response.status !== 200) {
+        this.logger.log(`[PROXY-HTTP-TRANSPORT] error: ${responseBody} }`, "error");
+      }
+
       return {
         status: response.status,
         headers: responseHeaders,
-        body: isStreaming ? response.body || undefined : await response.text(),
+        body: responseBody,
       };
     } catch (error) {
       this.logger.log(
