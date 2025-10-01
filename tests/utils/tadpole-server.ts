@@ -8,6 +8,7 @@ import type {
   PhaseStartedEvent,
   ServerEventType,
 } from "../../server/schemas/event-schemas.js";
+import type { TadpoleState } from "../../server/types/state-types.js";
 import {
   type ClientCommand,
   ClientMode,
@@ -268,6 +269,24 @@ export interface LaunchedServer {
    * @returns True if the lock file exists, false otherwise
    */
   hasLockFile: () => boolean;
+  /**
+   * Gets the current Tadpole state from state.json.
+   * @returns The parsed TadpoleState object
+   * @throws {Error} If state.json doesn't exist or cannot be parsed
+   */
+  getState: () => TadpoleState;
+  /**
+   * Waits for the state to match a predicate.
+   * Polls state.json until predicate returns true or timeout is reached.
+   * @param predicate - Optional function to test state (default: state exists)
+   * @param timeoutMs - Timeout in milliseconds (default: 10000)
+   * @returns Promise that resolves with the matching state
+   * @throws {Error} If timeout is reached
+   */
+  waitForState: (
+    predicate?: (state: TadpoleState) => boolean,
+    timeoutMs?: number,
+  ) => Promise<TadpoleState>;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -732,6 +751,50 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
     return fs.existsSync(lockFilePath);
   }
 
+  function getState(): TadpoleState {
+    const stateFilePath = path.join(executionDir, ".tadpole/state.json");
+    if (!fs.existsSync(stateFilePath)) {
+      throw new Error(`State file not found: ${stateFilePath}`);
+    }
+
+    try {
+      const stateJson = fs.readFileSync(stateFilePath, "utf-8");
+      return JSON.parse(stateJson) as TadpoleState;
+    } catch (error) {
+      throw new Error(
+        `Failed to parse state.json: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  async function waitForState(
+    predicate?: (state: TadpoleState) => boolean,
+    timeoutMs: number = 10000,
+  ): Promise<TadpoleState> {
+    const startTime = Date.now();
+    const pollInterval = 100; // Poll every 100ms
+
+    while (Date.now() - startTime < timeoutMs) {
+      let state: TadpoleState | undefined;
+
+      try {
+        state = getState();
+      } catch {
+        // State file might not exist yet, continue polling
+        continue;
+      }
+
+      // If no predicate provided, just return the state
+      if (!predicate || predicate(state)) {
+        return state;
+      }
+
+      await sleep(pollInterval);
+    }
+
+    throw new Error(`Timeout waiting for state after ${timeoutMs}ms`);
+  }
+
   return {
     process: child,
     client,
@@ -748,5 +811,7 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
     stop,
     kill,
     hasLockFile,
+    getState,
+    waitForState,
   };
 }
