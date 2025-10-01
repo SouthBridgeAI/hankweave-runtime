@@ -623,12 +623,24 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
     timeout: number = 10000,
     afterTimestamp?: string,
   ): Promise<ServerEvent> {
-    return waitForEvent(
+    const event = await waitForEvent(
       "phase.started",
       timeout,
       (e) => (e as PhaseStartedEvent).data?.phaseId === phaseId,
       afterTimestamp,
     );
+
+    // Wait for state to be persisted
+    await waitForState((state) => {
+      const currentRun = state.runs.find((run) => run.runId === state.currentRunId);
+      if (!currentRun) return false;
+
+      const phase = currentRun.phases.find((p) => p.phaseId === phaseId);
+      // Phase should exist in state (any status means it's been persisted)
+      return phase !== undefined;
+    }, timeout);
+
+    return event;
   }
 
   async function waitForPhaseCompletion(
@@ -636,12 +648,24 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
     timeout: number = 120000,
     afterTimestamp?: string,
   ): Promise<ServerEvent> {
-    return waitForEvent(
+    const event = await waitForEvent(
       "phase.completed",
       timeout,
       (e) => (e as PhaseCompletedEvent).data?.phaseId === phaseId,
       afterTimestamp,
     );
+
+    // Wait for state to be persisted with completed status
+    await waitForState((state) => {
+      const currentRun = state.runs.find((run) => run.runId === state.currentRunId);
+      if (!currentRun) return false;
+
+      const phase = currentRun.phases.find((p) => p.phaseId === phaseId);
+      // Phase should exist and have completed status
+      return phase !== undefined && phase.status === "completed";
+    }, timeout);
+
+    return event;
   }
 
   async function waitForConnectionClose(timeout: number = 10000): Promise<void> {

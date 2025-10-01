@@ -63,9 +63,6 @@ describe("tadpole server", () => {
       )) as PhaseStartedEvent;
       expect(phase2Started.data.phaseId).toBe(phaseTwo);
 
-      // Give server a moment to persist state
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
       // stop the server
       await tadpole.stop(5_000);
 
@@ -135,9 +132,6 @@ describe("tadpole server", () => {
         phase1Started.timestamp,
       )) as PhaseStartedEvent;
       expect(phase2Started.data.phaseId).toBe(phaseTwo);
-
-      // Give server a moment to persist state
-      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       // kill the tadpole (SIGKILL - simulates crash)
       await tadpole.kill(5_000);
