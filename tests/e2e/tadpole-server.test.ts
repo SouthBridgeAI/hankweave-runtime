@@ -6,20 +6,23 @@ import type {
   RollbackCompletedEvent,
 } from "../../server/schemas/event-schemas.js";
 import { PhaseId } from "../../server/types/branded-types.js";
-import { launchBasicServer } from "../utils/server-process-helper.js";
+import { launchTadpole } from "../utils/tadpole-server.js";
 
-describe("basic server lifecycle", () => {
-  it("start the tadpole server and wait for phase 1 to complete", async () => {
-    const server = await launchBasicServer();
+describe("tadpole server", () => {
+  it("starts and stops when asked to", async () => {
+    const tadpole = await launchTadpole();
 
-    expect(server.hasLockFile()).toBeTrue();
+    expect(tadpole.hasLockFile()).toBeTrue();
 
     const phaseOne = PhaseId("phase-1");
 
     try {
-      await server.waitForEvent("server.ready", 30_000);
-      const phase1Started = (await server.waitForPhaseStart(phaseOne, 60_000)) as PhaseStartedEvent;
-      const phase1Completed = (await server.waitForPhaseCompletion(
+      await tadpole.waitForEvent("server.ready", 30_000);
+      const phase1Started = (await tadpole.waitForPhaseStart(
+        phaseOne,
+        60_000,
+      )) as PhaseStartedEvent;
+      const phase1Completed = (await tadpole.waitForPhaseCompletion(
         phaseOne,
         120_000,
         phase1Started.timestamp,
@@ -27,30 +30,33 @@ describe("basic server lifecycle", () => {
 
       expect(phase1Completed.data.phaseId).toBe(phaseOne);
     } finally {
-      await server.stop();
+      await tadpole.stop();
     }
 
-    expect(server.process.exitCode !== null || server.process.signalCode !== null).toBeTrue();
+    expect(tadpole.process.exitCode !== null || tadpole.process.signalCode !== null).toBeTrue();
   }, 120_000);
 
-  it("should recover from server STOP and resume from phase 2 without replaying phase 1", async () => {
+  it("recovers from server STOP and resumes from where it stopped", async () => {
     // testing a case of "gracious" interruption
-    const server = await launchBasicServer();
+    const tadpole = await launchTadpole();
     const phaseOne = PhaseId("phase-1");
     const phaseTwo = PhaseId("phase-2");
 
     let secondServer = null;
 
     try {
-      // Wait for server to be ready
-      await server.waitForEvent("server.ready", 30_000);
+      // Wait for tadpole to be ready
+      await tadpole.waitForEvent("server.ready", 30_000);
 
       // Wait for phase 1 to start
-      const phase1Started = (await server.waitForPhaseStart(phaseOne, 60_000)) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(
+        phaseOne,
+        60_000,
+      )) as PhaseStartedEvent;
       expect(phase1Started.data.phaseId).toBe(phaseOne);
 
       // Wait for phase 2 to start
-      const phase2Started = (await server.waitForPhaseStart(
+      const phase2Started = (await tadpole.waitForPhaseStart(
         phaseTwo,
         120_000,
         phase1Started.timestamp,
@@ -61,18 +67,18 @@ describe("basic server lifecycle", () => {
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       // stop the server
-      await server.stop(5_000);
+      await tadpole.stop(5_000);
 
       // Verify server exited
-      expect(server.process.exitCode !== null || server.process.signalCode !== null).toBeTrue();
+      expect(tadpole.process.exitCode !== null || tadpole.process.signalCode !== null).toBeTrue();
 
       // Small delay before reconnecting
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      expect(server.hasLockFile()).toBeFalse();
+      expect(tadpole.hasLockFile()).toBeFalse();
 
       // relaunch the server and request previous events to capture rollback
-      secondServer = await launchBasicServer({
+      secondServer = await launchTadpole({
         reuseTestDirectory: true,
         sendPreviousEvents: true,
       });
@@ -103,30 +109,31 @@ describe("basic server lifecycle", () => {
       }
 
       // Clean up the first server if somehow still running
-      if (server.process.exitCode === null && server.process.signalCode === null) {
-        await server.stop();
+      if (tadpole.process.exitCode === null && tadpole.process.signalCode === null) {
+        await tadpole.stop();
       }
     }
   }, 180_000);
 
-  it("should recover from server KILL and resume from phase 2 without replaying phase 1", async () => {
+  it("recovers from server KILL and resumes from where it stopped", async () => {
     // testing a case of "ungracious" interruption (crash/SIGKILL)
-    const server = await launchBasicServer();
+    let tadpole = await launchTadpole();
     const phaseOne = PhaseId("phase-1");
     const phaseTwo = PhaseId("phase-2");
 
-    let secondServer = null;
-
     try {
-      // Wait for server to be ready
-      await server.waitForEvent("server.ready", 30_000);
+      // Wait for tadpole to be ready
+      await tadpole.waitForEvent("server.ready", 30_000);
 
       // Wait for phase 1 to start
-      const phase1Started = (await server.waitForPhaseStart(phaseOne, 60_000)) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(
+        phaseOne,
+        60_000,
+      )) as PhaseStartedEvent;
       expect(phase1Started.data.phaseId).toBe(phaseOne);
 
       // Wait for phase 2 to start
-      const phase2Started = (await server.waitForPhaseStart(
+      const phase2Started = (await tadpole.waitForPhaseStart(
         phaseTwo,
         120_000,
         phase1Started.timestamp,
@@ -136,26 +143,26 @@ describe("basic server lifecycle", () => {
       // Give server a moment to persist state
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      // kill the server (SIGKILL - simulates crash)
-      await server.kill(5_000);
+      // kill the tadpole (SIGKILL - simulates crash)
+      await tadpole.kill(5_000);
 
-      // Verify server exited
-      expect(server.process.exitCode !== null || server.process.signalCode !== null).toBeTrue();
+      // Verify tadpole exited
+      expect(tadpole.process.exitCode !== null || tadpole.process.signalCode !== null).toBeTrue();
 
       // Small delay before reconnecting
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       // lock file should be lingering after crash
-      expect(server.hasLockFile()).toBeTrue();
+      expect(tadpole.hasLockFile()).toBeTrue();
 
       // relaunch the server and request previous events to capture rollback
-      secondServer = await launchBasicServer({
+      tadpole = await launchTadpole({
         reuseTestDirectory: true,
         sendPreviousEvents: true,
       });
 
       // Wait for rollback to complete and verify it restored to phase 2
-      const rollbackCompleted = (await secondServer.waitForEvent(
+      const rollbackCompleted = (await tadpole.waitForEvent(
         "rollback.completed",
         30_000,
       )) as RollbackCompletedEvent;
@@ -163,25 +170,13 @@ describe("basic server lifecycle", () => {
       expect(rollbackCompleted.data.phaseId).toBe(phaseOne);
 
       // Verify phase 2 resumes without replaying phase 1
-      const resumedPhase = (await secondServer.waitForPhaseStart(
-        phaseTwo,
-        60_000,
-      )) as PhaseStartedEvent;
+      const resumedPhase = (await tadpole.waitForPhaseStart(phaseTwo, 60_000)) as PhaseStartedEvent;
 
       expect(resumedPhase.data.phaseId).toBe(phaseTwo);
     } finally {
       // Clean up the second server if it's running
-      if (
-        secondServer &&
-        secondServer.process.exitCode === null &&
-        secondServer.process.signalCode === null
-      ) {
-        await secondServer.stop();
-      }
-
-      // Clean up the first server if somehow still running
-      if (server.process.exitCode === null && server.process.signalCode === null) {
-        await server.stop();
+      if (tadpole && tadpole.process.exitCode === null && tadpole.process.signalCode === null) {
+        await tadpole.stop();
       }
     }
   }, 180_000);

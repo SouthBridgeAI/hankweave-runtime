@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { TadpoleServer } from "../../server/tadpole-server.js";
 import { generateTestTimestamp } from "../utils/test-helpers.js";
-import { ClientMode, connectTadpoleClient } from "../utils/server-process-helper.js";
+import { ClientMode, connectTadpoleClient } from "../utils/tadpole-server.js";
 
 // Test configuration similar to e2e tests
 const TEST_ROOT = path.resolve(
@@ -185,7 +185,9 @@ describe("TadpoleServer", () => {
 
   it("responds to ping command from single client", async () => {
     // Connect and handshake client
-    const { client } = await connectTadpoleClient(serverUrl, { mode: ClientMode.READANDWRITE });
+    const { client } = await connectTadpoleClient(serverUrl, {
+      mode: ClientMode.READANDWRITE,
+    });
 
     // Set up pong response listener
     const pongPromise = new Promise<any>((resolve) => {
@@ -369,9 +371,12 @@ describe("TadpoleServer", () => {
 
   it("sends no event history by default", async () => {
     // Connect client without requesting event history
-    const { client, handshakeResponse } = await connectTadpoleClient(serverUrl, {
-      mode: ClientMode.READONLY,
-    });
+    const { client, handshakeResponse } = await connectTadpoleClient(
+      serverUrl,
+      {
+        mode: ClientMode.READONLY,
+      }
+    );
 
     // Verify handshake response
     expect(handshakeResponse?.type).toBe("handshake.response");
@@ -384,10 +389,13 @@ describe("TadpoleServer", () => {
 
   it("sends no event history when sendPreviousEvents is false", async () => {
     // Connect client explicitly not requesting event history
-    const { client, handshakeResponse } = await connectTadpoleClient(serverUrl, {
-      mode: ClientMode.READONLY,
-      sendPreviousEvents: false,
-    });
+    const { client, handshakeResponse } = await connectTadpoleClient(
+      serverUrl,
+      {
+        mode: ClientMode.READONLY,
+        sendPreviousEvents: false,
+      }
+    );
 
     // Verify handshake response
     expect(handshakeResponse?.type).toBe("handshake.response");
@@ -423,10 +431,11 @@ describe("TadpoleServer", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Now connect a second client requesting event history
-    const { client: secondClient, handshakeResponse } = await connectTadpoleClient(serverUrl, {
-      mode: ClientMode.READONLY,
-      sendPreviousEvents: true,
-    });
+    const { client: secondClient, handshakeResponse } =
+      await connectTadpoleClient(serverUrl, {
+        mode: ClientMode.READONLY,
+        sendPreviousEvents: true,
+      });
 
     // Verify handshake response contains event history
     expect(handshakeResponse?.type).toBe("handshake.response");
@@ -473,16 +482,18 @@ describe("TadpoleServer", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Connect one client without event history
-    const { client: client1, handshakeResponse: response1 } = await connectTadpoleClient(serverUrl, {
-      mode: ClientMode.READONLY,
-      sendPreviousEvents: false,
-    });
+    const { client: client1, handshakeResponse: response1 } =
+      await connectTadpoleClient(serverUrl, {
+        mode: ClientMode.READONLY,
+        sendPreviousEvents: false,
+      });
 
     // Connect another client with event history
-    const { client: client2, handshakeResponse: response2 } = await connectTadpoleClient(serverUrl, {
-      mode: ClientMode.READONLY,
-      sendPreviousEvents: true,
-    });
+    const { client: client2, handshakeResponse: response2 } =
+      await connectTadpoleClient(serverUrl, {
+        mode: ClientMode.READONLY,
+        sendPreviousEvents: true,
+      });
 
     // First client should have no history
     expect(response1?.data.eventHistory).toHaveLength(0);
@@ -532,10 +543,11 @@ describe("TadpoleServer", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Connect client requesting full history
-    const { client: historyClient, handshakeResponse } = await connectTadpoleClient(serverUrl, {
-      mode: ClientMode.READONLY,
-      sendPreviousEvents: true,
-    });
+    const { client: historyClient, handshakeResponse } =
+      await connectTadpoleClient(serverUrl, {
+        mode: ClientMode.READONLY,
+        sendPreviousEvents: true,
+      });
 
     const eventHistory = handshakeResponse?.data.eventHistory ?? [];
     expect(eventHistory.length).toBeGreaterThan(0);
@@ -634,7 +646,9 @@ describe("TadpoleServer", () => {
 
   describe("Client Permissions", () => {
     it("readonly client can execute read-only commands (ping)", async () => {
-      const { client } = await connectTadpoleClient(serverUrl, { mode: ClientMode.READONLY });
+      const { client } = await connectTadpoleClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
 
       // Set up message listener for pong response
       const pongPromise = new Promise<any>((resolve) => {
@@ -664,7 +678,9 @@ describe("TadpoleServer", () => {
     });
 
     it("readonly client cannot execute state-modifying commands (ping.broadcast)", async () => {
-      const { client } = await connectTadpoleClient(serverUrl, { mode: ClientMode.READONLY });
+      const { client } = await connectTadpoleClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
 
       // Set up message listener for error response
       const errorPromise = new Promise<any>((resolve) => {
@@ -696,7 +712,9 @@ describe("TadpoleServer", () => {
     });
 
     it("readandwrite client can execute state-modifying commands (ping.broadcast)", async () => {
-      const { client } = await connectTadpoleClient(serverUrl, { mode: ClientMode.READANDWRITE });
+      const { client } = await connectTadpoleClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
 
       // Set up message listener - ping.broadcast won't return a direct response, but shouldn't error
       const responsePromise = new Promise<any>((resolve) => {
@@ -777,12 +795,18 @@ describe("TadpoleServer", () => {
       const { client: readonlyClient } = await connectTadpoleClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
-      const { client: readwriteClient1 } = await connectTadpoleClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
-      const { client: readwriteClient2 } = await connectTadpoleClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
+      const { client: readwriteClient1 } = await connectTadpoleClient(
+        serverUrl,
+        {
+          mode: ClientMode.READANDWRITE,
+        }
+      );
+      const { client: readwriteClient2 } = await connectTadpoleClient(
+        serverUrl,
+        {
+          mode: ClientMode.READANDWRITE,
+        }
+      );
 
       // Track messages received by each client
       const readonlyMessages: any[] = [];

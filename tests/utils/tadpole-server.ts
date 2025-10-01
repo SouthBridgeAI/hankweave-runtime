@@ -299,7 +299,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  *
  * @example
  * ```ts
- * const server = await launchBasicServer({ port: 8889 });
+ * const server = await launchTadpole({ port: 8889 });
  * try {
  *   await server.waitForEvent("server.ready", 30_000);
  *   const phase1 = await server.waitForPhaseStart("phase-1", 60_000);
@@ -309,9 +309,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * }
  * ```
  */
-export async function launchBasicServer(
-  options: LaunchServerOptions = {},
-): Promise<LaunchedServer> {
+export async function launchTadpole(options: LaunchServerOptions = {}): Promise<LaunchedServer> {
   const cwd = options.cwd ? path.resolve(options.cwd) : DEFAULT_CWD;
   const env = { ...process.env, ...options.env };
   const logPrefix = options.logPrefix ?? DEFAULT_LOG_PREFIX;
@@ -350,7 +348,7 @@ export async function launchBasicServer(
   const disallowedArgPrefixes = ["--config=", "--data=", "--execution=", "--port="];
   if (options.args?.some((arg) => disallowedArgPrefixes.some((prefix) => arg.startsWith(prefix)))) {
     throw new Error(
-      "launchBasicServer manages --config, --data, and --execution flags; please remove them from args.",
+      "launchTadpole manages --config, --data, and --execution flags; please remove them from args.",
     );
   }
 
