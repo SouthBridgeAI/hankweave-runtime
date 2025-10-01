@@ -153,8 +153,6 @@ export interface LaunchServerOptions {
   env?: NodeJS.ProcessEnv;
   /** Prefix for server log messages (default: "[tadpole-server]") */
   logPrefix?: string;
-  /** Additional command-line arguments to pass to the server */
-  args?: string[];
   /** Server WebSocket port (default: 8889) */
   port?: number;
   /** WebSocket connection timeout in milliseconds (default: 10000) */
@@ -370,15 +368,8 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
     });
   }
 
-  const disallowedArgPrefixes = ["--config=", "--data=", "--execution=", "--port="];
-  if (options.args?.some((arg) => disallowedArgPrefixes.some((prefix) => arg.startsWith(prefix)))) {
-    throw new Error(
-      "launchTadpole manages --config, --data, and --execution flags; please remove them from args.",
-    );
-  }
-
   const serverEntry = path.resolve(cwd, "server/index.ts");
-  const args = [
+  const spawnArgs = [
     serverEntry,
     "--basic",
     `--config=${configPath}`,
@@ -386,8 +377,6 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
     `--execution=${executionDir}`,
     `--port=${port}`,
   ];
-
-  const spawnArgs = [...args, ...(options.args ?? [])];
 
   const child = spawn("bun", spawnArgs, {
     cwd,
