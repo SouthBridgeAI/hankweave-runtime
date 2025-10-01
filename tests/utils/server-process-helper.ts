@@ -154,6 +154,10 @@ export interface LaunchServerOptions {
   websocketConnectTimeoutMs?: number;
   /** Number of WebSocket connection attempts (default: calculated from timeout) */
   websocketConnectAttempts?: number;
+  /** Reuse test directory from previous run without recreating it (default: false) */
+  reuseTestDirectory?: boolean;
+  /** Request previous events from the server in handshake (default: false) */
+  sendPreviousEvents?: boolean;
 }
 
 /**
@@ -329,11 +333,14 @@ export async function launchBasicServer(
   // Prepare an isolated execution directory similar to other E2E helpers.
   const testTimestamp = generateTestTimestamp();
   const testRunDir = path.join(testResultsDir, `basic-server-${testTimestamp}`);
-  await setupTestDirectory({
-    testDir: executionDir,
-    testResultsDir,
-    testRunDir,
-  });
+
+  if (!options.reuseTestDirectory) {
+    await setupTestDirectory({
+      testDir: executionDir,
+      testResultsDir,
+      testRunDir,
+    });
+  }
 
   const disallowedArgPrefixes = ["--config=", "--data=", "--execution=", "--port="];
   if (options.args?.some((arg) => disallowedArgPrefixes.some((prefix) => arg.startsWith(prefix)))) {
@@ -409,6 +416,7 @@ export async function launchBasicServer(
         performHandshake: true,
         mode: ClientMode.READANDWRITE,
         timeout: 5000,
+        sendPreviousEvents: options.sendPreviousEvents,
       });
       console.log(`${logPrefix} WebSocket connected on port ${port}`);
       break;
@@ -441,13 +449,18 @@ export async function launchBasicServer(
     );
   }
 
-  const { client, clientId } = clientSetup;
+  const { client, clientId, handshakeResponse } = clientSetup;
   const events: ServerEvent[] = [];
   const eventPromises = new Map<
     string,
     { resolve: (event: ServerEvent) => void; reject: (error: Error) => void }[]
   >();
   let connectionClosed = false;
+
+  // Add previous events from handshake if they were requested
+  if (handshakeResponse?.data?.eventHistory) {
+    events.push(...handshakeResponse.data.eventHistory);
+  }
 
   // Set up event tracking
   client.onmessage = (event: MessageEvent) => {
