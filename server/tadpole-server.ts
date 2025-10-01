@@ -223,6 +223,24 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
 
   /**
+   * Check if a process with the given PID is running.
+   * Uses process.kill(pid, 0) which doesn't actually send a signal but checks if the process exists.
+   *
+   * @param pid - Process ID to check
+   * @returns true if the process is running, false otherwise
+   */
+  private isProcessRunning(pid: number): boolean {
+    try {
+      // Signal 0 doesn't kill the process, just checks if it exists
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      // ESRCH error means the process doesn't exist
+      return false;
+    }
+  }
+
+  /**
    * Initialize and start the WebSocket server.
    *
    * Steps:
@@ -269,8 +287,27 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         const lockInfo = JSON.parse(lockData);
         const heartbeatAge = Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
 
-        if (heartbeatAge > 120000) {
-          // 2 minutes
+        // First check if the process is actually running
+        const processRunning = this.isProcessRunning(lockInfo.pid);
+
+        if (!processRunning) {
+          // Process is not running - this is a crash regardless of heartbeat age
+          this.logger.log(`Found lock file from dead process (PID: ${lockInfo.pid}), removing...`);
+          fs.unlinkSync(this.config.lockFile);
+
+          // Mark the run as crashed
+          if (lockInfo.runId) {
+            this.stateManager.transition({
+              type: "RunCrashed",
+              data: {
+                runId: RunId(lockInfo.runId),
+                detectedAt: new Date().toISOString(),
+                lastPhaseStatus: "unknown" as PhaseStatus,
+              },
+            });
+          }
+        } else if (heartbeatAge > 120000) {
+          // Process is running but heartbeat is stale (> 2 minutes)
           this.logger.log(`Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`);
           fs.unlinkSync(this.config.lockFile);
 
@@ -286,7 +323,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             });
           }
         } else {
-          // Check if it's our current run
+          // Process is running and heartbeat is recent - check if it's our current run
           const state = this.stateManager.getState();
           if (state.currentRunId && state.currentRunId === lockInfo.runId) {
             // We're recovering from a crash - continue the same run
@@ -3682,7 +3719,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // In tests, we don't want to exit to allow other tests to run
     if (exitProcess && reason !== "running integration test") {
       // Small delay to ensure log is written before process exits
-      console.log("Exiting process", reason);
       setTimeout(() => {
         process.exit(0);
       }, TIMEOUTS.PHASE_CLEANUP_DELAY_MS);
