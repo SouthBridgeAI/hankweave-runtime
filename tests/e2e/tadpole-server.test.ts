@@ -18,13 +18,9 @@ describe("tadpole server", () => {
 
     try {
       await tadpole.waitForEvent("server.ready");
-      const phase1Started = (await tadpole.waitForPhaseStart(
-        phaseOne,
-        60_000,
-      )) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
       const phase1Completed = (await tadpole.waitForPhaseCompletion(
         phaseOne,
-        120_000,
         phase1Started.timestamp,
       )) as PhaseCompletedEvent;
 
@@ -49,16 +45,12 @@ describe("tadpole server", () => {
       await tadpole.waitForEvent("server.ready");
 
       // Wait for phase 1 to start
-      const phase1Started = (await tadpole.waitForPhaseStart(
-        phaseOne,
-        60_000,
-      )) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
       expect(phase1Started.data.phaseId).toBe(phaseOne);
 
       // Wait for phase 2 to start
       const phase2Started = (await tadpole.waitForPhaseStart(
         phaseTwo,
-        120_000,
         phase1Started.timestamp,
       )) as PhaseStartedEvent;
       expect(phase2Started.data.phaseId).toBe(phaseTwo);
@@ -88,10 +80,7 @@ describe("tadpole server", () => {
       expect(rollbackCompleted.data.phaseId).toBe(phaseOne);
 
       // Verify phase 2 resumes without replaying phase 1
-      const resumedPhase = (await secondServer.waitForPhaseStart(
-        phaseTwo,
-        60_000,
-      )) as PhaseStartedEvent;
+      const resumedPhase = (await secondServer.waitForPhaseStart(phaseTwo)) as PhaseStartedEvent;
 
       expect(resumedPhase.data.phaseId).toBe(phaseTwo);
     } finally {
@@ -128,7 +117,6 @@ describe("tadpole server", () => {
       // Wait for phase 2 to start
       const phase2Started = (await tadpole.waitForPhaseStart(
         phaseTwo,
-        120_000,
         phase1Started.timestamp,
       )) as PhaseStartedEvent;
       expect(phase2Started.data.phaseId).toBe(phaseTwo);
@@ -159,7 +147,7 @@ describe("tadpole server", () => {
       expect(rollbackCompleted.data.phaseId).toBe(phaseOne);
 
       // Verify phase 2 resumes without replaying phase 1
-      const resumedPhase = (await tadpole.waitForPhaseStart(phaseTwo, 60_000)) as PhaseStartedEvent;
+      const resumedPhase = (await tadpole.waitForPhaseStart(phaseTwo)) as PhaseStartedEvent;
 
       expect(resumedPhase.data.phaseId).toBe(phaseTwo);
     } finally {

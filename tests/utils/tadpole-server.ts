@@ -208,28 +208,28 @@ export interface LaunchedServer {
   /**
    * Waits for a phase to start.
    * @param phaseId - The phase ID to wait for
-   * @param timeout - Timeout in milliseconds (default: 10000)
    * @param afterTimestamp - Only match events after this timestamp
+   * @param timeout - Timeout in milliseconds (default: 10000)
    * @returns Promise that resolves with the phase.started event
    * @throws {Error} If timeout is reached
    */
   waitForPhaseStart: (
     phaseId: string,
-    timeout?: number,
     afterTimestamp?: string,
+    timeout?: number,
   ) => Promise<ServerEvent>;
   /**
    * Waits for a phase to complete.
    * @param phaseId - The phase ID to wait for
-   * @param timeout - Timeout in milliseconds (default: 120000)
    * @param afterTimestamp - Only match events after this timestamp
+   * @param timeout - Timeout in milliseconds (default: 120000)
    * @returns Promise that resolves with the phase.completed event
    * @throws {Error} If timeout is reached
    */
   waitForPhaseCompletion: (
     phaseId: string,
-    timeout?: number,
     afterTimestamp?: string,
+    timeout?: number,
   ) => Promise<ServerEvent>;
   /**
    * Waits for the WebSocket connection to close.
@@ -620,8 +620,8 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
 
   async function waitForPhaseStart(
     phaseId: string,
-    timeout: number = 10000,
     afterTimestamp?: string,
+    timeout: number = 60_000,
   ): Promise<ServerEvent> {
     const event = await waitForEvent(
       "phase.started",
@@ -645,8 +645,8 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
 
   async function waitForPhaseCompletion(
     phaseId: string,
-    timeout: number = 120000,
     afterTimestamp?: string,
+    timeout: number = 120000,
   ): Promise<ServerEvent> {
     const event = await waitForEvent(
       "phase.completed",
