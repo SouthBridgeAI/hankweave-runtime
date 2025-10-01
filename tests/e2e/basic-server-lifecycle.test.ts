@@ -11,6 +11,9 @@ import { launchBasicServer } from "../utils/server-process-helper.js";
 describe("basic server lifecycle", () => {
   it("start the tadpole server and wait for phase 1 to complete", async () => {
     const server = await launchBasicServer();
+
+    expect(server.hasLockFile()).toBeTrue();
+
     const phaseOne = PhaseId("phase-1");
 
     try {
@@ -65,6 +68,8 @@ describe("basic server lifecycle", () => {
 
       // Small delay before reconnecting
       await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      expect(server.hasLockFile()).toBeFalse();
 
       // relaunch the server and request previous events to capture rollback
       secondServer = await launchBasicServer({

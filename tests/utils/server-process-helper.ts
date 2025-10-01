@@ -257,6 +257,11 @@ export interface LaunchedServer {
    * @throws {Error} If server doesn't exit within timeout
    */
   kill: (timeoutMs?: number) => Promise<void>;
+  /**
+   * Checks if the server lock file exists.
+   * @returns True if the lock file exists, false otherwise
+   */
+  hasLockFile: () => boolean;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -716,6 +721,11 @@ export async function launchBasicServer(
     }
   }
 
+  function hasLockFile(): boolean {
+    const lockFilePath = path.join(executionDir, ".tadpole/server.lock");
+    return fs.existsSync(lockFilePath);
+  }
+
   return {
     process: child,
     client,
@@ -731,5 +741,6 @@ export async function launchBasicServer(
     disconnect,
     stop,
     kill,
+    hasLockFile,
   };
 }
