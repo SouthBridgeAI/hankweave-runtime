@@ -126,10 +126,7 @@ describe("tadpole server", () => {
       await tadpole.waitForEvent("server.ready", 30_000);
 
       // Wait for phase 1 to start
-      const phase1Started = (await tadpole.waitForPhaseStart(
-        phaseOne,
-        60_000,
-      )) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
       expect(phase1Started.data.phaseId).toBe(phaseOne);
 
       // Wait for phase 2 to start
