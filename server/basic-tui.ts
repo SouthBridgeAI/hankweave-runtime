@@ -562,11 +562,20 @@ export class BasicTUI {
     console.log(`  ${COLORS.cyan}[r]${COLORS.reset} rollback menu`);
     console.log(`  ${COLORS.cyan}[q]${COLORS.reset} quit\n`);
 
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.setEncoding("utf8");
+    const stdin = process.stdin;
 
-    process.stdin.on("data", async (key: string) => {
+    if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+      console.warn(
+        `${COLORS.yellow}! Keyboard input disabled: interactive mode requires a TTY${COLORS.reset}`,
+      );
+      return;
+    }
+
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+
+    stdin.on("data", async (key: string) => {
       switch (key) {
         case "n":
           console.log(`\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next phase...${COLORS.reset}`);
