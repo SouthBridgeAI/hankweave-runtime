@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { describe, expect, it } from "bun:test";
+import type { PhaseCompletedEvent, PhaseStartedEvent } from "../../server/schemas/event-schemas.js";
 import { PhaseId } from "../../server/types/branded-types.js";
 import { launchBasicServer } from "../utils/server-process-helper.js";
 
@@ -10,12 +11,12 @@ describe("basic server lifecycle", () => {
 
     try {
       await server.waitForEvent("server.ready", 30_000);
-      const phase1Started = await server.waitForPhaseStart(phaseOne, 60_000);
-      const phase1Completed = await server.waitForPhaseCompletion(
+      const phase1Started = (await server.waitForPhaseStart(phaseOne, 60_000)) as PhaseStartedEvent;
+      const phase1Completed = (await server.waitForPhaseCompletion(
         phaseOne,
         120_000,
         phase1Started.timestamp,
-      );
+      )) as PhaseCompletedEvent;
 
       expect(phase1Completed.data.phaseId).toBe(phaseOne);
     } finally {
