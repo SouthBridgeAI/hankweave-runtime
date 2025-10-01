@@ -3,7 +3,11 @@ import { once } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PhaseCompletedEvent, PhaseStartedEvent } from "../../server/schemas/event-schemas.js";
+import type {
+  PhaseCompletedEvent,
+  PhaseStartedEvent,
+  ServerEventType,
+} from "../../server/schemas/event-schemas.js";
 import {
   type ClientCommand,
   ClientMode,
@@ -107,7 +111,9 @@ export async function connectTadpoleClient(
     setTimeout(() => reject(new Error("Handshake timeout")), timeout);
   });
 
-  const handshakeData: { mode: ClientMode; sendPreviousEvents?: boolean } = { mode };
+  const handshakeData: { mode: ClientMode; sendPreviousEvents?: boolean } = {
+    mode,
+  };
   if (sendPreviousEvents !== undefined) {
     handshakeData.sendPreviousEvents = sendPreviousEvents;
   }
@@ -193,7 +199,7 @@ export interface LaunchedServer {
    * @throws {Error} If timeout is reached
    */
   waitForEvent: (
-    type: string,
+    type: ServerEventType,
     timeoutMs?: number,
     filter?: (event: ServerEvent) => boolean,
     onlyAfterTimestamp?: string,
@@ -433,7 +439,9 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
       if (attempt >= websocketAttempts) break;
 
       console.log(
-        `${logPrefix} Waiting for WebSocket connection (attempt ${attempt + 1}/${websocketAttempts})`,
+        `${logPrefix} Waiting for WebSocket connection (attempt ${
+          attempt + 1
+        }/${websocketAttempts})`,
       );
 
       await sleep(DEFAULT_WEBSOCKET_CONNECT_DELAY_MS);
@@ -517,7 +525,7 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
   };
 
   async function waitForEvent(
-    type: string,
+    type: ServerEventType,
     timeoutMs: number = 30000,
     filter?: (event: ServerEvent) => boolean,
     onlyAfterTimestamp?: string,
@@ -527,14 +535,14 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
 
     if (onlyAfterTimestamp) {
       existing = events.find((e) => {
-        const matchesType = type === "*" || e.type === type;
+        const matchesType = e.type === type;
         const isAfterTimestamp = e.timestamp > onlyAfterTimestamp;
         const passesFilter = !filter || filter(e);
         return matchesType && isAfterTimestamp && passesFilter;
       });
     } else {
       existing = events.find((e) => {
-        const matchesType = type === "*" || e.type === type;
+        const matchesType = e.type === type;
         const passesFilter = !filter || filter(e);
         return matchesType && passesFilter;
       });
