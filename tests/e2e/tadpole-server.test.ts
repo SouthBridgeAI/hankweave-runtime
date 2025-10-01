@@ -17,7 +17,7 @@ describe("tadpole server", () => {
     const phaseOne = PhaseId("phase-1");
 
     try {
-      await tadpole.waitForEvent("server.ready", 30_000);
+      await tadpole.waitForEvent("server.ready");
       const phase1Started = (await tadpole.waitForPhaseStart(
         phaseOne,
         60_000,
@@ -46,7 +46,7 @@ describe("tadpole server", () => {
 
     try {
       // Wait for tadpole to be ready
-      await tadpole.waitForEvent("server.ready", 30_000);
+      await tadpole.waitForEvent("server.ready");
 
       // Wait for phase 1 to start
       const phase1Started = (await tadpole.waitForPhaseStart(
@@ -86,7 +86,6 @@ describe("tadpole server", () => {
       // Wait for rollback to complete and verify it restored to phase 2
       const rollbackCompleted = (await secondServer.waitForEvent(
         "rollback.completed",
-        30_000,
       )) as RollbackCompletedEvent;
 
       expect(rollbackCompleted.data.phaseId).toBe(phaseOne);
@@ -123,7 +122,7 @@ describe("tadpole server", () => {
 
     try {
       // Wait for tadpole to be ready
-      await tadpole.waitForEvent("server.ready", 30_000);
+      await tadpole.waitForEvent("server.ready");
 
       // Wait for phase 1 to start
       const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
@@ -161,7 +160,6 @@ describe("tadpole server", () => {
       // Wait for rollback to complete and verify it restored to phase 2
       const rollbackCompleted = (await tadpole.waitForEvent(
         "rollback.completed",
-        30_000,
       )) as RollbackCompletedEvent;
 
       expect(rollbackCompleted.data.phaseId).toBe(phaseOne);
