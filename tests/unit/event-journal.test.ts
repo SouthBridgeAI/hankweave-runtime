@@ -94,4 +94,251 @@ describe("EventJournal", () => {
       expect(journal.getAllEvents()).toHaveLength(2);
     });
   });
+
+  describe("getTotalEvents", () => {
+    it("returns 0 for empty journal", () => {
+      expect(journal.getTotalEvents()).toBe(0);
+    });
+
+    it("returns correct count of events", () => {
+      journal.append(createMockEvent("event-1"));
+      journal.append(createMockEvent("event-2"));
+      journal.append(createMockEvent("event-3"));
+
+      expect(journal.getTotalEvents()).toBe(3);
+    });
+  });
+
+  describe("getMostRecentEvents", () => {
+    it("returns empty array for empty journal", () => {
+      const result = journal.getMostRecentEvents(10);
+
+      expect(result.events).toEqual([]);
+      expect(result.cursor).toBeNull();
+      expect(result.totalEvents).toBe(0);
+    });
+
+    it("returns all events when limit exceeds total", () => {
+      journal.append(createMockEvent("event-1", "2025-01-01T10:00:00Z"));
+      journal.append(createMockEvent("event-2", "2025-01-01T10:01:00Z"));
+      journal.append(createMockEvent("event-3", "2025-01-01T10:02:00Z"));
+
+      const result = journal.getMostRecentEvents(10);
+
+      expect(result.events).toHaveLength(3);
+      expect(result.cursor).toBeNull();
+      expect(result.totalEvents).toBe(3);
+    });
+
+    it("returns events in reverse chronological order (most recent first)", () => {
+      journal.append(createMockEvent("event-1", "2025-01-01T10:00:00Z"));
+      journal.append(createMockEvent("event-2", "2025-01-01T10:01:00Z"));
+      journal.append(createMockEvent("event-3", "2025-01-01T10:02:00Z"));
+
+      const result = journal.getMostRecentEvents(10);
+
+      // Should be in reverse order (newest first)
+      expect(result.events[0].id).toBe("event-3");
+      expect(result.events[1].id).toBe("event-2");
+      expect(result.events[2].id).toBe("event-1");
+    });
+
+    it("returns limited number of most recent events", () => {
+      journal.append(createMockEvent("event-1", "2025-01-01T10:00:00Z"));
+      journal.append(createMockEvent("event-2", "2025-01-01T10:01:00Z"));
+      journal.append(createMockEvent("event-3", "2025-01-01T10:02:00Z"));
+      journal.append(createMockEvent("event-4", "2025-01-01T10:03:00Z"));
+
+      const result = journal.getMostRecentEvents(2);
+
+      expect(result.events).toHaveLength(2);
+      expect(result.events[0].id).toBe("event-4"); // Most recent
+      expect(result.events[1].id).toBe("event-3");
+      expect(result.totalEvents).toBe(4);
+    });
+
+    it("returns cursor pointing to next older event when more events exist", () => {
+      journal.append(createMockEvent("event-1", "2025-01-01T10:00:00Z"));
+      journal.append(createMockEvent("event-2", "2025-01-01T10:01:00Z"));
+      journal.append(createMockEvent("event-3", "2025-01-01T10:02:00Z"));
+      journal.append(createMockEvent("event-4", "2025-01-01T10:03:00Z"));
+
+      const result = journal.getMostRecentEvents(2);
+
+      expect(result.cursor).not.toBeNull();
+      expect(result.cursor?.eventId).toBe("event-2");
+      expect(result.cursor?.timestamp).toBe("2025-01-01T10:01:00Z");
+    });
+  });
+
+  describe("getNextEvents", () => {
+    let event1: ServerEvent;
+    let event2: ServerEvent;
+    let event3: ServerEvent;
+    let event4: ServerEvent;
+    let event5: ServerEvent;
+
+    beforeEach(() => {
+      event1 = createMockEvent("event-1", "2025-01-01T10:00:00Z");
+      event2 = createMockEvent("event-2", "2025-01-01T10:01:00Z");
+      event3 = createMockEvent("event-3", "2025-01-01T10:02:00Z");
+      event4 = createMockEvent("event-4", "2025-01-01T10:03:00Z");
+      event5 = createMockEvent("event-5", "2025-01-01T10:04:00Z");
+
+      journal.append(event1);
+      journal.append(event2);
+      journal.append(event3);
+      journal.append(event4);
+      journal.append(event5);
+    });
+
+    it("returns empty array when cursor not found", () => {
+      const result = journal.getNextEvents(
+        { timestamp: "2025-01-01T09:00:00Z", eventId: "nonexistent" },
+        10,
+      );
+
+      expect(result.events).toEqual([]);
+      expect(result.nextCursor).toBeNull();
+      expect(result.hasMore).toBe(false);
+    });
+
+    describe("backward direction (older events)", () => {
+      it("returns older events before cursor in reverse chronological order", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event4.timestamp, eventId: event4.id },
+          2,
+          "backward",
+        );
+
+        expect(result.events).toHaveLength(2);
+        expect(result.events[0].id).toBe("event-3"); // More recent of the two
+        expect(result.events[1].id).toBe("event-2");
+      });
+
+      it("returns all older events when limit exceeds available", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event4.timestamp, eventId: event4.id },
+          10,
+          "backward",
+        );
+
+        expect(result.events).toHaveLength(3); // event-1, event-2, event-3
+        expect(result.events[0].id).toBe("event-3");
+        expect(result.events[1].id).toBe("event-2");
+        expect(result.events[2].id).toBe("event-1");
+        expect(result.hasMore).toBe(false);
+      });
+
+      it("returns nextCursor when more older events exist", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event5.timestamp, eventId: event5.id },
+          2,
+          "backward",
+        );
+
+        expect(result.events).toHaveLength(2);
+        expect(result.nextCursor).not.toBeNull();
+        expect(result.nextCursor?.eventId).toBe("event-2");
+        expect(result.hasMore).toBe(true);
+      });
+
+      it("returns null nextCursor when no more older events exist", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event2.timestamp, eventId: event2.id },
+          10,
+          "backward",
+        );
+
+        expect(result.events).toHaveLength(1); // Only event-1
+        expect(result.nextCursor).toBeNull();
+        expect(result.hasMore).toBe(false);
+      });
+
+      it("returns empty array when cursor is at beginning", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event1.timestamp, eventId: event1.id },
+          10,
+          "backward",
+        );
+
+        expect(result.events).toEqual([]);
+        expect(result.nextCursor).toBeNull();
+        expect(result.hasMore).toBe(false);
+      });
+    });
+
+    describe("forward direction (newer events)", () => {
+      it("returns newer events after cursor", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event2.timestamp, eventId: event2.id },
+          2,
+          "forward",
+        );
+
+        expect(result.events).toHaveLength(2);
+        expect(result.events[0].id).toBe("event-3");
+        expect(result.events[1].id).toBe("event-4");
+      });
+
+      it("returns all newer events when limit exceeds available", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event2.timestamp, eventId: event2.id },
+          10,
+          "forward",
+        );
+
+        expect(result.events).toHaveLength(3); // event-3, event-4, event-5
+        expect(result.events[0].id).toBe("event-3");
+        expect(result.events[1].id).toBe("event-4");
+        expect(result.events[2].id).toBe("event-5");
+        expect(result.hasMore).toBe(false);
+      });
+
+      it("returns nextCursor when more newer events exist", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event1.timestamp, eventId: event1.id },
+          2,
+          "forward",
+        );
+
+        expect(result.events).toHaveLength(2);
+        expect(result.nextCursor).not.toBeNull();
+        expect(result.nextCursor?.eventId).toBe("event-4");
+        expect(result.hasMore).toBe(true);
+      });
+
+      it("returns null nextCursor when no more newer events exist", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event4.timestamp, eventId: event4.id },
+          10,
+          "forward",
+        );
+
+        expect(result.events).toHaveLength(1); // Only event-5
+        expect(result.nextCursor).toBeNull();
+        expect(result.hasMore).toBe(false);
+      });
+
+      it("returns empty array when cursor is at end", () => {
+        const result = journal.getNextEvents(
+          { timestamp: event5.timestamp, eventId: event5.id },
+          10,
+          "forward",
+        );
+
+        expect(result.events).toEqual([]);
+        expect(result.nextCursor).toBeNull();
+        expect(result.hasMore).toBe(false);
+      });
+    });
+
+    it("uses backward direction as default", () => {
+      const result = journal.getNextEvents({ timestamp: event4.timestamp, eventId: event4.id }, 2);
+
+      // Should return older events (backward)
+      expect(result.events[0].id).toBe("event-3");
+      expect(result.events[1].id).toBe("event-2");
+    });
+  });
 });
