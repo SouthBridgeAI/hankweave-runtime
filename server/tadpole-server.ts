@@ -157,6 +157,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     "checkpoint.list",
     "server.shutdown", // Special case - always allowed
     "ping",
+    "history.sync", // Read-only history pagination
   ]);
 
   constructor(
@@ -459,11 +460,24 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Get event history from journal for client synchronization
-    const eventHistory = sendPreviousEvents ? this.eventJournal.getAllEvents() : [];
+    // TODO: figure out if we want to send the most recent batch here
+    // or send things chronologically from the start
+    const {
+      events: recentEvents,
+      cursor,
+      totalEvents,
+    } = sendPreviousEvents
+      ? this.eventJournal.getMostRecentEvents(this.config.handshakeHistoryLimit)
+      : {
+          events: [],
+          cursor: null,
+          totalEvents: this.eventJournal.getTotalEvents(),
+        };
 
     this.logger.log(
-      `Sending ${eventHistory.length} events to client ${finalClientId}` +
-        (sendPreviousEvents ? " (full history)" : " (no history)"),
+      `Sending ${recentEvents.length} events (of ${totalEvents} total) to client ${finalClientId}` +
+        (sendPreviousEvents ? " (limited history)" : " (no history)") +
+        (cursor ? ` with cursor for pagination` : ""),
     );
 
     // Send handshake response
@@ -472,7 +486,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       data: {
         clientId: finalClientId,
         mode: grantedMode,
-        eventHistory: eventHistory,
+        eventHistory: recentEvents,
+        cursor: cursor,
+        totalEvents: totalEvents,
       },
     };
 
@@ -717,6 +733,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.handlePingBroadcast(command.id, sender);
         break;
 
+      case "history.sync":
+        this.handleHistorySync(command, sender);
+        break;
+
       default:
         // This should never happen due to Zod validation
         assertNever(command);
@@ -804,6 +824,75 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     this.eventJournal.append(broadcastPongEvent);
     this.emit("event", broadcastPongEvent);
+  }
+
+  // ============================================================================
+  // History Sync Command
+  // ============================================================================
+
+  private handleHistorySync(
+    command: import("./schemas/event-schemas.js").HistorySyncCommand,
+    sender?: ServerWebSocket<ClientData>,
+  ): void {
+    if (!sender?.data.handshakeComplete) {
+      this.logger.log("History sync command received but sender not ready", "error");
+      return;
+    }
+
+    this.logger.log(`Handling history.sync command: ${command.id}`);
+
+    const cursor = command.data?.cursor;
+    const limit = command.data?.limit ?? this.config.handshakeHistoryLimit;
+    const direction = command.data?.direction ?? "backward";
+
+    let events: import("./schemas/event-schemas.js").ServerEvent[];
+    let nextCursor: import("./types/types.js").EventCursor | null;
+    let hasMore: boolean;
+
+    if (cursor) {
+      // Paginate from cursor
+      const result = this.eventJournal.getNextEvents(cursor, limit, direction);
+      events = result.events;
+      nextCursor = result.nextCursor;
+      hasMore = result.hasMore;
+    } else {
+      // Get most recent events (no cursor provided)
+      const result = this.eventJournal.getMostRecentEvents(limit);
+      events = result.events;
+      nextCursor = result.cursor;
+      hasMore = nextCursor !== null;
+    }
+
+    // Send history.batch response
+    const historyBatchEvent: import("./schemas/event-schemas.js").HistoryBatchEvent = {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "history.batch",
+      data: {
+        events: events,
+        nextCursor: nextCursor,
+        hasMore: hasMore,
+        totalInBatch: events.length,
+      },
+    };
+
+    try {
+      this.logger.logSocketTraffic(this.config.socketLogFile, "out", historyBatchEvent);
+      sender.send(JSON.stringify(historyBatchEvent));
+      this.logger.log(
+        `Sent ${events.length} events to client ${sender.data.id}` +
+          ` (hasMore: ${hasMore}, direction: ${direction})`,
+      );
+    } catch (error) {
+      this.logger.log(
+        `Failed to send history batch to client ${sender.data.id}: ${error}`,
+        "error",
+      );
+      this.clients.delete(sender.data.id);
+    }
+
+    // Note: We don't store history.batch events in the journal or emit them
+    // as they are just responses containing existing events
   }
 
   // ============================================================================

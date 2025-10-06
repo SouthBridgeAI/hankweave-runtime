@@ -24,6 +24,19 @@ export enum ClientMode {
 }
 
 /**
+ * Cursor for paginating through event history
+ */
+export interface EventCursor {
+  timestamp: string;
+  eventId: string;
+}
+
+/**
+ * Direction for pagination through event history
+ */
+export type PaginationDirection = "forward" | "backward";
+
+/**
  * Handshake request sent by client to establish connection mode
  */
 export interface HandshakeRequest {
@@ -43,7 +56,9 @@ export interface HandshakeResponse {
   data: {
     clientId: string;
     mode: ClientMode; // Granted mode (may differ from requested)
-    eventHistory: ServerEvent[];
+    eventHistory: ServerEvent[]; // Limited by handshakeHistoryLimit
+    cursor: EventCursor | null; // Cursor for next page (null if no more events)
+    totalEvents: number; // Total events in journal
   };
 }
 
@@ -330,6 +345,9 @@ export interface ServerConfig {
 
   /** Maximum number of events to keep in the event journal (default: 10000) */
   eventJournalMaxSize: number;
+
+  /** Maximum number of recent events to include in handshake response (default: 50) */
+  handshakeHistoryLimit: number;
 }
 
 // ============================================================================

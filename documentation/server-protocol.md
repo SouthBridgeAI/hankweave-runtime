@@ -60,6 +60,55 @@ All communication, whether from client to server (Commands) or server to client 
 }
 ```
 
+## Handshake Protocol
+
+Before sending commands or receiving events, clients must complete a handshake with the server.
+
+### Handshake Request
+
+The client initiates the handshake by sending:
+
+```json
+{
+  "type": "handshake",
+  "data": {
+    "mode": "readandwrite",
+    "clientId": "optional-reconnect-id",
+    "sendPreviousEvents": true
+  }
+}
+```
+
+- `mode`: Either `"readonly"` or `"readandwrite"` to specify access level
+- `clientId`: Optional. If provided, attempts to reconnect with the same ID
+- `sendPreviousEvents`: Optional boolean (default: false). If true, server sends recent event history
+
+### Handshake Response
+
+The server responds with:
+
+```json
+{
+  "type": "handshake.response",
+  "data": {
+    "clientId": "client-123",
+    "mode": "readandwrite",
+    "eventHistory": [...],
+    "cursor": {
+      "timestamp": "2025-01-19T10:00:00Z",
+      "eventId": "evt-123"
+    },
+    "totalEvents": 1500
+  }
+}
+```
+
+- `clientId`: The assigned or confirmed client ID
+- `mode`: The granted access mode (may differ from requested)
+- `eventHistory`: Array of recent events (limited by `handshakeHistoryLimit` config, default 50)
+- `cursor`: Pagination cursor for fetching older events, or `null` if no more events
+- `totalEvents`: Total number of events in the journal
+
 ## Client Commands (Client → Server)
 
 Clients send commands to control the server's execution flow, manage phases, and query state.
@@ -210,6 +259,32 @@ Requests a graceful shutdown of the server. The server will clean up resources, 
 }
 ```
 
+### History Synchronization
+
+#### `history.sync`
+Fetches a paginated batch of events from the server's event journal. Used to retrieve older events beyond the initial handshake limit.
+
+```json
+{
+  "id": "cmd-133",
+  "type": "history.sync",
+  "data": {
+    "cursor": {
+      "timestamp": "2025-01-19T10:00:00Z",
+      "eventId": "evt-123"
+    },
+    "limit": 100,
+    "direction": "backward"
+  }
+}
+```
+
+- `cursor`: Optional. Starting point for pagination. If omitted, returns most recent events.
+- `limit`: Optional. Maximum events to return (defaults to `handshakeHistoryLimit` config)
+- `direction`: Optional. Either `"backward"` (older events, default) or `"forward"` (newer events)
+
+The server responds with a `history.batch` event containing the requested events.
+
 ## Server Events (Server → Client)
 
 The server emits events to keep the client informed about its state, Claude's activity, and changes in the project workspace.
@@ -255,6 +330,39 @@ A comprehensive snapshot of the server's current state. It's sent after `server.
   }
 }
 ```
+
+### History Synchronization Events
+
+#### `history.batch`
+Response to a `history.sync` command, containing a paginated batch of events from the journal.
+
+```json
+{
+  "id": "evt-history-001",
+  "timestamp": "2025-01-19T10:05:00Z",
+  "type": "history.batch",
+  "data": {
+    "events": [
+      { "id": "evt-100", "type": "phase.started", "..." },
+      { "id": "evt-99", "type": "assistant.action", "..." }
+    ],
+    "nextCursor": {
+      "timestamp": "2025-01-19T09:30:00Z",
+      "eventId": "evt-98"
+    },
+    "hasMore": true,
+    "totalInBatch": 100
+  }
+}
+```
+
+**Fields:**
+- `events`: Array of ServerEvent objects in the requested order
+- `nextCursor`: Cursor for fetching the next page, or `null` if no more events
+- `hasMore`: Boolean indicating if more events are available
+- `totalInBatch`: Number of events in this batch
+
+**Note:** `history.batch` events are not stored in the journal as they only contain references to existing events.
 
 ### Phase Lifecycle Events
 

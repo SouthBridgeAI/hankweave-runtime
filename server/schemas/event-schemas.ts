@@ -26,6 +26,15 @@ const tokenUsageSchema = z.object({
   cacheReadTokens: z.number(),
 });
 
+// Event cursor schema for pagination
+const eventCursorSchema = z.object({
+  timestamp: z.string(),
+  eventId: z.string(),
+});
+
+// Pagination direction schema
+const paginationDirectionSchema = z.enum(["forward", "backward"]);
+
 // File node type for recursive schema
 interface FileNode {
   name: string;
@@ -276,6 +285,13 @@ export const pongEventDataSchema = z.object({
   clientId: z.string().optional(), // Only present in ping.broadcast responses
 });
 
+export const historyBatchEventDataSchema = z.object({
+  events: z.array(z.any()), // Array of ServerEvent (we use z.any() to avoid circular reference)
+  nextCursor: eventCursorSchema.nullable(),
+  hasMore: z.boolean(),
+  totalInBatch: z.number(),
+});
+
 // ============================================================================
 // Full Event Schemas
 // ============================================================================
@@ -385,6 +401,11 @@ export const pongEventSchema = baseEventSchema.extend({
   data: pongEventDataSchema,
 });
 
+export const historyBatchEventSchema = baseEventSchema.extend({
+  type: z.literal("history.batch"),
+  data: historyBatchEventDataSchema,
+});
+
 // ============================================================================
 // Client Command Schemas
 // ============================================================================
@@ -477,6 +498,18 @@ export const pingBroadcastCommandSchema = z.object({
   type: z.literal("ping.broadcast"),
 });
 
+export const historySyncCommandSchema = z.object({
+  id: z.string(),
+  type: z.literal("history.sync"),
+  data: z
+    .object({
+      cursor: eventCursorSchema.optional(),
+      limit: z.number().optional(),
+      direction: paginationDirectionSchema.optional().default("backward"),
+    })
+    .optional(),
+});
+
 export const clientCommandSchema = z.discriminatedUnion("type", [
   startPhaseCommandSchema,
   nextPhaseCommandSchema,
@@ -490,6 +523,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   rollbackToLastSuccessCommandSchema,
   pingCommandSchema,
   pingBroadcastCommandSchema,
+  historySyncCommandSchema,
 ]);
 
 // ============================================================================
@@ -517,6 +551,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   rollbackProgressEventSchema,
   rollbackCompletedEventSchema,
   pongEventSchema,
+  historyBatchEventSchema,
 ]);
 
 // ============================================================================
@@ -547,6 +582,7 @@ export type RollbackWorkspaceCleanupEvent = z.infer<typeof rollbackWorkspaceClea
 export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
 export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
 export type PongEvent = z.infer<typeof pongEventSchema>;
+export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
 
 // Export client command types
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
@@ -562,6 +598,7 @@ export type RollbackToPhaseCommand = z.infer<typeof rollbackToPhaseCommandSchema
 export type RollbackToLastSuccessCommand = z.infer<typeof rollbackToLastSuccessCommandSchema>;
 export type PingCommand = z.infer<typeof pingCommandSchema>;
 export type PingBroadcastCommand = z.infer<typeof pingBroadcastCommandSchema>;
+export type HistorySyncCommand = z.infer<typeof historySyncCommandSchema>;
 
 // Export type helpers
 export type ServerEventType = ServerEvent["type"];
@@ -596,6 +633,7 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "rollback.progress": rollbackProgressEventDataSchema,
   "rollback.completed": rollbackCompletedEventDataSchema,
   pong: pongEventDataSchema,
+  "history.batch": historyBatchEventDataSchema,
 };
 
 // List of all valid event types (for chronicler validation)

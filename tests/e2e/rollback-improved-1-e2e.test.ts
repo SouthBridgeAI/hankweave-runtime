@@ -6,7 +6,6 @@ import * as path from "node:path";
 import { PhaseId } from "../../server/types/branded-types.js";
 import type {
   CheckpointListEvent,
-  ClientCommand,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   RollbackCompletedEvent,

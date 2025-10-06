@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { TadpoleServer } from "../../server/tadpole-server.js";
+import {
+  type ErrorEvent,
+  type HistoryBatchEvent,
+  type PongEvent,
+  type ServerEvent,
+  serverEventSchema,
+} from "../../server/schemas/event-schemas.js";
 import { generateTestTimestamp } from "../utils/test-helpers.js";
 import { ClientMode, connectTadpoleClient } from "../utils/tadpole-server.js";
 
@@ -32,10 +39,35 @@ const TEST_RUN_DIR = path.join(
   `server-integration-${TEST_TIMESTAMP}`
 );
 
+/**
+ * Helper function to parse and validate server events using Zod schema.
+ * This ensures events match the expected structure and provides type safety.
+ */
+function parseServerEvent(data: string) {
+  return serverEventSchema.parse(JSON.parse(data));
+}
+
 describe("TadpoleServer", () => {
   let server: TadpoleServer;
+  // Track all WebSocket clients created during tests for automatic cleanup
+  const testClients: WebSocket[] = [];
+
+  /**
+   * Helper to connect a client and automatically register it for cleanup.
+   * All clients registered this way will be closed in afterEach, even if the test fails.
+   */
+  async function connectAndRegisterClient(
+    url: string,
+    options?: Parameters<typeof connectTadpoleClient>[1]
+  ) {
+    const result = await connectTadpoleClient(url, options);
+    testClients.push(result.client);
+    return result;
+  }
 
   beforeEach(async () => {
+    // Clear client registry for new test
+    testClients.length = 0;
     // Clean up and create directories (similar to e2e test setup)
     if (fs.existsSync(EXECUTION_DIR)) {
       fs.rmSync(EXECUTION_DIR, { recursive: true, force: true });
@@ -98,6 +130,18 @@ describe("TadpoleServer", () => {
   });
 
   afterEach(async () => {
+    // Clean up all WebSocket clients registered during the test
+    for (const client of testClients) {
+      try {
+        if (client.readyState === WebSocket.OPEN) {
+          client.close();
+        }
+      } catch (error) {
+        // Ignore errors when closing clients
+      }
+    }
+    testClients.length = 0;
+
     if (server) {
       try {
         // Pass exitProcess: false to prevent the server from calling process.exit()
@@ -119,25 +163,22 @@ describe("TadpoleServer", () => {
 
   it("runs on expected port", async () => {
     // Try to connect to the server without handshake
-    const { client } = await connectTadpoleClient(serverUrl, {
+    const { client } = await connectAndRegisterClient(serverUrl, {
       performHandshake: false,
     });
 
     expect(client.readyState).toBe(WebSocket.OPEN);
-
-    // Clean up
-    client.close();
   });
 
   it("supports multiple connections", async () => {
     // Connect multiple clients without handshake
-    const { client: client1 } = await connectTadpoleClient(serverUrl, {
+    const { client: client1 } = await connectAndRegisterClient(serverUrl, {
       performHandshake: false,
     });
-    const { client: client2 } = await connectTadpoleClient(serverUrl, {
+    const { client: client2 } = await connectAndRegisterClient(serverUrl, {
       performHandshake: false,
     });
-    const { client: client3 } = await connectTadpoleClient(serverUrl, {
+    const { client: client3 } = await connectAndRegisterClient(serverUrl, {
       performHandshake: false,
     });
 
@@ -145,24 +186,19 @@ describe("TadpoleServer", () => {
     expect(client1.readyState).toBe(WebSocket.OPEN);
     expect(client2.readyState).toBe(WebSocket.OPEN);
     expect(client3.readyState).toBe(WebSocket.OPEN);
-
-    // Clean up
-    client1.close();
-    client2.close();
-    client3.close();
   });
 
   it("supports handshake protocol with different modes", async () => {
     // Connect clients with different modes
-    const { client: client1, clientId: clientId1 } = await connectTadpoleClient(
+    const { client: client1, clientId: clientId1 } = await connectAndRegisterClient(
       serverUrl,
       { mode: ClientMode.READANDWRITE }
     );
-    const { client: client2, clientId: clientId2 } = await connectTadpoleClient(
+    const { client: client2, clientId: clientId2 } = await connectAndRegisterClient(
       serverUrl,
       { mode: ClientMode.READANDWRITE }
     );
-    const { client: client3, clientId: clientId3 } = await connectTadpoleClient(
+    const { client: client3, clientId: clientId3 } = await connectAndRegisterClient(
       serverUrl,
       { mode: ClientMode.READONLY }
     );
@@ -176,23 +212,18 @@ describe("TadpoleServer", () => {
     expect(client1.readyState).toBe(WebSocket.OPEN);
     expect(client2.readyState).toBe(WebSocket.OPEN);
     expect(client3.readyState).toBe(WebSocket.OPEN);
-
-    // Clean up
-    client1.close();
-    client2.close();
-    client3.close();
   });
 
   it("responds to ping command from single client", async () => {
     // Connect and handshake client
-    const { client } = await connectTadpoleClient(serverUrl, {
+    const { client } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
 
     // Set up pong response listener
-    const pongPromise = new Promise<any>((resolve) => {
+    const pongPromise = new Promise<PongEvent>((resolve) => {
       client.onmessage = (event: MessageEvent) => {
-        const data = JSON.parse(event.data);
+        const data = parseServerEvent(event.data);
         if (data.type === "pong") {
           resolve(data);
         }
@@ -213,34 +244,31 @@ describe("TadpoleServer", () => {
     expect(pongResponse.data.message).toBe("pong");
     expect(pongResponse.data.timestamp).toBeDefined();
     expect(pongResponse.data.clientId).toBeUndefined(); // Regular ping doesn't include clientId
-
-    // Clean up
-    client.close();
   });
 
   it("responds to ping.broadcast command to all clients", async () => {
     // Connect and handshake clients
-    const { client: client1, clientId: client1Id } = await connectTadpoleClient(
+    const { client: client1, clientId: client1Id } = await connectAndRegisterClient(
       serverUrl,
       { mode: ClientMode.READANDWRITE }
     );
-    const { client: client2 } = await connectTadpoleClient(serverUrl, {
+    const { client: client2 } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READONLY,
     });
 
     // Set up pong response listeners
     const pongPromises = [
-      new Promise<any>((resolve) => {
+      new Promise<{ client: string; data: PongEvent }>((resolve) => {
         client1.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           if (data.type === "pong") {
             resolve({ client: "client1", data });
           }
         };
       }),
-      new Promise<any>((resolve) => {
+      new Promise<{ client: string; data: PongEvent }>((resolve) => {
         client2.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           if (data.type === "pong") {
             resolve({ client: "client2", data });
           }
@@ -268,31 +296,29 @@ describe("TadpoleServer", () => {
       expect(response.data.data.timestamp).toBeDefined();
       expect(response.data.data.clientId).toBe(client1Id); // Should include sender's client ID
     }
-
-    // Clean up
-    client1.close();
-    client2.close();
   });
 
   it("handles ping commands with multiple clients correctly", async () => {
     // Connect and handshake three clients
     const clientSetups = await Promise.all([
-      connectTadpoleClient(serverUrl, { mode: ClientMode.READANDWRITE }),
-      connectTadpoleClient(serverUrl, { mode: ClientMode.READANDWRITE }),
-      connectTadpoleClient(serverUrl, { mode: ClientMode.READANDWRITE }),
+      connectAndRegisterClient(serverUrl, { mode: ClientMode.READANDWRITE }),
+      connectAndRegisterClient(serverUrl, { mode: ClientMode.READANDWRITE }),
+      connectAndRegisterClient(serverUrl, { mode: ClientMode.READANDWRITE }),
     ]);
 
     const clients = clientSetups.map((setup) => setup.client);
     const clientIds = clientSetups.map((setup) => setup.clientId);
 
     // Test 1: Regular ping from client 0 - only client 0 should receive response
-    const pingPromise = new Promise<any[]>((resolve) => {
+    const pingPromise = new Promise<
+      Array<{ clientIndex: number; data: PongEvent }>
+    >((resolve) => {
       let responseCount = 0;
-      const responses: any[] = [];
+      const responses: Array<{ clientIndex: number; data: PongEvent }> = [];
 
       clients.forEach((client, index) => {
         client.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           if (data.type === "pong") {
             responses.push({ clientIndex: index, data });
             responseCount++;
@@ -324,13 +350,15 @@ describe("TadpoleServer", () => {
     expect(pingResponses[0].data.data.clientId).toBeUndefined(); // Regular ping doesn't include clientId
 
     // Test 2: Broadcast ping from client 1 - all clients should receive response
-    const broadcastPromise = new Promise<any[]>((resolve) => {
+    const broadcastPromise = new Promise<
+      Array<{ clientIndex: number; data: PongEvent }>
+    >((resolve) => {
       let responseCount = 0;
-      const responses: any[] = [];
+      const responses: Array<{ clientIndex: number; data: PongEvent }> = [];
 
       clients.forEach((client, index) => {
         client.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           if (data.type === "pong") {
             responses.push({ clientIndex: index, data });
             responseCount++;
@@ -364,14 +392,11 @@ describe("TadpoleServer", () => {
       expect(response.data.data.clientId).toBe(clientIds[1]); // Should be client 1's ID
       expect(response.data.data.message).toBe("pong");
     }
-
-    // Clean up
-    clients.forEach((client) => client.close());
   });
 
   it("sends no event history by default", async () => {
     // Connect client without requesting event history
-    const { client, handshakeResponse } = await connectTadpoleClient(
+    const { client, handshakeResponse } = await connectAndRegisterClient(
       serverUrl,
       {
         mode: ClientMode.READONLY,
@@ -382,14 +407,11 @@ describe("TadpoleServer", () => {
     expect(handshakeResponse?.type).toBe("handshake.response");
     expect(handshakeResponse?.data.eventHistory).toBeDefined();
     expect(handshakeResponse?.data.eventHistory).toHaveLength(0);
-
-    // Clean up
-    client.close();
   });
 
   it("sends no event history when sendPreviousEvents is false", async () => {
     // Connect client explicitly not requesting event history
-    const { client, handshakeResponse } = await connectTadpoleClient(
+    const { client, handshakeResponse } = await connectAndRegisterClient(
       serverUrl,
       {
         mode: ClientMode.READONLY,
@@ -401,14 +423,11 @@ describe("TadpoleServer", () => {
     expect(handshakeResponse?.type).toBe("handshake.response");
     expect(handshakeResponse?.data.eventHistory).toBeDefined();
     expect(handshakeResponse?.data.eventHistory).toHaveLength(0);
-
-    // Clean up
-    client.close();
   });
 
   it("sends event history when sendPreviousEvents is true", async () => {
     // First, connect a client and generate some events by sending ping commands
-    const { client: firstClient } = await connectTadpoleClient(serverUrl, {
+    const { client: firstClient } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
 
@@ -432,7 +451,7 @@ describe("TadpoleServer", () => {
 
     // Now connect a second client requesting event history
     const { client: secondClient, handshakeResponse } =
-      await connectTadpoleClient(serverUrl, {
+      await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
         sendPreviousEvents: true,
       });
@@ -445,12 +464,10 @@ describe("TadpoleServer", () => {
     // Should have multiple events (server.ready, state.snapshot, pong events, etc.)
     expect(handshakeResponse?.data.eventHistory.length).toBeGreaterThan(0);
 
-    // Verify structure of events in history
+    // Verify structure of events in history using schema
     for (const event of handshakeResponse?.data.eventHistory ?? []) {
-      expect(event).toHaveProperty("id");
-      expect(event).toHaveProperty("timestamp");
-      expect(event).toHaveProperty("type");
-      expect(event).toHaveProperty("data");
+      const result = serverEventSchema.safeParse(event);
+      expect(result.success).toBe(true);
     }
 
     // Look for specific event types we expect
@@ -459,15 +476,11 @@ describe("TadpoleServer", () => {
     );
     expect(eventTypes).toContain("server.ready");
     expect(eventTypes).toContain("state.snapshot");
-
-    // Clean up
-    firstClient.close();
-    secondClient.close();
   });
 
   it("multiple clients can request different event history settings", async () => {
     // Generate some events first
-    const { client: eventClient } = await connectTadpoleClient(serverUrl, {
+    const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
 
@@ -483,14 +496,14 @@ describe("TadpoleServer", () => {
 
     // Connect one client without event history
     const { client: client1, handshakeResponse: response1 } =
-      await connectTadpoleClient(serverUrl, {
+      await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
         sendPreviousEvents: false,
       });
 
     // Connect another client with event history
     const { client: client2, handshakeResponse: response2 } =
-      await connectTadpoleClient(serverUrl, {
+      await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
         sendPreviousEvents: true,
       });
@@ -500,16 +513,11 @@ describe("TadpoleServer", () => {
 
     // Second client should have history
     expect(response2?.data.eventHistory.length).toBeGreaterThan(0);
-
-    // Clean up
-    eventClient.close();
-    client1.close();
-    client2.close();
   });
 
   it("event history contains events in chronological order", async () => {
     // Generate a sequence of events
-    const { client: eventClient } = await connectTadpoleClient(serverUrl, {
+    const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
 
@@ -544,7 +552,7 @@ describe("TadpoleServer", () => {
 
     // Connect client requesting full history
     const { client: historyClient, handshakeResponse } =
-      await connectTadpoleClient(serverUrl, {
+      await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
         sendPreviousEvents: true,
       });
@@ -552,27 +560,23 @@ describe("TadpoleServer", () => {
     const eventHistory = handshakeResponse?.data.eventHistory ?? [];
     expect(eventHistory.length).toBeGreaterThan(0);
 
-    // Verify events are in chronological order (timestamps should be increasing)
+    // Verify events are in reverse chronological order (timestamps should be decreasing)
     for (let i = 1; i < eventHistory.length; i++) {
       const prevTimestamp = new Date(eventHistory[i - 1].timestamp).getTime();
       const currTimestamp = new Date(eventHistory[i].timestamp).getTime();
-      expect(currTimestamp).toBeGreaterThanOrEqual(prevTimestamp);
+      expect(currTimestamp).toBeLessThanOrEqual(prevTimestamp);
     }
-
-    // Clean up
-    eventClient.close();
-    historyClient.close();
   });
 
   it("does not shutdown after last client disconnects", async () => {
     // Connect multiple clients
-    const { client: client1 } = await connectTadpoleClient(serverUrl, {
+    const { client: client1 } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
-    const { client: client2 } = await connectTadpoleClient(serverUrl, {
+    const { client: client2 } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READONLY,
     });
-    const { client: client3 } = await connectTadpoleClient(serverUrl, {
+    const { client: client3 } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
 
@@ -590,19 +594,16 @@ describe("TadpoleServer", () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Try to connect a new client - this should succeed if server is still running
-    const { client: newClient } = await connectTadpoleClient(serverUrl, {
+    const { client: newClient } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
 
     expect(newClient.readyState).toBe(WebSocket.OPEN);
-
-    // Clean up
-    newClient.close();
   });
 
   it("shuts down when shutdown command is sent", async () => {
     // Connect a client with readandwrite mode (shutdown requires write permissions)
-    const { client } = await connectTadpoleClient(serverUrl, {
+    const { client } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READANDWRITE,
     });
 
@@ -635,25 +636,526 @@ describe("TadpoleServer", () => {
 
     expect(connectionFailed).toBe(true);
 
-    // Clean up - close the original client if still open
-    if (client.readyState === WebSocket.OPEN) {
-      client.close();
-    }
-
     // Mark server as null so afterEach doesn't try to shut it down again
     server = null as any;
   });
 
+  describe("History Sync", () => {
+    it("responds to history.sync without cursor (gets most recent events)", async () => {
+      // First, generate some events
+      const { client: eventClient } = await connectAndRegisterClient(
+        serverUrl,
+        {
+          mode: ClientMode.READANDWRITE,
+        }
+      );
+
+      // Send several ping commands to generate events
+      for (let i = 0; i < 5; i++) {
+        eventClient.send(
+          JSON.stringify({
+            id: `ping-${i}`,
+            type: "ping",
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      // Wait for events to be processed
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Now connect a client and request history sync
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      // Set up listener for history.batch response
+      const historyPromise = new Promise<HistoryBatchEvent | null>(
+        (resolve) => {
+          client.onmessage = (event: MessageEvent) => {
+            const data = parseServerEvent(event.data);
+            if (data.type === "history.batch") {
+              resolve(data);
+            }
+          };
+          setTimeout(() => resolve(null), 3000);
+        }
+      );
+
+      // Send history.sync command without cursor
+      client.send(
+        JSON.stringify({
+          id: "test-history-sync-1",
+          type: "history.sync",
+        })
+      );
+
+      const historyResponse = await historyPromise;
+      expect(historyResponse).not.toBeNull();
+      expect(historyResponse!.type).toBe("history.batch");
+      expect(historyResponse!.data.events.length).toBeGreaterThan(0);
+      expect(historyResponse!.data.totalInBatch).toBe(
+        historyResponse!.data.events.length
+      );
+
+      // Validate each event in the batch using schema
+      for (const event of historyResponse!.data.events) {
+        expect(serverEventSchema.safeParse(event).success).toBe(true);
+      }
+      // No explicit cleanup needed - afterEach handles all registered clients
+    });
+
+    it("responds to history.sync with cursor for backward pagination", async () => {
+      // Generate many events
+      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+
+      for (let i = 0; i < 10; i++) {
+        eventClient.send(
+          JSON.stringify({
+            id: `ping-backward-${i}`,
+            type: "ping",
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Connect client and request first batch
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      // Get first batch with small limit
+      const firstBatchPromise = new Promise<HistoryBatchEvent | null>(
+        (resolve) => {
+          client.onmessage = (event: MessageEvent) => {
+            const data = parseServerEvent(event.data);
+            if (data.type === "history.batch") {
+              resolve(data);
+            }
+          };
+          setTimeout(() => resolve(null), 3000);
+        }
+      );
+
+      client.send(
+        JSON.stringify({
+          id: "test-history-sync-first",
+          type: "history.sync",
+          data: {
+            limit: 3,
+            direction: "backward",
+          },
+        })
+      );
+
+      const firstBatch = await firstBatchPromise;
+      expect(firstBatch).not.toBeNull();
+      expect(firstBatch!.data.events.length).toBeLessThanOrEqual(3);
+
+      // If there's more data, request next batch with cursor
+      if (firstBatch!.data.hasMore && firstBatch!.data.nextCursor) {
+        const secondBatchPromise = new Promise<HistoryBatchEvent | null>(
+          (resolve) => {
+            client.onmessage = (event: MessageEvent) => {
+              const data = parseServerEvent(event.data);
+              if (data.type === "history.batch") {
+                resolve(data);
+              }
+            };
+            setTimeout(() => resolve(null), 3000);
+          }
+        );
+
+        client.send(
+          JSON.stringify({
+            id: "test-history-sync-second",
+            type: "history.sync",
+            data: {
+              cursor: firstBatch!.data.nextCursor,
+              limit: 3,
+              direction: "backward",
+            },
+          })
+        );
+
+        const secondBatch = await secondBatchPromise;
+        expect(secondBatch).not.toBeNull();
+        expect(secondBatch!.data.events.length).toBeGreaterThan(0);
+
+        // Verify second batch has different events (older ones in backward direction)
+        const firstEventIds = new Set(firstBatch!.data.events.map((e) => e.id));
+        const secondEventIds = secondBatch!.data.events.map((e) => e.id);
+
+        // Should not have duplicate events
+        for (const id of secondEventIds) {
+          expect(firstEventIds.has(id)).toBe(false);
+        }
+
+        // In backward direction, second batch should have older timestamps
+        if (
+          firstBatch!.data.events.length > 0 &&
+          secondBatch!.data.events.length > 0
+        ) {
+          const firstOldest = new Date(
+            firstBatch!.data.events[
+              firstBatch!.data.events.length - 1
+            ].timestamp
+          ).getTime();
+          const secondNewest = new Date(
+            secondBatch!.data.events[0].timestamp
+          ).getTime();
+          expect(secondNewest).toBeLessThanOrEqual(firstOldest);
+        }
+      }
+    });
+
+    it("responds to history.sync with cursor for forward pagination", async () => {
+      // Generate events
+      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+
+      for (let i = 0; i < 10; i++) {
+        eventClient.send(
+          JSON.stringify({
+            id: `ping-forward-${i}`,
+            type: "ping",
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Connect client
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      // Get oldest events first (backward to get a starting point)
+      const initialBatchPromise = new Promise<HistoryBatchEvent | null>(
+        (resolve) => {
+          client.onmessage = (event: MessageEvent) => {
+            const data = parseServerEvent(event.data);
+            if (data.type === "history.batch") {
+              resolve(data);
+            }
+          };
+          setTimeout(() => resolve(null), 3000);
+        }
+      );
+
+      client.send(
+        JSON.stringify({
+          id: "test-history-sync-initial",
+          type: "history.sync",
+          data: {
+            limit: 3,
+            direction: "backward",
+          },
+        })
+      );
+
+      const initialBatch = await initialBatchPromise;
+      expect(initialBatch).not.toBeNull();
+
+      // Now use forward direction from the cursor
+      if (initialBatch!.data.nextCursor) {
+        const forwardBatchPromise = new Promise<HistoryBatchEvent | null>(
+          (resolve) => {
+            client.onmessage = (event: MessageEvent) => {
+              const data = parseServerEvent(event.data);
+              if (data.type === "history.batch") {
+                resolve(data);
+              }
+            };
+            setTimeout(() => resolve(null), 3000);
+          }
+        );
+
+        client.send(
+          JSON.stringify({
+            id: "test-history-sync-forward",
+            type: "history.sync",
+            data: {
+              cursor: initialBatch!.data.nextCursor,
+              limit: 3,
+              direction: "forward",
+            },
+          })
+        );
+
+        const forwardBatch = await forwardBatchPromise;
+        expect(forwardBatch).not.toBeNull();
+
+        // Verify direction is respected
+        if (
+          initialBatch!.data.events.length > 0 &&
+          forwardBatch!.data.events.length > 0
+        ) {
+          const initialOldest = new Date(
+            initialBatch!.data.events[
+              initialBatch!.data.events.length - 1
+            ].timestamp
+          ).getTime();
+          const forwardNewest = new Date(
+            forwardBatch!.data.events[0].timestamp
+          ).getTime();
+          // Forward should give us newer events
+          expect(forwardNewest).toBeGreaterThanOrEqual(initialOldest);
+        }
+      }
+    });
+
+    it("respects custom limit in history.sync", async () => {
+      // Generate events
+      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+
+      for (let i = 0; i < 15; i++) {
+        eventClient.send(
+          JSON.stringify({
+            id: `ping-limit-${i}`,
+            type: "ping",
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Test with different limits
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      for (const limit of [1, 5, 10]) {
+        const historyPromise = new Promise<HistoryBatchEvent | null>(
+          (resolve) => {
+            client.onmessage = (event: MessageEvent) => {
+              const data = parseServerEvent(event.data);
+              if (data.type === "history.batch") {
+                resolve(data);
+              }
+            };
+            setTimeout(() => resolve(null), 3000);
+          }
+        );
+
+        client.send(
+          JSON.stringify({
+            id: `test-history-sync-limit-${limit}`,
+            type: "history.sync",
+            data: {
+              limit: limit,
+            },
+          })
+        );
+
+        const historyResponse = await historyPromise;
+        expect(historyResponse).not.toBeNull();
+        expect(historyResponse!.data.events.length).toBeLessThanOrEqual(limit);
+        expect(historyResponse!.data.totalInBatch).toBe(
+          historyResponse!.data.events.length
+        );
+
+        // Wait before next request
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    });
+
+    it("readonly client can execute history.sync command", async () => {
+      // Generate some events first
+      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+
+      eventClient.send(
+        JSON.stringify({
+          id: "setup-event",
+          type: "ping",
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Connect readonly client
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      // Readonly should be able to execute history.sync
+      const historyPromise = new Promise<HistoryBatchEvent | null>(
+        (resolve, reject) => {
+          client.onmessage = (event: MessageEvent) => {
+            const data = parseServerEvent(event.data);
+            if (data.type === "history.batch") {
+              resolve(data);
+            } else if (data.type === "error") {
+              reject(data);
+            }
+          };
+          setTimeout(() => resolve(null), 3000);
+        }
+      );
+
+      client.send(
+        JSON.stringify({
+          id: "test-readonly-history-sync",
+          type: "history.sync",
+        })
+      );
+
+      const historyResponse = await historyPromise;
+      expect(historyResponse).not.toBeNull();
+      expect(historyResponse!.type).toBe("history.batch");
+      // Should not get permission error
+    });
+
+    it("history.batch is not broadcast to other clients", async () => {
+      // Generate some events
+      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+
+      eventClient.send(
+        JSON.stringify({
+          id: "setup-event",
+          type: "ping",
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Connect two clients
+      const { client: client1 } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+      const { client: client2 } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      // Track messages received by each client
+      const client1Messages: ServerEvent[] = [];
+      const client2Messages: ServerEvent[] = [];
+
+      client1.onmessage = (event: MessageEvent) => {
+        const data = parseServerEvent(event.data);
+        client1Messages.push(data);
+      };
+
+      client2.onmessage = (event: MessageEvent) => {
+        const data = parseServerEvent(event.data);
+        client2Messages.push(data);
+      };
+
+      // Client1 requests history
+      const historyPromise = new Promise<void>((resolve) => {
+        client1.onmessage = (event: MessageEvent) => {
+          const data = parseServerEvent(event.data);
+          client1Messages.push(data);
+          if (data.type === "history.batch") {
+            resolve();
+          }
+        };
+        setTimeout(() => resolve(), 3000);
+      });
+
+      client1.send(
+        JSON.stringify({
+          id: "test-no-broadcast",
+          type: "history.sync",
+        })
+      );
+
+      await historyPromise;
+
+      // Give time for potential broadcast
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Client1 should have received history.batch
+      const client1HistoryBatches = client1Messages.filter(
+        (m) => m.type === "history.batch"
+      );
+      expect(client1HistoryBatches.length).toBeGreaterThan(0);
+
+      // Client2 should NOT have received it
+      const client2HistoryBatches = client2Messages.filter(
+        (m) => m.type === "history.batch"
+      );
+      expect(client2HistoryBatches.length).toBe(0);
+    });
+
+    it("cursor contains timestamp and eventId fields", async () => {
+      // Generate events
+      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+
+      for (let i = 0; i < 5; i++) {
+        eventClient.send(
+          JSON.stringify({
+            id: `ping-cursor-${i}`,
+            type: "ping",
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Request with limit to get a cursor
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      const historyPromise = new Promise<HistoryBatchEvent | null>(
+        (resolve) => {
+          client.onmessage = (event: MessageEvent) => {
+            const data = parseServerEvent(event.data);
+            if (data.type === "history.batch") {
+              resolve(data);
+            }
+          };
+          setTimeout(() => resolve(null), 3000);
+        }
+      );
+
+      client.send(
+        JSON.stringify({
+          id: "test-cursor-structure",
+          type: "history.sync",
+          data: {
+            limit: 2,
+          },
+        })
+      );
+
+      const historyResponse = await historyPromise;
+      expect(historyResponse).not.toBeNull();
+
+      // Cursor structure is validated by schema, just verify it exists if hasMore is true
+      if (historyResponse!.data.hasMore) {
+        expect(historyResponse!.data.nextCursor).not.toBeNull();
+      }
+    });
+  });
+
   describe("Client Permissions", () => {
     it("readonly client can execute read-only commands (ping)", async () => {
-      const { client } = await connectTadpoleClient(serverUrl, {
+      const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
 
       // Set up message listener for pong response
-      const pongPromise = new Promise<any>((resolve) => {
+      const pongPromise = new Promise<PongEvent | null>((resolve) => {
         client.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           if (data.type === "pong") {
             resolve(data);
           }
@@ -671,21 +1173,18 @@ describe("TadpoleServer", () => {
 
       const pongResponse = await pongPromise;
       expect(pongResponse).not.toBeNull();
-      expect(pongResponse.type).toBe("pong");
-
-      // Clean up
-      client.close();
+      expect(pongResponse!.type).toBe("pong");
     });
 
     it("readonly client cannot execute state-modifying commands (ping.broadcast)", async () => {
-      const { client } = await connectTadpoleClient(serverUrl, {
+      const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
 
       // Set up message listener for error response
-      const errorPromise = new Promise<any>((resolve) => {
+      const errorPromise = new Promise<ErrorEvent | null>((resolve) => {
         client.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           if (data.type === "error") {
             resolve(data);
           }
@@ -703,41 +1202,39 @@ describe("TadpoleServer", () => {
 
       const errorResponse = await errorPromise;
       expect(errorResponse).not.toBeNull();
-      expect(errorResponse.type).toBe("error");
-      expect(errorResponse.data.message).toContain("read-only mode");
-      expect(errorResponse.data.code).toBe("INSUFFICIENT_PERMISSIONS");
-
-      // Clean up
-      client.close();
+      expect(errorResponse!.type).toBe("error");
+      expect(errorResponse!.data.message).toContain("read-only mode");
+      expect(errorResponse!.data.code).toBe("INSUFFICIENT_PERMISSIONS");
     });
 
     it("readandwrite client can execute state-modifying commands (ping.broadcast)", async () => {
-      const { client } = await connectTadpoleClient(serverUrl, {
+      const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READANDWRITE,
       });
 
       // Set up message listener - ping.broadcast won't return a direct response, but shouldn't error
-      const responsePromise = new Promise<any>((resolve) => {
-        const messages: any[] = [];
-        client.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
-          messages.push(data);
-          // Should not get insufficient permissions error
-          if (data.type === "error") {
-            resolve(data);
-          }
-        };
-        // Resolve after timeout if no error (command accepted)
-        setTimeout(
-          () =>
-            resolve(
-              messages.length > 0
-                ? messages[messages.length - 1]
-                : { accepted: true }
-            ),
-          2000
-        );
-      });
+      const responsePromise = new Promise<ErrorEvent | { accepted: boolean }>(
+        (resolve) => {
+          const messages: Array<ErrorEvent> = [];
+          client.onmessage = (event: MessageEvent) => {
+            const data = parseServerEvent(event.data);
+            if (data.type === "error") {
+              messages.push(data);
+              resolve(data);
+            }
+          };
+          // Resolve after timeout if no error (command accepted)
+          setTimeout(
+            () =>
+              resolve(
+                messages.length > 0
+                  ? messages[messages.length - 1]
+                  : { accepted: true }
+              ),
+            2000
+          );
+        }
+      );
 
       // Send ping.broadcast command (state-modifying)
       client.send(
@@ -749,23 +1246,20 @@ describe("TadpoleServer", () => {
 
       const response = await responsePromise;
       // Should not get insufficient permissions error
-      if (response.type === "error") {
+      if ("type" in response && response.type === "error") {
         expect(response.data.code).not.toBe("INSUFFICIENT_PERMISSIONS");
       }
-
-      // Clean up
-      client.close();
     });
 
     it("client without handshake cannot execute any commands", async () => {
-      const { client } = await connectTadpoleClient(serverUrl, {
+      const { client } = await connectAndRegisterClient(serverUrl, {
         performHandshake: false,
       });
 
       // Set up message listener for error response
-      const errorPromise = new Promise<any>((resolve) => {
+      const errorPromise = new Promise<ErrorEvent | null>((resolve) => {
         client.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           if (data.type === "error") {
             resolve(data);
           }
@@ -783,25 +1277,22 @@ describe("TadpoleServer", () => {
 
       const errorResponse = await errorPromise;
       expect(errorResponse).not.toBeNull();
-      expect(errorResponse.type).toBe("error");
-      expect(errorResponse.data.message).toContain("Handshake required");
-
-      // Clean up
-      client.close();
+      expect(errorResponse?.type).toBe("error");
+      expect(errorResponse?.data.message).toContain("Handshake required");
     });
 
     it("permission errors are sent only to the offending client, not broadcast", async () => {
       // Connect multiple clients
-      const { client: readonlyClient } = await connectTadpoleClient(serverUrl, {
+      const { client: readonlyClient } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
-      const { client: readwriteClient1 } = await connectTadpoleClient(
+      const { client: readwriteClient1 } = await connectAndRegisterClient(
         serverUrl,
         {
           mode: ClientMode.READANDWRITE,
         }
       );
-      const { client: readwriteClient2 } = await connectTadpoleClient(
+      const { client: readwriteClient2 } = await connectAndRegisterClient(
         serverUrl,
         {
           mode: ClientMode.READANDWRITE,
@@ -809,29 +1300,29 @@ describe("TadpoleServer", () => {
       );
 
       // Track messages received by each client
-      const readonlyMessages: any[] = [];
-      const readwriteMessages1: any[] = [];
-      const readwriteMessages2: any[] = [];
+      const readonlyMessages: ServerEvent[] = [];
+      const readwriteMessages1: ServerEvent[] = [];
+      const readwriteMessages2: ServerEvent[] = [];
 
       readonlyClient.onmessage = (event: MessageEvent) => {
-        const data = JSON.parse(event.data);
+        const data = parseServerEvent(event.data);
         readonlyMessages.push(data);
       };
 
       readwriteClient1.onmessage = (event: MessageEvent) => {
-        const data = JSON.parse(event.data);
+        const data = parseServerEvent(event.data);
         readwriteMessages1.push(data);
       };
 
       readwriteClient2.onmessage = (event: MessageEvent) => {
-        const data = JSON.parse(event.data);
+        const data = parseServerEvent(event.data);
         readwriteMessages2.push(data);
       };
 
       // Wait for error to be received
       const errorPromise = new Promise<void>((resolve) => {
         readonlyClient.onmessage = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+          const data = parseServerEvent(event.data);
           readonlyMessages.push(data);
           if (data.type === "error") {
             resolve();
@@ -869,11 +1360,6 @@ describe("TadpoleServer", () => {
 
       expect(readwrite1Errors.length).toBe(0);
       expect(readwrite2Errors.length).toBe(0);
-
-      // Clean up
-      readonlyClient.close();
-      readwriteClient1.close();
-      readwriteClient2.close();
     });
   });
 });
