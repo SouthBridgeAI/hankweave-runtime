@@ -163,6 +163,8 @@ export interface LaunchServerOptions {
   reuseTestDirectory?: boolean;
   /** Request previous events from the server in handshake (default: false) */
   sendPreviousEvents?: boolean;
+  /** Number of ping events to generate after server is ready (default: 0) */
+  generatePingEvents?: number;
 }
 
 /**
@@ -171,6 +173,8 @@ export interface LaunchServerOptions {
 export interface LaunchedServer {
   /** The server child process */
   process: ChildProcess;
+  /** The WebSocket server URL */
+  websocketServerUrl: string;
   /** The connected WebSocket client */
   client: WebSocket;
   /** The client ID assigned by the server */
@@ -300,6 +304,86 @@ const TEST_RESULTS_RELATIVE_DIR = "tests/test-results";
 const TEST_EXECUTION_RELATIVE_DIR = "tests/test-area/tadpole-basic-server-execution";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Synchronizes event history from the server using pagination.
+ * Collects all events starting from the given cursor (or all events if no cursor).
+ *
+ * @param client - The WebSocket client to use for synchronization
+ * @param options - Sync options
+ * @param options.cursor - Optional cursor to start from (for pagination)
+ * @param options.limit - Number of events per batch (default: 50)
+ * @param options.direction - Direction to paginate (default: "backward")
+ * @param options.timeout - Timeout per batch request in milliseconds (default: 10000)
+ * @returns Promise that resolves with all collected events
+ *
+ * @example
+ * ```ts
+ * // Sync all events from a cursor
+ * const events = await syncHistory(client, { cursor: initialCursor });
+ *
+ * // Sync with custom limit
+ * const events = await syncHistory(client, { cursor: initialCursor, limit: 100 });
+ * ```
+ */
+export async function syncHistory(
+  client: WebSocket,
+  options: {
+    cursor?: { timestamp: string; eventId: string } | null;
+    limit?: number;
+    direction?: "forward" | "backward";
+    timeout?: number;
+  } = {},
+): Promise<ServerEvent[]> {
+  const { cursor: initialCursor, limit = 50, direction = "backward", timeout = 10_000 } = options;
+
+  const allEvents: ServerEvent[] = [];
+  let currentCursor = initialCursor;
+
+  while (currentCursor) {
+    const historyBatchPromise = new Promise<{
+      type: "history.batch";
+      data: {
+        events: ServerEvent[];
+        totalInBatch: number;
+        hasMore: boolean;
+        nextCursor: { timestamp: string; eventId: string } | null;
+      };
+    }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error("Timeout waiting for history.batch"));
+      }, timeout);
+
+      const originalOnMessage = client.onmessage;
+      client.onmessage = (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "history.batch") {
+          clearTimeout(timer);
+          client.onmessage = originalOnMessage;
+          resolve(data);
+        }
+      };
+    });
+
+    client.send(
+      JSON.stringify({
+        id: `history-sync-${allEvents.length}`,
+        type: "history.sync",
+        data: {
+          cursor: currentCursor,
+          limit,
+          direction,
+        },
+      }),
+    );
+
+    const historyBatch = await historyBatchPromise;
+    allEvents.push(...historyBatch.data.events);
+    currentCursor = historyBatch.data.hasMore ? historyBatch.data.nextCursor : null;
+  }
+
+  return allEvents;
+}
 
 /**
  * Launches a Tadpole server for E2E testing with predefined test configuration.
@@ -808,8 +892,30 @@ export async function launchTadpole(options: LaunchServerOptions = {}): Promise<
     throw new Error(`Timeout waiting for state after ${timeoutMs}ms`);
   }
 
+  // Generate ping events if requested
+  if (options.generatePingEvents && options.generatePingEvents > 0) {
+    console.log(`${logPrefix} Generating ${options.generatePingEvents} ping events...`);
+    for (let i = 0; i < options.generatePingEvents; i++) {
+      client.send(
+        JSON.stringify({
+          id: `ping-${i}`,
+          type: "ping",
+        }),
+      );
+      // Small delay to allow events to process
+      if (i % 10 === 0 && i > 0) {
+        await sleep(50);
+      }
+    }
+
+    // Wait for all ping events to be fully processed and persisted
+    console.log(`${logPrefix} Waiting for ping events to be processed...`);
+    await sleep(3000);
+  }
+
   return {
     process: child,
+    websocketServerUrl: serverUrl,
     client,
     clientId,
     events,
