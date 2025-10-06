@@ -73,14 +73,12 @@ The client initiates the handshake by sending:
   "type": "handshake",
   "data": {
     "mode": "readandwrite",
-    "clientId": "optional-reconnect-id",
     "sendPreviousEvents": true
   }
 }
 ```
 
 - `mode`: Either `"readonly"` or `"readandwrite"` to specify access level
-- `clientId`: Optional. If provided, attempts to reconnect with the same ID
 - `sendPreviousEvents`: Optional boolean (default: false). If true, server sends recent event history
 
 ### Handshake Response
@@ -103,7 +101,7 @@ The server responds with:
 }
 ```
 
-- `clientId`: The assigned or confirmed client ID
+- `clientId`: The server-assigned unique client ID
 - `mode`: The granted access mode (may differ from requested)
 - `eventHistory`: Array of recent events (limited by `handshakeHistoryLimit` config, default 50)
 - `cursor`: Pagination cursor for fetching older events, or `null` if no more events

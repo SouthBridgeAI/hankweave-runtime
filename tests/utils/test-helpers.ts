@@ -49,16 +49,10 @@ export class TestWSClient {
     options: {
       performHandshake?: boolean;
       mode?: ClientMode;
-      clientId?: string;
       timeout?: number;
     } = {},
   ): Promise<void> {
-    const {
-      performHandshake = true,
-      mode = ClientMode.READANDWRITE,
-      clientId,
-      timeout = 10000,
-    } = options;
+    const { performHandshake = true, mode = ClientMode.READANDWRITE, timeout = 10000 } = options;
 
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
@@ -72,7 +66,7 @@ export class TestWSClient {
         console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
 
         if (performHandshake) {
-          this.performHandshake(mode, clientId)
+          this.performHandshake(mode)
             .then(() => {
               clearTimeout(timeoutId);
               resolve();
@@ -149,7 +143,7 @@ export class TestWSClient {
     });
   }
 
-  private async performHandshake(mode: ClientMode, clientId?: string): Promise<void> {
+  private async performHandshake(mode: ClientMode): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error("Handshake timeout"));
@@ -182,7 +176,7 @@ export class TestWSClient {
       // Send handshake request
       const handshakeRequest: HandshakeRequest = {
         type: "handshake",
-        data: { mode, ...(clientId && { clientId }) },
+        data: { mode },
       };
 
       if (this.ws) {

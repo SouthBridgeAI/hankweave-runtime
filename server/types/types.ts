@@ -43,7 +43,6 @@ export interface HandshakeRequest {
   type: "handshake";
   data: {
     mode: ClientMode;
-    clientId?: string; // Optional for reconnection
     sendPreviousEvents?: boolean; // Whether to send event history (defaults to false)
   };
 }

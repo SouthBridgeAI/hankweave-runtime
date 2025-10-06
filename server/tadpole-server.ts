@@ -436,28 +436,22 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     ws: ServerWebSocket<ClientData>,
     request: HandshakeRequest,
   ): Promise<void> {
-    const { mode, clientId, sendPreviousEvents = false } = request.data;
+    const { mode, sendPreviousEvents = false } = request.data;
 
-    // Assign or validate client ID
-    const finalClientId = clientId || ws.data.id;
+    // Use server-assigned client ID
+    const clientId = ws.data.id;
 
     // Grant the requested mode (no restrictions)
     const grantedMode = mode;
-    this.logger.log(`Client ${finalClientId} granted ${grantedMode} access`);
+    this.logger.log(`Client ${clientId} granted ${grantedMode} access`);
 
     // Update client data
     ws.data = {
       ...ws.data,
-      id: finalClientId,
+      id: clientId,
       mode: grantedMode,
       handshakeComplete: true,
     };
-
-    // Update client in registry if ID changed
-    if (finalClientId !== ws.data.id) {
-      this.clients.delete(ws.data.id);
-      this.clients.set(finalClientId, ws);
-    }
 
     // Get event history from journal for client synchronization
     // TODO: figure out if we want to send the most recent batch here
@@ -475,7 +469,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         };
 
     this.logger.log(
-      `Sending ${recentEvents.length} events (of ${totalEvents} total) to client ${finalClientId}` +
+      `Sending ${recentEvents.length} events (of ${totalEvents} total) to client ${clientId}` +
         (sendPreviousEvents ? " (limited history)" : " (no history)") +
         (cursor ? ` with cursor for pagination` : ""),
     );
@@ -484,7 +478,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const response: HandshakeResponse = {
       type: "handshake.response",
       data: {
-        clientId: finalClientId,
+        clientId,
         mode: grantedMode,
         eventHistory: recentEvents,
         cursor: cursor,
@@ -493,7 +487,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     ws.send(JSON.stringify(response));
-    this.logger.log(`Handshake complete for client ${finalClientId} (${grantedMode})`);
+    this.logger.log(`Handshake complete for client ${clientId} (${grantedMode})`);
 
     // Send initial events now that handshake is complete
     const serverReadyEvent: ServerReadyEvent = {
