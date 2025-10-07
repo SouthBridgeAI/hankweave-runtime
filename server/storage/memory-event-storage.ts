@@ -38,9 +38,7 @@ export class MemoryEventStorage implements IEventStorage {
     }
   }
 
-  async getRecentEvents(
-    limit: number
-  ): Promise<{ events: ServerEvent[]; totalEvents: number }> {
+  async getRecentEvents(limit: number): Promise<{ events: ServerEvent[]; totalEvents: number }> {
     const totalEvents = this.events.length;
     const startIndex = Math.max(0, totalEvents - limit);
     const recentEvents = this.events.slice(startIndex);

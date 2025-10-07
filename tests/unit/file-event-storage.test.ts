@@ -36,7 +36,10 @@ describe("FileEventStorage", () => {
 
   it("creates the backing file on initialize", async () => {
     expect(eventsPath).not.toBeNull();
-    const contents = await readFile(eventsPath!, "utf-8");
+
+    if (!eventsPath) return;
+
+    const contents = await readFile(eventsPath, "utf-8");
     expect(contents).toBe("");
     expect(await storage.getTotalEvents()).toBe(0);
   });

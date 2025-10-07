@@ -49,8 +49,7 @@ export class EventJournal {
     totalEvents: number;
     hasMore: boolean;
   }> {
-    const { events: recentEvents, totalEvents } =
-      await this.storage.getRecentEvents(limit);
+    const { events: recentEvents, totalEvents } = await this.storage.getRecentEvents(limit);
     const ordered = [...recentEvents].reverse();
 
     return {

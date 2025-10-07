@@ -62,11 +62,7 @@ describe("EventJournal", () => {
       await journal.append(createMockEvent("event-3", "2025-01-01T10:02:00Z"));
 
       const result = await journal.getMostRecentEvents(5);
-      expect(result.events.map((e) => e.id)).toEqual([
-        "event-3",
-        "event-2",
-        "event-1",
-      ]);
+      expect(result.events.map((e) => e.id)).toEqual(["event-3", "event-2", "event-1"]);
       expect(result.totalEvents).toBe(3);
       expect(result.hasMore).toBe(false);
     });
@@ -77,11 +73,7 @@ describe("EventJournal", () => {
       }
 
       const result = await journal.getMostRecentEvents(3);
-      expect(result.events.map((e) => e.id)).toEqual([
-        "event-5",
-        "event-4",
-        "event-3",
-      ]);
+      expect(result.events.map((e) => e.id)).toEqual(["event-5", "event-4", "event-3"]);
       expect(result.totalEvents).toBe(5);
       expect(result.hasMore).toBe(true);
     });

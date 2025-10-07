@@ -7,10 +7,7 @@ import type {
   ServerEvent,
 } from "../../server/schemas/event-schemas.js";
 import { PhaseId } from "../../server/types/branded-types.js";
-import {
-  connectTadpoleClient,
-  launchTadpole,
-} from "../utils/tadpole-server.js";
+import { connectTadpoleClient, launchTadpole } from "../utils/tadpole-server.js";
 
 describe("tadpole server", () => {
   it("starts and stops when asked to", async () => {
@@ -22,12 +19,10 @@ describe("tadpole server", () => {
 
     try {
       await tadpole.waitForEvent("server.ready");
-      const phase1Started = (await tadpole.waitForPhaseStart(
-        phaseOne
-      )) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
       const phase1Completed = (await tadpole.waitForPhaseCompletion(
         phaseOne,
-        phase1Started.timestamp
+        phase1Started.timestamp,
       )) as PhaseCompletedEvent;
 
       expect(phase1Completed.data.phaseId).toBe(phaseOne);
@@ -35,9 +30,7 @@ describe("tadpole server", () => {
       await tadpole.stop();
     }
 
-    expect(
-      tadpole.process.exitCode !== null || tadpole.process.signalCode !== null
-    ).toBeTrue();
+    expect(tadpole.process.exitCode !== null || tadpole.process.signalCode !== null).toBeTrue();
   }, 120_000);
 
   it("recovers from server STOP and resumes from where it stopped", async () => {
@@ -53,15 +46,13 @@ describe("tadpole server", () => {
       await tadpole.waitForEvent("server.ready");
 
       // Wait for phase 1 to start
-      const phase1Started = (await tadpole.waitForPhaseStart(
-        phaseOne
-      )) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
       expect(phase1Started.data.phaseId).toBe(phaseOne);
 
       // Wait for phase 2 to start
       const phase2Started = (await tadpole.waitForPhaseStart(
         phaseTwo,
-        phase1Started.timestamp
+        phase1Started.timestamp,
       )) as PhaseStartedEvent;
       expect(phase2Started.data.phaseId).toBe(phaseTwo);
 
@@ -69,9 +60,7 @@ describe("tadpole server", () => {
       await tadpole.stop(5_000);
 
       // Verify server exited
-      expect(
-        tadpole.process.exitCode !== null || tadpole.process.signalCode !== null
-      ).toBeTrue();
+      expect(tadpole.process.exitCode !== null || tadpole.process.signalCode !== null).toBeTrue();
 
       // Small delay before reconnecting
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -86,15 +75,13 @@ describe("tadpole server", () => {
 
       // Wait for rollback to complete and verify it restored to phase 2
       const rollbackCompleted = (await secondServer.waitForEvent(
-        "rollback.completed"
+        "rollback.completed",
       )) as RollbackCompletedEvent;
 
       expect(rollbackCompleted.data.phaseId).toBe(phaseOne);
 
       // Verify phase 2 resumes without replaying phase 1
-      const resumedPhase = (await secondServer.waitForPhaseStart(
-        phaseTwo
-      )) as PhaseStartedEvent;
+      const resumedPhase = (await secondServer.waitForPhaseStart(phaseTwo)) as PhaseStartedEvent;
 
       expect(resumedPhase.data.phaseId).toBe(phaseTwo);
     } finally {
@@ -108,10 +95,7 @@ describe("tadpole server", () => {
       }
 
       // Clean up the first server if somehow still running
-      if (
-        tadpole.process.exitCode === null &&
-        tadpole.process.signalCode === null
-      ) {
+      if (tadpole.process.exitCode === null && tadpole.process.signalCode === null) {
         await tadpole.stop();
       }
     }
@@ -128,15 +112,13 @@ describe("tadpole server", () => {
       await tadpole.waitForEvent("server.ready");
 
       // Wait for phase 1 to start
-      const phase1Started = (await tadpole.waitForPhaseStart(
-        phaseOne
-      )) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
       expect(phase1Started.data.phaseId).toBe(phaseOne);
 
       // Wait for phase 2 to start
       const phase2Started = (await tadpole.waitForPhaseStart(
         phaseTwo,
-        phase1Started.timestamp
+        phase1Started.timestamp,
       )) as PhaseStartedEvent;
       expect(phase2Started.data.phaseId).toBe(phaseTwo);
 
@@ -144,9 +126,7 @@ describe("tadpole server", () => {
       await tadpole.kill(5_000);
 
       // Verify tadpole exited
-      expect(
-        tadpole.process.exitCode !== null || tadpole.process.signalCode !== null
-      ).toBeTrue();
+      expect(tadpole.process.exitCode !== null || tadpole.process.signalCode !== null).toBeTrue();
 
       // Small delay before reconnecting
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -162,24 +142,18 @@ describe("tadpole server", () => {
 
       // Wait for rollback to complete and verify it restored to phase 2
       const rollbackCompleted = (await tadpole.waitForEvent(
-        "rollback.completed"
+        "rollback.completed",
       )) as RollbackCompletedEvent;
 
       expect(rollbackCompleted.data.phaseId).toBe(phaseOne);
 
       // Verify phase 2 resumes without replaying phase 1
-      const resumedPhase = (await tadpole.waitForPhaseStart(
-        phaseTwo
-      )) as PhaseStartedEvent;
+      const resumedPhase = (await tadpole.waitForPhaseStart(phaseTwo)) as PhaseStartedEvent;
 
       expect(resumedPhase.data.phaseId).toBe(phaseTwo);
     } finally {
       // Clean up the second server if it's running
-      if (
-        tadpole &&
-        tadpole.process.exitCode === null &&
-        tadpole.process.signalCode === null
-      ) {
+      if (tadpole && tadpole.process.exitCode === null && tadpole.process.signalCode === null) {
         await tadpole.stop();
       }
     }
@@ -198,32 +172,26 @@ describe("tadpole server", () => {
       await tadpole.waitForEvent("server.ready");
 
       // Wait for phase 1 to complete
-      const phase1Started = (await tadpole.waitForPhaseStart(
-        phaseOne
-      )) as PhaseStartedEvent;
+      const phase1Started = (await tadpole.waitForPhaseStart(phaseOne)) as PhaseStartedEvent;
       const phase1Completed = (await tadpole.waitForPhaseCompletion(
         phaseOne,
-        phase1Started.timestamp
+        phase1Started.timestamp,
       )) as PhaseCompletedEvent;
 
       expect(phase1Completed.data.phaseId).toBe(phaseOne);
 
       // Connect a second client and request event history
-      const clientSetup = await connectTadpoleClient(
-        tadpole.websocketServerUrl,
-        {
-          performHandshake: true,
-          sendPreviousEvents: true,
-        }
-      );
+      const clientSetup = await connectTadpoleClient(tadpole.websocketServerUrl, {
+        performHandshake: true,
+        sendPreviousEvents: true,
+      });
       secondClient = clientSetup.client;
 
       // Verify handshake response contains event history
       expect(clientSetup.handshakeResponse).toBeDefined();
       expect(clientSetup.handshakeResponse?.data.eventHistory).toBeDefined();
 
-      const initialEventHistory =
-        clientSetup.handshakeResponse?.data.eventHistory || [];
+      const initialEventHistory = clientSetup.handshakeResponse?.data.eventHistory || [];
       const cursor = clientSetup.handshakeResponse?.data.cursor;
       const totalEvents = clientSetup.handshakeResponse?.data.totalEvents || 0;
 
@@ -252,9 +220,14 @@ describe("tadpole server", () => {
       }>((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error("Timed out waiting for history.batch")),
-          10_000
+          10_000,
         );
-        const originalOnMessage = secondClient!.onmessage;
+
+        if (!secondClient) {
+          return reject(new Error("Client not connected"));
+        }
+
+        const originalOnMessage = secondClient.onmessage;
         // TODO: reuse schema here
         const batches: Array<{
           type: "history.batch";
@@ -264,7 +237,7 @@ describe("tadpole server", () => {
           };
         }> = [];
 
-        secondClient!.onmessage = (event) => {
+        secondClient.onmessage = (event) => {
           const data = JSON.parse(event.data.toString());
           if (data.type !== "history.batch") {
             return;
@@ -272,9 +245,9 @@ describe("tadpole server", () => {
 
           batches.push(data);
 
-          if (!data.data.hasMore) {
+          if (!data.data.hasMore && secondClient) {
             clearTimeout(timeout);
-            secondClient!.onmessage = originalOnMessage;
+            secondClient.onmessage = originalOnMessage;
             resolve({ batches });
           }
         };
@@ -284,15 +257,12 @@ describe("tadpole server", () => {
         JSON.stringify({
           id: "history-sync-test",
           type: "history.sync",
-        })
+        }),
       );
 
       const { batches } = await historyStreamPromise;
       const finalBatch = batches[batches.length - 1];
-      const combined = [
-        ...initialEventHistory,
-        ...batches.flatMap((batch) => batch.data.events),
-      ];
+      const combined = [...initialEventHistory, ...batches.flatMap((batch) => batch.data.events)];
 
       expect(batches.length).toBeGreaterThan(0);
       expect(finalBatch.data.hasMore).toBe(false);
@@ -302,24 +272,19 @@ describe("tadpole server", () => {
 
       expect(
         combined.find(
-          (e) =>
-            e.type === "phase.started" &&
-            (e as PhaseStartedEvent).data.phaseId === phaseOne
-        )
+          (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === phaseOne,
+        ),
       ).toBeDefined();
 
       expect(
         combined.find(
           (e) =>
-            e.type === "phase.completed" &&
-            (e as PhaseCompletedEvent).data.phaseId === phaseOne
-        )
+            e.type === "phase.completed" && (e as PhaseCompletedEvent).data.phaseId === phaseOne,
+        ),
       ).toBeDefined();
 
       // Verify we have a sizable chunk of ping events (history snapshots only)
-      expect(combined.filter((e) => e.type === "pong").length).toBeGreaterThan(
-        0
-      );
+      expect(combined.filter((e) => e.type === "pong").length).toBeGreaterThan(0);
     } finally {
       // Clean up second client
       if (
@@ -331,10 +296,7 @@ describe("tadpole server", () => {
       }
 
       // Clean up server
-      if (
-        tadpole.process.exitCode === null &&
-        tadpole.process.signalCode === null
-      ) {
+      if (tadpole.process.exitCode === null && tadpole.process.signalCode === null) {
         await tadpole.stop();
       }
     }

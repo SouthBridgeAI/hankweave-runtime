@@ -1,7 +1,6 @@
-import { createReadStream as createFileReadStream } from "node:fs";
-import { promises as fs } from "node:fs";
-import { createInterface } from "node:readline";
+import { createReadStream as createFileReadStream, promises as fs } from "node:fs";
 import * as path from "node:path";
+import { createInterface } from "node:readline";
 import type { ServerEvent } from "../schemas/event-schemas.js";
 import type { IEventStorage } from "./event-storage.js";
 
@@ -65,9 +64,7 @@ export class FileEventStorage implements IEventStorage {
     this.totalEvents += totalAppended;
   }
 
-  async getRecentEvents(
-    limit: number
-  ): Promise<{ events: ServerEvent[]; totalEvents: number }> {
+  async getRecentEvents(limit: number): Promise<{ events: ServerEvent[]; totalEvents: number }> {
     if (limit <= 0) {
       return {
         events: [],
