@@ -342,9 +342,6 @@ export interface ServerConfig {
   /** Whether to disable the proxy server (default: false) */
   withoutProxy: boolean;
 
-  /** Maximum number of events to keep in the event journal (default: 10000) */
-  eventJournalMaxSize: number;
-
   /** Maximum number of recent events to include in handshake response (default: 50) */
   handshakeHistoryLimit: number;
 }

@@ -28,6 +28,7 @@ import type {
   TokenUsageEvent,
 } from "./schemas/event-schemas.js";
 import { StateManager } from "./state-manager.js";
+import { FileEventStorage } from "./storage/file-event-storage.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { EventId, PhaseId, RunId, SessionId } from "./types/branded-types.js";
 import type {
@@ -180,8 +181,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const tadpoleDir = path.join(this.config.executionPath, ".tadpole");
     this.stateManager = new StateManager(tadpoleDir, this.logger, this.config.phases);
 
-    // Initialize Event Journal
-    this.eventJournal = new EventJournal(this.config.eventJournalMaxSize);
+    // Initialize Event Journal with file-based storage
+    this.eventJournal = new EventJournal(new FileEventStorage(path.join(tadpoleDir, "events")));
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -278,6 +279,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize state manager
     await this.stateManager.initialize();
+
+    // Initialize event journal
+    await this.eventJournal.initialize();
 
     // Check for existing lock file
     if (fs.existsSync(this.config.lockFile)) {
@@ -461,11 +465,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       cursor,
       totalEvents,
     } = sendPreviousEvents
-      ? this.eventJournal.getMostRecentEvents(this.config.handshakeHistoryLimit)
+      ? await this.eventJournal.getMostRecentEvents(this.config.handshakeHistoryLimit)
       : {
           events: [],
           cursor: null,
-          totalEvents: this.eventJournal.getTotalEvents(),
+          totalEvents: await this.eventJournal.getTotalEvents(),
         };
 
     this.logger.log(
@@ -502,7 +506,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     // Store in journal and send to the client
-    this.eventJournal.append(serverReadyEvent);
+    await this.eventJournal.append(serverReadyEvent);
     this.sendEventToClient(ws, serverReadyEvent);
 
     // TODO: figure out if this should be only sent after handshake
@@ -524,7 +528,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       } as import("./types/types.js").ServerIdleEvent;
 
       // Store in journal and send to the client
-      this.eventJournal.append(serverIdleEvent);
+      await this.eventJournal.append(serverIdleEvent);
       this.sendEventToClient(ws, serverIdleEvent);
     }
   }
@@ -728,7 +732,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         break;
 
       case "history.sync":
-        this.handleHistorySync(command, sender);
+        await this.handleHistorySync(command, sender);
         break;
 
       default:
@@ -766,7 +770,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Store in event journal and emit for tests and basic TUI
-      this.eventJournal.append(pongEvent);
+      this.eventJournal.append(pongEvent).catch((error) => {
+        this.logger.log(`Error appending pong event to journal: ${error}`, "error");
+      });
       this.emit("event", pongEvent);
     } else {
       this.logger.log("Ping command received but no valid sender provided", "error");
@@ -816,7 +822,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     };
 
-    this.eventJournal.append(broadcastPongEvent);
+    this.eventJournal.append(broadcastPongEvent).catch((error) => {
+      this.logger.log(`Error appending broadcast pong event to journal: ${error}`, "error");
+    });
     this.emit("event", broadcastPongEvent);
   }
 
@@ -824,10 +832,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // History Sync Command
   // ============================================================================
 
-  private handleHistorySync(
+  private async handleHistorySync(
     command: import("./schemas/event-schemas.js").HistorySyncCommand,
     sender?: ServerWebSocket<ClientData>,
-  ): void {
+  ): Promise<void> {
     if (!sender?.data.handshakeComplete) {
       this.logger.log("History sync command received but sender not ready", "error");
       return;
@@ -845,13 +853,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     if (cursor) {
       // Paginate from cursor
-      const result = this.eventJournal.getNextEvents(cursor, limit, direction);
+      const result = await this.eventJournal.getNextEvents(cursor, limit, direction);
       events = result.events;
       nextCursor = result.nextCursor;
       hasMore = result.hasMore;
     } else {
       // Get most recent events (no cursor provided)
-      const result = this.eventJournal.getMostRecentEvents(limit);
+      const result = await this.eventJournal.getMostRecentEvents(limit);
       events = result.events;
       nextCursor = result.cursor;
       hasMore = nextCursor !== null;
@@ -894,8 +902,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // ============================================================================
 
   private sendEvent(event: ServerEvent): void {
-    // Store in journal first
-    this.eventJournal.append(event);
+    // Store in journal first (fire and forget, log errors)
+    this.eventJournal.append(event).catch((error) => {
+      this.logger.log(`Error appending event to journal: ${error}`, "error");
+    });
 
     if (this.clients.size === 0) {
       // Still store events even with no clients connected
@@ -953,7 +963,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     if (client) {
       // Send to specific client and store in journal
-      this.eventJournal.append(stateSnapshotEvent);
+      await this.eventJournal.append(stateSnapshotEvent);
       this.sendEventToClient(client, stateSnapshotEvent);
     } else {
       // Send to all clients (default behavior)
@@ -3775,6 +3785,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (this.proxyRunner) {
       this.proxyRunner.stop();
       this.proxyRunner = null;
+    }
+
+    // Close event journal
+    try {
+      await this.eventJournal.close();
+      this.logger.log("Event journal closed");
+    } catch (error) {
+      this.logger.log(`Error closing event journal: ${error}`, "error");
     }
 
     if (fs.existsSync(this.config.lockFile)) {
