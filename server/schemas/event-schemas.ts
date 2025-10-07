@@ -26,12 +26,6 @@ const tokenUsageSchema = z.object({
   cacheReadTokens: z.number(),
 });
 
-// Event cursor schema for pagination
-const eventCursorSchema = z.object({
-  timestamp: z.string(),
-  eventId: z.string(),
-});
-
 // Pagination direction schema
 const paginationDirectionSchema = z.enum(["forward", "backward"]);
 
@@ -60,7 +54,7 @@ const fileNodeSchema: z.ZodType<FileNode> = z.lazy(() =>
       lastModified: z.string(),
       children: z.array(fileNodeSchema),
     }),
-  ]),
+  ])
 );
 
 // Phase execution schema (complete version for state snapshots)
@@ -257,7 +251,7 @@ export const rollbackWorkspaceCleanupEventDataSchema = z.object({
       z.object({
         directory: z.string(),
         error: z.string(),
-      }),
+      })
     )
     .optional(),
   error: z.string().optional(),
@@ -287,9 +281,7 @@ export const pongEventDataSchema = z.object({
 
 export const historyBatchEventDataSchema = z.object({
   events: z.array(z.any()), // Array of ServerEvent (we use z.any() to avoid circular reference)
-  nextCursor: eventCursorSchema.nullable(),
   hasMore: z.boolean(),
-  totalInBatch: z.number(),
 });
 
 // ============================================================================
@@ -473,7 +465,14 @@ export const rollbackToPhaseCommandSchema = z.object({
   type: z.literal("rollback.toPhase"),
   data: z.object({
     phaseId: z.string(),
-    checkpointType: z.enum(["start", "end", "workspace-setup", "completed", "error", "skipped"]),
+    checkpointType: z.enum([
+      "start",
+      "end",
+      "workspace-setup",
+      "completed",
+      "error",
+      "skipped",
+    ]),
     autoRestart: z.boolean().optional(),
   }),
 });
@@ -501,13 +500,6 @@ export const pingBroadcastCommandSchema = z.object({
 export const historySyncCommandSchema = z.object({
   id: z.string(),
   type: z.literal("history.sync"),
-  data: z
-    .object({
-      cursor: eventCursorSchema.optional(),
-      limit: z.number().optional(),
-      direction: paginationDirectionSchema.optional().default("backward"),
-    })
-    .optional(),
 });
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
@@ -577,10 +569,16 @@ export type InfoEvent = z.infer<typeof infoEventSchema>;
 export type ServerIdleEvent = z.infer<typeof serverIdleEventSchema>;
 export type CheckpointListEvent = z.infer<typeof checkpointListEventSchema>;
 export type RollbackStartedEvent = z.infer<typeof rollbackStartedEventSchema>;
-export type RollbackPhaseCheckpointEvent = z.infer<typeof rollbackPhaseCheckpointEventSchema>;
-export type RollbackWorkspaceCleanupEvent = z.infer<typeof rollbackWorkspaceCleanupEventSchema>;
+export type RollbackPhaseCheckpointEvent = z.infer<
+  typeof rollbackPhaseCheckpointEventSchema
+>;
+export type RollbackWorkspaceCleanupEvent = z.infer<
+  typeof rollbackWorkspaceCleanupEventSchema
+>;
 export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
-export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
+export type RollbackCompletedEvent = z.infer<
+  typeof rollbackCompletedEventSchema
+>;
 export type PongEvent = z.infer<typeof pongEventSchema>;
 export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
 
@@ -592,10 +590,18 @@ export type SkipPhaseCommand = z.infer<typeof skipPhaseCommandSchema>;
 export type RedoPhaseCommand = z.infer<typeof redoPhaseCommandSchema>;
 export type ShutdownCommand = z.infer<typeof shutdownCommandSchema>;
 export type ForceStopCommand = z.infer<typeof forceStopCommandSchema>;
-export type ListCheckpointsCommand = z.infer<typeof listCheckpointsCommandSchema>;
-export type RollbackToCheckpointCommand = z.infer<typeof rollbackToCheckpointCommandSchema>;
-export type RollbackToPhaseCommand = z.infer<typeof rollbackToPhaseCommandSchema>;
-export type RollbackToLastSuccessCommand = z.infer<typeof rollbackToLastSuccessCommandSchema>;
+export type ListCheckpointsCommand = z.infer<
+  typeof listCheckpointsCommandSchema
+>;
+export type RollbackToCheckpointCommand = z.infer<
+  typeof rollbackToCheckpointCommandSchema
+>;
+export type RollbackToPhaseCommand = z.infer<
+  typeof rollbackToPhaseCommandSchema
+>;
+export type RollbackToLastSuccessCommand = z.infer<
+  typeof rollbackToLastSuccessCommandSchema
+>;
 export type PingCommand = z.infer<typeof pingCommandSchema>;
 export type PingBroadcastCommand = z.infer<typeof pingBroadcastCommandSchema>;
 export type HistorySyncCommand = z.infer<typeof historySyncCommandSchema>;
@@ -637,4 +643,6 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
 };
 
 // List of all valid event types (for chronicler validation)
-export const serverEventTypes = Object.keys(serverEventDataSchemas) as ServerEventType[];
+export const serverEventTypes = Object.keys(
+  serverEventDataSchemas
+) as ServerEventType[];

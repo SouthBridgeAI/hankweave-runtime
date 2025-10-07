@@ -190,18 +190,16 @@ describe("TadpoleServer", () => {
 
   it("supports handshake protocol with different modes", async () => {
     // Connect clients with different modes
-    const { client: client1, clientId: clientId1 } = await connectAndRegisterClient(
-      serverUrl,
-      { mode: ClientMode.READANDWRITE }
-    );
-    const { client: client2, clientId: clientId2 } = await connectAndRegisterClient(
-      serverUrl,
-      { mode: ClientMode.READANDWRITE }
-    );
-    const { client: client3, clientId: clientId3 } = await connectAndRegisterClient(
-      serverUrl,
-      { mode: ClientMode.READONLY }
-    );
+    const { client: client1, clientId: clientId1 } =
+      await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+    const { client: client2, clientId: clientId2 } =
+      await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+    const { client: client3, clientId: clientId3 } =
+      await connectAndRegisterClient(serverUrl, { mode: ClientMode.READONLY });
 
     // Verify client IDs are defined
     expect(clientId1).toBeDefined();
@@ -248,10 +246,10 @@ describe("TadpoleServer", () => {
 
   it("responds to ping.broadcast command to all clients", async () => {
     // Connect and handshake clients
-    const { client: client1, clientId: client1Id } = await connectAndRegisterClient(
-      serverUrl,
-      { mode: ClientMode.READANDWRITE }
-    );
+    const { client: client1, clientId: client1Id } =
+      await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
     const { client: client2 } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READONLY,
     });
@@ -659,19 +657,35 @@ describe("TadpoleServer", () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
-    async function requestHistory(
+    async function streamHistory(
       client: WebSocket,
-      data: Record<string, unknown> = {},
-    ): Promise<HistoryBatchEvent> {
-      return await new Promise<HistoryBatchEvent>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("Timed out waiting for history.batch")), 3000);
+      data?: Record<string, unknown>
+    ): Promise<{ batches: HistoryBatchEvent[]; events: ServerEvent[] }> {
+      return await new Promise<{
+        batches: HistoryBatchEvent[];
+        events: ServerEvent[];
+      }>((resolve, reject) => {
+        const batches: HistoryBatchEvent[] = [];
+        const events: ServerEvent[] = [];
+        const timeout = setTimeout(
+          () => reject(new Error("Timed out waiting for history.batch")),
+          3000
+        );
         const originalOnMessage = client.onmessage;
+
         client.onmessage = (event: MessageEvent) => {
           const parsed = parseServerEvent(event.data);
-          if (parsed.type === "history.batch") {
+          if (parsed.type !== "history.batch") {
+            return;
+          }
+
+          batches.push(parsed);
+          events.push(...parsed.data.events);
+
+          if (!parsed.data.hasMore) {
             clearTimeout(timeout);
             client.onmessage = originalOnMessage;
-            resolve(parsed);
+            resolve({ batches, events });
           }
         };
 
@@ -679,57 +693,57 @@ describe("TadpoleServer", () => {
           JSON.stringify({
             id: `test-history-${Date.now()}`,
             type: "history.sync",
-            data,
-          }),
+            ...(data && Object.keys(data).length > 0 ? { data } : {}),
+          })
         );
       });
     }
 
-    it("returns the latest events when no cursor is provided", async () => {
+    it("streams the entire history when no cursor is provided", async () => {
       await generatePingEvents(5);
 
       const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
 
-      const response = await requestHistory(client, { limit: 1000 });
+      const { batches, events } = await streamHistory(client);
+      const lastBatch = batches[batches.length - 1];
 
-      expect(response.data.events.length).toBeGreaterThan(0);
-      expect(response.data.nextCursor).toBeNull();
-      expect(response.data.totalInBatch).toBe(response.data.events.length);
-      expect(response.data.hasMore).toBe(false);
+      expect(events.length).toBeGreaterThan(0);
+      expect(batches.length).toBeGreaterThan(0);
+      expect(lastBatch?.data.hasMore).toBe(false);
     });
 
-    it("ignores cursor and direction hints and still returns a recent snapshot", async () => {
+    it("ignores pagination hints and still streams the full history", async () => {
       await generatePingEvents(10);
 
       const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
 
-      const response = await requestHistory(client, {
+      const { batches, events } = await streamHistory(client, {
         cursor: { timestamp: new Date().toISOString(), eventId: "fake-id" },
         limit: 3,
         direction: "backward",
       });
 
-      expect(response.data.events.length).toBeLessThanOrEqual(3);
-      expect(response.data.nextCursor).toBeNull();
-      expect(response.data.totalInBatch).toBe(response.data.events.length);
+      expect(events.length).toBeGreaterThan(3);
+      const lastBatch = batches[batches.length - 1];
+      expect(lastBatch?.data.hasMore).toBe(false);
     });
 
-    it("respects custom limits and sets hasMore when history exceeds the limit", async () => {
+    it("delivers multiple batches when history contains many events", async () => {
       await generatePingEvents(8);
 
       const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
 
-      const response = await requestHistory(client, { limit: 2 });
-
-      expect(response.data.events.length).toBeLessThanOrEqual(2);
-      expect(response.data.hasMore).toBe(true);
-      expect(response.data.nextCursor).toBeNull();
+      const { batches } = await streamHistory(client);
+      const lastBatch = batches[batches.length - 1];
+      expect(batches.length).toBeGreaterThan(1);
+      expect(batches.some((batch) => batch.data.hasMore)).toBe(true);
+      expect(lastBatch?.data.hasMore).toBe(false);
     });
 
     it("allows readonly clients to issue history.sync", async () => {
@@ -739,30 +753,38 @@ describe("TadpoleServer", () => {
         mode: ClientMode.READONLY,
       });
 
-      const response = await requestHistory(client);
-      expect(response.type).toBe("history.batch");
+      const { batches } = await streamHistory(client);
+      expect(batches.length).toBeGreaterThan(0);
     });
 
     it("only delivers history.batch to the requesting client", async () => {
       await generatePingEvents(3);
 
-      const { client: readonlyClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-      });
-      const { client: secondClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
+      const { client: readonlyClient } = await connectAndRegisterClient(
+        serverUrl,
+        {
+          mode: ClientMode.READONLY,
+        }
+      );
+      const { client: secondClient } = await connectAndRegisterClient(
+        serverUrl,
+        {
+          mode: ClientMode.READANDWRITE,
+        }
+      );
 
       const secondClientMessages: ServerEvent[] = [];
       secondClient.onmessage = (event: MessageEvent) => {
         secondClientMessages.push(parseServerEvent(event.data));
       };
 
-      const response = await requestHistory(readonlyClient, { limit: 2 });
-      expect(response.type).toBe("history.batch");
+      const { batches } = await streamHistory(readonlyClient);
+      expect(batches.length).toBeGreaterThan(0);
 
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(secondClientMessages.some((msg) => msg.type === "history.batch")).toBe(false);
+      expect(
+        secondClientMessages.some((msg) => msg.type === "history.batch")
+      ).toBe(false);
     });
   });
   describe("Client Permissions", () => {
@@ -902,9 +924,12 @@ describe("TadpoleServer", () => {
 
     it("permission errors are sent only to the offending client, not broadcast", async () => {
       // Connect multiple clients
-      const { client: readonlyClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-      });
+      const { client: readonlyClient } = await connectAndRegisterClient(
+        serverUrl,
+        {
+          mode: ClientMode.READONLY,
+        }
+      );
       const { client: readwriteClient1 } = await connectAndRegisterClient(
         serverUrl,
         {

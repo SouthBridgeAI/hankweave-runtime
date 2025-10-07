@@ -27,21 +27,21 @@ export class EventJournal {
     await this.storage.append(event);
   }
 
-  async getAllEvents(): Promise<ServerEvent[]> {
-    const stream = await this.storage.createReadStream();
+  async *getAllEvents(): AsyncGenerator<ServerEvent> {
     const reader = createInterface({
-      input: stream,
+      input: await this.storage.createReadStream(),
       crlfDelay: Number.POSITIVE_INFINITY,
     });
 
-    const events: ServerEvent[] = [];
-    for await (const rawLine of reader) {
-      const line = rawLine.trim();
-      if (line.length === 0) continue;
-      events.push(JSON.parse(line) as ServerEvent);
+    try {
+      for await (const rawLine of reader) {
+        const line = rawLine.trim();
+        if (line.length === 0) continue;
+        yield JSON.parse(line) as ServerEvent;
+      }
+    } finally {
+      reader.close();
     }
-
-    return events;
   }
 
   async getMostRecentEvents(limit: number): Promise<{
@@ -67,5 +67,4 @@ export class EventJournal {
   async streamAllEvents(): Promise<NodeJS.ReadableStream> {
     return this.storage.createReadStream();
   }
-
 }
