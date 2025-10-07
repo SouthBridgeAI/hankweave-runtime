@@ -56,7 +56,6 @@ export interface HandshakeResponse {
     clientId: string;
     mode: ClientMode; // Granted mode (may differ from requested)
     eventHistory: ServerEvent[]; // Limited by handshakeHistoryLimit
-    cursor: EventCursor | null; // Cursor for next page (null if no more events)
     totalEvents: number; // Total events in journal
   };
 }

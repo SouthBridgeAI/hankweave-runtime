@@ -23,8 +23,14 @@ Client                    Server
   ├──── Connect WS ────────>│
   │                         ├─ Check for existing clients
   │                         ├─ Create/verify lock file
+  │─── handshake ──────────>│
+  │                         ├─ Grant mode & optionally gather history
+  │<─ handshake.response ───┤
   │<──── server.ready ──────┤
   │<─── state.snapshot ─────┤
+  │                         │
+  │─── history.sync ───────>│ (optional)
+  │<──── history.batch ─────┤ (streamed batches)
   │                         │
   │─── phase.start ────────>│
   │<──── phase.started ─────┤
@@ -62,7 +68,7 @@ All communication, whether from client to server (Commands) or server to client 
 
 ## Handshake Protocol
 
-Before sending commands or receiving events, clients must complete a handshake with the server.
+Before sending commands or receiving events, clients must complete a handshake with the server. The server buffers all domain events until the handshake is acknowledged, ensuring both sides agree on permissions and synchronization behavior.
 
 ### Handshake Request
 
@@ -79,7 +85,7 @@ The client initiates the handshake by sending:
 ```
 
 - `mode`: Either `"readonly"` or `"readandwrite"` to specify access level
-- `sendPreviousEvents`: Optional boolean (default: false). If true, server sends recent event history
+- `sendPreviousEvents`: Optional boolean (default: `false`). When `true`, the server includes up to `handshakeHistoryLimit` recent events in the handshake response. When omitted or `false`, the response contains an empty history and the client can opt into a later sync.
 
 ### Handshake Response
 
@@ -92,10 +98,6 @@ The server responds with:
     "clientId": "client-123",
     "mode": "readandwrite",
     "eventHistory": [...],
-    "cursor": {
-      "timestamp": "2025-01-19T10:00:00Z",
-      "eventId": "evt-123"
-    },
     "totalEvents": 1500
   }
 }
@@ -103,9 +105,82 @@ The server responds with:
 
 - `clientId`: The server-assigned unique client ID
 - `mode`: The granted access mode (may differ from requested)
-- `eventHistory`: Array of recent events (limited by `handshakeHistoryLimit` config, default 50)
-- `cursor`: Pagination cursor for fetching older events, or `null` if no more events
-- `totalEvents`: Total number of events in the journal
+- `eventHistory`: Chronologically ordered recent events when `sendPreviousEvents` was `true`; otherwise an empty array
+- `cursor`: Reserved for future pagination support (currently always `null`)
+- `totalEvents`: Count of events currently stored in the journal. This can be larger than `eventHistory.length`, signalling that additional history is available via `history.sync`.
+
+Immediately after acknowledging the handshake, the server emits `server.ready` followed by a `state.snapshot`, then resumes real-time event delivery.
+
+### Example Client Flow
+
+The following TypeScript example uses the `ws` WebSocket client to:
+
+- establish a connection and complete the handshake,
+- request the full event history when more events are available than were included in the handshake response, and
+- handle real-time events alongside streamed history batches.
+
+```ts
+import WebSocket from "ws";
+
+const ws = new WebSocket("ws://localhost:7777");
+
+const handleServerEvent = (event: any) => {
+  console.log(`[event] ${event.type}`, event);
+};
+
+const sendHistorySync = () => {
+  const command = {
+    id: `cmd-history-sync-${Date.now()}`,
+    type: "history.sync",
+  };
+  ws.send(JSON.stringify(command));
+};
+
+ws.on("open", () => {
+  ws.send(
+    JSON.stringify({
+      type: "handshake",
+      data: {
+        mode: "readandwrite",
+        sendPreviousEvents: true,
+      },
+    }),
+  );
+});
+
+ws.on("message", (raw) => {
+  const message = JSON.parse(raw.toString());
+
+  switch (message.type) {
+    case "handshake.response": {
+      const { clientId, eventHistory, totalEvents } = message.data;
+      console.log(`Handshake complete. Server recognized client ${clientId}.`);
+
+      // Process the initial batch of recent events (if requested)
+      eventHistory.forEach(handleServerEvent);
+
+      if (totalEvents > eventHistory.length) {
+        sendHistorySync();
+      }
+      break;
+    }
+
+    case "history.batch": {
+      message.data.events.forEach(handleServerEvent);
+
+      if (!message.data.hasMore) {
+        console.log("History synchronization complete.");
+      }
+      break;
+    }
+
+    default: {
+      // All other messages are real-time server events
+      handleServerEvent(message);
+    }
+  }
+});
+```
 
 ## Client Commands (Client → Server)
 
@@ -260,28 +335,18 @@ Requests a graceful shutdown of the server. The server will clean up resources, 
 ### History Synchronization
 
 #### `history.sync`
-Fetches a paginated batch of events from the server's event journal. Used to retrieve older events beyond the initial handshake limit.
+Streams the full event journal to the client. Useful when the handshake did not request history, or when more events are available than were returned in `eventHistory`.
 
 ```json
 {
   "id": "cmd-133",
-  "type": "history.sync",
-  "data": {
-    "cursor": {
-      "timestamp": "2025-01-19T10:00:00Z",
-      "eventId": "evt-123"
-    },
-    "limit": 100,
-    "direction": "backward"
-  }
+  "type": "history.sync"
 }
 ```
 
-- `cursor`: Optional. Starting point for pagination. If omitted, returns most recent events.
-- `limit`: Optional. Maximum events to return (defaults to `handshakeHistoryLimit` config)
-- `direction`: Optional. Either `"backward"` (older events, default) or `"forward"` (newer events)
-
-The server responds with a `history.batch` event containing the requested events.
+- The command has no `data` payload.
+- The server responds with one or more `history.batch` events, each containing a chunk of events in chronological order.
+- Batches continue until the final message has `hasMore: false`. No follow-up command is required.
 
 ## Server Events (Server → Client)
 
@@ -344,21 +409,14 @@ Response to a `history.sync` command, containing a paginated batch of events fro
       { "id": "evt-100", "type": "phase.started", "..." },
       { "id": "evt-99", "type": "assistant.action", "..." }
     ],
-    "nextCursor": {
-      "timestamp": "2025-01-19T09:30:00Z",
-      "eventId": "evt-98"
-    },
-    "hasMore": true,
-    "totalInBatch": 100
+    "hasMore": true
   }
 }
 ```
 
 **Fields:**
-- `events`: Array of ServerEvent objects in the requested order
-- `nextCursor`: Cursor for fetching the next page, or `null` if no more events
-- `hasMore`: Boolean indicating if more events are available
-- `totalInBatch`: Number of events in this batch
+- `events`: Array of previously recorded `ServerEvent` objects delivered in chronological order
+- `hasMore`: Boolean indicating if additional batches will follow for the same `history.sync` request
 
 **Note:** `history.batch` events are not stored in the journal as they only contain references to existing events.
 

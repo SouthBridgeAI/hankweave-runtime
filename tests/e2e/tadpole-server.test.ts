@@ -159,7 +159,7 @@ describe("tadpole server", () => {
     }
   }, 180_000);
 
-  it("allows a second client to connect and retrieve event history via pagination", async () => {
+  it("allows a second client to connect and stream event history", async () => {
     // Launch tadpole with ping event generation
     const tadpole = await launchTadpole({
       generatePingEvents: 150,
@@ -192,7 +192,6 @@ describe("tadpole server", () => {
       expect(clientSetup.handshakeResponse?.data.eventHistory).toBeDefined();
 
       const initialEventHistory = clientSetup.handshakeResponse?.data.eventHistory || [];
-      const cursor = clientSetup.handshakeResponse?.data.cursor;
       const totalEvents = clientSetup.handshakeResponse?.data.totalEvents || 0;
 
       // Verify we received events (should be limited by handshakeHistoryLimit)
@@ -200,8 +199,6 @@ describe("tadpole server", () => {
       // default handshakeHistoryLimit is 50
       expect(initialEventHistory.length).toBeLessThanOrEqual(50);
 
-      // Cursor-based pagination is no longer supported
-      expect(cursor).toBeNull();
       expect(totalEvents).toBeGreaterThan(initialEventHistory.length);
 
       if (!secondClient) {
@@ -225,6 +222,7 @@ describe("tadpole server", () => {
 
         secondClient.onmessage = (event) => {
           const data = JSON.parse(event.data.toString());
+
           if (data.type !== "history.batch") {
             return;
           }

@@ -486,7 +486,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         clientId,
         mode: grantedMode,
         eventHistory: recentEvents,
-        cursor: null,
         totalEvents: totalEvents,
       },
     };
