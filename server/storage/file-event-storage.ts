@@ -34,9 +34,35 @@ export class FileEventStorage implements IEventStorage {
   }
 
   async append(event: ServerEvent): Promise<void> {
-    const serialized = `${JSON.stringify(event)}\n`;
-    await fs.appendFile(this.eventsFilePath, serialized);
-    this.totalEvents += 1;
+    await this.appendMany([event]);
+  }
+
+  async appendMany(events: Iterable<ServerEvent>): Promise<void> {
+    let totalAppended = 0;
+    const chunk: string[] = [];
+    const chunkSize = 10_000;
+
+    const flushChunk = async () => {
+      if (chunk.length === 0) return;
+      const payload = `${chunk.join("\n")}\n`;
+      chunk.length = 0;
+      await fs.appendFile(this.eventsFilePath, payload);
+    };
+
+    for (const event of events) {
+      chunk.push(JSON.stringify(event));
+      totalAppended += 1;
+
+      if (chunk.length >= chunkSize) {
+        await flushChunk();
+      }
+    }
+
+    if (chunk.length > 0) {
+      await flushChunk();
+    }
+
+    this.totalEvents += totalAppended;
   }
 
   async getRecentEvents(

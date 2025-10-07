@@ -15,6 +15,10 @@ export class EventJournal {
     this.storage = storage || new MemoryEventStorage();
   }
 
+  get transport(): IEventStorage {
+    return this.storage;
+  }
+
   async initialize(): Promise<void> {
     await this.storage.initialize();
   }

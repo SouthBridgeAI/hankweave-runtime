@@ -16,6 +16,12 @@ export interface IEventStorage {
   append(event: ServerEvent): Promise<void>;
 
   /**
+   * Append multiple events in bulk, optimized for large batches.
+   * Implementations should ensure this is faster than calling append repeatedly.
+   */
+  appendMany(events: Iterable<ServerEvent>): Promise<void>;
+
+  /**
    * Retrieve the most recent events in chronological order (oldest first)
    * along with the total number of events persisted.
    * @param limit Maximum number of events to return

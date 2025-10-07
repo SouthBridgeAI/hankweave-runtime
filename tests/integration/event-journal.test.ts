@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,90 +34,134 @@ function createPingEvent(id: number): ServerEvent {
   };
 }
 
+async function computeFileHash(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  const fileStream = createReadStream(filePath, { encoding: "utf-8" });
+
+  for await (const chunk of fileStream) {
+    hash.update(chunk);
+  }
+
+  return hash.digest("hex");
+}
+
 describe("EventJournal with FileEventStorage", () => {
   let tempDir: string;
   let journal: EventJournal;
+  let storage: FileEventStorage;
+  let eventsFilePath: string;
+  let expectedTotalEvents: number;
+  let lastEventId: ServerEvent["id"];
+  const TARGET_BYTES = 200 * 1024 * 1024;
+  let sampleEventBytes: number;
 
   beforeAll(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "event-journal-integration-"));
-    journal = new EventJournal(new FileEventStorage(tempDir));
+    storage = new FileEventStorage(tempDir);
+    journal = new EventJournal(storage);
     await journal.initialize();
+
+    const seedEvents = Array.from({ length: 5 }, (_, index) =>
+      createMockEvent(index + 1)
+    );
+    const seedBytes = seedEvents.reduce(
+      (size, event) => size + Buffer.byteLength(JSON.stringify(event)) + 1,
+      0
+    );
+
+    const sampleEvent = createPingEvent(0);
+    sampleEventBytes = Buffer.byteLength(JSON.stringify(sampleEvent)) + 1;
+    const remainingBytesTarget = Math.max(0, TARGET_BYTES - seedBytes);
+    const pingEventCount =
+      remainingBytesTarget > 0
+        ? Math.ceil(remainingBytesTarget / sampleEventBytes)
+        : 0;
+
+    expectedTotalEvents = seedEvents.length + pingEventCount;
+
+    lastEventId =
+      pingEventCount > 0
+        ? `ping-event-${(pingEventCount - 1).toString().padStart(10, "0")}`
+        : seedEvents[seedEvents.length - 1]!.id;
+
+    await storage.appendMany(
+      (function* (): Generator<ServerEvent> {
+        yield* seedEvents;
+        for (let i = 0; i < pingEventCount; i++) {
+          yield createPingEvent(i);
+        }
+      })()
+    );
+
+    eventsFilePath = join(tempDir, "events.jsonl");
   });
 
   afterAll(async () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("persists events and serves recent history", async () => {
-    for (let i = 1; i <= 5; i++) {
-      await journal.append(createMockEvent(i));
-    }
+  it("can handle somewhat big files", async () => {
+    expect(journal.transport).toBe(storage);
+    const { size } = await stat(eventsFilePath);
+    expect(size).toBeWithin(TARGET_BYTES, 1.1 * TARGET_BYTES);
+  });
 
-    const { events, hasMore, totalEvents } = await journal.getMostRecentEvents(3);
-    expect(events.map((e) => e.id)).toEqual(["event-5", "event-4", "event-3"]);
-    expect(totalEvents).toBe(5);
-    expect(hasMore).toBe(true);
+  it("provides access to the underlying transport and serves recent history", async () => {
+    const limit = 5;
+    const { events, hasMore, totalEvents } = await journal.getMostRecentEvents(
+      limit
+    );
+    expect(totalEvents).toBe(expectedTotalEvents);
+    expect(events).toHaveLength(Math.min(limit, expectedTotalEvents));
+    expect(await journal.getTotalEvents()).toBe(expectedTotalEvents);
+    if (expectedTotalEvents > 0) {
+      expect(events[0].id).toBe(lastEventId);
+    }
+    expect(hasMore).toBe(expectedTotalEvents > limit);
   });
 
   it("survives restart", async () => {
     journal = new EventJournal(new FileEventStorage(tempDir));
     await journal.initialize();
 
-    const { events, totalEvents } = await journal.getMostRecentEvents(10);
-    expect(totalEvents).toBe(5);
-    expect(events.map((e) => e.id)[0]).toBe("event-5");
+    const { events, totalEvents } = await journal.getMostRecentEvents(1);
+    expect(totalEvents).toBe(expectedTotalEvents);
+    if (events.length > 0) {
+      expect(events[0].id).toBe(lastEventId);
+    }
   });
 
   it("streams the full log", async () => {
     const stream = await journal.streamAllEvents();
-    const chunks: string[] = [];
-    stream.on("data", (chunk) => chunks.push(chunk.toString()));
-    await new Promise<void>((resolve) => stream.on("end", resolve));
+    const destinationPath = join(tempDir, "events-copy.jsonl");
+    const destination = createWriteStream(destinationPath, {
+      encoding: "utf-8",
+    });
 
-    const lines = chunks.join("").split("\n").filter(Boolean);
-    expect(lines.length).toBeGreaterThanOrEqual(5);
+    await new Promise<void>((resolve, reject) => {
+      const handleStreamError = (error: unknown) => {
+        destination.destroy();
+        reject(error);
+      };
+      const handleDestinationError = (error: unknown) => {
+        // stream. .destroy();
+        reject(error);
+      };
+
+      stream.setEncoding("utf-8");
+      stream.on("data", (chunk) => {
+        destination.write(chunk);
+      });
+      stream.once("error", handleStreamError);
+      destination.once("error", handleDestinationError);
+      stream.once("end", () => {
+        destination.end();
+      });
+      destination.once("finish", resolve);
+    });
+
+    expect(await computeFileHash(destinationPath)).toBe(
+      await computeFileHash(eventsFilePath)
+    );
   });
-
-  it("handles a ~200MB event log without degradation", async () => {
-    const largeDir = await mkdtemp(join(tmpdir(), "event-journal-massive-"));
-
-    try {
-      const largeJournal = new EventJournal(new FileEventStorage(largeDir));
-      await largeJournal.initialize();
-
-      const targetBytes = 200 * 1024 * 1024;
-      const sampleEvent = createPingEvent(0);
-      const sampleBytes = Buffer.byteLength(JSON.stringify(sampleEvent)) + 1; // newline
-      const eventCount = Math.ceil(targetBytes / sampleBytes);
-      const yieldInterval = Math.max(1, Math.floor(eventCount / 20));
-
-      for (let i = 0; i < eventCount; i++) {
-        await largeJournal.append(createPingEvent(i));
-        if ((i + 1) % yieldInterval === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-      }
-
-      const eventsPath = join(largeDir, "events.jsonl");
-      const { size } = await stat(eventsPath);
-      expect(size).toBeGreaterThanOrEqual(targetBytes);
-      expect(size).toBeLessThan(Math.floor(targetBytes * 1.1));
-
-      const { events, totalEvents, hasMore } = await largeJournal.getMostRecentEvents(100);
-      expect(events).toHaveLength(100);
-      expect(events[0].id).toBe(`ping-event-${(eventCount - 1).toString().padStart(10, "0")}`);
-      expect(totalEvents).toBe(eventCount);
-      expect(hasMore).toBe(eventCount > 100);
-
-      const stream = await largeJournal.streamAllEvents();
-      let chunkRead = 0;
-      for await (const _chunk of stream) {
-        chunkRead += 1;
-        break; // ensure stream begins emitting without reading entire file
-      }
-      expect(chunkRead).toBeGreaterThan(0);
-    } finally {
-      await rm(largeDir, { recursive: true, force: true });
-    }
-  }, 120_000);
 });

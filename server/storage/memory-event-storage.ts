@@ -16,12 +16,25 @@ export class MemoryEventStorage implements IEventStorage {
   }
 
   async append(event: ServerEvent): Promise<void> {
-    this.events.push(event);
+    await this.appendMany([event]);
+  }
 
-    // Trim old events if needed
+  async appendMany(events: Iterable<ServerEvent>): Promise<void> {
+    let appended = 0;
+    for (const event of events) {
+      this.events.push(event);
+      appended += 1;
+    }
+
+    if (appended === 0) {
+      return;
+    }
+
     if (this.events.length > this.maxEvents) {
-      const trimCount = Math.max(1, Math.floor(this.maxEvents * 0.1)); // Trim at least one event
-      this.events = this.events.slice(trimCount);
+      const trimCount = Math.max(1, Math.floor(this.maxEvents * 0.1));
+      const excess = this.events.length - this.maxEvents;
+      const totalTrim = Math.max(trimCount, excess);
+      this.events = this.events.slice(totalTrim);
     }
   }
 
