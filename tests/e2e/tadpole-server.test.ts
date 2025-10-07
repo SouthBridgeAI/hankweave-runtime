@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 import { describe, expect, it } from "bun:test";
 import type {
+  HistoryBatchEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   RollbackCompletedEvent,
-  ServerEvent,
 } from "../../server/schemas/event-schemas.js";
 import { PhaseId } from "../../server/types/branded-types.js";
 import { connectTadpoleClient, launchTadpole } from "../utils/tadpole-server.js";
@@ -209,14 +209,7 @@ describe("tadpole server", () => {
       }
 
       const historyStreamPromise = new Promise<{
-        // TODO: reuse schema here
-        batches: Array<{
-          type: "history.batch";
-          data: {
-            events: ServerEvent[];
-            hasMore: boolean;
-          };
-        }>;
+        batches: Array<HistoryBatchEvent>;
       }>((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error("Timed out waiting for history.batch")),
@@ -228,14 +221,7 @@ describe("tadpole server", () => {
         }
 
         const originalOnMessage = secondClient.onmessage;
-        // TODO: reuse schema here
-        const batches: Array<{
-          type: "history.batch";
-          data: {
-            events: ServerEvent[];
-            hasMore: boolean;
-          };
-        }> = [];
+        const batches: Array<HistoryBatchEvent> = [];
 
         secondClient.onmessage = (event) => {
           const data = JSON.parse(event.data.toString());
