@@ -641,511 +641,130 @@ describe("TadpoleServer", () => {
   });
 
   describe("History Sync", () => {
-    it("responds to history.sync without cursor (gets most recent events)", async () => {
-      // First, generate some events
-      const { client: eventClient } = await connectAndRegisterClient(
-        serverUrl,
-        {
-          mode: ClientMode.READANDWRITE,
-        }
-      );
-
-      // Send several ping commands to generate events
-      for (let i = 0; i < 5; i++) {
-        eventClient.send(
-          JSON.stringify({
-            id: `ping-${i}`,
-            type: "ping",
-          })
-        );
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-
-      // Wait for events to be processed
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Now connect a client and request history sync
+    async function generatePingEvents(count: number): Promise<void> {
       const { client } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-      });
-
-      // Set up listener for history.batch response
-      const historyPromise = new Promise<HistoryBatchEvent | null>(
-        (resolve) => {
-          client.onmessage = (event: MessageEvent) => {
-            const data = parseServerEvent(event.data);
-            if (data.type === "history.batch") {
-              resolve(data);
-            }
-          };
-          setTimeout(() => resolve(null), 3000);
-        }
-      );
-
-      // Send history.sync command without cursor
-      client.send(
-        JSON.stringify({
-          id: "test-history-sync-1",
-          type: "history.sync",
-        })
-      );
-
-      const historyResponse = await historyPromise;
-      expect(historyResponse).not.toBeNull();
-      expect(historyResponse!.type).toBe("history.batch");
-      expect(historyResponse!.data.events.length).toBeGreaterThan(0);
-      expect(historyResponse!.data.totalInBatch).toBe(
-        historyResponse!.data.events.length
-      );
-
-      // Validate each event in the batch using schema
-      for (const event of historyResponse!.data.events) {
-        expect(serverEventSchema.safeParse(event).success).toBe(true);
-      }
-      // No explicit cleanup needed - afterEach handles all registered clients
-    });
-
-    it("responds to history.sync with cursor for backward pagination", async () => {
-      // Generate many events
-      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READANDWRITE,
       });
 
-      for (let i = 0; i < 10; i++) {
-        eventClient.send(
-          JSON.stringify({
-            id: `ping-backward-${i}`,
-            type: "ping",
-          })
-        );
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Connect client and request first batch
-      const { client } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-      });
-
-      // Get first batch with small limit
-      const firstBatchPromise = new Promise<HistoryBatchEvent | null>(
-        (resolve) => {
-          client.onmessage = (event: MessageEvent) => {
-            const data = parseServerEvent(event.data);
-            if (data.type === "history.batch") {
-              resolve(data);
-            }
-          };
-          setTimeout(() => resolve(null), 3000);
-        }
-      );
-
-      client.send(
-        JSON.stringify({
-          id: "test-history-sync-first",
-          type: "history.sync",
-          data: {
-            limit: 3,
-            direction: "backward",
-          },
-        })
-      );
-
-      const firstBatch = await firstBatchPromise;
-      expect(firstBatch).not.toBeNull();
-      expect(firstBatch!.data.events.length).toBeLessThanOrEqual(3);
-
-      // If there's more data, request next batch with cursor
-      if (firstBatch!.data.hasMore && firstBatch!.data.nextCursor) {
-        const secondBatchPromise = new Promise<HistoryBatchEvent | null>(
-          (resolve) => {
-            client.onmessage = (event: MessageEvent) => {
-              const data = parseServerEvent(event.data);
-              if (data.type === "history.batch") {
-                resolve(data);
-              }
-            };
-            setTimeout(() => resolve(null), 3000);
-          }
-        );
-
+      for (let i = 0; i < count; i++) {
         client.send(
           JSON.stringify({
-            id: "test-history-sync-second",
-            type: "history.sync",
-            data: {
-              cursor: firstBatch!.data.nextCursor,
-              limit: 3,
-              direction: "backward",
-            },
-          })
-        );
-
-        const secondBatch = await secondBatchPromise;
-        expect(secondBatch).not.toBeNull();
-        expect(secondBatch!.data.events.length).toBeGreaterThan(0);
-
-        // Verify second batch has different events (older ones in backward direction)
-        const firstEventIds = new Set(firstBatch!.data.events.map((e) => e.id));
-        const secondEventIds = secondBatch!.data.events.map((e) => e.id);
-
-        // Should not have duplicate events
-        for (const id of secondEventIds) {
-          expect(firstEventIds.has(id)).toBe(false);
-        }
-
-        // In backward direction, second batch should have older timestamps
-        if (
-          firstBatch!.data.events.length > 0 &&
-          secondBatch!.data.events.length > 0
-        ) {
-          const firstOldest = new Date(
-            firstBatch!.data.events[
-              firstBatch!.data.events.length - 1
-            ].timestamp
-          ).getTime();
-          const secondNewest = new Date(
-            secondBatch!.data.events[0].timestamp
-          ).getTime();
-          expect(secondNewest).toBeLessThanOrEqual(firstOldest);
-        }
-      }
-    });
-
-    it("responds to history.sync with cursor for forward pagination", async () => {
-      // Generate events
-      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
-
-      for (let i = 0; i < 10; i++) {
-        eventClient.send(
-          JSON.stringify({
-            id: `ping-forward-${i}`,
-            type: "ping",
-          })
-        );
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Connect client
-      const { client } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-      });
-
-      // Get oldest events first (backward to get a starting point)
-      const initialBatchPromise = new Promise<HistoryBatchEvent | null>(
-        (resolve) => {
-          client.onmessage = (event: MessageEvent) => {
-            const data = parseServerEvent(event.data);
-            if (data.type === "history.batch") {
-              resolve(data);
-            }
-          };
-          setTimeout(() => resolve(null), 3000);
-        }
-      );
-
-      client.send(
-        JSON.stringify({
-          id: "test-history-sync-initial",
-          type: "history.sync",
-          data: {
-            limit: 3,
-            direction: "backward",
-          },
-        })
-      );
-
-      const initialBatch = await initialBatchPromise;
-      expect(initialBatch).not.toBeNull();
-
-      // Now use forward direction from the cursor
-      if (initialBatch!.data.nextCursor) {
-        const forwardBatchPromise = new Promise<HistoryBatchEvent | null>(
-          (resolve) => {
-            client.onmessage = (event: MessageEvent) => {
-              const data = parseServerEvent(event.data);
-              if (data.type === "history.batch") {
-                resolve(data);
-              }
-            };
-            setTimeout(() => resolve(null), 3000);
-          }
-        );
-
-        client.send(
-          JSON.stringify({
-            id: "test-history-sync-forward",
-            type: "history.sync",
-            data: {
-              cursor: initialBatch!.data.nextCursor,
-              limit: 3,
-              direction: "forward",
-            },
-          })
-        );
-
-        const forwardBatch = await forwardBatchPromise;
-        expect(forwardBatch).not.toBeNull();
-
-        // Verify direction is respected
-        if (
-          initialBatch!.data.events.length > 0 &&
-          forwardBatch!.data.events.length > 0
-        ) {
-          const initialOldest = new Date(
-            initialBatch!.data.events[
-              initialBatch!.data.events.length - 1
-            ].timestamp
-          ).getTime();
-          const forwardNewest = new Date(
-            forwardBatch!.data.events[0].timestamp
-          ).getTime();
-          // Forward should give us newer events
-          expect(forwardNewest).toBeGreaterThanOrEqual(initialOldest);
-        }
-      }
-    });
-
-    it("respects custom limit in history.sync", async () => {
-      // Generate events
-      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
-
-      for (let i = 0; i < 15; i++) {
-        eventClient.send(
-          JSON.stringify({
-            id: `ping-limit-${i}`,
+            id: `ping-history-${i}`,
             type: "ping",
           })
         );
         await new Promise((resolve) => setTimeout(resolve, 30));
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
 
-      // Test with different limits
-      const { client } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-      });
-
-      for (const limit of [1, 5, 10]) {
-        const historyPromise = new Promise<HistoryBatchEvent | null>(
-          (resolve) => {
-            client.onmessage = (event: MessageEvent) => {
-              const data = parseServerEvent(event.data);
-              if (data.type === "history.batch") {
-                resolve(data);
-              }
-            };
-            setTimeout(() => resolve(null), 3000);
+    async function requestHistory(
+      client: WebSocket,
+      data: Record<string, unknown> = {},
+    ): Promise<HistoryBatchEvent> {
+      return await new Promise<HistoryBatchEvent>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for history.batch")), 3000);
+        const originalOnMessage = client.onmessage;
+        client.onmessage = (event: MessageEvent) => {
+          const parsed = parseServerEvent(event.data);
+          if (parsed.type === "history.batch") {
+            clearTimeout(timeout);
+            client.onmessage = originalOnMessage;
+            resolve(parsed);
           }
-        );
+        };
 
         client.send(
           JSON.stringify({
-            id: `test-history-sync-limit-${limit}`,
+            id: `test-history-${Date.now()}`,
             type: "history.sync",
-            data: {
-              limit: limit,
-            },
-          })
+            data,
+          }),
         );
-
-        const historyResponse = await historyPromise;
-        expect(historyResponse).not.toBeNull();
-        expect(historyResponse!.data.events.length).toBeLessThanOrEqual(limit);
-        expect(historyResponse!.data.totalInBatch).toBe(
-          historyResponse!.data.events.length
-        );
-
-        // Wait before next request
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    });
-
-    it("readonly client can execute history.sync command", async () => {
-      // Generate some events first
-      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
       });
+    }
 
-      eventClient.send(
-        JSON.stringify({
-          id: "setup-event",
-          type: "ping",
-        })
-      );
+    it("returns the latest events when no cursor is provided", async () => {
+      await generatePingEvents(5);
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Connect readonly client
       const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
 
-      // Readonly should be able to execute history.sync
-      const historyPromise = new Promise<HistoryBatchEvent | null>(
-        (resolve, reject) => {
-          client.onmessage = (event: MessageEvent) => {
-            const data = parseServerEvent(event.data);
-            if (data.type === "history.batch") {
-              resolve(data);
-            } else if (data.type === "error") {
-              reject(data);
-            }
-          };
-          setTimeout(() => resolve(null), 3000);
-        }
-      );
+      const response = await requestHistory(client, { limit: 1000 });
 
-      client.send(
-        JSON.stringify({
-          id: "test-readonly-history-sync",
-          type: "history.sync",
-        })
-      );
-
-      const historyResponse = await historyPromise;
-      expect(historyResponse).not.toBeNull();
-      expect(historyResponse!.type).toBe("history.batch");
-      // Should not get permission error
+      expect(response.data.events.length).toBeGreaterThan(0);
+      expect(response.data.nextCursor).toBeNull();
+      expect(response.data.totalInBatch).toBe(response.data.events.length);
+      expect(response.data.hasMore).toBe(false);
     });
 
-    it("history.batch is not broadcast to other clients", async () => {
-      // Generate some events
-      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
+    it("ignores cursor and direction hints and still returns a recent snapshot", async () => {
+      await generatePingEvents(10);
 
-      eventClient.send(
-        JSON.stringify({
-          id: "setup-event",
-          type: "ping",
-        })
-      );
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Connect two clients
-      const { client: client1 } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
-      const { client: client2 } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-      });
-
-      // Track messages received by each client
-      const client1Messages: ServerEvent[] = [];
-      const client2Messages: ServerEvent[] = [];
-
-      client1.onmessage = (event: MessageEvent) => {
-        const data = parseServerEvent(event.data);
-        client1Messages.push(data);
-      };
-
-      client2.onmessage = (event: MessageEvent) => {
-        const data = parseServerEvent(event.data);
-        client2Messages.push(data);
-      };
-
-      // Client1 requests history
-      const historyPromise = new Promise<void>((resolve) => {
-        client1.onmessage = (event: MessageEvent) => {
-          const data = parseServerEvent(event.data);
-          client1Messages.push(data);
-          if (data.type === "history.batch") {
-            resolve();
-          }
-        };
-        setTimeout(() => resolve(), 3000);
-      });
-
-      client1.send(
-        JSON.stringify({
-          id: "test-no-broadcast",
-          type: "history.sync",
-        })
-      );
-
-      await historyPromise;
-
-      // Give time for potential broadcast
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Client1 should have received history.batch
-      const client1HistoryBatches = client1Messages.filter(
-        (m) => m.type === "history.batch"
-      );
-      expect(client1HistoryBatches.length).toBeGreaterThan(0);
-
-      // Client2 should NOT have received it
-      const client2HistoryBatches = client2Messages.filter(
-        (m) => m.type === "history.batch"
-      );
-      expect(client2HistoryBatches.length).toBe(0);
-    });
-
-    it("cursor contains timestamp and eventId fields", async () => {
-      // Generate events
-      const { client: eventClient } = await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
-
-      for (let i = 0; i < 5; i++) {
-        eventClient.send(
-          JSON.stringify({
-            id: `ping-cursor-${i}`,
-            type: "ping",
-          })
-        );
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Request with limit to get a cursor
       const { client } = await connectAndRegisterClient(serverUrl, {
         mode: ClientMode.READONLY,
       });
 
-      const historyPromise = new Promise<HistoryBatchEvent | null>(
-        (resolve) => {
-          client.onmessage = (event: MessageEvent) => {
-            const data = parseServerEvent(event.data);
-            if (data.type === "history.batch") {
-              resolve(data);
-            }
-          };
-          setTimeout(() => resolve(null), 3000);
-        }
-      );
+      const response = await requestHistory(client, {
+        cursor: { timestamp: new Date().toISOString(), eventId: "fake-id" },
+        limit: 3,
+        direction: "backward",
+      });
 
-      client.send(
-        JSON.stringify({
-          id: "test-cursor-structure",
-          type: "history.sync",
-          data: {
-            limit: 2,
-          },
-        })
-      );
+      expect(response.data.events.length).toBeLessThanOrEqual(3);
+      expect(response.data.nextCursor).toBeNull();
+      expect(response.data.totalInBatch).toBe(response.data.events.length);
+    });
 
-      const historyResponse = await historyPromise;
-      expect(historyResponse).not.toBeNull();
+    it("respects custom limits and sets hasMore when history exceeds the limit", async () => {
+      await generatePingEvents(8);
 
-      // Cursor structure is validated by schema, just verify it exists if hasMore is true
-      if (historyResponse!.data.hasMore) {
-        expect(historyResponse!.data.nextCursor).not.toBeNull();
-      }
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      const response = await requestHistory(client, { limit: 2 });
+
+      expect(response.data.events.length).toBeLessThanOrEqual(2);
+      expect(response.data.hasMore).toBe(true);
+      expect(response.data.nextCursor).toBeNull();
+    });
+
+    it("allows readonly clients to issue history.sync", async () => {
+      await generatePingEvents(1);
+
+      const { client } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+
+      const response = await requestHistory(client);
+      expect(response.type).toBe("history.batch");
+    });
+
+    it("only delivers history.batch to the requesting client", async () => {
+      await generatePingEvents(3);
+
+      const { client: readonlyClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+      const { client: secondClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+
+      const secondClientMessages: ServerEvent[] = [];
+      secondClient.onmessage = (event: MessageEvent) => {
+        secondClientMessages.push(parseServerEvent(event.data));
+      };
+
+      const response = await requestHistory(readonlyClient, { limit: 2 });
+      expect(response.type).toBe("history.batch");
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(secondClientMessages.some((msg) => msg.type === "history.batch")).toBe(false);
     });
   });
-
   describe("Client Permissions", () => {
     it("readonly client can execute read-only commands (ping)", async () => {
       const { client } = await connectAndRegisterClient(serverUrl, {

@@ -462,20 +462,20 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // or send things chronologically from the start
     const {
       events: recentEvents,
-      cursor,
       totalEvents,
+      hasMore,
     } = sendPreviousEvents
       ? await this.eventJournal.getMostRecentEvents(this.config.handshakeHistoryLimit)
       : {
           events: [],
-          cursor: null,
           totalEvents: await this.eventJournal.getTotalEvents(),
+          hasMore: false,
         };
 
     this.logger.log(
       `Sending ${recentEvents.length} events (of ${totalEvents} total) to client ${clientId}` +
         (sendPreviousEvents ? " (limited history)" : " (no history)") +
-        (cursor ? ` with cursor for pagination` : ""),
+        (hasMore ? " with additional history available via download" : ""),
     );
 
     // Send handshake response
@@ -485,7 +485,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         clientId,
         mode: grantedMode,
         eventHistory: recentEvents,
-        cursor: cursor,
+        cursor: null,
         totalEvents: totalEvents,
       },
     };
@@ -843,27 +843,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     this.logger.log(`Handling history.sync command: ${command.id}`);
 
-    const cursor = command.data?.cursor;
     const limit = command.data?.limit ?? this.config.handshakeHistoryLimit;
-    const direction = command.data?.direction ?? "backward";
-
-    let events: import("./schemas/event-schemas.js").ServerEvent[];
-    let nextCursor: import("./types/types.js").EventCursor | null;
-    let hasMore: boolean;
-
-    if (cursor) {
-      // Paginate from cursor
-      const result = await this.eventJournal.getNextEvents(cursor, limit, direction);
-      events = result.events;
-      nextCursor = result.nextCursor;
-      hasMore = result.hasMore;
-    } else {
-      // Get most recent events (no cursor provided)
-      const result = await this.eventJournal.getMostRecentEvents(limit);
-      events = result.events;
-      nextCursor = result.cursor;
-      hasMore = nextCursor !== null;
-    }
+    const { events, hasMore } = await this.eventJournal.getMostRecentEvents(limit);
 
     // Send history.batch response
     const historyBatchEvent: import("./schemas/event-schemas.js").HistoryBatchEvent = {
@@ -872,7 +853,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       type: "history.batch",
       data: {
         events: events,
-        nextCursor: nextCursor,
+        nextCursor: null,
         hasMore: hasMore,
         totalInBatch: events.length,
       },
@@ -883,7 +864,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       sender.send(JSON.stringify(historyBatchEvent));
       this.logger.log(
         `Sent ${events.length} events to client ${sender.data.id}` +
-          ` (hasMore: ${hasMore}, direction: ${direction})`,
+          ` (hasMore: ${hasMore})`,
       );
     } catch (error) {
       this.logger.log(
@@ -3789,7 +3770,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Close event journal
     try {
-      await this.eventJournal.close();
+      // Event journal no longer requires explicit shutdown
       this.logger.log("Event journal closed");
     } catch (error) {
       this.logger.log(`Error closing event journal: ${error}`, "error");

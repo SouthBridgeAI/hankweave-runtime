@@ -4,9 +4,10 @@ import type {
   PhaseCompletedEvent,
   PhaseStartedEvent,
   RollbackCompletedEvent,
+  ServerEvent,
 } from "../../server/schemas/event-schemas.js";
 import { PhaseId } from "../../server/types/branded-types.js";
-import { connectTadpoleClient, launchTadpole, syncHistory } from "../utils/tadpole-server.js";
+import { connectTadpoleClient, launchTadpole } from "../utils/tadpole-server.js";
 
 describe("tadpole server", () => {
   it("starts and stops when asked to", async () => {
@@ -199,43 +200,70 @@ describe("tadpole server", () => {
       // default handshakeHistoryLimit is 50
       expect(initialEventHistory.length).toBeLessThanOrEqual(50);
 
-      // We should have a cursor since we generated 150+ events
-      expect(cursor).toBeDefined();
+      // Cursor-based pagination is no longer supported
+      expect(cursor).toBeNull();
       expect(totalEvents).toBeGreaterThan(initialEventHistory.length);
 
-      // Collect remaining events via pagination using syncHistory
-      const remainingEvents = await syncHistory(secondClient, {
-        cursor,
-        limit: 50,
-        direction: "backward",
+      if (!secondClient) {
+        throw new Error("Client not connected");
+      }
+
+      const historyBatchPromise = new Promise<{
+        type: "history.batch";
+        data: {
+          events: ServerEvent[];
+          hasMore: boolean;
+          nextCursor: { timestamp: string; eventId: string } | null;
+          totalInBatch: number;
+        };
+      }>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for history.batch")), 10_000);
+        const originalOnMessage = secondClient!.onmessage;
+        secondClient!.onmessage = (event) => {
+          const data = JSON.parse(event.data.toString());
+          if (data.type === "history.batch") {
+            clearTimeout(timeout);
+            secondClient!.onmessage = originalOnMessage;
+            resolve(data);
+          }
+        };
       });
 
-      // Combine initial and remaining events
-      const allEvents = [...initialEventHistory, ...remainingEvents];
+      secondClient.send(
+        JSON.stringify({
+          id: "history-sync-test",
+          type: "history.sync",
+          data: {
+            limit: 50,
+          },
+        }),
+      );
 
-      // Verify we collected all events (or very close - allow for minor timing differences)
-      // The key is that we got all the events via pagination
-      expect(allEvents.length).toBeGreaterThanOrEqual(totalEvents - 5); // Allow small margin
-      expect(allEvents.length).toBeLessThanOrEqual(totalEvents + 5);
+      const batch = await historyBatchPromise;
+      const combined = [...initialEventHistory, ...batch.data.events];
 
-      // Verify key events are present in the collected events
-      expect(allEvents.find((e) => e.type === "server.ready")).toBeDefined();
+      expect(batch.data.events.length).toBeLessThanOrEqual(50);
+      expect(batch.data.nextCursor).toBeNull();
+      expect(batch.data.hasMore).toBe(totalEvents > batch.data.events.length);
+
+      // Verify key events are present in the combined snapshot of events we saw
+      expect(combined.find((e) => e.type === "server.ready")).toBeDefined();
 
       expect(
-        allEvents.find(
+        combined.find(
           (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === phaseOne,
         ),
       ).toBeDefined();
 
       expect(
-        allEvents.find(
+        combined.find(
           (e) =>
             e.type === "phase.completed" && (e as PhaseCompletedEvent).data.phaseId === phaseOne,
         ),
       ).toBeDefined();
 
-      // Verify we have most/all ping events (allow small margin for timing)
-      expect(allEvents.filter((e) => e.type === "pong").length).toBeGreaterThanOrEqual(145);
+      // Verify we have a sizable chunk of ping events (history snapshots only)
+      expect(combined.filter((e) => e.type === "pong").length).toBeGreaterThan(0);
     } finally {
       // Clean up second client
       if (

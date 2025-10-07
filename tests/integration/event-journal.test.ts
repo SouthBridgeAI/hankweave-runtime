@@ -7,207 +7,115 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { FileEventStorage } from "../../server/storage/file-event-storage.js";
 import { EventId } from "../../server/types/branded-types.js";
 
-// Helper function to create mock events with realistic size
 function createMockEvent(id: number, timestamp?: string): ServerEvent {
   return {
-    id: EventId(`event-${id.toString().padStart(10, "0")}`),
+    id: EventId(`event-${id}`),
     timestamp: timestamp || new Date(Date.now() + id * 1000).toISOString(),
     type: "pong",
     data: {
-      message: `Test event ${id} - This is a longer message to simulate realistic event sizes with additional data that would typically be present in production events. We want to ensure the file-based storage can handle large volumes efficiently. Extra padding to make events larger: Lorem ipsum dolor sit amet, consectetur adipiscing elit.`,
+      message: `Test event ${id}`,
       timestamp: timestamp || new Date(Date.now() + id * 1000).toISOString(),
-      clientId: `client-${Math.floor(id / 100)}`,
     },
   };
 }
 
-describe("Big Event Journal with FileEventStorage", () => {
+function createPingEvent(id: number): ServerEvent {
+  const timestamp = new Date(Date.now() + id).toISOString();
+  return {
+    id: EventId(`ping-event-${id.toString().padStart(10, "0")}`),
+    timestamp,
+    type: "pong",
+    data: {
+      message: `Ping event ${id}`,
+      timestamp,
+    },
+  };
+}
+
+describe("EventJournal with FileEventStorage", () => {
   let tempDir: string;
-  let storage: FileEventStorage;
   let journal: EventJournal;
 
-  // Configuration for the test
-  const TARGET_FILE_SIZE_MB = 200;
-  const SAMPLE_EVENT = createMockEvent(0);
-  const SAMPLE_EVENT_SIZE = JSON.stringify(SAMPLE_EVENT).length + 1; // +1 for newline
-  const TARGET_EVENT_COUNT = Math.floor(
-    (TARGET_FILE_SIZE_MB * 1024 * 1024) / SAMPLE_EVENT_SIZE
-  );
-
   beforeAll(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "event-journal-scaling-test-"));
-    storage = new FileEventStorage(tempDir);
-    journal = new EventJournal(storage);
+    tempDir = await mkdtemp(join(tmpdir(), "event-journal-integration-"));
+    journal = new EventJournal(new FileEventStorage(tempDir));
     await journal.initialize();
-
-    // Generate large dataset for all tests
-    console.log(
-      `\nGenerating dataset: ${TARGET_EVENT_COUNT.toLocaleString()} events (~${TARGET_FILE_SIZE_MB}MB)`
-    );
-    console.log(`Sample event size: ${SAMPLE_EVENT_SIZE} bytes`);
-
-    const startTime = Date.now();
-    let lastLogTime = startTime;
-
-    for (let i = 0; i < TARGET_EVENT_COUNT; i++) {
-      await journal.append(createMockEvent(i));
-
-      // Log progress every 50,000 events
-      if ((i + 1) % 50000 === 0) {
-        const now = Date.now();
-        const elapsed = now - startTime;
-        const batchElapsed = now - lastLogTime;
-        const eventsPerSec = Math.floor(50000 / (batchElapsed / 1000));
-        console.log(
-          `  Progress: ${(i + 1).toLocaleString()} events (${Math.floor(
-            elapsed / 1000
-          )}s, ${eventsPerSec.toLocaleString()} events/sec)`
-        );
-        lastLogTime = now;
-      }
-    }
-
-    const totalTime = Date.now() - startTime;
-    console.log(`\nGeneration complete: ${(totalTime / 1000).toFixed(2)}s`);
-    console.log(
-      `Average: ${Math.floor(
-        TARGET_EVENT_COUNT / (totalTime / 1000)
-      ).toLocaleString()} events/sec`
-    );
-
-    // Verify file size
-    const eventsFilePath = join(tempDir, "events.jsonl");
-    const fileStats = await stat(eventsFilePath);
-    const fileSizeMB = fileStats.size / (1024 * 1024);
-    console.log(`File size: ${fileSizeMB.toFixed(2)}MB`);
-    console.log(`Total events in journal: ${await journal.getTotalEvents()}`);
   });
 
   afterAll(async () => {
-    await journal.close();
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("gets most recent events efficiently", async () => {
-    const result = await journal.getMostRecentEvents(100);
-
-    expect(result.events).toHaveLength(100);
-    expect(result.events[0].id).toBe(
-      EventId(`event-${(TARGET_EVENT_COUNT - 1).toString().padStart(10, "0")}`)
-    );
-    expect(result.events[99].id).toBe(
-      EventId(
-        `event-${(TARGET_EVENT_COUNT - 100).toString().padStart(10, "0")}`
-      )
-    );
-    expect(result.cursor).not.toBeNull();
-    expect(result.totalEvents).toBe(TARGET_EVENT_COUNT);
-  });
-
-  it("paginates backward through older events", async () => {
-    const recentResult = await journal.getMostRecentEvents(100);
-    const backwardResult = await journal.getNextEvents(
-      recentResult.cursor!,
-      100,
-      "backward"
-    );
-    expect(backwardResult.events).toHaveLength(100);
-    expect(backwardResult.events[0].id).toBe(
-      EventId(
-        `event-${(TARGET_EVENT_COUNT - 102).toString().padStart(10, "0")}`
-      )
-    );
-    expect(backwardResult.hasMore).toBe(true);
-  });
-
-  it("paginates forward through newer events", async () => {
-    const recentResult = await journal.getMostRecentEvents(100);
-    const backwardResult = await journal.getNextEvents(
-      recentResult.cursor!,
-      100,
-      "backward"
-    );
-
-    const forwardResult = await journal.getNextEvents(
-      backwardResult.nextCursor!,
-      50,
-      "forward"
-    );
-
-    expect(forwardResult.events).toHaveLength(50);
-    expect(forwardResult.events[0].id).toBe(
-      EventId(
-        `event-${(TARGET_EVENT_COUNT - 201).toString().padStart(10, "0")}`
-      )
-    );
-  });
-
-  it("handles random access from middle of dataset", async () => {
-    const middleResult = await journal.getMostRecentEvents(1000);
-    const middleEvent =
-      middleResult.events[Math.floor(middleResult.events.length / 2)];
-    const middleCursor = {
-      timestamp: middleEvent.timestamp,
-      eventId: middleEvent.id,
-    };
-
-    const fromMiddleResult = await journal.getNextEvents(
-      middleCursor,
-      50,
-      "forward"
-    );
-
-    expect(fromMiddleResult.events).toHaveLength(50);
-    expect(fromMiddleResult.hasMore).toBe(true);
-  });
-
-  it("handles large page sizes efficiently", async () => {
-    const largePageResult = await journal.getMostRecentEvents(10000);
-    expect(largePageResult.events).toHaveLength(10000);
-  });
-
-  it("handles sequential pagination", async () => {
-    console.log("\nTesting sequential pagination...");
-
-    const pageSize = 1000;
-    const maxPages = 50; // Paginate through 50k events
-    let retrievedCount = 0;
-    let lastEventId: string | null = null;
-
-    // Get first page
-    const firstPage = await journal.getMostRecentEvents(pageSize);
-    retrievedCount += firstPage.events.length;
-    lastEventId = firstPage.events[firstPage.events.length - 1].id;
-
-    // Paginate through multiple pages
-    let cursor = firstPage.cursor;
-    let pageCount = 1;
-    while (cursor !== null && pageCount < maxPages) {
-      const nextPage = await journal.getNextEvents(
-        cursor,
-        pageSize,
-        "backward"
-      );
-      retrievedCount += nextPage.events.length;
-
-      if (nextPage.events.length > 0) {
-        const currentLastId = nextPage.events[nextPage.events.length - 1].id;
-        expect(currentLastId).not.toBe(lastEventId); // Ensure we're moving forward
-        lastEventId = currentLastId;
-      }
-
-      cursor = nextPage.nextCursor;
-      pageCount++;
-
-      // Log progress every 10 pages
-      if (pageCount % 10 === 0) {
-        console.log(
-          `  Retrieved ${retrievedCount.toLocaleString()} events (${pageCount} pages)`
-        );
-      }
+  it("persists events and serves recent history", async () => {
+    for (let i = 1; i <= 5; i++) {
+      await journal.append(createMockEvent(i));
     }
 
-    expect(retrievedCount).toBeGreaterThan(0);
-    expect(pageCount).toBe(maxPages);
+    const { events, hasMore, totalEvents } = await journal.getMostRecentEvents(3);
+    expect(events.map((e) => e.id)).toEqual(["event-5", "event-4", "event-3"]);
+    expect(totalEvents).toBe(5);
+    expect(hasMore).toBe(true);
   });
+
+  it("survives restart", async () => {
+    journal = new EventJournal(new FileEventStorage(tempDir));
+    await journal.initialize();
+
+    const { events, totalEvents } = await journal.getMostRecentEvents(10);
+    expect(totalEvents).toBe(5);
+    expect(events.map((e) => e.id)[0]).toBe("event-5");
+  });
+
+  it("streams the full log", async () => {
+    const stream = await journal.streamAllEvents();
+    const chunks: string[] = [];
+    stream.on("data", (chunk) => chunks.push(chunk.toString()));
+    await new Promise<void>((resolve) => stream.on("end", resolve));
+
+    const lines = chunks.join("").split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("handles a ~200MB event log without degradation", async () => {
+    const largeDir = await mkdtemp(join(tmpdir(), "event-journal-massive-"));
+
+    try {
+      const largeJournal = new EventJournal(new FileEventStorage(largeDir));
+      await largeJournal.initialize();
+
+      const targetBytes = 200 * 1024 * 1024;
+      const sampleEvent = createPingEvent(0);
+      const sampleBytes = Buffer.byteLength(JSON.stringify(sampleEvent)) + 1; // newline
+      const eventCount = Math.ceil(targetBytes / sampleBytes);
+      const yieldInterval = Math.max(1, Math.floor(eventCount / 20));
+
+      for (let i = 0; i < eventCount; i++) {
+        await largeJournal.append(createPingEvent(i));
+        if ((i + 1) % yieldInterval === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+
+      const eventsPath = join(largeDir, "events.jsonl");
+      const { size } = await stat(eventsPath);
+      expect(size).toBeGreaterThanOrEqual(targetBytes);
+      expect(size).toBeLessThan(Math.floor(targetBytes * 1.1));
+
+      const { events, totalEvents, hasMore } = await largeJournal.getMostRecentEvents(100);
+      expect(events).toHaveLength(100);
+      expect(events[0].id).toBe(`ping-event-${(eventCount - 1).toString().padStart(10, "0")}`);
+      expect(totalEvents).toBe(eventCount);
+      expect(hasMore).toBe(eventCount > 100);
+
+      const stream = await largeJournal.streamAllEvents();
+      let chunkRead = 0;
+      for await (const _chunk of stream) {
+        chunkRead += 1;
+        break; // ensure stream begins emitting without reading entire file
+      }
+      expect(chunkRead).toBeGreaterThan(0);
+    } finally {
+      await rm(largeDir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

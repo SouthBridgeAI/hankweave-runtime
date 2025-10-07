@@ -16,31 +16,14 @@ export interface IEventStorage {
   append(event: ServerEvent): Promise<void>;
 
   /**
-   * Get all events from storage
+   * Retrieve the most recent events in chronological order (oldest first)
+   * along with the total number of events persisted.
+   * @param limit Maximum number of events to return
    */
-  getAllEvents(): Promise<ServerEvent[]>;
-
-  /**
-   * Get a slice of events by index range
-   * @param startIndex Inclusive start index (0-based)
-   * @param endIndex Exclusive end index
-   */
-  getEvents(startIndex: number, endIndex: number): Promise<ServerEvent[]>;
-
-  /**
-   * Find the index of an event matching the predicate
-   * @param predicate Function to test each event
-   * @returns Index of the first matching event, or -1 if not found
-   */
-  findEventIndex(predicate: (event: ServerEvent) => boolean): Promise<number>;
-
-  /**
-   * Find the index of an event by ID and timestamp (optimized for cursor lookups)
-   * @param eventId The event ID to find
-   * @param timestamp The event timestamp to find
-   * @returns Index of the matching event, or -1 if not found
-   */
-  findEventByIdAndTimestamp(eventId: string, timestamp: string): Promise<number>;
+  getRecentEvents(limit: number): Promise<{
+    events: ServerEvent[];
+    totalEvents: number;
+  }>;
 
   /**
    * Get the total number of events in storage
@@ -48,12 +31,7 @@ export interface IEventStorage {
   getTotalEvents(): Promise<number>;
 
   /**
-   * Clear all events from storage (primarily for testing)
+   * Create a readable stream of the underlying event log for download/streaming.
    */
-  clear(): Promise<void>;
-
-  /**
-   * Close/cleanup storage resources
-   */
-  close(): Promise<void>;
+  createReadStream(): Promise<NodeJS.ReadableStream>;
 }
