@@ -9,18 +9,6 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { FileEventStorage } from "../../server/storage/file-event-storage.js";
 import { EventId } from "../../server/types/branded-types.js";
 
-function createMockEvent(id: number, timestamp?: string): ServerEvent {
-  return {
-    id: EventId(`event-${id}`),
-    timestamp: timestamp || new Date(Date.now() + id * 1000).toISOString(),
-    type: "pong",
-    data: {
-      message: `Test event ${id}`,
-      timestamp: timestamp || new Date(Date.now() + id * 1000).toISOString(),
-    },
-  };
-}
-
 function createPingEvent(id: number): ServerEvent {
   const timestamp = new Date(Date.now() + id).toISOString();
   return {
@@ -61,33 +49,16 @@ describe("EventJournal with FileEventStorage", () => {
     journal = new EventJournal(storage);
     await journal.initialize();
 
-    const seedEvents = Array.from({ length: 5 }, (_, index) =>
-      createMockEvent(index + 1)
-    );
-    const seedBytes = seedEvents.reduce(
-      (size, event) => size + Buffer.byteLength(JSON.stringify(event)) + 1,
-      0
-    );
-
     const sampleEvent = createPingEvent(0);
     sampleEventBytes = Buffer.byteLength(JSON.stringify(sampleEvent)) + 1;
-    const remainingBytesTarget = Math.max(0, TARGET_BYTES - seedBytes);
-    const pingEventCount =
-      remainingBytesTarget > 0
-        ? Math.ceil(remainingBytesTarget / sampleEventBytes)
-        : 0;
-
-    expectedTotalEvents = seedEvents.length + pingEventCount;
-
-    lastEventId =
-      pingEventCount > 0
-        ? `ping-event-${(pingEventCount - 1).toString().padStart(10, "0")}`
-        : seedEvents[seedEvents.length - 1]!.id;
+    expectedTotalEvents = Math.ceil(TARGET_BYTES / sampleEventBytes);
+    lastEventId = `ping-event-${(expectedTotalEvents - 1)
+      .toString()
+      .padStart(10, "0")}`;
 
     await storage.appendMany(
       (function* (): Generator<ServerEvent> {
-        yield* seedEvents;
-        for (let i = 0; i < pingEventCount; i++) {
+        for (let i = 0; i < expectedTotalEvents; i++) {
           yield createPingEvent(i);
         }
       })()
@@ -126,9 +97,7 @@ describe("EventJournal with FileEventStorage", () => {
 
     const { events, totalEvents } = await journal.getMostRecentEvents(1);
     expect(totalEvents).toBe(expectedTotalEvents);
-    if (events.length > 0) {
-      expect(events[0].id).toBe(lastEventId);
-    }
+    expect(events[0].id).toBe(lastEventId);
   });
 
   it("streams the full log", async () => {
@@ -144,7 +113,6 @@ describe("EventJournal with FileEventStorage", () => {
         reject(error);
       };
       const handleDestinationError = (error: unknown) => {
-        // stream. .destroy();
         reject(error);
       };
 
