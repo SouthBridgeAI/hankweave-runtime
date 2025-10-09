@@ -3,8 +3,6 @@ import { PhaseId } from "./types/branded-types.js";
 
 const phaseIdSchema = z.string().transform((id) => PhaseId(id));
 
-const paginationDirectionSchema = z.enum(["forward", "backward"]);
-
 export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
@@ -104,18 +102,6 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
     type: z.literal("history.sync"),
-    data: z
-      .object({
-        cursor: z
-          .object({
-            timestamp: z.string(),
-            eventId: z.string(),
-          })
-          .optional(),
-        limit: z.number().optional(),
-        direction: paginationDirectionSchema.optional().default("backward"),
-      })
-      .optional(),
   }),
 ]);
 

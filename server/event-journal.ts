@@ -1,149 +1,69 @@
+import { createInterface } from "node:readline";
 import type { ServerEvent } from "./schemas/event-schemas.js";
-import type { EventCursor, PaginationDirection } from "./types/types.js";
+import type { IEventStorage } from "./storage/event-storage.js";
+import { MemoryEventStorage } from "./storage/memory-event-storage.js";
 
 /**
- * Event Journal System for maintaining complete history of all events
- * for new client synchronization.
- *
- * Features:
- * - Maintains configurable event history limit in memory
- * - Supports complete event history retrieval
- * - Automatically trims old events when limit is exceeded
- * - Supports cursor-based pagination
+ * Event Journal System that stores all events in durable storage.
+ * Focuses on simple "tail" style access for initial client synchronization
+ * and exposes streaming helpers for bulk export.
  */
 export class EventJournal {
-  private events: ServerEvent[] = [];
-  private readonly maxEvents: number;
+  private readonly storage: IEventStorage;
 
-  constructor(maxEvents = 10000) {
-    this.maxEvents = maxEvents;
+  constructor(storage?: IEventStorage) {
+    this.storage = storage || new MemoryEventStorage();
   }
 
-  /**
-   * Append a new event to the journal
-   */
-  append(event: ServerEvent): void {
-    this.events.push(event);
+  get transport(): IEventStorage {
+    return this.storage;
+  }
 
-    // Trim old events if needed
-    if (this.events.length > this.maxEvents) {
-      const trimCount = Math.floor(this.maxEvents * 0.1); // Trim 10% when limit reached
-      this.events = this.events.slice(trimCount);
+  async initialize(): Promise<void> {
+    await this.storage.initialize();
+  }
+
+  async append(event: ServerEvent): Promise<void> {
+    await this.storage.append(event);
+  }
+
+  async *getAllEvents(): AsyncGenerator<ServerEvent> {
+    const reader = createInterface({
+      input: await this.storage.createReadStream(),
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
+
+    try {
+      for await (const rawLine of reader) {
+        const line = rawLine.trim();
+        if (line.length === 0) continue;
+        yield JSON.parse(line) as ServerEvent;
+      }
+    } finally {
+      reader.close();
     }
   }
 
-  /**
-   * Get all events in the journal
-   */
-  getAllEvents(): ServerEvent[] {
-    return [...this.events];
-  }
-
-  /**
-   * Get the most recent N events (reverse chronological order)
-   * @param limit Maximum number of events to return
-   * @returns Object containing events, cursor for next page, and metadata
-   */
-  getMostRecentEvents(limit: number): {
+  async getMostRecentEvents(limit: number): Promise<{
     events: ServerEvent[];
-    cursor: EventCursor | null;
     totalEvents: number;
-  } {
-    const totalEvents = this.events.length;
-
-    // Get the most recent events
-    const startIndex = Math.max(0, totalEvents - limit);
-    const events = this.events.slice(startIndex).reverse(); // Reverse for most recent first
-
-    // Create cursor for the next page (older events)
-    const cursor: EventCursor | null =
-      startIndex > 0 && events.length > 0
-        ? {
-            timestamp: this.events[startIndex - 1].timestamp,
-            eventId: this.events[startIndex - 1].id,
-          }
-        : null;
-
-    return {
-      events,
-      cursor,
-      totalEvents,
-    };
-  }
-
-  /**
-   * Get next batch of events relative to a cursor
-   * @param cursor Starting point for pagination
-   * @param limit Maximum number of events to return
-   * @param direction "forward" (newer) or "backward" (older)
-   * @returns Object containing events, next cursor, and metadata
-   */
-  getNextEvents(
-    cursor: EventCursor,
-    limit: number,
-    direction: PaginationDirection = "backward",
-  ): {
-    events: ServerEvent[];
-    nextCursor: EventCursor | null;
     hasMore: boolean;
-  } {
-    // Find the cursor position
-    const cursorIndex = this.events.findIndex(
-      (e) => e.timestamp === cursor.timestamp && e.id === cursor.eventId,
-    );
-
-    if (cursorIndex === -1) {
-      // Cursor not found, return empty
-      return {
-        events: [],
-        nextCursor: null,
-        hasMore: false,
-      };
-    }
-
-    let events: ServerEvent[];
-    let nextCursor: EventCursor | null = null;
-    let hasMore = false;
-
-    if (direction === "backward") {
-      // Get older events (before cursor)
-      const startIndex = Math.max(0, cursorIndex - limit);
-      events = this.events.slice(startIndex, cursorIndex).reverse(); // Reverse for most recent first
-
-      // Create cursor for next page
-      if (startIndex > 0 && events.length > 0) {
-        nextCursor = {
-          timestamp: this.events[startIndex - 1].timestamp,
-          eventId: this.events[startIndex - 1].id,
-        };
-        hasMore = true;
-      }
-    } else {
-      // Get newer events (after cursor)
-      const endIndex = Math.min(this.events.length, cursorIndex + 1 + limit);
-      events = this.events.slice(cursorIndex + 1, endIndex);
-
-      // Create cursor for next page
-      if (endIndex < this.events.length && events.length > 0) {
-        nextCursor = {
-          timestamp: this.events[endIndex].timestamp,
-          eventId: this.events[endIndex].id,
-        };
-        hasMore = true;
-      }
-    }
+  }> {
+    const { events: recentEvents, totalEvents } = await this.storage.getRecentEvents(limit);
+    const ordered = [...recentEvents].reverse();
 
     return {
-      events,
-      nextCursor,
-      hasMore,
+      events: ordered,
+      totalEvents,
+      hasMore: totalEvents > ordered.length,
     };
   }
 
-  /**
-   * Get total number of events in the journal
-   */
-  getTotalEvents(): number {
-    return this.events.length;
+  async getTotalEvents(): Promise<number> {
+    return this.storage.getTotalEvents();
+  }
+
+  async streamAllEvents(): Promise<NodeJS.ReadableStream> {
+    return this.storage.createReadStream();
   }
 }

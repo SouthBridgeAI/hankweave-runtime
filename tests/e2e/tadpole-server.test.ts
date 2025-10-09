@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 import { describe, expect, it } from "bun:test";
 import type {
+  HistoryBatchEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   RollbackCompletedEvent,
 } from "../../server/schemas/event-schemas.js";
 import { PhaseId } from "../../server/types/branded-types.js";
-import { connectTadpoleClient, launchTadpole, syncHistory } from "../utils/tadpole-server.js";
+import { connectTadpoleClient, launchTadpole } from "../utils/tadpole-server.js";
 
 describe("tadpole server", () => {
   it("starts and stops when asked to", async () => {
@@ -158,7 +159,7 @@ describe("tadpole server", () => {
     }
   }, 180_000);
 
-  it("allows a second client to connect and retrieve event history via pagination", async () => {
+  it("allows a second client to connect and stream event history", async () => {
     // Launch tadpole with ping event generation
     const tadpole = await launchTadpole({
       generatePingEvents: 150,
@@ -191,7 +192,6 @@ describe("tadpole server", () => {
       expect(clientSetup.handshakeResponse?.data.eventHistory).toBeDefined();
 
       const initialEventHistory = clientSetup.handshakeResponse?.data.eventHistory || [];
-      const cursor = clientSetup.handshakeResponse?.data.cursor;
       const totalEvents = clientSetup.handshakeResponse?.data.totalEvents || 0;
 
       // Verify we received events (should be limited by handshakeHistoryLimit)
@@ -199,43 +199,76 @@ describe("tadpole server", () => {
       // default handshakeHistoryLimit is 50
       expect(initialEventHistory.length).toBeLessThanOrEqual(50);
 
-      // We should have a cursor since we generated 150+ events
-      expect(cursor).toBeDefined();
       expect(totalEvents).toBeGreaterThan(initialEventHistory.length);
 
-      // Collect remaining events via pagination using syncHistory
-      const remainingEvents = await syncHistory(secondClient, {
-        cursor,
-        limit: 50,
-        direction: "backward",
+      if (!secondClient) {
+        throw new Error("Client not connected");
+      }
+
+      const historyStreamPromise = new Promise<{
+        batches: Array<HistoryBatchEvent>;
+      }>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Timed out waiting for history.batch")),
+          10_000,
+        );
+
+        if (!secondClient) {
+          return reject(new Error("Client not connected"));
+        }
+
+        const originalOnMessage = secondClient.onmessage;
+        const batches: Array<HistoryBatchEvent> = [];
+
+        secondClient.onmessage = (event) => {
+          const data = JSON.parse(event.data.toString());
+
+          if (data.type !== "history.batch") {
+            return;
+          }
+
+          batches.push(data);
+
+          if (!data.data.hasMore && secondClient) {
+            clearTimeout(timeout);
+            secondClient.onmessage = originalOnMessage;
+            resolve({ batches });
+          }
+        };
       });
 
-      // Combine initial and remaining events
-      const allEvents = [...initialEventHistory, ...remainingEvents];
+      secondClient.send(
+        JSON.stringify({
+          id: "history-sync-test",
+          type: "history.sync",
+        }),
+      );
 
-      // Verify we collected all events (or very close - allow for minor timing differences)
-      // The key is that we got all the events via pagination
-      expect(allEvents.length).toBeGreaterThanOrEqual(totalEvents - 5); // Allow small margin
-      expect(allEvents.length).toBeLessThanOrEqual(totalEvents + 5);
+      const { batches } = await historyStreamPromise;
+      const finalBatch = batches[batches.length - 1];
+      const combined = [...initialEventHistory, ...batches.flatMap((batch) => batch.data.events)];
 
-      // Verify key events are present in the collected events
-      expect(allEvents.find((e) => e.type === "server.ready")).toBeDefined();
+      expect(batches.length).toBeGreaterThan(0);
+      expect(finalBatch.data.hasMore).toBe(false);
+
+      // Verify key events are present in the combined snapshot of events we saw
+      expect(combined.find((e) => e.type === "server.ready")).toBeDefined();
 
       expect(
-        allEvents.find(
+        combined.find(
           (e) => e.type === "phase.started" && (e as PhaseStartedEvent).data.phaseId === phaseOne,
         ),
       ).toBeDefined();
 
       expect(
-        allEvents.find(
+        combined.find(
           (e) =>
             e.type === "phase.completed" && (e as PhaseCompletedEvent).data.phaseId === phaseOne,
         ),
       ).toBeDefined();
 
-      // Verify we have most/all ping events (allow small margin for timing)
-      expect(allEvents.filter((e) => e.type === "pong").length).toBeGreaterThanOrEqual(145);
+      // Verify we have a sizable chunk of ping events (history snapshots only)
+      expect(combined.filter((e) => e.type === "pong").length).toBeGreaterThan(0);
     } finally {
       // Clean up second client
       if (

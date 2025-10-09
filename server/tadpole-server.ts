@@ -18,6 +18,7 @@ import type {
   ErrorEvent,
   FileTreeUpdatedEvent,
   FileUpdatedEvent,
+  HistoryBatchEvent,
   InfoEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
@@ -28,6 +29,7 @@ import type {
   TokenUsageEvent,
 } from "./schemas/event-schemas.js";
 import { StateManager } from "./state-manager.js";
+import { FileEventStorage } from "./storage/file-event-storage.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { EventId, PhaseId, RunId, SessionId } from "./types/branded-types.js";
 import type {
@@ -180,8 +182,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const tadpoleDir = path.join(this.config.executionPath, ".tadpole");
     this.stateManager = new StateManager(tadpoleDir, this.logger, this.config.phases);
 
-    // Initialize Event Journal
-    this.eventJournal = new EventJournal(this.config.eventJournalMaxSize);
+    // Initialize Event Journal with file-based storage
+    this.eventJournal = new EventJournal(new FileEventStorage(path.join(tadpoleDir, "events")));
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -278,6 +280,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize state manager
     await this.stateManager.initialize();
+
+    // Initialize event journal
+    await this.eventJournal.initialize();
 
     // Check for existing lock file
     if (fs.existsSync(this.config.lockFile)) {
@@ -458,20 +463,20 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // or send things chronologically from the start
     const {
       events: recentEvents,
-      cursor,
       totalEvents,
+      hasMore,
     } = sendPreviousEvents
-      ? this.eventJournal.getMostRecentEvents(this.config.handshakeHistoryLimit)
+      ? await this.eventJournal.getMostRecentEvents(this.config.handshakeHistoryLimit)
       : {
           events: [],
-          cursor: null,
-          totalEvents: this.eventJournal.getTotalEvents(),
+          totalEvents: await this.eventJournal.getTotalEvents(),
+          hasMore: false,
         };
 
     this.logger.log(
       `Sending ${recentEvents.length} events (of ${totalEvents} total) to client ${clientId}` +
         (sendPreviousEvents ? " (limited history)" : " (no history)") +
-        (cursor ? ` with cursor for pagination` : ""),
+        (hasMore ? " with additional history available via download" : ""),
     );
 
     // Send handshake response
@@ -481,7 +486,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         clientId,
         mode: grantedMode,
         eventHistory: recentEvents,
-        cursor: cursor,
         totalEvents: totalEvents,
       },
     };
@@ -502,7 +506,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     // Store in journal and send to the client
-    this.eventJournal.append(serverReadyEvent);
+    await this.eventJournal.append(serverReadyEvent);
     this.sendEventToClient(ws, serverReadyEvent);
 
     // TODO: figure out if this should be only sent after handshake
@@ -524,7 +528,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       } as import("./types/types.js").ServerIdleEvent;
 
       // Store in journal and send to the client
-      this.eventJournal.append(serverIdleEvent);
+      await this.eventJournal.append(serverIdleEvent);
       this.sendEventToClient(ws, serverIdleEvent);
     }
   }
@@ -728,7 +732,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         break;
 
       case "history.sync":
-        this.handleHistorySync(command, sender);
+        await this.handleHistorySync(command, sender);
         break;
 
       default:
@@ -766,7 +770,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Store in event journal and emit for tests and basic TUI
-      this.eventJournal.append(pongEvent);
+      this.eventJournal.append(pongEvent).catch((error) => {
+        this.logger.log(`Error appending pong event to journal: ${error}`, "error");
+      });
       this.emit("event", pongEvent);
     } else {
       this.logger.log("Ping command received but no valid sender provided", "error");
@@ -816,7 +822,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     };
 
-    this.eventJournal.append(broadcastPongEvent);
+    this.eventJournal.append(broadcastPongEvent).catch((error) => {
+      this.logger.log(`Error appending broadcast pong event to journal: ${error}`, "error");
+    });
     this.emit("event", broadcastPongEvent);
   }
 
@@ -824,10 +832,10 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // History Sync Command
   // ============================================================================
 
-  private handleHistorySync(
+  private async handleHistorySync(
     command: import("./schemas/event-schemas.js").HistorySyncCommand,
     sender?: ServerWebSocket<ClientData>,
-  ): void {
+  ): Promise<void> {
     if (!sender?.data.handshakeComplete) {
       this.logger.log("History sync command received but sender not ready", "error");
       return;
@@ -835,54 +843,30 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     this.logger.log(`Handling history.sync command: ${command.id}`);
 
-    const cursor = command.data?.cursor;
-    const limit = command.data?.limit ?? this.config.handshakeHistoryLimit;
-    const direction = command.data?.direction ?? "backward";
-
-    let events: import("./schemas/event-schemas.js").ServerEvent[];
-    let nextCursor: import("./types/types.js").EventCursor | null;
-    let hasMore: boolean;
-
-    if (cursor) {
-      // Paginate from cursor
-      const result = this.eventJournal.getNextEvents(cursor, limit, direction);
-      events = result.events;
-      nextCursor = result.nextCursor;
-      hasMore = result.hasMore;
-    } else {
-      // Get most recent events (no cursor provided)
-      const result = this.eventJournal.getMostRecentEvents(limit);
-      events = result.events;
-      nextCursor = result.cursor;
-      hasMore = nextCursor !== null;
+    const target = sender;
+    if (!target) {
+      this.logger.log("History sync command received without sender", "error");
+      return;
     }
 
-    // Send history.batch response
-    const historyBatchEvent: import("./schemas/event-schemas.js").HistoryBatchEvent = {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "history.batch",
-      data: {
-        events: events,
-        nextCursor: nextCursor,
-        hasMore: hasMore,
-        totalInBatch: events.length,
-      },
-    };
+    const iterator = this.eventJournal.getAllEvents()[Symbol.asyncIterator]();
+    let next = await iterator.next();
 
-    try {
-      this.logger.logSocketTraffic(this.config.socketLogFile, "out", historyBatchEvent);
-      sender.send(JSON.stringify(historyBatchEvent));
-      this.logger.log(
-        `Sent ${events.length} events to client ${sender.data.id}` +
-          ` (hasMore: ${hasMore}, direction: ${direction})`,
-      );
-    } catch (error) {
-      this.logger.log(
-        `Failed to send history batch to client ${sender.data.id}: ${error}`,
-        "error",
-      );
-      this.clients.delete(sender.data.id);
+    if (next.done) {
+      this.sendHistoryBatch(target, [], false);
+      return;
+    }
+
+    let pending = next.value;
+    while (true) {
+      next = await iterator.next();
+      if (next.done) {
+        this.sendHistoryBatch(target, [pending], false);
+        break;
+      }
+
+      this.sendHistoryBatch(target, [pending], true);
+      pending = next.value;
     }
 
     // Note: We don't store history.batch events in the journal or emit them
@@ -893,9 +877,39 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   // Event & State Management
   // ============================================================================
 
+  private sendHistoryBatch(
+    sender: ServerWebSocket<ClientData>,
+    events: ServerEvent[],
+    hasMore: boolean,
+  ): void {
+    const historyBatchEvent: HistoryBatchEvent = {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "history.batch",
+      data: {
+        events,
+        hasMore,
+      },
+    };
+
+    try {
+      this.logger.logSocketTraffic(this.config.socketLogFile, "out", historyBatchEvent);
+      sender.send(JSON.stringify(historyBatchEvent));
+      this.logger.log(`Sent ${events.length} events to client ${sender.data.id}`);
+    } catch (error) {
+      this.logger.log(
+        `Failed to send history batch to client ${sender.data.id}: ${error}`,
+        "error",
+      );
+      this.clients.delete(sender.data.id);
+    }
+  }
+
   private sendEvent(event: ServerEvent): void {
-    // Store in journal first
-    this.eventJournal.append(event);
+    // Store in journal first (fire and forget, log errors)
+    this.eventJournal.append(event).catch((error) => {
+      this.logger.log(`Error appending event to journal: ${error}`, "error");
+    });
 
     if (this.clients.size === 0) {
       // Still store events even with no clients connected
@@ -953,7 +967,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     if (client) {
       // Send to specific client and store in journal
-      this.eventJournal.append(stateSnapshotEvent);
+      await this.eventJournal.append(stateSnapshotEvent);
       this.sendEventToClient(client, stateSnapshotEvent);
     } else {
       // Send to all clients (default behavior)
@@ -3775,6 +3789,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (this.proxyRunner) {
       this.proxyRunner.stop();
       this.proxyRunner = null;
+    }
+
+    // Close event journal
+    try {
+      // Event journal no longer requires explicit shutdown
+      this.logger.log("Event journal closed");
+    } catch (error) {
+      this.logger.log(`Error closing event journal: ${error}`, "error");
     }
 
     if (fs.existsSync(this.config.lockFile)) {

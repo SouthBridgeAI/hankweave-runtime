@@ -26,15 +26,6 @@ const tokenUsageSchema = z.object({
   cacheReadTokens: z.number(),
 });
 
-// Event cursor schema for pagination
-const eventCursorSchema = z.object({
-  timestamp: z.string(),
-  eventId: z.string(),
-});
-
-// Pagination direction schema
-const paginationDirectionSchema = z.enum(["forward", "backward"]);
-
 // File node type for recursive schema
 interface FileNode {
   name: string;
@@ -287,9 +278,7 @@ export const pongEventDataSchema = z.object({
 
 export const historyBatchEventDataSchema = z.object({
   events: z.array(z.any()), // Array of ServerEvent (we use z.any() to avoid circular reference)
-  nextCursor: eventCursorSchema.nullable(),
   hasMore: z.boolean(),
-  totalInBatch: z.number(),
 });
 
 // ============================================================================
@@ -501,13 +490,6 @@ export const pingBroadcastCommandSchema = z.object({
 export const historySyncCommandSchema = z.object({
   id: z.string(),
   type: z.literal("history.sync"),
-  data: z
-    .object({
-      cursor: eventCursorSchema.optional(),
-      limit: z.number().optional(),
-      direction: paginationDirectionSchema.optional().default("backward"),
-    })
-    .optional(),
 });
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
