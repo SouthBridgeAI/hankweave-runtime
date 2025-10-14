@@ -566,6 +566,73 @@ export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema
 export type PongEvent = z.infer<typeof pongEventSchema>;
 export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
 
+// ============================================================================
+// Event Category Classification
+// ============================================================================
+
+// Define which event types belong to each category
+const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>([
+  "phase.started",
+  "phase.completed",
+  "state.snapshot",
+  "server.idle",
+  "assistant.action",
+  "token.usage",
+  "tool.result",
+  "file.updated",
+  "filetree.updated",
+  "info",
+  "error",
+  "checkpoint.list",
+  "rollback.started",
+  "rollback.progress",
+  "rollback.phaseCheckpoint",
+  "rollback.completed",
+  "rollback.workspaceCleanup",
+]);
+
+const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>([
+  "server.ready",
+  "pong",
+  "history.batch",
+  "incomplete.phase",
+]);
+
+// Type unions for each category
+export type ServerStateEvent =
+  | PhaseStartedEvent
+  | PhaseCompletedEvent
+  | StateSnapshotEvent
+  | ServerIdleEvent
+  | AssistantActionEvent
+  | TokenUsageEvent
+  | ToolResultEvent
+  | FileUpdatedEvent
+  | FileTreeUpdatedEvent
+  | InfoEvent
+  | ErrorEvent
+  | CheckpointListEvent
+  | RollbackStartedEvent
+  | RollbackProgressEvent
+  | RollbackPhaseCheckpointEvent
+  | RollbackCompletedEvent
+  | RollbackWorkspaceCleanupEvent;
+
+export type ConnectionStateEvent =
+  | ServerReadyEvent
+  | PongEvent
+  | HistoryBatchEvent
+  | IncompletePhaseEvent;
+
+// Type guard functions
+export function isServerStateEvent(event: ServerEvent): event is ServerStateEvent {
+  return SERVER_STATE_EVENT_TYPES.has(event.type);
+}
+
+export function isConnectionStateEvent(event: ServerEvent): event is ConnectionStateEvent {
+  return CONNECTION_STATE_EVENT_TYPES.has(event.type);
+}
+
 // Export client command types
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 export type StartPhaseCommand = z.infer<typeof startPhaseCommandSchema>;
