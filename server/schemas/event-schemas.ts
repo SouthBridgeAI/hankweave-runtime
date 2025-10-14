@@ -570,7 +570,24 @@ export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
 // Event Category Classification
 // ============================================================================
 
-// Define which event types belong to each category
+/**
+ * Events are classified into two categories:
+ *
+ * - **Server State Events**: Track the server's execution state, phase lifecycle,
+ *   and persistent changes (e.g., phase execution, file updates, errors).
+ *   These events represent changes to the server's internal state and are
+ *   persisted to the event journal and broadcasted to all connected clients.
+ *
+ * - **Connection State Events**: Track client specific events
+ *   These events are not persisted to the event journal and are sent to individual clients.
+ *
+ * The category is automatically inferred from the event's type field using the
+ * Sets below. Events do not have an explicit category field.
+ */
+
+/**
+ * Set of event types that represent server state changes.
+ */
 const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>([
   "phase.started",
   "phase.completed",
@@ -591,6 +608,9 @@ const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>([
   "rollback.workspaceCleanup",
 ]);
 
+/**
+ * Set of event types that represent connection state changes.
+ */
 const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>([
   "server.ready",
   "pong",
@@ -598,7 +618,16 @@ const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>([
   "incomplete.phase",
 ]);
 
-// Type unions for each category
+/**
+ * Union type representing all server state events.
+ * These events track the server's execution state and persistent changes.
+ *
+ * @example
+ * function handleServerState(event: ServerStateEvent) {
+ *   // event is guaranteed to be a server state event
+ *   // TypeScript knows this is one of the server state event types
+ * }
+ */
 export type ServerStateEvent =
   | PhaseStartedEvent
   | PhaseCompletedEvent
@@ -618,17 +647,50 @@ export type ServerStateEvent =
   | RollbackCompletedEvent
   | RollbackWorkspaceCleanupEvent;
 
+/**
+ * Union type representing all connection state events.
+ * These events track WebSocket connection lifecycle and client communication.
+ *
+ * @example
+ * function handleConnectionState(event: ConnectionStateEvent) {
+ *   // event is guaranteed to be a connection state event
+ *   // TypeScript knows this is one of the connection state event types
+ * }
+ */
 export type ConnectionStateEvent =
   | ServerReadyEvent
   | PongEvent
   | HistoryBatchEvent
   | IncompletePhaseEvent;
 
-// Type guard functions
+/**
+ * Type guard to check if an event is a server state event.
+ *
+ * @param event - The event to check
+ * @returns true if the event is a server state event
+ *
+ * @example
+ * if (isServerStateEvent(event)) {
+ *   // TypeScript narrows event to ServerStateEvent
+ *   await journal.append(event);
+ * }
+ */
 export function isServerStateEvent(event: ServerEvent): event is ServerStateEvent {
   return SERVER_STATE_EVENT_TYPES.has(event.type);
 }
 
+/**
+ * Type guard to check if an event is a connection state event.
+ *
+ * @param event - The event to check
+ * @returns true if the event is a connection state event
+ *
+ * @example
+ * if (isConnectionStateEvent(event)) {
+ *   // TypeScript narrows event to ConnectionStateEvent
+ *   // Handle connection-specific logic without persisting
+ * }
+ */
 export function isConnectionStateEvent(event: ServerEvent): event is ConnectionStateEvent {
   return CONNECTION_STATE_EVENT_TYPES.has(event.type);
 }
