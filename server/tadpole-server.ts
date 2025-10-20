@@ -908,52 +908,52 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     data: ServerInternalEvents[K][0],
     target?: ServerWebSocket<ClientData>,
   ): boolean {
-    // Handle server event routing
-    if (event === "event") {
-      const serverEvent = data as ServerEvent;
+    if (event !== "event") {
+      // Should relax this restriction eventually
+      throw new Error(`Unsupported event type: ${event}. Can only emit "event" events.`);
+    }
 
-      // If a target is specified, send only to that client (overrides default routing)
-      if (target) {
-        try {
-          this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
-          target.send(JSON.stringify(serverEvent));
-        } catch (error) {
-          this.logger.log(`Failed to send event to client ${target.data.id}: ${error}`, "error");
-          this.clients.delete(target.data.id);
-        }
-      } else if (isServerStateEvent(serverEvent)) {
-        // Server state events without target: journal and broadcast to all clients
-        this.eventJournal.append(serverEvent).catch((error) => {
-          this.logger.log(`Error appending event to journal: ${error}`, "error");
-        });
+    const serverEvent = data as ServerEvent;
 
-        // Broadcast to all connected clients that have completed handshake
-        if (this.clients.size > 0) {
-          for (const [_, client] of this.clients) {
-            if (!client.data.handshakeComplete) continue;
-            try {
-              this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
-              client.send(JSON.stringify(serverEvent));
-            } catch (error) {
-              this.logger.log(
-                `Failed to send event to client ${client.data.id}: ${error}`,
-                "error",
-              );
-              this.clients.delete(client.data.id);
-            }
+    // early exit if we have a connection state event without a target
+    if (isConnectionStateEvent(serverEvent) && !target) {
+      this.logger.log(
+        `Connection state event ${serverEvent.type} requires a target client but none provided`,
+        "error",
+      );
+      return false;
+    }
+
+    if (isServerStateEvent(serverEvent)) {
+      // Server state events without target: journal and broadcast to all clients
+      this.eventJournal.append(serverEvent).catch((error) => {
+        this.logger.log(`Error appending event to journal: ${error}`, "error");
+      });
+
+      // Broadcast to all connected clients that have completed handshake
+      if (this.clients.size > 0) {
+        for (const [_, client] of this.clients) {
+          if (!client.data.handshakeComplete) continue;
+          try {
+            this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
+            client.send(JSON.stringify(serverEvent));
+          } catch (error) {
+            this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
+            this.clients.delete(client.data.id);
           }
         }
-      } else if (isConnectionStateEvent(serverEvent)) {
-        // Connection state events require a target
-        this.logger.log(
-          `Connection state event ${serverEvent.type} requires a target client but none provided`,
-          "error",
-        );
-        return false;
-      } else {
-        // This should never happen - all ServerEvents should be categorized
-        this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
       }
+    } else if (isConnectionStateEvent(serverEvent) && target) {
+      try {
+        this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
+        target.send(JSON.stringify(serverEvent));
+      } catch (error) {
+        this.logger.log(`Failed to send event to client ${target.data.id}: ${error}`, "error");
+        this.clients.delete(target.data.id);
+      }
+    } else {
+      // This should never happen - all ServerEvents should be categorized
+      this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
     }
 
     // Continue with normal emission for tests/TUI

@@ -396,12 +396,6 @@ export const historyBatchEventSchema = baseEventSchema.extend({
   data: historyBatchEventDataSchema,
 });
 
-export const fooCommandSchema = baseEventSchema.extend({
-  id: z.string(),
-  type: z.literal("foo"),
-  data: historyBatchEventDataSchema,
-});
-
 // ============================================================================
 // Client Command Schemas
 // ============================================================================
