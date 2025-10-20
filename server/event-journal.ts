@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import type { ServerEvent } from "./schemas/event-schemas.js";
+import { isServerStateEvent, type ServerEvent } from "./schemas/event-schemas.js";
 import type { IEventStorage } from "./storage/event-storage.js";
 import { MemoryEventStorage } from "./storage/memory-event-storage.js";
 
@@ -24,6 +24,13 @@ export class EventJournal {
   }
 
   async append(event: ServerEvent): Promise<void> {
+    // Only server state events should be journaled
+    if (!isServerStateEvent(event)) {
+      throw new Error(
+        `Cannot journal non-server-state event: ${event.type}. ` +
+          `Only server state events should be persisted to the event journal.`,
+      );
+    }
     await this.storage.append(event);
   }
 

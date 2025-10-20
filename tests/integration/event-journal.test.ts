@@ -9,15 +9,14 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { FileEventStorage } from "../../server/storage/file-event-storage.js";
 import { EventId } from "../../server/types/branded-types.js";
 
-function createPingEvent(id: number): ServerEvent {
+function createInfoEvent(id: number): ServerEvent {
   const timestamp = new Date(Date.now() + id).toISOString();
   return {
-    id: EventId(`ping-event-${id.toString().padStart(10, "0")}`),
+    id: EventId(`info-event-${id.toString().padStart(10, "0")}`),
     timestamp,
-    type: "pong",
+    type: "info",
     data: {
-      message: `Ping event ${id}`,
-      timestamp,
+      message: `Info event ${id}`,
     },
   };
 }
@@ -49,17 +48,17 @@ describe("EventJournal with FileEventStorage", () => {
     journal = new EventJournal(storage);
     await journal.initialize();
 
-    const sampleEvent = createPingEvent(0);
+    const sampleEvent = createInfoEvent(0);
     sampleEventBytes = Buffer.byteLength(JSON.stringify(sampleEvent)) + 1;
     expectedTotalEvents = Math.ceil(TARGET_BYTES / sampleEventBytes);
-    lastEventId = `ping-event-${(expectedTotalEvents - 1)
+    lastEventId = `info-event-${(expectedTotalEvents - 1)
       .toString()
       .padStart(10, "0")}`;
 
     await storage.appendMany(
       (function* (): Generator<ServerEvent> {
         for (let i = 0; i < expectedTotalEvents; i++) {
-          yield createPingEvent(i);
+          yield createInfoEvent(i);
         }
       })()
     );
