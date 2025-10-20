@@ -898,6 +898,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
    * - Server state events (no target): Journaled and broadcasted to all clients
    * - Server state events (with target): Sent only to specified client (e.g., validation errors)
    * - Connection state events (with target): Sent only to specified client, not journaled
+   * - Error server event is a notable exception - it's a server state error that can be sent to a specific client if target is provided
    *
    * @param event - Event type (always "event" for ServerEvents)
    * @param data - The server event to emit
@@ -910,10 +911,18 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   ): boolean {
     if (event !== "event") {
       // Should relax this restriction eventually
+      this.logger.log(`Unsupported event type emitted: ${event}`, "error");
       throw new Error(`Unsupported event type: ${event}. Can only emit "event" events.`);
     }
 
     const serverEvent = data as ServerEvent;
+
+    // this should never happen due to compile time checks, but...
+    if (!isServerStateEvent(serverEvent) && !isConnectionStateEvent(serverEvent)) {
+      // This should never happen - all ServerEvents should be categorized
+      this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
+      throw new Error(`Unknown event: ${(serverEvent as ServerEvent).type}`);
+    }
 
     // early exit if we have a connection state event without a target
     if (isConnectionStateEvent(serverEvent) && !target) {
@@ -924,7 +933,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       return false;
     }
 
-    if (isServerStateEvent(serverEvent)) {
+    // extra target check for error events that can be sent to a specific client
+    if (isServerStateEvent(serverEvent) && !target) {
       // Server state events without target: journal and broadcast to all clients
       this.eventJournal.append(serverEvent).catch((error) => {
         this.logger.log(`Error appending event to journal: ${error}`, "error");
@@ -939,21 +949,16 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
             client.send(JSON.stringify(serverEvent));
           } catch (error) {
             this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
-            this.clients.delete(client.data.id);
           }
         }
       }
-    } else if (isConnectionStateEvent(serverEvent) && target) {
+    } else {
       try {
         this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
-        target.send(JSON.stringify(serverEvent));
+        target?.send(JSON.stringify(serverEvent));
       } catch (error) {
-        this.logger.log(`Failed to send event to client ${target.data.id}: ${error}`, "error");
-        this.clients.delete(target.data.id);
+        this.logger.log(`Failed to send event to client ${target?.data.id}: ${error}`, "error");
       }
-    } else {
-      // This should never happen - all ServerEvents should be categorized
-      this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
     }
 
     // Continue with normal emission for tests/TUI
