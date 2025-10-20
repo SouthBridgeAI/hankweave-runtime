@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AssertEqual } from "../utils.js";
 
 // ============================================================================
 // Re-usable Base Schemas
@@ -395,6 +396,12 @@ export const historyBatchEventSchema = baseEventSchema.extend({
   data: historyBatchEventDataSchema,
 });
 
+export const fooCommandSchema = baseEventSchema.extend({
+  id: z.string(),
+  type: z.literal("foo"),
+  data: historyBatchEventDataSchema,
+});
+
 // ============================================================================
 // Client Command Schemas
 // ============================================================================
@@ -586,9 +593,9 @@ export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
  */
 
 /**
- * Set of event types that represent server state changes.
+ * Array of event types that represent server state changes.
  */
-const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>([
+const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "phase.started",
   "phase.completed",
   "state.snapshot",
@@ -606,27 +613,35 @@ const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>([
   "rollback.phaseCheckpoint",
   "rollback.completed",
   "rollback.workspaceCleanup",
-]);
+] as const;
 
 /**
- * Set of event types that represent connection state changes.
+ * Array of event types that represent connection state changes.
  */
-const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>([
+const CONNECTION_STATE_EVENT_TYPES_ARRAY = [
   "server.ready",
   "pong",
   "history.batch",
   "incomplete.phase",
-]);
+] as const;
+
+// Derive union types from the arrays
+type ServerStateEventType = (typeof SERVER_STATE_EVENT_TYPES_ARRAY)[number];
+type ConnectionStateEventType = (typeof CONNECTION_STATE_EVENT_TYPES_ARRAY)[number];
+
+/**
+ * Set of event types that represent server state changes.
+ */
+const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>(SERVER_STATE_EVENT_TYPES_ARRAY);
+
+/**
+ * Set of event types that represent connection state changes.
+ */
+const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>(CONNECTION_STATE_EVENT_TYPES_ARRAY);
 
 /**
  * Union type representing all server state events.
  * These events track the server's execution state and persistent changes.
- *
- * @example
- * function handleServerState(event: ServerStateEvent) {
- *   // event is guaranteed to be a server state event
- *   // TypeScript knows this is one of the server state event types
- * }
  */
 export type ServerStateEvent =
   | PhaseStartedEvent
@@ -650,18 +665,30 @@ export type ServerStateEvent =
 /**
  * Union type representing all connection state events.
  * These events track WebSocket connection lifecycle and client communication.
- *
- * @example
- * function handleConnectionState(event: ConnectionStateEvent) {
- *   // event is guaranteed to be a connection state event
- *   // TypeScript knows this is one of the connection state event types
- * }
  */
 export type ConnectionStateEvent =
   | ServerReadyEvent
   | PongEvent
   | HistoryBatchEvent
   | IncompletePhaseEvent;
+
+// Compile-time check: ensures all ServerEventTypes are categorized
+// This will cause a TypeScript error if any event is not categorized as either
+// a ServerStateEventType or ConnectionStateEventType
+const _assertAllEventsCategorized: AssertEqual<
+  ServerEventType,
+  ServerStateEventType | ConnectionStateEventType
+> = true;
+
+// Compile-time checks: ensure the union types match their respective arrays
+// These will cause TypeScript errors if events are missing from the unions
+const _assertServerStateEventsMatch: AssertEqual<ServerStateEvent["type"], ServerStateEventType> =
+  true;
+
+const _assertConnectionStateEventsMatch: AssertEqual<
+  ConnectionStateEvent["type"],
+  ConnectionStateEventType
+> = true;
 
 /**
  * Type guard to check if an event is a server state event.
