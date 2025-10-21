@@ -214,12 +214,60 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     });
 
+    // Listen to all state transitions and journal them
+    this.stateManager.on("stateChanged", (transition) => {
+      this.emitStateTransitionEvent(transition);
+    });
+
     this.stateManager.on("transitionError", ({ event: _event, error }) => {
       if (error.name === "PersistenceError") {
         // Can't save state - this is fatal
         this.handleError(error, "state-persistence", ErrorSeverity.FATAL);
       }
     });
+  }
+
+  /**
+   * Convert a state transition to a server event and emit it for journaling.
+   * This provides a complete audit trail of all state machine transitions.
+   */
+  private emitStateTransitionEvent(
+    transition: import("./types/state-types.js").StateTransition,
+  ): void {
+    // Extract relevant IDs from transition data
+    let runId: string | undefined;
+    let phaseId: string | undefined;
+
+    if ("runId" in transition.data) {
+      runId = transition.data.runId as string;
+    }
+    if ("phaseId" in transition.data) {
+      phaseId = transition.data.phaseId as string;
+    }
+
+    const stateTransitionEvent: import("./schemas/event-schemas.js").StateTransitionEvent = {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "state.transition",
+      data: {
+        transitionType: transition.type,
+        runId,
+        phaseId,
+        transition: {
+          type: transition.type,
+          data: transition.data as Record<string, unknown>,
+        },
+        resultingState: {
+          currentRunId: this.stateManager.getState().currentRunId,
+          runCount: this.stateManager.getState().runs.length,
+          totalCost: this.stateManager.getTotalCost(),
+          currentRunCost: this.stateManager.getCurrentRunCost(),
+        },
+      },
+    };
+
+    // Emit as a server state event - will be journaled but NOT sent to clients
+    this.emit("event", stateTransitionEvent);
   }
 
   // ============================================================================
