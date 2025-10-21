@@ -587,7 +587,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // All clients can execute any command
       // const command = result.data;
-      this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
       this.handleCommand(result.data, ws);
     } catch (error) {
       this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
@@ -880,7 +879,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     try {
-      this.logger.logSocketTraffic(this.config.socketLogFile, "out", historyBatchEvent);
       sender.send(JSON.stringify(historyBatchEvent));
       this.logger.log(`Sent ${events.length} events to client ${sender.data.id}`);
     } catch (error) {
@@ -945,7 +943,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         for (const [_, client] of this.clients) {
           if (!client.data.handshakeComplete) continue;
           try {
-            this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
             client.send(JSON.stringify(serverEvent));
           } catch (error) {
             this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
@@ -954,7 +951,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     } else {
       try {
-        this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
         target?.send(JSON.stringify(serverEvent));
       } catch (error) {
         this.logger.log(`Failed to send event to client ${target?.data.id}: ${error}`, "error");
