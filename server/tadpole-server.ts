@@ -108,6 +108,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   // Event Journal for multi-client support
   private eventJournal: EventJournal;
+  private eventJournalAppendQueue: Promise<void> = Promise.resolve();
 
   // Track pending tool uses for result matching
   private pendingToolUses: Map<
@@ -982,9 +983,12 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // extra target check for error events that can be sent to a specific client
     if (isServerStateEvent(serverEvent) && !target) {
       // Server state events without target: journal and broadcast to all clients
-      this.eventJournal.append(serverEvent).catch((error) => {
-        this.logger.log(`Error appending event to journal: ${error}`, "error");
-      });
+      // Use queue to ensure events are written in the order they're emitted
+      this.eventJournalAppendQueue = this.eventJournalAppendQueue
+        .then(() => this.eventJournal.append(serverEvent))
+        .catch((error) => {
+          this.logger.log(`Error appending event to journal: ${error}`, "error");
+        });
 
       // Broadcast to all connected clients that have completed handshake
       if (this.clients.size > 0) {

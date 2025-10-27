@@ -738,10 +738,8 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
         const timestamps = snapshot.events.map((e) => new Date(e.timestamp).getTime());
 
         // Check that timestamps are mostly monotonically increasing
-        // Allow up to 2ms backwards movement due to concurrent event processing
-        // where events from different async handlers may be journaled with slight timestamp skew
         for (let i = 1; i < timestamps.length; i++) {
-          expect(timestamps[i]).toBeGreaterThanOrEqual(timestamps[i - 1] - 2);
+          expect(timestamps[i]).toBeGreaterThanOrEqual(timestamps[i - 1]);
         }
       }
     });
