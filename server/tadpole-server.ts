@@ -884,10 +884,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    // Wait for any pending journal appends to complete before reading
-    // This ensures all events emitted so far are written to the journal file
-    // await this.eventJournalAppendQueue;
-
     const iterator = this.eventJournal.getAllEvents()[Symbol.asyncIterator]();
     let next = await iterator.next();
 
@@ -903,7 +899,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.sendHistoryBatch(target, [pending], false);
         break;
       }
-
       this.sendHistoryBatch(target, [pending], true);
       pending = next.value;
     }
