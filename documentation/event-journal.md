@@ -206,3 +206,45 @@ ws.on("message", (data) => {
   }
 });
 ```
+
+### Receiving Live Events After Sync
+
+After the history synchronization completes (`hasMore: false`), the WebSocket connection remains open and the client continues to receive **live events** as they occur on the server.
+
+**Important**: Live events include **both** Server State Events and Connection State Events:
+
+- **Server State Events**: Persisted events like `phase.started`, `state.transition`, `file.updated`, etc.
+- **Connection State Events**: Ephemeral events like `history.batch`, `incomplete.phase`, etc.
+
+Clients can filter live events based on their needs:
+
+```typescript
+let historySyncComplete = false;
+
+ws.on("message", (data) => {
+  const event = JSON.parse(data);
+
+  // Handle history sync batches
+  if (event.type === "history.batch") {
+    const { events, hasMore } = event.data;
+    events.forEach(processHistoricalEvent);
+
+    if (!hasMore) {
+      historySyncComplete = true;
+      console.log("History sync complete, now receiving live events...");
+    }
+    return;
+  }
+
+  // After sync completes, process live events
+  if (historySyncComplete) {
+    // Option 1: Process all events (both server state and connection events)
+    processLiveEvent(event);
+  }
+});
+```
+
+This pattern enables clients to:
+1. **Catch up** on historical events they missed while offline
+2. **Stay synchronized** with ongoing server activity in real-time
+3. **Filter events** based on their specific needs (e.g., UI updates vs. audit logging)
