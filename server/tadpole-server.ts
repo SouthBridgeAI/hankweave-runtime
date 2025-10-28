@@ -562,7 +562,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // server.ready is a connection state event - send to client only, don't journal
     this.emit("event", serverReadyEvent, ws);
 
-    // Handle autostart logic (only if this is the first write client)
     if (this.config.autostart) {
       this.autoStartNextPhase();
     } else {
