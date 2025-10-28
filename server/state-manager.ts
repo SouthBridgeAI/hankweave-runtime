@@ -147,10 +147,6 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
         await this.save();
 
-        // Log transition for debugging
-        await this.logTransitionEvent(event);
-
-        // Emit event AFTER state is persisted
         this.emit("stateChanged", event);
         this.logger.log(`State transition: ${event.type}`);
 
@@ -212,29 +208,6 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
       this.costCache.currentRun = currentRun.phases.reduce((total, phase) => {
         return total + getPhaseCost(phase);
       }, 0);
-    }
-  }
-
-  // Event logging for debugging
-  private async logTransitionEvent(event: ST.StateTransition): Promise<void> {
-    const eventLog = path.join(this.tadpoleDir, "events.jsonl");
-    const logEntry = {
-      timestamp: new Date().toISOString(),
-      serverPid: process.pid,
-      event,
-      resultingState: {
-        currentRunId: this.state.currentRunId,
-        runCount: this.state.runs.length,
-        totalCost: this.costCache.total,
-        currentRunCost: this.costCache.currentRun,
-      },
-    };
-
-    try {
-      await fs.promises.appendFile(eventLog, `${JSON.stringify(logEntry)}\n`);
-    } catch (error) {
-      // Don't fail transitions due to logging errors
-      this.logger.log(`Failed to log event: ${error}`, "debug");
     }
   }
 

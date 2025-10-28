@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { StateTransitionType } from "../types/state-types.js";
 import type { AssertEqual } from "../utils.js";
 
 // ============================================================================
@@ -282,6 +283,35 @@ export const historyBatchEventDataSchema = z.object({
   hasMore: z.boolean(),
 });
 
+export const stateTransitionEventDataSchema = z.object({
+  transitionType: z.enum([
+    "RunStarted",
+    "RunCompleted",
+    "RunFailed",
+    "RunCrashed",
+    "PhaseStarted",
+    "PhaseTransitioned",
+    "CostsUpdated",
+    "CostsIncremented",
+    "AssistantMessageCountUpdated",
+    "CheckpointCreated",
+    "InitialCheckpointSet",
+    "PhaseFinalCostSet",
+  ]),
+  runId: z.string().optional(),
+  phaseId: z.string().optional(),
+  transition: z.object({
+    type: z.string(),
+    data: z.record(z.unknown()),
+  }),
+  resultingState: z.object({
+    currentRunId: z.string().nullable(),
+    runCount: z.number(),
+    totalCost: z.number(),
+    currentRunCost: z.number(),
+  }),
+});
+
 // ============================================================================
 // Full Event Schemas
 // ============================================================================
@@ -394,6 +424,11 @@ export const pongEventSchema = baseEventSchema.extend({
 export const historyBatchEventSchema = baseEventSchema.extend({
   type: z.literal("history.batch"),
   data: historyBatchEventDataSchema,
+});
+
+export const stateTransitionEventSchema = baseEventSchema.extend({
+  type: z.literal("state.transition"),
+  data: stateTransitionEventDataSchema,
 });
 
 // ============================================================================
@@ -535,6 +570,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   rollbackCompletedEventSchema,
   pongEventSchema,
   historyBatchEventSchema,
+  stateTransitionEventSchema,
 ]);
 
 // ============================================================================
@@ -566,6 +602,7 @@ export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
 export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
 export type PongEvent = z.infer<typeof pongEventSchema>;
 export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
+export type StateTransitionEvent = z.infer<typeof stateTransitionEventSchema>;
 
 // ============================================================================
 // Event Category Classification
@@ -607,6 +644,7 @@ const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "rollback.phaseCheckpoint",
   "rollback.completed",
   "rollback.workspaceCleanup",
+  "state.transition",
 ] as const;
 
 /**
@@ -654,7 +692,8 @@ export type ServerStateEvent =
   | RollbackProgressEvent
   | RollbackPhaseCheckpointEvent
   | RollbackCompletedEvent
-  | RollbackWorkspaceCleanupEvent;
+  | RollbackWorkspaceCleanupEvent
+  | StateTransitionEvent;
 
 /**
  * Union type representing all connection state events.
@@ -682,6 +721,12 @@ const _assertServerStateEventsMatch: AssertEqual<ServerStateEvent["type"], Serve
 const _assertConnectionStateEventsMatch: AssertEqual<
   ConnectionStateEvent["type"],
   ConnectionStateEventType
+> = true;
+
+// Compile-time check: ensure state transition event schema matches StateTransitionType
+const _assertStateTransitionTypeMatch: AssertEqual<
+  z.infer<typeof stateTransitionEventDataSchema>["transitionType"],
+  StateTransitionType
 > = true;
 
 /**
@@ -766,6 +811,7 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "rollback.completed": rollbackCompletedEventDataSchema,
   pong: pongEventDataSchema,
   "history.batch": historyBatchEventDataSchema,
+  "state.transition": stateTransitionEventDataSchema,
 };
 
 // List of all valid event types (for chronicler validation)

@@ -108,6 +108,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   // Event Journal for multi-client support
   private eventJournal: EventJournal;
+  private eventJournalAppendQueue: Promise<void> = Promise.resolve();
 
   // Track pending tool uses for result matching
   private pendingToolUses: Map<
@@ -214,12 +215,60 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     });
 
+    // Listen to all state transitions and journal them
+    this.stateManager.on("stateChanged", (transition) => {
+      this.emitStateTransitionEvent(transition);
+    });
+
     this.stateManager.on("transitionError", ({ event: _event, error }) => {
       if (error.name === "PersistenceError") {
         // Can't save state - this is fatal
         this.handleError(error, "state-persistence", ErrorSeverity.FATAL);
       }
     });
+  }
+
+  /**
+   * Convert a state transition to a server event and emit it for journaling.
+   * This provides an audit trail of all state machine transitions.
+   */
+  private emitStateTransitionEvent(
+    transition: import("./types/state-types.js").StateTransition,
+  ): void {
+    // Extract relevant IDs from transition data
+    let runId: string | undefined;
+    let phaseId: string | undefined;
+
+    if ("runId" in transition.data) {
+      runId = transition.data.runId as string;
+    }
+    if ("phaseId" in transition.data) {
+      phaseId = transition.data.phaseId as string;
+    }
+
+    const stateTransitionEvent: import("./schemas/event-schemas.js").StateTransitionEvent = {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "state.transition",
+      data: {
+        transitionType: transition.type,
+        runId,
+        phaseId,
+        transition: {
+          type: transition.type,
+          data: transition.data as Record<string, unknown>,
+        },
+        resultingState: {
+          currentRunId: this.stateManager.getState().currentRunId,
+          runCount: this.stateManager.getState().runs.length,
+          totalCost: this.stateManager.getTotalCost(),
+          currentRunCost: this.stateManager.getCurrentRunCost(),
+        },
+      },
+    };
+
+    // Emit as a server state event - will be journaled but NOT sent to clients
+    this.emit("event", stateTransitionEvent);
   }
 
   // ============================================================================
@@ -584,10 +633,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         );
         return;
       }
-
-      // All clients can execute any command
-      // const command = result.data;
-      this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
       this.handleCommand(result.data, ws);
     } catch (error) {
       this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
@@ -880,7 +925,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     try {
-      this.logger.logSocketTraffic(this.config.socketLogFile, "out", historyBatchEvent);
       sender.send(JSON.stringify(historyBatchEvent));
       this.logger.log(`Sent ${events.length} events to client ${sender.data.id}`);
     } catch (error) {
@@ -936,16 +980,18 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // extra target check for error events that can be sent to a specific client
     if (isServerStateEvent(serverEvent) && !target) {
       // Server state events without target: journal and broadcast to all clients
-      this.eventJournal.append(serverEvent).catch((error) => {
-        this.logger.log(`Error appending event to journal: ${error}`, "error");
-      });
+      // Use queue to ensure events are written in the order they're emitted
+      this.eventJournalAppendQueue = this.eventJournalAppendQueue
+        .then(() => this.eventJournal.append(serverEvent))
+        .catch((error) => {
+          this.logger.log(`Error appending event to journal: ${error}`, "error");
+        });
 
       // Broadcast to all connected clients that have completed handshake
       if (this.clients.size > 0) {
         for (const [_, client] of this.clients) {
           if (!client.data.handshakeComplete) continue;
           try {
-            this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
             client.send(JSON.stringify(serverEvent));
           } catch (error) {
             this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
@@ -954,7 +1000,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     } else {
       try {
-        this.logger.logSocketTraffic(this.config.socketLogFile, "out", serverEvent);
         target?.send(JSON.stringify(serverEvent));
       } catch (error) {
         this.logger.log(`Failed to send event to client ${target?.data.id}: ${error}`, "error");
