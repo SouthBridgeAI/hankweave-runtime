@@ -223,10 +223,6 @@ async function setupAndRunPhases(): Promise<void> {
   testState.syncClient = clientSetup.client;
   console.log(`${colors.green}✓ Sync client connected${colors.reset}`);
 
-  // Track live events that arrive AFTER history.sync completes
-  // These will include new events from Phase 2 and 3
-  const liveEvents: ServerEvent[] = [];
-
   // Set up background event collection from sync client
   // This runs in parallel with the main execution
   const syncClientEventCollection = (async () => {
@@ -235,13 +231,14 @@ async function setupAndRunPhases(): Promise<void> {
         throw new Error("Sync client not connected");
       }
 
-      // Send history.sync command to get remaining events
-      const historyStreamPromise = new Promise<{
-        batches: Array<HistoryBatchEvent>;
+      // Collect all events: history from history.sync + live events until RunCompleted
+      const eventCollectionPromise = new Promise<{
+        historyEvents: ServerEvent[];
+        liveEvents: ServerEvent[];
       }>((resolve, reject) => {
         const timeout = setTimeout(
-          () => reject(new Error("Timed out waiting for history.batch")),
-          10_000,
+          () => reject(new Error("Timed out waiting for RunCompleted event")),
+          180_000, // 3 minutes - wait for entire run to complete
         );
 
         if (!testState.syncClient) {
@@ -249,11 +246,13 @@ async function setupAndRunPhases(): Promise<void> {
         }
 
         const batches: Array<HistoryBatchEvent> = [];
+        const collectedLiveEvents: ServerEvent[] = [];
         let historySyncComplete = false;
 
         // Set up message handler that:
         // 1. Collects history.batch events during sync
         // 2. Collects live events ONLY AFTER history sync is complete
+        // 3. Resolves when RunCompleted is received
         testState.syncClient.onmessage = (event: MessageEvent) => {
           const data = JSON.parse(event.data.toString());
 
@@ -265,13 +264,11 @@ async function setupAndRunPhases(): Promise<void> {
               `${colors.gray}  [Sync Client] Received batch: ${data.data.events.length} events, hasMore: ${data.data.hasMore}${colors.reset}`,
             );
 
-            if (!data.data.hasMore && testState.syncClient) {
+            if (!data.data.hasMore) {
               historySyncComplete = true;
-              clearTimeout(timeout);
               console.log(
                 `${colors.gray}  [Sync Client] History sync complete, now collecting live events...${colors.reset}`,
               );
-              resolve({ batches });
             }
             return;
           }
@@ -279,11 +276,32 @@ async function setupAndRunPhases(): Promise<void> {
           // Only collect live events AFTER history sync is complete
           // This ensures clear separation between historical and live events
           if (historySyncComplete) {
-            liveEvents.push(data as ServerEvent);
+            collectedLiveEvents.push(data as ServerEvent);
+
+            // Check if this is the RunCompleted event - signals end of collection
+            if (data.type === "state.transition" && data.data?.transitionType === "RunCompleted") {
+              clearTimeout(timeout);
+
+              // Extract history events from batches
+              const historyEvents: ServerEvent[] = [];
+              for (const batch of batches) {
+                historyEvents.push(...batch.data.events);
+              }
+
+              console.log(
+                `${colors.gray}  [Sync Client] Received RunCompleted event - collection complete${colors.reset}`,
+              );
+              console.log(
+                `${colors.gray}  [Sync Client] History: ${historyEvents.length} events, Live: ${collectedLiveEvents.length} events${colors.reset}`,
+              );
+
+              resolve({ historyEvents, liveEvents: collectedLiveEvents });
+            }
           }
         };
       });
 
+      // Send history.sync command to start collection
       testState.syncClient.send(
         JSON.stringify({
           id: `history-sync-${Date.now()}`,
@@ -291,22 +309,20 @@ async function setupAndRunPhases(): Promise<void> {
         }),
       );
 
-      const { batches } = await historyStreamPromise;
+      // Wait for both history and live events to be collected
+      const { historyEvents, liveEvents } = await eventCollectionPromise;
 
-      // Add batch events to syncedEvents
-      for (const batch of batches) {
-        testState.syncedEvents.push(...batch.data.events);
-      }
+      // Combine history + live events
+      testState.syncedEvents.push(...historyEvents);
+      testState.syncedEvents.push(...liveEvents);
 
       console.log(
-        `${colors.gray}  [Sync Client] Collected ${batches.length} batches with ${testState.syncedEvents.length} events${colors.reset}`,
+        `${colors.green}✓ Sync client collection complete: ${testState.syncedEvents.length} total events${colors.reset}`,
       );
     } catch (error) {
       console.error(`${colors.red}Sync client error: ${error}${colors.reset}`);
     }
   })();
-
-  // Don't await - let it run in background while we continue with phases 2 and 3
 
   // Phase 2
   // Wait for phase 2 to start (it should auto-start after phase 1)
@@ -364,27 +380,11 @@ async function setupAndRunPhases(): Promise<void> {
   testState.phase3Completed = await testState.client.waitForPhaseCompletion("phase-3", 60000);
   console.log(`${colors.green}✓ Phase 3 completed${colors.reset}`);
 
-  // Give a moment for final events and state transitions to complete
-  await new Promise((resolve) => setTimeout(resolve, 5000));
-
-  // Wait for sync client background collection to complete (with timeout)
+  // Wait for sync client background collection to complete
+  // The promise resolves when RunCompleted is received (after all phases finish)
   if (testState.syncClient) {
     try {
-      await Promise.race([
-        syncClientEventCollection,
-        new Promise((resolve) => setTimeout(resolve, 5000)),
-      ]);
-      console.log(
-        `${colors.green}✓ Sync client history.sync complete: ${testState.syncedEvents.length} events${colors.reset}`,
-      );
-
-      // Add live events that arrived during Phase 2 and 3
-      if (liveEvents.length > 0) {
-        testState.syncedEvents.push(...liveEvents);
-        console.log(
-          `${colors.gray}  [Sync Client] Added ${liveEvents.length} live events from Phase 2 and 3${colors.reset}`,
-        );
-      }
+      await syncClientEventCollection;
 
       // Deduplicate by event ID (defensive - shouldn't have duplicates but just in case)
       const eventIdsSeen = new Set<string>();
