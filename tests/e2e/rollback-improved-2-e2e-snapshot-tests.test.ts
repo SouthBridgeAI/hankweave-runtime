@@ -737,7 +737,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
       for (const snapshot of snapshots.values()) {
         const timestamps = snapshot.events.map((e) => new Date(e.timestamp).getTime());
 
-        // Check that timestamps are mostly monotonically increasing
+        // Check that timestamps are monotonically increasing
         for (let i = 1; i < timestamps.length; i++) {
           expect(timestamps[i]).toBeGreaterThanOrEqual(timestamps[i - 1]);
         }
