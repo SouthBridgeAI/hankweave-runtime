@@ -565,7 +565,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.sendStateSnapshot();
     }
 
-    // Handle autostart logic (only if this is the first write client)
     if (this.config.autostart) {
       this.autoStartNextPhase();
     } else {
