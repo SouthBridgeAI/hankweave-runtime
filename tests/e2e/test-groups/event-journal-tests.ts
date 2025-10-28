@@ -13,7 +13,8 @@ import type {
 interface TestState {
   executionPath?: string;
   events: ServerEvent[];
-  syncedEvents: ServerEvent[];
+  historyEvents: ServerEvent[];
+  liveEvents: ServerEvent[];
   phase1Started: PhaseStartedEvent | null;
   phase1Completed: PhaseCompletedEvent | null;
   phase2Started: PhaseStartedEvent | null;
@@ -336,37 +337,23 @@ export function runEventJournalTests(testState: TestState): void {
     const journalPath = getEventJournalPath();
     const journaledEvents = await readEventJournal(journalPath);
 
+    // Combine history and live events
+    const syncedEvents = [...testState.historyEvents, ...testState.liveEvents];
+
     // Should have synced events
-    expect(testState.syncedEvents.length).toBeGreaterThan(0);
+    expect(syncedEvents.length).toBeGreaterThan(0);
 
     // Should have journaled events
     expect(journaledEvents.length).toBeGreaterThan(0);
 
-    // Debug output: print both event lists for comparison
-    console.log("\n=== Event Comparison Debug Info ===");
-    console.log(`Journal file path: ${journalPath}`);
-    console.log(`Journal count:     ${journaledEvents.length}`);
-    console.log(`Synced count:      ${testState.syncedEvents.length}`);
-    console.log("===================================\n");
-
-    console.log("=== Journaled Events (from events.jsonl) ===");
-    for (const event of journaledEvents) {
-      console.log(JSON.stringify(event));
-    }
-    console.log("\n=== Synced Events (from history.sync) ===");
-    for (const event of testState.syncedEvents) {
-      console.log(JSON.stringify(event));
-    }
-    console.log("\n===========================================\n");
-
     // syncedEvents are already filtered to only include Server State Events in setup
     // All journaled events are also server state events
     // They should match exactly in count and content
-    expect(testState.syncedEvents.length).toBe(journaledEvents.length);
+    expect(syncedEvents.length).toBe(journaledEvents.length);
 
     // Compare each synced event with the corresponding journaled event
-    for (let i = 0; i < testState.syncedEvents.length; i++) {
-      const syncedEvent = testState.syncedEvents[i];
+    for (let i = 0; i < syncedEvents.length; i++) {
+      const syncedEvent = syncedEvents[i];
       const journaledEvent = journaledEvents[i];
 
       // Events should match exactly
