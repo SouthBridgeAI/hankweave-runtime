@@ -230,7 +230,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   /**
    * Convert a state transition to a server event and emit it for journaling.
-   * This provides a complete audit trail of all state machine transitions.
+   * This provides an audit trail of all state machine transitions.
    */
   private emitStateTransitionEvent(
     transition: import("./types/state-types.js").StateTransition,
