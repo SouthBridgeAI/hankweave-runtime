@@ -896,7 +896,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         this.sendHistoryBatch(target, [pending], false);
         break;
       }
-
       this.sendHistoryBatch(target, [pending], true);
       pending = next.value;
     }

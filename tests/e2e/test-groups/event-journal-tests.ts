@@ -8,11 +8,13 @@ import type {
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
-} from "../../../server/types/types.js";
+} from "../../../server/schemas/event-schemas.js";
 
 interface TestState {
   executionPath?: string;
   events: ServerEvent[];
+  historyEvents: ServerEvent[];
+  liveEvents: ServerEvent[];
   phase1Started: PhaseStartedEvent | null;
   phase1Completed: PhaseCompletedEvent | null;
   phase2Started: PhaseStartedEvent | null;
@@ -329,5 +331,38 @@ export function runEventJournalTests(testState: TestState): void {
         expect(event.data).toHaveProperty("totalTime");
       }
     });
+  });
+
+  it("should verify synced events match journal file line by line", async () => {
+    const journalPath = getEventJournalPath();
+    const journaledEvents = await readEventJournal(journalPath);
+
+    // Combine history and live events
+    const syncedEvents = [...testState.historyEvents, ...testState.liveEvents];
+
+    // Should have synced events
+    expect(syncedEvents.length).toBeGreaterThan(0);
+
+    // Should have journaled events
+    expect(journaledEvents.length).toBeGreaterThan(0);
+
+    // syncedEvents are already filtered to only include Server State Events in setup
+    // All journaled events are also server state events
+    // They should match exactly in count and content
+    expect(syncedEvents.length).toBe(journaledEvents.length);
+
+    // Compare each synced event with the corresponding journaled event
+    for (let i = 0; i < syncedEvents.length; i++) {
+      const syncedEvent = syncedEvents[i];
+      const journaledEvent = journaledEvents[i];
+
+      // Events should match exactly
+      expect(syncedEvent.id).toBe(journaledEvent.id);
+      expect(syncedEvent.timestamp).toBe(journaledEvent.timestamp);
+      expect(syncedEvent.type).toBe(journaledEvent.type);
+
+      // Deep comparison of data
+      expect(JSON.stringify(syncedEvent.data)).toBe(JSON.stringify(journaledEvent.data));
+    }
   });
 }
