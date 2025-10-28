@@ -633,9 +633,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         );
         return;
       }
-
-      // All clients can execute any command
-      // const command = result.data;
       this.handleCommand(result.data, ws);
     } catch (error) {
       this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
