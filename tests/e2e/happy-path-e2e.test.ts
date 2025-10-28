@@ -74,13 +74,15 @@ const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
 // Import types and utilities from the server
-import { isServerStateEvent } from "../../server/schemas/event-schemas.js";
+import { type HistoryBatchEvent, isServerStateEvent } from "../../server/schemas/event-schemas.js";
 import type {
   ErrorEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
 } from "../../server/types/types.js";
+// Import connectTadpoleClient for sync client
+import { connectTadpoleClient } from "../utils/tadpole-server.js";
 
 // Server configuration - Updated for execution isolation
 const serverConfig: ServerConfig = {
@@ -103,9 +105,11 @@ const tadpoleResultsDir = path.join(serverConfig.cwd, "tadpole-results/");
 interface TestState {
   serverProcess: ChildProcess | null;
   client: TestWSClient | null;
-  syncClient: TestWSClient | null; // Read-only client that starts after delay
+  syncClient: WebSocket | null; // Read-only client that starts after delay
   events: ServerEvent[];
-  syncedEvents: ServerEvent[]; // Server State Events collected from history.sync (Connection State Events filtered out)
+  // Server State Events collected from history.sync + additional live events afterwards
+  // this is useful for comparing against event journal to make sure client can always reconstruct full state
+  syncedEvents: ServerEvent[];
   phase1Started: PhaseStartedEvent | null;
   phase1Completed: PhaseCompletedEvent | null;
   phase2Started: PhaseStartedEvent | null;
@@ -211,40 +215,91 @@ async function setupAndRunPhases(): Promise<void> {
 
   // Start read-only sync client in background after Phase 1 completes
   console.log(`${colors.blue}Starting read-only sync client in background...${colors.reset}`);
-  testState.syncClient = new TestWSClient();
-  await testState.syncClient.connect(SERVER_PORT, {
+  const clientSetup = await connectTadpoleClient(`ws://localhost:${SERVER_PORT}`, {
+    performHandshake: true,
     mode: ClientMode.READONLY,
+    sendPreviousEvents: true,
   });
+  testState.syncClient = clientSetup.client;
   console.log(`${colors.green}✓ Sync client connected${colors.reset}`);
+
+  // Track live events that arrive AFTER history.sync completes
+  // These will include new events from Phase 2 and 3
+  const liveEvents: ServerEvent[] = [];
 
   // Set up background event collection from sync client
   // This runs in parallel with the main execution
   const syncClientEventCollection = (async () => {
     try {
-      // Send history.sync command to get all events so far
-      testState.syncClient?.sendCommand({
-        id: `history-sync-${Date.now()}`,
-        type: "history.sync",
-      });
-
-      // Collect all history.batch events in background
-      let hasMore = true;
-      while (hasMore && testState.syncClient) {
-        const batchEvent = await testState.syncClient.waitForEvent("history.batch", 10000);
-        if (batchEvent.type === "history.batch") {
-          testState.syncedEvents.push(...batchEvent.data.events);
-          hasMore = batchEvent.data.hasMore;
-          console.log(
-            `${colors.gray}  [Sync Client] Received batch: ${batchEvent.data.events.length} events, hasMore: ${hasMore}${colors.reset}`,
-          );
-        } else {
-          hasMore = false;
-        }
+      if (!testState.syncClient) {
+        throw new Error("Sync client not connected");
       }
 
-      // After history sync completes, continue collecting new events as they arrive
+      // Send history.sync command to get remaining events
+      const historyStreamPromise = new Promise<{
+        batches: Array<HistoryBatchEvent>;
+      }>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Timed out waiting for history.batch")),
+          10_000,
+        );
+
+        if (!testState.syncClient) {
+          return reject(new Error("Sync client not connected"));
+        }
+
+        const batches: Array<HistoryBatchEvent> = [];
+        let historySyncComplete = false;
+
+        // Set up message handler that:
+        // 1. Collects history.batch events during sync
+        // 2. Collects live events ONLY AFTER history sync is complete
+        testState.syncClient.onmessage = (event: MessageEvent) => {
+          const data = JSON.parse(event.data.toString());
+
+          // Handle history.batch events for sync
+          if (data.type === "history.batch") {
+            batches.push(data);
+
+            console.log(
+              `${colors.gray}  [Sync Client] Received batch: ${data.data.events.length} events, hasMore: ${data.data.hasMore}${colors.reset}`,
+            );
+
+            if (!data.data.hasMore && testState.syncClient) {
+              historySyncComplete = true;
+              clearTimeout(timeout);
+              console.log(
+                `${colors.gray}  [Sync Client] History sync complete, now collecting live events...${colors.reset}`,
+              );
+              resolve({ batches });
+            }
+            return;
+          }
+
+          // Only collect live events AFTER history sync is complete
+          // This ensures clear separation between historical and live events
+          if (historySyncComplete) {
+            liveEvents.push(data as ServerEvent);
+          }
+        };
+      });
+
+      testState.syncClient.send(
+        JSON.stringify({
+          id: `history-sync-${Date.now()}`,
+          type: "history.sync",
+        }),
+      );
+
+      const { batches } = await historyStreamPromise;
+
+      // Add batch events to syncedEvents
+      for (const batch of batches) {
+        testState.syncedEvents.push(...batch.data.events);
+      }
+
       console.log(
-        `${colors.gray}  [Sync Client] History sync complete, now collecting live events...${colors.reset}`,
+        `${colors.gray}  [Sync Client] Collected ${batches.length} batches with ${testState.syncedEvents.length} events${colors.reset}`,
       );
     } catch (error) {
       console.error(`${colors.red}Sync client error: ${error}${colors.reset}`);
@@ -320,28 +375,32 @@ async function setupAndRunPhases(): Promise<void> {
         new Promise((resolve) => setTimeout(resolve, 5000)),
       ]);
       console.log(
-        `${colors.green}✓ Sync client background collection complete: ${testState.syncedEvents.length} events${colors.reset}`,
+        `${colors.green}✓ Sync client history.sync complete: ${testState.syncedEvents.length} events${colors.reset}`,
       );
 
-      // Also collect any new events that arrived at sync client after history sync
-      // (events that are NOT history.batch wrapper events)
-      const syncClientAllEvents = testState.syncClient
-        .getEvents()
-        .filter((e) => e.type !== "history.batch");
+      // Add live events that arrived during Phase 2 and 3
+      if (liveEvents.length > 0) {
+        testState.syncedEvents.push(...liveEvents);
+        console.log(
+          `${colors.gray}  [Sync Client] Added ${liveEvents.length} live events from Phase 2 and 3${colors.reset}`,
+        );
+      }
 
-      // Deduplicate by event ID - only add events that aren't already in syncedEvents
-      // (Events might appear in both history.batch and real-time stream if they were
-      // emitted after sync client connected but before history.sync completed)
-      if (testState.syncedEvents.length > 0 && syncClientAllEvents.length > 0) {
-        const syncedEventIds = new Set(testState.syncedEvents.map((e) => e.id));
-        const newEvents = syncClientAllEvents.filter((e) => !syncedEventIds.has(e.id));
-
-        if (newEvents.length > 0) {
-          testState.syncedEvents.push(...newEvents);
-          console.log(
-            `${colors.gray}  [Sync Client] Added ${newEvents.length} new events received after history sync${colors.reset}`,
-          );
+      // Deduplicate by event ID (defensive - shouldn't have duplicates but just in case)
+      const eventIdsSeen = new Set<string>();
+      const beforeDedup = testState.syncedEvents.length;
+      testState.syncedEvents = testState.syncedEvents.filter((e) => {
+        if (eventIdsSeen.has(e.id)) {
+          return false;
         }
+        eventIdsSeen.add(e.id);
+        return true;
+      });
+      const duplicatesRemoved = beforeDedup - testState.syncedEvents.length;
+      if (duplicatesRemoved > 0) {
+        console.log(
+          `${colors.yellow}  [Sync Client] WARNING: Removed ${duplicatesRemoved} duplicate events (unexpected)${colors.reset}`,
+        );
       }
 
       // Filter to only include Server State Events (events that are journaled)
@@ -349,7 +408,18 @@ async function setupAndRunPhases(): Promise<void> {
       const totalEvents = testState.syncedEvents.length;
       testState.syncedEvents = testState.syncedEvents.filter(isServerStateEvent);
       console.log(
-        `${colors.gray}  [Sync Client] Filtered to ${testState.syncedEvents.length} server state events (removed ${totalEvents - testState.syncedEvents.length} connection state events)${colors.reset}`,
+        `${colors.gray}  [Sync Client] Filtered to ${
+          testState.syncedEvents.length
+        } server state events (removed ${
+          totalEvents - testState.syncedEvents.length
+        } connection state events)${colors.reset}`,
+      );
+
+      // Sort by timestamp to ensure chronological order
+      // (defensive - events should already be chronological from history.sync + live stream)
+      testState.syncedEvents.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      console.log(
+        `${colors.gray}  [Sync Client] Sorted events by timestamp (chronological order)${colors.reset}`,
       );
     } catch (error) {
       console.warn(
@@ -477,8 +547,12 @@ async function validateCheckpointSystem(): Promise<void> {
 // This function only shuts down the server and saves results
 async function shutdownServer(): Promise<void> {
   // Disconnect sync client if connected
-  if (testState.syncClient?.isConnected) {
-    await testState.syncClient.disconnect();
+  if (
+    testState.syncClient &&
+    (testState.syncClient.readyState === WebSocket.OPEN ||
+      testState.syncClient.readyState === WebSocket.CONNECTING)
+  ) {
+    testState.syncClient.close();
     console.log(`${colors.gray}✓ Sync client disconnected${colors.reset}`);
   }
 
