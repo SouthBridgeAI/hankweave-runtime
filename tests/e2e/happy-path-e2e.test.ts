@@ -9,6 +9,7 @@ import {
   logCleanupResults,
 } from "../utils/cleanup-integration.js";
 import {
+  ClientMode,
   cleanupTest,
   colors,
   generateTestTimestamp,
@@ -72,7 +73,8 @@ const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json
 const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
-// Import types from the server
+// Import types and utilities from the server
+import { isServerStateEvent } from "../../server/schemas/event-schemas.js";
 import type {
   ErrorEvent,
   PhaseCompletedEvent,
@@ -101,7 +103,9 @@ const tadpoleResultsDir = path.join(serverConfig.cwd, "tadpole-results/");
 interface TestState {
   serverProcess: ChildProcess | null;
   client: TestWSClient | null;
+  syncClient: TestWSClient | null; // Read-only client that starts after delay
   events: ServerEvent[];
+  syncedEvents: ServerEvent[]; // Server State Events collected from history.sync (Connection State Events filtered out)
   phase1Started: PhaseStartedEvent | null;
   phase1Completed: PhaseCompletedEvent | null;
   phase2Started: PhaseStartedEvent | null;
@@ -132,7 +136,9 @@ interface TestState {
 const testState: TestState = {
   serverProcess: null,
   client: null,
+  syncClient: null,
   events: [],
+  syncedEvents: [],
   phase1Started: null,
   phase1Completed: null,
   phase2Started: null,
@@ -203,6 +209,50 @@ async function setupAndRunPhases(): Promise<void> {
   testState.phase1Completed = await testState.client.waitForPhaseCompletion("phase-1", 60000);
   console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
 
+  // Start read-only sync client in background after Phase 1 completes
+  console.log(`${colors.blue}Starting read-only sync client in background...${colors.reset}`);
+  testState.syncClient = new TestWSClient();
+  await testState.syncClient.connect(SERVER_PORT, {
+    mode: ClientMode.READONLY,
+  });
+  console.log(`${colors.green}✓ Sync client connected${colors.reset}`);
+
+  // Set up background event collection from sync client
+  // This runs in parallel with the main execution
+  const syncClientEventCollection = (async () => {
+    try {
+      // Send history.sync command to get all events so far
+      testState.syncClient?.sendCommand({
+        id: `history-sync-${Date.now()}`,
+        type: "history.sync",
+      });
+
+      // Collect all history.batch events in background
+      let hasMore = true;
+      while (hasMore && testState.syncClient) {
+        const batchEvent = await testState.syncClient.waitForEvent("history.batch", 10000);
+        if (batchEvent.type === "history.batch") {
+          testState.syncedEvents.push(...batchEvent.data.events);
+          hasMore = batchEvent.data.hasMore;
+          console.log(
+            `${colors.gray}  [Sync Client] Received batch: ${batchEvent.data.events.length} events, hasMore: ${hasMore}${colors.reset}`,
+          );
+        } else {
+          hasMore = false;
+        }
+      }
+
+      // After history sync completes, continue collecting new events as they arrive
+      console.log(
+        `${colors.gray}  [Sync Client] History sync complete, now collecting live events...${colors.reset}`,
+      );
+    } catch (error) {
+      console.error(`${colors.red}Sync client error: ${error}${colors.reset}`);
+    }
+  })();
+
+  // Don't await - let it run in background while we continue with phases 2 and 3
+
   // Phase 2
   // Wait for phase 2 to start (it should auto-start after phase 1)
   // We'll poll for the event with a timeout
@@ -261,6 +311,52 @@ async function setupAndRunPhases(): Promise<void> {
 
   // Give a moment for final events and state transitions to complete
   await new Promise((resolve) => setTimeout(resolve, 5000));
+
+  // Wait for sync client background collection to complete (with timeout)
+  if (testState.syncClient) {
+    try {
+      await Promise.race([
+        syncClientEventCollection,
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]);
+      console.log(
+        `${colors.green}✓ Sync client background collection complete: ${testState.syncedEvents.length} events${colors.reset}`,
+      );
+
+      // Also collect any new events that arrived at sync client after history sync
+      // (events that are NOT history.batch wrapper events)
+      const syncClientAllEvents = testState.syncClient
+        .getEvents()
+        .filter((e) => e.type !== "history.batch");
+
+      // Deduplicate by event ID - only add events that aren't already in syncedEvents
+      // (Events might appear in both history.batch and real-time stream if they were
+      // emitted after sync client connected but before history.sync completed)
+      if (testState.syncedEvents.length > 0 && syncClientAllEvents.length > 0) {
+        const syncedEventIds = new Set(testState.syncedEvents.map((e) => e.id));
+        const newEvents = syncClientAllEvents.filter((e) => !syncedEventIds.has(e.id));
+
+        if (newEvents.length > 0) {
+          testState.syncedEvents.push(...newEvents);
+          console.log(
+            `${colors.gray}  [Sync Client] Added ${newEvents.length} new events received after history sync${colors.reset}`,
+          );
+        }
+      }
+
+      // Filter to only include Server State Events (events that are journaled)
+      // Connection State Events (server.ready, pong, history.batch, incomplete.phase) are NOT journaled
+      const totalEvents = testState.syncedEvents.length;
+      testState.syncedEvents = testState.syncedEvents.filter(isServerStateEvent);
+      console.log(
+        `${colors.gray}  [Sync Client] Filtered to ${testState.syncedEvents.length} server state events (removed ${totalEvents - testState.syncedEvents.length} connection state events)${colors.reset}`,
+      );
+    } catch (error) {
+      console.warn(
+        `${colors.yellow}Sync client collection timed out or errored: ${error}${colors.reset}`,
+      );
+    }
+  }
 
   // Store all events for tests
   testState.events = testState.client.getEvents();
@@ -380,6 +476,12 @@ async function validateCheckpointSystem(): Promise<void> {
 
 // This function only shuts down the server and saves results
 async function shutdownServer(): Promise<void> {
+  // Disconnect sync client if connected
+  if (testState.syncClient?.isConnected) {
+    await testState.syncClient.disconnect();
+    console.log(`${colors.gray}✓ Sync client disconnected${colors.reset}`);
+  }
+
   // Only shutdown if not already done
   if (testState.serverProcess || testState.client?.isConnected) {
     await cleanupTest({
