@@ -82,7 +82,7 @@ import type {
   ServerEvent,
 } from "../../server/types/types.js";
 // Import connectTadpoleClient for sync client
-import { connectTadpoleClient } from "../utils/tadpole-server.js";
+import { connectTadpoleClient } from "../utils/tadpole-server-test-helpers.js";
 
 // Server configuration - Updated for execution isolation
 const serverConfig: ServerConfig = {
