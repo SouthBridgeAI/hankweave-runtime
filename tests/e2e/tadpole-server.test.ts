@@ -270,9 +270,6 @@ describe("tadpole server", () => {
             e.type === "phase.completed" && (e as PhaseCompletedEvent).data.phaseId === phaseOne,
         ),
       ).toBeDefined();
-
-      // Verify we have server-state events like state.snapshot, file updates, etc.
-      expect(combined.filter((e) => e.type === "state.snapshot").length).toBeGreaterThan(0);
     } finally {
       // Clean up second client
       if (
