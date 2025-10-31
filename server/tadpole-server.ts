@@ -558,13 +558,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // server.ready is a connection state event - send to client only, don't journal
     this.emit("event", serverReadyEvent, ws);
 
-    // TODO: figure out if this is the right way to do this
-    // Let's NOT send state snapshot for every connection (JUST THE FIRST ONE) this event is considered a server state event (hence it gets broadcasted and journaled)
-    // individual clients can get entire journal via history.sync command if needed
-    if (this.clients.size === 1) {
-      await this.sendStateSnapshot();
-    }
-
     // Handle autostart logic (only if this is the first write client)
     if (this.config.autostart) {
       this.autoStartNextPhase();
