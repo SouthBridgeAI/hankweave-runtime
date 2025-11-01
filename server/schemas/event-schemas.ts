@@ -609,14 +609,19 @@ export type StateTransitionEvent = z.infer<typeof stateTransitionEventSchema>;
 // ============================================================================
 
 /**
- * Events are classified into two categories:
+ * Events are classified into three categories:
  *
  * - **Server State Events**: Track the server's execution state, phase lifecycle,
- *   and persistent changes (e.g., phase execution, file updates, errors).
+ *   and persistent changes (e.g., phase execution, errors, rollbacks).
  *   These events represent changes to the server's internal state and are
  *   persisted to the event journal and broadcasted to all connected clients.
  *
- * - **Connection State Events**: Track client specific events
+ * - **Agentic Backbone Events**: Capture the agent's core execution artifacts
+ *   (assistant actions, tool outputs, and workspace mutations). These events
+ *   are journaled and broadcast the same way as server state events but are
+ *   tracked separately for clarity.
+ *
+ * - **Connection State Events**: Track client specific events.
  *   These events are not persisted to the event journal and are sent to individual clients.
  *
  * The category is automatically inferred from the event's type field using the
@@ -631,11 +636,7 @@ const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "phase.completed",
   "state.snapshot",
   "server.idle",
-  "assistant.action",
   "token.usage",
-  "tool.result",
-  "file.updated",
-  "filetree.updated",
   "info",
   "error",
   "checkpoint.list",
@@ -645,6 +646,16 @@ const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "rollback.completed",
   "rollback.workspaceCleanup",
   "state.transition",
+] as const;
+
+/**
+ * Array of event types that represent agentic backbone events.
+ */
+const AGENTIC_BACKBONE_EVENT_TYPES_ARRAY = [
+  "assistant.action",
+  "tool.result",
+  "file.updated",
+  "filetree.updated",
 ] as const;
 
 /**
@@ -659,12 +670,18 @@ const CONNECTION_STATE_EVENT_TYPES_ARRAY = [
 
 // Derive union types from the arrays
 type ServerStateEventType = (typeof SERVER_STATE_EVENT_TYPES_ARRAY)[number];
+type AgenticBackboneEventType = (typeof AGENTIC_BACKBONE_EVENT_TYPES_ARRAY)[number];
 type ConnectionStateEventType = (typeof CONNECTION_STATE_EVENT_TYPES_ARRAY)[number];
 
 /**
  * Set of event types that represent server state changes.
  */
 const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>(SERVER_STATE_EVENT_TYPES_ARRAY);
+
+/**
+ * Set of event types that represent agentic backbone events.
+ */
+const AGENTIC_BACKBONE_EVENT_TYPES = new Set<ServerEventType>(AGENTIC_BACKBONE_EVENT_TYPES_ARRAY);
 
 /**
  * Set of event types that represent connection state changes.
@@ -680,11 +697,7 @@ export type ServerStateEvent =
   | PhaseCompletedEvent
   | StateSnapshotEvent
   | ServerIdleEvent
-  | AssistantActionEvent
   | TokenUsageEvent
-  | ToolResultEvent
-  | FileUpdatedEvent
-  | FileTreeUpdatedEvent
   | InfoEvent
   | ErrorEvent
   | CheckpointListEvent
@@ -694,6 +707,16 @@ export type ServerStateEvent =
   | RollbackCompletedEvent
   | RollbackWorkspaceCleanupEvent
   | StateTransitionEvent;
+
+/**
+ * Union type representing all agentic backbone events.
+ * These events capture the agent's core execution artifacts.
+ */
+export type AgenticBackboneEvent =
+  | AssistantActionEvent
+  | ToolResultEvent
+  | FileUpdatedEvent
+  | FileTreeUpdatedEvent;
 
 /**
  * Union type representing all connection state events.
@@ -707,16 +730,21 @@ export type ConnectionStateEvent =
 
 // Compile-time check: ensures all ServerEventTypes are categorized
 // This will cause a TypeScript error if any event is not categorized as either
-// a ServerStateEventType or ConnectionStateEventType
+// a ServerStateEventType, AgenticBackboneEventType, or ConnectionStateEventType
 const _assertAllEventsCategorized: AssertEqual<
   ServerEventType,
-  ServerStateEventType | ConnectionStateEventType
+  ServerStateEventType | AgenticBackboneEventType | ConnectionStateEventType
 > = true;
 
 // Compile-time checks: ensure the union types match their respective arrays
 // These will cause TypeScript errors if events are missing from the unions
 const _assertServerStateEventsMatch: AssertEqual<ServerStateEvent["type"], ServerStateEventType> =
   true;
+
+const _assertAgenticBackboneEventsMatch: AssertEqual<
+  AgenticBackboneEvent["type"],
+  AgenticBackboneEventType
+> = true;
 
 const _assertConnectionStateEventsMatch: AssertEqual<
   ConnectionStateEvent["type"],
@@ -743,6 +771,16 @@ const _assertStateTransitionTypeMatch: AssertEqual<
  */
 export function isServerStateEvent(event: ServerEvent): event is ServerStateEvent {
   return SERVER_STATE_EVENT_TYPES.has(event.type);
+}
+
+/**
+ * Type guard to check if an event is an agentic backbone event.
+ *
+ * @param event - The event to check
+ * @returns true if the event is an agentic backbone event
+ */
+export function isAgenticBackboneEvent(event: ServerEvent): event is AgenticBackboneEvent {
+  return AGENTIC_BACKBONE_EVENT_TYPES.has(event.type);
 }
 
 /**

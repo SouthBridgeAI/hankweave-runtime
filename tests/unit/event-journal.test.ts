@@ -103,8 +103,24 @@ describe("EventJournal", () => {
     };
 
     await expect(journal.append(connectionEvent)).rejects.toThrow(
-      "Cannot journal non-server-state event: pong",
+      "Cannot journal non-journaled event: pong",
     );
+  });
+
+  it("accepts agentic backbone events", async () => {
+    const agenticEvent: ServerEvent = {
+      id: EventId("test-event"),
+      timestamp: new Date().toISOString(),
+      type: "assistant.action",
+      data: {
+        phaseId: "phase-1",
+        action: "message",
+        content: "Test content",
+      },
+    };
+
+    await journal.append(agenticEvent);
+    expect(await journal.getTotalEvents()).toBe(1);
   });
 
   it("accepts server state events", async () => {

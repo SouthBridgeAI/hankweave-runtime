@@ -28,7 +28,11 @@ import type {
   StateSnapshotEvent,
   TokenUsageEvent,
 } from "./schemas/event-schemas.js";
-import { isConnectionStateEvent, isServerStateEvent } from "./schemas/event-schemas.js";
+import {
+  isAgenticBackboneEvent,
+  isConnectionStateEvent,
+  isServerStateEvent,
+} from "./schemas/event-schemas.js";
 import { StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
@@ -953,16 +957,19 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     const serverEvent = data as ServerEvent;
+    const isServerState = isServerStateEvent(serverEvent);
+    const isAgenticBackbone = isAgenticBackboneEvent(serverEvent);
+    const isConnectionState = isConnectionStateEvent(serverEvent);
 
     // this should never happen due to compile time checks, but...
-    if (!isServerStateEvent(serverEvent) && !isConnectionStateEvent(serverEvent)) {
+    if (!isServerState && !isAgenticBackbone && !isConnectionState) {
       // This should never happen - all ServerEvents should be categorized
       this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
       throw new Error(`Unknown event: ${(serverEvent as ServerEvent).type}`);
     }
 
     // early exit if we have a connection state event without a target
-    if (isConnectionStateEvent(serverEvent) && !target) {
+    if (isConnectionState && !target) {
       this.logger.log(
         `Connection state event ${serverEvent.type} requires a target client but none provided`,
         "error",
@@ -970,9 +977,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       return false;
     }
 
-    // extra target check for error events that can be sent to a specific client
-    if (isServerStateEvent(serverEvent) && !target) {
-      // Server state events without target: journal and broadcast to all clients
+    // Journal and broadcast events that should reach all clients when no target is provided
+    if ((isServerState || isAgenticBackbone) && !target) {
+      // Server state or agentic backbone events without target: journal and broadcast to all clients
       // Use queue to ensure events are written in the order they're emitted
       this.eventJournalAppendQueue = this.eventJournalAppendQueue
         .then(() => this.eventJournal.append(serverEvent))
