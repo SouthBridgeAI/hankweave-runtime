@@ -42,7 +42,7 @@ The architecture is guided by several key principles to ensure robustness, maint
 
 -   **Fail-Safe Operation**: The system is designed to be resilient. It includes mechanisms for graceful degradation (e.g., disabling checkpointing if Git is unavailable) and recovery from crashes, primarily through atomic state writes and a robust lock file mechanism.
 
--   **Event Categorization and Routing**: All server events are categorized into two types: **Server State Events** (persisted and broadcasted to all clients) and **Connection State Events** (ephemeral and client-specific). This separation ensures clean distinction between domain logic and connection lifecycle, with compile-time safety guarantees via TypeScript's type system. See [Event Journal documentation](./event-journal.md) for details.
+-   **Event Categorization and Routing**: All server events are categorized into two types: **Server State Events** (persisted and broadcasted to all clients) and **Connection State Events** (ephemeral and client-specific). This separation ensures clean distinction between domain logic and connection lifecycle, with compile-time safety guarantees via TypeScript's type system. Event schemas and categories are defined in [`server/schemas/event-schemas.ts`](../server/schemas/event-schemas.ts). See [Event Journal documentation](./event-journal.md) for details.
 
 -   **Append-Only History**: To ensure a complete and auditable trail, historical data (runs, phase executions, checkpoints) is never modified or deleted. New states are appended, preserving the full history of the workflow.
 
