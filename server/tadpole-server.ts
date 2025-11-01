@@ -963,14 +963,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // this should never happen due to compile time checks, but...
     if (!isServerState && !isAgenticBackbone && !isConnectionState) {
       // This should never happen - all ServerEvents should be categorized
-      this.logger.log(`Unknown event type: $(serverEvent as ServerEvent).type`, "error");
-      throw new Error(`Unknown event: $(serverEvent as ServerEvent).type`);
+      this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
+      throw new Error(`Unknown event: ${(serverEvent as ServerEvent).type}`);
     }
 
     // early exit if we have a connection state event without a target
     if (isConnectionState && !target) {
       this.logger.log(
-        `Connection state event $serverEvent.typerequires a target client but none provided`,
+        `Connection state event ${serverEvent.type} requires a target client but none provided`,
         "error",
       );
       return false;
@@ -993,7 +993,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           try {
             client.send(JSON.stringify(serverEvent));
           } catch (error) {
-            this.logger.log(`Failed to send event to client $client.data.id: ${error}`, "error");
+            this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
           }
         }
       }
@@ -1001,7 +1001,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       try {
         target?.send(JSON.stringify(serverEvent));
       } catch (error) {
-        this.logger.log(`Failed to send event to client $target?.data.id: ${error}`, "error");
+        this.logger.log(`Failed to send event to client ${target?.data.id}: ${error}`, "error");
       }
     }
 
@@ -1054,7 +1054,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private async startNewRun(
     startingConditions?: import("./types/state-types.js").StartingConditions,
   ): Promise<void> {
-    const runId = RunId(`$Date.now()-$Math.random().toString(36).substring(2, 7)`);
+    const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
     const runFolder = path.join(this.config.executionPath, ".tadpole", "runs", runId);
 
     // Create run folder
@@ -1066,7 +1066,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       data: {
         runId,
         runFolder,
-        gitBranch: `run-$runId`,
+        gitBranch: `run-${runId}`,
         startingConditions: startingConditions || { type: "fresh" },
         serverPid: process.pid,
       },
@@ -1100,7 +1100,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.updateHeartbeat();
     }, 30000); // Every 30 seconds
 
-    this.logger.log(`Started new run: $runId`);
+    this.logger.log(`Started new run: ${runId}`);
   }
 
   /**
@@ -1141,14 +1141,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const phase = this.config.phases.find((p) => p.id === phaseId);
     if (!phase) {
       await this.handleError(
-        new Error(`Unknown phase: $phaseId`),
+        new Error(`Unknown phase: ${phaseId}`),
         "startPhase",
         ErrorSeverity.OPERATION,
       );
       return;
     }
 
-    this.logger.log(`Starting phase: $phase.name`);
+    this.logger.log(`Starting phase: ${phase.name}`);
 
     // pull existing history for the phase and see if we had run workspace setup for it
     // git seems the best source of workspace setup related info
@@ -1162,14 +1162,14 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     if (workspaceSetupCheckpoint) {
-      this.logger.log(`Found existing workspace setup checkpoint: $workspaceSetupCheckpoint`);
+      this.logger.log(`Found existing workspace setup checkpoint: ${workspaceSetupCheckpoint}`);
     }
 
     // Check if phase already running via state manager (single source of truth)
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
       await this.handleError(
-        new Error(`Phase already running: $currentPhase.phaseId`),
+        new Error(`Phase already running: ${currentPhase.phaseId}`),
         "startPhase",
         ErrorSeverity.OPERATION,
       );
@@ -1182,7 +1182,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       const previousAttempt = currentRun.phases.find((p) => p.phaseId === phaseId);
       if (previousAttempt && isTerminalPhaseStatus(previousAttempt.status)) {
         // Phase was already attempted and finished - start new run
-        this.logger.log(`Phase $phaseIdwas already attempted in current run, starting new run`);
+        this.logger.log(`Phase ${phaseId} was already attempted in current run, starting new run`);
 
         // Complete current run
         this.stateManager.transition({
@@ -1233,18 +1233,18 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Run workspace setup operations if configured and we don't ask for explicit skip
     // and there is no existing workspace setup checkpoint for this phase
     if (!skipPreCommands && !workspaceSetupCheckpoint && phase.workspaceSetup) {
-      this.logger.log(`Running workspace setup for phase: $phase.name`);
+      this.logger.log(`Running workspace setup for phase: ${phase.name}`);
       let lastCopiedPath: string | null = null;
 
       for (const [index, item] of phase.workspaceSetup.entries()) {
         try {
           if (item.type === "copy" && item.copy) {
             const targetPath = path.join(this.config.executionPath, item.copy.to);
-            this.logger.log(`Copying $item.copy.fromto $targetPath`);
+            this.logger.log(`Copying ${item.copy.from} to ${targetPath}`);
             // Check if target path already exists
             if (fs.existsSync(targetPath)) {
               this.logger.log(
-                `Warning: Target path already exists: $targetPath. Removing it before copying.`,
+                `Warning: Target path already exists: ${targetPath}. Removing it before copying.`,
               );
               // TODO: let's discuss if this is too controversial
               // Remove the existing directory/file recursively
