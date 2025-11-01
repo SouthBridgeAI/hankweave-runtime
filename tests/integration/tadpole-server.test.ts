@@ -459,7 +459,7 @@ describe("TadpoleServer", () => {
     expect(handshakeResponse?.data.eventHistory).toBeDefined();
     expect(Array.isArray(handshakeResponse?.data.eventHistory)).toBe(true);
 
-    // Should have multiple events (server.ready, state.snapshot, pong events, etc.)
+    // Should have at least one server-state event (server.idle when no phases are running)
     expect(handshakeResponse?.data.eventHistory.length).toBeGreaterThan(0);
 
     // Verify structure of events in history using schema
@@ -472,8 +472,12 @@ describe("TadpoleServer", () => {
     const eventTypes = (handshakeResponse?.data.eventHistory ?? []).map(
       (e: any) => e.type
     );
-    expect(eventTypes).toContain("server.ready");
-    expect(eventTypes).toContain("state.snapshot");
+    // server.ready is a connection state event and not journaled, so it won't be in history
+    expect(eventTypes).not.toContain("server.ready");
+    // pong is a connection state event and not journaled, so it won't be in history
+    expect(eventTypes).not.toContain("pong");
+    // server.idle is a server state event and should be in history when no phases are running
+    expect(eventTypes).toContain("server.idle");
   });
 
   it("multiple clients can request different event history settings", async () => {
@@ -727,7 +731,9 @@ describe("TadpoleServer", () => {
         direction: "backward",
       });
 
-      expect(events.length).toBeGreaterThan(3);
+      // Since pong events are connection-state events and not journaled,
+      // we only expect server-state events like server.idle in the history
+      expect(events.length).toBeGreaterThanOrEqual(1);
       const lastBatch = batches[batches.length - 1];
       expect(lastBatch?.data.hasMore).toBe(false);
     });

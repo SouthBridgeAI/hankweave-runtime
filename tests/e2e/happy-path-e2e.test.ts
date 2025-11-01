@@ -27,6 +27,7 @@ import { runDualIdSystemTests } from "./test-groups/dual-id-system-tests.js";
 import { runEarlyPhaseFailureTests } from "./test-groups/early-phase-failure-tests.js";
 import { runErrorEventTests } from "./test-groups/error-event-tests.js";
 import { runEventIntegrityTests } from "./test-groups/event-integrity-tests.js";
+import { runEventJournalTests } from "./test-groups/event-journal-tests.js";
 import { runFileContentTests } from "./test-groups/file-content-tests.js";
 import { runFileSystemEdgeCasesTests } from "./test-groups/file-system-edge-cases-tests.js";
 import { runFileSystemTests } from "./test-groups/file-system-tests.js";
@@ -57,8 +58,6 @@ import { runTemplateVariableTests } from "./test-groups/template-variable-tests.
 import { runTokenUsageTests } from "./test-groups/token-usage-tests.js";
 import { runToolResultTests } from "./test-groups/tool-result-tests.js";
 import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
-import { runWebSocketEventsTests } from "./test-groups/websocket-events-tests.js";
-import { runWebSocketLoggingTests } from "./test-groups/websocket-logging-tests.js";
 
 // Test configuration
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
@@ -187,8 +186,6 @@ async function setupAndRunPhases(): Promise<void> {
     console.log(`  Execution path: ${testState.executionPath}`);
     console.log(`  Data path: ${testState.dataPath}`);
   }
-
-  await testState.client.waitForEvent("state.snapshot");
 
   // Wait for all phases to complete
   console.log(`${colors.blue}Waiting for all phases to complete...${colors.reset}`);
@@ -564,12 +561,8 @@ describe("Tadpole E2E Test", () => {
     runLogFilesTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
   });
 
-  describe("WebSocket Events", () => {
-    runWebSocketEventsTests(testState);
-  });
-
-  describe("WebSocket Logging", () => {
-    runWebSocketLoggingTests(testState);
+  describe("Event Journal", () => {
+    runEventJournalTests(testState);
   });
 
   describe("Cost Tracking", () => {

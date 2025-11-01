@@ -8,10 +8,9 @@ function createMockEvent(id: string, timestamp?: string): ServerEvent {
   return {
     id: EventId(id),
     timestamp: timestamp || new Date().toISOString(),
-    type: "pong",
+    type: "info",
     data: {
       message: `Test event ${id}`,
-      timestamp: timestamp || new Date().toISOString(),
     },
   };
 }
@@ -90,5 +89,55 @@ describe("EventJournal", () => {
 
     const lines = chunks.join("").split("\n").filter(Boolean);
     expect(lines).toHaveLength(2);
+  });
+
+  it("rejects connection state events", async () => {
+    const connectionEvent: ServerEvent = {
+      id: EventId("test-event"),
+      timestamp: new Date().toISOString(),
+      type: "pong",
+      data: {
+        message: "pong",
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    await expect(journal.append(connectionEvent)).rejects.toThrow(
+      "Cannot journal non-journaled event: pong",
+    );
+  });
+
+  it("accepts agentic backbone events", async () => {
+    const agenticEvent: ServerEvent = {
+      id: EventId("test-event"),
+      timestamp: new Date().toISOString(),
+      type: "assistant.action",
+      data: {
+        phaseId: "phase-1",
+        action: "message",
+        content: "Test content",
+      },
+    };
+
+    await journal.append(agenticEvent);
+    expect(await journal.getTotalEvents()).toBe(1);
+  });
+
+  it("accepts server state events", async () => {
+    const serverStateEvent: ServerEvent = {
+      id: EventId("test-event"),
+      timestamp: new Date().toISOString(),
+      type: "phase.started",
+      data: {
+        phaseId: "test-phase",
+        phaseName: "Test Phase",
+        sessionId: "test-session",
+        startTime: new Date().toISOString(),
+      },
+    };
+
+    // Should not throw - just verify it completes successfully
+    await journal.append(serverStateEvent);
+    expect(await journal.getTotalEvents()).toBe(1);
   });
 });

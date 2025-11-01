@@ -224,6 +224,24 @@ export function toError(error: unknown): Error {
 }
 
 // ============================================================================
+// Type Utilities
+// ============================================================================
+
+/**
+ * Helper type to check if two types are exactly equal at compile time.
+ * Returns `true` if the types match, `never` if they don't.
+ *
+ * Use this to enforce type constraints that must be validated at compile time.
+ *
+ * @example
+ * // Ensure all event types are categorized
+ * const _check: AssertEqual<EventType, CategoryA | CategoryB> = true;
+ */
+export type AssertEqual<T, U> = (<G>() => G extends T ? 1 : 2) extends <G>() => G extends U ? 1 : 2
+  ? true
+  : never;
+
+// ============================================================================
 // Exhaustive Checking
 // ============================================================================
 

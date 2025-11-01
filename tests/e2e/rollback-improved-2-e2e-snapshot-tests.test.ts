@@ -257,7 +257,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
       if (!fs.existsSync(dir)) continue;
 
       const statePath = path.join(dir, ".tadpole", "state.json");
-      const websocketLogPath = path.join(dir, ".tadpole", "logs", "websocket.log");
+      const eventJournalPath = path.join(dir, ".tadpole", "events", "events.jsonl");
       const gitDir = path.join(dir, ".tadpole", "checkpoints", ".git");
 
       if (fs.existsSync(statePath)) {
@@ -266,10 +266,10 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
         const events: ServerEvent[] = [];
         let checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
 
-        // Parse websocket.log file from snapshot (NEW JSONL format)
-        if (fs.existsSync(websocketLogPath)) {
+        // Parse events.jsonl file from snapshot (JSONL format)
+        if (fs.existsSync(eventJournalPath)) {
           try {
-            const logContent = await fs.promises.readFile(websocketLogPath, "utf-8");
+            const logContent = await fs.promises.readFile(eventJournalPath, "utf-8");
             const logLines = logContent
               .trim()
               .split("\n")
@@ -277,14 +277,9 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
             for (const line of logLines) {
               try {
-                // Parse JSONL format
-                const logEntry = JSON.parse(line);
-
-                // Filter for outgoing messages (server events)
-                if (logEntry.direction === "out" && logEntry.message) {
-                  const event = logEntry.message as ServerEvent;
-                  events.push(event);
-                }
+                // Parse JSONL format - each line is a ServerEvent
+                const event = JSON.parse(line) as ServerEvent;
+                events.push(event);
               } catch (_parseError) {
                 // Skip malformed JSON lines
               }
@@ -298,7 +293,7 @@ describe("Rollback E2E Snapshot Analysis Suite", () => {
 
             checkpoints = checkpointListEvent?.data.checkpoints || [];
           } catch (error) {
-            console.warn(`Failed to load websocket events from ${websocketLogPath}:`, error);
+            console.warn(`Failed to load events from ${eventJournalPath}:`, error);
           }
         }
 

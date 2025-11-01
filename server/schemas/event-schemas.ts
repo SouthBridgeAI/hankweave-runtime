@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { StateTransitionType } from "../types/state-types.js";
+import type { AssertEqual } from "../utils.js";
 
 // ============================================================================
 // Re-usable Base Schemas
@@ -281,6 +283,35 @@ export const historyBatchEventDataSchema = z.object({
   hasMore: z.boolean(),
 });
 
+export const stateTransitionEventDataSchema = z.object({
+  transitionType: z.enum([
+    "RunStarted",
+    "RunCompleted",
+    "RunFailed",
+    "RunCrashed",
+    "PhaseStarted",
+    "PhaseTransitioned",
+    "CostsUpdated",
+    "CostsIncremented",
+    "AssistantMessageCountUpdated",
+    "CheckpointCreated",
+    "InitialCheckpointSet",
+    "PhaseFinalCostSet",
+  ]),
+  runId: z.string().optional(),
+  phaseId: z.string().optional(),
+  transition: z.object({
+    type: z.string(),
+    data: z.record(z.unknown()),
+  }),
+  resultingState: z.object({
+    currentRunId: z.string().nullable(),
+    runCount: z.number(),
+    totalCost: z.number(),
+    currentRunCost: z.number(),
+  }),
+});
+
 // ============================================================================
 // Full Event Schemas
 // ============================================================================
@@ -393,6 +424,11 @@ export const pongEventSchema = baseEventSchema.extend({
 export const historyBatchEventSchema = baseEventSchema.extend({
   type: z.literal("history.batch"),
   data: historyBatchEventDataSchema,
+});
+
+export const stateTransitionEventSchema = baseEventSchema.extend({
+  type: z.literal("state.transition"),
+  data: stateTransitionEventDataSchema,
 });
 
 // ============================================================================
@@ -534,6 +570,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   rollbackCompletedEventSchema,
   pongEventSchema,
   historyBatchEventSchema,
+  stateTransitionEventSchema,
 ]);
 
 // ============================================================================
@@ -565,6 +602,202 @@ export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
 export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
 export type PongEvent = z.infer<typeof pongEventSchema>;
 export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
+export type StateTransitionEvent = z.infer<typeof stateTransitionEventSchema>;
+
+// ============================================================================
+// Event Category Classification
+// ============================================================================
+
+/**
+ * Events are classified into three categories:
+ *
+ * - **Server State Events**: Track the server's execution state, phase lifecycle,
+ *   and persistent changes (e.g., phase execution, errors, rollbacks).
+ *   These events represent changes to the server's internal state and are
+ *   persisted to the event journal and broadcasted to all connected clients.
+ *
+ * - **Agentic Backbone Events**: Capture the agent's core execution artifacts
+ *   (assistant actions, tool outputs, and workspace mutations). These events
+ *   are journaled and broadcast the same way as server state events but are
+ *   tracked separately for clarity.
+ *
+ * - **Connection State Events**: Track client specific events.
+ *   These events are not persisted to the event journal and are sent to individual clients.
+ *
+ * The category is automatically inferred from the event's type field using the
+ * Sets below. Events do not have an explicit category field.
+ */
+
+/**
+ * Array of event types that represent server state changes.
+ */
+const SERVER_STATE_EVENT_TYPES_ARRAY = [
+  "phase.started",
+  "phase.completed",
+  "state.snapshot",
+  "server.idle",
+  "token.usage",
+  "info",
+  "error",
+  "checkpoint.list",
+  "rollback.started",
+  "rollback.progress",
+  "rollback.phaseCheckpoint",
+  "rollback.completed",
+  "rollback.workspaceCleanup",
+  "state.transition",
+] as const;
+
+/**
+ * Array of event types that represent agentic backbone events.
+ */
+const AGENTIC_BACKBONE_EVENT_TYPES_ARRAY = [
+  "assistant.action",
+  "tool.result",
+  "file.updated",
+  "filetree.updated",
+] as const;
+
+/**
+ * Array of event types that represent connection state changes.
+ */
+const CONNECTION_STATE_EVENT_TYPES_ARRAY = [
+  "server.ready",
+  "pong",
+  "history.batch",
+  "incomplete.phase",
+] as const;
+
+// Derive union types from the arrays
+type ServerStateEventType = (typeof SERVER_STATE_EVENT_TYPES_ARRAY)[number];
+type AgenticBackboneEventType = (typeof AGENTIC_BACKBONE_EVENT_TYPES_ARRAY)[number];
+type ConnectionStateEventType = (typeof CONNECTION_STATE_EVENT_TYPES_ARRAY)[number];
+
+/**
+ * Set of event types that represent server state changes.
+ */
+const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>(SERVER_STATE_EVENT_TYPES_ARRAY);
+
+/**
+ * Set of event types that represent agentic backbone events.
+ */
+const AGENTIC_BACKBONE_EVENT_TYPES = new Set<ServerEventType>(AGENTIC_BACKBONE_EVENT_TYPES_ARRAY);
+
+/**
+ * Set of event types that represent connection state changes.
+ */
+const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>(CONNECTION_STATE_EVENT_TYPES_ARRAY);
+
+/**
+ * Union type representing all server state events.
+ * These events track the server's execution state and persistent changes.
+ */
+export type ServerStateEvent =
+  | PhaseStartedEvent
+  | PhaseCompletedEvent
+  | StateSnapshotEvent
+  | ServerIdleEvent
+  | TokenUsageEvent
+  | InfoEvent
+  | ErrorEvent
+  | CheckpointListEvent
+  | RollbackStartedEvent
+  | RollbackProgressEvent
+  | RollbackPhaseCheckpointEvent
+  | RollbackCompletedEvent
+  | RollbackWorkspaceCleanupEvent
+  | StateTransitionEvent;
+
+/**
+ * Union type representing all agentic backbone events.
+ * These events capture the agent's core execution artifacts.
+ */
+export type AgenticBackboneEvent =
+  | AssistantActionEvent
+  | ToolResultEvent
+  | FileUpdatedEvent
+  | FileTreeUpdatedEvent;
+
+/**
+ * Union type representing all connection state events.
+ * These events track WebSocket connection lifecycle and client communication.
+ */
+export type ConnectionStateEvent =
+  | ServerReadyEvent
+  | PongEvent
+  | HistoryBatchEvent
+  | IncompletePhaseEvent;
+
+// Compile-time check: ensures all ServerEventTypes are categorized
+// This will cause a TypeScript error if any event is not categorized as either
+// a ServerStateEventType, AgenticBackboneEventType, or ConnectionStateEventType
+const _assertAllEventsCategorized: AssertEqual<
+  ServerEventType,
+  ServerStateEventType | AgenticBackboneEventType | ConnectionStateEventType
+> = true;
+
+// Compile-time checks: ensure the union types match their respective arrays
+// These will cause TypeScript errors if events are missing from the unions
+const _assertServerStateEventsMatch: AssertEqual<ServerStateEvent["type"], ServerStateEventType> =
+  true;
+
+const _assertAgenticBackboneEventsMatch: AssertEqual<
+  AgenticBackboneEvent["type"],
+  AgenticBackboneEventType
+> = true;
+
+const _assertConnectionStateEventsMatch: AssertEqual<
+  ConnectionStateEvent["type"],
+  ConnectionStateEventType
+> = true;
+
+// Compile-time check: ensure state transition event schema matches StateTransitionType
+const _assertStateTransitionTypeMatch: AssertEqual<
+  z.infer<typeof stateTransitionEventDataSchema>["transitionType"],
+  StateTransitionType
+> = true;
+
+/**
+ * Type guard to check if an event is a server state event.
+ *
+ * @param event - The event to check
+ * @returns true if the event is a server state event
+ *
+ * @example
+ * if (isServerStateEvent(event)) {
+ *   // TypeScript narrows event to ServerStateEvent
+ *   await journal.append(event);
+ * }
+ */
+export function isServerStateEvent(event: ServerEvent): event is ServerStateEvent {
+  return SERVER_STATE_EVENT_TYPES.has(event.type);
+}
+
+/**
+ * Type guard to check if an event is an agentic backbone event.
+ *
+ * @param event - The event to check
+ * @returns true if the event is an agentic backbone event
+ */
+export function isAgenticBackboneEvent(event: ServerEvent): event is AgenticBackboneEvent {
+  return AGENTIC_BACKBONE_EVENT_TYPES.has(event.type);
+}
+
+/**
+ * Type guard to check if an event is a connection state event.
+ *
+ * @param event - The event to check
+ * @returns true if the event is a connection state event
+ *
+ * @example
+ * if (isConnectionStateEvent(event)) {
+ *   // TypeScript narrows event to ConnectionStateEvent
+ *   // Handle connection-specific logic without persisting
+ * }
+ */
+export function isConnectionStateEvent(event: ServerEvent): event is ConnectionStateEvent {
+  return CONNECTION_STATE_EVENT_TYPES.has(event.type);
+}
 
 // Export client command types
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
@@ -616,6 +849,7 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "rollback.completed": rollbackCompletedEventDataSchema,
   pong: pongEventDataSchema,
   "history.batch": historyBatchEventDataSchema,
+  "state.transition": stateTransitionEventDataSchema,
 };
 
 // List of all valid event types (for chronicler validation)

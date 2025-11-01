@@ -28,6 +28,11 @@ import type {
   StateSnapshotEvent,
   TokenUsageEvent,
 } from "./schemas/event-schemas.js";
+import {
+  isAgenticBackboneEvent,
+  isConnectionStateEvent,
+  isServerStateEvent,
+} from "./schemas/event-schemas.js";
 import { StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
@@ -107,6 +112,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
   // Event Journal for multi-client support
   private eventJournal: EventJournal;
+  private eventJournalAppendQueue: Promise<void> = Promise.resolve();
 
   // Track pending tool uses for result matching
   private pendingToolUses: Map<
@@ -196,7 +202,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       if (phase && "claudeSessionId" in phase) {
         const phaseConfig = this.config.phases.find((p) => p.id === data.phaseId);
         if (phaseConfig) {
-          this.sendEvent({
+          this.emit("event", {
             id: EventId(generateId()),
             timestamp: new Date().toISOString(),
             type: "phase.started",
@@ -213,12 +219,60 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     });
 
+    // Listen to all state transitions and journal them
+    this.stateManager.on("stateChanged", (transition) => {
+      this.emitStateTransitionEvent(transition);
+    });
+
     this.stateManager.on("transitionError", ({ event: _event, error }) => {
       if (error.name === "PersistenceError") {
         // Can't save state - this is fatal
         this.handleError(error, "state-persistence", ErrorSeverity.FATAL);
       }
     });
+  }
+
+  /**
+   * Convert a state transition to a server event and emit it for journaling.
+   * This provides an audit trail of all state machine transitions.
+   */
+  private emitStateTransitionEvent(
+    transition: import("./types/state-types.js").StateTransition,
+  ): void {
+    // Extract relevant IDs from transition data
+    let runId: string | undefined;
+    let phaseId: string | undefined;
+
+    if ("runId" in transition.data) {
+      runId = transition.data.runId as string;
+    }
+    if ("phaseId" in transition.data) {
+      phaseId = transition.data.phaseId as string;
+    }
+
+    const stateTransitionEvent: import("./schemas/event-schemas.js").StateTransitionEvent = {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "state.transition",
+      data: {
+        transitionType: transition.type,
+        runId,
+        phaseId,
+        transition: {
+          type: transition.type,
+          data: transition.data as Record<string, unknown>,
+        },
+        resultingState: {
+          currentRunId: this.stateManager.getState().currentRunId,
+          runCount: this.stateManager.getState().runs.length,
+          totalCost: this.stateManager.getTotalCost(),
+          currentRunCost: this.stateManager.getCurrentRunCost(),
+        },
+      },
+    };
+
+    // Emit as a server state event - will be journaled but NOT sent to clients
+    this.emit("event", stateTransitionEvent);
   }
 
   // ============================================================================
@@ -505,13 +559,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     };
 
-    // Store in journal and send to the client
-    await this.eventJournal.append(serverReadyEvent);
-    this.sendEventToClient(ws, serverReadyEvent);
-
-    // TODO: figure out if this should be only sent after handshake
-    // Send initial state snapshot to the newly connected client
-    await this.sendStateSnapshot(ws);
+    // server.ready is a connection state event - send to client only, don't journal
+    this.emit("event", serverReadyEvent, ws);
 
     if (this.config.autostart) {
       this.autoStartNextPhase();
@@ -526,9 +575,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         },
       } as import("./types/types.js").ServerIdleEvent;
 
-      // Store in journal and send to the client
-      await this.eventJournal.append(serverIdleEvent);
-      this.sendEventToClient(ws, serverIdleEvent);
+      // server.idle is a server state event - journal and broadcast to all clients
+      this.emit("event", serverIdleEvent);
     }
   }
 
@@ -546,15 +594,19 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
       // Require handshake completion for all other messages
       if (!ws.data.handshakeComplete) {
-        this.sendEventToClient(ws, {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "error",
-          data: {
-            message: "Handshake required before sending commands",
-            fatal: false,
-          },
-        } as ErrorEvent);
+        this.emit(
+          "event",
+          {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            data: {
+              message: "Handshake required before sending commands",
+              fatal: false,
+            },
+          } as ErrorEvent,
+          ws,
+        );
         return;
       }
 
@@ -562,21 +614,21 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
       if (!result.success) {
         this.logger.log(`Invalid client command: ${result.error.message}`, "error");
-        this.sendEventToClient(ws, {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "error",
-          data: {
-            message: "Invalid command format",
-            fatal: false,
-          },
-        } as ErrorEvent);
+        this.emit(
+          "event",
+          {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            data: {
+              message: "Invalid command format",
+              fatal: false,
+            },
+          } as ErrorEvent,
+          ws,
+        );
         return;
       }
-
-      // All clients can execute any command
-      // const command = result.data;
-      this.logger.logSocketTraffic(this.config.socketLogFile, "in", result.data);
       this.handleCommand(result.data, ws);
     } catch (error) {
       this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
@@ -610,19 +662,23 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         `Client ${sender.data.id} attempted state-modifying command while rollback is in progress`,
         "error",
       );
-      this.sendEventToClient(sender, {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: "Cannot execute state-modifying commands while rollback is in progress",
-          context: `Attempted command: ${command.type}`,
-          phase: this.currentPhase?.phase.id,
-          fatal: false,
-          severity: ErrorSeverity.OPERATION,
-          code: "ROLLBACK_IN_PROGRESS",
-        },
-      } as ErrorEvent);
+      this.emit(
+        "event",
+        {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "error",
+          data: {
+            message: "Cannot execute state-modifying commands while rollback is in progress",
+            context: `Attempted command: ${command.type}`,
+            phase: this.currentPhase?.phase.id,
+            fatal: false,
+            severity: ErrorSeverity.OPERATION,
+            code: "ROLLBACK_IN_PROGRESS",
+          },
+        } as ErrorEvent,
+        sender,
+      );
       return;
     }
 
@@ -634,19 +690,23 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           `Client ${sender.data.id} attempted state-modifying command without handshake`,
           "error",
         );
-        this.sendEventToClient(sender, {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "error",
-          data: {
-            message: "Cannot execute state-modifying commands without handshake",
-            context: `Attempted command: ${command.type}`,
-            phase: this.currentPhase?.phase.id,
-            fatal: false,
-            severity: ErrorSeverity.OPERATION,
-            code: "HANDSHAKE_REQUIRED",
-          },
-        } as ErrorEvent);
+        this.emit(
+          "event",
+          {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            data: {
+              message: "Cannot execute state-modifying commands without handshake",
+              context: `Attempted command: ${command.type}`,
+              phase: this.currentPhase?.phase.id,
+              fatal: false,
+              severity: ErrorSeverity.OPERATION,
+              code: "HANDSHAKE_REQUIRED",
+            },
+          } as ErrorEvent,
+          sender,
+        );
         return;
       }
 
@@ -656,19 +716,23 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           `Client ${sender.data.id} attempted state-modifying command in read-only mode`,
           "error",
         );
-        this.sendEventToClient(sender, {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "error",
-          data: {
-            message: "Cannot execute state-modifying commands in read-only mode",
-            context: `Attempted command: ${command.type}`,
-            phase: this.currentPhase?.phase.id,
-            fatal: false,
-            severity: ErrorSeverity.OPERATION,
-            code: "INSUFFICIENT_PERMISSIONS",
-          },
-        } as ErrorEvent);
+        this.emit(
+          "event",
+          {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            data: {
+              message: "Cannot execute state-modifying commands in read-only mode",
+              context: `Attempted command: ${command.type}`,
+              phase: this.currentPhase?.phase.id,
+              fatal: false,
+              severity: ErrorSeverity.OPERATION,
+              code: "INSUFFICIENT_PERMISSIONS",
+            },
+          } as ErrorEvent,
+          sender,
+        );
         return;
       }
     }
@@ -759,20 +823,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         },
       };
 
-      try {
-        this.logger.logSocketTraffic(this.config.socketLogFile, "out", pongEvent);
-        sender.send(JSON.stringify(pongEvent));
-      } catch (error) {
-        this.logger.log(`Failed to send pong to client ${sender.data.id}: ${error}`, "error");
-        // Remove disconnected client
-        this.clients.delete(sender.data.id);
-      }
-
-      // Store in event journal and emit for tests and basic TUI
-      this.eventJournal.append(pongEvent).catch((error) => {
-        this.logger.log(`Error appending pong event to journal: ${error}`, "error");
-      });
-      this.emit("event", pongEvent);
+      // pong is a connection state event - send to specific client only, don't journal
+      this.emit("event", pongEvent, sender);
     } else {
       this.logger.log("Ping command received but no valid sender provided", "error");
     }
@@ -785,46 +837,23 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Send pong response to all clients, including the sender's client ID
     // For broadcast, we'll include a clientId to distinguish the sender
-    for (const [clientId, client] of this.clients) {
+    // pong is a connection state event - each goes to a specific client, not journaled
+    for (const [_, client] of this.clients) {
       if (!client.data.handshakeComplete) continue;
 
-      try {
-        const pongEvent: PongEvent = {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "pong",
-          data: {
-            message: "pong",
-            timestamp: new Date().toISOString(),
-            clientId: senderClientId, // Include the sender's client ID in broadcast responses
-          },
-        };
-
-        this.logger.logSocketTraffic(this.config.socketLogFile, "out", pongEvent);
-        client.send(JSON.stringify(pongEvent));
-      } catch (error) {
-        this.logger.log(`Failed to send pong to client ${clientId}: ${error}`, "error");
-        // Remove disconnected client
-        this.clients.delete(clientId);
-      }
-    }
-
-    // Store a single event in journal and emit for tests and basic TUI
-    const broadcastPongEvent: PongEvent = {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "pong",
-      data: {
-        message: "pong",
+      const pongEvent: PongEvent = {
+        id: EventId(generateId()),
         timestamp: new Date().toISOString(),
-        clientId: senderClientId, // Use sender's client ID
-      },
-    };
+        type: "pong",
+        data: {
+          message: "pong",
+          timestamp: new Date().toISOString(),
+          clientId: senderClientId, // Include the sender's client ID in broadcast responses
+        },
+      };
 
-    this.eventJournal.append(broadcastPongEvent).catch((error) => {
-      this.logger.log(`Error appending broadcast pong event to journal: ${error}`, "error");
-    });
-    this.emit("event", broadcastPongEvent);
+      this.emit("event", pongEvent, client);
+    }
   }
 
   // ============================================================================
@@ -892,7 +921,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     try {
-      this.logger.logSocketTraffic(this.config.socketLogFile, "out", historyBatchEvent);
       sender.send(JSON.stringify(historyBatchEvent));
       this.logger.log(`Sent ${events.length} events to client ${sender.data.id}`);
     } catch (error) {
@@ -904,42 +932,84 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private sendEvent(event: ServerEvent): void {
-    // Store in journal first (fire and forget, log errors)
-    this.eventJournal.append(event).catch((error) => {
-      this.logger.log(`Error appending event to journal: ${error}`, "error");
-    });
-
-    if (this.clients.size === 0) {
-      // Still store events even with no clients connected
-      // Emit for tests and basic TUI
-      this.emit("event", event);
-      return;
+  /**
+   * Override emit to handle server event routing with optional client targeting.
+   *
+   * - Server state events (no target): Journaled and broadcasted to all clients
+   * - Server state events (with target): Sent only to specified client (e.g., validation errors)
+   * - Connection state events (with target): Sent only to specified client, not journaled
+   * - Error server event is a notable exception - it's a server state error that can be sent to a specific client if target is provided
+   *
+   * @param event - Event type (always "event" for ServerEvents)
+   * @param data - The server event to emit
+   * @param target - Optional target client. If provided, event is sent only to this client
+   */
+  emit<K extends keyof ServerInternalEvents>(
+    event: K,
+    data: ServerInternalEvents[K][0],
+    target?: ServerWebSocket<ClientData>,
+  ): boolean {
+    if (event !== "event") {
+      // Should relax this restriction eventually
+      this.logger.log(`Unsupported event type emitted: ${event}`, "error");
+      throw new Error(`Unsupported event type: ${event}. Can only emit "event" events.`);
     }
 
-    // Broadcast to all connected clients that have completed handshake
-    for (const [_, client] of this.clients) {
-      // Only send events to clients that have completed handshake
-      if (!client.data.handshakeComplete) continue;
-      this.sendEventToClient(client, event);
+    const serverEvent = data as ServerEvent;
+    const isServerState = isServerStateEvent(serverEvent);
+    const isAgenticBackbone = isAgenticBackboneEvent(serverEvent);
+    const isConnectionState = isConnectionStateEvent(serverEvent);
+
+    // this should never happen due to compile time checks, but...
+    if (!isServerState && !isAgenticBackbone && !isConnectionState) {
+      // This should never happen - all ServerEvents should be categorized
+      this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
+      throw new Error(`Unknown event: ${(serverEvent as ServerEvent).type}`);
     }
 
-    // Emit for tests and basic TUI
-    this.emit("event", event);
+    // early exit if we have a connection state event without a target
+    if (isConnectionState && !target) {
+      this.logger.log(
+        `Connection state event ${serverEvent.type} requires a target client but none provided`,
+        "error",
+      );
+      return false;
+    }
+
+    // Journal and broadcast events that should reach all clients when no target is provided
+    if ((isServerState || isAgenticBackbone) && !target) {
+      // Server state or agentic backbone events without target: journal and broadcast to all clients
+      // Use queue to ensure events are written in the order they're emitted
+      this.eventJournalAppendQueue = this.eventJournalAppendQueue
+        .then(() => this.eventJournal.append(serverEvent))
+        .catch((error) => {
+          this.logger.log(`Error appending event to journal: ${error}`, "error");
+        });
+
+      // Broadcast to all connected clients that have completed handshake
+      if (this.clients.size > 0) {
+        for (const [_, client] of this.clients) {
+          if (!client.data.handshakeComplete) continue;
+          try {
+            client.send(JSON.stringify(serverEvent));
+          } catch (error) {
+            this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
+          }
+        }
+      }
+    } else {
+      try {
+        target?.send(JSON.stringify(serverEvent));
+      } catch (error) {
+        this.logger.log(`Failed to send event to client ${target?.data.id}: ${error}`, "error");
+      }
+    }
+
+    // Continue with normal emission for tests/TUI
+    return super.emit(event, data);
   }
 
-  private sendEventToClient(ws: ServerWebSocket<ClientData>, event: ServerEvent): void {
-    try {
-      this.logger.logSocketTraffic(this.config.socketLogFile, "out", event);
-      ws.send(JSON.stringify(event));
-    } catch (error) {
-      this.logger.log(`Failed to send event to client ${ws.data.id}: ${error}`, "error");
-      // Remove disconnected client
-      this.clients.delete(ws.data.id);
-    }
-  }
-
-  private async sendStateSnapshot(client?: ServerWebSocket<ClientData>): Promise<void> {
+  private async sendStateSnapshot(): Promise<void> {
     const totalCost = this.stateManager.getTotalCost();
     const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
 
@@ -964,14 +1034,8 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       },
     };
 
-    if (client) {
-      // Send to specific client and store in journal
-      await this.eventJournal.append(stateSnapshotEvent);
-      this.sendEventToClient(client, stateSnapshotEvent);
-    } else {
-      // Send to all clients (default behavior)
-      this.sendEvent(stateSnapshotEvent);
-    }
+    // state.snapshot is a server state event - journal and broadcast to all clients
+    this.emit("event", stateSnapshotEvent);
   }
 
   // Get terminal phases for snapshot - returns all terminal phases (completed, failed, skipped)
@@ -1235,7 +1299,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           }
 
           // Send error event with details
-          this.sendEvent({
+          this.emit("event", {
             id: EventId(generateId()),
             timestamp: new Date().toISOString(),
             type: "error",
@@ -1321,7 +1385,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         );
 
         // Send info event about continuation
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "info",
@@ -1360,7 +1424,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         }
 
         // Send error event
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "error",
@@ -1427,7 +1491,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       // Only send events if we have files
       if (files.length > 0) {
         for (const file of files) {
-          this.sendEvent({
+          this.emit("event", {
             id: EventId(generateId()),
             timestamp: new Date().toISOString(),
             type: "file.updated",
@@ -1622,7 +1686,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       this.logger.log(`Claude started phase ${phaseId} with session ID: ${msg.session_id}`);
 
       // Send existing info event
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "info",
@@ -1670,7 +1734,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       };
 
       // Send error event
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -1733,7 +1797,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       );
 
       // Send token.usage event with the delta cost
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "token.usage",
@@ -1772,7 +1836,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           };
 
           // Send error event
-          this.sendEvent({
+          this.emit("event", {
             id: EventId(generateId()),
             timestamp: new Date().toISOString(),
             type: "error",
@@ -1793,7 +1857,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
           return; // Stop processing further messages
         }
 
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "assistant.action",
@@ -1805,7 +1869,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         } as AssistantActionEvent);
       } else if ("thinking" in item && item.type === "thinking") {
         const thinkingItem = item as ThinkingContent;
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "assistant.action",
@@ -1840,7 +1904,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
         // Send event for all tools, including unknown ones
         // toolName is typed as string to allow unknown tools
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "assistant.action",
@@ -1882,7 +1946,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       };
 
       // Send error event
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -1930,7 +1994,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         });
 
         // Send a final token usage event with the correct values
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "token.usage",
@@ -1994,7 +2058,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         }
 
         // Send tool result event
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "tool.result",
@@ -2136,7 +2200,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // The design decision to report 0 for skipped phases is handled here
     const reportedCost = finalStatus === "skipped" ? 0 : finalCost;
 
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "phase.completed",
@@ -2212,7 +2276,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         await this.autoStartNextPhase();
       } else {
         // Emit idle event
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "server.idle",
@@ -2326,7 +2390,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     };
 
     // Send file update event
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "file.updated",
@@ -2353,7 +2417,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Merge all trees into one
     const mergedTree = allTrees.flat();
 
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "filetree.updated",
@@ -2380,7 +2444,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     );
 
     // Always send to client
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "error",
@@ -2433,7 +2497,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
       if (this.config.autostart) {
         // Current behavior - shut down
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "info",
@@ -2447,7 +2511,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         }, 2000);
       } else {
         // New behavior - stay running and emit idle
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "server.idle",
@@ -2543,7 +2607,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       : this.stateManager.getCurrentRun();
 
     if (!targetRun) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2610,7 +2674,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "checkpoint.list",
@@ -2628,7 +2692,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   private async forceStopPhase(reason?: string): Promise<void> {
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (!currentPhase || isTerminalPhaseStatus(currentPhase.status)) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2679,7 +2743,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.cleanupCurrentPhase();
 
     // Send confirmation
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "info",
@@ -2696,7 +2760,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Check if phase is running
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2780,7 +2844,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Handle matches
     if (matches.length === 0) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2804,7 +2868,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         })
         .join("\n");
 
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2838,7 +2902,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Check if phase is running
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2873,7 +2937,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     if (!targetThreadPhase) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2975,7 +3039,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     if (!sha || !actualCheckpointType) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -2997,7 +3061,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // Check if phase is running
     const currentPhase = this.stateManager.getCurrentlyRunningPhase();
     if (currentPhase && !isTerminalPhaseStatus(currentPhase.status)) {
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -3095,7 +3159,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       );
     } else {
       this.logger.log("No checkpoints found in execution history", "error");
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "error",
@@ -3174,7 +3238,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const fromRun = thread.phases[0]?.runId || targetThreadPhase.runId;
     const fromPhase = thread.phases[0]?.phase.phaseId || targetThreadPhase.phase.phaseId;
 
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "rollback.started",
@@ -3196,7 +3260,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       currentStep++;
 
       // Emit progress
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "rollback.progress",
@@ -3215,7 +3279,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
         // Emit checkpoint event
         const phaseConfig = this.config.phases.find((p) => p.id === threadPhase.phase.phaseId);
-        this.sendEvent({
+        this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
           type: "rollback.phaseCheckpoint",
@@ -3235,7 +3299,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // 5. Final reset to target checkpoint
     currentStep++;
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "rollback.progress",
@@ -3250,7 +3314,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       await this.checkpointGit.resetToCheckpoint(targetSha);
     }
 
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "rollback.phaseCheckpoint",
@@ -3313,7 +3377,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.isRollingBack = false;
 
     // 11. Send completion event
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "rollback.completed",
@@ -3389,7 +3453,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const phaseName = phaseConfig?.name || phase.phaseId;
 
     // Emit cleanup started
-    this.sendEvent({
+    this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "rollback.workspaceCleanup",
@@ -3427,7 +3491,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     if (failedCleanups.length > 0) {
       // Partial or complete failure
       const status = successfulCleanups.length > 0 ? "partial" : "failed";
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "rollback.workspaceCleanup",
@@ -3443,7 +3507,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       } as import("./types/types.js").RollbackWorkspaceCleanupEvent);
     } else {
       // Complete success
-      this.sendEvent({
+      this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "rollback.workspaceCleanup",

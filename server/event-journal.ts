@@ -1,5 +1,9 @@
 import { createInterface } from "node:readline";
-import type { ServerEvent } from "./schemas/event-schemas.js";
+import {
+  isAgenticBackboneEvent,
+  isServerStateEvent,
+  type ServerEvent,
+} from "./schemas/event-schemas.js";
 import type { IEventStorage } from "./storage/event-storage.js";
 import { MemoryEventStorage } from "./storage/memory-event-storage.js";
 
@@ -24,6 +28,13 @@ export class EventJournal {
   }
 
   async append(event: ServerEvent): Promise<void> {
+    // Only server state or agentic backbone events should be journaled
+    if (!isServerStateEvent(event) && !isAgenticBackboneEvent(event)) {
+      throw new Error(
+        `Cannot journal non-journaled event: ${event.type}. ` +
+          `Only server state or agentic backbone events should be persisted to the event journal.`,
+      );
+    }
     await this.storage.append(event);
   }
 
