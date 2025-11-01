@@ -597,10 +597,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     // server.ready is a connection state event - send to client only, don't journal
     this.emit("event", serverReadyEvent, ws);
 
-<<<<<<< HEAD
-=======
-    // Handle autostart logic (only if this is the first write client)
->>>>>>> 3162e79 (do not send snapshot on new connection)
     if (this.config.autostart) {
       this.autoStartNextPhase();
     } else {
@@ -1032,6 +1028,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // this should never happen due to compile time checks, but...
 <<<<<<< HEAD
+<<<<<<< HEAD
     if (!isServerState && !isAgenticBackbone && !isConnectionState) {
 =======
     if (
@@ -1039,6 +1036,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       !isConnectionStateEvent(serverEvent)
     ) {
 >>>>>>> 3162e79 (do not send snapshot on new connection)
+=======
+    if (!isServerState && !isAgenticBackbone && !isConnectionState) {
+>>>>>>> 08da9c1 (add agentic backbone event category)
       // This should never happen - all ServerEvents should be categorized
       this.logger.log(
         `Unknown event type: ${(serverEvent as ServerEvent).type}`,
