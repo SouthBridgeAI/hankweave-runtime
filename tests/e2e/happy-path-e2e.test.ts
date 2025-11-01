@@ -187,8 +187,6 @@ async function setupAndRunPhases(): Promise<void> {
     console.log(`  Data path: ${testState.dataPath}`);
   }
 
-  await testState.client.waitForEvent("state.snapshot");
-
   // Wait for all phases to complete
   console.log(`${colors.blue}Waiting for all phases to complete...${colors.reset}`);
 
