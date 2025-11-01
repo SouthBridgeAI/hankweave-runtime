@@ -9,6 +9,7 @@ import {
   logCleanupResults,
 } from "../utils/cleanup-integration.js";
 import {
+  ClientMode,
   cleanupTest,
   colors,
   generateTestTimestamp,
@@ -72,13 +73,16 @@ const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json
 const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
-// Import types from the server
+// Import types and utilities from the server
+import { type HistoryBatchEvent, isJournaledEvent } from "../../server/schemas/event-schemas.js";
 import type {
   ErrorEvent,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
 } from "../../server/types/types.js";
+// Import connectTadpoleClient for sync client
+import { connectTadpoleClient } from "../utils/tadpole-server-test-helpers.js";
 
 // Server configuration - Updated for execution isolation
 const serverConfig: ServerConfig = {
@@ -101,7 +105,12 @@ const tadpoleResultsDir = path.join(serverConfig.cwd, "tadpole-results/");
 interface TestState {
   serverProcess: ChildProcess | null;
   client: TestWSClient | null;
+  syncClient: WebSocket | null; // Read-only client that starts after delay
   events: ServerEvent[];
+  // Server State Events collected from history.sync
+  historyEvents: ServerEvent[];
+  // Server State Events collected live after history sync completes
+  liveEvents: ServerEvent[];
   phase1Started: PhaseStartedEvent | null;
   phase1Completed: PhaseCompletedEvent | null;
   phase2Started: PhaseStartedEvent | null;
@@ -132,7 +141,12 @@ interface TestState {
 const testState: TestState = {
   serverProcess: null,
   client: null,
+  syncClient: null,
   events: [],
+  // Events collected via sync client using history.sync
+  historyEvents: [],
+  // Events collected live after history sync completes
+  liveEvents: [],
   phase1Started: null,
   phase1Completed: null,
   phase2Started: null,
@@ -201,6 +215,106 @@ async function setupAndRunPhases(): Promise<void> {
   testState.phase1Completed = await testState.client.waitForPhaseCompletion("phase-1", 60000);
   console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
 
+  // Start read-only sync client in background after Phase 1 completes
+  console.log(`${colors.blue}Starting read-only sync client in background...${colors.reset}`);
+  const clientSetup = await connectTadpoleClient(`ws://localhost:${SERVER_PORT}`, {
+    performHandshake: true,
+    mode: ClientMode.READONLY,
+    sendPreviousEvents: true,
+  });
+  testState.syncClient = clientSetup.client;
+  console.log(`${colors.green}✓ Sync client connected${colors.reset}`);
+
+  // Set up background event collection from sync client
+  // This runs in parallel with the main execution
+  const syncClientEventCollection = (async (): Promise<{
+    historyEvents: ServerEvent[];
+    liveEvents: ServerEvent[];
+  }> => {
+    if (!testState.syncClient) {
+      throw new Error("Sync client not connected");
+    }
+
+    // Collect all events: history from history.sync + live events until RunCompleted
+    const eventCollectionPromise = new Promise<{
+      historyEvents: ServerEvent[];
+      liveEvents: ServerEvent[];
+    }>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("Timed out waiting for RunCompleted event")),
+        180_000, // 3 minutes - wait for entire run to complete
+      );
+
+      if (!testState.syncClient) {
+        return reject(new Error("Sync client not connected"));
+      }
+
+      const batches: Array<HistoryBatchEvent> = [];
+      const collectedLiveEvents: ServerEvent[] = [];
+      let historySyncComplete = false;
+
+      // Set up message handler that:
+      // 1. Collects history.batch events during sync
+      // 2. Collects live events ONLY AFTER history sync is complete
+      // 3. Resolves when RunCompleted is received
+      testState.syncClient.onmessage = (event: MessageEvent) => {
+        const serverEvent = JSON.parse(event.data) as ServerEvent;
+
+        // Handle history.batch events for sync
+        if (serverEvent.type === "history.batch") {
+          batches.push(serverEvent as HistoryBatchEvent);
+          if (!(serverEvent as HistoryBatchEvent).data.hasMore) {
+            historySyncComplete = true;
+            console.log(
+              `${colors.gray}  [Sync Client] History sync complete, now collecting live events...${colors.reset}`,
+            );
+          }
+          return;
+        }
+
+        // Only collect live events AFTER history sync is complete
+        // This ensures clear separation between historical and live events
+        if (historySyncComplete) {
+          collectedLiveEvents.push(serverEvent);
+
+          // Check if this is the RunCompleted event - signals end of collection
+          if (
+            serverEvent.type === "state.transition" &&
+            serverEvent.data?.transitionType === "RunCompleted"
+          ) {
+            clearTimeout(timeout);
+
+            // Extract history events from batches
+            const historyEvents: ServerEvent[] = [];
+            for (const batch of batches) {
+              historyEvents.push(...batch.data.events);
+            }
+
+            console.log(
+              `${colors.gray}  [Sync Client] Received RunCompleted event - collection complete${colors.reset}`,
+            );
+            console.log(
+              `${colors.gray}  [Sync Client] History: ${historyEvents.length} events, Live: ${collectedLiveEvents.length} events${colors.reset}`,
+            );
+
+            resolve({ historyEvents, liveEvents: collectedLiveEvents });
+          }
+        }
+      };
+    });
+
+    // Send history.sync command to start collection
+    testState.syncClient.send(
+      JSON.stringify({
+        id: `history-sync-${Date.now()}`,
+        type: "history.sync",
+      }),
+    );
+
+    // Wait for both history and live events to be collected
+    return await eventCollectionPromise;
+  })();
+
   // Phase 2
   // Wait for phase 2 to start (it should auto-start after phase 1)
   // We'll poll for the event with a timeout
@@ -257,8 +371,20 @@ async function setupAndRunPhases(): Promise<void> {
   testState.phase3Completed = await testState.client.waitForPhaseCompletion("phase-3", 60000);
   console.log(`${colors.green}✓ Phase 3 completed${colors.reset}`);
 
-  // Give a moment for final events and state transitions to complete
-  await new Promise((resolve) => setTimeout(resolve, 5000));
+  // Wait for sync client background collection to complete
+  // The promise resolves when RunCompleted is received (after all phases finish)
+  if (testState.syncClient) {
+    try {
+      const { historyEvents, liveEvents } = await syncClientEventCollection;
+      testState.historyEvents = historyEvents;
+      // Filter out Connection State Events - only keep events that are persisted to journal
+      testState.liveEvents = liveEvents.filter(isJournaledEvent);
+    } catch (error) {
+      console.warn(
+        `${colors.yellow}Sync client collection timed out or errored: ${error}${colors.reset}`,
+      );
+    }
+  }
 
   // Store all events for tests
   testState.events = testState.client.getEvents();
@@ -378,6 +504,16 @@ async function validateCheckpointSystem(): Promise<void> {
 
 // This function only shuts down the server and saves results
 async function shutdownServer(): Promise<void> {
+  // Disconnect sync client if connected
+  if (
+    testState.syncClient &&
+    (testState.syncClient.readyState === WebSocket.OPEN ||
+      testState.syncClient.readyState === WebSocket.CONNECTING)
+  ) {
+    testState.syncClient.close();
+    console.log(`${colors.gray}✓ Sync client disconnected${colors.reset}`);
+  }
+
   // Only shutdown if not already done
   if (testState.serverProcess || testState.client?.isConnected) {
     await cleanupTest({
@@ -563,6 +699,30 @@ describe("Tadpole E2E Test", () => {
 
   describe("Event Journal", () => {
     runEventJournalTests(testState);
+  });
+
+  describe("History Sync", () => {
+    it("should start with RunStarted state transition", () => {
+      expect(testState.historyEvents.length).toBeGreaterThan(0);
+
+      const firstEvent = testState.historyEvents[0];
+      expect(firstEvent.type).toBe("state.transition");
+      if (firstEvent.type === "state.transition") {
+        expect(firstEvent.data.transitionType).toBe("RunStarted");
+      }
+    });
+
+    it("should have phase-1 completion as last history event", () => {
+      // The sync client was started after Phase 1 completed
+      // So the last history event should be phase-1's completion
+      expect(testState.historyEvents.length).toBeGreaterThan(0);
+
+      const lastHistoryEvent = testState.historyEvents[testState.historyEvents.length - 1];
+      expect(lastHistoryEvent.type).toBe("phase.completed");
+      if (lastHistoryEvent.type === "phase.completed") {
+        expect(lastHistoryEvent.data.phaseId).toBe("phase-1");
+      }
+    });
   });
 
   describe("Cost Tracking", () => {

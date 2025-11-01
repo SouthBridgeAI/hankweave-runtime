@@ -7,7 +7,7 @@ import type {
   RollbackCompletedEvent,
 } from "../../server/schemas/event-schemas.js";
 import { PhaseId } from "../../server/types/branded-types.js";
-import { connectTadpoleClient, launchTadpole } from "../utils/tadpole-server.js";
+import { connectTadpoleClient, launchTadpole } from "../utils/tadpole-server-test-helpers.js";
 
 describe("tadpole server", () => {
   it("starts and stops when asked to", async () => {
@@ -225,7 +225,7 @@ describe("tadpole server", () => {
         const batches: Array<HistoryBatchEvent> = [];
 
         secondClient.onmessage = (event) => {
-          const data = JSON.parse(event.data.toString());
+          const data = JSON.parse(event.data);
 
           if (data.type !== "history.batch") {
             return;

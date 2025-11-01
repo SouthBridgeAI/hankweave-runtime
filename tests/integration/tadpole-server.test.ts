@@ -10,7 +10,10 @@ import {
   serverEventSchema,
 } from "../../server/schemas/event-schemas.js";
 import { generateTestTimestamp } from "../utils/test-helpers.js";
-import { ClientMode, connectTadpoleClient } from "../utils/tadpole-server.js";
+import {
+  ClientMode,
+  connectTadpoleClient,
+} from "../utils/tadpole-server-test-helpers.js";
 
 // Test configuration similar to e2e tests
 const TEST_ROOT = path.resolve(

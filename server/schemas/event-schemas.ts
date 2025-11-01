@@ -799,6 +799,25 @@ export function isConnectionStateEvent(event: ServerEvent): event is ConnectionS
   return CONNECTION_STATE_EVENT_TYPES.has(event.type);
 }
 
+/**
+ * Type guard to check if an event should be journaled.
+ * Journaled events include both server state events and agentic backbone events.
+ *
+ * @param event - The event to check
+ * @returns true if the event should be journaled
+ *
+ * @example
+ * if (isJournaledEvent(event)) {
+ *   // This event is persisted to the event journal
+ *   // and broadcasted to all connected clients
+ * }
+ */
+export function isJournaledEvent(
+  event: ServerEvent,
+): event is ServerStateEvent | AgenticBackboneEvent {
+  return isServerStateEvent(event) || isAgenticBackboneEvent(event);
+}
+
 // Export client command types
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 export type StartPhaseCommand = z.infer<typeof startPhaseCommandSchema>;

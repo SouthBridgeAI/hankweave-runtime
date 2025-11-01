@@ -1,3 +1,6 @@
+// Collection of test helpers and utilities for launching and interacting with a Tadpole server.
+// Used for writing tests
+
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import * as fs from "node:fs";
