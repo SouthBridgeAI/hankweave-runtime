@@ -54,14 +54,14 @@ High-level event management and querying:
 
 ## Event Categories & Routing
 
-All server events are categorized into two mutually exclusive types, enabling intelligent routing and persistence decisions.
+All server events are categorized into three mutually exclusive types, enabling intelligent routing and persistence decisions.
 
 ### Server State Events
 
 Events that represent changes to the server's persistent execution state. These events:
 - **Are persisted** to the event journal (file or memory storage)
 - **Are broadcasted** to all connected clients that have completed handshake
-- **Represent domain logic**: phase execution, file changes, Claude's actions, errors
+- **Represent domain logic**: phase execution, state transitions, errors
 
 **Event Types**:
 ```typescript
@@ -72,10 +72,7 @@ phase.started, phase.completed
 state.snapshot, server.idle, state.transition
 
 // Execution events
-assistant.action, token.usage, tool.result
-
-// File system events
-file.updated, filetree.updated
+token.usage
 
 // Notifications
 info, error
@@ -84,6 +81,24 @@ info, error
 checkpoint.list
 rollback.started, rollback.progress, rollback.phaseCheckpoint
 rollback.completed, rollback.workspaceCleanup
+```
+
+### Agentic Backbone Events
+
+Events that capture the agent's core execution artifacts. These events:
+- **Are persisted** to the event journal (file or memory storage)
+- **Are broadcasted** to all connected clients that have completed handshake
+- **Represent agent artifacts**: Claude's actions, tool outputs, workspace mutations
+
+These events are journaled and broadcast the same way as server state events but are tracked separately for clarity.
+
+**Event Types**:
+```typescript
+// Claude's actions and tool execution
+assistant.action, tool.result
+
+// File system mutations
+file.updated, filetree.updated
 ```
 
 ### Connection State Events
@@ -103,11 +118,11 @@ incomplete.phase    // Client-specific warning
 
 ### Compile-Time Safety Guarantees
 
-The system uses TypeScript's type system to ensure all events are categorized in one of the 2 categories. If you add a new event and forget to classify it, typescript compiler will gently remind you about this.
+The system uses TypeScript's type system to ensure all events are categorized in one of the 3 categories. If you add a new event and forget to classify it, typescript compiler will gently remind you about this.
 
 ### Runtime Validation
 
-The event journal explicitly rejects connection state events.
+The event journal accepts both server state events and agentic backbone events, but explicitly rejects connection state events.
 
 ## Event Schemas
 
@@ -211,9 +226,10 @@ ws.on("message", (data) => {
 
 After the history synchronization completes (`hasMore: false`), the WebSocket connection remains open and the client continues to receive **live events** as they occur on the server.
 
-**Important**: Live events include **both** Server State Events and Connection State Events:
+**Important**: Live events include **Server State Events**, **Agentic Backbone Events**, and **Connection State Events**:
 
-- **Server State Events**: Persisted events like `phase.started`, `state.transition`, `file.updated`, etc.
+- **Server State Events**: Persisted events like `phase.started`, `state.transition`, `state.snapshot`, etc.
+- **Agentic Backbone Events**: Persisted events like `assistant.action`, `tool.result`, `file.updated`, `filetree.updated`
 - **Connection State Events**: Ephemeral events like `history.batch`, `incomplete.phase`, etc.
 
 Clients can filter live events based on their needs:

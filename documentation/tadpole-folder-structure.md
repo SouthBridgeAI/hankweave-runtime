@@ -111,7 +111,7 @@ This is the unified event journal that consolidates all server activity logging 
 
 - **Location**: `.tadpole/events/events.jsonl`
 - **Format**: JSON Lines (JSONL), where each line is a self-contained JSON object
-- **Content**: All **Server State Events** - events that represent changes to the server's persistent execution state
+- **Content**: All **Server State Events** and **Agentic Backbone Events** - events that represent changes to the server's persistent execution state and the agent's core execution artifacts
 - **Use Case**: Audit trail for debugging, analysis, and understanding execution history
 
 For detailed information about event schemas, routing, and the event journal system, see [Event Journal documentation](./event-journal.md).
