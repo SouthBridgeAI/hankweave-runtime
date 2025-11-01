@@ -961,7 +961,6 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const isConnectionState = isConnectionStateEvent(serverEvent);
 
     // this should never happen due to compile time checks, but...
-
     if (!isServerState && !isAgenticBackbone && !isConnectionState) {
       // This should never happen - all ServerEvents should be categorized
       this.logger.log(`Unknown event type: $(serverEvent as ServerEvent).type`, "error");
