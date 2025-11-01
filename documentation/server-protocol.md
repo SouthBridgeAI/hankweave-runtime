@@ -27,7 +27,6 @@ Client                    Server
   │                         ├─ Grant mode & optionally gather history
   │<─ handshake.response ───┤
   │<──── server.ready ──────┤
-  │<─── state.snapshot ─────┤
   │                         │
   │─── history.sync ───────>│ (optional)
   │<──── history.batch ─────┤ (streamed batches)
@@ -109,7 +108,7 @@ The server responds with:
 - `cursor`: Reserved for future pagination support (currently always `null`)
 - `totalEvents`: Count of events currently stored in the journal. This can be larger than `eventHistory.length`, signalling that additional history is available via `history.sync`.
 
-Immediately after acknowledging the handshake, the server emits `server.ready` followed by a `state.snapshot`, then resumes real-time event delivery.
+Immediately after acknowledging the handshake, the server emits `server.ready`, then resumes real-time event delivery.
 
 ### Example Client Flow
 
@@ -375,7 +374,7 @@ The initial handshake event, sent once a client connects successfully. It provid
 - `dataPath`: Where the user's original data is accessible (via symlink or copy) at `<execution-dir>/read_only_data_source`
 
 #### `state.snapshot`
-A comprehensive snapshot of the server's current state. It's sent after `server.ready` and after major state changes (like phase completion or rollback). This event is the primary source of truth for the client to build its own state representation.
+A comprehensive snapshot of the server's current state. It's sent after major state changes (like phase completion or rollback). This event is the primary source of truth for the client to build its own state representation.
 
 ```json
 {
@@ -648,12 +647,11 @@ The `rollbackToLastSuccess` operation prioritizes completion checkpoints but fal
 
 ### Connection Lifecycle
 The typical connection flow is designed to quickly synchronize the client with the server's state:
-1.  The client establishes a WebSocket connection.
-2.  The server immediately responds with a `server.ready` event.
-3.  This is followed by a comprehensive `state.snapshot` event.
-4.  The server checks if the execution thread has previously failed by analyzing the execution history.
-5.  If a failure is detected, the server automatically triggers `rollbackToLastSuccess` to restore the workspace to a known good state before resuming.
-6.  If `autostart` is enabled, the server proceeds to start the next phase (after rollback if needed). Otherwise, it sends a `server.idle` event and waits for commands.
+1.  The client establishes a WebSocket connection and completes the handshake.
+2.  The server responds with a `server.ready` event.
+3.  The server checks if the execution thread has previously failed by analyzing the execution history.
+4.  If a failure is detected, the server automatically triggers `rollbackToLastSuccess` to restore the workspace to a known good state before resuming.
+5.  If `autostart` is enabled, the server proceeds to start the next phase (after rollback if needed). Otherwise, it sends a `server.idle` event and waits for commands.
 
 **Automatic Failure Recovery:**
 When the server starts up, it analyzes the execution thread to detect if previous execution attempts failed. If `ExecutionThread.failed` is true (indicating phases with status "failed" or runStatus "failed"/"crashed"), the server automatically performs a rollback to the last successful checkpoint before starting any new work. This ensures that resuming a session never continues from a broken state.
@@ -667,7 +665,7 @@ The protocol is backed by a robust state manager that ensures consistency. All s
 ### Event Ordering
 The server provides strong guarantees about the order of events, which simplifies client-side logic:
 - Phase lifecycle events (`phase.started`, `phase.completed`) will always be sent in the correct sequence for a given phase.
-- A `state.snapshot` always reflects the state *after* the event that triggered it (e.g., after a `phase.completed` event).
+- A `state.snapshot`, when sent, always reflects the state *after* the event that triggered it (e.g., after a `phase.completed` event).
 - File system events (`file.updated`, `filetree.updated`) are sent as changes are detected during a phase's execution.
 
 ### Message Size Limits
