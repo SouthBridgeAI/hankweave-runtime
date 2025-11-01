@@ -74,7 +74,7 @@ const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
 // Import types and utilities from the server
-import { type HistoryBatchEvent, isServerStateEvent } from "../../server/schemas/event-schemas.js";
+import { type HistoryBatchEvent, isJournaledEvent } from "../../server/schemas/event-schemas.js";
 import type {
   ErrorEvent,
   PhaseCompletedEvent,
@@ -258,12 +258,12 @@ async function setupAndRunPhases(): Promise<void> {
       // 2. Collects live events ONLY AFTER history sync is complete
       // 3. Resolves when RunCompleted is received
       testState.syncClient.onmessage = (event: MessageEvent) => {
-        const { data } = JSON.parse(event.data);
+        const serverEvent = JSON.parse(event.data) as ServerEvent;
 
         // Handle history.batch events for sync
-        if (data.type === "history.batch") {
-          batches.push(data);
-          if (!data.data.hasMore) {
+        if (serverEvent.type === "history.batch") {
+          batches.push(serverEvent as HistoryBatchEvent);
+          if (!(serverEvent as HistoryBatchEvent).data.hasMore) {
             historySyncComplete = true;
             console.log(
               `${colors.gray}  [Sync Client] History sync complete, now collecting live events...${colors.reset}`,
@@ -275,10 +275,13 @@ async function setupAndRunPhases(): Promise<void> {
         // Only collect live events AFTER history sync is complete
         // This ensures clear separation between historical and live events
         if (historySyncComplete) {
-          collectedLiveEvents.push(data as ServerEvent);
+          collectedLiveEvents.push(serverEvent);
 
           // Check if this is the RunCompleted event - signals end of collection
-          if (data.type === "state.transition" && data.data?.transitionType === "RunCompleted") {
+          if (
+            serverEvent.type === "state.transition" &&
+            serverEvent.data?.transitionType === "RunCompleted"
+          ) {
             clearTimeout(timeout);
 
             // Extract history events from batches
@@ -374,8 +377,8 @@ async function setupAndRunPhases(): Promise<void> {
     try {
       const { historyEvents, liveEvents } = await syncClientEventCollection;
       testState.historyEvents = historyEvents;
-      // Connection State Events (server.ready, pong, history.batch, incomplete.phase) are NOT journaled
-      testState.liveEvents = liveEvents.filter(isServerStateEvent);
+      // Filter out Connection State Events - only keep events that are persisted to journal
+      testState.liveEvents = liveEvents.filter(isJournaledEvent);
     } catch (error) {
       console.warn(
         `${colors.yellow}Sync client collection timed out or errored: ${error}${colors.reset}`,
