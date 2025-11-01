@@ -225,7 +225,7 @@ describe("tadpole server", () => {
         const batches: Array<HistoryBatchEvent> = [];
 
         secondClient.onmessage = (event) => {
-          const data = JSON.parse(event.data.toString());
+          const data = JSON.parse(event.data);
 
           if (data.type !== "history.batch") {
             return;

@@ -258,7 +258,7 @@ async function setupAndRunPhases(): Promise<void> {
       // 2. Collects live events ONLY AFTER history sync is complete
       // 3. Resolves when RunCompleted is received
       testState.syncClient.onmessage = (event: MessageEvent) => {
-        const data = JSON.parse(event.data.toString());
+        const { data } = JSON.parse(event.data);
 
         // Handle history.batch events for sync
         if (data.type === "history.batch") {
