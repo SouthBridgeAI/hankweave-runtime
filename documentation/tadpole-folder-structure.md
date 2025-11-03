@@ -18,7 +18,8 @@ The folder is organized to separate concerns, making it easy to locate state inf
 ├── state.json          # The central, authoritative state file for all runs.
 ├── state.json.bak      # An automatic backup of the state file for recovery.
 ├── server.lock         # A lock file present only when the server is running.
-├── events.jsonl        # A detailed, append-only log of all state transitions.
+├── events/             # Event journal directory
+│   └── events.jsonl    # Unified event journal (all server state events)
 ├── runs/               # A directory containing data for each individual server run.
 │   └── 1234567-abc/    # A folder for a specific run, named with a unique ID.
 │       └── ...         # Contains Claude's raw log files for each phase.
@@ -104,36 +105,36 @@ interface LockFile {
 - The associated run is marked as `crashed` in the state
 - You can manually delete the lock file if needed, but the server will detect this on next startup
 
-### `events.jsonl`
+### `events/events.jsonl`
 
-For deep debugging and auditing, this file provides a granular, append-only log of every single state transition that occurs. Each line is a JSON object representing a specific event and a snapshot of key state metrics after the event was processed.
+This is the unified event journal that consolidates all server activity logging into a single, append-only file.
 
-- **Format**: JSON Lines (JSONL), where each line is a self-contained JSON object.
-- **Use Case**: Allows developers to trace the exact sequence of events that led to a particular state, which is invaluable for diagnosing complex bugs or race conditions.
+- **Location**: `.tadpole/events/events.jsonl`
+- **Format**: JSON Lines (JSONL), where each line is a self-contained JSON object
+- **Content**: All **Server State Events** and **Agentic Backbone Events** - events that represent changes to the server's persistent execution state and the agent's core execution artifacts
+- **Use Case**: Audit trail for debugging, analysis, and understanding execution history
 
-**Event Structure:**
+For detailed information about event schemas, routing, and the event journal system, see [Event Journal documentation](./event-journal.md).
+
+**Example Event:**
 ```json
 {
+  "id": "evt-abc123",
   "timestamp": "2025-01-19T10:00:00.123Z",
-  "type": "PhaseTransitioned",
+  "type": "phase.started",
   "data": {
     "runId": "1234-abc",
     "phaseId": "phase-1",
-    "from": "starting",
-    "to": "running"
-  },
-  "metrics": {
-    "totalRuns": 5,
-    "currentRunPhases": 2,
-    "totalCost": 1.23
+    "phaseName": "planning",
+    "phaseConfig": { ... }
   }
 }
 ```
 
 **Notes:**
 - This file can grow large over time but is never truncated automatically
-- Each event includes the state metrics *after* the transition was applied
 - Safe to delete when the server is not running if you don't need the history
+- Events are broadcasted to all connected clients in real-time
 
 ### `runs/` Directory
 
@@ -208,13 +209,13 @@ git checkout run-1234-abc           # Switch to a run's branch
 
 ### Append-Only Design
 
-The system is designed around an append-only philosophy for historical data. Runs are added to the `state.json` file, events are appended to `events.jsonl`, and checkpoints are new commits in the git history. Nothing is ever deleted or modified, ensuring a complete and auditable trail of every action taken.
+The system is designed around an append-only philosophy for historical data. Runs are added to the `state.json` file, events are appended to `events/events.jsonl`, and checkpoints are new commits in the git history. Nothing is ever deleted or modified, ensuring a complete and auditable trail of every action taken.
 
 ### Storage Limits and Performance
 
 **File Size Considerations:**
 - `state.json`: Typically remains small (<1MB even with hundreds of runs)
-- `events.jsonl`: Can grow to several MB over time
+- `events/events.jsonl`: Can grow to several MB over time
 - Claude logs: Each phase generates 10KB-10MB depending on conversation length
 - Checkpoint repository: Size depends on tracked files
 

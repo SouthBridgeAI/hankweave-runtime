@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { ServerEvent } from "../schemas/event-schemas.js";
 import type { PhaseId } from "./branded-types.js";
 import type { logMessageSchema } from "./claude-session-schema.js";
 
@@ -9,6 +10,74 @@ import type { logMessageSchema } from "./claude-session-schema.js";
 export type ModelName = "sonnet" | "opus";
 
 export type ContinuationMode = "fresh" | "continue-previous";
+
+// ============================================================================
+// WebSocket Client Types
+// ============================================================================
+
+/**
+ * Client access modes for different capabilities
+ */
+export enum ClientMode {
+  READONLY = "readonly",
+  READANDWRITE = "readandwrite",
+}
+
+/**
+ * Cursor for paginating through event history
+ */
+export interface EventCursor {
+  timestamp: string;
+  eventId: string;
+}
+
+/**
+ * Direction for pagination through event history
+ */
+export type PaginationDirection = "forward" | "backward";
+
+/**
+ * Handshake request sent by client to establish connection mode
+ */
+export interface HandshakeRequest {
+  type: "handshake";
+  data: {
+    mode: ClientMode;
+    sendPreviousEvents?: boolean; // Whether to send event history (defaults to false)
+  };
+}
+
+/**
+ * Handshake response sent by server after processing request
+ */
+export interface HandshakeResponse {
+  type: "handshake.response";
+  data: {
+    clientId: string;
+    mode: ClientMode; // Granted mode (may differ from requested)
+    eventHistory: ServerEvent[]; // Limited by handshakeHistoryLimit
+    totalEvents: number; // Total events in journal
+  };
+}
+
+/**
+ * Client metadata stored with each WebSocket connection.
+ * Provides connection tracking and activity monitoring.
+ */
+export type ClientData =
+  | {
+      id: string;
+      connectionTime: Date;
+      lastActivity: Date;
+      handshakeComplete: false;
+    }
+  | {
+      id: string;
+      connectionTime: Date;
+      lastActivity: Date;
+      mode: ClientMode;
+      handshakeComplete: true;
+    };
 
 // ============================================================================
 // Process Exit Types (moved to schemas)
@@ -271,6 +340,9 @@ export interface ServerConfig {
 
   /** Whether to disable the proxy server (default: false) */
   withoutProxy: boolean;
+
+  /** Maximum number of recent events to include in handshake response (default: 50) */
+  handshakeHistoryLimit: number;
 }
 
 // ============================================================================

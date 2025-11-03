@@ -23,8 +23,13 @@ Client                    Server
   ├──── Connect WS ────────>│
   │                         ├─ Check for existing clients
   │                         ├─ Create/verify lock file
+  │─── handshake ──────────>│
+  │                         ├─ Grant mode & optionally gather history
+  │<─ handshake.response ───┤
   │<──── server.ready ──────┤
-  │<─── state.snapshot ─────┤
+  │                         │
+  │─── history.sync ───────>│ (optional)
+  │<──── history.batch ─────┤ (streamed batches)
   │                         │
   │─── phase.start ────────>│
   │<──── phase.started ─────┤
@@ -58,6 +63,122 @@ All communication, whether from client to server (Commands) or server to client 
   "type": string,      // A string identifying the message type for routing.
   "data"?: object      // An optional payload containing type-specific data.
 }
+```
+
+## Handshake Protocol
+
+Before sending commands or receiving events, clients must complete a handshake with the server. The server buffers all domain events until the handshake is acknowledged, ensuring both sides agree on permissions and synchronization behavior.
+
+### Handshake Request
+
+The client initiates the handshake by sending:
+
+```json
+{
+  "type": "handshake",
+  "data": {
+    "mode": "readandwrite",
+    "sendPreviousEvents": true
+  }
+}
+```
+
+- `mode`: Either `"readonly"` or `"readandwrite"` to specify access level
+- `sendPreviousEvents`: Optional boolean (default: `false`). When `true`, the server includes up to `handshakeHistoryLimit` recent events in the handshake response. When omitted or `false`, the response contains an empty history and the client can opt into a later sync.
+
+### Handshake Response
+
+The server responds with:
+
+```json
+{
+  "type": "handshake.response",
+  "data": {
+    "clientId": "client-123",
+    "mode": "readandwrite",
+    "eventHistory": [...],
+    "totalEvents": 1500
+  }
+}
+```
+
+- `clientId`: The server-assigned unique client ID
+- `mode`: The granted access mode (may differ from requested)
+- `eventHistory`: Chronologically ordered recent events when `sendPreviousEvents` was `true`; otherwise an empty array
+- `cursor`: Reserved for future pagination support (currently always `null`)
+- `totalEvents`: Count of events currently stored in the journal. This can be larger than `eventHistory.length`, signalling that additional history is available via `history.sync`.
+
+Immediately after acknowledging the handshake, the server emits `server.ready`, then resumes real-time event delivery.
+
+### Example Client Flow
+
+The following TypeScript example uses the `ws` WebSocket client to:
+
+- establish a connection and complete the handshake,
+- request the full event history when more events are available than were included in the handshake response, and
+- handle real-time events alongside streamed history batches.
+
+```ts
+import WebSocket from "ws";
+
+const ws = new WebSocket("ws://localhost:7777");
+
+const handleServerEvent = (event: any) => {
+  console.log(`[event] ${event.type}`, event);
+};
+
+const sendHistorySync = () => {
+  const command = {
+    id: `cmd-history-sync-${Date.now()}`,
+    type: "history.sync",
+  };
+  ws.send(JSON.stringify(command));
+};
+
+ws.on("open", () => {
+  ws.send(
+    JSON.stringify({
+      type: "handshake",
+      data: {
+        mode: "readandwrite",
+        sendPreviousEvents: true,
+      },
+    }),
+  );
+});
+
+ws.on("message", (raw) => {
+  const message = JSON.parse(raw.toString());
+
+  switch (message.type) {
+    case "handshake.response": {
+      const { clientId, eventHistory, totalEvents } = message.data;
+      console.log(`Handshake complete. Server recognized client ${clientId}.`);
+
+      // Process the initial batch of recent events (if requested)
+      eventHistory.forEach(handleServerEvent);
+
+      if (totalEvents > eventHistory.length) {
+        sendHistorySync();
+      }
+      break;
+    }
+
+    case "history.batch": {
+      message.data.events.forEach(handleServerEvent);
+
+      if (!message.data.hasMore) {
+        console.log("History synchronization complete.");
+      }
+      break;
+    }
+
+    default: {
+      // All other messages are real-time server events
+      handleServerEvent(message);
+    }
+  }
+});
 ```
 
 ## Client Commands (Client → Server)
@@ -210,6 +331,22 @@ Requests a graceful shutdown of the server. The server will clean up resources, 
 }
 ```
 
+### History Synchronization
+
+#### `history.sync`
+Streams the full event journal to the client. Useful when the handshake did not request history, or when more events are available than were returned in `eventHistory`.
+
+```json
+{
+  "id": "cmd-133",
+  "type": "history.sync"
+}
+```
+
+- The command has no `data` payload.
+- The server responds with one or more `history.batch` events, each containing a chunk of events in chronological order.
+- Batches continue until the final message has `hasMore: false`. No follow-up command is required.
+
 ## Server Events (Server → Client)
 
 The server emits events to keep the client informed about its state, Claude's activity, and changes in the project workspace.
@@ -237,7 +374,7 @@ The initial handshake event, sent once a client connects successfully. It provid
 - `dataPath`: Where the user's original data is accessible (via symlink or copy) at `<execution-dir>/read_only_data_source`
 
 #### `state.snapshot`
-A comprehensive snapshot of the server's current state. It's sent after `server.ready` and after major state changes (like phase completion or rollback). This event is the primary source of truth for the client to build its own state representation.
+A comprehensive snapshot of the server's current state. It's sent after major state changes (like phase completion or rollback). This event is the primary source of truth for the client to build its own state representation.
 
 ```json
 {
@@ -255,6 +392,32 @@ A comprehensive snapshot of the server's current state. It's sent after `server.
   }
 }
 ```
+
+### History Synchronization Events
+
+#### `history.batch`
+Response to a `history.sync` command, containing a paginated batch of events from the journal.
+
+```json
+{
+  "id": "evt-history-001",
+  "timestamp": "2025-01-19T10:05:00Z",
+  "type": "history.batch",
+  "data": {
+    "events": [
+      { "id": "evt-100", "type": "phase.started", "..." },
+      { "id": "evt-99", "type": "assistant.action", "..." }
+    ],
+    "hasMore": true
+  }
+}
+```
+
+**Fields:**
+- `events`: Array of previously recorded `ServerEvent` objects delivered in chronological order
+- `hasMore`: Boolean indicating if additional batches will follow for the same `history.sync` request
+
+**Note:** `history.batch` events are not stored in the journal as they only contain references to existing events.
 
 ### Phase Lifecycle Events
 
@@ -484,12 +647,11 @@ The `rollbackToLastSuccess` operation prioritizes completion checkpoints but fal
 
 ### Connection Lifecycle
 The typical connection flow is designed to quickly synchronize the client with the server's state:
-1.  The client establishes a WebSocket connection.
-2.  The server immediately responds with a `server.ready` event.
-3.  This is followed by a comprehensive `state.snapshot` event.
-4.  The server checks if the execution thread has previously failed by analyzing the execution history.
-5.  If a failure is detected, the server automatically triggers `rollbackToLastSuccess` to restore the workspace to a known good state before resuming.
-6.  If `autostart` is enabled, the server proceeds to start the next phase (after rollback if needed). Otherwise, it sends a `server.idle` event and waits for commands.
+1.  The client establishes a WebSocket connection and completes the handshake.
+2.  The server responds with a `server.ready` event.
+3.  The server checks if the execution thread has previously failed by analyzing the execution history.
+4.  If a failure is detected, the server automatically triggers `rollbackToLastSuccess` to restore the workspace to a known good state before resuming.
+5.  If `autostart` is enabled, the server proceeds to start the next phase (after rollback if needed). Otherwise, it sends a `server.idle` event and waits for commands.
 
 **Automatic Failure Recovery:**
 When the server starts up, it analyzes the execution thread to detect if previous execution attempts failed. If `ExecutionThread.failed` is true (indicating phases with status "failed" or runStatus "failed"/"crashed"), the server automatically performs a rollback to the last successful checkpoint before starting any new work. This ensures that resuming a session never continues from a broken state.
@@ -503,7 +665,7 @@ The protocol is backed by a robust state manager that ensures consistency. All s
 ### Event Ordering
 The server provides strong guarantees about the order of events, which simplifies client-side logic:
 - Phase lifecycle events (`phase.started`, `phase.completed`) will always be sent in the correct sequence for a given phase.
-- A `state.snapshot` always reflects the state *after* the event that triggered it (e.g., after a `phase.completed` event).
+- A `state.snapshot`, when sent, always reflects the state *after* the event that triggered it (e.g., after a `phase.completed` event).
 - File system events (`file.updated`, `filetree.updated`) are sent as changes are detected during a phase's execution.
 
 ### Message Size Limits

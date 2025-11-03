@@ -6,7 +6,6 @@ import * as path from "node:path";
 import { PhaseId } from "../../server/types/branded-types.js";
 import type {
   CheckpointListEvent,
-  ClientCommand,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   RollbackCompletedEvent,
@@ -161,7 +160,7 @@ async function createSnapshot(
   await client.sendCommand({
     id: generateId(),
     type: "checkpoint.list",
-  } as ClientCommand);
+  });
 
   const checkpointEvent = (await client.waitForEvent(
     "checkpoint.list",
@@ -296,7 +295,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
     id: generateId(),
     type: "phase.start",
     data: { phaseId: PhaseId("phase-1") },
-  } as ClientCommand);
+  });
 
   console.log(`${colors.gray}  → Waiting for phase.started event for phase-1...${colors.reset}`);
   const phase1Started = await (
@@ -347,7 +346,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
     id: generateId(),
     type: "phase.start",
     data: { phaseId: PhaseId("phase-2") },
-  } as ClientCommand);
+  });
 
   console.log(`${colors.gray}  → Waiting for phase.started event for phase-2...${colors.reset}`);
   const phase2Started = await (
@@ -402,7 +401,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
     id: generateId(),
     type: "phase.start",
     data: { phaseId: PhaseId("phase-3") },
-  } as ClientCommand);
+  });
 
   console.log(`${colors.gray}  → Waiting for phase.started event for phase-3...${colors.reset}`);
   const phase3Started = await (
@@ -433,7 +432,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await testState.client.sendCommand({
     id: generateId(),
     type: "phase.skip",
-  } as ClientCommand);
+  });
 
   console.log(
     `${colors.gray}  → Waiting for phase.completed event for skipped phase-3...${colors.reset}`,
@@ -493,7 +492,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await testState.client.sendCommand({
     id: generateId(),
     type: "checkpoint.list",
-  } as ClientCommand);
+  });
 
   console.log(`${colors.gray}  → Waiting for checkpoint.list event...${colors.reset}`);
   const checkpointList1 = (await testState.client.waitForEvent(
@@ -523,7 +522,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
       checkpointType: "completed",
       autoRestart: false,
     },
-  } as ClientCommand);
+  });
 
   console.log(`${colors.gray}  → Waiting for rollback.completed event...${colors.reset}`);
   const rollback1 = (await testState.client.waitForEvent(
@@ -562,7 +561,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
     id: generateId(),
     type: "phase.start",
     data: { phaseId: PhaseId("phase-2") },
-  } as ClientCommand);
+  });
 
   console.log(
     `${colors.gray}  → Waiting for phase.started event for phase-2 (scenario 3)...${colors.reset}`,
@@ -620,7 +619,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
     id: generateId(),
     type: "phase.start",
     data: { phaseId: PhaseId("phase-3") },
-  } as ClientCommand);
+  });
 
   console.log(
     `${colors.gray}  → Waiting for phase.started event for phase-3 (scenario 3)...${colors.reset}`,
@@ -673,7 +672,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
   await testState.client.sendCommand({
     id: generateId(),
     type: "checkpoint.list",
-  } as ClientCommand);
+  });
 
   console.log(`${colors.gray}  → Waiting for checkpoint.list event (scenario 4)...${colors.reset}`);
   const checkpointList2 = (await testState.client.waitForEvent(
@@ -718,7 +717,7 @@ async function executeRollbackScenarios(): Promise<TestSnapshot[]> {
       checkpointSha: firstCheckpoint.sha,
       autoRestart: false,
     },
-  } as ClientCommand);
+  });
 
   // Wait for rollback to complete with proper error handling
   let rollback2: RollbackCompletedEvent;

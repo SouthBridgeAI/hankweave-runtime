@@ -815,6 +815,12 @@ export type StateTransition =
       };
     };
 
+/**
+ * Extract the type field from StateTransition for use in schemas.
+ * This ensures type safety when creating state transition events.
+ */
+export type StateTransitionType = StateTransition["type"];
+
 // ============================================================================
 // State Manager Interface
 // ============================================================================

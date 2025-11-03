@@ -145,7 +145,7 @@ bun test tests/unit/event-schema-sync.test.ts
 
 ### Integration Testing
 
-The system can be tested against real websocket logs to verify trigger behavior and timing.
+The system can be tested against the real event journal to verify trigger behavior and timing.
 
 ## Integration Status
 

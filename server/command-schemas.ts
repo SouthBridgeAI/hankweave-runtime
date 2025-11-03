@@ -27,6 +27,11 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
     type: z.literal("server.shutdown"),
+    data: z
+      .object({
+        reason: z.string().optional(),
+      })
+      .optional(),
   }),
 
   // Query checkpoints
@@ -81,6 +86,22 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
         autoRestart: z.boolean().optional().default(false),
       })
       .optional(),
+  }),
+
+  // Ping commands for testing
+  z.object({
+    id: z.string(),
+    type: z.literal("ping"),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("ping.broadcast"),
+  }),
+
+  // History synchronization
+  z.object({
+    id: z.string(),
+    type: z.literal("history.sync"),
   }),
 ]);
 

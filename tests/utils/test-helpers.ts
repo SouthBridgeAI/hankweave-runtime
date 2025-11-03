@@ -1,13 +1,16 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ClientCommand } from "../../server/command-schemas.js";
 import type { TadpoleState } from "../../server/types/state-types.js";
 import type {
-  ClientCommand,
+  HandshakeRequest,
+  HandshakeResponse,
   PhaseCompletedEvent,
   PhaseStartedEvent,
   ServerEvent,
 } from "../../server/types/types.js";
+import { ClientMode } from "../../server/types/types.js";
 
 // ============================================================================
 // Colors for terminal output
@@ -24,6 +27,10 @@ export const colors = {
 // ============================================================================
 // Test WebSocket Client
 // ============================================================================
+
+// Re-export for convenience
+export { ClientMode } from "../../server/types/types.js";
+
 export class TestWSClient {
   private ws: WebSocket | null = null;
   private events: ServerEvent[] = [];
@@ -33,46 +40,73 @@ export class TestWSClient {
   >();
   private connected = false;
   private connectionClosed = false;
+  private handshakeComplete = false;
+  private clientId: string | null = null;
+  private grantedMode: ClientMode | null = null;
 
-  async connect(port: number): Promise<void> {
+  async connect(
+    port: number,
+    options: {
+      performHandshake?: boolean;
+      mode?: ClientMode;
+      timeout?: number;
+    } = {},
+  ): Promise<void> {
+    const { performHandshake = true, mode = ClientMode.READANDWRITE, timeout = 10000 } = options;
+
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         reject(new Error("WebSocket connection timeout"));
-      }, 10000);
+      }, timeout);
 
       this.ws = new WebSocket(`ws://localhost:${port}`);
 
       this.ws.onopen = () => {
-        clearTimeout(timeout);
         this.connected = true;
         console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
-        resolve();
+
+        if (performHandshake) {
+          this.performHandshake(mode)
+            .then(() => {
+              clearTimeout(timeoutId);
+              resolve();
+            })
+            .catch((error) => {
+              clearTimeout(timeoutId);
+              reject(error);
+            });
+        } else {
+          clearTimeout(timeoutId);
+          resolve();
+        }
       };
 
       this.ws.onmessage = (event: MessageEvent) => {
         try {
-          const serverEvent: ServerEvent = JSON.parse(event.data);
+          const data = JSON.parse(event.data);
+
+          // Handle handshake response separately
+          if (data.type === "handshake.response") {
+            this.handleHandshakeResponse(data as HandshakeResponse);
+            return;
+          }
+
+          // Regular server events
+          const serverEvent: ServerEvent = data;
           this.events.push(serverEvent);
 
           // Resolve any waiting promises for this event type
           const waiters = this.eventPromises.get(serverEvent.type);
           if (waiters) {
-            // Create a new array to hold waiters that don't match
-            const _remainingWaiters: typeof waiters = [];
-
             waiters.forEach(({ resolve }) => {
-              // Each waiter's resolve function will check if it matches
               resolve(serverEvent);
             });
-
-            // Don't delete the waiters array - let each waiter remove itself if it matches
           }
 
           // Also resolve "any" event waiters
           const anyWaiters = this.eventPromises.get("*");
           if (anyWaiters) {
             anyWaiters.forEach(({ resolve }) => resolve(serverEvent));
-            // Don't delete - let each waiter remove itself
           }
         } catch (error) {
           console.error("Failed to parse server event:", error);
@@ -80,13 +114,16 @@ export class TestWSClient {
       };
 
       this.ws.onerror = (error: Event) => {
-        clearTimeout(timeout);
+        clearTimeout(timeoutId);
         reject(error);
       };
 
       this.ws.onclose = () => {
         this.connected = false;
         this.connectionClosed = true;
+        this.handshakeComplete = false;
+        this.clientId = null;
+        this.grantedMode = null;
         console.log(`${colors.gray}WebSocket connection closed${colors.reset}`);
 
         // Resolve any pending connection close waiters
@@ -104,6 +141,77 @@ export class TestWSClient {
         }
       };
     });
+  }
+
+  private async performHandshake(mode: ClientMode): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Handshake timeout"));
+      }, 5000);
+
+      // Set up temporary handler for handshake response
+      const handshakePromise = new Promise<HandshakeResponse>((handshakeResolve) => {
+        const originalOnMessage = this.ws?.onmessage || null;
+
+        const handleHandshakeMessage = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "handshake.response") {
+              // Restore original message handler
+              if (this.ws) {
+                this.ws.onmessage = originalOnMessage;
+              }
+              handshakeResolve(data as HandshakeResponse);
+            }
+          } catch (error) {
+            console.error("Failed to parse handshake response:", error);
+          }
+        };
+
+        if (this.ws) {
+          this.ws.onmessage = handleHandshakeMessage;
+        }
+      });
+
+      // Send handshake request
+      const handshakeRequest: HandshakeRequest = {
+        type: "handshake",
+        data: { mode },
+      };
+
+      if (this.ws) {
+        this.ws.send(JSON.stringify(handshakeRequest));
+      }
+
+      handshakePromise
+        .then((response) => {
+          this.handleHandshakeResponse(response);
+          clearTimeout(timeout);
+          resolve();
+        })
+        .catch((error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+    });
+  }
+
+  private handleHandshakeResponse(response: HandshakeResponse): void {
+    this.clientId = response.data.clientId;
+    this.grantedMode = response.data.mode;
+    this.handshakeComplete = true;
+
+    console.log(
+      `${colors.green}✓ Handshake complete - Client ID: ${this.clientId}, Mode: ${this.grantedMode}${colors.reset}`,
+    );
+
+    // Add any event history to our events array
+    if (response.data.eventHistory && response.data.eventHistory.length > 0) {
+      this.events.push(...response.data.eventHistory);
+      console.log(
+        `${colors.gray}Received ${response.data.eventHistory.length} historical events${colors.reset}`,
+      );
+    }
   }
 
   async waitForConnectionClose(timeout: number = 10000): Promise<void> {
@@ -249,10 +357,26 @@ export class TestWSClient {
     return this.connected;
   }
 
+  get isHandshakeComplete(): boolean {
+    return this.handshakeComplete;
+  }
+
+  get getClientId(): string | null {
+    return this.clientId;
+  }
+
+  get getGrantedMode(): ClientMode | null {
+    return this.grantedMode;
+  }
+
   sendCommand(command: ClientCommand): void {
-    if (this.ws && this.connected) {
-      this.ws.send(JSON.stringify(command));
+    if (!this.ws || !this.connected) {
+      throw new Error("WebSocket not connected");
     }
+    if (!this.handshakeComplete) {
+      throw new Error("Handshake not completed - cannot send commands");
+    }
+    this.ws.send(JSON.stringify(command));
   }
 
   async disconnect(): Promise<void> {
@@ -260,6 +384,29 @@ export class TestWSClient {
       this.ws.close();
       this.ws = null;
     }
+    this.connected = false;
+    this.handshakeComplete = false;
+    this.clientId = null;
+    this.grantedMode = null;
+  }
+
+  // Convenience methods for ping commands
+  sendPing(id?: string): void {
+    this.sendCommand({
+      id: id || `ping-${Date.now()}`,
+      type: "ping",
+    });
+  }
+
+  sendPingBroadcast(id?: string): void {
+    this.sendCommand({
+      id: id || `ping-broadcast-${Date.now()}`,
+      type: "ping.broadcast",
+    });
+  }
+
+  async waitForPong(timeout: number = 5000): Promise<ServerEvent> {
+    return this.waitForEvent("pong", timeout);
   }
 }
 
