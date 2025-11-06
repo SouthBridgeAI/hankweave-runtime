@@ -8,12 +8,13 @@ The server runs on port 7777 by default. All messages exchanged are JSON-encoded
 
 ## Connection Model
 
-The connection model is designed for simplicity and state consistency:
+The server supports a **multi-client architecture**, allowing multiple WebSocket clients to connect concurrently and observe or control the same execution workflow.
 
-- **Single Client**: The server enforces a strict single-client model. This is a deliberate design choice to prevent conflicting commands and ensure that the project state remains consistent and predictable. If a client is already connected, any new connection attempts are rejected with WebSocket close code `1008`.
-
-- **Automatic Shutdown**: To ensure clean resource management and prevent orphaned processes, the server is designed to shut down gracefully when its client disconnects. This ties the server's lifecycle directly to the client's session.
-
+- **Multi-Client Support**: The server maintains a registry of all connected clients. There is no hard limit on the number of clients that can connect.
+- **Access Modes**: Each client connects in one of two modes, specified during the initial handshake:
+  - `readandwrite`: The client can send control commands (e.g., `phase.start`, `rollback.toCheckpoint`) and receive all server events.
+  - `readonly`: The client can only receive server events and is prohibited from sending any commands that would alter the server's state. This is ideal for passive monitoring UIs.
+- **Connection Handling**: The server's lifecycle is no longer tied to a single client connection. It continues to run even if all clients disconnect, allowing for persistent, long-running workflows that can be re-connected to at any time.
 - **Lock File**: On startup, the server creates a lock file at `.tadpole/server.lock`. This file contains the server's process ID (PID) and the current run ID. This mechanism prevents multiple server instances from running in the same project directory, which would otherwise lead to state corruption and race conditions. The lock file also includes a heartbeat timestamp, allowing the server to detect and clean up stale locks from crashed previous sessions.
 
 ### Connection Flow Diagram
@@ -393,6 +394,32 @@ A comprehensive snapshot of the server's current state. It's sent after major st
 }
 ```
 
+#### `state.transition`
+A granular event that signals a specific, atomic change in the server's state. This is the underlying event that drives all state changes and is the most reliable way to track the state machine's evolution in real-time.
+
+```json
+{
+  "id": "evt-100",
+  "timestamp": "2025-01-19T10:00:10Z",
+  "type": "state.transition",
+  "data": {
+    "transitionType": "PhaseTransitioned",
+    "runId": "run-123",
+    "phaseId": "phase-1",
+    "transition": {
+      "type": "PhaseTransitioned",
+      "data": { "from": "running", "to": "completed" }
+    },
+    "resultingState": {
+      "currentRunId": "run-123",
+      "runCount": 1,
+      "totalCost": 0.0123,
+      "currentRunCost": 0.0123
+    }
+  }
+}
+```
+
 ### History Synchronization Events
 
 #### `history.batch`
@@ -558,6 +585,107 @@ Sent after a `file.updated` event to provide the client with the new, complete s
   "type": "filetree.updated",
   "data": {
     "tree": [ "...FileNode array..." ]
+  }
+}
+```
+
+### Chronicler Events
+
+These events provide visibility into the lifecycle and activity of the parallel Chronicler agents.
+
+#### `chronicler.loaded`
+Sent when a chronicler is successfully loaded and initialized at the start of a phase.
+
+```json
+{
+  "id": "evt-chr-001",
+  "timestamp": "2025-01-19T10:00:11Z",
+  "type": "chronicler.loaded",
+  "data": {
+    "chroniclerId": "narrator",
+    "phaseId": "phase-1",
+    "model": "anthropic/claude-3-5-sonnet-20241022",
+    "triggerType": "event",
+    "executionStrategy": "debounce",
+    "conversational": false,
+    "source": "file"
+  }
+}
+```
+
+#### `chronicler.triggered`
+Sent when a chronicler's trigger conditions are met and it begins processing a batch of events.
+
+```json
+{
+  "id": "evt-chr-002",
+  "timestamp": "2025-01-19T10:03:00Z",
+  "type": "chronicler.triggered",
+  "data": {
+    "chroniclerId": "narrator",
+    "phaseId": "phase-1",
+    "triggerNumber": 1,
+    "strategy": "debounce",
+    "eventCount": 5,
+    "queueSize": 0
+  }
+}
+```
+
+#### `chronicler.output`
+Sent when a chronicler's LLM call completes and produces an output.
+
+```json
+{
+  "id": "evt-chr-003",
+  "timestamp": "2025-01-19T10:03:05Z",
+  "type": "chronicler.output",
+  "data": {
+    "chroniclerId": "narrator",
+    "phaseId": "phase-1",
+    "triggerNumber": 1,
+    "outputType": "text",
+    "content": "The agent has started analyzing the files.",
+    "cost": 0.00015,
+    "tokens": { "input": 50, "output": 25 },
+    "eventCount": 5
+  }
+}
+```
+
+#### `chronicler.error`
+Sent when a chronicler encounters a non-fatal error, such as a failed LLM call.
+
+```json
+{
+  "id": "evt-chr-004",
+  "timestamp": "2025-01-19T10:04:00Z",
+  "type": "chronicler.error",
+  "data": {
+    "chroniclerId": "narrator",
+    "phaseId": "phase-1",
+    "errorType": "llm-call-failed",
+    "message": "API returned status 500",
+    "retriable": true,
+    "consecutiveFailureCount": 1
+  }
+}
+```
+
+#### `chronicler.unloaded`
+Sent when a chronicler is unloaded at the end of a phase or due to a fatal error.
+
+```json
+{
+  "id": "evt-chr-005",
+  "timestamp": "2025-01-19T10:05:10Z",
+  "type": "chronicler.unloaded",
+  "data": {
+    "chroniclerId": "narrator",
+    "phaseId": "phase-1",
+    "reason": "phase-complete",
+    "finalCost": 0.0012,
+    "llmCallCount": 8
   }
 }
 ```

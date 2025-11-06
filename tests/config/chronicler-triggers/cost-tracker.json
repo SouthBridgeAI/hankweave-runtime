@@ -18,10 +18,10 @@
   "execution": {
     "strategy": "immediate"
   },
-  "promptTemplate": "High cost detected in phase {{phaseId}}:\n\nToken usage: {{inputTokens}} input, {{outputTokens}} output\nCache: {{cacheReadTokens}} read, {{cacheCreationTokens}} created\nTotal cost: ${{totalCost}}\n\nAnalyze if this cost is justified based on the phase's complexity.",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
   "output": {
     "format": "json",
     "file": "cost-alerts.jsonl"
-  }
+  },
+  "userPromptText": "High cost detected in phase {{phaseId}}:\n\nToken usage: {{inputTokens}} input, {{outputTokens}} output\nCache: {{cacheReadTokens}} read, {{cacheCreationTokens}} created\nTotal cost: ${{totalCost}}\n\nAnalyze if this cost is justified based on the phase's complexity."
 }

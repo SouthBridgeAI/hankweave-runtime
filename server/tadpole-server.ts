@@ -4,6 +4,8 @@ import path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { minimatch } from "minimatch";
 import { CheckpointGit } from "./checkpoint-git.js";
+import { ChroniclerConfigLoader } from "./chroniclers/chronicler-config-loader.js";
+import { ChroniclerManager } from "./chroniclers/chronicler-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
 import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
@@ -30,6 +32,7 @@ import type {
 } from "./schemas/event-schemas.js";
 import {
   isAgenticBackboneEvent,
+  isChroniclerEvent,
   isConnectionStateEvent,
   isServerStateEvent,
 } from "./schemas/event-schemas.js";
@@ -168,6 +171,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     "history.sync", // Read-only history pagination
   ]);
 
+  // Chronicler system
+  private chroniclerManager: ChroniclerManager;
+  private chroniclerConfigLoader: ChroniclerConfigLoader;
+  private currentPhaseChroniclers = new Set<string>();
+
   constructor(
     config: Omit<ServerConfig, keyof typeof DEFAULT_CONFIG> &
       Partial<Pick<ServerConfig, keyof typeof DEFAULT_CONFIG>> & {
@@ -190,6 +198,17 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize Event Journal with file-based storage
     this.eventJournal = new EventJournal(new FileEventStorage(path.join(tadpoleDir, "events")));
+
+    // Initialize chronicler config loader (stateful, with cache)
+    this.chroniclerConfigLoader = new ChroniclerConfigLoader(this.logger);
+
+    // Initialize ChroniclerManager
+    this.chroniclerManager = new ChroniclerManager({
+      logger: this.logger,
+      enablePersistence: this.config.chronicler.enablePersistence,
+      healthCheckGracePeriodMs: this.config.chronicler.healthCheckGracePeriodMs,
+      waitForHealthChecks: this.config.chronicler.waitForAllHealthChecks,
+    });
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -228,6 +247,35 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       if (error.name === "PersistenceError") {
         // Can't save state - this is fatal
         this.handleError(error, "state-persistence", ErrorSeverity.FATAL);
+      }
+    });
+  }
+
+  /**
+   * Set up event routing to chroniclers using EventEmitter pattern.
+   * Listening on the server's own "event" emissions is cleaner than
+   * modifying the emit() override method.
+   *
+   * Event Filtering Design:
+   * - Server State events → Chroniclers ✓ (phase lifecycle, errors, etc.)
+   * - Agentic Backbone events → Chroniclers ✓ (assistant actions, tool results, file updates)
+   * - Connection State events → NOT routed (client-specific, e.g., pong, handshake)
+   * - Chronicler events → NOT routed (prevents infinite loops)
+   *
+   * Chronicler events (chronicler.loaded, chronicler.output, etc.) are persisted
+   * and broadcast to clients like Server State events, but intentionally NOT
+   * sent back to chroniclers to avoid self-observation loops.
+   */
+  private setupChroniclerEventRouting(): void {
+    this.on("event", (event) => {
+      // Only route Server State and Agentic Backbone events
+      // Connection State events are client-specific
+      // Chronicler events are intentionally NOT routed (isChroniclerEvent check would go here)
+      if (isServerStateEvent(event) || isAgenticBackboneEvent(event)) {
+        // Fire-and-forget pattern - don't block event emission
+        this.chroniclerManager.handleEvent(event).catch((error) => {
+          this.logger.log(`Error in chronicler event handling: ${error}`, "error");
+        });
       }
     });
   }
@@ -337,6 +385,18 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize event journal
     await this.eventJournal.initialize();
+
+    // Initialize ChroniclerManager (creates .tadpole/chroniclers directory)
+    await this.chroniclerManager.initialize();
+
+    // Phase 2: Set up event callback for chronicler events
+    this.chroniclerManager.setEventCallback((chroniclerEvent) => {
+      // Chronicler events are ServerEvents - emit them to the event stream
+      this.emit("event", chroniclerEvent);
+    });
+
+    // Set up event routing to chroniclers
+    this.setupChroniclerEventRouting();
 
     // Check for existing lock file
     if (fs.existsSync(this.config.lockFile)) {
@@ -958,10 +1018,11 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const serverEvent = data as ServerEvent;
     const isServerState = isServerStateEvent(serverEvent);
     const isAgenticBackbone = isAgenticBackboneEvent(serverEvent);
+    const isChronicler = isChroniclerEvent(serverEvent);
     const isConnectionState = isConnectionStateEvent(serverEvent);
 
     // this should never happen due to compile time checks, but...
-    if (!isServerState && !isAgenticBackbone && !isConnectionState) {
+    if (!isServerState && !isAgenticBackbone && !isChronicler && !isConnectionState) {
       // This should never happen - all ServerEvents should be categorized
       this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
       throw new Error(`Unknown event: ${(serverEvent as ServerEvent).type}`);
@@ -977,7 +1038,7 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Journal and broadcast events that should reach all clients when no target is provided
-    if ((isServerState || isAgenticBackbone) && !target) {
+    if ((isServerState || isAgenticBackbone || isChronicler) && !target) {
       // Server state or agentic backbone events without target: journal and broadcast to all clients
       // Use queue to ensure events are written in the order they're emitted
       this.eventJournalAppendQueue = this.eventJournalAppendQueue
@@ -1337,6 +1398,63 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
         },
       },
     });
+
+    // Load chroniclers for this phase (during "starting" state)
+    const chroniclerResult = await this.loadChroniclersForPhase(phase);
+
+    // Check for fatal chronicler load failures
+    const fatalFailures = chroniclerResult.errors.filter((e) => e.fatal);
+    if (fatalFailures.length > 0) {
+      const failedChroniclers = fatalFailures.map((e) => e.ref).join(", ");
+      const errorMsg = `Required chroniclers failed to load (failPhaseIfNotLoaded=true): ${failedChroniclers}`;
+
+      // Use specific failure reason type
+      this.phaseFailureReason = {
+        type: "chronicler-load-failure",
+        retriable: false,
+        message: errorMsg,
+        chroniclerRefs: fatalFailures.map((e) => e.ref),
+      };
+
+      this.stateManager.transition({
+        type: "PhaseTransitioned",
+        data: {
+          runId: this.currentRunId,
+          phaseId: phase.id,
+          from: "starting",
+          to: "failed",
+          metadata: {
+            failedDuring: "starting",
+            failureReason: this.phaseFailureReason,
+          },
+        },
+      });
+
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: errorMsg,
+          context: `Failed chroniclers: ${failedChroniclers}`,
+          phase: phase.id,
+          fatal: true,
+          severity: ErrorSeverity.PHASE,
+          code: "CHRONICLER_LOAD_FAILURE",
+        },
+      } as ErrorEvent);
+
+      this.cleanupCurrentPhase();
+      return;
+    }
+
+    // Log warnings for non-fatal failures
+    for (const error of chroniclerResult.errors.filter((e) => !e.fatal)) {
+      this.logger.log(
+        `Non-required chronicler failed to load (${error.ref}): ${error.error}`,
+        "info",
+      );
+    }
 
     // Add checkpoint patterns - accumulate from all phases up to current
     // This ensures resume functionality works correctly
@@ -2101,6 +2219,88 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     const updatedPhase = this.stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
     if (!updatedPhase) return;
 
+    // Phase 2: Transition to completing-chroniclers if we have any chroniclers
+    // This provides visibility into "agent done, chroniclers working" state
+    const chroniclerCount = this.currentPhaseChroniclers.size;
+    if (chroniclerCount > 0 && this.currentRunId) {
+      this.stateManager.transition({
+        type: "PhaseTransitioned",
+        data: {
+          runId: this.currentRunId,
+          phaseId,
+          from: updatedPhase.status,
+          to: "completing-chroniclers",
+          metadata: {
+            chroniclerCount,
+            chroniclerIds: Array.from(this.currentPhaseChroniclers),
+          },
+        },
+      });
+
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Completing work for ${chroniclerCount} chronicler(s)...`,
+        },
+      } as InfoEvent);
+
+      // Wait for transition to complete before continuing
+      await this.stateManager.waitForPendingTransitions();
+    }
+
+    // Complete chronicler work BEFORE determining final status
+    // This ensures all chronicler queues are drained and costs are finalized
+    if (this.chroniclerManager && chroniclerCount > 0) {
+      await this.chroniclerManager.completeAllWork();
+
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Chronicler work completed (${chroniclerCount} chronicler(s))`,
+        },
+      } as InfoEvent);
+    }
+
+    // Phase 2: Capture final chronicler states after completing work
+    if (this.currentRunId && chroniclerCount > 0) {
+      const chroniclerStates = this.chroniclerManager.getChroniclerStates();
+      const totalCost = chroniclerStates.reduce((sum, state) => sum + state.totalCost, 0);
+
+      this.stateManager.transition({
+        type: "ChroniclerStatesUpdated",
+        data: {
+          runId: this.currentRunId,
+          phaseId,
+          chroniclerStates,
+          totalCost,
+        },
+      });
+
+      this.logger.log(`Updated final state for ${chroniclerStates.length} chronicler(s)`, "debug");
+
+      // Wait for this transition to complete before continuing
+      await this.stateManager.waitForPendingTransitions();
+    }
+
+    // Get chronicler costs for logging
+    const chroniclerCostMap: Record<string, number> = {};
+    if (this.chroniclerManager && this.currentPhaseChroniclers.size > 0) {
+      const costs = this.chroniclerManager.getChroniclerCosts();
+      for (const [id, cost] of costs) {
+        chroniclerCostMap[id] = cost;
+      }
+
+      const totalChroniclerCost = Object.values(chroniclerCostMap).reduce((a, b) => a + b, 0);
+      this.logger.log(
+        `Chronicler costs: ${JSON.stringify(chroniclerCostMap)} (total: $${totalChroniclerCost.toFixed(6)})`,
+        "info",
+      );
+    }
+
     // Determine final status based on the actual phase outcome
     // Priority order: force stop > result message > skip request > exit code
     let finalStatus: PhaseStatus;
@@ -2153,14 +2353,18 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
+    // Re-fetch phase status after completing-chroniclers transition (if it happened)
+    const phaseBeforeFinalTransition =
+      chroniclerCount > 0 ? this.stateManager.getPhaseInCurrentRun(PhaseId(phaseId)) : updatedPhase;
+
     // Final transition (fire-and-forget)
-    if (this.currentRunId) {
+    if (this.currentRunId && phaseBeforeFinalTransition) {
       this.stateManager.transition({
         type: "PhaseTransitioned",
         data: {
           runId: this.currentRunId,
           phaseId,
-          from: updatedPhase.status, // Use the updated status (might be "completing" now)
+          from: phaseBeforeFinalTransition.status, // Use the most current status
           to: finalStatus,
           metadata: {
             exitCode,
@@ -3524,6 +3728,171 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   // ============================================================================
+  // Chronicler Integration
+  // ============================================================================
+
+  /**
+   * Load chroniclers for a phase.
+   * Parses configs, passes to ChroniclerManager for instantiation.
+   *
+   * @returns Result with loaded configs and any errors
+   */
+  private async loadChroniclersForPhase(phase: PhaseConfig): Promise<{
+    loaded: import("./chroniclers/chronicler-config-loader.js").LoadedChroniclerConfig[];
+    errors: import("./chroniclers/chronicler-config-loader.js").ChroniclerConfigLoadResult["errors"];
+  }> {
+    if (!phase.chroniclers || phase.chroniclers.length === 0) {
+      return { loaded: [], errors: [] };
+    }
+
+    this.logger.log(
+      `Loading ${phase.chroniclers.length} chronicler config(s) for phase ${phase.id}`,
+      "info",
+    );
+
+    // Use config loader to parse and validate
+    // Use configPath if available, otherwise fall back to cwd
+    const phaseConfigDir = this.config.configPath
+      ? path.dirname(this.config.configPath)
+      : this.config.cwd;
+    const loadResult = this.chroniclerConfigLoader.loadConfigsForPhase(
+      phase.chroniclers,
+      phase.id,
+      phaseConfigDir,
+    );
+
+    if (loadResult.errors.length > 0) {
+      this.logger.log(`${loadResult.errors.length} chronicler config(s) failed to load`, "info");
+    }
+
+    if (loadResult.configs.length === 0) {
+      this.logger.log("No chroniclers loaded for this phase", "info");
+      return { loaded: [], errors: loadResult.errors };
+    }
+
+    // Pass to ChroniclerManager for instantiation
+    try {
+      // Apply phase-level overrides to chronicler configs
+      const configs = loadResult.configs.map((lc) => {
+        const config = lc.config;
+
+        // Merge reportToWebsocket settings (phase overrides chronicler)
+        if (lc.config.reportToWebsocket || lc.outputPaths || lc.failPhaseIfNotLoaded) {
+          // Create a merged config with phase-level reportToWebsocket override
+          const phaseReportSettings = phase.chroniclers?.find(
+            (entry) =>
+              (typeof entry.chroniclerConfig === "object" &&
+                entry.chroniclerConfig.id === config.id) ||
+              typeof entry.chroniclerConfig === "string",
+          )?.settings?.reportToWebsocket;
+
+          if (phaseReportSettings) {
+            // Merge phase settings over chronicler settings (handle undefined safely)
+            const mergedReportSettings = {
+              ...(config.reportToWebsocket || {}),
+              ...phaseReportSettings,
+            };
+
+            return {
+              ...config,
+              reportToWebsocket: mergedReportSettings,
+            };
+          }
+        }
+
+        return config;
+      });
+
+      const configDirs = loadResult.configs.map((lc) => lc.configDirectory);
+
+      // Build output paths map from phase-level settings
+      const outputPathsMap = new Map<string, { logFile?: string; lastValueFile?: string }>();
+      for (const lc of loadResult.configs) {
+        if (lc.outputPaths) {
+          outputPathsMap.set(lc.config.id, lc.outputPaths);
+        }
+      }
+
+      // ChroniclerManager internally unloads previous phase's chroniclers
+      await this.chroniclerManager.loadChroniclersForPhase(configs, phase.id as PhaseId, {
+        configDirectory: configDirs[0],
+        runStartTime: new Date(),
+        executionPath: this.config.executionPath,
+        outputPathsMap: outputPathsMap.size > 0 ? outputPathsMap : undefined,
+        // Note: llmCallOverride and llmObjectCallOverride are only used in tests
+        // In production, ChroniclerManager uses its own provider registry
+      });
+
+      // Track loaded chronicler IDs
+      this.currentPhaseChroniclers.clear();
+      for (const config of configs) {
+        this.currentPhaseChroniclers.add(config.id);
+      }
+
+      this.logger.log(`Successfully loaded ${configs.length} chronicler instance(s)`, "info");
+
+      // Phase 2: Emit chronicler.loaded events
+      for (const loadedConfig of loadResult.configs) {
+        const config = loadedConfig.config;
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "chronicler.loaded",
+          data: {
+            chroniclerId: config.id,
+            phaseId: phase.id,
+            model: config.model,
+            triggerType: config.trigger.type,
+            executionStrategy: config.execution.strategy,
+            conversational: !!config.conversational,
+            source: loadedConfig.source,
+            sourcePath: loadedConfig.sourcePath,
+          },
+        } as import("./schemas/event-schemas.js").ChroniclerLoadedEvent);
+      }
+
+      // Phase 2: Capture initial chronicler states in phase state
+      if (this.currentRunId && configs.length > 0) {
+        const chroniclerStates = this.chroniclerManager.getChroniclerStates();
+        const totalCost = chroniclerStates.reduce((sum, state) => sum + state.totalCost, 0);
+
+        this.stateManager.transition({
+          type: "ChroniclerStatesUpdated",
+          data: {
+            runId: this.currentRunId,
+            phaseId: phase.id as PhaseId,
+            chroniclerStates,
+            totalCost,
+          },
+        });
+
+        this.logger.log(
+          `Captured initial state for ${chroniclerStates.length} chronicler(s)`,
+          "debug",
+        );
+      }
+
+      return { loaded: loadResult.configs, errors: loadResult.errors };
+    } catch (error) {
+      const errorMsg = `Failed to instantiate chroniclers in ChroniclerManager: ${error}`;
+
+      // Treat as fatal if all loaded configs had failPhaseIfNotLoaded=true
+      const allRequired = loadResult.configs.every((lc) => lc.failPhaseIfNotLoaded);
+
+      return {
+        loaded: [],
+        errors: [
+          {
+            ref: "ChroniclerManager",
+            error: errorMsg,
+            fatal: allRequired,
+          },
+        ],
+      };
+    }
+  }
+
+  // ============================================================================
   // Utility & Helper Methods
   // ============================================================================
 
@@ -3809,6 +4178,13 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     this.cleanupCurrentPhase();
+
+    // Shutdown chronicler manager
+    if (this.chroniclerManager) {
+      this.logger.log("Shutting down chronicler manager...", "info");
+      await this.chroniclerManager.shutdown();
+      this.logger.log("Chronicler manager shutdown complete", "info");
+    }
 
     // Mark run as completed or failed based on reason
     if (this.currentRunId && reason === "all phases completed") {

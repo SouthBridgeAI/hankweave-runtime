@@ -4,10 +4,11 @@ import {
   serverEventDataSchemas,
   serverEventTypes,
 } from "../schemas/event-schemas.js";
+import { tadpoleLlmCallParamsSchema } from "../types/llm-call-types.js";
 
-// Helper function to check if a string is a valid event type
+// Helper function to check if a string is a valid event type or wildcard
 const isValidEventType = (type: string): boolean => {
-  return serverEventTypes.includes(type as ServerEvent["type"]);
+  return type === "*" || serverEventTypes.includes(type as ServerEvent["type"]);
 };
 
 // Helper function to resolve nested paths in objects
@@ -64,18 +65,26 @@ const conditionSchema = z.discriminatedUnion("operator", [
   numericComparisonConditionSchema,
 ]);
 
+// Type for event types including wildcard
+type EventTypeOrWildcard = ServerEvent["type"] | "*";
+
 // Pattern step schema with validation
 const patternStepSchema = z
   .object({
     type: z.string().refine(isValidEventType, {
       message: "Invalid event type",
-    }) as z.ZodType<ServerEvent["type"]>,
+    }) as z.ZodType<EventTypeOrWildcard>,
     conditions: z.array(conditionSchema).optional(),
   })
   .superRefine((data, ctx) => {
+    // Skip path validation for wildcard events
+    if (data.type === "*") {
+      return;
+    }
+
     // Validate that condition paths are valid for the event type
     if (data.conditions) {
-      const eventSchema = serverEventDataSchemas[data.type];
+      const eventSchema = serverEventDataSchemas[data.type as ServerEvent["type"]];
       if (eventSchema && eventSchema instanceof z.ZodObject) {
         const shape = eventSchema.shape;
 
@@ -151,7 +160,7 @@ const eventTriggerSchema = z.object({
     .array(
       z.string().refine(isValidEventType, {
         message: "Invalid event type",
-      }) as z.ZodType<ServerEvent["type"]>,
+      }) as z.ZodType<EventTypeOrWildcard>,
     )
     .min(1),
   conditions: z.array(conditionSchema).optional(),
@@ -165,7 +174,7 @@ const sequenceTriggerSchema = z.object({
       .array(
         z.string().refine(isValidEventType, {
           message: "Invalid event type",
-        }) as z.ZodType<ServerEvent["type"]>,
+        }) as z.ZodType<EventTypeOrWildcard>,
       )
       .min(1),
   }),
@@ -183,12 +192,22 @@ export const chroniclerTriggerSchema = z
   .superRefine((trigger, ctx) => {
     // Additional validation for EventTrigger conditions
     if (trigger.type === "event" && trigger.conditions) {
+      // Skip validation if wildcard is present (any event type is allowed)
+      if (trigger.on.includes("*")) {
+        return; // Wildcard allows any path, skip validation
+      }
+
       // For event triggers, we need to validate paths against all possible event types
       for (const condition of trigger.conditions) {
         let validForAnyEvent = false;
 
         for (const eventType of trigger.on) {
-          const eventSchema = serverEventDataSchemas[eventType];
+          // Skip wildcard in validation (already handled above)
+          if (eventType === "*") {
+            continue;
+          }
+
+          const eventSchema = serverEventDataSchemas[eventType as ServerEvent["type"]];
           if (eventSchema && eventSchema instanceof z.ZodObject) {
             const shape = eventSchema.shape;
 
@@ -278,33 +297,185 @@ export const chroniclerExecutionSchema = z.discriminatedUnion("strategy", [
   }),
 ]);
 
+// --- Trimming Strategy Schema (for Conversational mode) ---
+// Intent: Define how the conversation history is pruned to stay within LLM context limits
+const trimmingStrategySchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("maxTurns"),
+    maxTurns: z.number().int().positive().max(100),
+  }),
+  z.object({
+    type: z.literal("maxTokens"),
+    maxTokens: z.number().int().positive().max(100000),
+  }),
+]);
+
+// --- Error Handling Schema ---
+// Intent: Configure chronicler error handling behavior
+const errorHandlingSchema = z
+  .object({
+    maxConsecutiveFailures: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe("Maximum consecutive failures before unloading chronicler. Default: 3"),
+    unloadOnFatalError: z
+      .boolean()
+      .optional()
+      .describe("Whether to unload on fatal errors. Default: true"),
+  })
+  .optional();
+
+// --- Structured Output Schema ---
+// Intent: Configure structured object generation with Zod schemas
+// Uses union with refinement to enforce mutually exclusive configurations
+const structuredOutputSchema = z
+  .object({
+    output: z.enum(["object", "array", "enum"]),
+    schemaStr: z.string().optional(), // Inline Zod schema code
+    schemaFile: z.string().optional(), // Path to Zod schema file
+    enumValues: z.array(z.string()).min(1).optional(), // For enum mode
+    schemaName: z.string().optional(),
+    schemaDescription: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      // Enum mode requires enumValues (and no schema)
+      if (data.output === "enum") {
+        return data.enumValues && data.enumValues.length > 0 && !data.schemaStr && !data.schemaFile;
+      }
+      // Object/array modes require exactly one of schemaStr or schemaFile
+      const hasSchemaStr = !!data.schemaStr;
+      const hasSchemaFile = !!data.schemaFile;
+      return (
+        (hasSchemaStr || hasSchemaFile) && !(hasSchemaStr && hasSchemaFile) && !data.enumValues
+      );
+    },
+    {
+      message:
+        "Must provide exactly one of: schemaStr, schemaFile (for object/array), or enumValues (for enum)",
+    },
+  );
+
+// Report to WebSocket configuration schema
+const reportToWebsocketSchema = z
+  .object({
+    lifecycle: z.boolean().optional(),
+    errors: z.boolean().optional(),
+    outputs: z.boolean().optional(),
+    triggers: z.boolean().optional(),
+  })
+  .optional();
+
 // Main chronicler configuration schema
-export const chroniclerConfigSchema = z.object({
-  id: z
-    .string()
-    .min(1)
-    .regex(/^[a-z0-9-]+$/, {
-      message: "ID must contain only lowercase letters, numbers, and hyphens",
-    }),
-  name: z.string().min(1),
-  description: z.string().optional(),
-  trigger: chroniclerTriggerSchema,
-  execution: chroniclerExecutionSchema,
-  promptTemplate: z.string().min(1),
-  model: z.enum(["sonnet", "opus"]).optional(),
-  output: z
-    .object({
-      format: z.enum(["text", "json", "jsonl"]).optional(),
-      file: z.string().optional(),
-    })
-    .optional(),
-});
+export const chroniclerConfigSchema = z
+  .object({
+    id: z
+      .string()
+      .min(1)
+      .regex(/^[a-z0-9-]+$/, {
+        message: "ID must contain only lowercase letters, numbers, and hyphens",
+      }),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    trigger: chroniclerTriggerSchema,
+    execution: chroniclerExecutionSchema,
+
+    // Existing prompt fields remain
+    systemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
+    systemPromptText: z.string().optional(),
+    userPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
+    userPromptText: z.string().optional(),
+
+    // Optional conversational configuration
+    // When present, enables stateful conversation tracking across triggers
+    conversational: z
+      .object({
+        trimmingStrategy: trimmingStrategySchema,
+        continueOnError: z.boolean().optional(),
+      })
+      .optional(),
+
+    // Optional error handling configuration
+    errorHandling: errorHandlingSchema,
+
+    // Optional LLM parameters
+    llmParams: tadpoleLlmCallParamsSchema.optional(),
+
+    // Required model field - accepts full model IDs (e.g., "anthropic/claude-3-5-sonnet-20241022")
+    model: z
+      .string()
+      .describe(
+        'The full model ID to use (e.g., "anthropic/claude-3-5-sonnet-20241022", "openai/gpt-4-turbo").',
+      ),
+
+    // Optional structured output configuration
+    structuredOutput: structuredOutputSchema.optional(),
+
+    // Optional joinString for text output formatting
+    // Supports escape sequences: \n, \t, \r, \\
+    joinString: z
+      .string()
+      .optional()
+      .describe(
+        "String to join entries in text-based log file. Only valid for text output. " +
+          "Supports escape sequences: \\n (newline), \\t (tab), \\r (carriage return), \\\\ (backslash). " +
+          "Defaults to '\\n---\\n' for visual separation.",
+      ),
+
+    // Optional reportToWebsocket configuration
+    reportToWebsocket: reportToWebsocketSchema,
+
+    output: z
+      .object({
+        format: z.enum(["text", "json", "jsonl"]).optional(),
+        file: z.string().optional(),
+      })
+      .optional(),
+  })
+  .strict() // Enforce no unknown keys
+  .refine((data) => data.userPromptFile || data.userPromptText, {
+    message:
+      "Each chronicler must have at least one of `userPromptFile` or `userPromptText` defined.",
+    path: [],
+  })
+  .refine(
+    (data) => {
+      // Conversational chroniclers require a system prompt to establish context
+      if (data.conversational) {
+        return data.systemPromptFile || data.systemPromptText;
+      }
+      return true;
+    },
+    {
+      message:
+        "Conversational chroniclers require a system prompt (systemPromptFile or systemPromptText).",
+      path: ["conversational"],
+    },
+  )
+  .refine(
+    (data) => {
+      // joinString is only valid for text output, not structured output
+      if (data.joinString && data.structuredOutput) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: "joinString is only valid for text output, not structured output",
+      path: ["joinString"],
+    },
+  );
 
 // Array of chronicler configs
 export const chroniclersArraySchema = z.array(chroniclerConfigSchema);
 
-// Export types derived from schemas
+// Export types derived from schemas (single source of truth)
 export type ChroniclerConfig = z.infer<typeof chroniclerConfigSchema>;
+export type TrimingStrategy = z.infer<typeof trimmingStrategySchema>;
+export type ChroniclerLlmParams = z.infer<typeof tadpoleLlmCallParamsSchema>;
+export type ConversationalConfig = z.infer<typeof chroniclerConfigSchema>["conversational"];
 export type ChroniclerTrigger = z.infer<typeof chroniclerTriggerSchema>;
 export type ChroniclerExecution = z.infer<typeof chroniclerExecutionSchema>;
 
@@ -326,6 +497,32 @@ export type ImmediateExecution = { strategy: "immediate" };
 export type DebounceExecution = { strategy: "debounce"; milliseconds: number };
 export type CountExecution = { strategy: "count"; threshold: number };
 export type TimeWindowExecution = { strategy: "timeWindow"; milliseconds: number };
+
+// Phase-specific settings schema
+export const phaseChroniclerSettingsSchema = z
+  .object({
+    failPhaseIfNotLoaded: z.boolean().optional(),
+    outputPaths: z
+      .object({
+        logFile: z.string().optional(),
+        lastValueFile: z.string().optional(),
+      })
+      .optional(),
+    reportToWebsocket: reportToWebsocketSchema,
+  })
+  .optional();
+
+// Phase chronicler entry schema (wrapper pattern)
+export const phaseChroniclerEntrySchema = z.object({
+  chroniclerConfig: z.union([
+    z.string(), // File path
+    chroniclerConfigSchema, // Inline config
+  ]),
+  settings: phaseChroniclerSettingsSchema,
+});
+
+// Export type
+export type PhaseChroniclerSettings = z.infer<typeof phaseChroniclerSettingsSchema>;
 
 // Export helper function for use in other modules
 export { getValueByPath };

@@ -172,6 +172,7 @@ export function validateTransitionMetadata(to: PhaseStatus, metadata: unknown): 
     // Other transitions don't require metadata
     case "preparing":
     case "starting":
+    case "completing-chroniclers":
       break;
   }
 }

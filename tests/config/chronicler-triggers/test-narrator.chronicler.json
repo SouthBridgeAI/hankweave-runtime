@@ -1,0 +1,20 @@
+{
+  "id": "test-narrator",
+  "name": "E2E Test Narrator",
+  "description": "Creates human-readable narrative of agent actions for E2E testing",
+  "model": "anthropic/claude-haiku-4-5",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action",
+      "tool.result"
+    ]
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 5000
+  },
+  "systemPromptText": "You are an expert observer summarizing an AI agent's actions. Your tone is technical but clear. Do not offer opinions, just state what happened based on the events.",
+  "userPromptText": "Based on the following sequence of events, write a concise, human-readable paragraph summarizing what the agent just did. Focus on the agent's goal and the outcome.\n\nEvents:\n<%= JSON.stringify(it.events, null, 2) %>",
+  "joinString": "\n\n---\n\n"
+}

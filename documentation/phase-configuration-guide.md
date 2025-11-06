@@ -294,6 +294,92 @@ Claude will see these as:
 - `GITHUB_TOKEN=ghp_xxxxx`
 - `API_ENDPOINT=https://api.example.com`
 
+**Note**: Chroniclers use a different set of environment variables (`TADPOLE_CHRONICLER_*` prefix) for their LLM API keys. See the [Chronicler Configuration Guide](./chroniclers/configuration-guide.md#environment-variables) for details.
+
+## Configuring Chroniclers
+
+You can run one or more parallel observation agents, called Chroniclers, during a phase. They are defined in a `chroniclers` array within the phase configuration.
+
+### The Wrapper Pattern
+
+To keep chronicler definitions reusable across different phases, Tadpole uses a "wrapper" pattern. For each chronicler you want to run, you provide an object that separates the chronicler's definition from its settings for this specific phase.
+
+```json
+{
+  "id": "phase-1",
+  // ...
+  "chroniclers": [
+    {
+      "chroniclerConfig": "./chroniclers/my-narrator.json",
+      "settings": {
+        "failPhaseIfNotLoaded": true,
+        "outputPaths": {
+          "logFile": "phase-1-narrative.log"
+        }
+      }
+    }
+  ]
+}
+```
+
+- `chroniclerConfig`: This can be either a string (a path to a JSON file containing the chronicler's configuration) or an inline JSON object with the full chronicler configuration.
+- `settings`: An optional object containing settings that apply to this chronicler only for this phase.
+
+### Phase-Specific Settings (`settings`)
+
+#### `failPhaseIfNotLoaded`
+- **Type**: `boolean`
+- **Default**: `false`
+
+If set to `true`, the entire phase will fail to start if this specific chronicler cannot be loaded (e.g., its configuration file is not found or contains errors). This is useful for critical chroniclers that are essential for the phase's purpose.
+
+#### `outputPaths`
+- **Type**: `object`
+
+This object specifies where the chronicler should write its output files.
+
+- `logFile`: A path for an append-only log file. Every output from the chronicler will be added to this file.
+- `lastValueFile`: A path for a file that will be overwritten with the latest output from the chronicler.
+
+**Path Resolution Logic**:
+- **Filename only** (e.g., `"summary.md"`): The file will be placed in a dedicated directory for that chronicler inside the execution environment at `.tadpole/chronicler-outputs/<chronicler-id>/summary.md`. This is the recommended approach to keep outputs organized.
+- **Path with a slash** (e.g., `"reports/summary.md"`): The path is treated as relative to the root of the execution directory. This allows chroniclers to write files into the main workspace, where they could potentially be read by the primary agent.
+
+#### `reportToWebsocket`
+- **Type**: `object`
+
+This object allows you to override the chronicler's default settings for which of its internal events are reported to the WebSocket client. This is useful for reducing noise in the event stream.
+
+- `lifecycle`: `true` or `false`
+- `errors`: `true` or `false`
+- `outputs`: `true` or `false`
+- `triggers`: `true` or `false`
+
+### Full Example of a `PhaseChroniclerEntry`
+
+```json
+{
+  "chroniclers": [
+    {
+      "chroniclerConfig": "./chroniclers/code-reviewer.json",
+      "settings": {
+        "failPhaseIfNotLoaded": false,
+        "outputPaths": {
+          "logFile": "code-review.log",
+          "lastValueFile": "latest-review.txt"
+        },
+        "reportToWebsocket": {
+          "outputs": false,
+          "triggers": true
+        }
+      }
+    }
+  ]
+}
+```
+
+For a deep dive into creating the chronicler configuration files themselves (including triggers, execution strategies, and prompts), see the **[Chronicler Configuration Guide](./chroniclers/configuration-guide.md)**.
+
 ## Output Configuration
 
 Tadpole can automatically copy files from the execution directory to a `tadpole-results` directory where you run the command from. This makes it easy to access the output of your phases without navigating to the execution directory.
@@ -305,7 +391,7 @@ Add an `outputFiles` array to your phase configuration (one or more copy groups)
 ```json
 {
   "id": "analyze",
-  "name": "Code Analysis", 
+  "name": "Code Analysis",
   "promptFile": "./prompts/analyze.md",
   "model": "sonnet",
   "continuationMode": "fresh",
@@ -322,7 +408,7 @@ This will copy `analysis.md` from the execution directory to `tadpole-results/an
 
 ### Before-copy Commands
 
-You can run shell commands before copying files in each output group using the `beforeCopy` array. These are especially useful when you need to rename files before copying them to the `tadpole-results` in the directory where you run tadpole. 
+You can run shell commands before copying files in each output group using the `beforeCopy` array. These are especially useful when you need to rename files before copying them to the `tadpole-results` in the directory where you run tadpole.
 
 **Please note**: if one of the `beforeCopy` commands fails, the whole copy group fails and nothing is copied to `tadpole-results` for this specific group. Tadpole will however attempt to run remaining copy groups.
 
@@ -380,7 +466,7 @@ The `copy` array supports glob patterns for flexible file selection:
   "id": "documentation-phase",
   "name": "Generate Documentation",
   "promptFile": "./prompts/generate-docs.md",
-  "model": "sonnet", 
+  "model": "sonnet",
   "continuationMode": "fresh",
   "trackedFiles": ["docs/**/*.md", "README.md"],
   "outputFiles": [
@@ -393,7 +479,7 @@ The `copy` array supports glob patterns for flexible file selection:
           }
         },
         {
-          "type": "command", 
+          "type": "command",
           "command": {
             "run": "cp -r docs/* versioned-docs/$(date +%Y-%m-%d)/"
           }
@@ -548,7 +634,6 @@ The `copy` array supports glob patterns for flexible file selection:
 
 ### 1. Phase Granularity
 - Keep phases focused on a single logical task
-- If a phase prompt exceeds 500 lines, consider splitting it
 - Each phase should produce a clear, verifiable output
 
 ### 2. Model Selection Strategy

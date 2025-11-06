@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { phaseChroniclerEntrySchema } from "./config-validation/chronicler.schema.js";
 import { PhaseId } from "./types/branded-types.js";
 import type { PhaseConfig, ServerConfig } from "./types/types.js";
 
@@ -159,6 +160,7 @@ const phaseConfigSchema = z
     trackedFiles: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
     outputFiles: phaseOutputSchema,
+    chroniclers: z.array(phaseChroniclerEntrySchema).optional(),
   })
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
@@ -212,6 +214,11 @@ export const DEFAULT_CONFIG: Omit<
   toolResultTruncateLength: 2500, // Default truncation length for tool results
   withoutProxy: false, // Enable proxy by default
   handshakeHistoryLimit: 50, // Maximum recent events to include in handshake response
+  chronicler: {
+    enablePersistence: true,
+    healthCheckGracePeriodMs: 2000, // 2 seconds
+    waitForAllHealthChecks: false,
+  },
 };
 
 // ============================================================================
@@ -363,6 +370,63 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
                 }: source path "${item.copy.from}" does not exist`,
               );
             }
+          }
+        }
+      }
+
+      // Validate chroniclers
+      if (phase.chroniclers && phase.chroniclers.length > 0) {
+        const seenChroniclerIds = new Set<string>();
+        const configDir = path.dirname(configPath);
+
+        for (const [chrIndex, entry] of phase.chroniclers.entries()) {
+          const entryLabel = `Phase ${index + 1} (${phase.id}), chronicler ${chrIndex + 1}`;
+
+          // Extract chronicler config to check ID
+          let chroniclerConfig: unknown;
+          if (typeof entry.chroniclerConfig === "string") {
+            // File reference - resolve and load
+            const resolvedPath = path.isAbsolute(entry.chroniclerConfig)
+              ? entry.chroniclerConfig
+              : path.resolve(configDir, entry.chroniclerConfig);
+
+            if (!fs.existsSync(resolvedPath)) {
+              const severity = entry.settings?.failPhaseIfNotLoaded ? "ERROR" : "WARNING";
+              validationErrors.push(
+                `${entryLabel}: Chronicler config file not found: ${entry.chroniclerConfig} [${severity}]`,
+              );
+              continue; // Skip further validation for this chronicler
+            }
+
+            try {
+              const content = fs.readFileSync(resolvedPath, "utf-8");
+              chroniclerConfig = JSON.parse(content);
+            } catch (error) {
+              const severity = entry.settings?.failPhaseIfNotLoaded ? "ERROR" : "WARNING";
+              const errorMsg = error instanceof Error ? error.message : String(error);
+              validationErrors.push(
+                `${entryLabel}: Failed to parse chronicler config file ${entry.chroniclerConfig}: ${errorMsg} [${severity}]`,
+              );
+              continue;
+            }
+          } else {
+            // Inline config
+            chroniclerConfig = entry.chroniclerConfig;
+          }
+
+          // Check for duplicate chronicler IDs
+          if (
+            chroniclerConfig &&
+            typeof chroniclerConfig === "object" &&
+            "id" in chroniclerConfig
+          ) {
+            const chroniclerId = (chroniclerConfig as { id: string }).id;
+            if (seenChroniclerIds.has(chroniclerId)) {
+              validationErrors.push(
+                `${entryLabel}: Duplicate chronicler ID '${chroniclerId}' in phase ${phase.id}`,
+              );
+            }
+            seenChroniclerIds.add(chroniclerId);
           }
         }
       }

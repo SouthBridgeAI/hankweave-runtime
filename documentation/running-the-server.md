@@ -191,9 +191,9 @@ bun run server --config=phases.json
 
 In this mode, the server:
 1.  Starts a WebSocket server on the configured port.
-2.  Waits for a single client to connect.
+2.  Waits for clients to connect. It can handle multiple concurrent clients, each with different access modes (`readonly` or `readandwrite`).
 3.  Communicates exclusively through the JSON-based protocol, sending events and receiving commands.
-4.  Automatically shuts down when the client disconnects.
+4.  Continues running even if all clients disconnect, allowing for persistent workflows.
 
 ### Basic TUI Mode
 
@@ -233,6 +233,8 @@ The validation process checks for:
 
 ## Environment Variables
 
+### Main Agent Environment Variables
+
 You can pass environment variables to the Claude process in two ways:
 
 1.  **System Environment Variables**: Any environment variable on your system prefixed with `TADPOLE_` will be passed to the Claude process with the prefix removed. This is a secure way to inject secrets like API keys without hardcoding them.
@@ -257,6 +259,20 @@ You can pass environment variables to the Claude process in two ways:
       }
     }
     ```
+
+### Chronicler Environment Variables
+
+Chroniclers use a different set of environment variables for their LLM API keys. This allows you to use separate API accounts for chroniclers.
+
+**Chronicler-Specific API Keys** (with `TADPOLE_CHRONICLER_` prefix) examples:
+- `TADPOLE_CHRONICLER_ANTHROPIC_API_KEY`
+- `TADPOLE_CHRONICLER_OPENAI_API_KEY`
+- `TADPOLE_CHRONICLER_GROQ_API_KEY`
+- `TADPOLE_CHRONICLER_GOOGLE_API_KEY`
+
+If these are not set, chroniclers fall back to the standard variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
+
+For complete details on chronicler environment variables and use cases, see the [Chronicler Configuration Guide](./chroniclers/configuration-guide.md#environment-variables).
 
 ## Typical Workflows
 

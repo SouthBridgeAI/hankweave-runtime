@@ -1,0 +1,29 @@
+{
+  "id": "conversational-narrator",
+  "name": "Conversational Narrator",
+  "description": "A narrator that maintains conversation history across events",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action",
+      "tool.result"
+    ]
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 500
+  },
+  "systemPromptText": "You are a helpful narrator that maintains context across multiple observations. Build on your previous summaries.",
+  "userPromptText": "Summarize the following events: {{events}}",
+  "conversational": {
+    "trimmingStrategy": {
+      "type": "maxTurns",
+      "maxTurns": 5
+    }
+  },
+  "model": "anthropic/claude-haiku-4-5",
+  "output": {
+    "format": "text",
+    "file": "conversational-narrator.log"
+  }
+}

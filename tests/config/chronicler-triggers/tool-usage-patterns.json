@@ -13,10 +13,10 @@
     "strategy": "count",
     "threshold": 10
   },
-  "promptTemplate": "Analyze the tool usage patterns from these {{events.length}} tool calls:\n\n{{events}}\n\nProvide insights on:\n1. Most frequently used tools\n2. Average execution time by tool\n3. Success/failure rates\n4. Patterns of inefficient tool usage (e.g., repeated similar calls)\n5. Suggestions for optimization",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
   "output": {
     "format": "json",
     "file": "tool-patterns.jsonl"
-  }
+  },
+  "userPromptText": "Analyze the tool usage patterns from these {{events.length}} tool calls:\n\n{{events}}\n\nProvide insights on:\n1. Most frequently used tools\n2. Average execution time by tool\n3. Success/failure rates\n4. Patterns of inefficient tool usage (e.g., repeated similar calls)\n5. Suggestions for optimization"
 }

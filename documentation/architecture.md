@@ -42,7 +42,7 @@ The architecture is guided by several key principles to ensure robustness, maint
 
 -   **Fail-Safe Operation**: The system is designed to be resilient. It includes mechanisms for graceful degradation (e.g., disabling checkpointing if Git is unavailable) and recovery from crashes, primarily through atomic state writes and a robust lock file mechanism.
 
--   **Event Categorization and Routing**: All server events are categorized into two types: **Server State Events** (persisted and broadcasted to all clients) and **Connection State Events** (ephemeral and client-specific). This separation ensures clean distinction between domain logic and connection lifecycle, with compile-time safety guarantees via TypeScript's type system. Event schemas and categories are defined in [`server/schemas/event-schemas.ts`](../server/schemas/event-schemas.ts). See [Event Journal documentation](./event-journal.md) for details.
+-   **Event Categorization and Routing**: All server events are categorized into four types: **Server State**, **Agentic Backbone**, **Chronicler**, and **Connection State**. This granular separation ensures a clean distinction between domain logic, agent activities, parallel observations, and connection lifecycle, with compile-time safety guarantees via TypeScript's type system. Event schemas and categories are defined in [`server/schemas/event-schemas.ts`](../server/schemas/event-schemas.ts). See [Event Journal documentation](./event-journal.md) for details.
 
 -   **Append-Only History**: To ensure a complete and auditable trail, historical data (runs, phase executions, checkpoints) is never modified or deleted. New states are appended, preserving the full history of the workflow.
 
@@ -69,6 +69,12 @@ The server is composed of several distinct, yet interconnected, modules.
 
 -   **`server/schemas/event-schemas.ts`**: The single source of truth for all server event definitions. This file uses Zod schemas to define the structure and validation rules for all 19 server event types. TypeScript types are automatically inferred from these schemas, ensuring perfect consistency between runtime validation and compile-time type checking. The file exports both the schemas and the inferred types, including a discriminated union `ServerEvent` type for type-safe event handling.
 -   **`server/types/types.ts`**: Contains non-event TypeScript types and interfaces used throughout the system, such as `PhaseConfig`, `ServerConfig`, and command types. Event types are re-exported from the schemas file for backward compatibility.
+-   **`server/types/input-ai-types.ts`**: Defines Zod schemas and TypeScript types for AI SDK compatibility. This file provides simplified, validated versions of the AI SDK's `ModelMessage` types for communicating with LLMs like Claude. Key features:
+    - **Zod-First Design**: All message types (`TadpoleSystemModelMessage`, `TadpoleUserModelMessage`, `TadpoleAssistantModelMessage`, `TadpoleToolModelMessage`) are defined as Zod schemas with TypeScript types inferred from them
+    - **AI SDK Compatibility**: Includes compile-time validation to ensure our types remain compatible with the official `ai` SDK types, alerting us to breaking changes
+    - **Discriminated Union**: The main `TadpoleModelMessage` type uses role-based discrimination for type-safe message handling
+    - **Rich Content Support**: Handles text, images, files, tool calls, and tool results with proper validation
+    - **Used by Chroniclers**: These types are used in the conversational chronicler system for maintaining type-safe conversation history with LLMs
 
 ### Process & Log Management
 
@@ -84,6 +90,13 @@ The server is composed of several distinct, yet interconnected, modules.
 
 -   **`server/execution-setup.ts`**: Manages the creation and detection of execution directories. It handles automatic execution directory creation in `~/.tadpole-executions/`, supports explicit execution paths, and manages data access via symlinks or copies. This module ensures clean separation between user data and execution artifacts. It supports both files and directories as data sources.
 -   **`server/data-hasher.ts`**: Generates deterministic hashes of data sources (files or directories) to identify which executions belong to which data source. Uses time and depth limits to handle large projects efficiently while maintaining unique identification across different data sources. Files are hashed based on content and metadata.
+
+### Chronicler Subsystem
+
+-   **`server/chroniclers/chronicler-manager.ts`**: The central orchestrator for the Chronicler system. A single instance is created per server and is responsible for loading, managing, and routing events to all chronicler instances for the currently active phase.
+-   **`server/chroniclers/chronicler-config-loader.ts`**: A utility class that handles the loading, parsing, validation, and caching of chronicler configuration files. It supports both file-based and inline configurations.
+-   **`server/chroniclers/chronicler.ts`**: The runtime for an individual chronicler instance. It manages its own trigger engine, execution strategy (e.g., debounce, count), and conversational state, processing events and making LLM calls as configured.
+-   **`server/chroniclers/trigger-engine.ts`**: The logic that evaluates the incoming event stream against the chronicler's trigger conditions (`event` or `sequence` triggers) to determine when it should activate.
 
 ## Data Flow and Interaction
 
@@ -144,7 +157,7 @@ The state transition process is designed to be robust and atomic:
    └────────┘ └────────────────────────────┘
 ```
 
-**Note:** missing from the diagram above is LLMProxy server that TadpoleServer starts by default. This proxy is a simple passthrough at the moment.
+**Note:** Missing from the diagram above are two key components: the **`LLMProxy`** server, which TadpoleServer starts by default, and the **`ChroniclerManager`**, which listens to the `TadpoleServer`'s event bus and manages the parallel Chronicler agents.
 
 ## Key Architectural Decisions
 
@@ -164,10 +177,12 @@ This architecture enables use cases such as:
 
 ### Event Categorization and Routing
 
-All server events are categorized into two mutually exclusive types for intelligent routing:
+All server events are categorized into four mutually exclusive types for intelligent routing:
 
--   **Server State Events**: Persisted to the event journal and broadcasted to all connected clients (e.g., `phase.started`, `file.updated`, `state.transition`)
--   **Connection State Events**: Ephemeral events sent only to specific target clients (e.g., `handshake.response`, `pong`, `history.batch`)
+-   **Server State Events**: Persisted to the event journal and broadcasted to all connected clients (e.g., `phase.started`, `state.transition`). These represent the core state of the workflow.
+-   **Agentic Backbone Events**: Capture the agent's primary actions and their effects on the workspace (e.g., `assistant.action`, `tool.result`, `file.updated`). These are also persisted and broadcasted.
+-   **Chronicler Events**: Represent the lifecycle and output of the parallel Chronicler agents (e.g., `chronicler.loaded`, `chronicler.output`). These are persisted and broadcasted, allowing clients to observe the observers.
+-   **Connection State Events**: Ephemeral events sent only to specific target clients (e.g., `handshake.response`, `pong`, `history.batch`). These are not persisted.
 
 The system uses TypeScript's type system to enforce compile-time exhaustiveness checks, ensuring all events are explicitly categorized. This prevents accidental misrouting and maintains clean separation between domain logic and connection lifecycle.
 

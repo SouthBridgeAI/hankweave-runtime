@@ -22,6 +22,7 @@ import {
 // New test groups
 import { runCheckpointExclusionTests } from "./test-groups/checkpoint-exclusion-tests.js";
 import { runCheckpointSystemTests } from "./test-groups/checkpoint-system-tests.js";
+import { runChroniclerIntegrationTests } from "./test-groups/chronicler-integration-tests.js";
 import { runCostPrecisionTests } from "./test-groups/cost-precision-tests.js";
 import { runCostTrackingTests } from "./test-groups/cost-tracking-tests.js";
 import { runDualIdSystemTests } from "./test-groups/dual-id-system-tests.js";
@@ -870,6 +871,10 @@ describe("Tadpole E2E Test", () => {
 
   describe("Error Event Metadata", () => {
     runErrorEventTests(testState);
+  });
+
+  describe("Chronicler Integration", () => {
+    runChroniclerIntegrationTests(testState);
   });
 
   // Cleanup after all tests - Updated for execution isolation

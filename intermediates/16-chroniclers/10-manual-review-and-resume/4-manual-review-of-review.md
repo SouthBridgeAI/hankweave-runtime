@@ -1,0 +1,32 @@
+# Review
+
+1. Codex and Cline got it right, but all three missed the spirit of the question (which I didn't ask properly). If `performHealthChecks` is non-blocking, then the thing that runs immediately after is just going to log no for all providers, right? One thing to do here might be to actually add some time delay for waiting anyway so at least SOME providers have a chance of being up. Some fixed delay, with a promise returned that the caller can wait on if they want chroniclermanager to be up first.
+2. Small change - all three got it right, let's add it to the list.
+3. Sonnet wanted to add unloadOnFatalError into the config while the other two did what was asked (but the question was also not super prescriptive so I'll allow it) - let's go with Sonnet's change. it's right this is a medium change.
+4. No number 4 I think I removed that. Codex randomly (and without saying anything) decides to renumber the items - points docked for that
+5. All three of them had some ideas but they all missed the obvious things like:
+   a. Why is the realProviders check happening every single time with every config? It should be outside the for loop so we don't repeat this computation each time. Also leads to simpler code.
+   b. Otherwise this is fine. It's actually reasonably readable, I got confused with the hasRealProviders check being specific to the model so I thought we were repeating the thing. Some points docked from all models for not pushing back, codex was wrong in its description of the flow as well (missed the actual testing mock check).
+   Should be a minor change if we're only making that - but do double check that it doesn't break the functionality.
+6. All of them got it right - small change, just refactoring. Cline sonnet gets extra points for listing out all the places to change.
+7. Sonnet got the line numbers wrong somehow. Codex and Opus got it right , and both suggested a mapping object, but Codex's version is needlessly code golfing. Opus got it close - let's use the opus version with an actual finish mapper.
+8. This is primarily a renaming thing, small change. Cline sonnet and opus got it right - we add a docstring and call it mockOrFallBackLLMCall. Codex just calls it fallback, which still implies production. Cline sonnet is better - let's go with that.
+9. Let's go with cline and opus's agreement with my suggestion. Codex still wanted to change it again. Cline sonnet also suggests renaming another variable for consistency - let's do that too.
+10. All three agree with hoisting but with completely different approaches.  Cline sonnet does hoisting but also suggests catching destroy errors - let's skip that for now even though that's a good idea. Let's just hoist - small change then.
+11. Docstring and commenting changes - let's do this last. Cline sonnet 4.5 had the best answers here with some things pointed out, but others are fine.
+12. This is a large change. Codex and CC Opus are pretty wrong that a single LLM call is quick - can be in the order of tens of seconds. Cline Sonnet doesn't make that mistake - but all three suggest a queue. Codex's answer is so short it doesn't have enough context to disagree with. Sonnet provides a code snippet which makes me notice that we're calling handleEvent in a for loop inside of the object's own handler - and I'm uncomfortable with that kind of Ouroboros. A better solution might be to have a `handleEvents` function inside chroniclers that can take care of batching instead of there being a for loop *with* a map outside of chroniclers that's queueing up things for the event loop. DEFER for now, let's mark this one for AFTER everything is done and we've discussed it.
+    a.  However, as far as finding why this was introduced, I think Opus got it right. Sonnet couldn't find it in the intermediates, Codex got close but didn't get the right one - it focused on test race conditions but not teardown - different intermediate.
+13. Codex had a horrible horrible response that didn't even really try to work through the problem. Agreed with sonnet here, let's track absolute timestamps, but we make sure to add a check to see if the start time is in the past so we can fire the timer right away and start a new cycle (in the case of something being paused/hanging etc). Opus was fine.
+14. All good - no changes here, all of them suggested no changes but Sonnet and Opus gave comparably good answers while Codex had no context.
+15. All three agree and are right - small change. Cline Sonnet suggests adding an assertion but let's skip that for now.
+16. Okay once again we have different approaches. Let's go with the Sonnet approach (thank you Cline Sonnet for providing two possibilities) 1, which is to make `model` optional in TadpoleGenerateTextOptions. I'm wondering if that wouldn't break our type assertions keeping us in line with AI SDK though - can you check?
+17. Let's go with the ACTUAL PLAN from Cline Sonnet. CC Opus and Codex Codex had it okay but not enough to actually implement on.
+18. This is a question I thought might be tough but all three handled it well. We have three different async initialization patterns, but they can all be defended. Okay let's keep them and add jsdoc comments explaining the pattern reasons - go with Cline sonnet for the reasoning.
+19. Codex missed the utility of `forceSkipPruning` for tests. Lets' go with Cline Sonnet's recommendation that we just add comments for now.
+20. Small change - let's do it.
+21. All three are reasonable answers - let's go with Cline Sonnet because it lays out more of the changes so it's more reviewed. I have no idea what Codex will actually do haha
+22. Okay I agree with Cline sonnet on the detail but all three got it close to right. I'd say let's not throw a fatal error, and just throw a regular error (and log failures) but try and clear history and keep going. Still better than completely unloading the chronicler.
+23. All three got it right - let's just add a comment and move on.
+24. Oh boy codex and cc opus - we don't have a trace level in our logging just yet. Chill. Okay let's go with Cline Sonnet's suggestion for now to just keep the matched log and remove the other ones.
+25. Okay all three agree that `unknown` best represents our knowledge. Let's add a comment there but no other change.
+26.

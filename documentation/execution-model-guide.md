@@ -142,20 +142,6 @@ State transitions:
 preparing → starting → initializing → running → {completed, failed, skipped}
 ```
 
-### Phase Execution Time
-
-Total phase time calculation:
-
-```
-T_phase = T_setup + T_init + T_claude + T_checkpoint
-```
-
-Where:
-- `T_setup` = workspace setup time
-- `T_init` = Claude process initialization
-- `T_claude` = Claude execution time
-- `T_checkpoint` = git checkpoint creation time
-
 ## 6. Cost Calculations
 
 ### Token Cost Formula
@@ -197,25 +183,6 @@ while current_run:
     else:
         break
 ```
-
-## 8. Checkpoint Storage
-
-### Checkpoint Size Estimation
-
-```
-S_checkpoint = ∑(f_size) for all f matching tracked_patterns
-```
-
-### Storage Growth Rate
-
-```
-dS/dt = N_phases × S_avg_checkpoint × F_change
-```
-
-Where:
-- `N_phases` = phases per hour
-- `S_avg_checkpoint` = average checkpoint size
-- `F_change` = fraction of files changed per phase
 
 ## 9. Performance Metrics
 
@@ -369,3 +336,5 @@ Phase Execution → beforeCopy commands → copy patterns → tadpole-results/
 | `<project>/tadpole-results/` | User-accessible output | Persistent |
 
 The tadpole-results directory provides a clean interface to access phase outputs without navigating temporary execution directories.
+
+**Note on Chronicler Outputs**: The `outputFiles` mechanism described above is for the main agent's phase outputs. Outputs from parallel Chronicler agents are handled separately. They can be configured via the `settings.outputPaths` in the phase's `chroniclers` array, or they will be auto-generated inside the `.tadpole/chroniclers/outputs/` directory. See the Chronicler configuration guides for more details.

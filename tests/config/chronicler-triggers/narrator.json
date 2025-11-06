@@ -14,10 +14,14 @@
     "strategy": "debounce",
     "milliseconds": 3000
   },
-  "promptTemplate": "Summarize the following agent activities in a conversational, human-readable way. Focus on what the agent is trying to accomplish:\n\n{{events}}\n\nProvide a brief, clear summary of what happened.",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
+  "llmParams": {
+    "temperature": 0.3,
+    "maxOutputTokens": 4096
+  },
   "output": {
     "format": "text",
     "file": "narrator.log"
-  }
+  },
+  "userPromptText": "Summarize the following agent activities in a conversational, human-readable way. Focus on what the agent is trying to accomplish:\n\n<%= JSON.stringify(it.events, null, 2) %>\n\nProvide a brief, clear summary of what happened."
 }

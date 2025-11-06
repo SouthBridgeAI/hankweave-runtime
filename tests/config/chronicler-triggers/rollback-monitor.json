@@ -28,10 +28,10 @@
   "execution": {
     "strategy": "immediate"
   },
-  "promptTemplate": "A rollback operation has completed. Analyze the rollback sequence:\n\n{{events}}\n\nProvide:\n1. Summary of what was rolled back\n2. Reason for the rollback (if apparent)\n3. Success/failure of the rollback\n4. Impact on the project state\n5. Recommendations for moving forward",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
   "output": {
     "format": "json",
     "file": "rollback-analysis.jsonl"
-  }
+  },
+  "userPromptText": "A rollback operation has completed. Analyze the rollback sequence:\n\n{{events}}\n\nProvide:\n1. Summary of what was rolled back\n2. Reason for the rollback (if apparent)\n3. Success/failure of the rollback\n4. Impact on the project state\n5. Recommendations for moving forward"
 }

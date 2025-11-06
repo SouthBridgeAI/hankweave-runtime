@@ -48,10 +48,10 @@
   "execution": {
     "strategy": "immediate"
   },
-  "promptTemplate": "The agent has encountered 3 consecutive errors. Analyze the pattern and suggest what might be going wrong:\n\n{{events}}\n\nProvide:\n1. Common cause analysis\n2. Suggested fixes\n3. Whether the agent should continue or needs intervention",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
   "output": {
     "format": "json",
     "file": "error-patterns.jsonl"
-  }
+  },
+  "userPromptText": "The agent has encountered 3 consecutive errors. Analyze the pattern and suggest what might be going wrong:\n\n<%= JSON.stringify(it.events, null, 2) %>\n\nProvide:\n1. Common cause analysis\n2. Suggested fixes\n3. Whether the agent should continue or needs intervention"
 }

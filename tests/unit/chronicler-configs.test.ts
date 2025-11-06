@@ -43,10 +43,17 @@ describe("Chronicler Configuration Files", () => {
       }
     });
 
-    it("should have prompt templates", () => {
+    it("should have user prompts", () => {
       for (const config of configFiles) {
-        expect(config.content.promptTemplate).toBeDefined();
-        expect(config.content.promptTemplate.length).toBeGreaterThan(0);
+        // Check that at least one user prompt field is defined
+        const hasUserPromptText = config.content.userPromptText !== undefined;
+        const hasUserPromptFile = config.content.userPromptFile !== undefined;
+        expect(hasUserPromptText || hasUserPromptFile).toBe(true);
+
+        // If userPromptText is defined, it should not be empty
+        if (hasUserPromptText) {
+          expect(config.content.userPromptText.length).toBeGreaterThan(0);
+        }
       }
     });
   });

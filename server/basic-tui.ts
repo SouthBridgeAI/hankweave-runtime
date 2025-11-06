@@ -501,6 +501,95 @@ export class BasicTUI {
         break;
       }
 
+      // Chronicler Events
+      case "chronicler.loaded": {
+        console.log(
+          `\n${timestamp} ${COLORS.magenta}${COLORS.bold}Chronicler Loaded${COLORS.reset}`,
+        );
+        this.drawBox(
+          `Chronicler: ${event.data.chroniclerId}`,
+          [
+            `Phase: ${COLORS.dim}${event.data.phaseId}${COLORS.reset}`,
+            `Model: ${COLORS.dim}${event.data.model}${COLORS.reset}`,
+            `Trigger: ${COLORS.cyan}${event.data.triggerType}${COLORS.reset}`,
+            `Strategy: ${COLORS.cyan}${event.data.executionStrategy}${COLORS.reset}`,
+            `Source: ${COLORS.dim}${event.data.source}${event.data.sourcePath ? ` (${event.data.sourcePath.split("/").pop()})` : ""}${COLORS.reset}`,
+          ],
+          COLORS.magenta,
+        );
+        break;
+      }
+
+      case "chronicler.unloaded": {
+        const reasonColor =
+          event.data.reason === "fatal-error" || event.data.reason === "consecutive-failures"
+            ? COLORS.red
+            : COLORS.dim;
+        console.log(
+          `\n${timestamp} ${reasonColor}Chronicler Unloaded${COLORS.reset}: ${COLORS.bold}${event.data.chroniclerId}${COLORS.reset}`,
+        );
+        console.log(`  ${SYMBOLS.arrow} Reason: ${event.data.reason}`);
+        console.log(
+          `  ${SYMBOLS.arrow} Final Cost: ${COLORS.yellow}$${event.data.finalCost.toFixed(6)}${COLORS.reset}`,
+        );
+        console.log(`  ${SYMBOLS.arrow} LLM Calls: ${event.data.llmCallCount}`);
+        break;
+      }
+
+      case "chronicler.triggered": {
+        console.log(
+          `\n${timestamp} ${COLORS.dim}${COLORS.italic}Chronicler Triggered: ${event.data.chroniclerId} (#${event.data.triggerNumber}, ${event.data.eventCount} events)${COLORS.reset}`,
+        );
+        break;
+      }
+
+      case "chronicler.output": {
+        const outputContent =
+          event.data.outputType === "structured"
+            ? JSON.stringify(event.data.content, null, 2).split("\n")
+            : [event.data.content as string];
+
+        this.drawBox(
+          `Chronicler Output: ${event.data.chroniclerId}`,
+          [
+            ...outputContent,
+            `${COLORS.dim}${"─".repeat(20)}${COLORS.reset}`,
+            `Cost: ${COLORS.yellow}$${event.data.cost.toFixed(6)}${COLORS.reset}`,
+            `Tokens: ${COLORS.dim}(in: ${event.data.tokens.input}, out: ${event.data.tokens.output})${COLORS.reset}`,
+          ],
+          COLORS.green,
+        );
+        break;
+      }
+
+      case "chronicler.error": {
+        console.log(`\n${timestamp} ${COLORS.red}${COLORS.bold}Chronicler Error${COLORS.reset}`);
+        this.drawBox(
+          `Chronicler Error: ${event.data.chroniclerId}`,
+          [
+            `Type: ${COLORS.yellow}${event.data.errorType}${COLORS.reset}`,
+            `Message: ${event.data.message}`,
+            `Retriable: ${event.data.retriable ? "yes" : "no"}`,
+            `Consecutive Failures: ${event.data.consecutiveFailureCount}`,
+          ],
+          COLORS.red,
+        );
+        break;
+      }
+
+      // Silent handlers for internal/protocol events
+      case "state.transition":
+        // Internal state event, too noisy for TUI
+        break;
+
+      case "history.batch":
+        // Protocol-level event for client sync, not relevant for TUI display
+        break;
+
+      case "pong":
+        // Response to a ping, not user-facing
+        break;
+
       default: {
         // Show all unknown events for debugging
         // Cast to a generic event structure for debugging

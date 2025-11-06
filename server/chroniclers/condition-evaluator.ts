@@ -2,9 +2,19 @@ import { getValueByPath } from "../config-validation/chronicler.schema.js";
 import type { Condition } from "../types/chronicler-types.js";
 
 /**
- * Evaluates a single condition against event data
- * @param condition The condition to evaluate
- * @param eventData The event data to evaluate against (from ServerEvent.data)
+ * Evaluates a single condition against event data.
+ *
+ * Note: eventData is typed as Record<string, unknown> intentionally because:
+ * - Event data structure varies by event type (discriminated union)
+ * - Condition paths are strings defined at runtime (from JSON config)
+ * - We cannot statically verify path existence or value types at compile time
+ * - Runtime type checking happens inside the function for each operator
+ *
+ * Using 'unknown' accurately represents our compile-time knowledge and forces
+ * proper runtime validation rather than unsafe type assertions.
+ *
+ * @param condition - The condition to evaluate
+ * @param eventData - The event data to evaluate against (from ServerEvent.data)
  * @returns true if the condition matches, false otherwise
  */
 export function evaluateCondition(

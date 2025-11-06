@@ -15,9 +15,10 @@ const processExitSchema = z.discriminatedUnion("type", [
 
 // Failure reason schema
 const failureReasonSchema = z.object({
-  type: z.enum(["timeout", "rate-limit", "api-error", "unknown"]),
+  type: z.enum(["timeout", "rate-limit", "api-error", "chronicler-load-failure", "unknown"]),
   retriable: z.boolean(),
   message: z.string().optional(),
+  chroniclerRefs: z.array(z.string()).optional(), // Which chroniclers failed (for chronicler-load-failure)
 });
 
 // Token usage schema
@@ -65,6 +66,7 @@ const phaseExecutionSchema = z.object({
     "starting",
     "initializing",
     "running",
+    "completing-chroniclers",
     "completed",
     "failed",
     "skipped",
@@ -102,6 +104,7 @@ const checkpointQueryInfoSchema = z.object({
     "starting",
     "initializing",
     "running",
+    "completing-chroniclers",
     "completed",
     "failed",
     "skipped",
@@ -297,6 +300,7 @@ export const stateTransitionEventDataSchema = z.object({
     "CheckpointCreated",
     "InitialCheckpointSet",
     "PhaseFinalCostSet",
+    "ChroniclerStatesUpdated",
   ]),
   runId: z.string().optional(),
   phaseId: z.string().optional(),
@@ -310,6 +314,59 @@ export const stateTransitionEventDataSchema = z.object({
     totalCost: z.number(),
     currentRunCost: z.number(),
   }),
+});
+
+// Chronicler event data schemas
+export const chroniclerLoadedEventDataSchema = z.object({
+  chroniclerId: z.string(),
+  phaseId: z.string(),
+  model: z.string(),
+  triggerType: z.enum(["event", "sequence"]),
+  executionStrategy: z.enum(["immediate", "debounce", "count", "timeWindow"]),
+  conversational: z.boolean(),
+  source: z.enum(["file", "inline"]),
+  sourcePath: z.string().optional(),
+});
+
+export const chroniclerUnloadedEventDataSchema = z.object({
+  chroniclerId: z.string(),
+  phaseId: z.string(),
+  reason: z.enum(["phase-complete", "fatal-error", "consecutive-failures", "shutdown"]),
+  errorType: z.enum(["template", "configuration", "corruption", "resource"]).optional(),
+  finalCost: z.number(),
+  llmCallCount: z.number(),
+});
+
+export const chroniclerErrorEventDataSchema = z.object({
+  chroniclerId: z.string(),
+  phaseId: z.string(),
+  errorType: z.enum(["llm-call-failed", "template-render-failed", "file-write-failed"]),
+  message: z.string(),
+  retriable: z.boolean(),
+  consecutiveFailureCount: z.number(),
+});
+
+export const chroniclerOutputEventDataSchema = z.object({
+  chroniclerId: z.string(),
+  phaseId: z.string(),
+  triggerNumber: z.number(),
+  outputType: z.enum(["text", "structured"]),
+  content: z.union([z.string(), z.record(z.unknown())]),
+  cost: z.number(),
+  tokens: z.object({
+    input: z.number(),
+    output: z.number(),
+  }),
+  eventCount: z.number(),
+});
+
+export const chroniclerTriggeredEventDataSchema = z.object({
+  chroniclerId: z.string(),
+  phaseId: z.string(),
+  triggerNumber: z.number(),
+  strategy: z.enum(["immediate", "debounce", "count", "timeWindow"]),
+  eventCount: z.number(),
+  queueSize: z.number(),
 });
 
 // ============================================================================
@@ -429,6 +486,32 @@ export const historyBatchEventSchema = baseEventSchema.extend({
 export const stateTransitionEventSchema = baseEventSchema.extend({
   type: z.literal("state.transition"),
   data: stateTransitionEventDataSchema,
+});
+
+// Chronicler event schemas
+export const chroniclerLoadedEventSchema = baseEventSchema.extend({
+  type: z.literal("chronicler.loaded"),
+  data: chroniclerLoadedEventDataSchema,
+});
+
+export const chroniclerUnloadedEventSchema = baseEventSchema.extend({
+  type: z.literal("chronicler.unloaded"),
+  data: chroniclerUnloadedEventDataSchema,
+});
+
+export const chroniclerErrorEventSchema = baseEventSchema.extend({
+  type: z.literal("chronicler.error"),
+  data: chroniclerErrorEventDataSchema,
+});
+
+export const chroniclerOutputEventSchema = baseEventSchema.extend({
+  type: z.literal("chronicler.output"),
+  data: chroniclerOutputEventDataSchema,
+});
+
+export const chroniclerTriggeredEventSchema = baseEventSchema.extend({
+  type: z.literal("chronicler.triggered"),
+  data: chroniclerTriggeredEventDataSchema,
 });
 
 // ============================================================================
@@ -571,6 +654,11 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   pongEventSchema,
   historyBatchEventSchema,
   stateTransitionEventSchema,
+  chroniclerLoadedEventSchema,
+  chroniclerUnloadedEventSchema,
+  chroniclerErrorEventSchema,
+  chroniclerOutputEventSchema,
+  chroniclerTriggeredEventSchema,
 ]);
 
 // ============================================================================
@@ -603,13 +691,18 @@ export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema
 export type PongEvent = z.infer<typeof pongEventSchema>;
 export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
 export type StateTransitionEvent = z.infer<typeof stateTransitionEventSchema>;
+export type ChroniclerLoadedEvent = z.infer<typeof chroniclerLoadedEventSchema>;
+export type ChroniclerUnloadedEvent = z.infer<typeof chroniclerUnloadedEventSchema>;
+export type ChroniclerErrorEvent = z.infer<typeof chroniclerErrorEventSchema>;
+export type ChroniclerOutputEvent = z.infer<typeof chroniclerOutputEventSchema>;
+export type ChroniclerTriggeredEvent = z.infer<typeof chroniclerTriggeredEventSchema>;
 
 // ============================================================================
 // Event Category Classification
 // ============================================================================
 
 /**
- * Events are classified into three categories:
+ * Events are classified into FOUR categories:
  *
  * - **Server State Events**: Track the server's execution state, phase lifecycle,
  *   and persistent changes (e.g., phase execution, errors, rollbacks).
@@ -620,6 +713,10 @@ export type StateTransitionEvent = z.infer<typeof stateTransitionEventSchema>;
  *   (assistant actions, tool outputs, and workspace mutations). These events
  *   are journaled and broadcast the same way as server state events but are
  *   tracked separately for clarity.
+ *
+ * - **Chronicler Events**: Track chronicler lifecycle, outputs, and errors.
+ *   Persisted and broadcasted like Server State Events but explicitly categorized
+ *   for filtering. Chroniclers are observers, not participants.
  *
  * - **Connection State Events**: Track client specific events.
  *   These events are not persisted to the event journal and are sent to individual clients.
@@ -659,6 +756,17 @@ const AGENTIC_BACKBONE_EVENT_TYPES_ARRAY = [
 ] as const;
 
 /**
+ * Array of event types that represent chronicler events.
+ */
+const CHRONICLER_EVENT_TYPES_ARRAY = [
+  "chronicler.loaded",
+  "chronicler.unloaded",
+  "chronicler.error",
+  "chronicler.output",
+  "chronicler.triggered",
+] as const;
+
+/**
  * Array of event types that represent connection state changes.
  */
 const CONNECTION_STATE_EVENT_TYPES_ARRAY = [
@@ -671,6 +779,7 @@ const CONNECTION_STATE_EVENT_TYPES_ARRAY = [
 // Derive union types from the arrays
 type ServerStateEventType = (typeof SERVER_STATE_EVENT_TYPES_ARRAY)[number];
 type AgenticBackboneEventType = (typeof AGENTIC_BACKBONE_EVENT_TYPES_ARRAY)[number];
+type ChroniclerEventType = (typeof CHRONICLER_EVENT_TYPES_ARRAY)[number];
 type ConnectionStateEventType = (typeof CONNECTION_STATE_EVENT_TYPES_ARRAY)[number];
 
 /**
@@ -682,6 +791,11 @@ const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>(SERVER_STATE_EVENT_TYP
  * Set of event types that represent agentic backbone events.
  */
 const AGENTIC_BACKBONE_EVENT_TYPES = new Set<ServerEventType>(AGENTIC_BACKBONE_EVENT_TYPES_ARRAY);
+
+/**
+ * Set of event types that represent chronicler events.
+ */
+const CHRONICLER_EVENT_TYPES = new Set<ServerEventType>(CHRONICLER_EVENT_TYPES_ARRAY);
 
 /**
  * Set of event types that represent connection state changes.
@@ -719,6 +833,17 @@ export type AgenticBackboneEvent =
   | FileTreeUpdatedEvent;
 
 /**
+ * Union type representing all chronicler events.
+ * These events track chronicler lifecycle and activity.
+ */
+export type ChroniclerEvent =
+  | ChroniclerLoadedEvent
+  | ChroniclerUnloadedEvent
+  | ChroniclerErrorEvent
+  | ChroniclerOutputEvent
+  | ChroniclerTriggeredEvent;
+
+/**
  * Union type representing all connection state events.
  * These events track WebSocket connection lifecycle and client communication.
  */
@@ -729,11 +854,10 @@ export type ConnectionStateEvent =
   | IncompletePhaseEvent;
 
 // Compile-time check: ensures all ServerEventTypes are categorized
-// This will cause a TypeScript error if any event is not categorized as either
-// a ServerStateEventType, AgenticBackboneEventType, or ConnectionStateEventType
+// This will cause a TypeScript error if any event is not categorized
 const _assertAllEventsCategorized: AssertEqual<
   ServerEventType,
-  ServerStateEventType | AgenticBackboneEventType | ConnectionStateEventType
+  ServerStateEventType | AgenticBackboneEventType | ChroniclerEventType | ConnectionStateEventType
 > = true;
 
 // Compile-time checks: ensure the union types match their respective arrays
@@ -745,6 +869,9 @@ const _assertAgenticBackboneEventsMatch: AssertEqual<
   AgenticBackboneEvent["type"],
   AgenticBackboneEventType
 > = true;
+
+const _assertChroniclerEventsMatch: AssertEqual<ChroniclerEvent["type"], ChroniclerEventType> =
+  true;
 
 const _assertConnectionStateEventsMatch: AssertEqual<
   ConnectionStateEvent["type"],
@@ -784,6 +911,16 @@ export function isAgenticBackboneEvent(event: ServerEvent): event is AgenticBack
 }
 
 /**
+ * Type guard to check if an event is a chronicler event.
+ *
+ * @param event - The event to check
+ * @returns true if the event is a chronicler event
+ */
+export function isChroniclerEvent(event: ServerEvent): event is ChroniclerEvent {
+  return CHRONICLER_EVENT_TYPES.has(event.type);
+}
+
+/**
  * Type guard to check if an event is a connection state event.
  *
  * @param event - The event to check
@@ -801,7 +938,7 @@ export function isConnectionStateEvent(event: ServerEvent): event is ConnectionS
 
 /**
  * Type guard to check if an event should be journaled.
- * Journaled events include both server state events and agentic backbone events.
+ * Journaled events include server state, agentic backbone, and chronicler events.
  *
  * @param event - The event to check
  * @returns true if the event should be journaled
@@ -814,8 +951,8 @@ export function isConnectionStateEvent(event: ServerEvent): event is ConnectionS
  */
 export function isJournaledEvent(
   event: ServerEvent,
-): event is ServerStateEvent | AgenticBackboneEvent {
-  return isServerStateEvent(event) || isAgenticBackboneEvent(event);
+): event is ServerStateEvent | AgenticBackboneEvent | ChroniclerEvent {
+  return isServerStateEvent(event) || isAgenticBackboneEvent(event) || isChroniclerEvent(event);
 }
 
 // Export client command types
@@ -869,6 +1006,11 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   pong: pongEventDataSchema,
   "history.batch": historyBatchEventDataSchema,
   "state.transition": stateTransitionEventDataSchema,
+  "chronicler.loaded": chroniclerLoadedEventDataSchema,
+  "chronicler.unloaded": chroniclerUnloadedEventDataSchema,
+  "chronicler.error": chroniclerErrorEventDataSchema,
+  "chronicler.output": chroniclerOutputEventDataSchema,
+  "chronicler.triggered": chroniclerTriggeredEventDataSchema,
 };
 
 // List of all valid event types (for chronicler validation)

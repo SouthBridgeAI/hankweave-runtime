@@ -16,10 +16,10 @@
     "strategy": "timeWindow",
     "milliseconds": 10000
   },
-  "promptTemplate": "Summarize the activity in this 10-second window: {{events}}",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
   "output": {
     "format": "text",
     "file": "time-window-summaries.log"
-  }
+  },
+  "userPromptText": "Summarize the activity in this 10-second window: <%= JSON.stringify(it.events, null, 2) %>"
 }

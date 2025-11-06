@@ -585,8 +585,12 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
           // Mark any running phase as failed
           const runningPhase = run.phases.find((p) => !isTerminalPhaseStatus(p.status));
           if (runningPhase) {
+            const isRunningStatus = runningPhase.status === "running";
+            const runningPhaseTyped = isRunningStatus ? (runningPhase as ST.RunningPhase) : null;
+
             const failedPhase: ST.FailedPhase = {
-              ...runningPhase,
+              phaseId: runningPhase.phaseId,
+              startTime: runningPhase.startTime,
               status: "failed",
               endTime: event.data.detectedAt,
               failedDuring: runningPhase.status as
@@ -610,7 +614,30 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                       cacheCreationTokens: 0,
                       cacheReadTokens: 0,
                     },
+              chroniclers: runningPhaseTyped?.chroniclers
+                ? {
+                    executed: runningPhaseTyped.chroniclers.loaded,
+                    totalCost: runningPhaseTyped.chroniclers.totalCost,
+                  }
+                : undefined,
             };
+
+            // Copy optional fields if they exist
+            if ("workspaceSetupCheckpoint" in runningPhase) {
+              failedPhase.workspaceSetupCheckpoint = runningPhase.workspaceSetupCheckpoint;
+            }
+            if ("claudePid" in runningPhase) {
+              failedPhase.claudePid = runningPhase.claudePid;
+            }
+            if ("claudeSessionId" in runningPhase) {
+              failedPhase.claudeSessionId = runningPhase.claudeSessionId;
+            }
+            if ("claudeLogPath" in runningPhase) {
+              failedPhase.claudeLogPath = runningPhase.claudeLogPath;
+            }
+            if ("previousSessionId" in runningPhase) {
+              failedPhase.previousSessionId = runningPhase.previousSessionId;
+            }
 
             // Replace the phase
             const phaseIndex = run.phases.indexOf(runningPhase);
@@ -670,7 +697,8 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
         switch (to) {
           case "starting": {
             const startingPhase: ST.StartingPhase = {
-              ...currentPhase,
+              phaseId: currentPhase.phaseId,
+              startTime: currentPhase.startTime,
               status: "starting",
               workspaceSetupCheckpoint: metadata?.checkpointSha,
             };
@@ -723,9 +751,22 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
             break;
           }
 
+          case "completing-chroniclers": {
+            // Transition from running to completing-chroniclers
+            const runningPhase = currentPhase as ST.RunningPhase;
+            const completingPhase: ST.CompletingChroniclersPhase = {
+              ...runningPhase,
+              status: "completing-chroniclers",
+            };
+            run.phases[phaseIndex] = completingPhase;
+            break;
+          }
+
           case "completed": {
+            // Can transition from running OR completing-chroniclers
+            const sourcePhase = currentPhase as ST.RunningPhase | ST.CompletingChroniclersPhase;
             const completedPhase: ST.CompletedPhase = {
-              ...(currentPhase as ST.RunningPhase),
+              ...sourcePhase,
               status: "completed",
               endTime: new Date().toISOString(),
               exitCode: 0,
@@ -741,6 +782,12 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                     },
               resultMessageReceived: metadata?.resultMessageReceived || false,
               completionCheckpoint: metadata?.checkpointSha || "",
+              chroniclers: sourcePhase.chroniclers
+                ? {
+                    executed: sourcePhase.chroniclers.loaded,
+                    totalCost: sourcePhase.chroniclers.totalCost,
+                  }
+                : undefined,
             };
             run.phases[phaseIndex] = completedPhase;
             break;
@@ -757,6 +804,11 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
             ) {
               throw new Error("Invalid metadata for failed transition");
             }
+            // Can transition from running OR completing-chroniclers
+            const sourcePhase =
+              currentPhase.status === "running" || currentPhase.status === "completing-chroniclers"
+                ? (currentPhase as ST.RunningPhase | ST.CompletingChroniclersPhase)
+                : null;
             const failedPhase: ST.FailedPhase = {
               phaseId: currentPhase.phaseId,
               startTime: currentPhase.startTime,
@@ -766,7 +818,8 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                 | "preparing"
                 | "starting"
                 | "initializing"
-                | "running",
+                | "running"
+                | "completing-chroniclers",
               exitCode: metadata.exitCode as number,
               failureReason: metadata.failureReason as ST.FailureReason,
               partialCost: "currentCost" in currentPhase ? currentPhase.currentCost : 0,
@@ -779,6 +832,13 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                       cacheCreationTokens: 0,
                       cacheReadTokens: 0,
                     },
+              // Rename chroniclers.loaded → chroniclers.executed for terminal state
+              chroniclers: sourcePhase?.chroniclers
+                ? {
+                    executed: sourcePhase.chroniclers.loaded,
+                    totalCost: sourcePhase.chroniclers.totalCost,
+                  }
+                : undefined,
             };
 
             // Copy optional fields if they exist
@@ -810,6 +870,11 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
             if (!metadata || typeof metadata !== "object" || !("skippedDuring" in metadata)) {
               throw new Error("Invalid metadata for skipped transition");
             }
+            // Can transition from running OR completing-chroniclers
+            const sourcePhase =
+              currentPhase.status === "running" || currentPhase.status === "completing-chroniclers"
+                ? (currentPhase as ST.RunningPhase | ST.CompletingChroniclersPhase)
+                : null;
             const skippedPhase: ST.SkippedPhase = {
               phaseId: currentPhase.phaseId,
               startTime: currentPhase.startTime,
@@ -831,6 +896,12 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                       cacheCreationTokens: 0,
                       cacheReadTokens: 0,
                     },
+              chroniclers: sourcePhase?.chroniclers
+                ? {
+                    executed: sourcePhase.chroniclers.loaded,
+                    totalCost: sourcePhase.chroniclers.totalCost,
+                  }
+                : undefined,
             };
 
             // Copy optional fields if they exist
@@ -965,6 +1036,39 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
         if (phase && phase.status === "running") {
           phase.currentCost = event.data.finalCost;
           phase.currentTokens = event.data.finalTokens;
+        }
+        break;
+      }
+
+      case "ChroniclerStatesUpdated": {
+        const run = newState.runs.find((r) => r.runId === event.data.runId);
+        if (!run) break;
+
+        // Find the phase - can be starting, initializing, running, or completing-chroniclers
+        // We need to support starting/initializing because the first update happens right after loading
+        const phase = run.phases
+          .slice()
+          .reverse()
+          .find(
+            (p) =>
+              p.phaseId === event.data.phaseId &&
+              (p.status === "starting" ||
+                p.status === "initializing" ||
+                p.status === "running" ||
+                p.status === "completing-chroniclers"),
+          );
+
+        if (
+          phase &&
+          (phase.status === "starting" ||
+            phase.status === "initializing" ||
+            phase.status === "running" ||
+            phase.status === "completing-chroniclers")
+        ) {
+          phase.chroniclers = {
+            loaded: event.data.chroniclerStates,
+            totalCost: event.data.totalCost,
+          };
         }
         break;
       }

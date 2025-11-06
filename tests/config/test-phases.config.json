@@ -2,7 +2,10 @@
   {
     "id": "phase-1",
     "name": "Phase 1: TestPhase1",
-    "promptFile": ["./phase1Prompt1.md", "./phase1Prompt2.md"],
+    "promptFile": [
+      "./phase1Prompt1.md",
+      "./phase1Prompt2.md"
+    ],
     "model": "sonnet",
     "continuationMode": "fresh",
     "workspaceSetup": [
@@ -20,10 +23,15 @@
       "./noTodosPrompt.md"
     ],
     "description": "Write three pick one",
-    "trackedFiles": ["notes/**/*", "*.md"],
+    "trackedFiles": [
+      "notes/**/*",
+      "*.md"
+    ],
     "outputFiles": [
       {
-        "copy": ["notes/favorite_poem.txt"],
+        "copy": [
+          "notes/favorite_poem.txt"
+        ],
         "beforeCopy": [
           {
             "type": "command",
@@ -34,6 +42,14 @@
           }
         ]
       }
+    ],
+    "chroniclers": [
+      {
+        "chroniclerConfig": "./chronicler-triggers/test-narrator.chronicler.json"
+      },
+      {
+        "chroniclerConfig": "./chronicler-triggers/cost-analyst.chronicler.json"
+      }
     ]
   },
   {
@@ -42,12 +58,18 @@
     "promptText": "Can you put your second favorite of the poems you just made into the notes folder as '<%PROJECT_DIR%>/notes/second_favorite_poem.txt'?",
     "model": "sonnet",
     "continuationMode": "continue-previous",
-    "appendSystemPromptFile": ["./noTodosPrompt.md"],
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
     "description": "Write one more",
-    "trackedFiles": ["notes/**/*"],
+    "trackedFiles": [
+      "notes/**/*"
+    ],
     "outputFiles": [
       {
-        "copy": ["notes/second_favorite_poem.txt"],
+        "copy": [
+          "notes/second_favorite_poem.txt"
+        ],
         "beforeCopy": [
           {
             "type": "command",
@@ -57,6 +79,14 @@
             }
           }
         ]
+      }
+    ],
+    "chroniclers": [
+      {
+        "chroniclerConfig": "./chronicler-triggers/test-narrator.chronicler.json"
+      },
+      {
+        "chroniclerConfig": "./chronicler-triggers/cost-analyst.chronicler.json"
       }
     ]
   },
@@ -83,10 +113,23 @@
     ],
     "continuationMode": "fresh",
     "description": "Convert poems to code",
-    "appendSystemPromptFile": ["./noTodosPrompt.md"],
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
     "trackedFiles": [
       "typescript_code/src/**/*.ts",
       "typescript_code/package.json"
+    ],
+    "chroniclers": [
+      {
+        "chroniclerConfig": "./chronicler-triggers/qa-bot.chronicler.json"
+      },
+      {
+        "chroniclerConfig": "./chronicler-triggers/cost-analyst.chronicler.json",
+        "settings": {
+          "failPhaseIfNotLoaded": true
+        }
+      }
     ]
   }
 ]

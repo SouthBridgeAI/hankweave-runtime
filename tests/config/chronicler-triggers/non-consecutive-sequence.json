@@ -27,10 +27,10 @@
   "execution": {
     "strategy": "immediate"
   },
-  "promptTemplate": "Phase lifecycle detected: {{events}}",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
   "output": {
     "format": "json",
     "file": "phase-lifecycle.jsonl"
-  }
+  },
+  "userPromptText": "Phase lifecycle detected: <%= JSON.stringify(it.events, null, 2) %>"
 }

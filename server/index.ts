@@ -255,6 +255,9 @@ Examples:
       // This is where tadpole is running
       cwd: originalCwd,
 
+      // Path to config file (for resolving relative chronicler paths)
+      configPath: absoluteConfigPath,
+
       // Required execution properties from ExecutionSetup
       readOnlySourceDataPath: executionSetup.readOnlySourceDataPath,
       executionPath: executionSetup.executionPath,

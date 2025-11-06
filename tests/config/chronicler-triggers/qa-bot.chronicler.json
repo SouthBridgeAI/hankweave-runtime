@@ -1,0 +1,26 @@
+{
+  "id": "qa-bot",
+  "name": "E2E QA Bot",
+  "description": "Reviews TypeScript code written by the agent for E2E testing",
+  "model": "anthropic/claude-haiku-4-5",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "file.updated"
+    ],
+    "conditions": [
+      {
+        "operator": "matches",
+        "path": "path",
+        "value": "\\.ts$"
+      }
+    ]
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 10000
+  },
+  "systemPromptText": "You are a senior TypeScript developer reviewing code written by a junior AI agent. Be concise and focus on correctness, style, and potential bugs.",
+  "userPromptText": "Review the code in the following file update events and provide a short, bulleted list of feedback.\n\nFiles Updated:\n<% for (const event of it.events) { %>- <%= event.data.path %>\n<% } %>\n\nContent of last file:\n```typescript\n<%= it.events[it.events.length - 1].data.content %>\n```",
+  "joinString": "\n\n---\n\n"
+}

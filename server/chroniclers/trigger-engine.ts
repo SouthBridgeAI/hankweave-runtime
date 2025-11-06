@@ -9,16 +9,39 @@ import type { Logger } from "../utils.js";
 import { evaluateConditions } from "./condition-evaluator.js";
 
 /**
- * Base class for trigger engines
+ * Base class for trigger engines.
+ *
+ * Trigger engines evaluate whether incoming events match configured
+ * trigger criteria and return matching events for chronicler execution.
+ *
+ * Implementations:
+ * - EventTriggerEngine: Stateless, evaluates each event independently
+ * - SequenceTriggerEngine: Stateful, maintains history to detect patterns
  */
 export abstract class TriggerEngine {
+  /**
+   * Process an incoming event against trigger criteria.
+   *
+   * @param event - Server event to evaluate
+   * @returns Object with matched flag and array of matching events
+   */
   abstract processEvent(event: ServerEvent): { matched: boolean; events: ServerEvent[] };
+
+  /**
+   * Reset engine state.
+   * For stateless engines (Event): No-op
+   * For stateful engines (Sequence): Clears history and trigger position
+   */
   abstract reset(): void;
 }
 
 /**
- * Engine for evaluating simple event triggers
- * Stateless - evaluates each event independently
+ * Engine for evaluating simple event triggers.
+ * Stateless - evaluates each event independently.
+ *
+ * Note: triggerId is for logging only and may collide between chroniclers
+ * with identical trigger configurations. This is intentional for grouping
+ * related log messages from similar triggers.
  */
 export class EventTriggerEngine extends TriggerEngine {
   private triggerId: string;
@@ -28,30 +51,26 @@ export class EventTriggerEngine extends TriggerEngine {
     private logger?: Logger,
   ) {
     super();
+    // Note: Non-unique across chroniclers - multiple chroniclers with same
+    // trigger configuration will share this ID for logging purposes
     this.triggerId = `EventTrigger-${trigger.on.join(",")}`;
   }
 
   processEvent(event: ServerEvent): { matched: boolean; events: ServerEvent[] } {
-    // Check if event type matches
-    if (!this.trigger.on.includes(event.type)) {
+    // Check if event type matches (including wildcard)
+    if (!this.trigger.on.includes(event.type) && !this.trigger.on.includes("*")) {
       return { matched: false, events: [] };
     }
 
     // Check conditions if any
     if (this.trigger.conditions && this.trigger.conditions.length > 0) {
-      this.logger?.log(
-        `[${this.triggerId}] Checking ${this.trigger.conditions.length} conditions for ${event.type}`,
-        "debug",
-      );
-
       const conditionsMet = evaluateConditions(this.trigger.conditions, event.data);
       if (!conditionsMet) {
-        this.logger?.log(`[${this.triggerId}] Conditions not met for ${event.type}`, "debug");
         return { matched: false, events: [] };
       }
     }
 
-    // Event matches
+    // Event matches - keep this important log for understanding trigger behavior
     this.logger?.log(`[${this.triggerId}] MATCHED ${event.type}`, "debug");
     return { matched: true, events: [event] };
   }
@@ -62,8 +81,23 @@ export class EventTriggerEngine extends TriggerEngine {
 }
 
 /**
- * Engine for evaluating sequence triggers
- * Stateful - maintains history of events and last trigger position
+ * Engine for evaluating sequence triggers.
+ *
+ * Stateful - maintains history of events matching interest filter and tracks
+ * last trigger position to avoid re-matching same sequences.
+ *
+ * Pattern Matching:
+ * - Consecutive mode (default): Matches if events appear back-to-back
+ * - Non-consecutive mode: Matches if events appear in order (gaps allowed)
+ *
+ * Memory Management:
+ * - Event history capped at maxHistorySize (1000 events)
+ * - Oldest events dropped when limit exceeded
+ * - Trigger position tracking prevents duplicate matches
+ *
+ * Wildcard Support:
+ * - Interest filter can include "*" to track all events
+ * - Pattern steps can use "*" to match any event type
  */
 export class SequenceTriggerEngine extends TriggerEngine {
   private eventHistory: ServerEvent[] = [];
@@ -79,9 +113,26 @@ export class SequenceTriggerEngine extends TriggerEngine {
     this.triggerId = `SequenceTrigger-${trigger.pattern.length}steps`;
   }
 
+  /**
+   * Process an event and check if it completes a sequence pattern.
+   *
+   * Processing steps:
+   * 1. Add event to history if it matches interest filter
+   * 2. Trim history if it exceeds maxHistorySize
+   * 3. Check if this is the last event type in interest filter (optimization)
+   * 4. Get search window (events since last trigger)
+   * 5. Check if pattern matches in search window
+   * 6. Update last trigger position if matched
+   *
+   * @param event - Server event to process
+   * @returns Match result with matched flag and matching events
+   */
   processEvent(event: ServerEvent): { matched: boolean; events: ServerEvent[] } {
-    // Add to history if it matches interest filter
-    if (this.trigger.interestFilter.on.includes(event.type)) {
+    // Add to history if it matches interest filter (including wildcard)
+    if (
+      this.trigger.interestFilter.on.includes(event.type) ||
+      this.trigger.interestFilter.on.includes("*")
+    ) {
       this.eventHistory.push(event);
 
       // Trim history if too large
@@ -96,10 +147,15 @@ export class SequenceTriggerEngine extends TriggerEngine {
     }
 
     // Only check for pattern match if this is the last event type in interest filter
-    const lastInterestType =
-      this.trigger.interestFilter.on[this.trigger.interestFilter.on.length - 1];
-    if (event.type !== lastInterestType) {
-      return { matched: false, events: [] };
+    // Exception: when interest filter contains "*", check pattern on every event
+    const hasWildcardInterest = this.trigger.interestFilter.on.includes("*");
+
+    if (!hasWildcardInterest) {
+      const lastInterestType =
+        this.trigger.interestFilter.on[this.trigger.interestFilter.on.length - 1];
+      if (event.type !== lastInterestType) {
+        return { matched: false, events: [] };
+      }
     }
 
     // Get search window (events after last trigger)
@@ -148,6 +204,21 @@ export class SequenceTriggerEngine extends TriggerEngine {
     }
   }
 
+  /**
+   * Check if events match pattern in consecutive order.
+   *
+   * Matches if the TAIL of the event array matches the pattern exactly.
+   * All pattern steps must match in order with no gaps.
+   *
+   * Example:
+   * Pattern: [toolUse, toolResult]
+   * Events: [action, toolUse, toolResult, action]
+   * Result: MATCH (tail matches)
+   *
+   * @param events - Events to check
+   * @param pattern - Pattern steps to match
+   * @returns Match result
+   */
   private checkConsecutivePattern(
     events: ServerEvent[],
     pattern: PatternStep[],
@@ -165,8 +236,8 @@ export class SequenceTriggerEngine extends TriggerEngine {
       const event = tailEvents[i];
       const step = pattern[i];
 
-      // Check event type
-      if (event.type !== step.type) {
+      // Check event type (including wildcard)
+      if (step.type !== "*" && event.type !== step.type) {
         return { matched: false, events: [] };
       }
 
@@ -181,6 +252,21 @@ export class SequenceTriggerEngine extends TriggerEngine {
     return { matched: true, events: matchedEvents };
   }
 
+  /**
+   * Check if events match pattern in non-consecutive order.
+   *
+   * Matches if pattern steps appear in order, but gaps are allowed.
+   * Uses greedy matching (first occurrence of each step).
+   *
+   * Example:
+   * Pattern: [toolUse, toolResult]
+   * Events: [action, toolUse, action, action, toolResult, action]
+   * Result: MATCH (pattern found with gaps)
+   *
+   * @param events - Events to check
+   * @param pattern - Pattern steps to match
+   * @returns Match result
+   */
   private checkNonConsecutivePattern(
     events: ServerEvent[],
     pattern: PatternStep[],
@@ -193,8 +279,8 @@ export class SequenceTriggerEngine extends TriggerEngine {
       const event = events[eventIndex];
       const step = pattern[patternIndex];
 
-      // Check if this event matches the current pattern step
-      if (event.type === step.type) {
+      // Check if this event matches the current pattern step (including wildcard)
+      if (step.type === "*" || event.type === step.type) {
         // Check conditions
         if (!step.conditions || evaluateConditions(step.conditions, event.data)) {
           matchedEvents.push(event);

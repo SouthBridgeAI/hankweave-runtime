@@ -15,6 +15,11 @@ At its core, Tadpole Runner is a bridge between your development environment and
 -   **File Tracking**: Specify which files Claude should pay attention to. The server will monitor these files for changes, stream updates to you in real-time, and include them in checkpoints.
 -   **Session Continuity**: Build complex, multi-turn conversations with Claude. A phase can be configured to "continue" from the previous one, inheriting the full conversational context.
 -   **Workspace Setup**: Automate the preparation of your development environment. Before a phase starts, the server can copy template files or run shell commands (like `npm install`), ensuring Claude has everything it needs to get started.
+-   **Chronicler System**: Run parallel, non-blocking observation agents that monitor the main workflow's event stream. Chroniclers can be used to extract insights, generate summaries, perform real-time evaluation, or produce structured data without interfering with the primary task. They are highly configurable, with features like:
+    - Event-driven triggers with complex conditions.
+    - Stateful, conversational context over a whole phase.
+    - Structured JSON output using Zod schemas.
+    - Real-time cost tracking and health monitoring.
 
 ## Installation
 
@@ -154,7 +159,6 @@ Comprehensive documentation is available in the `documentation/` directory:
 
 ## Important Considerations
 
--   **Single Client Model**: The server is designed to be controlled by a single client at a time. When that client disconnects, the server gracefully shuts down.
 -   **Atomic State Persistence**: Your workflow's history is precious. The server uses an atomic write process (write-to-temp, backup, then rename) to ensure that the `state.json` file is never corrupted, even if the server crashes mid-write.
 -   **File Tracking**: Remember that only files matching the `trackedFiles` patterns in your phase configuration will be monitored for changes and included in checkpoints. This is a feature, not a limitation, as it allows you to be precise about what state you want to version.
 

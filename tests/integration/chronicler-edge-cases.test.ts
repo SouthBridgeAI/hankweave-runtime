@@ -24,6 +24,7 @@ function createChroniclerConfig(partial: Partial<ChroniclerConfig>): ChroniclerC
   const base: ChroniclerConfig = {
     id: "test-chronicler",
     name: "Test Chronicler",
+    model: "sonnet",
     trigger: {
       type: "event",
       on: ["info"],
@@ -32,7 +33,7 @@ function createChroniclerConfig(partial: Partial<ChroniclerConfig>): ChroniclerC
     execution: {
       strategy: "immediate"
     },
-    promptTemplate: "Test: {{events}}",
+    userPromptText: "Test: {{events}}",
     ...partial
   };
   return chroniclerConfigSchema.parse(base);
@@ -488,7 +489,7 @@ describe("Chronicler Edge Cases and Properties", () => {
       // Should still detect the final error sequence despite large history
       const lastCall = mock.calls[mock.calls.length - 1];
       if (lastCall) {
-        const events = lastCall.events;
+        const events = lastCall.eventsOrMessages;
         if (events[0].type === "tool.result" && events[1].type === "tool.result" && events[2].type === "tool.result") {
           const data0 = events[0].data as any;
           const data1 = events[1].data as any;

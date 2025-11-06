@@ -23,10 +23,10 @@
   "execution": {
     "strategy": "immediate"
   },
-  "promptTemplate": "Bash tool usage detected: {{events}}",
-  "model": "sonnet",
+  "model": "anthropic/claude-haiku-4-5",
   "output": {
     "format": "json",
     "file": "bash-commands.jsonl"
-  }
+  },
+  "userPromptText": "Bash tool usage detected: <%= JSON.stringify(it.events, null, 2) %>"
 }

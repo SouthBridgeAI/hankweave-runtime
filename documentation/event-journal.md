@@ -54,7 +54,7 @@ High-level event management and querying:
 
 ## Event Categories & Routing
 
-All server events are categorized into three mutually exclusive types, enabling intelligent routing and persistence decisions.
+All server events are categorized into four mutually exclusive types, enabling intelligent routing and persistence decisions.
 
 ### Server State Events
 
@@ -101,6 +101,19 @@ assistant.action, tool.result
 file.updated, filetree.updated
 ```
 
+### Chronicler Events
+
+Events that represent the lifecycle and output of the parallel Chronicler agents. These events:
+- **Are persisted** to the event journal.
+- **Are broadcasted** to all connected clients.
+- **Represent observational work**: a layer of analysis that runs parallel to the main agent.
+
+**Event Types**:
+```typescript
+// Chronicler lifecycle and activity
+chronicler.loaded, chronicler.unloaded, chronicler.error, chronicler.output, chronicler.triggered
+```
+
 ### Connection State Events
 
 Events specific to individual client connections. These events:
@@ -118,11 +131,11 @@ incomplete.phase    // Client-specific warning
 
 ### Compile-Time Safety Guarantees
 
-The system uses TypeScript's type system to ensure all events are categorized in one of the 3 categories. If you add a new event and forget to classify it, typescript compiler will gently remind you about this.
+The system uses TypeScript's type system to ensure all events are categorized in one of the 4 categories. If you add a new event and forget to classify it, the TypeScript compiler will gently remind you about this.
 
 ### Runtime Validation
 
-The event journal accepts both server state events and agentic backbone events, but explicitly rejects connection state events.
+The event journal accepts server state, agentic backbone, and chronicler events, but explicitly rejects connection state events.
 
 ## Event Schemas
 

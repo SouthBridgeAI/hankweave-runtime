@@ -9,7 +9,7 @@
 
 
 ## Finish tasks
-1. Data directory OR file
+1. Data directory OR filec
 2. Output management and setup
 3. Parallel calls
 4. Allow looping phases?

@@ -3,10 +3,12 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "tc": "bun run tsc --noEmit && echo 'Type check passed ✅'",
+    "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
+    "tc": "bun typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
+    "fetch-models": "bun scripts/fetch-models-dev.ts",
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
     "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/integration tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts  && bun tests/unit/cleanup-after-tests.ts",
@@ -28,8 +30,13 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.5",
+    "@ai-sdk/google": "^2.0.7",
+    "@ai-sdk/groq": "^2.0.11",
+    "@ai-sdk/openai": "^2.0.18",
     "@biomejs/biome": "^2.0.6",
-    "ai": "^5.0.14",
+    "ai": "^5.0.15",
+    "eta": "^3.5.0",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",
     "minimatch": "^10.0.1",

@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { ServerEvent } from "../schemas/event-schemas.js";
 import type { PhaseId } from "./branded-types.js";
+import type { ChroniclerConfig } from "./chronicler-types.js";
 import type { logMessageSchema } from "./claude-session-schema.js";
 
 // ============================================================================
@@ -168,6 +169,77 @@ export type WorkspaceSetupItem =
   | WorkspaceShellCommand;
 
 /**
+ * Phase-level chronicler entry.
+ * Wraps chronicler config with phase-specific settings.
+ *
+ * This separation keeps chronicler configs reusable across phases
+ * while allowing phase-specific configuration.
+ */
+export interface PhaseChroniclerEntry {
+  /**
+   * Chronicler configuration.
+   * Can be:
+   * - File path (string): "./chroniclers/narrator.json"
+   * - Inline config (object): Full ChroniclerConfig
+   */
+  chroniclerConfig: string | ChroniclerConfig;
+
+  /**
+   * Phase-specific settings for this chronicler.
+   */
+  settings?: {
+    /**
+     * Fail the phase if this chronicler fails to load.
+     *
+     * IMPORTANT: This only affects LOAD-TIME failures (config errors, file not found, etc).
+     * Does NOT fail the phase if:
+     * - Chronicler needs to be unloaded mid-execution (due to errors)
+     * - Chronicler LLM calls fail (those are handled by error thresholds)
+     * - Chronicler queue overflows
+     *
+     * Use for mission-critical chroniclers where phase cannot proceed without them.
+     * Default: false (chroniclers are optional)
+     */
+    failPhaseIfNotLoaded?: boolean;
+
+    /**
+     * Output file paths for this chronicler in this phase.
+     * If omitted, chronicler auto-generates paths in .tadpole/chronicler-outputs/
+     * You can use filenames to join together logs from different chroniclers.
+     * Path convention:
+     * - Filename only (no '/'): .tadpole/chronicler-outputs/{id}/{filename}
+     * - Path with '/': {executionPath}/{path}
+     */
+    outputPaths?: {
+      logFile?: string;
+      lastValueFile?: string;
+    };
+
+    /**
+     * Override chronicler's reportToWebsocket settings for this phase.
+     * Phase-level settings take precedence over chronicler-level settings.
+     *
+     * Controls which chronicler events are emitted to the WebSocket stream:
+     * - lifecycle: chronicler.loaded, chronicler.unloaded (default: true)
+     * - errors: chronicler.error events (default: true)
+     * - outputs: chronicler.output events with full content (default: true)
+     * - triggers: chronicler.triggered events (default: false - verbose)
+     *
+     * Example: Disable verbose output events for this phase only:
+     * ```json
+     * "reportToWebsocket": { "outputs": false, "triggers": false }
+     * ```
+     */
+    reportToWebsocket?: {
+      lifecycle?: boolean;
+      errors?: boolean;
+      outputs?: boolean;
+      triggers?: boolean;
+    };
+  };
+}
+
+/**
  * Configuration for a single phase in the Tadpole workflow.
  * A phase represents a discrete task for Claude to perform, with its own
  * prompt, model settings, and optional file watching.
@@ -231,6 +303,18 @@ export interface PhaseConfig {
     /** Optional commands to run before copying (run in executionPath) */
     beforeCopy?: ShellCommand[];
   }[];
+
+  /**
+   * Chroniclers to run during this phase.
+   * Chroniclers are parallel observation agents that process the event stream.
+   *
+   * Each entry is a wrapper object with:
+   * - chroniclerConfig: Portable chronicler configuration (file or inline)
+   * - settings: Phase-specific settings (output paths, load requirements)
+   *
+   * This wrapper pattern keeps chronicler configs reusable across phases.
+   */
+  chroniclers?: PhaseChroniclerEntry[];
 }
 
 /**
@@ -282,6 +366,9 @@ export interface ServerConfig {
 
   /** Current working directory for the server process */
   cwd: string;
+
+  /** Path to the phase configuration file (for resolving relative chronicler paths) */
+  configPath?: string;
 
   /** Output directory for generated files. Will be scoped to cwd */
   outputDirectory: string;
@@ -343,6 +430,32 @@ export interface ServerConfig {
 
   /** Maximum number of recent events to include in handshake response (default: 50) */
   handshakeHistoryLimit: number;
+
+  /**
+   * Chronicler system configuration.
+   * Controls behavior of ChroniclerManager for all phases.
+   */
+  chronicler: {
+    /**
+     * Enable filesystem persistence for chronicler outputs and history.
+     * Default: true
+     */
+    enablePersistence: boolean;
+
+    /**
+     * Grace period to wait for provider health checks before loading chroniclers.
+     * Allows some providers to become available without blocking phase start.
+     * Default: 2000ms (2 seconds)
+     */
+    healthCheckGracePeriodMs: number;
+
+    /**
+     * Whether to wait for ALL provider health checks before proceeding.
+     * If false, uses grace period then continues.
+     * Default: false (don't block)
+     */
+    waitForAllHealthChecks: boolean;
+  };
 }
 
 // ============================================================================

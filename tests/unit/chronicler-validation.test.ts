@@ -28,7 +28,7 @@ describe("Chronicler Configuration Validation", () => {
           strategy: "debounce",
           milliseconds: 2500,
         },
-        promptTemplate: "Summarize the following events: {{events}}",
+        userPromptText: "Summarize the following events: {{events}}",
         model: "sonnet",
         output: {
           format: "text",
@@ -44,6 +44,7 @@ describe("Chronicler Configuration Validation", () => {
       const config: ChroniclerConfig = {
         id: "error-detector",
         name: "Error Pattern Detector",
+        model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "sequence",
           interestFilter: {
@@ -88,7 +89,7 @@ describe("Chronicler Configuration Validation", () => {
         execution: {
           strategy: "immediate",
         },
-        promptTemplate: "Three consecutive errors detected: {{events}}",
+        userPromptText: "Three consecutive errors detected: {{events}}",
       };
 
       const result = chroniclerConfigSchema.safeParse(config);
@@ -194,7 +195,7 @@ describe("Chronicler Configuration Validation", () => {
           name: "Test",
           trigger: { type: "event", on: ["info"] },
           execution: { strategy: "immediate" },
-          promptTemplate: "test",
+          userPromptText: "test",
         };
 
         const result = chroniclerConfigSchema.safeParse(config);
@@ -246,6 +247,278 @@ describe("Chronicler Configuration Validation", () => {
         const result = chroniclerTriggerSchema.safeParse(trigger);
         expect(result.success).toBe(false);
       }
+    });
+  });
+
+  describe("Prompt Configuration", () => {
+    it("should accept configuration with only userPromptFile", () => {
+      const config: ChroniclerConfig = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        userPromptFile: "path/to/prompt.md",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept configuration with userPromptFile array", () => {
+      const config: ChroniclerConfig = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        userPromptFile: ["path/1.md", "path/2.md"],
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept configuration with only userPromptText", () => {
+      const config: ChroniclerConfig = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        userPromptText: "This is a prompt.",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept configuration with both userPromptFile and userPromptText", () => {
+      const config: ChroniclerConfig = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        userPromptFile: "path/to/prompt.md",
+        userPromptText: "Additional prompt text",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept configuration with systemPromptFile and userPromptText", () => {
+      const config: ChroniclerConfig = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        systemPromptFile: "path/to/system.md",
+        userPromptText: "User prompt text",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept configuration with systemPromptText and userPromptFile", () => {
+      const config: ChroniclerConfig = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        systemPromptText: "System prompt text",
+        userPromptFile: "path/to/user.md",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept configuration with all four prompt fields", () => {
+      const config: ChroniclerConfig = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        systemPromptFile: ["system1.md", "system2.md"],
+        systemPromptText: "System prompt text",
+        userPromptFile: ["user1.md", "user2.md"],
+        userPromptText: "User prompt text",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should fail validation if no user prompt is provided", () => {
+      const config = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        // No userPromptFile or userPromptText
+        systemPromptFile: "path/to/system.md",
+        systemPromptText: "System prompt only",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.errors[0].message).toContain(
+          "Each chronicler must have at least one of `userPromptFile` or `userPromptText` defined.",
+        );
+      }
+    });
+
+    it("should fail validation if the old promptTemplate field is used", () => {
+      const config = {
+        id: "test-chronicler",
+        name: "Test Chronicler",
+        model: "anthropic/claude-3-5-sonnet-20241022",
+        trigger: {
+          type: "event",
+          on: ["info"],
+        },
+        execution: {
+          strategy: "immediate",
+        },
+        promptTemplate: "Old style prompt", // This should fail due to .strict()
+        userPromptText: "New style prompt",
+      };
+
+      const result = chroniclerConfigSchema.safeParse(config);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        // The error message for unrecognized keys varies by Zod version
+        const errorMessage = result.error.errors[0].message.toLowerCase();
+        expect(errorMessage).toMatch(/unrecognized|unknown/);
+      }
+    });
+  });
+
+  describe("Structured Output Configuration", () => {
+    it("should accept valid structured output with inline schema", () => {
+      const config = {
+        id: "test-structured",
+        name: "Test Structured",
+        model: "anthropic/claude",
+        trigger: { type: "event" as const, on: ["file.updated" as const] },
+        execution: { strategy: "immediate" as const },
+        userPromptText: "Test",
+        structuredOutput: {
+          schemaStr: "z.object({ name: z.string() })",
+          output: "object" as const,
+        },
+      };
+      expect(() => chroniclerConfigSchema.parse(config)).not.toThrow();
+    });
+
+    it("should accept structured output with schemaFile", () => {
+      const config = {
+        id: "test-file-schema",
+        name: "Test File Schema",
+        model: "openai/gpt-4o",
+        trigger: { type: "event" as const, on: ["tool.result" as const] },
+        execution: { strategy: "immediate" as const },
+        userPromptText: "Test",
+        structuredOutput: {
+          schemaFile: "./schemas/test.ts",
+          output: "array" as const,
+        },
+      };
+      expect(() => chroniclerConfigSchema.parse(config)).not.toThrow();
+    });
+
+    it("should accept enum output with enumValues", () => {
+      const config = {
+        id: "test-enum",
+        name: "Test Enum",
+        model: "anthropic/claude",
+        trigger: { type: "event" as const, on: ["phase.completed" as const] },
+        execution: { strategy: "immediate" as const },
+        userPromptText: "Test",
+        structuredOutput: {
+          output: "enum" as const,
+          enumValues: ["low", "medium", "high"],
+        },
+      };
+      expect(() => chroniclerConfigSchema.parse(config)).not.toThrow();
+    });
+
+    it("should reject object output without schema or schemaFile", () => {
+      const config = {
+        id: "test-no-schema",
+        name: "Test No Schema",
+        model: "anthropic/claude",
+        trigger: { type: "event" as const, on: ["file.updated" as const] },
+        execution: { strategy: "immediate" as const },
+        userPromptText: "Test",
+        structuredOutput: {
+          output: "object" as const,
+        },
+      };
+      expect(() => chroniclerConfigSchema.parse(config)).toThrow();
+    });
+
+    it("should reject enum output without enumValues", () => {
+      const config = {
+        id: "test-enum-no-values",
+        name: "Test Enum No Values",
+        model: "anthropic/claude",
+        trigger: { type: "event" as const, on: ["file.updated" as const] },
+        execution: { strategy: "immediate" as const },
+        userPromptText: "Test",
+        structuredOutput: {
+          output: "enum" as const,
+        },
+      };
+      expect(() => chroniclerConfigSchema.parse(config)).toThrow();
     });
   });
 

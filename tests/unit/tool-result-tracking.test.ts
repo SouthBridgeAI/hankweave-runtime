@@ -148,7 +148,7 @@ describe("Tool Result Tracking", () => {
       }
     });
 
-    test.skip("should handle array content in tool results", async () => {
+    test("should handle array content in tool results", async () => {
       const userMessages: UserMessage[] = [];
       const arrayLogPath = path.join(testDir, "array-tool-results.jsonl");
 
@@ -167,7 +167,7 @@ describe("Tool Result Tracking", () => {
           content: [
             {
               type: "tool_result",
-              tool_use_id: "toolu_array_content",
+              tool_use_id: "toolu_01ABC23XYZ", // Valid format: alphanumeric only (no underscores in suffix)
               content: [
                 { type: "text", text: "Line 1 of result" },
                 { type: "text", text: "Line 2 of result" },

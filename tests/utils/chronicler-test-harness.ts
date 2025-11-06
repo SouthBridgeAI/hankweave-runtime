@@ -1,25 +1,56 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { ChroniclerManager } from "../../server/chroniclers/chronicler-manager.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
+import { PhaseId } from "../../server/types/branded-types.js";
 import type { ChroniclerConfig } from "../../server/types/chronicler-types.js";
+import type {
+  TadpoleGenerateTextOptions,
+  TadpoleGenerateTextResult,
+} from "../../server/types/llm-call-types.js";
 import { WebSocketLogReader } from "../../server/websocket-log-reader.js";
+import "../types/global-test-types.js";
+import { createMockLlm } from "./mock-llm.js";
 
 /**
- * Simple mock implementation for LLM calls.
+ * Enhanced mock implementation that properly tracks original events.
+ * Uses a clean test hook approach to track events without global state pollution.
+ * Uses a queue-based system to handle multiple immediate executions correctly.
  */
 class MockLlmCall {
-  public calls: Array<{ chroniclerId: string; events: ServerEvent[] }> = [];
+  public calls: Array<{ chroniclerId: string; eventsOrMessages: ServerEvent[] }> = [];
+  private mockLlmProvider = createMockLlm();
+  // Changed to use a queue (array of arrays) for each chronicler
+  private pendingEventsQueueByChronicler = new Map<string, ServerEvent[][]>();
 
-  public fn = (chroniclerId: string, batchedEvents: ServerEvent[]) => {
-    console.log(
-      `[Mock LLM Call] Chronicler '${chroniclerId}' fired with ${batchedEvents.length} events.`,
-    );
-    this.calls.push({ chroniclerId, events: batchedEvents });
-    return Promise.resolve({ summary: "Mock LLM Result" });
+  public fn = async (
+    chroniclerId: string,
+    options: TadpoleGenerateTextOptions,
+  ): Promise<TadpoleGenerateTextResult> => {
+    // Get the queue for this chronicler
+    const eventQueue = this.pendingEventsQueueByChronicler.get(chroniclerId) || [];
+
+    // Shift the first batch of events from the queue (FIFO)
+    const events = eventQueue.shift() || [];
+
+    // Update the queue if there are remaining batches
+    if (eventQueue.length > 0) {
+      this.pendingEventsQueueByChronicler.set(chroniclerId, eventQueue);
+    } else {
+      // Remove the chronicler from the map if queue is empty
+      this.pendingEventsQueueByChronicler.delete(chroniclerId);
+    }
+
+    this.calls.push({ chroniclerId, eventsOrMessages: events });
+
+    // Use the typed mock to generate proper response
+    return await this.mockLlmProvider.generateText(options);
   };
 
   public mockClear() {
     this.calls = [];
+    this.pendingEventsQueueByChronicler.clear();
   }
 
   public toHaveBeenCalled(): boolean {
@@ -32,7 +63,29 @@ class MockLlmCall {
 
   public getCall(index: number): [string, ServerEvent[]] | undefined {
     const call = this.calls[index];
-    return call ? [call.chroniclerId, call.events] : undefined;
+    return call ? [call.chroniclerId, call.eventsOrMessages] : undefined;
+  }
+
+  // Track events for a specific chronicler (called when events are about to be processed)
+  public trackEventsForChronicler(chroniclerId: string, events: ServerEvent[]): void {
+    // Get or create the queue for this chronicler
+    let eventQueue = this.pendingEventsQueueByChronicler.get(chroniclerId);
+    if (!eventQueue) {
+      eventQueue = [];
+      this.pendingEventsQueueByChronicler.set(chroniclerId, eventQueue);
+    }
+
+    // Push the new events to the queue (not replace)
+    eventQueue.push(events);
+  }
+
+  // Get count of pending events for debugging
+  public getPendingEventsCount(): number {
+    let totalBatches = 0;
+    for (const queue of this.pendingEventsQueueByChronicler.values()) {
+      totalBatches += queue.length;
+    }
+    return totalBatches;
   }
 }
 
@@ -56,34 +109,53 @@ export async function runChroniclerTest(
   // 1. Reset mocks before each run
   mockLlmCall.mockClear();
 
-  // 2. Create an instance of the ChroniclerManager
-  const manager = new ChroniclerManager();
+  // 2. Create temp directory for test execution
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "chronicler-test-"));
 
-  // 3. Tell the manager to load our test configurations and use our mock LLM function
-  await manager.loadChroniclers(chroniclerConfigs, mockLlmCall.fn);
+  try {
+    // 3. Create callback that tracks events for the MockLlmCall
+    const onExecute = (id: string, events: ServerEvent[]) => {
+      mockLlmCall.trackEventsForChronicler(id, events);
+    };
 
-  // 4. Read the event stream from the provided log file
-  const logReader = new WebSocketLogReader(logFilePath);
-  const entries = await logReader.readLog();
+    // 4. Create an instance of the ChroniclerManager without logger (silent mode)
+    const manager = new ChroniclerManager();
 
-  // 5. Feed the events into the manager one by one to simulate a real-time stream
-  for (const logEntry of entries) {
-    // We only care about outgoing server events
-    if (logEntry.direction === "out") {
-      const event = logEntry.message as ServerEvent;
-      // Only process if it's actually a server event (has type, id, timestamp, data)
-      if (event && typeof event === "object" && "type" in event && "id" in event) {
-        await manager.handleEvent(event);
+    // 5. Tell the manager to load our test configurations and use our mock LLM function
+    await manager.loadChroniclersForPhase(chroniclerConfigs, PhaseId("test-phase"), {
+      llmCallOverride: mockLlmCall.fn,
+      onExecute,
+      executionPath: tempDir, // Pass temp directory as execution path
+    });
+
+    // 6. Read the event stream from the provided log file
+    const logReader = new WebSocketLogReader(logFilePath);
+    const entries = await logReader.readLog();
+
+    // 7. Feed the events into the manager one by one to simulate a real-time stream
+    for (const logEntry of entries) {
+      // We only care about outgoing server events
+      if (logEntry.direction === "out") {
+        const event = logEntry.message as ServerEvent;
+        // Only process if it's actually a server event (has type, id, timestamp, data)
+        if (event && typeof event === "object" && "type" in event && "id" in event) {
+          // Fire and forget - no await
+          manager.handleEvent(event);
+        }
       }
     }
+
+    // 8. Wait for all pending operations to complete
+    await manager.completeAllWork();
+
+    // 9. Return the mock function so tests can make assertions on it
+    return mockLlmCall;
+  } finally {
+    // Clean up temp directory
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   }
-
-  // 6. After all events are processed, tell the manager to flush any pending triggers
-  //    (e.g., for debounce or timeWindow strategies that might have pending events)
-  await manager.flush();
-
-  // 7. Return the mock function so tests can make assertions on it
-  return mockLlmCall;
 }
 
 /**

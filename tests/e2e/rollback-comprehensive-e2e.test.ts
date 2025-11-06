@@ -1489,4 +1489,183 @@ describe("Comprehensive Rollback E2E Test", () => {
       expect(foundWordsworth).toBe(true);
     });
   });
+
+  // ========================================================================
+  // PRIORITY 8: Chronicler Rollback Behavior
+  // ========================================================================
+
+  describe("Priority 8: Chronicler Rollback Behavior", () => {
+    test("8.1 Chronicler Outputs Persist Across Rollbacks", () => {
+      // Chroniclers are observers - their outputs should NOT be rolled back
+      // They're observational logs, not part of execution state
+
+      for (const snapshot of testSnapshots) {
+        const outputsDir = path.join(snapshot.directory, ".tadpole", "chronicler-outputs");
+
+        if (fs.existsSync(outputsDir)) {
+          // If chroniclers exist, their outputs should accumulate, never delete
+          const chroniclerDirs = fs.readdirSync(outputsDir);
+
+          for (const chrDir of chroniclerDirs) {
+            const chrOutputPath = path.join(outputsDir, chrDir);
+            const files = fs.readdirSync(chrOutputPath);
+
+            // Each file should have unique timestamp (no overwriting)
+            const timestamps = files
+              .map((f) => {
+                const match = f.match(/-(\d+)\.(md|ndjson|jsonl|json)$/);
+                return match ? match[1] : null;
+              })
+              .filter((t) => t !== null);
+
+            // All timestamps should be unique
+            const uniqueTimestamps = new Set(timestamps);
+            expect(uniqueTimestamps.size).toBe(timestamps.length);
+
+            console.log(
+              `Chronicler ${chrDir}: ${files.length} output files with unique timestamps`,
+            );
+          }
+        }
+      }
+    });
+
+    test("8.2 Chronicler State Separated Per Run", () => {
+      // Each run should have its own chronicler state entries
+      // Rollback creates a new run with fresh chronicler instances
+
+      for (const snapshot of testSnapshots) {
+        for (const run of snapshot.state.runs) {
+          const phasesWithChroniclers = run.phases.filter(
+            (p) =>
+              (p.status === "completed" || p.status === "failed" || p.status === "skipped") &&
+              p.chroniclers,
+          );
+
+          if (phasesWithChroniclers.length > 0) {
+            for (const phase of phasesWithChroniclers) {
+              if (
+                phase.status === "completed" ||
+                phase.status === "failed" ||
+                phase.status === "skipped"
+              ) {
+                expect(phase.chroniclers).toBeDefined();
+                if (phase.chroniclers) {
+                  expect(phase.chroniclers.executed).toBeDefined();
+                }
+
+                // Each chronicler state should have unique timestamps for this run
+                for (const chrState of phase.chroniclers?.executed ?? []) {
+                  expect(chrState.loadedAt).toBeDefined();
+                  // Status can be "active" or "unloaded" depending on timing
+                  expect(["active", "unloaded"]).toContain(chrState.status);
+                  // unloadReason only exists for unloaded chroniclers
+                  if (chrState.status === "unloaded") {
+                    expect(chrState.unloadReason).toBeDefined();
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    test("8.3 Conversational History Survives Rollback", () => {
+      // Conversational chroniclers save history to disk
+      // These files should persist across rollbacks
+
+      for (const snapshot of testSnapshots) {
+        const chroniclersDir = path.join(snapshot.directory, ".tadpole", "chroniclers");
+
+        if (fs.existsSync(chroniclersDir)) {
+          const historyFiles = fs.readdirSync(chroniclersDir).filter((f) => f.endsWith(".json"));
+
+          // History files should exist and be valid JSON
+          for (const histFile of historyFiles) {
+            const histPath = path.join(chroniclersDir, histFile);
+            const content = fs.readFileSync(histPath, "utf-8");
+
+            expect(() => JSON.parse(content)).not.toThrow();
+
+            const history = JSON.parse(content);
+            expect(history.messages).toBeDefined();
+            expect(Array.isArray(history.messages)).toBe(true);
+          }
+
+          console.log(
+            `Found ${historyFiles.length} conversational history file(s) in ${snapshot.name}`,
+          );
+        }
+      }
+    });
+
+    test("8.4 Chronicler Costs Independent Per Run", () => {
+      // Each run's chronicler costs should be separate
+      // Costs don't carry over or accumulate across rollbacks
+
+      const runsWithChroniclers = testSnapshots.flatMap((s) =>
+        s.state.runs.filter((r) =>
+          r.phases.some(
+            (p) =>
+              (p.status === "completed" || p.status === "failed" || p.status === "skipped") &&
+              p.chroniclers,
+          ),
+        ),
+      );
+
+      if (runsWithChroniclers.length > 1) {
+        // Verify each run has independent cost tracking
+        for (const run of runsWithChroniclers) {
+          for (const phase of run.phases) {
+            if (
+              (phase.status === "completed" ||
+                phase.status === "failed" ||
+                phase.status === "skipped") &&
+              phase.chroniclers
+            ) {
+              // Chronicler costs should be >= 0 and independent
+              expect(phase.chroniclers.totalCost).toBeGreaterThanOrEqual(0);
+
+              // Individual costs should sum to total
+              const sum = phase.chroniclers.executed.reduce((acc, chr) => acc + chr.totalCost, 0);
+              expect(Math.abs(sum - phase.chroniclers.totalCost)).toBeLessThan(0.000001);
+            }
+          }
+        }
+      }
+    });
+
+    test("8.5 Chronicler Unload Events on Rollback", () => {
+      // When a run completes/fails, chroniclers should unload with phase-complete reason
+      // This should happen even during rollback scenarios
+
+      for (const snapshot of testSnapshots) {
+        const unloadEvents = snapshot.events.filter((e) => e.type === "chronicler.unloaded");
+
+        if (unloadEvents.length > 0) {
+          for (const event of unloadEvents) {
+            // Type narrow to ChroniclerUnloadedEvent
+            if (event.type === "chronicler.unloaded") {
+              const data = event.data;
+
+              // Should have valid unload reason
+              expect([
+                "phase-complete",
+                "fatal-error",
+                "consecutive-failures",
+                "shutdown",
+              ]).toContain(data.reason);
+
+              // Should have final cost and call count
+              expect(typeof data.finalCost).toBe("number");
+              expect(typeof data.llmCallCount).toBe("number");
+            }
+          }
+
+          console.log(`${snapshot.name}: ${unloadEvents.length} chronicler unload event(s)`);
+        }
+      }
+    });
+  });
 });

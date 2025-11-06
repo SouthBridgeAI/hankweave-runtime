@@ -9,13 +9,35 @@ import type { FailureReason, TokenUsage } from "./types.js";
 export type { PhaseId, RunId, SessionId, FailureReason, TokenUsage };
 
 // ============================================================================
+// Chronicler State
+// ============================================================================
+
+/**
+ * State tracking for a single chronicler within a phase.
+ * Mutable structure updated in-place during phase execution.
+ */
+export interface ChroniclerState {
+  id: string;
+  model: string;
+  loadedAt: string;
+  unloadedAt?: string;
+  llmCallCount: number;
+  failedLLMCalls: number;
+  lastLlmCallAt?: string;
+  totalTriggers: number;
+  totalCost: number;
+  status: "active" | "unloaded";
+  unloadReason?: "phase-complete" | "fatal-error" | "consecutive-failures";
+}
+
+// ============================================================================
 // Phase Execution States - Discriminated Union
 // ============================================================================
 
 /**
  * Phase execution status progression.
  *
- * Normal flow: preparing → starting → initializing → running → completed
+ * Normal flow: preparing → starting → initializing → running → completing-chroniclers → completed
  * Can skip to "failed" or "skipped" from any non-terminal state.
  *
  * Intent: Track granular progress for better crash recovery and user feedback.
@@ -25,6 +47,7 @@ export type PhaseStatus =
   | "starting" // Spawning Claude process
   | "initializing" // Process started, waiting for session ID
   | "running" // Claude is working (have session ID)
+  | "completing-chroniclers" // Completing chronicler work (draining queues)
   | "completed" // Success - terminal state
   | "failed" // Failed - terminal state
   | "skipped"; // User skipped - terminal state
@@ -84,6 +107,15 @@ export interface StartingPhase extends BasePhase {
    * Edge case: May be undefined if no workspace setup configured
    */
   workspaceSetupCheckpoint?: string;
+
+  /**
+   * Chroniclers loaded for this phase.
+   * Set after chroniclers load during starting state.
+   */
+  chroniclers?: {
+    loaded: ChroniclerState[];
+    totalCost: number;
+  };
 }
 
 /**
@@ -123,6 +155,15 @@ export interface InitializingPhase extends BasePhase {
    * Used by: Claude CLI --resume flag
    */
   previousSessionId?: SessionId;
+
+  /**
+   * Chroniclers loaded for this phase.
+   * Optional field added during starting state, carried forward to initializing.
+   */
+  chroniclers?: {
+    loaded: ChroniclerState[];
+    totalCost: number;
+  };
 }
 
 /**
@@ -174,6 +215,65 @@ export interface RunningPhase extends BasePhase {
    * Used by: Continue functionality to check if session is valid
    */
   assistantMessageCount: number;
+
+  /**
+   * Chroniclers loaded for this phase.
+   * Updated in-place during execution.
+   */
+  chroniclers?: {
+    loaded: ChroniclerState[];
+    totalCost: number;
+  };
+}
+
+/**
+ * Phase is completing chronicler work.
+ * Transient state between agent completion and final state.
+ *
+ * This state indicates:
+ * - Main Claude agent has finished (process exited)
+ * - Chronicler queues are being drained
+ * - All pending LLM calls are completing
+ * - Output files are being finalized
+ *
+ * Next states:
+ * - completed: All work done successfully
+ * - failed: Checkpoint creation failed
+ * - skipped: Should not normally happen from this state
+ */
+export interface CompletingChroniclersPhase extends BasePhase {
+  status: "completing-chroniclers";
+  workspaceSetupCheckpoint?: string;
+  claudePid: number;
+  claudeSessionId: SessionId;
+  claudeLogPath: string;
+  previousSessionId?: SessionId;
+
+  /**
+   * Current cost accumulated while Claude was running.
+   * Will become finalCost when transitioning to completed.
+   */
+  currentCost: number;
+
+  /**
+   * Current token counts.
+   * Will become finalTokens when transitioning to completed.
+   */
+  currentTokens: TokenUsage;
+
+  /**
+   * Number of assistant messages received.
+   */
+  assistantMessageCount: number;
+
+  /**
+   * Chroniclers being completed.
+   * States are updated in-place as work completes.
+   */
+  chroniclers?: {
+    loaded: ChroniclerState[];
+    totalCost: number;
+  };
 }
 
 // ============================================================================
@@ -240,6 +340,15 @@ export interface CompletedPhase extends BasePhase {
    * Used by: Rollback target points
    */
   completionCheckpoint: string;
+
+  /**
+   * Chroniclers that executed during this phase (final state).
+   * Field renamed from 'loaded' to 'executed' when phase completes.
+   */
+  chroniclers?: {
+    executed: ChroniclerState[];
+    totalCost: number;
+  };
 }
 
 /**
@@ -256,8 +365,9 @@ export interface FailedPhase extends BasePhase {
    *
    * Used by: Error analysis, retry strategies
    * Example: "preparing" means workspace setup failed
+   * Note: Can include "completing-chroniclers" if checkpoint creation fails during that phase
    */
-  failedDuring: "preparing" | "starting" | "initializing" | "running";
+  failedDuring: "preparing" | "starting" | "initializing" | "running" | "completing-chroniclers";
 
   // Claude info - only set if we got that far
   claudePid?: number;
@@ -302,6 +412,14 @@ export interface FailedPhase extends BasePhase {
    * Edge case: Might not exist if git operations failed
    */
   errorCheckpoint?: string;
+
+  /**
+   * Chroniclers that executed before failure.
+   */
+  chroniclers?: {
+    executed: ChroniclerState[];
+    totalCost: number;
+  };
 }
 
 /**
@@ -356,6 +474,14 @@ export interface SkippedPhase extends BasePhase {
    * Used by: Skip history in git
    */
   skipCheckpoint?: string;
+
+  /**
+   * Chroniclers that executed before skip.
+   */
+  chroniclers?: {
+    executed: ChroniclerState[];
+    totalCost: number;
+  };
 }
 
 /**
@@ -367,6 +493,7 @@ export type PhaseExecution =
   | StartingPhase
   | InitializingPhase
   | RunningPhase
+  | CompletingChroniclersPhase
   | CompletedPhase
   | FailedPhase
   | SkippedPhase;
@@ -559,7 +686,8 @@ export const PhaseTransitions: Record<PhaseStatus, PhaseStatus[]> = {
   preparing: ["starting", "failed", "skipped"],
   starting: ["initializing", "failed", "skipped"],
   initializing: ["running", "failed", "skipped"],
-  running: ["completed", "failed", "skipped"],
+  running: ["completing-chroniclers", "completed", "failed", "skipped"],
+  "completing-chroniclers": ["completed", "failed", "skipped"],
   completed: [], // Terminal - no transitions
   failed: [], // Terminal - no transitions
   skipped: [], // Terminal - no transitions
@@ -696,6 +824,10 @@ export type StateTransition =
           // For completing → completed
           resultMessageReceived?: boolean;
 
+          // For running → completing-chroniclers
+          chroniclerCount?: number;
+          chroniclerIds?: string[];
+
           // Checkpoint info
           checkpointSha?: string;
           checkpointBranch?: string;
@@ -812,6 +944,26 @@ export type StateTransition =
         phaseId: PhaseId;
         finalCost: number;
         finalTokens: TokenUsage;
+      };
+    }
+
+  /**
+   * Chronicler states updated/initialized for a phase.
+   * Sets the initial chronicler state when chroniclers load,
+   * or updates states before phase completion.
+   *
+   * Triggered by: After chroniclers load, before completing-chroniclers transition
+   * State changes:
+   * - Sets/updates RunningPhase.chroniclers field
+   * - Updates CompletingChroniclersPhase.chroniclers field
+   */
+  | {
+      type: "ChroniclerStatesUpdated";
+      data: {
+        runId: RunId;
+        phaseId: PhaseId;
+        chroniclerStates: ChroniclerState[];
+        totalCost: number;
       };
     };
 
@@ -1113,6 +1265,8 @@ export function getPhaseCost(phase: PhaseExecution): number {
       return 0;
     case "running":
       return phase.currentCost;
+    case "completing-chroniclers":
+      return phase.currentCost;
     default:
       return 0;
   }
@@ -1135,6 +1289,8 @@ export function getPhaseTokens(phase: PhaseExecution): TokenUsage {
         cacheReadTokens: 0,
       };
     case "running":
+      return phase.currentTokens;
+    case "completing-chroniclers":
       return phase.currentTokens;
     default:
       return {
