@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 export async function runCheckpointSystemTests(testDir: string) {
-  const checkpointDir = path.join(testDir, ".tadpole/checkpoints");
+  const checkpointDir = path.join(testDir, ".strandweave/checkpoints");
   const gitDir = path.join(checkpointDir, ".git");
 
   test("checkpoint directory structure created", () => {
@@ -17,7 +17,7 @@ export async function runCheckpointSystemTests(testDir: string) {
     const gitConfigPath = path.join(checkpointDir, ".gitconfig");
     if (fs.existsSync(gitConfigPath)) {
       const gitConfig = fs.readFileSync(gitConfigPath, "utf-8");
-      expect(gitConfig).toContain("name = Tadpole Runner");
+      expect(gitConfig).toContain("name = Strandweave Runtime");
       expect(gitConfig).toContain("email = froggie@southbridge.ai");
       expect(gitConfig).toContain("gpgsign = false");
     }
@@ -30,7 +30,7 @@ export async function runCheckpointSystemTests(testDir: string) {
     expect(fs.existsSync(excludePath)).toBe(true);
   });
 
-  test("git commits created for each phase", async () => {
+  test("git commits created for each codon", async () => {
     // Execute git log to get commits
     const { execSync } = await import("node:child_process");
     try {
@@ -48,10 +48,10 @@ export async function runCheckpointSystemTests(testDir: string) {
 
       // Should have at least:
       // - Initial commit
-      // - Phase 1 completion (workspace setup has no files to commit)
-      // - Phase 2 completion (no workspace setup)
-      // - Phase 3 workspace setup (after copying files)
-      // - Phase 3 completion
+      // - Codon 1 completion (rig setup has no files to commit)
+      // - Codon 2 completion (no rig setup)
+      // - Codon 3 rig setup (after copying files)
+      // - Codon 3 completion
       expect(commits.length).toBeGreaterThanOrEqual(5);
     } catch (error) {
       console.error(`Git log failed: ${error}`);
@@ -73,19 +73,16 @@ export async function runCheckpointSystemTests(testDir: string) {
 
       const commitMessages = gitLog.trim().split("\n");
 
-      // Check for workspace setup commits
-      const workspaceSetupCommits = commitMessages.filter((msg) =>
-        msg.startsWith("workspace-setup:"),
-      );
-      expect(workspaceSetupCommits.length).toBeGreaterThanOrEqual(1); // Only Phase 3 (Phase 1 has no files to commit)
+      // Check for rig setup commits
+      const rigSetupCommits = commitMessages.filter((msg) => msg.startsWith("rig-setup:"));
+      expect(rigSetupCommits.length).toBeGreaterThanOrEqual(1); // Only Codon 3 (Codon 1 has no files to commit)
 
       // Check for completion commits
       const completedCommits = commitMessages.filter((msg) => msg.startsWith("completed:"));
-      expect(completedCommits.length).toBe(3); // All 3 phases
+      expect(completedCommits.length).toBe(3); // All 3 codons
 
-      // Verify format: status:phase-id [run:runId] phase-name
-      const formatRegex =
-        /^(workspace-setup|completed|error|exit|skipped):phase-\d+ \[run:[^\]]+\] .+$/;
+      // Verify format: status:codon-id [run:runId] codon-name
+      const formatRegex = /^(rig-setup|completed|error|exit|skipped):codon-\d+ \[run:[^\]]+\] .+$/;
       const invalidCommits = commitMessages.filter(
         (msg) => msg !== "Initial checkpoint setup" && !formatRegex.test(msg),
       );

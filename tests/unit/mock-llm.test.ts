@@ -487,7 +487,7 @@ describe("Mock LLM Utility", () => {
 
       // Should be truncated (10 tokens * 4 chars = 40 chars max)
       expect(result.text.length).toBeLessThanOrEqual(40);
-      expect(result.text).toEndWith("...");
+      expect(result.text.endsWith("...")).toBe(true);
       expect(result.finishReason).toBe("length");
     });
 

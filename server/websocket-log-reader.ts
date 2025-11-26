@@ -93,7 +93,7 @@ export class WebSocketLogReader {
   }
 
   /**
-   * Filter entries by message type (e.g., "phase.start", "server.ready").
+   * Filter entries by message type (e.g., "codon.start", "server.ready").
    *
    * @param messageType - The type field of the WebSocket message
    */
@@ -118,16 +118,16 @@ export class WebSocketLogReader {
   }
 
   /**
-   * Get all messages for a specific phase.
+   * Get all messages for a specific codon.
    *
-   * @param phaseId - The phase ID to filter by
+   * @param codonId - The codon ID to filter by
    */
-  getPhaseMessages(phaseId: string): WebSocketLogEntry[] {
+  getCodonMessages(codonId: string): WebSocketLogEntry[] {
     return this.entries.filter((entry) => {
       // Check if message has a data property
       if ("data" in entry.message && entry.message.data) {
         const data = entry.message.data as Record<string, unknown>;
-        return data.phaseId === phaseId;
+        return data.codonId === codonId;
       }
       return false;
     });

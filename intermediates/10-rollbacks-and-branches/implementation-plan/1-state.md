@@ -85,9 +85,9 @@ This document defines the state management system for Langton Runner. The key de
 ## Core Types
 
 ```typescript
-// ============================================================================
+// -------------
 // Branded Types
-// ============================================================================
+// -------------
 
 /**
  * Unique identifier for a server run.
@@ -126,9 +126,9 @@ export type PhaseStatus =
   | "failed" // Failed - terminal state
   | "skipped"; // User skipped - terminal state
 
-// ============================================================================
+// -------------
 // Phase Execution States - Discriminated Union
-// ============================================================================
+// -------------
 
 /**
  * Base properties shared by all phase states.
@@ -287,9 +287,9 @@ export interface CompletingPhase extends BasePhase {
   currentTokens: TokenUsage;
 }
 
-// ============================================================================
+// -------------
 // Terminal States - Immutable once reached
-// ============================================================================
+// -------------
 
 /**
  * Phase completed successfully.
@@ -484,9 +484,9 @@ export type PhaseExecution =
   | FailedPhase
   | SkippedPhase;
 
-// ============================================================================
+// -------------
 // Run State
-// ============================================================================
+// -------------
 
 /**
  * Represents one server lifecycle (start → shutdown).
@@ -610,9 +610,9 @@ export type StartingConditions =
       reason?: "retry" | "rollback" | "continue";
     };
 
-// ============================================================================
+// -------------
 // Top-Level State
-// ============================================================================
+// -------------
 
 /**
  * Root state object for Langton.

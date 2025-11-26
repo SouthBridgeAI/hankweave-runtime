@@ -4,9 +4,9 @@ import * as path from "node:path";
 import { colors } from "../../utils/test-helpers.js";
 
 export function runJSONLSchemaTests(testDir: string) {
-  for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-    test(`${phaseId} JSONL has valid schema`, () => {
-      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
+  for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
+    test(`${codonId} JSONL has valid schema`, () => {
+      const logPath = path.join(testDir, `.strandweave/logs/log-${codonId}.jsonl`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const lines = logContent.split("\n").filter((l) => l.trim());
@@ -30,7 +30,7 @@ export function runJSONLSchemaTests(testDir: string) {
                 invalidLines++;
                 if (invalidLines === 1) {
                   console.log(
-                    `${colors.yellow}Invalid entry in ${phaseId}: ${JSON.stringify(entry).substring(
+                    `${colors.yellow}Invalid entry in ${codonId}: ${JSON.stringify(entry).substring(
                       0,
                       200,
                     )}${colors.reset}`,
@@ -41,7 +41,7 @@ export function runJSONLSchemaTests(testDir: string) {
               invalidLines++;
               if (invalidLines === 1) {
                 console.log(
-                  `${colors.yellow}Missing type in ${phaseId}: ${JSON.stringify(entry).substring(
+                  `${colors.yellow}Missing type in ${codonId}: ${JSON.stringify(entry).substring(
                     0,
                     200,
                   )}${colors.reset}`,

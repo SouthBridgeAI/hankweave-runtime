@@ -1,7 +1,10 @@
 {
-  "name": "tapole",
+  "name": "strandweave",
   "module": "index.ts",
   "type": "module",
+  "bin": {
+    "strandweave": "./server/index.ts"
+  },
   "scripts": {
     "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
     "tc": "bun typecheck",
@@ -11,7 +14,8 @@
     "fetch-models": "bun scripts/fetch-models-dev.ts",
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
-    "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/integration tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts  && bun tests/unit/cleanup-after-tests.ts",
+    "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/integration tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts && bun tests/unit/cleanup-after-tests.ts",
+    "test:long": "LONG_TESTS=true bun test tests/long-running",
     "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",
     "test:integration": "bun tests/integration",
     "test:e2e:check": "bun tests/utils/check-test-ready.ts",
@@ -20,8 +24,8 @@
     "pre-test": "bun run test:e2e:check && bun run pre-test:cleanup",
     "pre-test:cleanup": "rm -rf tests/test-area && mkdir -p tests/test-area && rm -rf tests/test-results && mkdir -p tests/test-results && echo '✅ Test area and results cleaned'",
     "cleanup": "echo 'Error: --cleanup requires --config' && exit 1",
-    "cleanup:example": "bun server/index.ts --cleanup --config=phases.json",
-    "cleanup:force": "bun server/index.ts --cleanup --config=phases.json -y"
+    "cleanup:example": "bun server/index.ts --cleanup --config=codon-sequence.json",
+    "cleanup:force": "bun server/index.ts --cleanup --config=codon-sequence.json -y"
   },
   "devDependencies": {
     "@types/bun": "latest"

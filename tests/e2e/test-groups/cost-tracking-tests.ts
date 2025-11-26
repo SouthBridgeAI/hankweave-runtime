@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type {
-  PhaseCompletedEvent,
+  CodonCompletedEvent,
   ServerEvent,
   StateSnapshotEvent,
 } from "../../../server/types/types.js";
@@ -13,8 +13,8 @@ interface TestState {
   client: TestWSClient | null;
   events: ServerEvent[];
   // State-based fields
-  completedPhases: Array<{
-    phaseId: string;
+  completedCodons: Array<{
+    codonId: string;
     cost: number;
     sessionId: string;
   }>;
@@ -27,15 +27,15 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     expect(testState.totalCost).toBeGreaterThan(0);
   });
 
-  test("all 3 phases marked as completed", () => {
-    // Use state-based completed phases instead of event
-    expect(testState.completedPhases.length).toBe(3);
+  test("all 3 codons marked as completed", () => {
+    // Use state-based completed codons instead of event
+    expect(testState.completedCodons.length).toBe(3);
   });
 
-  test("completed phases have costs", () => {
-    // Verify each completed phase has a cost
-    for (const phase of testState.completedPhases) {
-      expect(phase.cost).toBeGreaterThan(0);
+  test("completed codons have costs", () => {
+    // Verify each completed codon has a cost
+    for (const codon of testState.completedCodons) {
+      expect(codon.cost).toBeGreaterThan(0);
     }
   });
 
@@ -56,10 +56,10 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
   test("costs match between WebSocket and logs", () => {
     // Calculate costs from JSONL logs using result messages
     let logTotalCost = 0;
-    const phaseLogCosts: Record<string, number> = {};
+    const codonLogCosts: Record<string, number> = {};
 
     // Find the run folder
-    const runsDir = path.join(testDir, ".tadpole/runs");
+    const runsDir = path.join(testDir, ".strandweave/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);
@@ -68,8 +68,8 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
       }
     }
 
-    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(runFolder, `${phaseId}-claude.log`); // Corrected path
+    for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
+      const logPath = path.join(runFolder, `${codonId}-claude.log`); // Corrected path
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);
@@ -80,18 +80,18 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
         );
 
         if (resultMessage?.total_cost_usd) {
-          phaseLogCosts[phaseId] = resultMessage.total_cost_usd;
+          codonLogCosts[codonId] = resultMessage.total_cost_usd;
           logTotalCost += resultMessage.total_cost_usd;
         }
       }
     }
 
     // Compare with WebSocket reported costs
-    const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
+    const codonCompletedEvents = testState.client?.getEventsByType("codon.completed") || [];
     let wsReportedCost = 0;
 
-    for (const event of phaseCompletedEvents) {
-      const completedEvent = event as PhaseCompletedEvent;
+    for (const event of codonCompletedEvents) {
+      const completedEvent = event as CodonCompletedEvent;
       if (completedEvent.data?.success) {
         wsReportedCost += completedEvent.data?.cost || 0;
       }
@@ -100,11 +100,11 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     expect(wsReportedCost).toBeCloseTo(logTotalCost, 4); // Increased precision
   });
 
-  test("individual phase costs match", () => {
-    const phaseLogCosts: Record<string, number> = {};
+  test("individual codon costs match", () => {
+    const codonLogCosts: Record<string, number> = {};
 
     // Find the run folder
-    const runsDir = path.join(testDir, ".tadpole/runs");
+    const runsDir = path.join(testDir, ".strandweave/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);
@@ -114,8 +114,8 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     }
 
     // Calculate from logs using result messages
-    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(runFolder, `${phaseId}-claude.log`); // Corrected path
+    for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
+      const logPath = path.join(runFolder, `${codonId}-claude.log`); // Corrected path
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);
@@ -123,17 +123,17 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
           (e) => e.type === "result" && e.subtype === "success",
         );
         if (resultMessage?.total_cost_usd) {
-          phaseLogCosts[phaseId] = resultMessage.total_cost_usd;
+          codonLogCosts[codonId] = resultMessage.total_cost_usd;
         }
       }
     }
 
     // Compare with events
-    const phaseCompletedEvents = testState.client?.getEventsByType("phase.completed") || [];
-    for (const event of phaseCompletedEvents) {
-      const completedEvent = event as PhaseCompletedEvent;
-      if (completedEvent.data?.success && completedEvent.data?.phaseId) {
-        const logCost = phaseLogCosts[completedEvent.data.phaseId] || 0;
+    const codonCompletedEvents = testState.client?.getEventsByType("codon.completed") || [];
+    for (const event of codonCompletedEvents) {
+      const completedEvent = event as CodonCompletedEvent;
+      if (completedEvent.data?.success && completedEvent.data?.codonId) {
+        const logCost = codonLogCosts[completedEvent.data.codonId] || 0;
         expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 4); // Increased precision
       }
     }

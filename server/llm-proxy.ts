@@ -168,9 +168,9 @@ class HttpTransport implements LLMTransport {
   }
 }
 
-// =============================================================================
+// -------------=
 // Built-in Middleware
-// =============================================================================
+// -------------=
 
 /**
  * Middleware that logs request and response information for debugging and monitoring
@@ -246,9 +246,9 @@ export class DoubleMaxTokens extends LLMProxyMiddleware {
   }
 }
 
-// =============================================================================
+// -------------=
 // Proxy Class
-// =============================================================================
+// -------------=
 
 /**
  * Main LLM proxy class that orchestrates request/response processing through middleware and transport
@@ -433,12 +433,13 @@ export function createPassthroughProxy({
     new HttpTransport(proxyToUrl, logger),
     [new LoggingMiddleware(logger)],
     logger,
+    false,
   );
 }
 
-// =============================================================================
+// -------------=
 // Proxy Runner
-// =============================================================================
+// -------------=
 
 /**
  * Bun server runner for the LLM proxy
@@ -494,7 +495,7 @@ export class BunProxyRunner {
 
         // Health check endpoint
         if (pathname === "/health" || pathname === "/") {
-          return new Response("Tadpole Proxy OK", {
+          return new Response("Strandweave Proxy OK", {
             status: 200,
             headers: { "Content-Type": "text/plain" },
           });

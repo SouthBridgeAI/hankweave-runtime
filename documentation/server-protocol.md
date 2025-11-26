@@ -1,8 +1,8 @@
-# Tadpole Server Protocol
+# Strandweave Server Protocol
 
 ## Overview
 
-The Tadpole server operates on a WebSocket-based protocol designed for real-time, bidirectional communication between the server and a client. This approach enables a highly interactive and transparent experience, allowing clients to monitor Claude's activity, control the execution flow, and receive immediate updates on file system changes and state transitions.
+The Strandweave server operates on a WebSocket-based protocol designed for real-time, bidirectional communication between the server and a client. This approach enables a highly interactive and transparent experience, allowing clients to monitor Claude's activity, control the execution flow, and receive immediate updates on file system changes and state transitions.
 
 The server runs on port 7777 by default. All messages exchanged are JSON-encoded and adhere to a strict schema, ensuring type safety and predictable interactions.
 
@@ -12,10 +12,10 @@ The server supports a **multi-client architecture**, allowing multiple WebSocket
 
 - **Multi-Client Support**: The server maintains a registry of all connected clients. There is no hard limit on the number of clients that can connect.
 - **Access Modes**: Each client connects in one of two modes, specified during the initial handshake:
-  - `readandwrite`: The client can send control commands (e.g., `phase.start`, `rollback.toCheckpoint`) and receive all server events.
+  - `readandwrite`: The client can send control commands (e.g., `codon.start`, `rollback.toCheckpoint`) and receive all server events.
   - `readonly`: The client can only receive server events and is prohibited from sending any commands that would alter the server's state. This is ideal for passive monitoring UIs.
 - **Connection Handling**: The server's lifecycle is no longer tied to a single client connection. It continues to run even if all clients disconnect, allowing for persistent, long-running workflows that can be re-connected to at any time.
-- **Lock File**: On startup, the server creates a lock file at `.tadpole/server.lock`. This file contains the server's process ID (PID) and the current run ID. This mechanism prevents multiple server instances from running in the same project directory, which would otherwise lead to state corruption and race conditions. The lock file also includes a heartbeat timestamp, allowing the server to detect and clean up stale locks from crashed previous sessions.
+- **Lock File**: On startup, the server creates a lock file at `.strandweave/runtime.lock`. This file contains the server's process ID (PID) and the current run ID. This mechanism prevents multiple server instances from running in the same project directory, which would otherwise lead to state corruption and race conditions. The lock file also includes a heartbeat timestamp, allowing the server to detect and clean up stale locks from crashed previous sessions.
 
 ### Connection Flow Diagram
 ```
@@ -32,11 +32,11 @@ Client                    Server
   │─── history.sync ───────>│ (optional)
   │<──── history.batch ─────┤ (streamed batches)
   │                         │
-  │─── phase.start ────────>│
-  │<──── phase.started ─────┤
+  │─── codon.start ────────>│
+  │<──── codon.started ─────┤
   │<─── assistant.action ───┤ (streaming)
   │<──── token.usage ───────┤ (periodic)
-  │<─── phase.completed ────┤
+  │<─── codon.completed ────┤
   │                         │
   │──── Disconnect ─────────>│
   │                         ├─ Kill Claude process
@@ -184,65 +184,65 @@ ws.on("message", (raw) => {
 
 ## Client Commands (Client → Server)
 
-Clients send commands to control the server's execution flow, manage phases, and query state.
+Clients send commands to control the server's execution flow, manage codons, and query state.
 
-### Phase Control Commands
+### Codon Control Commands
 
-These commands are used to direct the phase execution lifecycle.
+These commands are used to direct the codon execution lifecycle.
 
-#### `phase.start`
-Initiates the execution of a specific phase by its unique ID. This is typically used for manual control when autostart is disabled or to retry a specific phase from a previous run.
+#### `codon.start`
+Initiates the execution of a specific codon by its unique ID. This is typically used for manual control when autostart is disabled or to retry a specific codon from a previous run.
 
-- `skipPreCommands`: An optional boolean that, when `true`, skips the `workspaceSetup` operations for the phase. This is useful when retrying a phase where the setup has already been completed and doesn't need to be repeated.
+- `skipPreCommands`: An optional boolean that, when `true`, skips the `rigSetup` operations for the codon. This is useful when retrying a codon where the setup has already been completed and doesn't need to be repeated.
 
 ```json
 {
   "id": "cmd-123",
-  "type": "phase.start",
+  "type": "codon.start",
   "data": {
-    "phaseId": "phase-1-analysis",
+    "codonId": "codon-1-analysis",
     "skipPreCommands": false
   }
 }
 ```
 
-#### `phase.next`
-The standard command to advance the workflow. The server uses its internal execution thread logic to determine the next phase in the sequence and starts it.
+#### `codon.next`
+The standard command to advance the workflow. The server uses its internal execution thread logic to determine the next codon in the sequence and starts it.
 
 ```json
 {
   "id": "cmd-124",
-  "type": "phase.next"
+  "type": "codon.next"
 }
 ```
 
-#### `phase.skip`
-Instructs the server to gracefully terminate the currently running phase. The phase is marked as `skipped` in the state history. If autostart is enabled, the server will automatically proceed to the next phase.
+#### `codon.skip`
+Instructs the server to gracefully terminate the currently running codon. The codon is marked as `skipped` in the state history. If autostart is enabled, the server will automatically proceed to the next codon.
 
 ```json
 {
   "id": "cmd-125",
-  "type": "phase.skip"
+  "type": "codon.skip"
 }
 ```
 
-#### `phase.redo`
-Allows for re-running the most recently executed phase, regardless of its completion status. This is useful for iterating on a specific step without rolling back.
+#### `codon.redo`
+Allows for re-running the most recently executed codon, regardless of its completion status. This is useful for iterating on a specific step without rolling back.
 
 ```json
 {
   "id": "cmd-126",
-  "type": "phase.redo"
+  "type": "codon.redo"
 }
 ```
 
-#### `phase.forceStop`
-Immediately terminates the current phase and marks it as `failed`. This is a more forceful action than `skip` and is intended for situations where a phase is stuck or producing incorrect results. A forced stop may halt the entire run if the failure is considered non-retriable.
+#### `codon.forceStop`
+Immediately terminates the current codon and marks it as `failed`. This is a more forceful action than `skip` and is intended for situations where a codon is stuck or producing incorrect results. A forced stop may halt the entire run if the failure is considered non-retriable.
 
 ```json
 {
   "id": "cmd-127",
-  "type": "phase.forceStop",
+  "type": "codon.forceStop",
   "data": {
     "reason": "User intervention"
   }
@@ -271,7 +271,7 @@ A read-only query to retrieve a list of all available checkpoints for a given ru
 #### `rollback.toCheckpoint`
 Reverts the project's file state and execution history to a specific checkpoint, identified by its Git SHA. The server supports partial SHAs for convenience, as long as they are unique.
 
-- `autoRestart`: If `true`, the server will attempt to automatically start the next phase after the rollback is complete.
+- `autoRestart`: If `true`, the server will attempt to automatically start the next codon after the rollback is complete.
 
 ```json
 {
@@ -284,23 +284,23 @@ Reverts the project's file state and execution history to a specific checkpoint,
 }
 ```
 
-#### `rollback.toPhase`
-A more abstract way to roll back. Instead of a specific SHA, you specify a target phase and a checkpoint type. The server resolves this to the correct checkpoint SHA from the execution history.
+#### `rollback.toCodon`
+A more abstract way to roll back. Instead of a specific SHA, you specify a target codon and a checkpoint type. The server resolves this to the correct checkpoint SHA from the execution history.
 
 **Checkpoint Types:**
-- `"workspace-setup"`: After workspace setup, before Claude starts
+- `"rig-setup"`: After rig setup, before Claude starts
 - `"completed"`: After successful completion
 - `"error"`: After failure (if checkpoint was created)
 - `"skipped"`: After skip
-- `"start"`: Alias for workspace-setup
-- `"end"`: Latest checkpoint for the phase
+- `"start"`: Alias for rig-setup
+- `"end"`: Latest checkpoint for the codon
 
 ```json
 {
   "id": "cmd-130",
-  "type": "rollback.toPhase",
+  "type": "rollback.toCodon",
   "data": {
-    "phaseId": "phase-2",
+    "codonId": "codon-2",
     "checkpointType": "completed",
     "autoRestart": false
   }
@@ -308,7 +308,7 @@ A more abstract way to roll back. Instead of a specific SHA, you specify a targe
 ```
 
 #### `rollback.toLastSuccess`
-A convenient command to revert to the completion checkpoint of the last successfully executed phase in the history.
+A convenient command to revert to the completion checkpoint of the last successfully executed codon in the history.
 
 ```json
 {
@@ -350,7 +350,7 @@ Streams the full event journal to the client. Useful when the handshake did not 
 
 ## Server Events (Server → Client)
 
-The server emits events to keep the client informed about its state, Claude's activity, and changes in the project workspace.
+The server emits events to keep the client informed about its state, Claude's activity, and changes in the project execution environment.
 
 ### Connection & State Events
 
@@ -364,18 +364,18 @@ The initial handshake event, sent once a client connects successfully. It provid
   "type": "server.ready",
   "data": {
     "serverVersion": "1.0.0",
-    "executionPath": "/home/.tadpole-executions/1234-abc",
-    "dataPath": "/home/.tadpole-executions/1234-abc/read_only_data_source"
+    "executionPath": "/home/.strandweave-executions/1234-abc",
+    "dataPath": "/home/.strandweave-executions/1234-abc/read_only_data_source"
   }
 }
 ```
 
 **Note**: Prior to execution isolation, this event included `projectPath`. This has been replaced with:
-- `executionPath`: Where the server operates and all Tadpole artifacts are stored
+- `executionPath`: Where the server operates and all Strandweave artifacts are stored
 - `dataPath`: Where the user's original data is accessible (via symlink or copy) at `<execution-dir>/read_only_data_source`
 
 #### `state.snapshot`
-A comprehensive snapshot of the server's current state. It's sent after major state changes (like phase completion or rollback). This event is the primary source of truth for the client to build its own state representation.
+A comprehensive snapshot of the server's current state. It's sent after major state changes (like codon completion or rollback). This event is the primary source of truth for the client to build its own state representation.
 
 ```json
 {
@@ -383,8 +383,8 @@ A comprehensive snapshot of the server's current state. It's sent after major st
   "timestamp": "2025-01-19T10:00:05Z",
   "type": "state.snapshot",
   "data": {
-    "currentPhase": { "...PhaseExecution object..." },
-    "completedPhases": [ "..." ],
+    "currentCodon": { "...CodonExecution object..." },
+    "completedCodons": [ "..." ],
     "fileTree": [ "...FileNode array..." ],
     "totalCost": 1.23,
     "totalTime": 300000,
@@ -403,11 +403,11 @@ A granular event that signals a specific, atomic change in the server's state. T
   "timestamp": "2025-01-19T10:00:10Z",
   "type": "state.transition",
   "data": {
-    "transitionType": "PhaseTransitioned",
+    "transitionType": "CodonTransitioned",
     "runId": "run-123",
-    "phaseId": "phase-1",
+    "codonId": "codon-1",
     "transition": {
-      "type": "PhaseTransitioned",
+      "type": "CodonTransitioned",
       "data": { "from": "running", "to": "completed" }
     },
     "resultingState": {
@@ -432,7 +432,7 @@ Response to a `history.sync` command, containing a paginated batch of events fro
   "type": "history.batch",
   "data": {
     "events": [
-      { "id": "evt-100", "type": "phase.started", "..." },
+      { "id": "evt-100", "type": "codon.started", "..." },
       { "id": "evt-99", "type": "assistant.action", "..." }
     ],
     "hasMore": true
@@ -446,19 +446,19 @@ Response to a `history.sync` command, containing a paginated batch of events fro
 
 **Note:** `history.batch` events are not stored in the journal as they only contain references to existing events.
 
-### Phase Lifecycle Events
+### Codon Lifecycle Events
 
-#### `phase.started`
-Announces the beginning of a phase's execution, after workspace setup is complete and the Claude process has been spawned.
+#### `codon.started`
+Announces the beginning of a codon's execution, after rig setup is complete and the Claude process has been spawned.
 
 ```json
 {
   "id": "evt-003",
   "timestamp": "2025-01-19T10:00:10Z",
-  "type": "phase.started",
+  "type": "codon.started",
   "data": {
-    "phaseId": "phase-1",
-    "phaseName": "Initial Analysis",
+    "codonId": "codon-1",
+    "codonName": "Initial Analysis",
     "sessionId": "session-uuid-123",
     "startTime": "2025-01-19T10:00:10Z",
     "metadata": {
@@ -469,10 +469,10 @@ Announces the beginning of a phase's execution, after workspace setup is complet
 ```
 
 **Fields:**
-- `metadata.checkpointSha`: Optional. Present when resuming from an existing workspace setup checkpoint, indicating the Git SHA of the workspace state being reused.
+- `metadata.checkpointSha`: Optional. Present when resuming from an existing rig setup checkpoint, indicating the Git SHA of the rig state being reused.
 
-#### `phase.completed`
-Marks the end of a phase's execution, providing a summary of its outcome, cost, and duration.
+#### `codon.completed`
+Marks the end of a codon's execution, providing a summary of its outcome, cost, and duration.
 
 - `failureReason`: If `success` is `false`, this object provides structured information about the error, including whether it's considered retriable.
 
@@ -480,9 +480,9 @@ Marks the end of a phase's execution, providing a summary of its outcome, cost, 
 {
   "id": "evt-004",
   "timestamp": "2025-01-19T10:05:10Z",
-  "type": "phase.completed",
+  "type": "codon.completed",
   "data": {
-    "phaseId": "phase-1",
+    "codonId": "codon-1",
     "success": true,
     "cost": 0.0123,
     "duration": 300000,
@@ -502,7 +502,7 @@ A real-time stream of Claude's actions, parsed from its log output. This provide
   "timestamp": "2025-01-19T10:01:00Z",
   "type": "assistant.action",
   "data": {
-    "phaseId": "phase-1",
+    "codonId": "codon-1",
     "action": "tool_use",
     "toolName": "Read",
     "toolInput": { "file_path": "src/index.ts" }
@@ -519,7 +519,7 @@ Provides detailed information about the completion of a tool execution, includin
   "timestamp": "2025-01-19T10:01:05Z",
   "type": "tool.result",
   "data": {
-    "phaseId": "phase-1",
+    "codonId": "codon-1",
     "toolUseId": "toolu_01ABC123XYZ",
     "toolName": "Read",
     "result": "const app = express();\n// ... file content ...",
@@ -548,7 +548,7 @@ Provides a real-time update on token consumption and associated costs after each
   "timestamp": "2025-01-19T10:01:05Z",
   "type": "token.usage",
   "data": {
-    "phaseId": "phase-1",
+    "codonId": "codon-1",
     "inputTokens": 1024,
     "outputTokens": 512,
     "totalCost": 0.0045
@@ -559,7 +559,7 @@ Provides a real-time update on token consumption and associated costs after each
 ### File System Events
 
 #### `file.updated`
-Notifies the client of a change (creation, modification, or deletion) to a file being tracked in the current phase.
+Notifies the client of a change (creation, modification, or deletion) to a file being tracked in the current codon.
 
 ```json
 {
@@ -589,21 +589,21 @@ Sent after a `file.updated` event to provide the client with the new, complete s
 }
 ```
 
-### Chronicler Events
+### Sentinel Events
 
-These events provide visibility into the lifecycle and activity of the parallel Chronicler agents.
+These events provide visibility into the lifecycle and activity of the parallel Sentinel agents.
 
-#### `chronicler.loaded`
-Sent when a chronicler is successfully loaded and initialized at the start of a phase.
+#### `sentinel.loaded`
+Sent when a sentinel is successfully loaded and initialized at the start of a codon.
 
 ```json
 {
   "id": "evt-chr-001",
   "timestamp": "2025-01-19T10:00:11Z",
-  "type": "chronicler.loaded",
+  "type": "sentinel.loaded",
   "data": {
-    "chroniclerId": "narrator",
-    "phaseId": "phase-1",
+    "sentinelId": "narrator",
+    "codonId": "codon-1",
     "model": "anthropic/claude-3-5-sonnet-20241022",
     "triggerType": "event",
     "executionStrategy": "debounce",
@@ -613,17 +613,17 @@ Sent when a chronicler is successfully loaded and initialized at the start of a 
 }
 ```
 
-#### `chronicler.triggered`
-Sent when a chronicler's trigger conditions are met and it begins processing a batch of events.
+#### `sentinel.triggered`
+Sent when a sentinel's trigger conditions are met and it begins processing a batch of events.
 
 ```json
 {
   "id": "evt-chr-002",
   "timestamp": "2025-01-19T10:03:00Z",
-  "type": "chronicler.triggered",
+  "type": "sentinel.triggered",
   "data": {
-    "chroniclerId": "narrator",
-    "phaseId": "phase-1",
+    "sentinelId": "narrator",
+    "codonId": "codon-1",
     "triggerNumber": 1,
     "strategy": "debounce",
     "eventCount": 5,
@@ -632,17 +632,17 @@ Sent when a chronicler's trigger conditions are met and it begins processing a b
 }
 ```
 
-#### `chronicler.output`
-Sent when a chronicler's LLM call completes and produces an output.
+#### `sentinel.output`
+Sent when a sentinel's LLM call completes and produces an output.
 
 ```json
 {
   "id": "evt-chr-003",
   "timestamp": "2025-01-19T10:03:05Z",
-  "type": "chronicler.output",
+  "type": "sentinel.output",
   "data": {
-    "chroniclerId": "narrator",
-    "phaseId": "phase-1",
+    "sentinelId": "narrator",
+    "codonId": "codon-1",
     "triggerNumber": 1,
     "outputType": "text",
     "content": "The agent has started analyzing the files.",
@@ -653,17 +653,17 @@ Sent when a chronicler's LLM call completes and produces an output.
 }
 ```
 
-#### `chronicler.error`
-Sent when a chronicler encounters a non-fatal error, such as a failed LLM call.
+#### `sentinel.error`
+Sent when a sentinel encounters a non-fatal error, such as a failed LLM call.
 
 ```json
 {
   "id": "evt-chr-004",
   "timestamp": "2025-01-19T10:04:00Z",
-  "type": "chronicler.error",
+  "type": "sentinel.error",
   "data": {
-    "chroniclerId": "narrator",
-    "phaseId": "phase-1",
+    "sentinelId": "narrator",
+    "codonId": "codon-1",
     "errorType": "llm-call-failed",
     "message": "API returned status 500",
     "retriable": true,
@@ -672,18 +672,18 @@ Sent when a chronicler encounters a non-fatal error, such as a failed LLM call.
 }
 ```
 
-#### `chronicler.unloaded`
-Sent when a chronicler is unloaded at the end of a phase or due to a fatal error.
+#### `sentinel.unloaded`
+Sent when a sentinel is unloaded at the end of a codon or due to a fatal error.
 
 ```json
 {
   "id": "evt-chr-005",
   "timestamp": "2025-01-19T10:05:10Z",
-  "type": "chronicler.unloaded",
+  "type": "sentinel.unloaded",
   "data": {
-    "chroniclerId": "narrator",
-    "phaseId": "phase-1",
-    "reason": "phase-complete",
+    "sentinelId": "narrator",
+    "codonId": "codon-1",
+    "reason": "codon-complete",
     "finalCost": 0.0012,
     "llmCallCount": 8
   }
@@ -693,7 +693,7 @@ Sent when a chronicler is unloaded at the end of a phase or due to a fatal error
 ### Status & Rollback Events
 
 #### `server.idle`
-Indicates that the server is not executing any phase and is waiting for a command. This happens when autostart is disabled or when all phases have been completed.
+Indicates that the server is not executing any codon and is waiting for a command. This happens when autostart is disabled or when all codons have been completed.
 
 ```json
 {
@@ -701,8 +701,8 @@ Indicates that the server is not executing any phase and is waiting for a comman
   "timestamp": "2025-01-19T10:05:10Z",
   "type": "server.idle",
   "data": {
-    "reason": "phase-completed",
-    "message": "Phase phase-1 completed. Use 'phase.next' to continue."
+    "reason": "codon-completed",
+    "message": "Codon codon-1 completed. Use 'codon.next' to continue."
   }
 }
 ```
@@ -730,20 +730,20 @@ A series of events that provide detailed, step-by-step feedback during a rollbac
 
 The server provides robust resume functionality that allows execution to continue from previous sessions, even after failures or interruptions.
 
-### Workspace Setup Checkpoint Reuse
+### Rig Setup Checkpoint Reuse
 
-When a phase is started, the server checks the phase's execution history for an existing `workspaceSetupCheckpoint`:
+When a codon is started, the server checks the codon's execution history for an existing `rigSetupCheckpoint`:
 
-1. **Checkpoint Discovery**: The server queries the state manager for all previous runs of the phase and searches for any entry containing a `workspaceSetupCheckpoint`
-2. **Automatic Skip**: If a checkpoint is found, workspace setup operations (file copies, commands) are automatically skipped, regardless of the `skipPreCommands` parameter
-3. **Resume from Checkpoint**: The phase resumes execution with the workspace already configured from the previous attempt
+1. **Checkpoint Discovery**: The server queries the state manager for all previous runs of the codon and searches for any entry containing a `rigSetupCheckpoint`
+2. **Automatic Skip**: If a checkpoint is found, rig setup operations (file copies, commands) are automatically skipped, regardless of the `skipPreCommands` parameter
+3. **Resume from Checkpoint**: The codon resumes execution with the rig already configured from the previous attempt
 
-This mechanism prevents expensive and time-consuming workspace setup operations from being repeated when resuming failed phases. It's particularly valuable for phases that copy large directories or perform complex setup operations.
+This mechanism prevents expensive and time-consuming rig setup operations from being repeated when resuming failed codons. It's particularly valuable for codons that copy large directories or perform complex setup operations.
 
 **Example Scenario:**
 ```
-Run 1: Phase starts → Workspace setup (copies 5GB of data) → Phase fails during execution
-Run 2: Phase starts → Finds existing checkpoint → Skips workspace setup → Resumes immediately
+Run 1: Codon starts → Rig setup (copies 5GB of data) → Codon fails during execution
+Run 2: Codon starts → Finds existing checkpoint → Skips rig setup → Resumes immediately
 ```
 
 ### Automatic Failure Detection and Recovery
@@ -751,25 +751,25 @@ Run 2: Phase starts → Finds existing checkpoint → Skips workspace setup → 
 On server startup (when a client connects), the server performs automatic failure detection:
 
 1. **Thread Analysis**: The server calls `getExecutionThread()` to analyze the complete execution history
-2. **Failure Check**: The `ExecutionThread.failed` property is checked, which returns true if any phase has:
-   - `phase.status === "failed"`
+2. **Failure Check**: The `ExecutionThread.failed` property is checked, which returns true if any codon has:
+   - `codon.status === "failed"`
    - `runStatus === "failed"`
    - `runStatus === "crashed"`
 3. **Automatic Rollback**: If failure is detected, the server automatically invokes `rollbackToLastSuccess()` with the `autostart` configuration
 4. **Clean Restart**: After rollback, the server starts fresh from a known good state
 
-This ensures that resuming a session never begins from a corrupted or failed state. The workspace is automatically restored to the last successful checkpoint, allowing execution to proceed cleanly.
+This ensures that resuming a session never begins from a corrupted or failed state. The rig is automatically restored to the last successful checkpoint, allowing execution to proceed cleanly.
 
 ### Checkpoint Types Used for Resume
 
-The resume functionality leverages different checkpoint types depending on the phase's state:
+The resume functionality leverages different checkpoint types depending on the codon's state:
 
-- **Workspace Setup Checkpoint**: Created after workspace setup, before phase execution begins. Used to skip setup on resume.
-- **Completion Checkpoint**: Created after successful phase completion. Used as the primary rollback target.
-- **Error Checkpoint**: Created when a phase fails (if configured). Can be used as a fallback rollback target.
-- **Skip Checkpoint**: Created when a phase is skipped. Can be used as a fallback rollback target.
+- **Rig Setup Checkpoint**: Created after rig setup, before codon execution begins. Used to skip setup on resume.
+- **Completion Checkpoint**: Created after successful codon completion. Used as the primary rollback target.
+- **Error Checkpoint**: Created when a codon fails (if configured). Can be used as a fallback rollback target.
+- **Skip Checkpoint**: Created when a codon is skipped. Can be used as a fallback rollback target.
 
-The `rollbackToLastSuccess` operation prioritizes completion checkpoints but falls back to any available checkpoint (workspace-setup, error, or skipped) if no successful completions exist.
+The `rollbackToLastSuccess` operation prioritizes completion checkpoints but falls back to any available checkpoint (rig-setup, error, or skipped) if no successful completions exist.
 
 ## Protocol Behavior
 
@@ -778,23 +778,23 @@ The typical connection flow is designed to quickly synchronize the client with t
 1.  The client establishes a WebSocket connection and completes the handshake.
 2.  The server responds with a `server.ready` event.
 3.  The server checks if the execution thread has previously failed by analyzing the execution history.
-4.  If a failure is detected, the server automatically triggers `rollbackToLastSuccess` to restore the workspace to a known good state before resuming.
-5.  If `autostart` is enabled, the server proceeds to start the next phase (after rollback if needed). Otherwise, it sends a `server.idle` event and waits for commands.
+4.  If a failure is detected, the server automatically triggers `rollbackToLastSuccess` to restore the rig to a known good state before resuming.
+5.  If `autostart` is enabled, the server proceeds to start the next codon (after rollback if needed). Otherwise, it sends a `server.idle` event and waits for commands.
 
 **Automatic Failure Recovery:**
-When the server starts up, it analyzes the execution thread to detect if previous execution attempts failed. If `ExecutionThread.failed` is true (indicating phases with status "failed" or runStatus "failed"/"crashed"), the server automatically performs a rollback to the last successful checkpoint before starting any new work. This ensures that resuming a session never continues from a broken state.
+When the server starts up, it analyzes the execution thread to detect if previous execution attempts failed. If `ExecutionThread.failed` is true (indicating codons with status "failed" or runStatus "failed"/"crashed"), the server automatically performs a rollback to the last successful checkpoint before starting any new work. This ensures that resuming a session never continues from a broken state.
 
 ### Command Processing
-The server processes commands sequentially to maintain state integrity. Most commands that modify state (e.g., starting or stopping a phase) are blocked during a rollback operation to prevent conflicts. Read-only queries like `checkpoint.list` are always permitted.
+The server processes commands sequentially to maintain state integrity. Most commands that modify state (e.g., starting or stopping a codon) are blocked during a rollback operation to prevent conflicts. Read-only queries like `checkpoint.list` are always permitted.
 
 ### State Consistency
 The protocol is backed by a robust state manager that ensures consistency. All state changes are validated and persisted atomically to disk before any corresponding events are sent to the client. This guarantees that the client's view of the state, as informed by events, accurately reflects the persisted reality, even in the event of a crash.
 
 ### Event Ordering
 The server provides strong guarantees about the order of events, which simplifies client-side logic:
-- Phase lifecycle events (`phase.started`, `phase.completed`) will always be sent in the correct sequence for a given phase.
-- A `state.snapshot`, when sent, always reflects the state *after* the event that triggered it (e.g., after a `phase.completed` event).
-- File system events (`file.updated`, `filetree.updated`) are sent as changes are detected during a phase's execution.
+- Codon lifecycle events (`codon.started`, `codon.completed`) will always be sent in the correct sequence for a given codon.
+- A `state.snapshot`, when sent, always reflects the state *after* the event that triggered it (e.g., after a `codon.completed` event).
+- File system events (`file.updated`, `filetree.updated`) are sent as changes are detected during a codon's execution.
 
 ### Message Size Limits
 - Maximum message size: 10MB (configurable in WebSocket options)
@@ -811,10 +811,10 @@ When errors occur, the server sends structured error events:
   "timestamp": "2025-01-19T10:00:00Z",
   "type": "error",
   "data": {
-    "code": "PHASE_TIMEOUT",
-    "message": "Phase execution timed out after 30 minutes",
+    "code": "CODON_TIMEOUT",
+    "message": "Codon execution timed out after 30 minutes",
     "details": {
-      "phaseId": "phase-1",
+      "codonId": "codon-1",
       "elapsed": 1800000
     },
     "fatal": false,
@@ -825,11 +825,11 @@ When errors occur, the server sends structured error events:
 ```
 
 **Error Codes:**
-- `CONFIG_INVALID`: Phase configuration error
+- `CONFIG_INVALID`: Codon configuration error
 - `CLAUDE_NOT_FOUND`: Claude CLI not available
 - `API_ERROR`: Claude API error (rate limit, auth, etc.)
-- `PHASE_TIMEOUT`: Phase took too long
+- `CODON_TIMEOUT`: Codon took too long
 - `STATE_CORRUPTED`: State file corruption detected
 - `GIT_ERROR`: Checkpoint operation failed
-- `WORKSPACE_SETUP_FAILED`: Copy/command failed
+- `RIG_SETUP_FAILED`: Copy/command failed
 - `INTERNAL_ERROR`: Unexpected server error

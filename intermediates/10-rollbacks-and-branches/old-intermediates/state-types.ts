@@ -25,9 +25,9 @@ import type {
  * 5. Strong typing prevents invalid states
  */
 
-// ============================================================================
+// -------------
 // Branded Types for Strong Type Safety
-// ============================================================================
+// -------------
 
 declare const __brand: unique symbol;
 type Brand<B> = { [__brand]: B };
@@ -44,9 +44,9 @@ export const AttemptId = (id: string): AttemptId => id as AttemptId;
 // Already defined in branded-types.ts, but re-export for convenience
 export type { PhaseId, SessionId } from "../../server/branded-types.js";
 
-// ============================================================================
+// -------------
 // HOW BRANCHING WORKS
-// ============================================================================
+// -------------
 
 /**
  * BRANCHING CONCEPTS:
@@ -76,9 +76,9 @@ export type { PhaseId, SessionId } from "../../server/branded-types.js";
  *           └── attempt-6 (phase-3, different approach)
  */
 
-// ============================================================================
+// -------------
 // HOW ROLLBACKS WORK
-// ============================================================================
+// -------------
 
 /**
  * ROLLBACK MECHANISM:
@@ -111,9 +111,9 @@ export type { PhaseId, SessionId } from "../../server/branded-types.js";
  *    Can rollback to any attempt, not just direct ancestors
  */
 
-// ============================================================================
+// -------------
 // DATA NORMALIZATION STRATEGY
-// ============================================================================
+// -------------
 
 /**
  * NORMALIZED DATA (stored once, referenced by ID):
@@ -133,9 +133,9 @@ export type { PhaseId, SessionId } from "../../server/branded-types.js";
  * - Attempt lineage/ancestry
  */
 
-// ============================================================================
+// -------------
 // Attempt States - Discriminated Union
-// ============================================================================
+// -------------
 
 /**
  * Base properties shared by all attempt states
@@ -334,9 +334,9 @@ export type AttemptState =
   | SkippedAttemptState
   | CrashedAttemptState;
 
-// ============================================================================
+// -------------
 // Run State - Root State Object
-// ============================================================================
+// -------------
 
 /**
  * Complete state for a Tadpole server run
@@ -415,9 +415,9 @@ export interface RunState {
   };
 }
 
-// ============================================================================
+// -------------
 // EXAMPLE STATE SCENARIOS
-// ============================================================================
+// -------------
 
 /**
  * SCENARIO 1: Simple Linear Execution
@@ -459,9 +459,9 @@ export interface RunState {
  * - rollback/att-4: branches from att-1 commit
  */
 
-// ============================================================================
+// -------------
 // Write-Ahead Log Events
-// ============================================================================
+// -------------
 
 /**
  * WAL DESIGN:
@@ -556,9 +556,9 @@ export type WALEvent =
       };
     });
 
-// ============================================================================
+// -------------
 // FUTURE CONSIDERATIONS
-// ============================================================================
+// -------------
 
 /**
  * POTENTIAL ENHANCEMENTS:
@@ -587,9 +587,9 @@ export type WALEvent =
  *    - State pruning policies
  */
 
-// ============================================================================
+// -------------
 // Zod Schemas for Runtime Validation
-// ============================================================================
+// -------------
 
 // Token usage schema
 const tokenUsageSchema = z.object({
@@ -789,9 +789,9 @@ export const walEventSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-// ============================================================================
+// -------------
 // Type Guards
-// ============================================================================
+// -------------
 
 export function isInitializingAttempt(
   state: AttemptState
@@ -833,9 +833,9 @@ export function isTerminalAttempt(state: AttemptState): boolean {
   return ["completed", "failed", "skipped", "crashed"].includes(state.status);
 }
 
-// ============================================================================
+// -------------
 // Utility Types
-// ============================================================================
+// -------------
 
 /**
  * Extract attempt states by status

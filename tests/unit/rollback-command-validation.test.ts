@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { StateManager } from "../../server/state-manager.js";
-import { PhaseId, RunId, SessionId } from "../../server/types/branded-types.js";
-import type * as ST from "../../server/types/state-types.js";
-import { Logger } from "../../server/utils.js";
+import { StateManager } from "../../server/state-manager";
+import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
+import type * as ST from "../../server/types/state-types";
+import { Logger } from "../../server/utils";
 
 // Test directory setup
-const TEST_DIR = path.join(__dirname, "test-rollback-validation");
-const TEST_TADPOLE_DIR = path.join(TEST_DIR, ".tadpole");
+const TEST_DIR = path.join(import.meta.dir, "test-rollback-validation");
+const TEST_STRANDWEAVE_DIR = path.join(TEST_DIR, ".strandweave");
 
 // Mock logger
 class MockLogger extends Logger {
@@ -29,13 +29,13 @@ describe("Rollback Command Validation", () => {
 
   beforeEach(async () => {
     // Create test directory
-    await fs.promises.mkdir(TEST_TADPOLE_DIR, { recursive: true });
+    await fs.promises.mkdir(TEST_STRANDWEAVE_DIR, { recursive: true });
 
     // Create mock logger
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_TADPOLE_DIR, mockLogger);
+    stateManager = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger);
     await stateManager.initialize();
   });
 
@@ -48,12 +48,12 @@ describe("Rollback Command Validation", () => {
     }
   });
 
-  describe("rollback while phase is running", () => {
-    test("should prevent rollback while phase is running", async () => {
+  describe("rollback while codon is running", () => {
+    test("should prevent rollback while codon is running", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
-      // Start a run and phase
+      // Start a run and codon
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -66,8 +66,8 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
       // Progress to running state
@@ -87,12 +87,12 @@ describe("Rollback Command Validation", () => {
 
       for (const t of transitions) {
         stateManager.transition({
-          type: "PhaseTransitioned",
+          type: "CodonTransitioned",
           data: {
             runId,
-            phaseId,
-            from: t.from as ST.PhaseStatus,
-            to: t.to as ST.PhaseStatus,
+            codonId,
+            from: t.from as ST.CodonStatus,
+            to: t.to as ST.CodonStatus,
             metadata: t.metadata,
           },
         });
@@ -100,23 +100,23 @@ describe("Rollback Command Validation", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      // Verify phase is running
-      const currentPhase = stateManager.getCurrentlyRunningPhase();
-      expect(currentPhase).not.toBeNull();
-      expect(currentPhase?.status).toBe("running");
+      // Verify codon is running
+      const currentCodon = stateManager.getCurrentlyRunningCodon();
+      expect(currentCodon).not.toBeNull();
+      expect(currentCodon?.status).toBe("running");
 
       // This test validates the concept - in the actual server,
       // the rollback command handler would check this condition
-      expect(currentPhase?.status).not.toBe("completed");
-      expect(currentPhase?.status).not.toBe("failed");
-      expect(currentPhase?.status).not.toBe("skipped");
+      expect(currentCodon?.status).not.toBe("completed");
+      expect(currentCodon?.status).not.toBe("failed");
+      expect(currentCodon?.status).not.toBe("skipped");
     });
 
-    test("should allow rollback after phase completes", async () => {
+    test("should allow rollback after codon completes", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
-      // Start and complete a phase
+      // Start and complete a codon
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -129,11 +129,11 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
-      // Complete the phase
+      // Complete the codon
       const transitions = [
         { from: "preparing", to: "starting" },
         {
@@ -155,12 +155,12 @@ describe("Rollback Command Validation", () => {
 
       for (const t of transitions) {
         stateManager.transition({
-          type: "PhaseTransitioned",
+          type: "CodonTransitioned",
           data: {
             runId,
-            phaseId,
-            from: t.from as ST.PhaseStatus,
-            to: t.to as ST.PhaseStatus,
+            codonId,
+            from: t.from as ST.CodonStatus,
+            to: t.to as ST.CodonStatus,
             metadata: t.metadata,
           },
         });
@@ -168,22 +168,22 @@ describe("Rollback Command Validation", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      // Verify phase is completed and rollback would be allowed
-      const currentPhase = stateManager.getCurrentlyRunningPhase();
-      expect(currentPhase).toBeNull(); // No current phase since it's completed
+      // Verify codon is completed and rollback would be allowed
+      const currentCodon = stateManager.getCurrentlyRunningCodon();
+      expect(currentCodon).toBeNull(); // No current codon since it's completed
 
       const run = stateManager.getCurrentRun();
       expect(run).not.toBeNull();
-      expect(run?.phases[0].status).toBe("completed");
+      expect(run?.codons[0].status).toBe("completed");
     });
   });
 
   describe("checkpoint validation", () => {
-    test("should validate phase exists before rollback", async () => {
+    test("should validate codon exists before rollback", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
-      // Start a run with one phase
+      // Start a run with one codon
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -196,25 +196,25 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
       await stateManager.waitForPendingTransitions();
 
-      // Try to find a non-existent phase
-      const nonExistentPhase = PhaseId("non-existent-phase");
+      // Try to find a non-existent codon
+      const nonExistentCodon = CodonId("non-existent-codon");
       const run = stateManager.getCurrentRun();
-      const phase = run?.phases.find((p) => p.phaseId === nonExistentPhase);
+      const codon = run?.codons.find((p) => p.codonId === nonExistentCodon);
 
-      expect(phase).toBeUndefined();
+      expect(codon).toBeUndefined();
     });
 
     test("should handle missing checkpoint SHA", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
-      // Start and complete a phase without checkpoint
+      // Start and complete a codon without checkpoint
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -227,8 +227,8 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
       // Progress through valid state transitions to completed
@@ -253,12 +253,12 @@ describe("Rollback Command Validation", () => {
 
       for (const t of transitions) {
         stateManager.transition({
-          type: "PhaseTransitioned",
+          type: "CodonTransitioned",
           data: {
             runId,
-            phaseId,
-            from: t.from as ST.PhaseStatus,
-            to: t.to as ST.PhaseStatus,
+            codonId,
+            from: t.from as ST.CodonStatus,
+            to: t.to as ST.CodonStatus,
             metadata: t.metadata,
           },
         });
@@ -270,29 +270,29 @@ describe("Rollback Command Validation", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const run = stateManager.getCurrentRun();
-      const phase = run?.phases[0];
+      const codon = run?.codons[0];
 
-      // Debug: log the actual phase status if it's not what we expect
-      if (phase?.status !== "completed") {
-        console.log(`Debug: Expected 'completed' but got '${phase?.status}'`);
-        console.log(`Phase object:`, JSON.stringify(phase, null, 2));
+      // Debug: log the actual codon status if it's not what we expect
+      if (codon?.status !== "completed") {
+        console.log(`Debug: Expected 'completed' but got '${codon?.status}'`);
+        console.log(`Codon object:`, JSON.stringify(codon, null, 2));
       }
 
-      expect(phase?.status).toBe("completed");
+      expect(codon?.status).toBe("completed");
 
-      // In a completed phase, completionCheckpoint might be empty
-      if (phase?.status === "completed") {
-        expect(phase.completionCheckpoint).toBe("");
+      // In a completed codon, completionCheckpoint might be empty
+      if (codon?.status === "completed") {
+        expect(codon.completionCheckpoint).toBe("");
       }
     });
   });
 
   describe("rollback to last success scenarios", () => {
-    test("should handle rollback to last success with no successful phases", async () => {
+    test("should handle rollback to last success with no successful codons", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
-      // Start a run with a failed phase
+      // Start a run with a failed codon
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -305,16 +305,16 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
-      // Fail the phase
+      // Fail the codon
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "preparing",
           to: "failed",
           metadata: {
@@ -333,14 +333,14 @@ describe("Rollback Command Validation", () => {
 
       // In this case, rollback should fall back to first checkpoint
       const run = stateManager.getCurrentRun();
-      expect(run?.phases[0].status).toBe("failed");
+      expect(run?.codons[0].status).toBe("failed");
     });
   });
 
   describe("checkpoint type validation", () => {
-    test("should validate workspace-setup checkpoint exists", async () => {
+    test("should validate rig-setup checkpoint exists", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
       stateManager.transition({
         type: "RunStarted",
@@ -354,36 +354,36 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
-      // Transition to starting with workspace checkpoint
+      // Transition to starting with rig setup checkpoint
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "preparing",
           to: "starting",
-          metadata: { checkpointSha: "workspace123" },
+          metadata: { checkpointSha: "rigsetup123" },
         },
       });
 
       await stateManager.waitForPendingTransitions();
 
       const run = stateManager.getCurrentRun();
-      const phase = run?.phases[0];
-      expect(phase?.status).toBe("starting");
+      const codon = run?.codons[0];
+      expect(codon?.status).toBe("starting");
 
-      if (phase?.status === "starting" && "workspaceSetupCheckpoint" in phase) {
-        expect(phase.workspaceSetupCheckpoint).toBe("workspace123");
+      if (codon?.status === "starting" && "rigSetupCheckpoint" in codon) {
+        expect(codon.rigSetupCheckpoint).toBe("rigsetup123");
       }
     });
 
     test("should validate completed checkpoint exists", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
       stateManager.transition({
         type: "RunStarted",
@@ -397,8 +397,8 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
       // Complete with checkpoint
@@ -423,12 +423,12 @@ describe("Rollback Command Validation", () => {
 
       for (const t of transitions) {
         stateManager.transition({
-          type: "PhaseTransitioned",
+          type: "CodonTransitioned",
           data: {
             runId,
-            phaseId,
-            from: t.from as ST.PhaseStatus,
-            to: t.to as ST.PhaseStatus,
+            codonId,
+            from: t.from as ST.CodonStatus,
+            to: t.to as ST.CodonStatus,
             metadata: t.metadata,
           },
         });
@@ -437,17 +437,17 @@ describe("Rollback Command Validation", () => {
       await stateManager.waitForPendingTransitions();
 
       const run = stateManager.getCurrentRun();
-      const phase = run?.phases[0];
-      expect(phase?.status).toBe("completed");
+      const codon = run?.codons[0];
+      expect(codon?.status).toBe("completed");
 
-      if (phase?.status === "completed") {
-        expect(phase.completionCheckpoint).toBe("completed123");
+      if (codon?.status === "completed") {
+        expect(codon.completionCheckpoint).toBe("completed123");
       }
     });
 
     test("should validate skipped checkpoint exists", async () => {
       const runId = RunId("test-run");
-      const phaseId = PhaseId("test-phase");
+      const codonId = CodonId("test-codon");
 
       stateManager.transition({
         type: "RunStarted",
@@ -461,16 +461,16 @@ describe("Rollback Command Validation", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
       // Skip with checkpoint
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "preparing",
           to: "skipped",
           metadata: {
@@ -483,11 +483,11 @@ describe("Rollback Command Validation", () => {
       await stateManager.waitForPendingTransitions();
 
       const run = stateManager.getCurrentRun();
-      const phase = run?.phases[0];
-      expect(phase?.status).toBe("skipped");
+      const codon = run?.codons[0];
+      expect(codon?.status).toBe("skipped");
 
-      if (phase?.status === "skipped" && "skipCheckpoint" in phase) {
-        expect(phase.skipCheckpoint).toBe("skipped123");
+      if (codon?.status === "skipped" && "skipCheckpoint" in codon) {
+        expect(codon.skipCheckpoint).toBe("skipped123");
       }
     });
   });

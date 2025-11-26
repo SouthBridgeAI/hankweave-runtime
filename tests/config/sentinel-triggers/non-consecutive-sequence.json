@@ -1,0 +1,36 @@
+{
+  "id": "non-consecutive-sequence",
+  "name": "Non-Consecutive Sequence Detector",
+  "description": "Detects codon start followed by completion, even with events in between",
+  "trigger": {
+    "type": "sequence",
+    "interestFilter": {
+      "on": [
+        "codon.started",
+        "codon.completed"
+      ]
+    },
+    "pattern": [
+      {
+        "type": "codon.started",
+        "conditions": []
+      },
+      {
+        "type": "codon.completed",
+        "conditions": []
+      }
+    ],
+    "options": {
+      "consecutive": false
+    }
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "model": "anthropic/claude-haiku-4-5",
+  "output": {
+    "format": "json",
+    "file": "codon-lifecycle.jsonl"
+  },
+  "userPromptText": "Codon lifecycle detected: <%= JSON.stringify(it.events, null, 2) %>"
+}

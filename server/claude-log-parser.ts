@@ -13,8 +13,8 @@ import {
 export interface ClaudeLogParserOptions {
   /** Path to the Claude JSONL log file to parse */
   logPath: string;
-  /** ID of the phase being parsed (for context) */
-  phaseId: string;
+  /** ID of the codon being parsed (for context) */
+  codonId: string;
   /** Callback for system messages (init, info) */
   onSystemMessage?: (msg: SystemMessage) => void;
   /** Callback for assistant messages (Claude's responses) */
@@ -66,6 +66,15 @@ export class ClaudeLogParser {
   }
 
   /**
+   * Get all parsed messages from the log file.
+   * Re-parses the entire log file to collect all messages.
+   * Useful for analyzing the entire conversation at process completion.
+   */
+  getAllMessages(): Array<SystemMessage | AssistantMessage | UserMessage | ResultMessage> {
+    return this.parseLogFile({ noEmit: true, fullParse: true });
+  }
+
+  /**
    * Force an immediate parse of the log file.
    * Useful when we need to ensure all messages are processed before process termination.
    */
@@ -73,39 +82,74 @@ export class ClaudeLogParser {
     this.parseLogFile();
   }
 
-  private parseLogFile(): void {
+  /**
+   * Parse the log file and return all parsed messages.
+   * Supports both incremental parsing (with buffer management) and full file parsing.
+   *
+   * @param options.noEmit - If true, don't fire callbacks (default: false)
+   * @param options.fullParse - If true, parse entire file from scratch (default: false)
+   */
+  private parseLogFile(options?: {
+    noEmit?: boolean;
+    fullParse?: boolean;
+  }): Array<SystemMessage | AssistantMessage | UserMessage | ResultMessage> {
     const { logPath } = this.options;
+    const { noEmit = false, fullParse = false } = options || {};
+    const messages: Array<SystemMessage | AssistantMessage | UserMessage | ResultMessage> = [];
+
     if (!fs.existsSync(logPath)) {
-      return;
+      return messages;
     }
 
     try {
       const content = fs.readFileSync(logPath, "utf-8");
 
-      // On first parse, read from beginning to catch any messages written before we started
-      const newContent = this.isFirstParse ? content : content.slice(this.lastPosition);
-      if (!newContent) {
-        return;
-      }
-
-      this.buffer += newContent;
-      const lines = this.buffer.split("\n");
-      this.buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.trim()) {
-          this.parseLogLine(line);
+      if (fullParse) {
+        // Full parse mode: parse entire file without buffer management
+        const lines = content.split("\n");
+        for (const line of lines) {
+          if (line.trim()) {
+            const message = this.parseLogLine(line, noEmit);
+            if (message) {
+              messages.push(message);
+            }
+          }
         }
-      }
+      } else {
+        // Incremental parse mode: use buffer and position tracking
+        // On first parse, read from beginning to catch any messages written before we started
+        const newContent = this.isFirstParse ? content : content.slice(this.lastPosition);
+        if (!newContent) {
+          return messages;
+        }
 
-      this.lastPosition = content.length - this.buffer.length;
-      this.isFirstParse = false; // Mark that we've done our first parse
+        this.buffer += newContent;
+        const lines = this.buffer.split("\n");
+        this.buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.trim()) {
+            const message = this.parseLogLine(line, noEmit);
+            if (message) {
+              messages.push(message);
+            }
+          }
+        }
+
+        this.lastPosition = content.length - this.buffer.length;
+        this.isFirstParse = false; // Mark that we've done our first parse
+      }
     } catch (error) {
       console.error(`Error parsing log: ${error}`);
     }
+
+    return messages;
   }
 
-  private parseLogLine(line: string): void {
+  private parseLogLine(
+    line: string,
+    noEmit = false,
+  ): SystemMessage | AssistantMessage | UserMessage | ResultMessage | undefined {
     try {
       const parsed = JSON.parse(line);
       const result = logMessageSchema.safeParse(parsed);
@@ -113,7 +157,7 @@ export class ClaudeLogParser {
         // Log validation failures for debugging - especially important for system init messages
         if (parsed.type === "system" && parsed.subtype === "init") {
           console.error(
-            `[ClaudeLogParser] Failed to parse system init message for phase ${this.options.phaseId}:`,
+            `[ClaudeLogParser] Failed to parse system init message for codon ${this.options.codonId}:`,
             result.error.format(),
           );
           console.error(
@@ -121,38 +165,44 @@ export class ClaudeLogParser {
             JSON.stringify(parsed, null, 2),
           );
         }
-        return; // Skip invalid messages
+        return undefined; // Skip invalid messages
       }
 
       const message = result.data;
 
-      switch (message.type) {
-        case "system":
-          if (this.options.onSystemMessage) {
-            this.options.onSystemMessage(message);
-          }
-          break;
+      // Only emit callbacks if noEmit is false
+      if (!noEmit) {
+        switch (message.type) {
+          case "system":
+            if (this.options.onSystemMessage) {
+              this.options.onSystemMessage(message);
+            }
+            break;
 
-        case "assistant":
-          if (this.options.onAssistantMessage) {
-            this.options.onAssistantMessage(message);
-          }
-          break;
+          case "assistant":
+            if (this.options.onAssistantMessage) {
+              this.options.onAssistantMessage(message);
+            }
+            break;
 
-        case "user":
-          if (this.options.onUserMessage) {
-            this.options.onUserMessage(message);
-          }
-          break;
+          case "user":
+            if (this.options.onUserMessage) {
+              this.options.onUserMessage(message);
+            }
+            break;
 
-        case "result":
-          if (this.options.onResultMessage) {
-            this.options.onResultMessage(message);
-          }
-          break;
+          case "result":
+            if (this.options.onResultMessage) {
+              this.options.onResultMessage(message);
+            }
+            break;
+        }
       }
+
+      return message;
     } catch {
       // Invalid JSON, skip
+      return undefined;
     }
   }
 }

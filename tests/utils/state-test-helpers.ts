@@ -1,24 +1,24 @@
 import path from "node:path";
-import { StateManager } from "../../server/state-manager.js";
-import { PhaseId } from "../../server/types/branded-types.js";
-import type { PhaseStatus, TadpoleState } from "../../server/types/state-types.js";
-import type { PhaseConfig } from "../../server/types/types.js";
-import { Logger } from "../../server/utils.js";
+import { StateManager } from "../../server/state-manager";
+import { CodonId } from "../../server/types/branded-types";
+import type { CodonStatus, StrandweaveState } from "../../server/types/state-types";
+import type { CodonConfig } from "../../server/types/types";
+import { Logger } from "../../server/utils";
 
-export function waitForPhaseStatus(
+export function waitForCodonStatus(
   stateManager: StateManager,
-  phaseId: string,
-  status: PhaseStatus,
+  codonId: string,
+  status: CodonStatus,
   timeout = 5000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
     const check = () => {
-      const phase = stateManager.getPhaseInCurrentRun(PhaseId(phaseId));
-      if (phase?.status === status) {
+      const codon = stateManager.getCodonInCurrentRun(CodonId(codonId));
+      if (codon?.status === status) {
         resolve();
       } else if (Date.now() - startTime > timeout) {
-        reject(new Error(`Timeout waiting for phase ${phaseId} to reach status ${status}`));
+        reject(new Error(`Timeout waiting for codon ${codonId} to reach status ${status}`));
       } else {
         setTimeout(check, 100);
       }
@@ -27,34 +27,35 @@ export function waitForPhaseStatus(
   });
 }
 
-export function createMockState(overrides?: Partial<TadpoleState>): TadpoleState {
+export function createMockState(overrides?: Partial<StrandweaveState>): StrandweaveState {
   return {
     runs: [],
     currentRunId: null,
+    executionPlan: [],
     ...overrides,
   };
 }
 
 export function createTestStateManager(
   testDir: string,
-  phaseConfigs?: PhaseConfig[],
+  codonConfigs?: CodonConfig[],
 ): StateManager {
   const logger = new Logger(path.join(testDir, "test.log"));
-  return new StateManager(path.join(testDir, ".tadpole"), logger, phaseConfigs);
+  return new StateManager(path.join(testDir, ".strandweave"), logger, codonConfigs);
 }
 
-export function getCompletedPhasesFromState(state: TadpoleState): Array<{
-  phaseId: string;
+export function getCompletedCodonsFromState(state: StrandweaveState): Array<{
+  codonId: string;
   cost: number;
   sessionId: string;
 }> {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
   if (!currentRun) return [];
 
-  return currentRun.phases
+  return currentRun.codons
     .filter((p) => p.status === "completed")
     .map((p) => ({
-      phaseId: p.phaseId,
+      codonId: p.codonId,
       cost: "finalCost" in p ? p.finalCost : 0,
       sessionId: "claudeSessionId" in p ? p.claudeSessionId : "unknown",
     }));

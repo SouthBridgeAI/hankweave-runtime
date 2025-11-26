@@ -1,12 +1,12 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
 import type {
-  TadpoleGenerateObjectOptions,
-  TadpoleGenerateObjectResult,
-  TadpoleGenerateTextOptions,
-  TadpoleGenerateTextResult,
-  TadpoleStreamTextOptions,
-  TadpoleStreamTextResult,
+  StrandweaveGenerateObjectOptions,
+  StrandweaveGenerateObjectResult,
+  StrandweaveGenerateTextOptions,
+  StrandweaveGenerateTextResult,
+  StrandweaveStreamTextOptions,
+  StrandweaveStreamTextResult,
 } from "../../server/types/llm-call-types";
 
 // --- Helper Functions for Realistic Simulation ---
@@ -63,12 +63,15 @@ function generateMockDataForSchema(schema: z.ZodSchema<unknown>): unknown {
 export type MockLlmConfig = {
   forceError?: Error;
   errorProvider?: (
-    options: TadpoleGenerateTextOptions | TadpoleStreamTextOptions | TadpoleGenerateObjectOptions,
+    options:
+      | StrandweaveGenerateTextOptions
+      | StrandweaveStreamTextOptions
+      | StrandweaveGenerateObjectOptions,
   ) => Error | undefined;
   // Custom implementations for testing
   generateObject?: <T>(
-    options: TadpoleGenerateObjectOptions,
-  ) => Promise<TadpoleGenerateObjectResult<T>>;
+    options: StrandweaveGenerateObjectOptions,
+  ) => Promise<StrandweaveGenerateObjectResult<T>>;
   // Add parameter overrides for testing
   respectMaxOutputTokens?: boolean; // Default: true
 };
@@ -86,8 +89,8 @@ export function createMockLlm(config: MockLlmConfig = {}) {
    * Mock implementation of `generateText`.
    */
   async function mockGenerateText(
-    options: TadpoleGenerateTextOptions,
-  ): Promise<TadpoleGenerateTextResult> {
+    options: StrandweaveGenerateTextOptions,
+  ): Promise<StrandweaveGenerateTextResult> {
     // Handle forced errors for testing
     if (config.forceError) {
       throw config.forceError;
@@ -131,7 +134,7 @@ export function createMockLlm(config: MockLlmConfig = {}) {
   /**
    * Mock implementation of `streamText`.
    */
-  function mockStreamText(options: TadpoleStreamTextOptions): TadpoleStreamTextResult {
+  function mockStreamText(options: StrandweaveStreamTextOptions): StrandweaveStreamTextResult {
     // Handle forced errors for testing
     if (config.forceError) {
       throw config.forceError;
@@ -215,8 +218,8 @@ export function createMockLlm(config: MockLlmConfig = {}) {
    * Mock implementation of `generateObject`.
    */
   async function mockGenerateObject<T>(
-    options: TadpoleGenerateObjectOptions,
-  ): Promise<TadpoleGenerateObjectResult<T>> {
+    options: StrandweaveGenerateObjectOptions,
+  ): Promise<StrandweaveGenerateObjectResult<T>> {
     // Handle forced errors for testing
     if (config.forceError) {
       throw config.forceError;
@@ -268,10 +271,10 @@ export function createMockLlm(config: MockLlmConfig = {}) {
  */
 export function createTypedMockLlmAdapter(
   customResponse?: string | (() => Promise<string>) | (() => Promise<never>),
-): (id: string, options: TadpoleGenerateTextOptions) => Promise<TadpoleGenerateTextResult> {
+): (id: string, options: StrandweaveGenerateTextOptions) => Promise<StrandweaveGenerateTextResult> {
   const mockLlm = createMockLlm();
 
-  return async (_id: string, options: TadpoleGenerateTextOptions) => {
+  return async (_id: string, options: StrandweaveGenerateTextOptions) => {
     // If a custom response function is provided, use it for the text
     if (customResponse) {
       if (typeof customResponse === "string") {

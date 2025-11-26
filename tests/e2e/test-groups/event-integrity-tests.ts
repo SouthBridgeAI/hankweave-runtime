@@ -69,7 +69,7 @@ export function runEventIntegrityTests(testState: TestState) {
 
     assistantActions.forEach((action) => {
       if (action.type === "assistant.action") {
-        const signature = `${action.data.phaseId}_${action.data.action}_${action.data.content}`;
+        const signature = `${action.data.codonId}_${action.data.action}_${action.data.content}`;
         actionSignatures.set(signature, (actionSignatures.get(signature) || 0) + 1);
       }
     });
@@ -98,29 +98,29 @@ export function runEventIntegrityTests(testState: TestState) {
     });
   });
 
-  test("memory and resource monitoring in completed phases", () => {
+  test("memory and resource monitoring in completed codons", () => {
     const finalSnapshot = [...testState.events].reverse().find((e) => e.type === "state.snapshot");
 
-    if (finalSnapshot?.type === "state.snapshot" && finalSnapshot.data.completedPhases) {
-      // Completed phases should only have essential data
-      finalSnapshot.data.completedPhases.forEach((phase) => {
+    if (finalSnapshot?.type === "state.snapshot" && finalSnapshot.data.completedCodons) {
+      // Completed codons should only have essential data
+      finalSnapshot.data.completedCodons.forEach((codon) => {
         // Check for new properties
-        expect(phase).toHaveProperty("phaseId");
+        expect(codon).toHaveProperty("codonId");
 
-        expect(phase).toHaveProperty("claudeSessionId");
+        expect(codon).toHaveProperty("claudeSessionId");
 
-        expect(phase).toHaveProperty("status");
-        expect(phase.status).toBe("completed"); // Also check the value
+        expect(codon).toHaveProperty("status");
+        expect(codon.status).toBe("completed"); // Also check the value
 
         // Add checks for other important final properties
-        expect(phase).toHaveProperty("endTime");
-        expect(phase).toHaveProperty("finalCost");
-        expect(phase).toHaveProperty("completionCheckpoint");
+        expect(codon).toHaveProperty("endTime");
+        expect(codon).toHaveProperty("finalCost");
+        expect(codon).toHaveProperty("completionCheckpoint");
 
         // Should not have large data structures
-        const phaseStr = JSON.stringify(phase);
+        const codonStr = JSON.stringify(codon);
         // The object is richer, so we increase the size limit slightly.
-        expect(phaseStr.length).toBeLessThan(2000);
+        expect(codonStr.length).toBeLessThan(2000);
       });
     }
   });

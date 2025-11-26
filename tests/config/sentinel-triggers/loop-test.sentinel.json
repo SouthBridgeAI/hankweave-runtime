@@ -1,0 +1,18 @@
+{
+  "id": "loop-test-sentinel",
+  "name": "Loop Test Sentinel",
+  "description": "Minimal sentinel for testing in loop iterations",
+  "model": "anthropic/claude-haiku-4-5",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action"
+    ]
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 5000
+  },
+  "userPromptText": "Summarize this action in one sentence: <%= JSON.stringify(it.events[0], null, 2) %>",
+  "joinString": "\n\n"
+}

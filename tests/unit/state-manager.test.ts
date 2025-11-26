@@ -1,18 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import {
-  InvalidTransitionError,
-  PersistenceError,
-  StateManager,
-} from "../../server/state-manager.js";
-import { PhaseId, RunId, SessionId } from "../../server/types/branded-types.js";
-import type * as ST from "../../server/types/state-types.js";
-import { Logger } from "../../server/utils.js";
+import { InvalidTransitionError, PersistenceError, StateManager } from "../../server/state-manager";
+import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
+import type * as ST from "../../server/types/state-types";
+import { Logger } from "../../server/utils";
 
 // Test directory setup
-const TEST_DIR = path.join(__dirname, "test-state-manager");
-const TEST_TADPOLE_DIR = path.join(TEST_DIR, ".tadpole");
+const TEST_DIR = path.join(import.meta.dir, "test-state-manager");
+const TEST_STRANDWEAVE_DIR = path.join(TEST_DIR, ".strandweave");
 
 // Mock logger - extends Logger to handle private property
 class MockLogger extends Logger {
@@ -33,13 +29,13 @@ describe("StateManager", () => {
 
   beforeEach(async () => {
     // Create test directory
-    await fs.promises.mkdir(TEST_TADPOLE_DIR, { recursive: true });
+    await fs.promises.mkdir(TEST_STRANDWEAVE_DIR, { recursive: true });
 
     // Create mock logger
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_TADPOLE_DIR, mockLogger);
+    stateManager = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger);
   });
 
   afterEach(async () => {
@@ -65,14 +61,14 @@ describe("StateManager", () => {
 
     test("loads existing state from disk", async () => {
       // Create a state file
-      const existingState: ST.TadpoleState = {
+      const existingState: ST.StrandweaveState = {
         runs: [
           {
             runId: RunId("test-run-1"),
             runFolder: "/test/runs/test-run-1",
             gitBranch: "run-test-run-1",
             startingConditions: { type: "fresh" },
-            phases: [],
+            codons: [],
             status: "completed",
             startTime: "2024-01-01T00:00:00Z",
             endTime: "2024-01-01T01:00:00Z",
@@ -80,9 +76,10 @@ describe("StateManager", () => {
           },
         ],
         currentRunId: null,
+        executionPlan: [],
       };
 
-      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, JSON.stringify(existingState));
 
       await stateManager.initialize();
@@ -98,27 +95,28 @@ describe("StateManager", () => {
 
     test("recovers from backup when main file corrupted", async () => {
       // Create corrupted main file
-      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, "{ invalid json");
 
       // Create valid backup
-      const backupState: ST.TadpoleState = {
+      const backupState: ST.StrandweaveState = {
         runs: [
           {
             runId: RunId("backup-run"),
             runFolder: "/test/runs/backup-run",
             gitBranch: "run-backup-run",
             startingConditions: { type: "fresh" },
-            phases: [],
+            codons: [],
             status: "completed",
             startTime: "2024-01-01T00:00:00Z",
             serverPid: 12345,
           },
         ],
         currentRunId: null,
+        executionPlan: [],
       };
 
-      const backupPath = path.join(TEST_TADPOLE_DIR, "state.json.bak");
+      const backupPath = path.join(TEST_STRANDWEAVE_DIR, "state.json.bak");
       await fs.promises.writeFile(backupPath, JSON.stringify(backupState));
 
       await stateManager.initialize();
@@ -133,17 +131,20 @@ describe("StateManager", () => {
     });
 
     test("detects crashed runs on startup", async () => {
+      // Ensure directory structure exists for atomic writes
+      await fs.promises.mkdir(TEST_STRANDWEAVE_DIR, { recursive: true });
+
       // Create state with running run from dead process
-      const existingState: ST.TadpoleState = {
+      const existingState: ST.StrandweaveState = {
         runs: [
           {
             runId: RunId("crashed-run"),
             runFolder: "/test/runs/crashed-run",
             gitBranch: "run-crashed-run",
             startingConditions: { type: "fresh" },
-            phases: [
+            codons: [
               {
-                phaseId: PhaseId("test-phase"),
+                codonId: CodonId("test-codon"),
                 startTime: "2024-01-01T00:00:00Z",
                 status: "running",
                 claudeSessionId: SessionId("test-session"),
@@ -165,19 +166,20 @@ describe("StateManager", () => {
           },
         ],
         currentRunId: null,
+        executionPlan: [],
       };
 
-      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, JSON.stringify(existingState));
 
       await stateManager.initialize();
 
-      // Wait for async transition to process
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Wait for async transition to process and persist
+      await stateManager.waitForPendingTransitions();
 
       const state = stateManager.getState();
       expect(state.runs[0].status).toBe("crashed");
-      expect(state.runs[0].phases[0].status).toBe("failed");
+      expect(state.runs[0].codons[0].status).toBe("failed");
     });
   });
 
@@ -199,21 +201,21 @@ describe("StateManager", () => {
         },
       });
 
-      // Start a phase
+      // Start a codon
       stateManager.transition({
-        type: "PhaseStarted",
+        type: "CodonStarted",
         data: {
           runId: RunId("test-run"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
         },
       });
 
       // Transition through states
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId: RunId("test-run"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           from: "preparing",
           to: "starting",
         },
@@ -224,11 +226,11 @@ describe("StateManager", () => {
 
       const state = stateManager.getState();
       expect(state.currentRunId).toBe(RunId("test-run"));
-      expect(state.runs[0].phases[0].status).toBe("starting");
+      expect(state.runs[0].codons[0].status).toBe("starting");
     });
 
     test("rejects invalid transitions", async () => {
-      // Start a run and phase
+      // Start a run and codon
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -241,10 +243,10 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
+        type: "CodonStarted",
         data: {
           runId: RunId("test-run"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
         },
       });
 
@@ -256,10 +258,10 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId: RunId("test-run"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           from: "preparing",
           to: "completed", // Invalid: can't go directly to completed
         },
@@ -284,7 +286,7 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
 
       // Check that state file exists
-      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
       expect(fs.existsSync(statePath)).toBe(true);
 
       // Load and verify content
@@ -294,7 +296,7 @@ describe("StateManager", () => {
     });
 
     test("maintains immutability of terminal states", async () => {
-      // Create a completed phase
+      // Create a completed codon
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -307,10 +309,10 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
+        type: "CodonStarted",
         data: {
           runId: RunId("test-run"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
         },
       });
 
@@ -336,12 +338,12 @@ describe("StateManager", () => {
 
       for (const t of transitions) {
         stateManager.transition({
-          type: "PhaseTransitioned",
+          type: "CodonTransitioned",
           data: {
             runId: RunId("test-run"),
-            phaseId: PhaseId("test-phase"),
-            from: t.from as ST.PhaseStatus,
-            to: t.to as ST.PhaseStatus,
+            codonId: CodonId("test-codon"),
+            from: t.from as ST.CodonStatus,
+            to: t.to as ST.CodonStatus,
             metadata: t.metadata,
           },
         });
@@ -356,10 +358,10 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId: RunId("test-run"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           from: "completed",
           to: "failed",
         },
@@ -368,9 +370,9 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
       expect(errorEmitted).toBe(true);
 
-      // Verify phase is still completed
+      // Verify codon is still completed
       const state = stateManager.getState();
-      expect(state.runs[0].phases[0].status).toBe("completed");
+      expect(state.runs[0].codons[0].status).toBe("completed");
     });
 
     test("handles rapid transitions without corruption", async () => {
@@ -388,13 +390,13 @@ describe("StateManager", () => {
         },
       });
 
-      // Start 5 phases rapidly
+      // Start 5 codons rapidly
       for (let i = 0; i < 5; i++) {
         stateManager.transition({
-          type: "PhaseStarted",
+          type: "CodonStarted",
           data: {
             runId,
-            phaseId: PhaseId(`phase-${i}`),
+            codonId: CodonId(`codon-${i}`),
           },
         });
       }
@@ -402,23 +404,23 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
 
       const state = stateManager.getState();
-      expect(state.runs[0].phases).toHaveLength(5);
+      expect(state.runs[0].codons).toHaveLength(5);
 
       // Verify state file is valid
-      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
       const savedState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
-      expect(savedState.runs[0].phases).toHaveLength(5);
+      expect(savedState.runs[0].codons).toHaveLength(5);
     });
   });
 
   describe("queries", () => {
     const runId = RunId("query-test");
-    const phaseId = PhaseId("test-phase");
+    const codonId = CodonId("test-codon");
 
     beforeEach(async () => {
       await stateManager.initialize();
 
-      // Set up a run with phases
+      // Set up a run with codons
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -431,8 +433,8 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
-        data: { runId, phaseId },
+        type: "CodonStarted",
+        data: { runId, codonId },
       });
 
       await stateManager.waitForPendingTransitions();
@@ -444,23 +446,23 @@ describe("StateManager", () => {
       expect(currentRun?.runId).toBe(runId);
     });
 
-    test("getCurrentlyRunningPhase returns running phase", async () => {
+    test("getCurrentlyRunningCodon returns running codon", async () => {
       // Progress to running state
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "preparing",
           to: "starting",
         },
       });
 
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "starting",
           to: "initializing",
           metadata: { claudePid: 123, claudeLogPath: "test.log" },
@@ -468,10 +470,10 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "initializing",
           to: "running",
           metadata: { claudeSessionId: SessionId("session-123") },
@@ -480,29 +482,29 @@ describe("StateManager", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      const currentPhase = stateManager.getCurrentlyRunningPhase();
-      expect(currentPhase).not.toBeNull();
-      expect(currentPhase?.status).toBe("running");
-      expect(currentPhase?.phaseId).toBe(phaseId);
+      const currentCodon = stateManager.getCurrentlyRunningCodon();
+      expect(currentCodon).not.toBeNull();
+      expect(currentCodon?.status).toBe("running");
+      expect(currentCodon?.codonId).toBe(codonId);
     });
 
     test("cost calculations sum correctly", async () => {
       // Update costs
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "preparing",
           to: "starting",
         },
       });
 
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "starting",
           to: "initializing",
           metadata: { claudePid: 123, claudeLogPath: "test.log" },
@@ -510,10 +512,10 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseTransitioned",
+        type: "CodonTransitioned",
         data: {
           runId,
-          phaseId,
+          codonId,
           from: "initializing",
           to: "running",
           metadata: { claudeSessionId: SessionId("session-123") },
@@ -525,7 +527,7 @@ describe("StateManager", () => {
         type: "CostsUpdated",
         data: {
           runId,
-          phaseId,
+          codonId,
           cost: 0.05,
           tokens: {
             inputTokens: 1000,
@@ -546,7 +548,7 @@ describe("StateManager", () => {
         type: "CostsUpdated",
         data: {
           runId,
-          phaseId,
+          codonId,
           cost: 0.1,
           tokens: {
             inputTokens: 2000,
@@ -584,8 +586,8 @@ describe("StateManager", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
-      const backupPath = path.join(TEST_TADPOLE_DIR, "state.json.bak");
+      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
+      const backupPath = path.join(TEST_STRANDWEAVE_DIR, "state.json.bak");
 
       // First save creates state file, no backup yet
       expect(fs.existsSync(statePath)).toBe(true);
@@ -593,10 +595,10 @@ describe("StateManager", () => {
 
       // Second transition creates backup
       stateManager.transition({
-        type: "PhaseStarted",
+        type: "CodonStarted",
         data: {
           runId: RunId("persist-test"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
         },
       });
 
@@ -607,18 +609,19 @@ describe("StateManager", () => {
 
       // Backup should contain previous state
       const backupState = JSON.parse(await fs.promises.readFile(backupPath, "utf-8"));
-      expect(backupState.runs[0].phases).toHaveLength(0);
+      expect(backupState.runs[0].codons).toHaveLength(0);
 
-      // Current state should have phase
+      // Current state should have codon
       const currentState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
-      expect(currentState.runs[0].phases).toHaveLength(1);
+      expect(currentState.runs[0].codons).toHaveLength(1);
     });
 
     test("validates state integrity", () => {
       // Test with valid state
-      const validState: ST.TadpoleState = {
+      const validState: ST.StrandweaveState = {
         runs: [],
         currentRunId: null,
+        executionPlan: [],
       };
 
       const validation = stateManager.validate(validState);
@@ -633,9 +636,10 @@ describe("StateManager", () => {
       expect(corruptedValidation.errors.some((e) => e.type === "corrupted_data")).toBe(true);
 
       // Test with missing run reference
-      const missingRunState: ST.TadpoleState = {
+      const missingRunState: ST.StrandweaveState = {
         runs: [],
         currentRunId: RunId("non-existent"),
+        executionPlan: [],
       };
 
       const missingValidation = stateManager.validate(missingRunState);
@@ -672,16 +676,16 @@ describe("StateManager", () => {
       expect(eventEmitted).toBe(true);
     });
 
-    test("emits phaseRunning when phase starts running", async () => {
-      let phaseRunningEmitted = false;
+    test("emits codonRunning when codon starts running", async () => {
+      let codonRunningEmitted = false;
 
-      stateManager.on("phaseRunning", (data) => {
-        expect(data.phaseId).toBe(PhaseId("test-phase"));
+      stateManager.on("codonRunning", (data) => {
+        expect(data.codonId).toBe(CodonId("test-codon"));
         expect(data.to).toBe("running");
-        phaseRunningEmitted = true;
+        codonRunningEmitted = true;
       });
 
-      // Set up run and phase
+      // Set up run and codon
       stateManager.transition({
         type: "RunStarted",
         data: {
@@ -694,10 +698,10 @@ describe("StateManager", () => {
       });
 
       stateManager.transition({
-        type: "PhaseStarted",
+        type: "CodonStarted",
         data: {
           runId: RunId("event-test"),
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
         },
       });
 
@@ -718,19 +722,19 @@ describe("StateManager", () => {
 
       for (const t of transitions) {
         stateManager.transition({
-          type: "PhaseTransitioned",
+          type: "CodonTransitioned",
           data: {
             runId: RunId("event-test"),
-            phaseId: PhaseId("test-phase"),
-            from: t.from as ST.PhaseStatus,
-            to: t.to as ST.PhaseStatus,
+            codonId: CodonId("test-codon"),
+            from: t.from as ST.CodonStatus,
+            to: t.to as ST.CodonStatus,
             metadata: t.metadata,
           },
         });
       }
 
       await stateManager.waitForPendingTransitions();
-      expect(phaseRunningEmitted).toBe(true);
+      expect(codonRunningEmitted).toBe(true);
     });
   });
 
@@ -748,9 +752,9 @@ describe("StateManager", () => {
       await stateManager.initialize();
 
       // Make directory read-only to cause save error
-      const statePath = path.join(TEST_TADPOLE_DIR, "state.json");
+      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, "dummy");
-      await fs.promises.chmod(TEST_TADPOLE_DIR, 0o444); // Read-only
+      await fs.promises.chmod(TEST_STRANDWEAVE_DIR, 0o444); // Read-only
 
       let _errorEmitted = false;
       stateManager.on("transitionError", ({ error }) => {
@@ -772,11 +776,507 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
 
       // Restore permissions
-      await fs.promises.chmod(TEST_TADPOLE_DIR, 0o755);
+      await fs.promises.chmod(TEST_STRANDWEAVE_DIR, 0o755);
 
       // State should still be updated in memory despite save error
       const state = stateManager.getState();
       expect(state.currentRunId).toBe(RunId("error-test"));
+    });
+  });
+
+  describe("expandNextIterationForCodon", () => {
+    test("passes contextExceeded flag to planner", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("test-loop"),
+          name: "Test Loop",
+          codons: [
+            {
+              id: CodonId("work"),
+              name: "Work",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "Do work",
+            },
+          ],
+          terminateOn: { type: "contextExceeded" as const },
+        },
+      ];
+
+      // Create state manager with codon configs
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Verify initial plan has one codon (work#0)
+      const initialState = smWithConfigs.getState();
+      expect(initialState.executionPlan).toHaveLength(1);
+      expect(initialState.executionPlan[0].codonId).toBe(CodonId("work#0"));
+
+      // Expand without context exceeded - should add iteration 1
+      await smWithConfigs.expandNextIterationForCodon({
+        codonId: CodonId("work#0"),
+        contextExceeded: false,
+      });
+      const expandedState = smWithConfigs.getState();
+      expect(expandedState.executionPlan).toHaveLength(2);
+      expect(expandedState.executionPlan[1].codonId).toBe(CodonId("work#1"));
+
+      // Expand with context exceeded - should NOT add iteration 2
+      await smWithConfigs.expandNextIterationForCodon({
+        codonId: CodonId("work#1"),
+        contextExceeded: true,
+      });
+      const finalState = smWithConfigs.getState();
+      expect(finalState.executionPlan).toHaveLength(2); // No new iteration
+    });
+
+    test("persists updated plan after expansion", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("test-loop"),
+          name: "Test Loop",
+          codons: [
+            {
+              id: CodonId("codon"),
+              name: "Codon",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "Test",
+            },
+          ],
+          terminateOn: { type: "iterationLimit" as const, limit: 3 },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Expand iteration
+      await smWithConfigs.expandNextIterationForCodon({
+        codonId: CodonId("codon#0"),
+      });
+
+      // Verify plan was updated in memory
+      const state = smWithConfigs.getState();
+      expect(state.executionPlan).toHaveLength(2);
+
+      // Create new state manager and load from disk to verify persistence
+      const smReloaded = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smReloaded.initialize();
+
+      const reloadedState = smReloaded.getState();
+      expect(reloadedState.executionPlan).toHaveLength(2);
+      expect(reloadedState.executionPlan[1].codonId).toBe(CodonId("codon#1"));
+    });
+
+    test("validates plan after expansion", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("loop"),
+          name: "Loop",
+          codons: [
+            {
+              id: CodonId("p"),
+              name: "P",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "P",
+            },
+          ],
+          terminateOn: { type: "iterationLimit" as const, limit: 3 },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Expansion should succeed with valid plan
+      await expect(async () => {
+        await smWithConfigs.expandNextIterationForCodon({
+          codonId: CodonId("p#0"),
+        });
+      }).not.toThrow();
+    });
+
+    test("handles codon not found in plan", async () => {
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, []);
+      await smWithConfigs.initialize();
+
+      // Try to expand non-existent codon - should return early without error
+      await smWithConfigs.expandNextIterationForCodon({
+        codonId: CodonId("nonexistent"),
+      });
+
+      // Execution plan should remain unchanged
+      const state = smWithConfigs.getState();
+      expect(state.executionPlan).toHaveLength(0);
+    });
+
+    test("default contextExceeded=false continues loop", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("loop"),
+          name: "Loop",
+          codons: [
+            {
+              id: CodonId("p"),
+              name: "P",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "P",
+            },
+          ],
+          terminateOn: { type: "contextExceeded" as const },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Call without contextExceeded parameter (defaults to false)
+      await smWithConfigs.expandNextIterationForCodon({
+        codonId: CodonId("p#0"),
+      });
+
+      // Should expand (not terminate)
+      expect(smWithConfigs.getState().executionPlan).toHaveLength(2);
+    });
+  });
+
+  describe("isContextExceededAcceptable", () => {
+    test("returns true for codon in loop with contextExceeded termination", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("context-loop"),
+          name: "Context Loop",
+          codons: [
+            {
+              id: CodonId("work"),
+              name: "Work",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "Do work",
+            },
+          ],
+          terminateOn: { type: "contextExceeded" as const },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Check if context exceeded is acceptable for this codon
+      const acceptable = smWithConfigs.isContextExceededAcceptable(CodonId("work#0"));
+      expect(acceptable).toBe(true);
+    });
+
+    test("returns false for codon in loop with iterationLimit termination", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("limited-loop"),
+          name: "Limited Loop",
+          codons: [
+            {
+              id: CodonId("work"),
+              name: "Work",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "Do work",
+            },
+          ],
+          terminateOn: { type: "iterationLimit" as const, limit: 3 },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Context exceeded NOT acceptable for iterationLimit loops
+      const acceptable = smWithConfigs.isContextExceededAcceptable(CodonId("work#0"));
+      expect(acceptable).toBe(false);
+    });
+
+    test("returns false for regular codon (not in loop)", async () => {
+      const codonConfigs = [
+        {
+          id: CodonId("regular"),
+          name: "Regular Codon",
+          model: "sonnet" as const,
+          continuationMode: "fresh" as const,
+          promptText: "Do work",
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Regular codons don't accept context exceeded
+      const acceptable = smWithConfigs.isContextExceededAcceptable(CodonId("regular"));
+      expect(acceptable).toBe(false);
+    });
+
+    test("returns false for codon not found in plan", async () => {
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, []);
+      await smWithConfigs.initialize();
+
+      // Codon doesn't exist in plan
+      const acceptable = smWithConfigs.isContextExceededAcceptable(CodonId("nonexistent"));
+      expect(acceptable).toBe(false);
+    });
+
+    test("returns false if no codon configs provided", async () => {
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger);
+      await smWithConfigs.initialize();
+
+      // No codon configs means no loops
+      const acceptable = smWithConfigs.isContextExceededAcceptable(CodonId("any-codon"));
+      expect(acceptable).toBe(false);
+    });
+
+    test("works correctly for different codons in same loop", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("multi-codon-loop"),
+          name: "Multi Codon Loop",
+          codons: [
+            {
+              id: CodonId("codon1"),
+              name: "Codon 1",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "P1",
+            },
+            {
+              id: CodonId("codon2"),
+              name: "Codon 2",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "P2",
+            },
+          ],
+          terminateOn: { type: "contextExceeded" as const },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Both codons in the same loop should accept context exceeded
+      expect(smWithConfigs.isContextExceededAcceptable(CodonId("codon1#0"))).toBe(true);
+      expect(smWithConfigs.isContextExceededAcceptable(CodonId("codon2#0"))).toBe(true);
+    });
+
+    test("works correctly for multiple loops with different termination types", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("context-loop"),
+          name: "Context Loop",
+          codons: [
+            {
+              id: CodonId("work1"),
+              name: "Work 1",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "W1",
+            },
+          ],
+          terminateOn: { type: "contextExceeded" as const },
+        },
+        {
+          type: "loop" as const,
+          id: CodonId("limited-loop"),
+          name: "Limited Loop",
+          codons: [
+            {
+              id: CodonId("work2"),
+              name: "Work 2",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "W2",
+            },
+          ],
+          terminateOn: { type: "iterationLimit" as const, limit: 2 },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // First loop accepts context exceeded
+      expect(smWithConfigs.isContextExceededAcceptable(CodonId("work1#0"))).toBe(true);
+
+      // Second loop does NOT accept context exceeded
+      expect(smWithConfigs.isContextExceededAcceptable(CodonId("work2#0"))).toBe(false);
+    });
+
+    test("works correctly after loop expansion", async () => {
+      const codonConfigs = [
+        {
+          type: "loop" as const,
+          id: CodonId("loop"),
+          name: "Loop",
+          codons: [
+            {
+              id: CodonId("p"),
+              name: "P",
+              model: "sonnet" as const,
+              continuationMode: "fresh" as const,
+              promptText: "P",
+            },
+          ],
+          terminateOn: { type: "contextExceeded" as const },
+        },
+      ];
+
+      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      await smWithConfigs.initialize();
+
+      // Trigger RunStarted to build initial plan
+      smWithConfigs.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("test-run"),
+          runFolder: "/test/runs/test-run",
+          gitBranch: "run-test-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await smWithConfigs.waitForPendingTransitions();
+
+      // Expand to create p#1
+      await smWithConfigs.expandNextIterationForCodon({
+        codonId: CodonId("p#0"),
+      });
+
+      // Both iterations should accept context exceeded
+      expect(smWithConfigs.isContextExceededAcceptable(CodonId("p#0"))).toBe(true);
+      expect(smWithConfigs.isContextExceededAcceptable(CodonId("p#1"))).toBe(true);
     });
   });
 });

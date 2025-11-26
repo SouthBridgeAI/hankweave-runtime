@@ -1,8 +1,8 @@
 // Utilities for test data parsing and validation
 
-// ============================================================================
+// -------------
 // JSONL Parsing
-// ============================================================================
+// -------------
 
 // Types for Claude JSONL log entries
 export interface ClaudeLogEntry {
@@ -41,9 +41,9 @@ export function parseJSONL(content: string): ClaudeLogEntry[] {
     .filter((item): item is ClaudeLogEntry => item !== null);
 }
 
-// ============================================================================
+// -------------
 // Cost Calculation
-// ============================================================================
+// -------------
 
 export interface UsageData {
   input_tokens?: number;
@@ -106,9 +106,9 @@ export function calculateCostFromUsage(
   );
 }
 
-// ============================================================================
+// -------------
 // File Tree Navigation
-// ============================================================================
+// -------------
 
 export interface FileNode {
   name: string;

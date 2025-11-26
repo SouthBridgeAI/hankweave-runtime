@@ -4,7 +4,7 @@ import path from "node:path";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import type { PhaseConfig } from "./types/types.js";
+import { type Codon, isContextExceeded } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
 
 /**
@@ -27,25 +27,21 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   }
 
   /**
-   * Spawn a Claude process for the given phase configuration.
+   * Spawn a Claude process for the given codon configuration.
    * Sets up logging, environment, and process monitoring.
    *
-   * @param phase - Phase configuration
+   * @param codon - Codon configuration (not Loop - loops must be expanded first)
    * @param previousSessionId - Session ID to continue from (if any)
-   * @param logPath - Custom log file path (optional, defaults to .tadpole/logs/)
+   * @param logPath - Custom log file path (optional, defaults to .strandweave/logs/)
    */
-  async spawn(
-    phase: PhaseConfig,
-    previousSessionId: string | null,
-    logPath?: string,
-  ): Promise<string> {
+  async spawn(codon: Codon, previousSessionId: string | null, logPath?: string): Promise<string> {
     if (this.process) {
       throw new Error("Process already running");
     }
 
-    // Use provided logPath or default to .tadpole/logs/
+    // Use provided logPath or default to .strandweave/logs/
     const actualLogPath =
-      logPath || path.join(this.executionPath, `.tadpole/logs/log-${phase.id}.jsonl`);
+      logPath || path.join(this.executionPath, `.strandweave/logs/log-${codon.id}.jsonl`);
 
     // Ensure log directory exists
     const logsDir = path.dirname(actualLogPath);
@@ -57,15 +53,15 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     this.logStream = fs.createWriteStream(actualLogPath);
 
     // Build Claude arguments
-    const args = this.buildClaudeArgs(phase, previousSessionId);
+    const args = this.buildClaudeArgs(codon, previousSessionId);
 
     // Set up environment
     const env = { ...process.env }; // Start with server's environment
 
-    // Pass through TADPOLE_ prefixed variables from server environment
+    // Pass through STRANDWEAVE_ prefixed variables from server environment
     for (const key in process.env) {
-      if (key.startsWith("TADPOLE_")) {
-        const newKey = key.substring("TADPOLE_".length);
+      if (key.startsWith("STRANDWEAVE_")) {
+        const newKey = key.substring("STRANDWEAVE_".length);
         env[newKey] = process.env[key];
         this.logger.log(`Passing through env var: ${newKey}`);
       }
@@ -76,11 +72,11 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseURL}`);
     }
 
-    // Add phase-specific environment variables from config
+    // Add codon-specific environment variables from config
     // These will override any existing variables with the same name
-    if (phase.env) {
-      this.logger.log("Applying phase-specific environment variables...");
-      Object.assign(env, phase.env);
+    if (codon.env) {
+      this.logger.log("Applying codon-specific environment variables...");
+      Object.assign(env, codon.env);
     }
 
     // Log the exact command being run
@@ -125,9 +121,9 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     this.setupProcessHandlers();
 
     // Feed prompt to stdin
-    await this.feedPrompt(phase);
+    await this.feedPrompt(codon);
 
-    this.logger.log(`Claude process started for phase ${phase.id} (PID: ${this.process.pid})`);
+    this.logger.log(`Claude process started for codon ${codon.id} (PID: ${this.process.pid})`);
 
     return actualLogPath;
   }
@@ -135,9 +131,9 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   /**
    * Build command line arguments for Claude CLI.
    */
-  private buildClaudeArgs(phase: PhaseConfig, previousSessionId: string | null): string[] {
-    // Use model override if provided, otherwise use phase model
-    const model = this.modelOverride || phase.model;
+  private buildClaudeArgs(codon: Codon, previousSessionId: string | null): string[] {
+    // Use model override if provided, otherwise use codon model
+    const model = this.modelOverride || codon.model;
 
     const args = [
       "--verbose",
@@ -153,15 +149,15 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     // Log model usage
     if (this.modelOverride) {
-      this.logger.log(`Using model override: ${model} (phase config specified: ${phase.model})`);
+      this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
     }
 
-    if (phase.continuationMode === "continue-previous" && previousSessionId) {
+    if (codon.continuationMode === "continue-previous" && previousSessionId) {
       args.push("-c", "--resume", previousSessionId);
     }
 
     // Handle system prompt if provided
-    const systemPrompt = this.buildSystemPrompt(phase);
+    const systemPrompt = this.buildSystemPrompt(codon);
     if (systemPrompt) {
       args.push("--append-system-prompt", escapeShellArg(systemPrompt));
       this.logger.log(`Added system prompt to Claude (${systemPrompt.length} chars)`);
@@ -174,21 +170,21 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   /**
    * Build system prompt from file or text.
    */
-  private buildSystemPrompt(phase: PhaseConfig): string | null {
+  private buildSystemPrompt(codon: Codon): string | null {
     let content: string | null = null;
 
-    if (phase.appendSystemPromptFile) {
-      const files = Array.isArray(phase.appendSystemPromptFile)
-        ? phase.appendSystemPromptFile
-        : [phase.appendSystemPromptFile];
+    if (codon.appendSystemPromptFile) {
+      const files = Array.isArray(codon.appendSystemPromptFile)
+        ? codon.appendSystemPromptFile
+        : [codon.appendSystemPromptFile];
 
       const parts: string[] = [];
       for (const file of files) {
         parts.push(fs.readFileSync(file, "utf-8"));
       }
       content = parts.join("\n\n");
-    } else if (phase.appendSystemPromptText) {
-      content = phase.appendSystemPromptText;
+    } else if (codon.appendSystemPromptText) {
+      content = codon.appendSystemPromptText;
     }
 
     if (content) {
@@ -205,22 +201,22 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   /**
    * Feed prompt content to Claude's stdin.
    */
-  private async feedPrompt(phase: PhaseConfig): Promise<void> {
+  private async feedPrompt(codon: Codon): Promise<void> {
     if (!this.process?.stdin) {
       throw new Error("Process stdin not available");
     }
 
     let promptContent: string;
 
-    if (phase.promptFile) {
-      const files = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+    if (codon.promptFile) {
+      const files = Array.isArray(codon.promptFile) ? codon.promptFile : [codon.promptFile];
       const parts: string[] = [];
       for (const file of files) {
         parts.push(fs.readFileSync(file, "utf-8"));
       }
       promptContent = parts.join("\n\n");
-    } else if (phase.promptText) {
-      promptContent = phase.promptText;
+    } else if (codon.promptText) {
+      promptContent = codon.promptText;
     } else {
       throw new Error("No prompt file or text provided");
     }
@@ -245,8 +241,20 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     this.process.on("exit", (code, signal) => {
       this.logger.log(`Claude process exited with code: ${code}, signal: ${signal}`);
+
+      // Parse final log entries to ensure we have all messages
+      this.logParser.parseNow();
+
+      // Check all messages for context exceeded indicators
+      const allMessages = this.logParser.getAllMessages();
+      const contextExceeded = allMessages.some((msg) => isContextExceeded(msg));
+
+      if (contextExceeded) {
+        this.logger.log("Context exceeded detected in log messages");
+      }
+
       this.cleanup();
-      this.emit("exit", code || 0);
+      this.emit("exit", code || 0, contextExceeded);
     });
 
     this.process.on("error", (error) => {

@@ -5,8 +5,8 @@ import type { TestWSClient } from "../../utils/test-helpers.js";
 interface TestState {
   client: TestWSClient | null;
   // State-based fields
-  completedPhases: Array<{
-    phaseId: string;
+  completedCodons: Array<{
+    codonId: string;
     cost: number;
     sessionId: string;
   }>;
@@ -17,8 +17,8 @@ export function runStateSnapshotTests(testState: TestState) {
   test("state snapshot includes recent file access", () => {
     const stateSnapshots = testState.client?.getEventsByType("state.snapshot") || [];
 
-    // The final state snapshot (sent after phase completion) should have recent file access
-    // if any files were accessed during the phases
+    // The final state snapshot (sent after codon completion) should have recent file access
+    // if any files were accessed during the codons
     const lastSnapshot = stateSnapshots[stateSnapshots.length - 1] as StateSnapshotEvent;
 
     if (lastSnapshot) {
@@ -44,50 +44,50 @@ export function runStateSnapshotTests(testState: TestState) {
       // Total cost should match state.json
       expect(lastSnapshot.data.totalCost).toBeCloseTo(testState.totalCost, 6);
 
-      // Completed phases count should match
-      expect(lastSnapshot.data.completedPhases?.length).toBe(testState.completedPhases.length);
+      // Completed codons count should match
+      expect(lastSnapshot.data.completedCodons?.length).toBe(testState.completedCodons.length);
     }
   });
 
-  test("state snapshot completed phases have expected fields", () => {
+  test("state snapshot completed codons have expected fields", () => {
     const stateSnapshots = testState.client?.getEventsByType("state.snapshot") || [];
 
     const lastSnapshot = stateSnapshots[stateSnapshots.length - 1] as StateSnapshotEvent;
 
-    if (lastSnapshot?.data?.completedPhases) {
-      // Each completed phase in the snapshot should have required fields
-      for (const phase of lastSnapshot.data.completedPhases) {
-        expect(phase.phaseId).toBeDefined();
-        // Cost is only available on certain phase types
-        if (phase.status === "completed") {
-          expect(phase.finalCost).toBeGreaterThanOrEqual(0);
-        } else if (phase.status === "failed") {
-          expect(phase.partialCost).toBeGreaterThanOrEqual(0);
-        } else if (phase.status === "running") {
-          expect(phase.currentCost).toBeGreaterThanOrEqual(0);
+    if (lastSnapshot?.data?.completedCodons) {
+      // Each completed codon in the snapshot should have required fields
+      for (const codon of lastSnapshot.data.completedCodons) {
+        expect(codon.codonId).toBeDefined();
+        // Cost is only available on certain codon types
+        if (codon.status === "completed") {
+          expect(codon.finalCost).toBeGreaterThanOrEqual(0);
+        } else if (codon.status === "failed") {
+          expect(codon.partialCost).toBeGreaterThanOrEqual(0);
+        } else if (codon.status === "running") {
+          expect(codon.currentCost).toBeGreaterThanOrEqual(0);
         }
-        // Session ID is only available on certain phase types
-        if (phase.status === "completed") {
-          expect(phase.claudeSessionId).toBeDefined();
-        } else if (phase.status === "failed" && phase.claudeSessionId) {
-          expect(phase.claudeSessionId).toBeDefined();
-        } else if (phase.status === "skipped" && phase.claudeSessionId) {
-          expect(phase.claudeSessionId).toBeDefined();
-        } else if (phase.status === "running") {
-          expect(phase.claudeSessionId).toBeDefined();
+        // Session ID is only available on certain codon types
+        if (codon.status === "completed") {
+          expect(codon.claudeSessionId).toBeDefined();
+        } else if (codon.status === "failed" && codon.claudeSessionId) {
+          expect(codon.claudeSessionId).toBeDefined();
+        } else if (codon.status === "skipped" && codon.claudeSessionId) {
+          expect(codon.claudeSessionId).toBeDefined();
+        } else if (codon.status === "running") {
+          expect(codon.claudeSessionId).toBeDefined();
         }
-        // Duration is only available on terminal phase types
+        // Duration is only available on terminal codon types
         if (
-          (phase.status === "completed" ||
-            phase.status === "failed" ||
-            phase.status === "skipped") &&
-          phase.endTime
+          (codon.status === "completed" ||
+            codon.status === "failed" ||
+            codon.status === "skipped") &&
+          codon.endTime
         ) {
-          const duration = new Date(phase.endTime).getTime() - new Date(phase.startTime).getTime();
+          const duration = new Date(codon.endTime).getTime() - new Date(codon.startTime).getTime();
           expect(duration).toBeGreaterThan(0);
         }
-        // Note: The CompletedPhase type in StateSnapshotEvent is simplified
-        // and doesn't include all fields from the full phase execution
+        // Note: The CompletedCodon type in StateSnapshotEvent is simplified
+        // and doesn't include all fields from the full codon execution
       }
     }
   });

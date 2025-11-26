@@ -1,28 +1,28 @@
 import { z } from "zod";
-import { PhaseId } from "./types/branded-types.js";
+import { CodonId } from "./types/branded-types.js";
 
-const phaseIdSchema = z.string().transform((id) => PhaseId(id));
+const codonIdSchema = z.string().transform((id) => CodonId(id));
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
-    type: z.literal("phase.start"),
+    type: z.literal("codon.start"),
     data: z.object({
-      phaseId: phaseIdSchema,
+      codonId: codonIdSchema,
       skipPreCommands: z.boolean().optional(),
     }),
   }),
   z.object({
     id: z.string(),
-    type: z.literal("phase.next"),
+    type: z.literal("codon.next"),
   }),
   z.object({
     id: z.string(),
-    type: z.literal("phase.skip"),
+    type: z.literal("codon.skip"),
   }),
   z.object({
     id: z.string(),
-    type: z.literal("phase.redo"),
+    type: z.literal("codon.redo"),
   }),
   z.object({
     id: z.string(),
@@ -45,10 +45,10 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       .optional(),
   }),
 
-  // Force stop current phase
+  // Force stop current codon
   z.object({
     id: z.string(),
-    type: z.literal("phase.forceStop"),
+    type: z.literal("codon.forceStop"),
     data: z
       .object({
         reason: z.string().optional(),
@@ -66,18 +66,18 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     }),
   }),
 
-  // Rollback to phase + checkpoint type
+  // Rollback to codon + checkpoint type
   z.object({
     id: z.string(),
-    type: z.literal("rollback.toPhase"),
+    type: z.literal("rollback.toCodon"),
     data: z.object({
-      phaseId: phaseIdSchema,
-      checkpointType: z.enum(["start", "end", "workspace-setup", "completed", "error", "skipped"]),
+      codonId: codonIdSchema,
+      checkpointType: z.enum(["start", "end", "rig-setup", "completed", "error", "skipped"]),
       autoRestart: z.boolean().optional().default(false),
     }),
   }),
 
-  // Rollback to last successful phase
+  // Rollback to last successful codon
   z.object({
     id: z.string(),
     type: z.literal("rollback.toLastSuccess"),

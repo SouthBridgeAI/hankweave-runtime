@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import { EventId } from "../../server/types/branded-types.js";
-import type { ToolResultContent, UserMessage } from "../../server/types/claude-session-schema.js";
-import type { ToolResultEvent } from "../../server/types/types.js";
+import { ClaudeLogParser } from "../../server/claude-log-parser";
+import { EventId } from "../../server/types/branded-types";
+import type { ToolResultContent, UserMessage } from "../../server/types/claude-session-schema";
+import type { ToolResultEvent } from "../../server/types/types";
 
 describe("Tool Result Tracking", () => {
   describe("ToolResultEvent type", () => {
@@ -14,7 +14,7 @@ describe("Tool Result Tracking", () => {
         timestamp: new Date().toISOString(),
         type: "tool.result",
         data: {
-          phaseId: "phase-1",
+          codonId: "codon-1",
           toolUseId: "toolu_01234567890",
           toolName: "Write",
           result: "File written successfully",
@@ -26,7 +26,7 @@ describe("Tool Result Tracking", () => {
       };
 
       expect(event.type).toBe("tool.result");
-      expect(event.data.phaseId).toBe("phase-1");
+      expect(event.data.codonId).toBe("codon-1");
       expect(event.data.toolUseId).toBe("toolu_01234567890");
       expect(event.data.toolName).toBe("Write");
       expect(event.data.result).toBe("File written successfully");
@@ -42,7 +42,7 @@ describe("Tool Result Tracking", () => {
         timestamp: new Date().toISOString(),
         type: "tool.result",
         data: {
-          phaseId: "phase-1",
+          codonId: "codon-1",
           toolUseId: "toolu_12345",
           toolName: "Read",
           result: "This is a very long file content that has been truncated...",
@@ -64,7 +64,7 @@ describe("Tool Result Tracking", () => {
         timestamp: new Date().toISOString(),
         type: "tool.result",
         data: {
-          phaseId: "phase-1",
+          codonId: "codon-1",
           toolUseId: "toolu_error",
           toolName: "Write",
           result: "Error: Permission denied",
@@ -108,7 +108,7 @@ describe("Tool Result Tracking", () => {
 
       const parser = new ClaudeLogParser({
         logPath,
-        phaseId: "test-phase",
+        codonId: "test-codon",
         parsingInterval: 50,
         onUserMessage: (msg) => userMessages.push(msg),
       });
@@ -128,7 +128,11 @@ describe("Tool Result Tracking", () => {
         },
       };
 
-      fs.writeFileSync(logPath, `${JSON.stringify(userMessage)}\n`);
+      fs.writeFileSync(
+        logPath,
+        `${JSON.stringify(userMessage)}
+`,
+      );
 
       parser.start();
 
@@ -154,7 +158,7 @@ describe("Tool Result Tracking", () => {
 
       const parser = new ClaudeLogParser({
         logPath: arrayLogPath,
-        phaseId: "test-phase",
+        codonId: "test-codon",
         parsingInterval: 50,
         onUserMessage: (msg) => userMessages.push(msg),
       });
@@ -177,7 +181,11 @@ describe("Tool Result Tracking", () => {
         },
       };
 
-      fs.writeFileSync(arrayLogPath, `${JSON.stringify(userMessage)}\n`);
+      fs.writeFileSync(
+        arrayLogPath,
+        `${JSON.stringify(userMessage)}
+`,
+      );
 
       parser.start();
 
@@ -201,7 +209,7 @@ describe("Tool Result Tracking", () => {
 
       const parser = new ClaudeLogParser({
         logPath,
-        phaseId: "test-phase",
+        codonId: "test-codon",
         parsingInterval: 50,
         onUserMessage: (msg) => userMessages.push(msg),
       });
@@ -224,7 +232,11 @@ describe("Tool Result Tracking", () => {
         },
       };
 
-      fs.writeFileSync(logPath, `${JSON.stringify(userMessage)}\n`);
+      fs.writeFileSync(
+        logPath,
+        `${JSON.stringify(userMessage)}
+`,
+      );
 
       parser.start();
 
@@ -298,7 +310,7 @@ describe("Tool Result Tracking", () => {
         {
           toolName: string;
           timestamp: number;
-          phaseId: string;
+          codonId: string;
         }
       >();
 
@@ -309,12 +321,12 @@ describe("Tool Result Tracking", () => {
       pendingToolUses.set(toolUseId, {
         toolName: "Read",
         timestamp: startTime,
-        phaseId: "phase-1",
+        codonId: "codon-1",
       });
 
       expect(pendingToolUses.has(toolUseId)).toBe(true);
       expect(pendingToolUses.get(toolUseId)?.toolName).toBe("Read");
-      expect(pendingToolUses.get(toolUseId)?.phaseId).toBe("phase-1");
+      expect(pendingToolUses.get(toolUseId)?.codonId).toBe("codon-1");
 
       // Simulate tool result arriving
       const toolUse = pendingToolUses.get(toolUseId);
@@ -333,9 +345,9 @@ describe("Tool Result Tracking", () => {
 
       // Add multiple tool uses
       const toolUses = [
-        { id: "toolu_1", name: "Read", phase: "phase-1" },
-        { id: "toolu_2", name: "Write", phase: "phase-1" },
-        { id: "toolu_3", name: "Edit", phase: "phase-2" },
+        { id: "toolu_1", name: "Read", codon: "codon-1" },
+        { id: "toolu_2", name: "Write", codon: "codon-1" },
+        { id: "toolu_3", name: "Edit", codon: "codon-2" },
       ];
 
       const baseTime = Date.now();
@@ -343,7 +355,7 @@ describe("Tool Result Tracking", () => {
         pendingToolUses.set(tool.id, {
           toolName: tool.name,
           timestamp: baseTime + index * 10,
-          phaseId: tool.phase,
+          codonId: tool.codon,
         });
       });
 
@@ -381,17 +393,17 @@ describe("Tool Result Tracking", () => {
       pendingToolUses.set("toolu_1", {
         toolName: "Read",
         timestamp: Date.now(),
-        phaseId: "phase-1",
+        codonId: "codon-1",
       });
       pendingToolUses.set("toolu_2", {
         toolName: "Write",
         timestamp: Date.now(),
-        phaseId: "phase-1",
+        codonId: "codon-1",
       });
       pendingToolUses.set("toolu_3", {
         toolName: "Edit",
         timestamp: Date.now(),
-        phaseId: "phase-1",
+        codonId: "codon-1",
       });
 
       expect(pendingToolUses.size).toBe(3);

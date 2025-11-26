@@ -71,11 +71,11 @@ export function extractMessageContext(
 ): Record<string, unknown> {
   const context: Record<string, unknown> = {};
 
-  // Extract phase ID if present
+  // Extract codon ID if present
   if ("data" in message && message.data) {
     const data = message.data as Record<string, unknown>;
-    if ("phaseId" in data) {
-      context.phaseId = data.phaseId;
+    if ("codonId" in data) {
+      context.codonId = data.codonId;
     }
     if ("sessionId" in data) {
       context.sessionId = data.sessionId;

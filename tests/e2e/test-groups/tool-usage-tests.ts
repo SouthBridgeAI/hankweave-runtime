@@ -35,9 +35,23 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
     expect(toolCounts.Read || 0).toBeGreaterThanOrEqual(2);
   });
 
-  test("tool uses reported via WebSocket for each phase", () => {
-    for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
+  test("tool uses reported via WebSocket for each codon", () => {
+    // Find the run folder - there should be exactly one
+    const runsDir = path.join(testDir, ".strandweave/runs");
+    let runFolder = "";
+
+    if (fs.existsSync(runsDir)) {
+      const runFolders = fs.readdirSync(runsDir);
+      if (runFolders.length > 0) {
+        runFolder = path.join(runsDir, runFolders[0]);
+      }
+    }
+
+    if (!runFolder) return;
+
+    for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
+      // Logs are now in .strandweave/runs/{runId}/codon-{codonId}-claude.log
+      const logPath = path.join(runFolder, `${codonId}-claude.log`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const logEntries = parseJSONL(logContent);
@@ -51,11 +65,11 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
           ),
         ).length;
 
-        // Count WebSocket events for this phase
-        const phaseActions = assistantActionEvents.filter(
-          (e) => (e as AssistantActionEvent).data?.phaseId === phaseId,
+        // Count WebSocket events for this codon
+        const codonActions = assistantActionEvents.filter(
+          (e) => (e as AssistantActionEvent).data?.codonId === codonId,
         );
-        const wsToolUses = phaseActions.filter(
+        const wsToolUses = codonActions.filter(
           (e) =>
             (e as AssistantActionEvent).data?.action === "tool_use" &&
             (e as AssistantActionEvent).data?.toolName !== "TodoWrite",

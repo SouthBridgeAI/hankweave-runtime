@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { type ServerEvent, serverEventDataSchemas } from "../../server/schemas/event-schemas.js";
+import { type ServerEvent, serverEventDataSchemas } from "../../server/schemas/event-schemas";
 
 describe("Event Schema Synchronization", () => {
   it("should have schemas for all event types", () => {
@@ -7,21 +7,21 @@ describe("Event Schema Synchronization", () => {
     const eventTypes: ServerEvent["type"][] = [
       "server.ready",
       "state.snapshot",
-      "phase.started",
-      "phase.completed",
+      "codon.started",
+      "codon.completed",
       "assistant.action",
       "token.usage",
       "tool.result",
       "file.updated",
       "filetree.updated",
       "error",
-      "incomplete.phase",
+      "incomplete.codon",
       "info",
       "server.idle",
       "checkpoint.list",
       "rollback.started",
-      "rollback.phaseCheckpoint",
-      "rollback.workspaceCleanup",
+      "rollback.codonCheckpoint",
+      "rollback.rigCleanup",
       "rollback.progress",
       "rollback.completed",
     ];
@@ -34,7 +34,7 @@ describe("Event Schema Synchronization", () => {
   it("should validate sample events correctly", () => {
     // Test a sample event
     const sampleEvent = {
-      phaseId: "test-phase",
+      codonId: "test-codon",
       action: "message",
       content: "Test content",
     };

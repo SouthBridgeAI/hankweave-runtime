@@ -10,7 +10,7 @@ interface TestState {
 
 export function runLockFileTests(testState: TestState, testDir: string) {
   test("lock file PID matches server process", () => {
-    const lockFile = path.join(testDir, ".tadpole/server.lock");
+    const lockFile = path.join(testDir, ".strandweave/runtime.lock");
     if (fs.existsSync(lockFile) && testState.serverProcess?.pid) {
       const lockContent = fs.readFileSync(lockFile, "utf-8");
 
@@ -36,7 +36,7 @@ export function runLockFileTests(testState: TestState, testDir: string) {
   test("no stale lock files after shutdown", () => {
     // This is particularly important for the shutdown test
     if (testState.serverExited) {
-      const lockFile = path.join(testDir, ".tadpole/server.lock");
+      const lockFile = path.join(testDir, ".strandweave/runtime.lock");
 
       // Give a moment for cleanup
       setTimeout(() => {

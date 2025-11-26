@@ -32,8 +32,8 @@ describe("WebSocket Logging", () => {
     test("logs incoming messages in JSONL format", () => {
       const message: ClientCommand = {
         id: "cmd-123",
-        type: "phase.start",
-        data: { phaseId: "phase-1" },
+        type: "codon.start",
+        data: { codonId: "codon-1" },
       };
 
       logger.logSocketTraffic(logPath, "in", message);
@@ -72,17 +72,17 @@ describe("WebSocket Logging", () => {
     test("appends multiple messages as separate JSONL lines", () => {
       const message1: ClientCommand = {
         id: "cmd-1",
-        type: "phase.start",
-        data: { phaseId: "phase-1" },
+        type: "codon.start",
+        data: { codonId: "codon-1" },
       };
 
       const message2: ServerEvent = {
         id: EventId("evt-1"),
         timestamp: new Date().toISOString(),
-        type: "phase.started",
+        type: "codon.started",
         data: {
-          phaseId: "phase-1",
-          phaseName: "Test Phase",
+          codonId: "codon-1",
+          codonName: "Test Codon",
           sessionId: "session-123",
           startTime: new Date().toISOString(),
         },
@@ -100,10 +100,10 @@ describe("WebSocket Logging", () => {
       const entry2 = JSON.parse(lines[1]) as WebSocketLogEntry;
 
       expect(entry1.direction).toBe("in");
-      expect(entry1.message.type).toBe("phase.start");
+      expect(entry1.message.type).toBe("codon.start");
 
       expect(entry2.direction).toBe("out");
-      expect(entry2.message.type).toBe("phase.started");
+      expect(entry2.message.type).toBe("codon.started");
     });
 
     test("handles large messages", () => {
@@ -172,8 +172,8 @@ describe("WebSocket Logging", () => {
         direction: "in",
         message: {
           id: "cmd-1",
-          type: "phase.start",
-          data: { phaseId: "phase-1" },
+          type: "codon.start",
+          data: { codonId: "codon-1" },
           // biome-ignore lint/suspicious/noExplicitAny: Test mock data
         } as any,
         metadata: { size: 100 },
@@ -192,7 +192,7 @@ describe("WebSocket Logging", () => {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
           // biome-ignore lint/suspicious/noExplicitAny: Test mock data
-          message: { id: "cmd-1", type: "phase.start" } as any,
+          message: { id: "cmd-1", type: "codon.start" } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:01.000Z",
@@ -200,7 +200,7 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
-            type: "phase.started",
+            type: "codon.started",
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
         },
@@ -210,7 +210,7 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-2",
             timestamp: "2025-01-19T10:00:02.000Z",
-            type: "phase.completed",
+            type: "codon.completed",
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
         },
@@ -229,7 +229,7 @@ describe("WebSocket Logging", () => {
         loggedAt: new Date().toISOString(),
         direction: "in",
         // biome-ignore lint/suspicious/noExplicitAny: Test mock data
-        message: { id: "cmd-1", type: "phase.start" } as any,
+        message: { id: "cmd-1", type: "codon.start" } as any,
       };
 
       const content = [
@@ -280,8 +280,8 @@ describe("WebSocket Logging", () => {
           direction: "in",
           message: {
             id: "cmd-1",
-            type: "phase.start",
-            data: { phaseId: "phase-1" },
+            type: "codon.start",
+            data: { codonId: "codon-1" },
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
         },
@@ -291,8 +291,8 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
-            type: "phase.started",
-            data: { phaseId: "phase-1", sessionId: "session-123" },
+            type: "codon.started",
+            data: { codonId: "codon-1", sessionId: "session-123" },
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
         },
@@ -301,7 +301,7 @@ describe("WebSocket Logging", () => {
           direction: "in",
           message: {
             id: "cmd-2",
-            type: "phase.skip",
+            type: "codon.skip",
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
         },
@@ -311,8 +311,8 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-2",
             timestamp: "2025-01-19T10:00:03.000Z",
-            type: "phase.completed",
-            data: { phaseId: "phase-1", success: false },
+            type: "codon.completed",
+            data: { codonId: "codon-1", success: false },
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
         },
@@ -321,8 +321,8 @@ describe("WebSocket Logging", () => {
           direction: "in",
           message: {
             id: "cmd-3",
-            type: "phase.start",
-            data: { phaseId: "phase-2" },
+            type: "codon.start",
+            data: { codonId: "codon-2" },
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
         },
@@ -356,13 +356,13 @@ describe("WebSocket Logging", () => {
     });
 
     test("filterByMessageType", () => {
-      const phaseStarts = reader.filterByMessageType("phase.start");
+      const codonStarts = reader.filterByMessageType("codon.start");
       const errors = reader.filterByMessageType("error");
 
-      expect(phaseStarts.length).toBe(2);
+      expect(codonStarts.length).toBe(2);
       expect(errors.length).toBe(1);
 
-      expect(phaseStarts[0].message.type).toBe("phase.start");
+      expect(codonStarts[0].message.type).toBe("codon.start");
       expect(errors[0].message.type).toBe("error");
     });
 
@@ -377,18 +377,18 @@ describe("WebSocket Logging", () => {
       expect(filtered[2].loggedAt).toBe("2025-01-19T10:00:03.000Z");
     });
 
-    test("getPhaseMessages", () => {
-      const phase1Messages = reader.getPhaseMessages("phase-1");
-      const phase2Messages = reader.getPhaseMessages("phase-2");
+    test("getCodonMessages", () => {
+      const codon1Messages = reader.getCodonMessages("codon-1");
+      const codon2Messages = reader.getCodonMessages("codon-2");
 
-      expect(phase1Messages.length).toBe(3);
-      expect(phase2Messages.length).toBe(1);
+      expect(codon1Messages.length).toBe(3);
+      expect(codon2Messages.length).toBe(1);
     });
 
     test("getSessionMessages", () => {
       const sessionMessages = reader.getSessionMessages("session-123");
       expect(sessionMessages.length).toBe(1);
-      expect(sessionMessages[0].message.type).toBe("phase.started");
+      expect(sessionMessages[0].message.type).toBe("codon.started");
     });
 
     test("getServerEvents", () => {
@@ -415,7 +415,7 @@ describe("WebSocket Logging", () => {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
           // biome-ignore lint/suspicious/noExplicitAny: Test mock data
-          message: { id: "cmd-1", type: "phase.start" } as any,
+          message: { id: "cmd-1", type: "codon.start" } as any,
           metadata: { size: 50 },
         },
         {
@@ -424,7 +424,7 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
-            type: "phase.started",
+            type: "codon.started",
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
           metadata: { size: 100 },
@@ -433,7 +433,7 @@ describe("WebSocket Logging", () => {
           loggedAt: "2025-01-19T10:00:02.000Z",
           direction: "in",
           // biome-ignore lint/suspicious/noExplicitAny: Test mock data
-          message: { id: "cmd-2", type: "phase.start" } as any,
+          message: { id: "cmd-2", type: "codon.start" } as any,
           metadata: { size: 50 },
         },
         {
@@ -460,8 +460,8 @@ describe("WebSocket Logging", () => {
       expect(stats.totalEntries).toBe(4);
       expect(stats.incomingCount).toBe(2);
       expect(stats.outgoingCount).toBe(2);
-      expect(stats.messageTypes["phase.start"]).toBe(2);
-      expect(stats.messageTypes["phase.started"]).toBe(1);
+      expect(stats.messageTypes["codon.start"]).toBe(2);
+      expect(stats.messageTypes["codon.started"]).toBe(1);
       expect(stats.messageTypes.error).toBe(1);
       expect(stats.averageMessageSize).toBe(100);
       expect(stats.timeRange.start).toBe("2025-01-19T10:00:00.000Z");
@@ -494,7 +494,7 @@ describe("WebSocket Logging", () => {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
           // biome-ignore lint/suspicious/noExplicitAny: Test mock data
-          message: { id: "cmd-1", type: "phase.start" } as any,
+          message: { id: "cmd-1", type: "codon.start" } as any,
         },
         {
           loggedAt: "2025-01-19T10:00:01.000Z",
@@ -598,7 +598,7 @@ describe("WebSocket Logging", () => {
         loggedAt: new Date().toISOString(),
         direction: "in",
         // biome-ignore lint/suspicious/noExplicitAny: Test mock data
-        message: { id: "cmd-1", type: "phase.start" } as any,
+        message: { id: "cmd-1", type: "codon.start" } as any,
       };
 
       fs.writeFileSync(logPath, `${JSON.stringify(entry)}\n`);
@@ -614,7 +614,7 @@ describe("WebSocket Logging", () => {
           loggedAt: "2025-01-19T10:00:00.000Z",
           direction: "in",
           // biome-ignore lint/suspicious/noExplicitAny: Test mock data
-          message: { id: "cmd-1", type: "phase.start" } as any,
+          message: { id: "cmd-1", type: "codon.start" } as any,
           metadata: { size: 100 },
         },
         {
@@ -623,7 +623,7 @@ describe("WebSocket Logging", () => {
           message: {
             id: "evt-1",
             timestamp: "2025-01-19T10:00:01.000Z",
-            type: "phase.started",
+            type: "codon.started",
             // biome-ignore lint/suspicious/noExplicitAny: Test mock data
           } as any,
           metadata: { size: 200 },
@@ -642,23 +642,23 @@ describe("WebSocket Logging", () => {
   });
 
   describe("Real-world scenarios", () => {
-    test("handles complete phase execution flow", async () => {
+    test("handles complete codon execution flow", async () => {
       const logger = new Logger(path.join(tempDir, "main.log"));
       const wsLogPath = path.join(tempDir, "websocket.log");
 
-      // Simulate a complete phase execution
+      // Simulate a complete codon execution
       // biome-ignore lint/suspicious/noExplicitAny: Test mock data array
       const messages: Array<[string, any]> = [
-        ["in", { id: "cmd-1", type: "phase.start", data: { phaseId: "phase-1" } }],
+        ["in", { id: "cmd-1", type: "codon.start", data: { codonId: "codon-1" } }],
         [
           "out",
           {
             id: "evt-1",
             timestamp: new Date().toISOString(),
-            type: "phase.started",
+            type: "codon.started",
             data: {
-              phaseId: "phase-1",
-              phaseName: "Analysis",
+              codonId: "codon-1",
+              codonName: "Analysis",
               sessionId: "session-123",
               startTime: new Date().toISOString(),
             },
@@ -671,7 +671,7 @@ describe("WebSocket Logging", () => {
             timestamp: new Date().toISOString(),
             type: "assistant.action",
             data: {
-              phaseId: "phase-1",
+              codonId: "codon-1",
               action: "tool_use" as const,
               content: "",
               toolName: "Read",
@@ -685,7 +685,7 @@ describe("WebSocket Logging", () => {
             timestamp: new Date().toISOString(),
             type: "tool.result",
             data: {
-              phaseId: "phase-1",
+              codonId: "codon-1",
               toolUseId: "tool-1",
               toolName: "Read",
               result: "File content",
@@ -703,7 +703,7 @@ describe("WebSocket Logging", () => {
             timestamp: new Date().toISOString(),
             type: "token.usage",
             data: {
-              phaseId: "phase-1",
+              codonId: "codon-1",
               inputTokens: 1000,
               outputTokens: 500,
               cacheCreationTokens: 0,
@@ -717,9 +717,9 @@ describe("WebSocket Logging", () => {
           {
             id: "evt-5",
             timestamp: new Date().toISOString(),
-            type: "phase.completed",
+            type: "codon.completed",
             data: {
-              phaseId: "phase-1",
+              codonId: "codon-1",
               success: true,
               cost: 0.0045,
               duration: 5000,
@@ -739,23 +739,23 @@ describe("WebSocket Logging", () => {
       await reader.readLog();
 
       // Verify the flow
-      const phaseMessages = reader.getPhaseMessages("phase-1");
-      expect(phaseMessages.length).toBe(6);
+      const codonMessages = reader.getCodonMessages("codon-1");
+      expect(codonMessages.length).toBe(6);
 
       const stats = reader.getStatistics();
       expect(stats.totalEntries).toBe(6);
-      expect(stats.messageTypes["phase.start"]).toBe(1);
-      expect(stats.messageTypes["phase.completed"]).toBe(1);
+      expect(stats.messageTypes["codon.start"]).toBe(1);
+      expect(stats.messageTypes["codon.completed"]).toBe(1);
       expect(stats.messageTypes["tool.result"]).toBe(1);
 
       // Check session tracking
       const sessionMessages = reader.getSessionMessages("session-123");
       expect(sessionMessages.length).toBe(1);
-      expect(sessionMessages[0].message.type).toBe("phase.started");
+      expect(sessionMessages[0].message.type).toBe("codon.started");
 
-      // Export phase messages for debugging
-      const exportPath = path.join(tempDir, "phase-1-export.jsonl");
-      reader.exportToFile(phaseMessages, exportPath);
+      // Export codon messages for debugging
+      const exportPath = path.join(tempDir, "codon-1-export.jsonl");
+      reader.exportToFile(codonMessages, exportPath);
       expect(fs.existsSync(exportPath)).toBe(true);
     });
 
@@ -766,7 +766,7 @@ describe("WebSocket Logging", () => {
       // Simulate an error scenario with recovery
       // biome-ignore lint/suspicious/noExplicitAny: Test mock data array
       const messages: Array<[string, any]> = [
-        ["in", { id: "cmd-1", type: "phase.start", data: { phaseId: "phase-1" } }],
+        ["in", { id: "cmd-1", type: "codon.start", data: { codonId: "codon-1" } }],
         [
           "out",
           {
@@ -776,16 +776,16 @@ describe("WebSocket Logging", () => {
             data: { message: "API timeout", fatal: false },
           },
         ],
-        ["in", { id: "cmd-2", type: "phase.redo" }],
+        ["in", { id: "cmd-2", type: "codon.redo" }],
         [
           "out",
           {
             id: "evt-2",
             timestamp: new Date().toISOString(),
-            type: "phase.started",
+            type: "codon.started",
             data: {
-              phaseId: "phase-1",
-              phaseName: "Retry",
+              codonId: "codon-1",
+              codonName: "Retry",
               sessionId: "session-456",
               startTime: new Date().toISOString(),
             },
@@ -796,9 +796,9 @@ describe("WebSocket Logging", () => {
           {
             id: "evt-3",
             timestamp: new Date().toISOString(),
-            type: "phase.completed",
+            type: "codon.completed",
             data: {
-              phaseId: "phase-1",
+              codonId: "codon-1",
               success: true,
               cost: 0.001,
               duration: 3000,
@@ -819,10 +819,10 @@ describe("WebSocket Logging", () => {
       const errors = reader.filterByMessageType("error");
       expect(errors.length).toBe(1);
 
-      const redoCommands = reader.filterByMessageType("phase.redo");
+      const redoCommands = reader.filterByMessageType("codon.redo");
       expect(redoCommands.length).toBe(1);
 
-      const completions = reader.filterByMessageType("phase.completed");
+      const completions = reader.filterByMessageType("codon.completed");
       expect(completions.length).toBe(1);
 
       // biome-ignore lint/suspicious/noExplicitAny: Test data access
@@ -837,8 +837,8 @@ describe("WebSocket Logging", () => {
       // Log a message using the new format
       const message: ClientCommand = {
         id: "cmd-1",
-        type: "phase.start",
-        data: { phaseId: "phase-1" },
+        type: "codon.start",
+        data: { codonId: "codon-1" },
       };
 
       logger.logSocketTraffic(wsLogPath, "in", message);

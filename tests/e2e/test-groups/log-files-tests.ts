@@ -5,7 +5,7 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runLogFilesTests(testDir: string) {
   // Find the run folder - there should be exactly one
-  const runsDir = path.join(testDir, ".tadpole/runs");
+  const runsDir = path.join(testDir, ".strandweave/runs");
   let runFolder = "";
 
   if (fs.existsSync(runsDir)) {
@@ -15,10 +15,10 @@ export function runLogFilesTests(testDir: string) {
     }
   }
 
-  for (const phaseId of ["phase-1", "phase-2", "phase-3"]) {
-    describe(`${phaseId} logs`, () => {
-      // Logs are now in .tadpole/runs/{runId}/phase-{phaseId}-claude.log
-      const logPath = path.join(runFolder, `${phaseId}-claude.log`);
+  for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
+    describe(`${codonId} logs`, () => {
+      // Logs are now in .strandweave/runs/{runId}/codon-{codonId}-claude.log
+      const logPath = path.join(runFolder, `${codonId}-claude.log`);
 
       test(`log file exists`, () => {
         expect(fs.existsSync(logPath)).toBe(true);

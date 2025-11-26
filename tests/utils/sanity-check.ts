@@ -11,7 +11,7 @@ const colors = {
   gray: "\x1b[90m",
 };
 
-console.log(`\n${colors.blue}=== Tadpole Test Sanity Check ===${colors.reset}\n`);
+console.log(`\n${colors.blue}=== Strandweave Test Sanity Check ===${colors.reset}\n`);
 
 // Get current directory info
 const cwd = process.cwd();
@@ -22,7 +22,7 @@ let isCorrectDir = false;
 if (fs.existsSync("package.json")) {
   try {
     const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-    isCorrectDir = pkg.name === "tadpole";
+    isCorrectDir = pkg.name === "strandweave";
     console.log(`Package name: ${colors.yellow}${pkg.name}${colors.reset}`);
   } catch (_e) {
     console.log(`${colors.red}Error reading package.json${colors.reset}`);
@@ -30,8 +30,8 @@ if (fs.existsSync("package.json")) {
 }
 
 if (!isCorrectDir) {
-  console.log(`\n${colors.red}❌ Not in tadpole root directory!${colors.reset}`);
-  console.log(`Expected to find package.json with name: "tadpole"`);
+  console.log(`\n${colors.red}❌ Not in strandweave root directory!${colors.reset}`);
+  console.log(`Expected to find package.json with name: "strandweave"`);
   process.exit(1);
 }
 
@@ -39,19 +39,23 @@ console.log(`${colors.green}✓ In correct directory${colors.reset}`);
 
 // Check test configuration
 console.log(`\n${colors.blue}Test Configuration:${colors.reset}`);
-const testConfigPath = path.join(cwd, "tests/config/test-phases.config.json");
+const testConfigPath = path.join(cwd, "tests/config/test-codons.config.json");
 if (fs.existsSync(testConfigPath)) {
   console.log(`${colors.green}✓ Test config exists${colors.reset}: ${testConfigPath}`);
 
-  // Parse and show phases
+  // Parse and show codons
   try {
-    const phases = JSON.parse(fs.readFileSync(testConfigPath, "utf-8"));
-    console.log(`\nPhases to run:`);
-    phases.forEach((phase: { id?: string; name?: string; model?: string; watch?: string }) => {
-      console.log(`  - ${colors.yellow}${phase.id}${colors.reset}: ${phase.name}`);
-      console.log(`    Model: ${phase.model}`);
-      console.log(`    Watch: ${phase.watch || "none"}`);
-    });
+    const codons = JSON.parse(fs.readFileSync(testConfigPath, "utf-8"));
+    console.log(`\nCodons to run:`);
+    codons.forEach(
+      (codon: { id?: string; name?: string; model?: string; trackedFiles?: string[] }) => {
+        console.log(`  - ${colors.yellow}${codon.id}${colors.reset}: ${codon.name}`);
+        console.log(`    Model: ${codon.model}`);
+        console.log(
+          `    Tracked Files: ${codon.trackedFiles ? codon.trackedFiles.join(", ") : "none"}`,
+        );
+      },
+    );
   } catch (_e) {
     console.log(`${colors.red}Error parsing test config${colors.reset}`);
   }
@@ -101,7 +105,7 @@ console.log(
 );
 
 // Check for existing server
-const lockFilePath = path.join(testAreaPath, ".tadpole/server.lock");
+const lockFilePath = path.join(testAreaPath, ".strandweave/runtime.lock");
 if (fs.existsSync(lockFilePath)) {
   console.log(`\n${colors.red}⚠ Lock file exists!${colors.reset} Server may be running`);
   console.log(`Lock file: ${lockFilePath}`);

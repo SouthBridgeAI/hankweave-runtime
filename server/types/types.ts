@@ -1,20 +1,20 @@
 import type { z } from "zod";
 import type { ServerEvent } from "../schemas/event-schemas.js";
-import type { PhaseId } from "./branded-types.js";
-import type { ChroniclerConfig } from "./chronicler-types.js";
-import type { logMessageSchema } from "./claude-session-schema.js";
+import type { CodonId } from "./branded-types.js";
+import type { AssistantMessage, logMessageSchema, ResultMessage } from "./claude-session-schema.js";
+import type { SentinelConfig } from "./sentinel-types.js";
 
-// ============================================================================
+// -------------
 // Model Types
-// ============================================================================
+// -------------
 
 export type ModelName = "sonnet" | "opus";
 
 export type ContinuationMode = "fresh" | "continue-previous";
 
-// ============================================================================
+// -------------
 // WebSocket Client Types
-// ============================================================================
+// -------------
 
 /**
  * Client access modes for different capabilities
@@ -80,30 +80,30 @@ export type ClientData =
       handshakeComplete: true;
     };
 
-// ============================================================================
+// -------------
 // Process Exit Types (moved to schemas)
-// ============================================================================
+// -------------
 // ProcessExit is now defined in server/schemas/event-schemas.ts
 
-// ============================================================================
+// -------------
 // Failure Reason Types (moved to schemas)
-// ============================================================================
+// -------------
 // FailureReason is now defined in server/schemas/event-schemas.ts
 
-// ============================================================================
+// -------------
 // Message ID Types
-// ============================================================================
+// -------------
 
 export type ClaudeMessageId = `msg_${string}`;
 export type UUIDMessageId = string; // Keep flexible for UUIDs
 export type MessageId = ClaudeMessageId | UUIDMessageId;
 
-// ============================================================================
+// -------------
 // Checkpoint Status Types
-// ============================================================================
+// -------------
 
 export const CHECKPOINT_STATUS = {
-  WORKSPACE_SETUP: "workspace-setup",
+  RIG_SETUP: "rig-setup",
   COMPLETED: "completed",
   ERROR: "error",
   EXIT: "exit",
@@ -112,12 +112,12 @@ export const CHECKPOINT_STATUS = {
 
 export type CheckpointStatus = (typeof CHECKPOINT_STATUS)[keyof typeof CHECKPOINT_STATUS];
 
-// ============================================================================
+// -------------
 // Server Configuration
-// ============================================================================
+// -------------
 
 type ShellCommandWorkingDirectory = "project";
-type WorkspaceShellCommandWorkingDirectory = ShellCommandWorkingDirectory | "lastCopied";
+type RigShellCommandWorkingDirectory = ShellCommandWorkingDirectory | "lastCopied";
 
 export type ShellCommand = {
   /** Type of setup operation */
@@ -131,7 +131,7 @@ export type ShellCommand = {
   };
 };
 
-export type WorkspaceShellCommand = {
+export type RigShellCommand = {
   /** Type of setup operation */
   type: "command";
   /** For command operations */
@@ -139,14 +139,14 @@ export type WorkspaceShellCommand = {
     /** Shell command to execute */
     run: string;
     /** Working directory for command execution (default: "project") */
-    workingDirectory?: WorkspaceShellCommandWorkingDirectory;
+    workingDirectory?: RigShellCommandWorkingDirectory;
   };
 };
 
 /**
- * Workspace setup operation - either copy files/directories or run commands.
+ * Rig setup operation - either copy files/directories or run commands.
  */
-export type WorkspaceSetupItem =
+export type RigSetupItem =
   | {
       /** Type of setup operation */
       type: "copy";
@@ -165,49 +165,81 @@ export type WorkspaceSetupItem =
          */
         to: string;
       };
+      /**
+       * If true, failure of this operation won't fail the codon (default: false).
+       * Recommended for rig setup in loop codons where operations might
+       * fail in some iterations (e.g., copying files that don't exist yet).
+       */
+      allowFailure?: boolean;
     }
-  | WorkspaceShellCommand;
+  | (RigShellCommand & {
+      /**
+       * If true, failure of this operation won't fail the codon (default: false).
+       * Recommended for rig setup in loop codons where operations might
+       * fail in some iterations (e.g., running commands that might not succeed initially).
+       */
+      allowFailure?: boolean;
+    });
+
+// -------------
+// Loop Termination Conditions
+// -------------
 
 /**
- * Phase-level chronicler entry.
- * Wraps chronicler config with phase-specific settings.
- *
- * This separation keeps chronicler configs reusable across phases
- * while allowing phase-specific configuration.
+ * Loop termination conditions define when a loop should stop iterating.
+ * - iterationLimit: Stop after a fixed number of iterations
+ * - contextExceeded: Stop when Claude signals context exhaustion
  */
-export interface PhaseChroniclerEntry {
+export type LoopTermination =
+  | { type: "iterationLimit"; limit: number }
+  | { type: "contextExceeded" };
+// Future: | { type: "budgetExhausted"; budget: number; budgetType: "tokens" | "time" }
+
+// -------------
+// Codon and Loop Types
+// -------------
+
+/**
+ * Single codon configuration - represents one executable codon.
+ * Codon-level sentinel entry.
+ * Wraps sentinel config with codon-specific settings.
+ *
+ * This separation keeps sentinel configs reusable across codons
+ * while allowing codon-specific configuration.
+ */
+export interface CodonSentinelEntry {
   /**
-   * Chronicler configuration.
+   * Sentinel configuration.
    * Can be:
-   * - File path (string): "./chroniclers/narrator.json"
-   * - Inline config (object): Full ChroniclerConfig
+   * - File path (string): "./sentinels/narrator.json"
+   * - Inline config (object): Full SentinelConfig
    */
-  chroniclerConfig: string | ChroniclerConfig;
+  sentinelConfig: string | SentinelConfig;
 
   /**
-   * Phase-specific settings for this chronicler.
+   * Codon-specific settings for this sentinel.
    */
   settings?: {
     /**
-     * Fail the phase if this chronicler fails to load.
+     * Fail the codon if this sentinel fails to load.
      *
      * IMPORTANT: This only affects LOAD-TIME failures (config errors, file not found, etc).
-     * Does NOT fail the phase if:
-     * - Chronicler needs to be unloaded mid-execution (due to errors)
-     * - Chronicler LLM calls fail (those are handled by error thresholds)
-     * - Chronicler queue overflows
+     * Does NOT fail the codon if:
+     * - Sentinel needs to be unloaded mid-execution (due to errors)
+     * - Sentinel LLM calls fail (those are handled by error thresholds)
+     * - Sentinel queue overflows
      *
-     * Use for mission-critical chroniclers where phase cannot proceed without them.
-     * Default: false (chroniclers are optional)
+     * Use for mission-critical sentinels where codon cannot proceed without them.
+     * Default: false (sentinels are optional)
      */
-    failPhaseIfNotLoaded?: boolean;
+    failCodonIfNotLoaded?: boolean;
 
     /**
-     * Output file paths for this chronicler in this phase.
-     * If omitted, chronicler auto-generates paths in .tadpole/chronicler-outputs/
-     * You can use filenames to join together logs from different chroniclers.
+     * Output file paths for this sentinel in this codon.
+     * If omitted, sentinel auto-generates paths in .strandweave/sentinel-outputs/
+     * You can use filenames to join together logs from different sentinels.
      * Path convention:
-     * - Filename only (no '/'): .tadpole/chronicler-outputs/{id}/{filename}
+     * - Filename only (no '/'): .strandweave/sentinel-outputs/{id}/{filename}
      * - Path with '/': {executionPath}/{path}
      */
     outputPaths?: {
@@ -216,16 +248,16 @@ export interface PhaseChroniclerEntry {
     };
 
     /**
-     * Override chronicler's reportToWebsocket settings for this phase.
-     * Phase-level settings take precedence over chronicler-level settings.
+     * Override sentinel's reportToWebsocket settings for this codon.
+     * Codon-level settings take precedence over sentinel-level settings.
      *
-     * Controls which chronicler events are emitted to the WebSocket stream:
-     * - lifecycle: chronicler.loaded, chronicler.unloaded (default: true)
-     * - errors: chronicler.error events (default: true)
-     * - outputs: chronicler.output events with full content (default: true)
-     * - triggers: chronicler.triggered events (default: false - verbose)
+     * Controls which sentinel events are emitted to the WebSocket stream:
+     * - lifecycle: sentinel.loaded, sentinel.unloaded (default: true)
+     * - errors: sentinel.error events (default: true)
+     * - outputs: sentinel.output events with full content (default: true)
+     * - triggers: sentinel.triggered events (default: false - verbose)
      *
-     * Example: Disable verbose output events for this phase only:
+     * Example: Disable verbose output events for this codon only:
      * ```json
      * "reportToWebsocket": { "outputs": false, "triggers": false }
      * ```
@@ -240,13 +272,16 @@ export interface PhaseChroniclerEntry {
 }
 
 /**
- * Configuration for a single phase in the Tadpole workflow.
- * A phase represents a discrete task for Claude to perform, with its own
+ * Configuration for a single codon in the Strandweave workflow.
+ * A codon represents a discrete task for Claude to perform, with its own
  * prompt, model settings, and optional file watching.
  */
-export interface PhaseConfig {
-  /** Unique identifier for this phase (e.g., "phase-1", "data-analysis") */
-  id: PhaseId;
+export interface Codon {
+  /** Type discriminator - optional, defaults to "codon" */
+  type?: "codon";
+
+  /** Unique identifier for this codon (e.g., "codon-1", "data-analysis") */
+  id: CodonId;
 
   /** Human-readable name displayed in UI and logs */
   name: string;
@@ -267,25 +302,25 @@ export interface PhaseConfig {
   model: ModelName;
 
   /**
-   * How this phase should handle continuation from previous phases.
+   * How this codon should handle continuation from previous codons.
    * - "fresh": Start a new session (default for most cases)
-   * - "continue-previous": Continue from the previous phase's session,
-   *   maintaining context and conversation history. The previous phase must
+   * - "continue-previous": Continue from the previous codon's session,
+   *   maintaining context and conversation history. The previous codon must
    *   have completed successfully.
    */
   continuationMode: ContinuationMode;
 
   /**
-   * Workspace setup operations to run before phase starts.
-   * Each operation must complete successfully for phase to start.
+   * Rig setup operations to run before codon starts.
+   * Each operation must complete successfully for codon to start.
    */
-  workspaceSetup?: WorkspaceSetupItem[];
+  rigSetup?: RigSetupItem[];
 
-  /** Optional description shown to users about what this phase does */
+  /** Optional description shown to users about what this codon does */
   description?: string;
 
   /**
-   * Glob patterns for files to track during phase execution.
+   * Glob patterns for files to track during codon execution.
    * These files will be:
    * - Watched for changes and streamed to the client
    * - Tracked in the git-based checkpoint system
@@ -296,7 +331,7 @@ export interface PhaseConfig {
   /** Optional environment variables to set for the Claude process */
   env?: Record<string, string>;
 
-  /** Optional output copy steps to run after phase completion: files to copy out from a completed phase, with optional pre-copy commands. */
+  /** Optional output copy steps to run after codon completion: files to copy out from a completed codon, with optional pre-copy commands. */
   outputFiles?: {
     /** Glob patterns to copy from execution directory to output directory */
     copy: string[];
@@ -305,48 +340,79 @@ export interface PhaseConfig {
   }[];
 
   /**
-   * Chroniclers to run during this phase.
-   * Chroniclers are parallel observation agents that process the event stream.
+   * Sentinels to run during this codon.
+   * Sentinels are parallel observation agents that process the event stream.
    *
    * Each entry is a wrapper object with:
-   * - chroniclerConfig: Portable chronicler configuration (file or inline)
-   * - settings: Phase-specific settings (output paths, load requirements)
+   * - sentinelConfig: Portable sentinel configuration (file or inline)
+   * - settings: Codon-specific settings (output paths, load requirements)
    *
-   * This wrapper pattern keeps chronicler configs reusable across phases.
+   * This wrapper pattern keeps sentinel configs reusable across codons.
    */
-  chroniclers?: PhaseChroniclerEntry[];
+  sentinels?: CodonSentinelEntry[];
 }
+
+/**
+ * Loop configuration - contains multiple codons that repeat.
+ * Loops flatten at runtime into individual codon executions.
+ * Nested loops are not supported in v1.
+ */
+export interface Loop {
+  /** Type discriminator - required for loops */
+  type: "loop";
+
+  /** Unique identifier for this loop (e.g., "iterative-development") */
+  id: CodonId;
+
+  /** Human-readable name displayed in UI and logs */
+  name: string;
+
+  /** Optional description shown to users about what this loop does */
+  description?: string;
+
+  /** Termination condition for the loop */
+  terminateOn: LoopTermination;
+
+  /** Array of codons to execute in each iteration. Only Codon objects allowed (no nested loops). */
+  codons: Codon[];
+}
+
+/**
+ * CodonConfig is a discriminated union of Codon and Loop.
+ * This is the top-level configuration type used in codon-sequence.json.
+ */
+export type CodonConfig = Codon | Loop;
 
 /**
  * Information for creating a checkpoint commit in the shadow git repository.
  *
- * The checkpoint system creates a shadow git repo in `.tadpole/checkpoints/` that tracks
+ * The checkpoint system creates a shadow git repo in `.strandweave/checkpoints/` that tracks
  * files matching the `checkpointAndWatch` patterns. Each checkpoint creates a commit
- * with detailed metadata about the phase state.
+ * with detailed metadata about the codon state.
  */
 export interface CheckpointInfo {
   /** The type of checkpoint being created */
   status: CheckpointStatus;
 
-  /** Unique identifier of the phase (e.g., "phase-1") */
-  phaseId: PhaseId;
+  /** Unique identifier of the codon (e.g., "codon-1") */
+  codonId: CodonId;
 
-  /** Human-readable name of the phase */
-  phaseName: string;
+  /** Human-readable name of the codon */
+  codonName: string;
 
-  /** Unique identifier for this Tadpole server run */
+  /** Unique identifier for this Strandweave runtime run */
   runId: string;
 
   /** ISO timestamp when the checkpoint was created */
   timestamp: string;
 
-  /** Duration in milliseconds (only for completed/error/skipped phases) */
+  /** Duration in milliseconds (only for completed/error/skipped codons) */
   duration?: number;
 }
 
 /**
  * Main server configuration containing all runtime settings.
- * Most values have defaults in config.ts except execution paths and phases.
+ * Most values have defaults in config.ts except execution paths and codons.
  */
 export interface ServerConfig {
   /** WebSocket server port (default: 7777) */
@@ -367,7 +433,7 @@ export interface ServerConfig {
   /** Current working directory for the server process */
   cwd: string;
 
-  /** Path to the phase configuration file (for resolving relative chronicler paths) */
+  /** Path to the codon configuration file (for resolving relative sentinel paths) */
   configPath?: string;
 
   /** Output directory for generated files. Will be scoped to cwd */
@@ -389,12 +455,12 @@ export interface ServerConfig {
   /** How data is linked (symlink or copy) */
   linkType: "symlink" | "copy";
 
-  /** Array of phase configurations to execute */
-  phases: PhaseConfig[];
+  /** Array of codon configurations to execute */
+  codons: CodonConfig[];
 
   /**
    * Token cost configuration per million tokens.
-   * Used to calculate costs for each phase and total project cost.
+   * Used to calculate costs for each codon and total project cost.
    */
   costsPerMTok: {
     /** Cost per million input tokens */
@@ -413,7 +479,7 @@ export interface ServerConfig {
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
   anthropicBaseURL?: string;
 
-  /** Whether to automatically start phases (default: true) */
+  /** Whether to automatically start codons (default: true) */
   autostart: boolean;
 
   /** Time limit for hashing directories in milliseconds (default: 5000) */
@@ -422,7 +488,7 @@ export interface ServerConfig {
   /** Maximum length for tool result content before truncation (default: 2500) */
   toolResultTruncateLength: number;
 
-  /** Optional model override for all phases (ignores per-phase model settings) */
+  /** Optional model override for all codons (ignores per-codon model settings) */
   modelOverride?: ModelName;
 
   /** Whether to disable the proxy server (default: false) */
@@ -432,19 +498,19 @@ export interface ServerConfig {
   handshakeHistoryLimit: number;
 
   /**
-   * Chronicler system configuration.
-   * Controls behavior of ChroniclerManager for all phases.
+   * Sentinel system configuration.
+   * Controls behavior of SentinelManager for all codons.
    */
-  chronicler: {
+  sentinel: {
     /**
-     * Enable filesystem persistence for chronicler outputs and history.
+     * Enable filesystem persistence for sentinel outputs and history.
      * Default: true
      */
     enablePersistence: boolean;
 
     /**
-     * Grace period to wait for provider health checks before loading chroniclers.
-     * Allows some providers to become available without blocking phase start.
+     * Grace period to wait for provider health checks before loading sentinels.
+     * Allows some providers to become available without blocking codon start.
      * Default: 2000ms (2 seconds)
      */
     healthCheckGracePeriodMs: number;
@@ -458,13 +524,13 @@ export interface ServerConfig {
   };
 }
 
-// ============================================================================
+// -------------
 // Internal Types
-// ============================================================================
+// -------------
 
 /**
  * Token usage tracking for Claude API calls.
- * Used to calculate costs and monitor usage across phases.
+ * Used to calculate costs and monitor usage across codons.
  */
 export interface TokenUsage {
   /** Standard input tokens processed */
@@ -477,9 +543,9 @@ export interface TokenUsage {
   cacheReadTokens: number;
 }
 
-// ============================================================================
+// -------------
 // Synthetic Message Types
-// ============================================================================
+// -------------
 
 /**
  * Synthetic timeout message structure.
@@ -512,91 +578,131 @@ export function isSyntheticTimeout(msg: ClaudeLogMessage): msg is SyntheticTimeo
   );
 }
 
-// ============================================================================
+/**
+ * Type guard to check if a log message indicates a context exceeded error.
+ * Detects two patterns:
+ * - Pattern 1: Synthetic assistant message with "API Error: terminated" or output token maximum exceeded
+ * - Pattern 2: Result message with "exceeded the...output token maximum"
+ */
+export function isContextExceeded(msg: ClaudeLogMessage): boolean {
+  // Pattern 1: Synthetic assistant message with context exceeded indicators
+  if (msg.type === "assistant") {
+    const assistantMsg = msg as AssistantMessage;
+    if (
+      assistantMsg.message.model === "<synthetic>" &&
+      Array.isArray(assistantMsg.message.content) &&
+      assistantMsg.message.content.length === 1 &&
+      assistantMsg.message.content[0].type === "text"
+    ) {
+      const text = assistantMsg.message.content[0].text;
+      // Check for either "API Error: terminated" or output token maximum exceeded
+      return (
+        text === "API Error: terminated" ||
+        (text.includes("exceeded the") && text.includes("output token maximum"))
+      );
+    }
+  }
+
+  // Pattern 2: Result message with output token limit exceeded
+  if (msg.type === "result") {
+    const resultMsg = msg as ResultMessage;
+    return (
+      resultMsg.is_error === true &&
+      typeof resultMsg.result === "string" &&
+      resultMsg.result.includes("exceeded the") &&
+      resultMsg.result.includes("output token maximum")
+    );
+  }
+
+  return false;
+}
+
+// -------------
 // Claude Log Types (from claude-session-schema)
-// ============================================================================
+// -------------
 
 export type ClaudeLogMessage = z.infer<typeof logMessageSchema>;
 
-// ============================================================================
+// -------------
 // Re-export types from schemas for backward compatibility
-// ============================================================================
+// -------------
 
 export type {
   AssistantActionEvent,
   CheckpointListEvent,
   // Data types used in events
   CheckpointQueryInfo,
+  CodonCompletedEvent,
+  CodonExecution,
+  CodonStartedEvent,
   ErrorEvent,
   FailureReason,
   FileNode,
   FileTreeUpdatedEvent,
   FileUpdatedEvent,
-  IncompletePhaseEvent,
+  HistoryBatchEvent,
+  IncompleteCodonEvent,
   InfoEvent,
-  PhaseCompletedEvent,
-  PhaseExecution,
-  PhaseStartedEvent,
   ProcessExit,
+  RollbackCodonCheckpointEvent,
   RollbackCompletedEvent,
-  RollbackPhaseCheckpointEvent,
   RollbackProgressEvent,
+  RollbackRigCleanupEvent,
   RollbackStartedEvent,
-  RollbackWorkspaceCleanupEvent,
   ServerEvent,
-  ServerIdleEvent,
   // Event types
+  ServerIdleEvent,
   ServerReadyEvent,
   StateSnapshotEvent,
   TokenUsageEvent,
   ToolResultEvent,
 } from "../schemas/event-schemas.js";
 
-// ============================================================================
+// -------------
 // Client -> Server Commands (keeping these here for now)
-// ============================================================================
+// -------------
 
 /**
- * Start a specific phase by ID.
+ * Start a specific codon by ID.
  * Can optionally skip pre-start commands for retry scenarios.
  */
-export interface StartPhaseCommand {
+export interface StartCodonCommand {
   /** Unique ID for this command (for request/response correlation) */
   id: string;
-  type: "phase.start";
+  type: "codon.start";
   data: {
-    /** ID of the phase to start */
-    phaseId: string;
-    /** If true, skip the phase's preStart command */
+    /** ID of the codon to start */
+    codonId: string;
+    /** If true, skip the codon's preStart command */
     skipPreCommands?: boolean;
   };
 }
 
 /**
- * Start the next phase in sequence.
- * Determines next phase based on completion history.
+ * Start the next codon in sequence.
+ * Determines next codon based on completion history.
  */
-export interface NextPhaseCommand {
+export interface NextCodonCommand {
   id: string;
-  type: "phase.next";
+  type: "codon.next";
 }
 
 /**
- * Skip the currently running phase.
- * Terminates the Claude process and marks phase as skipped.
+ * Skip the currently running codon.
+ * Terminates the Claude process and marks codon as skipped.
  */
-export interface SkipPhaseCommand {
+export interface SkipCodonCommand {
   id: string;
-  type: "phase.skip";
+  type: "codon.skip";
 }
 
 /**
- * Re-run the last completed phase.
- * Useful for retrying failed phases or regenerating outputs.
+ * Re-run the last completed codon.
+ * Useful for retrying failed codons or regenerating outputs.
  */
-export interface RedoPhaseCommand {
+export interface RedoCodonCommand {
   id: string;
-  type: "phase.redo";
+  type: "codon.redo";
 }
 
 /**
@@ -609,11 +715,11 @@ export interface ShutdownCommand {
 }
 
 /**
- * Force stop the current running phase.
+ * Force stop the current running codon.
  */
 export interface ForceStopCommand {
   id: string;
-  type: "phase.forceStop";
+  type: "codon.forceStop";
   data?: {
     /** Optional reason for force stopping */
     reason?: string;
@@ -647,23 +753,23 @@ export interface RollbackToCheckpointCommand {
 }
 
 /**
- * Rollback to a phase with specific checkpoint type.
+ * Rollback to a codon with specific checkpoint type.
  */
-export interface RollbackToPhaseCommand {
+export interface RollbackToCodonCommand {
   id: string;
-  type: "rollback.toPhase";
+  type: "rollback.toCodon";
   data: {
-    /** Phase ID to rollback to */
-    phaseId: string;
-    /** Checkpoint type within that phase */
-    checkpointType: "start" | "end" | "workspace-setup" | "completed" | "error" | "skipped";
+    /** Codon ID to rollback to */
+    codonId: string;
+    /** Checkpoint type within that codon */
+    checkpointType: "start" | "end" | "rig-setup" | "completed" | "error" | "skipped";
     /** Whether to auto-restart after rollback */
     autoRestart?: boolean;
   };
 }
 
 /**
- * Rollback to last successful phase.
+ * Rollback to last successful codon.
  */
 export interface RollbackToLastSuccessCommand {
   id: string;
@@ -680,13 +786,13 @@ export interface RollbackToLastSuccessCommand {
  * TypeScript will automatically narrow the type based on the `type` field.
  */
 export type ClientCommand =
-  | StartPhaseCommand
-  | NextPhaseCommand
-  | SkipPhaseCommand
-  | RedoPhaseCommand
+  | StartCodonCommand
+  | NextCodonCommand
+  | SkipCodonCommand
+  | RedoCodonCommand
   | ShutdownCommand
   | ForceStopCommand
   | ListCheckpointsCommand
   | RollbackToCheckpointCommand
-  | RollbackToPhaseCommand
+  | RollbackToCodonCommand
   | RollbackToLastSuccessCommand;

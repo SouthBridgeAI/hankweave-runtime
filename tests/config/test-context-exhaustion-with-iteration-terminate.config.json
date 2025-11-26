@@ -1,0 +1,55 @@
+[
+  {
+    "id": "initial-setup",
+    "name": "Initial Setup Codon",
+    "promptText": "Create a directory called 'large_content' in <%PROJECT_DIR%> if it doesn't exist. Then create an empty file at <%PROJECT_DIR%>/large_content/setup_complete.txt with the text 'Setup complete'.",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "description": "Setup for context exhaustion test",
+    "trackedFiles": ["large_content/**/*"],
+    "appendSystemPromptFile": ["./noTodosPrompt.md"],
+    "outputFiles": []
+  },
+  {
+    "type": "loop",
+    "id": "context-exhaustion-loop-no-terminate",
+    "name": "Context Exhaustion Loop (No Termination)",
+    "description": "Loop that generates massive amounts of content to exhaust context but has no termination condition",
+    "terminateOn": { "type": "iterationLimit", "limit": 20 },
+    "codons": [
+      {
+        "id": "generate-content",
+        "name": "Generate Large Content",
+        "promptText": "Generate a VERY LONG detailed analysis (at least 45000 words) about a random topic and save it to <%PROJECT_DIR%>/large_content/content_<TIMESTAMP>.md. Include extensive code examples, detailed explanations, and comprehensive documentation. Make each iteration completely different with unique content.",
+        "model": "sonnet",
+        "continuationMode": "continue-previous",
+        "description": "Generate massive content",
+        "trackedFiles": ["large_content/**/*"],
+        "appendSystemPromptFile": ["./noTodosPrompt.md"],
+        "outputFiles": []
+      },
+      {
+        "id": "analyze-content",
+        "name": "Analyze Content",
+        "promptText": "Read ALL the content files in <%PROJECT_DIR%>/large_content/ and write a comprehensive 23000+ word analysis comparing them all. Save your analysis to <%PROJECT_DIR%>/large_content/analysis_<TIMESTAMP>.md. Reference specific details from each file.",
+        "model": "sonnet",
+        "continuationMode": "continue-previous",
+        "description": "Analyze all accumulated content",
+        "trackedFiles": ["large_content/**/*"],
+        "appendSystemPromptFile": ["./noTodosPrompt.md"],
+        "outputFiles": []
+      }
+    ]
+  },
+  {
+    "id": "final-codon",
+    "name": "Final Codon After Loop",
+    "promptText": "Create a summary file at <%PROJECT_DIR%>/large_content/final_summary.txt with the text 'This should never be created because the loop should fail'.",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "description": "Final codon that should never execute",
+    "trackedFiles": ["large_content/**/*"],
+    "appendSystemPromptFile": ["./noTodosPrompt.md"],
+    "outputFiles": []
+  }
+]

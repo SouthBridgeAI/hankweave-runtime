@@ -1,0 +1,135 @@
+[
+  {
+    "id": "codon-1",
+    "name": "Codon 1: TestCodon1",
+    "promptFile": [
+      "./codon1Prompt1.md",
+      "./codon1Prompt2.md"
+    ],
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "rigSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p notes",
+          "workingDirectory": "project"
+        }
+      }
+    ],
+    "appendSystemPromptFile": [
+      "./systemPrompt1.md",
+      "./systemPrompt2.md",
+      "./noTodosPrompt.md"
+    ],
+    "description": "Write three pick one",
+    "trackedFiles": [
+      "notes/**/*",
+      "*.md"
+    ],
+    "outputFiles": [
+      {
+        "copy": [
+          "notes/favorite_poem.txt"
+        ],
+        "beforeCopy": [
+          {
+            "type": "command",
+            "command": {
+              "run": "echo 'Before copy command executed for codon-1' >> notes/beforecopy_log.txt",
+              "workingDirectory": "project"
+            }
+          }
+        ]
+      }
+    ],
+    "sentinels": [
+      {
+        "sentinelConfig": "./sentinel-triggers/test-narrator.sentinel.json"
+      },
+      {
+        "sentinelConfig": "./sentinel-triggers/cost-analyst.sentinel.json"
+      }
+    ]
+  },
+  {
+    "id": "codon-2",
+    "name": "Codon 2: Schema Generation",
+    "promptText": "Can you put your second favorite of the poems you just made into the notes folder as '<%PROJECT_DIR%>/notes/second_favorite_poem.txt'?",
+    "model": "sonnet",
+    "continuationMode": "continue-previous",
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
+    "description": "Write one more",
+    "trackedFiles": [
+      "notes/**/*"
+    ],
+    "outputFiles": [
+      {
+        "copy": [
+          "notes/second_favorite_poem.txt"
+        ],
+        "beforeCopy": [
+          {
+            "type": "command",
+            "command": {
+              "run": "gambozino --version",
+              "workingDirectory": "project"
+            }
+          }
+        ]
+      }
+    ],
+    "sentinels": [
+      {
+        "sentinelConfig": "./sentinel-triggers/test-narrator.sentinel.json"
+      },
+      {
+        "sentinelConfig": "./sentinel-triggers/cost-analyst.sentinel.json"
+      }
+    ]
+  },
+  {
+    "id": "codon-3",
+    "name": "Codon 3: More Validation",
+    "promptText": "Can you convert the poems in the notes folder into typescript code in the <%PROJECT_DIR%>/typescript_code/src folder? Call them poem1.ts and poem2.ts. DON'T USE TODOs.",
+    "model": "sonnet",
+    "rigSetup": [
+      {
+        "type": "copy",
+        "copy": {
+          "from": "./typescript_structure",
+          "to": "typescript_code"
+        }
+      },
+      {
+        "type": "command",
+        "command": {
+          "run": "bun install",
+          "workingDirectory": "lastCopied"
+        }
+      }
+    ],
+    "continuationMode": "fresh",
+    "description": "Convert poems to code",
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
+    "trackedFiles": [
+      "typescript_code/src/**/*.ts",
+      "typescript_code/package.json"
+    ],
+    "sentinels": [
+      {
+        "sentinelConfig": "./sentinel-triggers/qa-bot.sentinel.json"
+      },
+      {
+        "sentinelConfig": "./sentinel-triggers/cost-analyst.sentinel.json",
+        "settings": {
+          "failCodonIfNotLoaded": true
+        }
+      }
+    ]
+  }
+]

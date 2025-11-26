@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import { calculateCost } from "../../server/config.js";
+import { ClaudeLogParser } from "../../server/claude-log-parser";
+import { calculateCost } from "../../server/config";
 import type {
   AssistantMessage,
   ResultMessage,
   UserMessage,
-} from "../../server/types/claude-session-schema.js";
-import { logMessageSchema } from "../../server/types/claude-session-schema.js";
-import type { TokenUsage } from "../../server/types/types.js";
+} from "../../server/types/claude-session-schema";
+import { logMessageSchema } from "../../server/types/claude-session-schema";
+import type { TokenUsage } from "../../server/types/types";
 
-// Local helper for testing log parsing - replaces the removed loadPhaseStateFromLog
+// Local helper for testing log parsing - replaces the removed loadCodonStateFromLog
 function parseLogForTesting(
   logPath: string,
   costsPerMTok: {
@@ -356,7 +356,7 @@ describe("Real Claude Logs Validation", () => {
     );
 
     test.each(timeoutLogs.map((f) => [getRelativePath(f), f]))(
-      "should parse timeout phase state correctly for %s",
+      "should parse timeout codon state correctly for %s",
       (_relativePath, logPath) => {
         const state = parseLogForTesting(logPath, {
           input: 3,
@@ -365,7 +365,7 @@ describe("Real Claude Logs Validation", () => {
           cacheRead: 0.3,
         });
 
-        expect(state.success).toBe(false); // Phase failed due to timeout
+        expect(state.success).toBe(false); // Codon failed due to timeout
         expect(state.sessionId).toBeTruthy(); // Should have a session ID
         expect(state.cost).toBeGreaterThan(0); // Should have some cost
         expect(state.tokens.inputTokens).toBeGreaterThanOrEqual(0);
@@ -390,7 +390,7 @@ describe("Real Claude Logs Validation", () => {
 
       const parser = new ClaudeLogParser({
         logPath,
-        phaseId: "phase-1",
+        codonId: "codon-1",
         parsingInterval: 50,
         onSystemMessage: () => messages.system++,
         onAssistantMessage: () => messages.assistant++,
@@ -595,7 +595,7 @@ describe("Real Claude Logs Validation", () => {
 
         const parser = new ClaudeLogParser({
           logPath,
-          phaseId: "test-phase",
+          codonId: "test-codon",
           parsingInterval: 50,
           onUserMessage: (msg: UserMessage) => {
             if (Array.isArray(msg.message.content)) {

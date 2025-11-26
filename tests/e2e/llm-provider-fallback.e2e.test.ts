@@ -29,7 +29,7 @@ describe("Provider Fallback Scenarios", () => {
         // Clear all API keys
         for (const def of PROVIDER_DEFINITIONS) {
           delete process.env[def.apiKeyEnvVar];
-          delete process.env[`TADPOLE_CHRONICLER_${def.apiKeyEnvVar}`];
+          delete process.env[`STRANDWEAVE_SENTINEL_${def.apiKeyEnvVar}`];
         }
 
         const registry = new LlmProviderRegistry({ logger: mockLogger });
@@ -250,7 +250,7 @@ describe("Provider Fallback Scenarios", () => {
       registry.setProviderAvailable("openai", true);
       registry.setProviderHealth("openai", true);
 
-      // Simulate chronicler fallback logic
+      // Simulate sentinel fallback logic
       const preferredModels = ["claude-3-5-sonnet-20241022", "gpt-4o-mini", "gemini-1.5-flash"];
       let selectedModel = null;
 

@@ -1,0 +1,128 @@
+[
+  {
+    "id": "codon-1",
+    "name": "Codon 1: TestCodon1",
+    "promptFile": [
+      "./codon1Prompt1.md",
+      "./codon1Prompt2.md"
+    ],
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "rigSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p notes",
+          "workingDirectory": "project"
+        }
+      }
+    ],
+    "appendSystemPromptFile": [
+      "./systemPrompt1.md",
+      "./systemPrompt2.md",
+      "./noTodosPrompt.md"
+    ],
+    "description": "Write three pick one",
+    "trackedFiles": [
+      "notes/**/*",
+      "*.md"
+    ],
+    "outputFiles": [
+      {
+        "copy": [
+          "notes/favorite_poem.txt"
+        ],
+        "beforeCopy": [
+          {
+            "type": "command",
+            "command": {
+              "run": "echo 'Before copy command executed for codon-1' >> notes/beforecopy_log.txt",
+              "workingDirectory": "project"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "loop",
+    "id": "iterative-refinement",
+    "name": "Iterative Poem Refinement",
+    "description": "Refine poems iteratively",
+    "terminateOn": {
+      "type": "iterationLimit",
+      "limit": 2
+    },
+    "codons": [
+      {
+        "id": "write-poem",
+        "name": "Write Additional Poem",
+        "promptText": "Can you write one more poem based on the romantic poets and save it to <%PROJECT_DIR%>/notes/additional_poem_<TIMESTAMP>.txt? Make each iteration different.",
+        "model": "sonnet",
+        "continuationMode": "continue-previous",
+        "appendSystemPromptFile": [
+          "./noTodosPrompt.md"
+        ],
+        "description": "Write another poem",
+        "trackedFiles": [
+          "notes/**/*"
+        ],
+        "sentinels": [
+          {
+            "sentinelConfig": "./sentinel-triggers/loop-test.sentinel.json"
+          }
+        ]
+      },
+      {
+        "id": "review-poem",
+        "name": "Review Poem",
+        "promptText": "Can you review the poem you just wrote in additional_poem_<TIMESTAMP>.txt and save your review as <%PROJECT_DIR%>/notes/poem_review_<TIMESTAMP>.txt?",
+        "model": "sonnet",
+        "continuationMode": "continue-previous",
+        "appendSystemPromptFile": [
+          "./noTodosPrompt.md"
+        ],
+        "description": "Review the poem",
+        "trackedFiles": [
+          "notes/**/*"
+        ],
+        "sentinels": [
+          {
+            "sentinelConfig": "./sentinel-triggers/loop-test.sentinel.json"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "codon-3",
+    "name": "Codon 3: More Validation",
+    "promptText": "Can you convert the poems in the notes folder into typescript code in the <%PROJECT_DIR%>/typescript_code/src folder? Call them poem1.ts and poem2.ts. DON'T USE TODOs.",
+    "model": "sonnet",
+    "rigSetup": [
+      {
+        "type": "copy",
+        "copy": {
+          "from": "./typescript_structure",
+          "to": "typescript_code"
+        }
+      },
+      {
+        "type": "command",
+        "command": {
+          "run": "bun install",
+          "workingDirectory": "lastCopied"
+        }
+      }
+    ],
+    "continuationMode": "fresh",
+    "description": "Convert poems to code",
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
+    "trackedFiles": [
+      "typescript_code/src/**/*.ts",
+      "typescript_code/package.json"
+    ]
+  }
+]

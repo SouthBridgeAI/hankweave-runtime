@@ -4,7 +4,7 @@
 export interface TestRun {
   runId: string;
   status: "running" | "completed" | "failed" | "crashed";
-  phases: TestPhaseExecution[];
+  codons: TestCodonExecution[];
   endTime?: string;
   startTime: string;
   runFolder: string;
@@ -13,8 +13,8 @@ export interface TestRun {
   startingConditions: { type: string; [key: string]: unknown };
 }
 
-export interface TestPhaseExecution {
-  phaseId: string;
+export interface TestCodonExecution {
+  codonId: string;
   status: string;
   finalCost?: number;
   partialCost?: number;

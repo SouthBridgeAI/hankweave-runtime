@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Tadpole Server Event Journal is a logging and event tracking system that serves as the **single source of truth** for all server activity. It is a unified event stream that is both persisted to disk and broadcasted to connected clients.
+The Strandweave Server Event Journal is a logging and event tracking system that serves as the **single source of truth** for all server activity. It is a unified event stream that is both persisted to disk and broadcasted to connected clients.
 
 The Event Journal provides:
 - **Audit trail** of all server state changes
@@ -14,7 +14,7 @@ The Event Journal provides:
 All server state events are stored at:
 
 ```
-.tadpole/events/events.jsonl
+.strandweave/events/events.jsonl
 ```
 
 ## Event Journal Architecture
@@ -36,7 +36,7 @@ In-memory event storage with configurable limits:
 **Location**: `server/storage/file-event-storage.ts`
 
 Persistent JSONL-based event storage:
-- Append-only file format (`.tadpole/events/events.jsonl`)
+- Append-only file format (`.strandweave/events/events.jsonl`)
 - Atomic writes with proper error handling
 - Crash recovery on server restart
 - Suitable for production use
@@ -61,12 +61,12 @@ All server events are categorized into four mutually exclusive types, enabling i
 Events that represent changes to the server's persistent execution state. These events:
 - **Are persisted** to the event journal (file or memory storage)
 - **Are broadcasted** to all connected clients that have completed handshake
-- **Represent domain logic**: phase execution, state transitions, errors
+- **Represent domain logic**: codon execution, state transitions, errors
 
 **Event Types**:
 ```typescript
-// Phase lifecycle
-phase.started, phase.completed
+// Codon lifecycle
+codon.started, codon.completed
 
 // State updates
 state.snapshot, server.idle, state.transition
@@ -79,8 +79,8 @@ info, error
 
 // Checkpoints and rollback
 checkpoint.list
-rollback.started, rollback.progress, rollback.phaseCheckpoint
-rollback.completed, rollback.workspaceCleanup
+rollback.started, rollback.progress, rollback.codonCheckpoint
+rollback.completed, rollback.rigCleanup
 ```
 
 ### Agentic Backbone Events
@@ -88,7 +88,7 @@ rollback.completed, rollback.workspaceCleanup
 Events that capture the agent's core execution artifacts. These events:
 - **Are persisted** to the event journal (file or memory storage)
 - **Are broadcasted** to all connected clients that have completed handshake
-- **Represent agent artifacts**: Claude's actions, tool outputs, workspace mutations
+- **Represent agent artifacts**: Claude's actions, tool outputs, rig mutations
 
 These events are journaled and broadcast the same way as server state events but are tracked separately for clarity.
 
@@ -101,17 +101,17 @@ assistant.action, tool.result
 file.updated, filetree.updated
 ```
 
-### Chronicler Events
+### Sentinel Events
 
-Events that represent the lifecycle and output of the parallel Chronicler agents. These events:
+Events that represent the lifecycle and output of the parallel Sentinel agents. These events:
 - **Are persisted** to the event journal.
 - **Are broadcasted** to all connected clients.
 - **Represent observational work**: a layer of analysis that runs parallel to the main agent.
 
 **Event Types**:
 ```typescript
-// Chronicler lifecycle and activity
-chronicler.loaded, chronicler.unloaded, chronicler.error, chronicler.output, chronicler.triggered
+// Sentinel lifecycle and activity
+sentinel.loaded, sentinel.unloaded, sentinel.error, sentinel.output, sentinel.triggered
 ```
 
 ### Connection State Events
@@ -126,7 +126,7 @@ Events specific to individual client connections. These events:
 server.ready        // Sent to specific client after connection
 pong                // Response to specific client's ping
 history.batch       // Streamed to requesting client only
-incomplete.phase    // Client-specific warning
+incomplete.codon    // Client-specific warning
 ```
 
 ### Compile-Time Safety Guarantees
@@ -135,7 +135,7 @@ The system uses TypeScript's type system to ensure all events are categorized in
 
 ### Runtime Validation
 
-The event journal accepts server state, agentic backbone, and chronicler events, but explicitly rejects connection state events.
+The event journal accepts server state, agentic backbone, and sentinel events, but explicitly rejects connection state events.
 
 ## Event Schemas
 
@@ -151,17 +151,17 @@ All events are defined using Zod schemas, providing:
 
 Each line in the file is a complete JSON object representing a single server event. Events follow the structure defined in the event schemas.
 
-**Example: Phase Started Event**
+**Example: Codon Started Event**
 ```json
 {
   "id": "evt-abc123",
   "timestamp": "2025-10-28T10:30:00.000Z",
-  "type": "phase.started",
+  "type": "codon.started",
   "data": {
-    "phaseId": "phase-1",
+    "codonId": "codon-1",
     "runId": "run-456",
-    "phaseName": "planning",
-    "phaseConfig": { ... }
+    "codonName": "planning",
+    "codonConfig": { ... }
   }
 }
 ```
@@ -173,12 +173,12 @@ Each line in the file is a complete JSON object representing a single server eve
   "timestamp": "2025-10-28T10:30:01.000Z",
   "type": "state.transition",
   "data": {
-    "transitionType": "PhaseStarted",
+    "transitionType": "CodonStarted",
     "runId": "run-456",
-    "phaseId": "phase-1",
+    "codonId": "codon-1",
     "transition": {
-      "type": "PhaseStarted",
-      "data": { "runId": "run-456", "phaseId": "phase-1" }
+      "type": "CodonStarted",
+      "data": { "runId": "run-456", "codonId": "codon-1" }
     },
     "resultingState": {
       "currentRunId": "run-456",
@@ -241,9 +241,9 @@ After the history synchronization completes (`hasMore: false`), the WebSocket co
 
 **Important**: Live events include **Server State Events**, **Agentic Backbone Events**, and **Connection State Events**:
 
-- **Server State Events**: Persisted events like `phase.started`, `state.transition`, `state.snapshot`, etc.
+- **Server State Events**: Persisted events like `codon.started`, `state.transition`, `state.snapshot`, etc.
 - **Agentic Backbone Events**: Persisted events like `assistant.action`, `tool.result`, `file.updated`, `filetree.updated`
-- **Connection State Events**: Ephemeral events like `history.batch`, `incomplete.phase`, etc.
+- **Connection State Events**: Ephemeral events like `history.batch`, `incomplete.codon`, etc.
 
 Clients can filter live events based on their needs:
 

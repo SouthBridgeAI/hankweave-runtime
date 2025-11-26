@@ -19,7 +19,7 @@ let inCorrectDir = false;
 try {
   if (fs.existsSync("package.json")) {
     const packageJson = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-    inCorrectDir = packageJson.name === "tadpole" && fs.existsSync("server/index.ts");
+    inCorrectDir = packageJson.name === "strandweave" && fs.existsSync("server/index.ts");
   }
 } catch {
   inCorrectDir = false;
@@ -27,15 +27,15 @@ try {
 checks.push({
   name: "Working directory",
   pass: inCorrectDir,
-  message: inCorrectDir ? "In tadpole root" : "Must run from tadpole root directory",
+  message: inCorrectDir ? "In strandweave root" : "Must run from strandweave root directory",
 });
 
 // Check 2: Test config exists
-const testConfigExists = fs.existsSync("tests/config/test-phases.config.json");
+const testConfigExists = fs.existsSync("tests/config/test-codons.config.json");
 checks.push({
   name: "Test configuration",
   pass: testConfigExists,
-  message: testConfigExists ? "test-phases.config.json found" : "Missing test configuration",
+  message: testConfigExists ? "test-codons.config.json found" : "Missing test configuration",
 });
 
 // Check 3: Test directory exists
@@ -55,7 +55,7 @@ checks.push({
 });
 
 // Check 5: No lock file (no server running)
-const lockFile = "tests/test-area/.tadpole/server.lock";
+const lockFile = "tests/test-area/.strandweave/runtime.lock";
 const noLockFile = !fs.existsSync(lockFile);
 checks.push({
   name: "Server lock file",

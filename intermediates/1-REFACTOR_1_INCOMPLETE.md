@@ -876,9 +876,9 @@ import type {
   ShutdownCommand,
 } from "./types.js";
 
-// ============================================================================
+// -------------
 // Server Event Guards
-// ============================================================================
+// -------------
 
 export function isServerReadyEvent(
   event: ServerEvent
@@ -996,9 +996,9 @@ export function isIncompletePhaseEvent(
   );
 }
 
-// ============================================================================
+// -------------
 // Client Command Guards
-// ============================================================================
+// -------------
 
 export function isStartPhaseCommand(
   cmd: ClientCommand
@@ -1373,17 +1373,17 @@ await this.handleError(
 
 ```typescript
 export class LangtonServer extends EventEmitter {
-  // ============================================================================
+  // -------------
   // Constructor and Properties
-  // ============================================================================
+  // -------------
 
   constructor(config: ServerConfig) {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Server Lifecycle
-  // ============================================================================
+  // -------------
 
   /**
    * Start the WebSocket server and initialize state.
@@ -1401,9 +1401,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // WebSocket Management
-  // ============================================================================
+  // -------------
 
   /**
    * Handle new WebSocket client connection.
@@ -1444,9 +1444,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Command Handling
-  // ============================================================================
+  // -------------
 
   /**
    * Route and handle client commands.
@@ -1455,9 +1455,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Phase Management
-  // ============================================================================
+  // -------------
 
   /**
    * Start execution of a specific phase.
@@ -1515,9 +1515,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Workspace Setup
-  // ============================================================================
+  // -------------
 
   /**
    * Run workspace setup operations (copy files, run commands).
@@ -1543,9 +1543,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Claude Process Management
-  // ============================================================================
+  // -------------
 
   /**
    * Start Claude process for a phase.
@@ -1572,9 +1572,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Log Message Handlers
-  // ============================================================================
+  // -------------
 
   /**
    * Handle system messages from Claude logs.
@@ -1597,9 +1597,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // File Watching
-  // ============================================================================
+  // -------------
 
   /**
    * Handle file-related tool calls from Claude.
@@ -1618,9 +1618,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // State Management
-  // ============================================================================
+  // -------------
 
   /**
    * Load state from previous sessions by parsing Claude log files.
@@ -1643,9 +1643,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Checkpoint Management
-  // ============================================================================
+  // -------------
 
   /**
    * Initialize checkpoint system.
@@ -1668,9 +1668,9 @@ export class LangtonServer extends EventEmitter {
     /* ... */
   }
 
-  // ============================================================================
+  // -------------
   // Error Handling
-  // ============================================================================
+  // -------------
 
   /**
    * Handle errors with appropriate severity and client notification.

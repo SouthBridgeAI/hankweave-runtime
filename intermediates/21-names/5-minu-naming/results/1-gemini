@@ -1,0 +1,104 @@
+
+
+### 1. The Naming Menu
+
+I've organized the new candidates around three distinct, creative themes: **Organic/Biological**, **Composition/Music**, and **Alchemy/Craft**.
+
+| Concept | Current Name(s) | Candidate 1 (Organic 🐸) | Candidate 2 (Composition 🎵) | Candidate 3 (Alchemy 🔥) |
+| :--- | :--- | :--- | :--- | :--- |
+| **The Program** (The "DNA") | `Tadprogram` | **`Genome`** | **`Score`** | **`Codex`** |
+| **The Definition File** (The "Scroll") | `phases.json` | `genome.json` | `score.json` | `codex.json` |
+| **The Step** (The unit of work) | `phase` | **`Stage`** | **`Movement`** | **`Verse`** |
+| **The Workspace** (The "lab") | `workspace` | **`Nursery`** | **`Studio`** | **`Crucible`** |
+| **The Observers** (The "watchers") | `chroniclers` | **`Sentinels`** | **`Chorus`** | **`Familiars`** |
+| **The Save Point** (The "memory") | `snapshot` | **`Lilypad`** | **`Bookmark`** | **`Sigil`** |
+| **The Execution** (The "attempt") | `session` | **`GrowthCycle`** | **`Performance`** | **`Ritual`** |
+| **The Logical History** (The "true path") | `Execution Thread` | **`Lineage`** | **`Continuo`** | **`Weave`** |
+| **The Outputs** (The "result") | `artifacts` | **`Artifacts`** | **`Artifacts`** | **`Artifacts`** |
+
+---
+
+### 2. Prose Iterations
+
+Here are three distinct versions. The first two are thematic, and the third is a "best of" mix that I think is particularly strong.
+
+#### Iteration A: The "Organic" Theme (On-Brand & Evolutionary)
+
+This version fully embraces the `Tadpole` brand, using metaphors of genetics, growth, and the pond ecosystem. It's unique and highly memorable.
+
+* `Tadprogram` -> **`Genome`**
+* `phases.json` -> **`genome.json`**
+* `phase` -> **`Stage`**
+* `workspace` -> **`Nursery`**
+* `chroniclers` -> **`Chroniclers`** (Kept, it fits!)
+* `snapshot` -> **`Lilypad`**
+* `session` -> **`GrowthCycle`**
+* `Execution Thread` -> **`Lineage`**
+
+> **📖 The System Defined (Organic Theme)**
+>
+> The entire system is powered by `` `Tadpole` ``, the core **engine** that evolves a task. `` `Annalie` `` is the *analyzer* interface you use to author the plan and review the resulting *annals* (or history).
+>
+> `` `Annalie` `` works by finding or creating a `` `Genome` ``—the complete genetic code for the agent. The `` `Tadpole` `` engine is what runs that `` `Genome` ``.
+>
+> An **`Author`** writes a `` `Genome` `` by defining a series of developmental `` `Stages` `` in a `` `genome.json` `` file. To write portable instructions, the **`Author`** must understand the `` `Nursery` ``, which is the isolated, sandboxed environment where the `` `Genome` `` will grow. Finally, an **`Author`** can configure `` `Chroniclers` ``, which are parallel "observer" agents that record the organism's progress.
+>
+> An **`Operator`** is the user who runs and interacts with a `` `Genome` ``.
+>
+> An **`Operator`** starts a `` `GrowthCycle` `` to begin an execution. During a `` `GrowthCycle` ``, they monitor the `` `Active Stage` `` and the `` `Lineage` ``, which shows the true, branching evolutionary **`Execution Thread`**. The system's most powerful feature is **`Return to Lilypad`**, which lets the **`Operator`** revert the `` `Nursery` `` to a previous `` `Lilypad` `` (a stable "save point") to try a new evolutionary path. When the `` `GrowthCycle` `` is complete, the **`Operator`** retrieves the `` `Artifacts` `` from the `` `Nursery` ``.
+
+#### Iteration B: The "Composition" Theme (Elegant & Creative)
+
+This version uses the metaphor of a musical score. It's elegant, sophisticated, and frames the process as a creative, structured act.
+
+* `Tadprogram` -> **`Score`**
+* `phases.json` -> **`score.json`**
+* `phase` -> **`Movement`**
+* `workspace` -> **`Studio`**
+* `chroniclers` -> **`Chorus`**
+* `snapshot` -> **`Bookmark`**
+* `session` -> **`Performance`**
+* `Execution Thread` -> **`Continuo`**
+
+> **📖 The System Defined (Composition Theme)**
+>
+> The entire system is powered by `` `Tadpole` ``, the core **engine** that performs complex agentic tasks. `` `Annalie` `` is the *analyzer* interface you use to compose the task and review the *annals* of its performance.
+>
+> `` `Annalie` `` works by finding or creating a `` `Score` ``—the complete musical composition for the agent. The `` `Tadpole` `` engine is what runs that `` `Score` ``.
+>
+> An **`Author`** writes a `` `Score` `` by defining a series of `` `Movements` `` in a `` `score.json` `` file. To write portable instructions, the **`Author`** must understand the `` `Studio` ``, which is the isolated, sound-proofed environment where the `` `Score` `` will be performed. Finally, an **`Author`** can configure a `` `Chorus` ``, which are parallel "observer" agents that add texture and commentary without altering the main melody.
+>
+> An **`Operator`** is the user who runs and interacts with a `` `Score` ``.
+>
+> An **`Operator`** starts a `` `Performance` `` to begin an execution. During a `` `Performance` ``, they monitor the `` `Active Movement` `` and the `` `Continuo` ``, which shows the true, underlying **`Execution Thread`** of the piece. The system's most powerful feature is **`Return to Bookmark`**, which lets the **`Operator`** return the `` `Studio` `` to a previous `` `Bookmark` `` to re-perform a section. When the `` `Performance` `` is complete, the **`Operator`** retrieves the `` `Artifacts` `` from the `` `Studio` ``.
+
+#### Iteration C: The "Hybrid" Theme (Creative & Powerful Mix)
+
+This version cherry-picks the most evocative and accurate names from all themes to create the strongest possible combination.
+
+* `Tadprogram` -> **`Score`** (Elegant, implies "the plan")
+* `phases.json` -> **`score.json`**
+* `phase` -> **`Leg`** (Simple, implies a journey)
+* `workspace` -> **`Crucible`** (Evokes isolation, transformation, and mess)
+* `chroniclers` -> **`Chroniclers`** (Keep; it's perfect)
+* `snapshot` -> **`Lilypad`** (The single most memorable and on-brand name)
+* `session` -> **`Ritual`** (Evokes a precise, repeatable, and complex process)
+* `Execution Thread` -> **`Worldline`** (The best name for this complex concept)
+
+> **📖 The System Defined (Hybrid Theme)**
+>
+> The entire system is powered by `` `Tadpole` ``, the core **engine** that executes complex agentic tasks. `` `Annalie` `` is the *analyzer* interface you use to compose plans and review the historical *annals* of the engine's work.
+>
+> `` `Annalie` `` works by finding or creating a `` `Score` ``—the complete "plan" for the agent. The `` `Tadpole` `` engine is what runs that `` `Score` ``.
+>
+> An **`Author`** writes a `` `Score` `` by defining a series of `` `Legs` `` in a `` `score.json` `` file. To write portable instructions, the **`Author`** must understand the `` `Crucible` ``, which is the isolated, sandboxed environment where the work is transformed. Finally, an **`Author`** can configure `` `Chroniclers` ``, which are parallel "observer" agents that record the process.
+>
+> An **`Operator`** is the user who runs and interacts with a `` `Score` ``.
+>
+> An **`Operator`** starts a `` `Ritual` `` to begin an execution. During a `` `Ritual` ``, they monitor the `` `Active Leg` `` and the `` `Worldline` ``, which shows the true, stitched-together **`Execution Thread`** of all events. The system's most powerful feature is **`Return to Lilypad`**, which lets the **`Operator`** branch the `` `Worldline` `` from a previous `` `Lilypad` `` (a stable "save point") to retry or recover. When the `` `Ritual` `` is complete, the **`Operator`** retrieves the `` `Artifacts` `` from the `` `Crucible` ``.
+
+---
+
+How do these more creative iterations feel?
+
+Do any of the themes (Organic, Composition) feel right, or do you prefer the "Hybrid" mix? More importantly, are there specific names like **`Lilypad`**, **`Score`**, **`Crucible`**, or **`Worldline`** that feel like "kernels" we should build around?

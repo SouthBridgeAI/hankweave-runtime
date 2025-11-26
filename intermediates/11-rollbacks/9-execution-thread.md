@@ -3,9 +3,9 @@
 ## Implementation
 
 ```typescript
-// ============================================================================
+// -------------
 // execution-thread.ts - Clean implementation with simplified algorithm
-// ============================================================================
+// -------------
 
 import type {
   LangtonState,
@@ -19,9 +19,9 @@ import type {
 import type { PhaseConfig } from "./types.js";
 import type { Logger } from "./utils.js";
 
-// ============================================================================
+// -------------
 // Types
-// ============================================================================
+// -------------
 
 /**
  * Complete checkpoint information including git metadata
@@ -71,9 +71,9 @@ export interface ExecutionThread {
   nextPhaseId?: PhaseId; // What phase should execute next (if any)
 }
 
-// ============================================================================
+// -------------
 // Main Analysis Function - Simplified Algorithm
-// ============================================================================
+// -------------
 
 /**
  * Analyze execution history to build a unified thread with all metadata.
@@ -394,9 +394,9 @@ function isTerminalStatus(status: PhaseStatus): boolean {
   return status === "completed" || status === "failed" || status === "skipped";
 }
 
-// ============================================================================
+// -------------
 // Simple Query Functions
-// ============================================================================
+// -------------
 
 /**
  * Get the next phase to execute from a thread
@@ -471,9 +471,9 @@ export function getPhasesToRollback(
   return thread.phases.slice(0, targetIndex);
 }
 
-// ============================================================================
+// -------------
 // Integration Benefits - How This Simplifies Existing Code
-// ============================================================================
+// -------------
 
 /**
  * Functions that can be simplified or removed by using execution thread:

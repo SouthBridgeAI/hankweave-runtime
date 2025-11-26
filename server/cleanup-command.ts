@@ -66,11 +66,11 @@ export class CleanupCommand {
       }
 
       // Display what will be removed
-      console.log("🧹 Tadpole Cleanup Tool\n");
+      console.log("🧹 Strandweave Cleanup Tool\n");
       console.log("The following execution directory will be removed:\n");
 
       for (const dir of dirsToRemove) {
-        const metaPath = path.join(dir, ".tadpole", "execution-meta.json");
+        const metaPath = path.join(dir, ".strandweave", "execution-meta.json");
         try {
           const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
           console.log(`📁 ${dir}`);
@@ -122,8 +122,8 @@ export class CleanupCommand {
             continue;
           }
 
-          // Check for running server
-          const lockFile = path.join(dir, ".tadpole", "server.lock");
+          // Check for lock file
+          const lockFile = path.join(dir, ".strandweave", "runtime.lock");
           if (fs.existsSync(lockFile)) {
             result.errors.push(`Cannot remove ${dir}: Server is running`);
             console.log(`❌ Skipped (server running): ${dir}`);

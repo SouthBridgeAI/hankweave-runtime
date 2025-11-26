@@ -24,7 +24,7 @@ export async function runResourceCleanupTests(testDir: string) {
 
   test("log files are properly closed and flushed", () => {
     // All log files should be readable and complete
-    const logsDir = path.join(testDir, ".tadpole/logs");
+    const logsDir = path.join(testDir, ".strandweave/logs");
     const logFiles = fs.readdirSync(logsDir).filter((f) => f.endsWith(".jsonl"));
 
     logFiles.forEach((logFile) => {
@@ -55,7 +55,7 @@ export async function runResourceCleanupTests(testDir: string) {
   });
 
   test("server memory usage is reasonable", () => {
-    const serverLog = path.join(testDir, ".tadpole/logs/server.log");
+    const serverLog = path.join(testDir, ".strandweave/logs/server.log");
     if (fs.existsSync(serverLog)) {
       const logContent = fs.readFileSync(serverLog, "utf-8");
 

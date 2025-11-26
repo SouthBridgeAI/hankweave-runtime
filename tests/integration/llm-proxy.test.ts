@@ -7,6 +7,7 @@ import {
   cleanupTest,
   TestWSClient,
   ServerConfig,
+  getFreePort,
 } from "../utils/test-helpers.js";
 import type { ChildProcess } from "node:child_process";
 
@@ -31,7 +32,7 @@ const runTests = async (
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
     // Try to connect - this will throw if server isn't running
-    await client.connect(7777);
+    await client.connect(config.port);
 
     // Wait for server.ready event to confirm it's fully started
     await client.waitForEvent("server.ready", 10000);
@@ -73,24 +74,24 @@ const runTests = async (
 describe("LLM proxy", () => {
   beforeEach(() => {
     // Create temporary directory
-    const tempDir = mkdtempSync(path.join(tmpdir(), "tadpole-test-"));
-    configPath = path.join(tempDir, "phases.json");
+    const tempDir = mkdtempSync(path.join(tmpdir(), "strandweave-test-"));
+    configPath = path.join(tempDir, "codons.json");
 
     writeFileSync(
       configPath,
       JSON.stringify(
         [
           {
-            id: "phase-1-analysis",
-            name: "Phase 1: Initial Analysis",
+            id: "codon-1-analysis",
+            name: "Codon 1: Initial Analysis",
             promptFile: "prompts/1-analyze.md",
             model: "sonnet",
             continuationMode: "fresh",
             trackedFiles: ["src/**/*.ts", "analysis.md"],
           },
           {
-            id: "phase-2-implementation",
-            name: "Phase 2: Implementation",
+            id: "codon-2-implementation",
+            name: "Codon 2: Implementation",
             promptFile: "prompts/2-implement.md",
             model: "sonnet",
             continuationMode: "continue-previous",
@@ -122,12 +123,12 @@ describe("LLM proxy", () => {
     expect(configPath).toBeDefined();
 
     const tempDir = path.dirname(configPath!);
-    const port = 7777;
+    const port = await getFreePort();
 
     await runTests(
       {
         testRunDir: tempDir,
-        phasesConfig: configPath!,
+        configFile: configPath!,
         port,
         testMode: "integration",
         cwd: tempDir,
@@ -140,13 +141,13 @@ describe("LLM proxy", () => {
           `http://localhost:${port + 1}/health`
         );
         expect(healthResponse.ok).toBe(true);
-        expect(await healthResponse.text()).toBe("Tadpole Proxy OK");
+        expect(await healthResponse.text()).toBe("Strandweave Proxy OK");
 
         // sleep a bit to make sure we run smth
         await new Promise((resolve) => setTimeout(resolve, 15000));
 
         // Check if server log contains the logging middleware message
-        const logPath = path.join(executionDir!, ".tadpole/logs/server.log");
+        const logPath = path.join(executionDir!, ".strandweave/logs/server.log");
         expect(readFileSync(logPath, "utf-8")).toContain(
           "[LOGGING-MIDDLEWARE] Received request"
         );
@@ -160,11 +161,11 @@ describe("LLM proxy", () => {
     expect(configPath).toBeDefined();
 
     const tempDir = path.dirname(configPath!);
-    const port = 7777;
+    const port = await getFreePort();
     await runTests(
       {
         testRunDir: tempDir,
-        phasesConfig: configPath!,
+        configFile: configPath!,
         port,
         testMode: "integration",
         cwd: tempDir,

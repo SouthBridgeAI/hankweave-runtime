@@ -1,0 +1,25 @@
+{
+  "id": "time-window-summary",
+  "name": "Time Window Summary",
+  "description": "Creates summaries every 10 seconds",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action",
+      "tool.result",
+      "codon.started",
+      "codon.completed"
+    ],
+    "conditions": []
+  },
+  "execution": {
+    "strategy": "timeWindow",
+    "milliseconds": 10000
+  },
+  "model": "anthropic/claude-haiku-4-5",
+  "output": {
+    "format": "text",
+    "file": "time-window-summaries.log"
+  },
+  "userPromptText": "Summarize the activity in this 10-second window: <%= JSON.stringify(it.events, null, 2) %>"
+}

@@ -13,7 +13,8 @@ import {
   cleanupTest,
   colors,
   generateTestTimestamp,
-  getCompletedPhasesFromState,
+  getCompletedCodonsFromState,
+  getFreePort,
   getTotalCostFromState,
   type ServerConfig,
   startServer,
@@ -22,11 +23,12 @@ import {
 // New test groups
 import { runCheckpointExclusionTests } from "./test-groups/checkpoint-exclusion-tests.js";
 import { runCheckpointSystemTests } from "./test-groups/checkpoint-system-tests.js";
-import { runChroniclerIntegrationTests } from "./test-groups/chronicler-integration-tests.js";
+import { runCodonExecutionTests } from "./test-groups/codon-execution-tests.js";
+import { runCodonTimingTests } from "./test-groups/codon-timing-tests.js";
 import { runCostPrecisionTests } from "./test-groups/cost-precision-tests.js";
 import { runCostTrackingTests } from "./test-groups/cost-tracking-tests.js";
 import { runDualIdSystemTests } from "./test-groups/dual-id-system-tests.js";
-import { runEarlyPhaseFailureTests } from "./test-groups/early-phase-failure-tests.js";
+import { runEarlyCodonFailureTests } from "./test-groups/early-codon-failure-tests.js";
 import { runErrorEventTests } from "./test-groups/error-event-tests.js";
 import { runEventIntegrityTests } from "./test-groups/event-integrity-tests.js";
 import { runEventJournalTests } from "./test-groups/event-journal-tests.js";
@@ -45,13 +47,12 @@ import { runMessageOrderingTests } from "./test-groups/message-ordering-tests.js
 import { runMultiFilePromptTests } from "./test-groups/multi-file-prompt-tests.js";
 import { runPathConsistencyTests } from "./test-groups/path-consistency-tests.js";
 import { runPerformanceTests } from "./test-groups/performance-tests.js";
-import { runPhaseExecutionTests } from "./test-groups/phase-execution-tests.js";
-import { runPhaseTimingTests } from "./test-groups/phase-timing-tests.js";
 import { runPreStartCommandsTests } from "./test-groups/pre-start-commands-tests.js";
 import { runProcessLifecycleTests } from "./test-groups/process-lifecycle-tests.js";
 import { runRaceConditionTests } from "./test-groups/race-condition-tests.js";
 import { runResourceCleanupTests } from "./test-groups/resource-cleanup-tests.js";
 import { runSecurityValidationTests } from "./test-groups/security-validation-tests.js";
+import { runSentinelIntegrationTests } from "./test-groups/sentinel-integration-tests.js";
 import { runServerStateTests } from "./test-groups/server-state-tests.js";
 import { runSessionContinuityTests } from "./test-groups/session-continuity-tests.js";
 import { runStateConsistencyTests } from "./test-groups/state-consistency-tests.js";
@@ -67,8 +68,7 @@ const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
-const SERVER_PORT = parseInt(process.env.tadpole_TEST_PORT || "7780");
-const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
+const CODONS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons.config.json");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = generateTestTimestamp();
@@ -77,31 +77,31 @@ const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 // Import types and utilities from the server
 import { type HistoryBatchEvent, isJournaledEvent } from "../../server/schemas/event-schemas.js";
 import type {
+  CodonCompletedEvent,
+  CodonStartedEvent,
   ErrorEvent,
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
   ServerEvent,
 } from "../../server/types/types.js";
-// Import connectTadpoleClient for sync client
-import { connectTadpoleClient } from "../utils/tadpole-server-test-helpers.js";
+// Import connectStrandweaveClient for sync client
+import { connectStrandweaveClient } from "../utils/strandweave-server-test-helpers.js";
 
 // Server configuration - Updated for execution isolation
 const serverConfig: ServerConfig = {
   testRunDir: TEST_RUN_DIR,
-  phasesConfig: PHASES_CONFIG,
-  port: SERVER_PORT,
+  configFile: CODONS_CONFIG,
+  port: 0, // Will be set dynamically
   testMode: "e2e-happy-path",
   dataSourceDir: DATA_SOURCE_FILE, // New: specify data source file
-  cwd: process.cwd(), // Server starts from test runner's CWD
+  cwd: TEST_RUN_DIR, // Server starts from isolated test directory
   useDataFlag: true, // New: use --data flag
   startNew: true, // Force new execution for tests
 };
 
-const tadpoleResultsDir = path.join(serverConfig.cwd, "tadpole-results/");
+const strandweaveResultsDir = path.join(serverConfig.cwd, "strandweave-results/");
 
-// ============================================================================
+// -------------
 // Test State - Shared across all tests
-// ============================================================================
+// -------------
 
 interface TestState {
   serverProcess: ChildProcess | null;
@@ -112,12 +112,12 @@ interface TestState {
   historyEvents: ServerEvent[];
   // Server State Events collected live after history sync completes
   liveEvents: ServerEvent[];
-  phase1Started: PhaseStartedEvent | null;
-  phase1Completed: PhaseCompletedEvent | null;
-  phase2Started: PhaseStartedEvent | null;
-  phase2Completed: PhaseCompletedEvent | null;
-  phase3Started: PhaseStartedEvent | null;
-  phase3Completed: PhaseCompletedEvent | null;
+  codon1Started: CodonStartedEvent | null;
+  codon1Completed: CodonCompletedEvent | null;
+  codon2Started: CodonStartedEvent | null;
+  codon2Completed: CodonCompletedEvent | null;
+  codon3Started: CodonStartedEvent | null;
+  codon3Completed: CodonCompletedEvent | null;
   errorEvents: ErrorEvent[];
   testStartTime: number;
   cleanupResult?: CleanupIntegrationResult;
@@ -131,8 +131,8 @@ interface TestState {
     trackedFiles: string[];
   };
   // State-based fields for new state management
-  completedPhases: Array<{
-    phaseId: string;
+  completedCodons: Array<{
+    codonId: string;
     cost: number;
     sessionId: string;
   }>;
@@ -148,23 +148,23 @@ const testState: TestState = {
   historyEvents: [],
   // Events collected live after history sync completes
   liveEvents: [],
-  phase1Started: null,
-  phase1Completed: null,
-  phase2Started: null,
-  phase2Completed: null,
-  phase3Started: null,
-  phase3Completed: null,
+  codon1Started: null,
+  codon1Completed: null,
+  codon2Started: null,
+  codon2Completed: null,
+  codon3Started: null,
+  codon3Completed: null,
   errorEvents: [],
   testStartTime: 0,
-  completedPhases: [],
+  completedCodons: [],
   totalCost: 0,
 };
 
-// ============================================================================
-// Setup and Run Phases (Outside of test blocks)
-// ============================================================================
+// -------------
+// Setup and Run Codons (Outside of test blocks)
+// -------------
 
-async function setupAndRunPhases(): Promise<void> {
+async function setupAndRunCodons(): Promise<void> {
   testState.testStartTime = Date.now();
 
   // Ensure test results directory exists
@@ -175,10 +175,14 @@ async function setupAndRunPhases(): Promise<void> {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
   }
 
-  // Clean up tadpole-results directory if it exists
-  if (fs.existsSync(tadpoleResultsDir)) {
-    fs.rmSync(tadpoleResultsDir, { recursive: true, force: true });
+  // Clean up strandweave-results directory if it exists
+  if (fs.existsSync(strandweaveResultsDir)) {
+    fs.rmSync(strandweaveResultsDir, { recursive: true, force: true });
   }
+
+  // Get a free port for this test run
+  serverConfig.port = await getFreePort();
+  console.log(`${colors.blue}Using dynamic port: ${serverConfig.port}${colors.reset}`);
 
   // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
@@ -188,7 +192,7 @@ async function setupAndRunPhases(): Promise<void> {
 
   // Connect WebSocket client
   testState.client = new TestWSClient();
-  await testState.client.connect(SERVER_PORT);
+  await testState.client.connect(serverConfig.port);
 
   // Wait for initial events
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
@@ -202,23 +206,23 @@ async function setupAndRunPhases(): Promise<void> {
     console.log(`  Data path: ${testState.dataPath}`);
   }
 
-  // Wait for all phases to complete
-  console.log(`${colors.blue}Waiting for all phases to complete...${colors.reset}`);
+  // Wait for all codons to complete
+  console.log(`${colors.blue}Waiting for all codons to complete...${colors.reset}`);
 
-  // Phase 1
-  const phase1StartEvent = await testState.client.waitForEvent("phase.started", 10000);
-  if (phase1StartEvent.type !== "phase.started") {
-    throw new Error("Expected phase.started event for phase 1");
+  // Codon 1
+  const codon1StartEvent = await testState.client.waitForEvent("codon.started", 10000);
+  if (codon1StartEvent.type !== "codon.started") {
+    throw new Error("Expected codon.started event for codon 1");
   }
-  testState.phase1Started = phase1StartEvent;
-  console.log(`${colors.green}✓ Phase 1 started${colors.reset}`);
+  testState.codon1Started = codon1StartEvent;
+  console.log(`${colors.green}✓ Codon 1 started${colors.reset}`);
 
-  testState.phase1Completed = await testState.client.waitForPhaseCompletion("phase-1", 60000);
-  console.log(`${colors.green}✓ Phase 1 completed${colors.reset}`);
+  testState.codon1Completed = await testState.client.waitForCodonCompletion("codon-1", 60000);
+  console.log(`${colors.green}✓ Codon 1 completed${colors.reset}`);
 
-  // Start read-only sync client in background after Phase 1 completes
+  // Start read-only sync client in background after Codon 1 completes
   console.log(`${colors.blue}Starting read-only sync client in background...${colors.reset}`);
-  const clientSetup = await connectTadpoleClient(`ws://localhost:${SERVER_PORT}`, {
+  const clientSetup = await connectStrandweaveClient(`ws://localhost:${serverConfig.port}`, {
     performHandshake: true,
     mode: ClientMode.READONLY,
     sendPreviousEvents: true,
@@ -316,20 +320,20 @@ async function setupAndRunPhases(): Promise<void> {
     return await eventCollectionPromise;
   })();
 
-  // Phase 2
-  // Wait for phase 2 to start (it should auto-start after phase 1)
+  // Codon 2
+  // Wait for codon 2 to start (it should auto-start after codon 1)
   // We'll poll for the event with a timeout
-  const phase2StartTime = Date.now();
-  const phase2Timeout = 10000; // 10 seconds
+  const codon2StartTime = Date.now();
+  const codon2Timeout = 10000; // 10 seconds
 
-  while (Date.now() - phase2StartTime < phase2Timeout) {
-    const phase2StartEvent = testState.client
+  while (Date.now() - codon2StartTime < codon2Timeout) {
+    const codon2StartEvent = testState.client
       .getEvents()
-      .find((e) => e.type === "phase.started" && e.data.phaseId === "phase-2");
+      .find((e) => e.type === "codon.started" && e.data.codonId === "codon-2");
 
-    if (phase2StartEvent && phase2StartEvent.type === "phase.started") {
-      testState.phase2Started = phase2StartEvent;
-      console.log(`${colors.green}✓ Phase 2 started${colors.reset}`);
+    if (codon2StartEvent && codon2StartEvent.type === "codon.started") {
+      testState.codon2Started = codon2StartEvent;
+      console.log(`${colors.green}✓ Codon 2 started${colors.reset}`);
       break;
     }
 
@@ -337,27 +341,27 @@ async function setupAndRunPhases(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  if (!testState.phase2Started) {
-    console.log(`${colors.red}✗ Phase 2 did not start${colors.reset}`);
+  if (!testState.codon2Started) {
+    console.log(`${colors.red}✗ Codon 2 did not start${colors.reset}`);
   }
 
-  testState.phase2Completed = await testState.client.waitForPhaseCompletion("phase-2", 60000);
-  console.log(`${colors.green}✓ Phase 2 completed${colors.reset}`);
+  testState.codon2Completed = await testState.client.waitForCodonCompletion("codon-2", 60000);
+  console.log(`${colors.green}✓ Codon 2 completed${colors.reset}`);
 
-  // Phase 3
-  // Wait for phase 3 to start (it should auto-start after phase 2)
+  // Codon 3
+  // Wait for codon 3 to start (it should auto-start after codon 2)
   // We'll poll for the event with a timeout
-  const phase3StartTime = Date.now();
-  const phase3Timeout = 10000; // 10 seconds
+  const codon3StartTime = Date.now();
+  const codon3Timeout = 10000; // 10 seconds
 
-  while (Date.now() - phase3StartTime < phase3Timeout) {
-    const phase3StartEvent = testState.client
+  while (Date.now() - codon3StartTime < codon3Timeout) {
+    const codon3StartEvent = testState.client
       .getEvents()
-      .find((e) => e.type === "phase.started" && e.data.phaseId === "phase-3");
+      .find((e) => e.type === "codon.started" && e.data.codonId === "codon-3");
 
-    if (phase3StartEvent && phase3StartEvent.type === "phase.started") {
-      testState.phase3Started = phase3StartEvent;
-      console.log(`${colors.green}✓ Phase 3 started${colors.reset}`);
+    if (codon3StartEvent && codon3StartEvent.type === "codon.started") {
+      testState.codon3Started = codon3StartEvent;
+      console.log(`${colors.green}✓ Codon 3 started${colors.reset}`);
       break;
     }
 
@@ -365,15 +369,15 @@ async function setupAndRunPhases(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  if (!testState.phase3Started) {
-    console.log(`${colors.red}✗ Phase 3 did not start${colors.reset}`);
+  if (!testState.codon3Started) {
+    console.log(`${colors.red}✗ Codon 3 did not start${colors.reset}`);
   }
 
-  testState.phase3Completed = await testState.client.waitForPhaseCompletion("phase-3", 60000);
-  console.log(`${colors.green}✓ Phase 3 completed${colors.reset}`);
+  testState.codon3Completed = await testState.client.waitForCodonCompletion("codon-3", 60000);
+  console.log(`${colors.green}✓ Codon 3 completed${colors.reset}`);
 
   // Wait for sync client background collection to complete
-  // The promise resolves when RunCompleted is received (after all phases finish)
+  // The promise resolves when RunCompleted is received (after all codons finish)
   if (testState.syncClient) {
     try {
       const { historyEvents, liveEvents } = await syncClientEventCollection;
@@ -401,10 +405,10 @@ async function setupAndRunPhases(): Promise<void> {
   console.log(`\n${colors.blue}Reading state from state.json...${colors.reset}`);
   try {
     if (testState.executionPath) {
-      testState.completedPhases = await getCompletedPhasesFromState(testState.executionPath);
+      testState.completedCodons = await getCompletedCodonsFromState(testState.executionPath);
       testState.totalCost = await getTotalCostFromState(testState.executionPath);
       console.log(`${colors.green}✓ State data loaded from state.json${colors.reset}`);
-      console.log(`  - Completed phases: ${testState.completedPhases.length}`);
+      console.log(`  - Completed codons: ${testState.completedCodons.length}`);
       console.log(`  - Total cost: $${testState.totalCost.toFixed(6)}`);
     }
   } catch (error) {
@@ -421,7 +425,7 @@ async function validateCheckpointSystem(): Promise<void> {
     return;
   }
 
-  const checkpointDir = path.join(testState.executionPath, ".tadpole/checkpoints");
+  const checkpointDir = path.join(testState.executionPath, ".strandweave/checkpoints");
   const gitDir = path.join(checkpointDir, ".git");
 
   // Store validation results for tests
@@ -499,9 +503,9 @@ async function validateCheckpointSystem(): Promise<void> {
   console.log(`${colors.green}✓ Checkpoint validation complete${colors.reset}`);
 }
 
-// ============================================================================
+// -------------
 // Cleanup Functions - Updated for execution isolation
-// ============================================================================
+// -------------
 
 // This function only shuts down the server and saves results
 async function shutdownServer(): Promise<void> {
@@ -536,9 +540,9 @@ async function runFullCleanup(): Promise<void> {
   // Use the cleanup integration to clean execution directory
   console.log(`\n${colors.blue}Running cleanup integration...${colors.reset}`);
 
-  // Clean up tadpole-results directory if it exists
-  if (fs.existsSync(tadpoleResultsDir)) {
-    fs.rmSync(tadpoleResultsDir, { recursive: true, force: true });
+  // Clean up strandweave-results directory if it exists
+  if (fs.existsSync(strandweaveResultsDir)) {
+    fs.rmSync(strandweaveResultsDir, { recursive: true, force: true });
   }
 
   const cleanupResult = await executeTestCleanup({
@@ -555,41 +559,43 @@ async function runFullCleanup(): Promise<void> {
   testState.cleanupResult = cleanupResult;
 }
 
-// ============================================================================
+// -------------
 // Run setup before tests
-// ============================================================================
+// -------------
 
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
 console.log(
-  `${colors.blue}Tadpole Server End-to-End Test (with Execution Isolation)${colors.reset}`,
+  `${colors.blue}Strandweave Server End-to-End Test (with Execution Isolation)${colors.reset}`,
 );
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
 // This runs before any tests
-await setupAndRunPhases();
+await setupAndRunCodons();
 
-// ============================================================================
+// -------------
 // Now run the actual tests using Bun's test framework
 // NOTE: Many test groups need updates to use testState.executionPath
-// ============================================================================
+// -------------
 
-describe("Tadpole E2E Test", () => {
-  describe("Phase Execution", () => {
-    runPhaseExecutionTests(testState);
+describe("Strandweave E2E Test", () => {
+  describe("Codon Execution", () => {
+    runCodonExecutionTests(testState);
   });
 
-  describe("Tadpole results", () => {
+  describe("Strandweave results", () => {
     it("should contain favorite_poem.txt", () => {
-      expect(fs.existsSync(path.join(tadpoleResultsDir, "notes", "favorite_poem.txt"))).toBe(true);
-    });
-
-    it("should NOT contain second_favorite_poem.txt because beforeCopy fails", () => {
-      expect(fs.existsSync(path.join(tadpoleResultsDir, "notes", "second_favorite_poem.txt"))).toBe(
-        false,
+      expect(fs.existsSync(path.join(strandweaveResultsDir, "notes", "favorite_poem.txt"))).toBe(
+        true,
       );
     });
 
-    it("should have executed beforeCopy command for phase-1", () => {
+    it("should NOT contain second_favorite_poem.txt because beforeCopy fails", () => {
+      expect(
+        fs.existsSync(path.join(strandweaveResultsDir, "notes", "second_favorite_poem.txt")),
+      ).toBe(false);
+    });
+
+    it("should have executed beforeCopy command for codon-1", () => {
       if (!testState.executionPath) {
         throw new Error("Execution path not available");
       }
@@ -600,7 +606,7 @@ describe("Tadpole E2E Test", () => {
 
       // Check the content of the log file
       const logContent = fs.readFileSync(beforeCopyLogPath, "utf-8");
-      expect(logContent).toContain("Before copy command executed for phase-1");
+      expect(logContent).toContain("Before copy command executed for codon-1");
     });
   });
 
@@ -713,15 +719,15 @@ describe("Tadpole E2E Test", () => {
       }
     });
 
-    it("should have phase-1 completion as last history event", () => {
-      // The sync client was started after Phase 1 completed
-      // So the last history event should be phase-1's completion
+    it("should have codon-1 completion as last history event", () => {
+      // The sync client was started after Codon 1 completed
+      // So the last history event should be codon-1's completion
       expect(testState.historyEvents.length).toBeGreaterThan(0);
 
       const lastHistoryEvent = testState.historyEvents[testState.historyEvents.length - 1];
-      expect(lastHistoryEvent.type).toBe("phase.completed");
-      if (lastHistoryEvent.type === "phase.completed") {
-        expect(lastHistoryEvent.data.phaseId).toBe("phase-1");
+      expect(lastHistoryEvent.type).toBe("codon.completed");
+      if (lastHistoryEvent.type === "codon.completed") {
+        expect(lastHistoryEvent.data.codonId).toBe("codon-1");
       }
     });
   });
@@ -742,8 +748,8 @@ describe("Tadpole E2E Test", () => {
     runFileWatchingTests(testState);
   });
 
-  describe("Phase Timing", () => {
-    runPhaseTimingTests(testState);
+  describe("Codon Timing", () => {
+    runCodonTimingTests(testState);
   });
 
   describe("Session Continuity", () => {
@@ -819,8 +825,8 @@ describe("Tadpole E2E Test", () => {
     runDualIdSystemTests(testState);
   });
 
-  describe("Early Phase Failures", () => {
-    runEarlyPhaseFailureTests(testState);
+  describe("Early Codon Failures", () => {
+    runEarlyCodonFailureTests(testState);
   });
 
   describe("Log Ordering", () => {
@@ -862,7 +868,7 @@ describe("Tadpole E2E Test", () => {
   });
 
   describe("Multi-file Prompts", () => {
-    runMultiFilePromptTests(testState, PHASES_CONFIG);
+    runMultiFilePromptTests(testState, CODONS_CONFIG);
   });
 
   describe("Lock File Integrity", () => {
@@ -873,8 +879,8 @@ describe("Tadpole E2E Test", () => {
     runErrorEventTests(testState);
   });
 
-  describe("Chronicler Integration", () => {
-    runChroniclerIntegrationTests(testState);
+  describe("Sentinel Integration", () => {
+    runSentinelIntegrationTests(testState);
   });
 
   // Cleanup after all tests - Updated for execution isolation

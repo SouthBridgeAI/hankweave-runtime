@@ -12,19 +12,19 @@ export function runFileContentTests(testDir: string) {
     }
   });
 
-  test("system prompt is observed - phase 1 poem contains Korean translations", () => {
+  test("system prompt is observed - codon 1 poem contains Korean translations", () => {
     const poem1Path = path.join(testDir, "notes/favorite_poem.txt");
 
     // Check for Korean characters (Hangul Unicode range: \u1100-\u11FF, \uAC00-\uD7AF)
     const hasKorean = (text: string) => /[\u1100-\u11FF\uAC00-\uD7AF]/.test(text);
 
-    // Check first poem (phase 1 has the system prompt configured)
+    // Check first poem (codon 1 has the system prompt configured)
     if (fs.existsSync(poem1Path)) {
       const content = fs.readFileSync(poem1Path, "utf-8");
       expect(hasKorean(content)).toBe(true);
     }
 
-    // Note: Phase 2 doesn't have a system prompt configured, so we don't check second_favorite_poem.txt
+    // Note: Codon 2 doesn't have a system prompt configured, so we don't check second_favorite_poem.txt
   });
 
   test("poem1.ts contains exports", () => {

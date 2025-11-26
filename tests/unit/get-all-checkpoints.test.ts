@@ -60,19 +60,19 @@ describe("StateManager - getAllCheckpoints", () => {
     const mockCheckpointData = [
       {
         sha: "abc123",
-        message: "completed:phase-3 [run:2024-01-01-abc] Phase 3: Final",
+        message: "completed:codon-3 [run:2024-01-01-abc] Codon 3: Final",
         timestamp: "2024-01-01T03:00:00Z",
         branch: "run-2024-01-01-abc",
       },
       {
         sha: "def456",
-        message: "workspace-setup:phase-2 [run:2024-01-01-abc] Phase 2: Middle",
+        message: "rig-setup:codon-2 [run:2024-01-01-abc] Codon 2: Middle",
         timestamp: "2024-01-01T02:00:00Z",
         branch: "run-2024-01-01-abc",
       },
       {
         sha: "ghi789",
-        message: "completed:phase-1 [run:2024-01-01-abc] Phase 1: Start",
+        message: "completed:codon-1 [run:2024-01-01-abc] Codon 1: Start",
         timestamp: "2024-01-01T01:00:00Z",
         branch: "run-2024-01-01-abc",
       },

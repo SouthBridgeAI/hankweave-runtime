@@ -10,16 +10,16 @@
 
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { tadpoleModelMessageSchema } from "./input-ai-types.js";
+import { strandweaveModelMessageSchema } from "./input-ai-types.js";
 
 // --- Base Schemas ---
 
 /**
- * A schema for common model-calling parameters that can be configured by chroniclers.
+ * A schema for common model-calling parameters that can be configured by sentinels.
  * We are intentionally keeping this simple, focusing on the most frequently used options
  * and omitting others like topP, topK, abortSignal, etc.
  */
-export const tadpoleLlmCallParamsSchema = z.object({
+export const strandweaveLlmCallParamsSchema = z.object({
   temperature: z
     .number()
     .min(0)
@@ -50,20 +50,20 @@ export const tadpoleLlmCallParamsSchema = z.object({
  * We're removing the prompt field and focusing on messages for consistency.
  *
  * Note: Model is optional here because the concrete LLM call implementation
- * (in ChroniclerManager) provides it. Chroniclers don't have direct access
+ * (in SentinelManager) provides it. Sentinels don't have direct access
  * to the model instance - it's injected by the manager.
  */
-export const tadpoleGenerateTextOptionsSchema = tadpoleLlmCallParamsSchema.extend({
+export const strandweaveGenerateTextOptionsSchema = strandweaveLlmCallParamsSchema.extend({
   model: z.custom<LanguageModel>().optional(), // Optional - provided by concrete implementation
   system: z.string().optional(),
-  messages: z.array(tadpoleModelMessageSchema),
+  messages: z.array(strandweaveModelMessageSchema),
 });
 
 /**
  * The result from a `generateText` call.
  * This is a subset of the AI SDK's `GenerateTextResult`.
  */
-export const tadpoleGenerateTextResultSchema = z.object({
+export const strandweaveGenerateTextResultSchema = z.object({
   text: z.string(),
   finishReason: z.enum(["stop", "length", "content-filter", "tool-calls", "error", "other"]),
   usage: z.object({
@@ -78,14 +78,14 @@ export const tadpoleGenerateTextResultSchema = z.object({
  * Input parameters for a `streamText` call.
  * This is a subset of the AI SDK's `StreamTextOptions`.
  */
-export const tadpoleStreamTextOptionsSchema = tadpoleGenerateTextOptionsSchema; // Same options as generateText
+export const strandweaveStreamTextOptionsSchema = strandweaveGenerateTextOptionsSchema; // Same options as generateText
 
 /**
  * The result from a `streamText` call.
  * We simplify this to focus on the text stream and the final result promise.
  * The textStream is an AsyncIterableStream<string> according to the docs.
  */
-export const tadpoleStreamTextResultSchema = z.object({
+export const strandweaveStreamTextResultSchema = z.object({
   textStream: z.custom<AsyncIterable<string>>(), // AsyncIterableStream<string> is AsyncIterable<string> & ReadableStream<string>
   // We can't easily represent the full promise-based result in Zod,
   // so we'll handle that with TypeScript types.
@@ -101,10 +101,10 @@ export const tadpoleStreamTextResultSchema = z.object({
  * Note: Model is optional for the same reason as in generateText -
  * it's provided by the concrete implementation.
  */
-export const tadpoleGenerateObjectOptionsSchema = tadpoleLlmCallParamsSchema.extend({
+export const strandweaveGenerateObjectOptionsSchema = strandweaveLlmCallParamsSchema.extend({
   model: z.custom<LanguageModel>().optional(), // Optional - provided by concrete implementation
   schema: z.custom<z.ZodSchema<unknown>>().optional(), // Optional for 'no-schema' or enum output
-  messages: z.array(tadpoleModelMessageSchema),
+  messages: z.array(strandweaveModelMessageSchema),
   system: z.string().optional(),
   mode: z.enum(["auto", "json", "tool"]).optional(),
   output: z.enum(["object", "array", "enum", "no-schema"]).optional(),
@@ -117,7 +117,7 @@ export const tadpoleGenerateObjectOptionsSchema = tadpoleLlmCallParamsSchema.ext
  * The result from a `generateObject` call.
  * This is a subset of the AI SDK's `GenerateObjectResult`.
  */
-export const tadpoleGenerateObjectResultSchema = z.object({
+export const strandweaveGenerateObjectResultSchema = z.object({
   object: z.any(),
   finishReason: z.enum(["stop", "length", "content-filter", "error", "other"]),
   usage: z.object({
@@ -128,13 +128,13 @@ export const tadpoleGenerateObjectResultSchema = z.object({
 
 // --- Exported TypeScript Types ---
 
-export type TadpoleLlmCallParams = z.infer<typeof tadpoleLlmCallParamsSchema>;
-export type TadpoleGenerateTextOptions = z.infer<typeof tadpoleGenerateTextOptionsSchema>;
-export type TadpoleGenerateTextResult = z.infer<typeof tadpoleGenerateTextResultSchema>;
-export type TadpoleStreamTextOptions = z.infer<typeof tadpoleStreamTextOptionsSchema>;
+export type StrandweaveLlmCallParams = z.infer<typeof strandweaveLlmCallParamsSchema>;
+export type StrandweaveGenerateTextOptions = z.infer<typeof strandweaveGenerateTextOptionsSchema>;
+export type StrandweaveGenerateTextResult = z.infer<typeof strandweaveGenerateTextResultSchema>;
+export type StrandweaveStreamTextOptions = z.infer<typeof strandweaveStreamTextOptionsSchema>;
 // StreamTextResult is complex, so we define it more carefully.
 // According to the docs, textStream is AsyncIterableStream<string> which is AsyncIterable<string> & ReadableStream<string>
-export type TadpoleStreamTextResult = {
+export type StrandweaveStreamTextResult = {
   textStream: AsyncIterable<string> & ReadableStream<string>;
   // The promises for the final state are essential for testing.
   usage: Promise<{ inputTokens: number; outputTokens: number }>;
@@ -142,16 +142,18 @@ export type TadpoleStreamTextResult = {
   // Add other promises as needed for tests, e.g., `text`.
   text: Promise<string>;
 };
-export type TadpoleGenerateObjectOptions = z.infer<typeof tadpoleGenerateObjectOptionsSchema>;
-export type TadpoleGenerateObjectResult<T> = Omit<
-  z.infer<typeof tadpoleGenerateObjectResultSchema>,
+export type StrandweaveGenerateObjectOptions = z.infer<
+  typeof strandweaveGenerateObjectOptionsSchema
+>;
+export type StrandweaveGenerateObjectResult<T> = Omit<
+  z.infer<typeof strandweaveGenerateObjectResultSchema>,
   "object"
 > & { object: T };
 
 // --- Structured Output Context ---
 
 /**
- * Context for structured output configuration in chroniclers.
+ * Context for structured output configuration in sentinels.
  * Contains the loaded Zod schema and output mode settings.
  */
 export interface StructuredOutputContext {

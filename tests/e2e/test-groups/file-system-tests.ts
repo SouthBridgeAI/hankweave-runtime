@@ -1,25 +1,25 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { PhaseCompletedEvent, PhaseStartedEvent } from "../../../server/types/types.js";
+import type { CodonCompletedEvent, CodonStartedEvent } from "../../../server/types/types.js";
 
 interface TestState {
-  phase1Started: PhaseStartedEvent | null;
-  phase1Completed: PhaseCompletedEvent | null;
-  phase2Started: PhaseStartedEvent | null;
-  phase2Completed: PhaseCompletedEvent | null;
-  phase3Started: PhaseStartedEvent | null;
-  phase3Completed: PhaseCompletedEvent | null;
+  codon1Started: CodonStartedEvent | null;
+  codon1Completed: CodonCompletedEvent | null;
+  codon2Started: CodonStartedEvent | null;
+  codon2Completed: CodonCompletedEvent | null;
+  codon3Started: CodonStartedEvent | null;
+  codon3Completed: CodonCompletedEvent | null;
 }
 
 export function runFileSystemTests(_testState: TestState, testDir: string) {
-  // Workspace setup tests
-  test("Phase 1 workspace setup created notes directory", () => {
+  // Rig setup tests
+  test("Codon 1 rig setup created notes directory", () => {
     expect(fs.existsSync(path.join(testDir, "notes"))).toBe(true);
     expect(fs.statSync(path.join(testDir, "notes")).isDirectory()).toBe(true);
   });
 
-  test("Phase 3 workspace setup copied typescript_structure", () => {
+  test("Codon 3 rig setup copied typescript_structure", () => {
     const typescriptCodeDir = path.join(testDir, "typescript_code");
     expect(fs.existsSync(typescriptCodeDir)).toBe(true);
     expect(fs.statSync(typescriptCodeDir).isDirectory()).toBe(true);
@@ -31,7 +31,7 @@ export function runFileSystemTests(_testState: TestState, testDir: string) {
     expect(fs.statSync(path.join(typescriptCodeDir, "src")).isDirectory()).toBe(true);
   });
 
-  test("Phase 3 workspace setup ran bun install", () => {
+  test("Codon 3 rig setup ran bun install", () => {
     const typescriptCodeDir = path.join(testDir, "typescript_code");
     // Check that bun install created node_modules or updated bun.lockb
     const bunLockExists = fs.existsSync(path.join(typescriptCodeDir, "bun.lockb"));
@@ -40,19 +40,19 @@ export function runFileSystemTests(_testState: TestState, testDir: string) {
   });
 
   // Original tests
-  test("Phase 1 created favorite_poem.txt", () => {
+  test("Codon 1 created favorite_poem.txt", () => {
     expect(fs.existsSync(path.join(testDir, "notes/favorite_poem.txt"))).toBe(true);
   });
 
-  test("Phase 2 created second_favorite_poem.txt", () => {
+  test("Codon 2 created second_favorite_poem.txt", () => {
     expect(fs.existsSync(path.join(testDir, "notes/second_favorite_poem.txt"))).toBe(true);
   });
 
-  test("Phase 3 created poem1.ts", () => {
+  test("Codon 3 created poem1.ts", () => {
     expect(fs.existsSync(path.join(testDir, "typescript_code/src/poem1.ts"))).toBe(true);
   });
 
-  test("Phase 3 created poem2.ts", () => {
+  test("Codon 3 created poem2.ts", () => {
     expect(fs.existsSync(path.join(testDir, "typescript_code/src/poem2.ts"))).toBe(true);
   });
 }

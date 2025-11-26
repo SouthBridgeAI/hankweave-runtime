@@ -2,9 +2,9 @@ import { z } from "zod";
 import type { StateTransitionType } from "../types/state-types.js";
 import type { AssertEqual } from "../utils.js";
 
-// ============================================================================
+// -------------
 // Re-usable Base Schemas
-// ============================================================================
+// -------------
 
 // Process exit types
 const processExitSchema = z.discriminatedUnion("type", [
@@ -15,10 +15,10 @@ const processExitSchema = z.discriminatedUnion("type", [
 
 // Failure reason schema
 const failureReasonSchema = z.object({
-  type: z.enum(["timeout", "rate-limit", "api-error", "chronicler-load-failure", "unknown"]),
+  type: z.enum(["timeout", "rate-limit", "api-error", "sentinel-load-failure", "unknown"]),
   retriable: z.boolean(),
   message: z.string().optional(),
-  chroniclerRefs: z.array(z.string()).optional(), // Which chroniclers failed (for chronicler-load-failure)
+  sentinelRefs: z.array(z.string()).optional(), // Which sentinels failed (for sentinel-load-failure)
 });
 
 // Token usage schema
@@ -57,16 +57,16 @@ const fileNodeSchema: z.ZodType<FileNode> = z.lazy(() =>
   ]),
 );
 
-// Phase execution schema (complete version for state snapshots)
-const phaseExecutionSchema = z.object({
-  phaseId: z.string(),
-  phaseName: z.string().optional(),
+// Codon execution schema (complete version for state snapshots)
+const codonExecutionSchema = z.object({
+  codonId: z.string(),
+  codonName: z.string().optional(),
   status: z.enum([
     "preparing",
     "starting",
     "initializing",
     "running",
-    "completing-chroniclers",
+    "completing-sentinels",
     "completed",
     "failed",
     "skipped",
@@ -88,23 +88,23 @@ const phaseExecutionSchema = z.object({
   currentCost: z.number().optional(),
   // Checkpoint fields
   completionCheckpoint: z.string().optional(),
-  workspaceSetupCheckpoint: z.string().optional(),
+  rigSetupCheckpoint: z.string().optional(),
   errorCheckpoint: z.string().optional(),
   skipCheckpoint: z.string().optional(),
 });
 
 // Checkpoint query info schema
 const checkpointQueryInfoSchema = z.object({
-  phaseId: z.string(),
-  phaseName: z.string(),
-  checkpointType: z.enum(["workspace-setup", "completed", "error", "skipped"]),
+  codonId: z.string(),
+  codonName: z.string(),
+  checkpointType: z.enum(["rig-setup", "completed", "error", "skipped"]),
   sha: z.string(),
   status: z.enum([
     "preparing",
     "starting",
     "initializing",
     "running",
-    "completing-chroniclers",
+    "completing-sentinels",
     "completed",
     "failed",
     "skipped",
@@ -112,9 +112,9 @@ const checkpointQueryInfoSchema = z.object({
   timestamp: z.string(),
 });
 
-// ============================================================================
+// -------------
 // Event Data Payload Schemas
-// ============================================================================
+// -------------
 
 export const serverReadyEventDataSchema = z.object({
   serverVersion: z.string(),
@@ -123,8 +123,8 @@ export const serverReadyEventDataSchema = z.object({
 });
 
 export const stateSnapshotEventDataSchema = z.object({
-  currentPhase: phaseExecutionSchema.optional(),
-  completedPhases: z.array(phaseExecutionSchema),
+  currentCodon: codonExecutionSchema.optional(),
+  completedCodons: z.array(codonExecutionSchema),
   fileTree: z.array(fileNodeSchema),
   totalCost: z.number(),
   totalTime: z.number(),
@@ -138,17 +138,17 @@ export const stateSnapshotEventDataSchema = z.object({
   isRollingBack: z.boolean(),
 });
 
-export const phaseStartedEventDataSchema = z.object({
-  phaseId: z.string(),
-  phaseName: z.string(),
-  phaseDescription: z.string().optional(),
+export const codonStartedEventDataSchema = z.object({
+  codonId: z.string(),
+  codonName: z.string(),
+  codonDescription: z.string().optional(),
   sessionId: z.string(),
   previousSessionId: z.string().optional(),
   startTime: z.string().datetime(),
 });
 
-export const phaseCompletedEventDataSchema = z.object({
-  phaseId: z.string(),
+export const codonCompletedEventDataSchema = z.object({
+  codonId: z.string(),
   success: z.boolean(),
   cost: z.number(),
   duration: z.number(),
@@ -157,7 +157,7 @@ export const phaseCompletedEventDataSchema = z.object({
 });
 
 export const assistantActionEventDataSchema = z.object({
-  phaseId: z.string(),
+  codonId: z.string(),
   action: z.enum(["thinking", "message", "tool_use"]),
   content: z.string(),
   toolName: z.string().optional(),
@@ -165,7 +165,7 @@ export const assistantActionEventDataSchema = z.object({
 });
 
 export const tokenUsageEventDataSchema = z.object({
-  phaseId: z.string(),
+  codonId: z.string(),
   inputTokens: z.number(),
   outputTokens: z.number(),
   cacheCreationTokens: z.number(),
@@ -174,7 +174,7 @@ export const tokenUsageEventDataSchema = z.object({
 });
 
 export const toolResultEventDataSchema = z.object({
-  phaseId: z.string(),
+  codonId: z.string(),
   toolUseId: z.string(),
   toolName: z.string(),
   result: z.string(),
@@ -197,16 +197,16 @@ export const fileTreeUpdatedEventDataSchema = z.object({
 
 export const errorEventDataSchema = z.object({
   message: z.string(),
-  phase: z.string().optional(),
+  codon: z.string().optional(),
   fatal: z.boolean(),
-  severity: z.enum(["fatal", "phase", "operation", "warning"]).optional(),
+  severity: z.enum(["fatal", "codon", "operation", "warning"]).optional(),
   context: z.string().optional(),
   code: z.string().optional(),
 });
 
-export const incompletePhaseEventDataSchema = z.object({
-  phaseId: z.string(),
-  phaseName: z.string(),
+export const incompleteCodonEventDataSchema = z.object({
+  codonId: z.string(),
+  codonName: z.string(),
   message: z.string(),
 });
 
@@ -215,7 +215,7 @@ export const infoEventDataSchema = z.object({
 });
 
 export const serverIdleEventDataSchema = z.object({
-  reason: z.enum(["startup", "phase-completed", "all-phases-completed"]),
+  reason: z.enum(["startup", "codon-completed", "all-codons-completed"]),
   message: z.string(),
 });
 
@@ -227,24 +227,24 @@ export const checkpointListEventDataSchema = z.object({
 
 export const rollbackStartedEventDataSchema = z.object({
   fromRun: z.string(),
-  fromPhase: z.string(),
-  toPhase: z.string(),
+  fromCodon: z.string(),
+  toCodon: z.string(),
   toCheckpoint: z.string(),
   checkpointType: z.string(),
-  phasesToProcess: z.array(z.string()),
+  codonsToProcess: z.array(z.string()),
 });
 
-export const rollbackPhaseCheckpointEventDataSchema = z.object({
-  phaseId: z.string(),
-  phaseName: z.string(),
+export const rollbackCodonCheckpointEventDataSchema = z.object({
+  codonId: z.string(),
+  codonName: z.string(),
   checkpoint: z.string(),
   checkpointType: z.string(),
   message: z.string(),
 });
 
-export const rollbackWorkspaceCleanupEventDataSchema = z.object({
-  phaseId: z.string(),
-  phaseName: z.string(),
+export const rollbackRigCleanupEventDataSchema = z.object({
+  codonId: z.string(),
+  codonName: z.string(),
   directories: z.array(z.string()),
   status: z.enum(["started", "completed", "failed", "partial"]),
   successfulCleanups: z.array(z.string()).optional(),
@@ -269,8 +269,8 @@ export const rollbackCompletedEventDataSchema = z.object({
   fromRun: z.string(),
   toRun: z.string(),
   checkpoint: z.string(),
-  phaseId: z.string(),
-  phaseName: z.string(),
+  codonId: z.string(),
+  codonName: z.string(),
   checkpointType: z.string(),
   autoRestart: z.boolean(),
 });
@@ -292,18 +292,18 @@ export const stateTransitionEventDataSchema = z.object({
     "RunCompleted",
     "RunFailed",
     "RunCrashed",
-    "PhaseStarted",
-    "PhaseTransitioned",
+    "CodonStarted",
+    "CodonTransitioned",
     "CostsUpdated",
     "CostsIncremented",
     "AssistantMessageCountUpdated",
     "CheckpointCreated",
     "InitialCheckpointSet",
-    "PhaseFinalCostSet",
-    "ChroniclerStatesUpdated",
+    "CodonFinalCostSet",
+    "SentinelStatesUpdated",
   ]),
   runId: z.string().optional(),
-  phaseId: z.string().optional(),
+  codonId: z.string().optional(),
   transition: z.object({
     type: z.string(),
     data: z.record(z.unknown()),
@@ -316,10 +316,10 @@ export const stateTransitionEventDataSchema = z.object({
   }),
 });
 
-// Chronicler event data schemas
-export const chroniclerLoadedEventDataSchema = z.object({
-  chroniclerId: z.string(),
-  phaseId: z.string(),
+// Sentinel event data schemas
+export const sentinelLoadedEventDataSchema = z.object({
+  sentinelId: z.string(),
+  codonId: z.string(),
   model: z.string(),
   triggerType: z.enum(["event", "sequence"]),
   executionStrategy: z.enum(["immediate", "debounce", "count", "timeWindow"]),
@@ -328,27 +328,27 @@ export const chroniclerLoadedEventDataSchema = z.object({
   sourcePath: z.string().optional(),
 });
 
-export const chroniclerUnloadedEventDataSchema = z.object({
-  chroniclerId: z.string(),
-  phaseId: z.string(),
-  reason: z.enum(["phase-complete", "fatal-error", "consecutive-failures", "shutdown"]),
+export const sentinelUnloadedEventDataSchema = z.object({
+  sentinelId: z.string(),
+  codonId: z.string(),
+  reason: z.enum(["codon-complete", "fatal-error", "consecutive-failures", "shutdown"]),
   errorType: z.enum(["template", "configuration", "corruption", "resource"]).optional(),
   finalCost: z.number(),
   llmCallCount: z.number(),
 });
 
-export const chroniclerErrorEventDataSchema = z.object({
-  chroniclerId: z.string(),
-  phaseId: z.string(),
+export const sentinelErrorEventDataSchema = z.object({
+  sentinelId: z.string(),
+  codonId: z.string(),
   errorType: z.enum(["llm-call-failed", "template-render-failed", "file-write-failed"]),
   message: z.string(),
   retriable: z.boolean(),
   consecutiveFailureCount: z.number(),
 });
 
-export const chroniclerOutputEventDataSchema = z.object({
-  chroniclerId: z.string(),
-  phaseId: z.string(),
+export const sentinelOutputEventDataSchema = z.object({
+  sentinelId: z.string(),
+  codonId: z.string(),
   triggerNumber: z.number(),
   outputType: z.enum(["text", "structured"]),
   content: z.union([z.string(), z.record(z.unknown())]),
@@ -360,18 +360,18 @@ export const chroniclerOutputEventDataSchema = z.object({
   eventCount: z.number(),
 });
 
-export const chroniclerTriggeredEventDataSchema = z.object({
-  chroniclerId: z.string(),
-  phaseId: z.string(),
+export const sentinelTriggeredEventDataSchema = z.object({
+  sentinelId: z.string(),
+  codonId: z.string(),
   triggerNumber: z.number(),
   strategy: z.enum(["immediate", "debounce", "count", "timeWindow"]),
   eventCount: z.number(),
   queueSize: z.number(),
 });
 
-// ============================================================================
+// -------------
 // Full Event Schemas
-// ============================================================================
+// -------------
 
 const baseEventSchema = z.object({
   id: z.string(), // EventId branded type will be handled by inference
@@ -388,14 +388,14 @@ export const stateSnapshotEventSchema = baseEventSchema.extend({
   data: stateSnapshotEventDataSchema,
 });
 
-export const phaseStartedEventSchema = baseEventSchema.extend({
-  type: z.literal("phase.started"),
-  data: phaseStartedEventDataSchema,
+export const codonStartedEventSchema = baseEventSchema.extend({
+  type: z.literal("codon.started"),
+  data: codonStartedEventDataSchema,
 });
 
-export const phaseCompletedEventSchema = baseEventSchema.extend({
-  type: z.literal("phase.completed"),
-  data: phaseCompletedEventDataSchema,
+export const codonCompletedEventSchema = baseEventSchema.extend({
+  type: z.literal("codon.completed"),
+  data: codonCompletedEventDataSchema,
 });
 
 export const assistantActionEventSchema = baseEventSchema.extend({
@@ -428,9 +428,9 @@ export const errorEventSchema = baseEventSchema.extend({
   data: errorEventDataSchema,
 });
 
-export const incompletePhaseEventSchema = baseEventSchema.extend({
-  type: z.literal("incomplete.phase"),
-  data: incompletePhaseEventDataSchema,
+export const incompleteCodonEventSchema = baseEventSchema.extend({
+  type: z.literal("incomplete.codon"),
+  data: incompleteCodonEventDataSchema,
 });
 
 export const infoEventSchema = baseEventSchema.extend({
@@ -453,14 +453,14 @@ export const rollbackStartedEventSchema = baseEventSchema.extend({
   data: rollbackStartedEventDataSchema,
 });
 
-export const rollbackPhaseCheckpointEventSchema = baseEventSchema.extend({
-  type: z.literal("rollback.phaseCheckpoint"),
-  data: rollbackPhaseCheckpointEventDataSchema,
+export const rollbackCodonCheckpointEventSchema = baseEventSchema.extend({
+  type: z.literal("rollback.codonCheckpoint"),
+  data: rollbackCodonCheckpointEventDataSchema,
 });
 
-export const rollbackWorkspaceCleanupEventSchema = baseEventSchema.extend({
-  type: z.literal("rollback.workspaceCleanup"),
-  data: rollbackWorkspaceCleanupEventDataSchema,
+export const rollbackRigCleanupEventSchema = baseEventSchema.extend({
+  type: z.literal("rollback.rigCleanup"),
+  data: rollbackRigCleanupEventDataSchema,
 });
 
 export const rollbackProgressEventSchema = baseEventSchema.extend({
@@ -488,58 +488,58 @@ export const stateTransitionEventSchema = baseEventSchema.extend({
   data: stateTransitionEventDataSchema,
 });
 
-// Chronicler event schemas
-export const chroniclerLoadedEventSchema = baseEventSchema.extend({
-  type: z.literal("chronicler.loaded"),
-  data: chroniclerLoadedEventDataSchema,
+// Sentinel event schemas
+export const sentinelLoadedEventSchema = baseEventSchema.extend({
+  type: z.literal("sentinel.loaded"),
+  data: sentinelLoadedEventDataSchema,
 });
 
-export const chroniclerUnloadedEventSchema = baseEventSchema.extend({
-  type: z.literal("chronicler.unloaded"),
-  data: chroniclerUnloadedEventDataSchema,
+export const sentinelUnloadedEventSchema = baseEventSchema.extend({
+  type: z.literal("sentinel.unloaded"),
+  data: sentinelUnloadedEventDataSchema,
 });
 
-export const chroniclerErrorEventSchema = baseEventSchema.extend({
-  type: z.literal("chronicler.error"),
-  data: chroniclerErrorEventDataSchema,
+export const sentinelErrorEventSchema = baseEventSchema.extend({
+  type: z.literal("sentinel.error"),
+  data: sentinelErrorEventDataSchema,
 });
 
-export const chroniclerOutputEventSchema = baseEventSchema.extend({
-  type: z.literal("chronicler.output"),
-  data: chroniclerOutputEventDataSchema,
+export const sentinelOutputEventSchema = baseEventSchema.extend({
+  type: z.literal("sentinel.output"),
+  data: sentinelOutputEventDataSchema,
 });
 
-export const chroniclerTriggeredEventSchema = baseEventSchema.extend({
-  type: z.literal("chronicler.triggered"),
-  data: chroniclerTriggeredEventDataSchema,
+export const sentinelTriggeredEventSchema = baseEventSchema.extend({
+  type: z.literal("sentinel.triggered"),
+  data: sentinelTriggeredEventDataSchema,
 });
 
-// ============================================================================
+// -------------
 // Client Command Schemas
-// ============================================================================
+// -------------
 
-export const startPhaseCommandSchema = z.object({
+export const startCodonCommandSchema = z.object({
   id: z.string(),
-  type: z.literal("phase.start"),
+  type: z.literal("codon.start"),
   data: z.object({
-    phaseId: z.string(),
+    codonId: z.string(),
     skipPreCommands: z.boolean().optional(),
   }),
 });
 
-export const nextPhaseCommandSchema = z.object({
+export const nextCodonCommandSchema = z.object({
   id: z.string(),
-  type: z.literal("phase.next"),
+  type: z.literal("codon.next"),
 });
 
-export const skipPhaseCommandSchema = z.object({
+export const skipCodonCommandSchema = z.object({
   id: z.string(),
-  type: z.literal("phase.skip"),
+  type: z.literal("codon.skip"),
 });
 
-export const redoPhaseCommandSchema = z.object({
+export const redoCodonCommandSchema = z.object({
   id: z.string(),
-  type: z.literal("phase.redo"),
+  type: z.literal("codon.redo"),
 });
 
 export const shutdownCommandSchema = z.object({
@@ -549,7 +549,7 @@ export const shutdownCommandSchema = z.object({
 
 export const forceStopCommandSchema = z.object({
   id: z.string(),
-  type: z.literal("phase.forceStop"),
+  type: z.literal("codon.forceStop"),
   data: z
     .object({
       reason: z.string().optional(),
@@ -576,12 +576,12 @@ export const rollbackToCheckpointCommandSchema = z.object({
   }),
 });
 
-export const rollbackToPhaseCommandSchema = z.object({
+export const rollbackToCodonCommandSchema = z.object({
   id: z.string(),
-  type: z.literal("rollback.toPhase"),
+  type: z.literal("rollback.toCodon"),
   data: z.object({
-    phaseId: z.string(),
-    checkpointType: z.enum(["start", "end", "workspace-setup", "completed", "error", "skipped"]),
+    codonId: z.string(),
+    checkpointType: z.enum(["start", "end", "rig-setup", "completed", "error", "skipped"]),
     autoRestart: z.boolean().optional(),
   }),
 });
@@ -612,58 +612,58 @@ export const historySyncCommandSchema = z.object({
 });
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
-  startPhaseCommandSchema,
-  nextPhaseCommandSchema,
-  skipPhaseCommandSchema,
-  redoPhaseCommandSchema,
+  startCodonCommandSchema,
+  nextCodonCommandSchema,
+  skipCodonCommandSchema,
+  redoCodonCommandSchema,
   shutdownCommandSchema,
   forceStopCommandSchema,
   listCheckpointsCommandSchema,
   rollbackToCheckpointCommandSchema,
-  rollbackToPhaseCommandSchema,
+  rollbackToCodonCommandSchema,
   rollbackToLastSuccessCommandSchema,
   pingCommandSchema,
   pingBroadcastCommandSchema,
   historySyncCommandSchema,
 ]);
 
-// ============================================================================
+// -------------
 // Master Discriminated Union
-// ============================================================================
+// -------------
 
 export const serverEventSchema = z.discriminatedUnion("type", [
   serverReadyEventSchema,
   stateSnapshotEventSchema,
-  phaseStartedEventSchema,
-  phaseCompletedEventSchema,
+  codonStartedEventSchema,
+  codonCompletedEventSchema,
   assistantActionEventSchema,
   tokenUsageEventSchema,
   toolResultEventSchema,
   fileUpdatedEventSchema,
   fileTreeUpdatedEventSchema,
   errorEventSchema,
-  incompletePhaseEventSchema,
+  incompleteCodonEventSchema,
   infoEventSchema,
   serverIdleEventSchema,
   checkpointListEventSchema,
   rollbackStartedEventSchema,
-  rollbackPhaseCheckpointEventSchema,
-  rollbackWorkspaceCleanupEventSchema,
+  rollbackCodonCheckpointEventSchema,
+  rollbackRigCleanupEventSchema,
   rollbackProgressEventSchema,
   rollbackCompletedEventSchema,
   pongEventSchema,
   historyBatchEventSchema,
   stateTransitionEventSchema,
-  chroniclerLoadedEventSchema,
-  chroniclerUnloadedEventSchema,
-  chroniclerErrorEventSchema,
-  chroniclerOutputEventSchema,
-  chroniclerTriggeredEventSchema,
+  sentinelLoadedEventSchema,
+  sentinelUnloadedEventSchema,
+  sentinelErrorEventSchema,
+  sentinelOutputEventSchema,
+  sentinelTriggeredEventSchema,
 ]);
 
-// ============================================================================
+// -------------
 // Inferred TypeScript Types
-// ============================================================================
+// -------------
 
 // Export the master union type
 export type ServerEvent = z.infer<typeof serverEventSchema>;
@@ -671,52 +671,52 @@ export type ServerEvent = z.infer<typeof serverEventSchema>;
 // Export individual event types for convenience
 export type ServerReadyEvent = z.infer<typeof serverReadyEventSchema>;
 export type StateSnapshotEvent = z.infer<typeof stateSnapshotEventSchema>;
-export type PhaseStartedEvent = z.infer<typeof phaseStartedEventSchema>;
-export type PhaseCompletedEvent = z.infer<typeof phaseCompletedEventSchema>;
+export type CodonStartedEvent = z.infer<typeof codonStartedEventSchema>;
+export type CodonCompletedEvent = z.infer<typeof codonCompletedEventSchema>;
 export type AssistantActionEvent = z.infer<typeof assistantActionEventSchema>;
 export type TokenUsageEvent = z.infer<typeof tokenUsageEventSchema>;
 export type ToolResultEvent = z.infer<typeof toolResultEventSchema>;
 export type FileUpdatedEvent = z.infer<typeof fileUpdatedEventSchema>;
 export type FileTreeUpdatedEvent = z.infer<typeof fileTreeUpdatedEventSchema>;
 export type ErrorEvent = z.infer<typeof errorEventSchema>;
-export type IncompletePhaseEvent = z.infer<typeof incompletePhaseEventSchema>;
+export type IncompleteCodonEvent = z.infer<typeof incompleteCodonEventSchema>;
 export type InfoEvent = z.infer<typeof infoEventSchema>;
 export type ServerIdleEvent = z.infer<typeof serverIdleEventSchema>;
 export type CheckpointListEvent = z.infer<typeof checkpointListEventSchema>;
 export type RollbackStartedEvent = z.infer<typeof rollbackStartedEventSchema>;
-export type RollbackPhaseCheckpointEvent = z.infer<typeof rollbackPhaseCheckpointEventSchema>;
-export type RollbackWorkspaceCleanupEvent = z.infer<typeof rollbackWorkspaceCleanupEventSchema>;
+export type RollbackCodonCheckpointEvent = z.infer<typeof rollbackCodonCheckpointEventSchema>;
+export type RollbackRigCleanupEvent = z.infer<typeof rollbackRigCleanupEventSchema>;
 export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
 export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
 export type PongEvent = z.infer<typeof pongEventSchema>;
 export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
 export type StateTransitionEvent = z.infer<typeof stateTransitionEventSchema>;
-export type ChroniclerLoadedEvent = z.infer<typeof chroniclerLoadedEventSchema>;
-export type ChroniclerUnloadedEvent = z.infer<typeof chroniclerUnloadedEventSchema>;
-export type ChroniclerErrorEvent = z.infer<typeof chroniclerErrorEventSchema>;
-export type ChroniclerOutputEvent = z.infer<typeof chroniclerOutputEventSchema>;
-export type ChroniclerTriggeredEvent = z.infer<typeof chroniclerTriggeredEventSchema>;
+export type SentinelLoadedEvent = z.infer<typeof sentinelLoadedEventSchema>;
+export type SentinelUnloadedEvent = z.infer<typeof sentinelUnloadedEventSchema>;
+export type SentinelErrorEvent = z.infer<typeof sentinelErrorEventSchema>;
+export type SentinelOutputEvent = z.infer<typeof sentinelOutputEventSchema>;
+export type SentinelTriggeredEvent = z.infer<typeof sentinelTriggeredEventSchema>;
 
-// ============================================================================
+// -------------
 // Event Category Classification
-// ============================================================================
+// -------------
 
 /**
  * Events are classified into FOUR categories:
  *
- * - **Server State Events**: Track the server's execution state, phase lifecycle,
- *   and persistent changes (e.g., phase execution, errors, rollbacks).
+ * - **Server State Events**: Track the server's execution state, codon lifecycle,
+ *   and persistent changes (e.g., codon execution, errors, rollbacks).
  *   These events represent changes to the server's internal state and are
  *   persisted to the event journal and broadcasted to all connected clients.
  *
  * - **Agentic Backbone Events**: Capture the agent's core execution artifacts
- *   (assistant actions, tool outputs, and workspace mutations). These events
+ *   (assistant actions, tool outputs, and rig mutations). These events
  *   are journaled and broadcast the same way as server state events but are
  *   tracked separately for clarity.
  *
- * - **Chronicler Events**: Track chronicler lifecycle, outputs, and errors.
+ * - **Sentinel Events**: Track sentinel lifecycle, outputs, and errors.
  *   Persisted and broadcasted like Server State Events but explicitly categorized
- *   for filtering. Chroniclers are observers, not participants.
+ *   for filtering. Sentinels are observers, not participants.
  *
  * - **Connection State Events**: Track client specific events.
  *   These events are not persisted to the event journal and are sent to individual clients.
@@ -729,8 +729,8 @@ export type ChroniclerTriggeredEvent = z.infer<typeof chroniclerTriggeredEventSc
  * Array of event types that represent server state changes.
  */
 const SERVER_STATE_EVENT_TYPES_ARRAY = [
-  "phase.started",
-  "phase.completed",
+  "codon.started",
+  "codon.completed",
   "state.snapshot",
   "server.idle",
   "token.usage",
@@ -739,9 +739,9 @@ const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "checkpoint.list",
   "rollback.started",
   "rollback.progress",
-  "rollback.phaseCheckpoint",
+  "rollback.codonCheckpoint",
   "rollback.completed",
-  "rollback.workspaceCleanup",
+  "rollback.rigCleanup",
   "state.transition",
 ] as const;
 
@@ -756,14 +756,14 @@ const AGENTIC_BACKBONE_EVENT_TYPES_ARRAY = [
 ] as const;
 
 /**
- * Array of event types that represent chronicler events.
+ * Array of event types that represent sentinel events.
  */
-const CHRONICLER_EVENT_TYPES_ARRAY = [
-  "chronicler.loaded",
-  "chronicler.unloaded",
-  "chronicler.error",
-  "chronicler.output",
-  "chronicler.triggered",
+const SENTINEL_EVENT_TYPES_ARRAY = [
+  "sentinel.loaded",
+  "sentinel.unloaded",
+  "sentinel.error",
+  "sentinel.output",
+  "sentinel.triggered",
 ] as const;
 
 /**
@@ -773,13 +773,13 @@ const CONNECTION_STATE_EVENT_TYPES_ARRAY = [
   "server.ready",
   "pong",
   "history.batch",
-  "incomplete.phase",
+  "incomplete.codon",
 ] as const;
 
 // Derive union types from the arrays
 type ServerStateEventType = (typeof SERVER_STATE_EVENT_TYPES_ARRAY)[number];
 type AgenticBackboneEventType = (typeof AGENTIC_BACKBONE_EVENT_TYPES_ARRAY)[number];
-type ChroniclerEventType = (typeof CHRONICLER_EVENT_TYPES_ARRAY)[number];
+type SentinelEventType = (typeof SENTINEL_EVENT_TYPES_ARRAY)[number];
 type ConnectionStateEventType = (typeof CONNECTION_STATE_EVENT_TYPES_ARRAY)[number];
 
 /**
@@ -793,9 +793,9 @@ const SERVER_STATE_EVENT_TYPES = new Set<ServerEventType>(SERVER_STATE_EVENT_TYP
 const AGENTIC_BACKBONE_EVENT_TYPES = new Set<ServerEventType>(AGENTIC_BACKBONE_EVENT_TYPES_ARRAY);
 
 /**
- * Set of event types that represent chronicler events.
+ * Set of event types that represent sentinel events.
  */
-const CHRONICLER_EVENT_TYPES = new Set<ServerEventType>(CHRONICLER_EVENT_TYPES_ARRAY);
+const SENTINEL_EVENT_TYPES = new Set<ServerEventType>(SENTINEL_EVENT_TYPES_ARRAY);
 
 /**
  * Set of event types that represent connection state changes.
@@ -807,8 +807,8 @@ const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>(CONNECTION_STATE_E
  * These events track the server's execution state and persistent changes.
  */
 export type ServerStateEvent =
-  | PhaseStartedEvent
-  | PhaseCompletedEvent
+  | CodonStartedEvent
+  | CodonCompletedEvent
   | StateSnapshotEvent
   | ServerIdleEvent
   | TokenUsageEvent
@@ -817,9 +817,9 @@ export type ServerStateEvent =
   | CheckpointListEvent
   | RollbackStartedEvent
   | RollbackProgressEvent
-  | RollbackPhaseCheckpointEvent
+  | RollbackCodonCheckpointEvent
   | RollbackCompletedEvent
-  | RollbackWorkspaceCleanupEvent
+  | RollbackRigCleanupEvent
   | StateTransitionEvent;
 
 /**
@@ -833,15 +833,15 @@ export type AgenticBackboneEvent =
   | FileTreeUpdatedEvent;
 
 /**
- * Union type representing all chronicler events.
- * These events track chronicler lifecycle and activity.
+ * Union type representing all sentinel events.
+ * These events track sentinel lifecycle and activity.
  */
-export type ChroniclerEvent =
-  | ChroniclerLoadedEvent
-  | ChroniclerUnloadedEvent
-  | ChroniclerErrorEvent
-  | ChroniclerOutputEvent
-  | ChroniclerTriggeredEvent;
+export type SentinelEvent =
+  | SentinelLoadedEvent
+  | SentinelUnloadedEvent
+  | SentinelErrorEvent
+  | SentinelOutputEvent
+  | SentinelTriggeredEvent;
 
 /**
  * Union type representing all connection state events.
@@ -851,13 +851,13 @@ export type ConnectionStateEvent =
   | ServerReadyEvent
   | PongEvent
   | HistoryBatchEvent
-  | IncompletePhaseEvent;
+  | IncompleteCodonEvent;
 
 // Compile-time check: ensures all ServerEventTypes are categorized
 // This will cause a TypeScript error if any event is not categorized
 const _assertAllEventsCategorized: AssertEqual<
   ServerEventType,
-  ServerStateEventType | AgenticBackboneEventType | ChroniclerEventType | ConnectionStateEventType
+  ServerStateEventType | AgenticBackboneEventType | SentinelEventType | ConnectionStateEventType
 > = true;
 
 // Compile-time checks: ensure the union types match their respective arrays
@@ -870,8 +870,7 @@ const _assertAgenticBackboneEventsMatch: AssertEqual<
   AgenticBackboneEventType
 > = true;
 
-const _assertChroniclerEventsMatch: AssertEqual<ChroniclerEvent["type"], ChroniclerEventType> =
-  true;
+const _assertSentinelEventsMatch: AssertEqual<SentinelEvent["type"], SentinelEventType> = true;
 
 const _assertConnectionStateEventsMatch: AssertEqual<
   ConnectionStateEvent["type"],
@@ -911,13 +910,13 @@ export function isAgenticBackboneEvent(event: ServerEvent): event is AgenticBack
 }
 
 /**
- * Type guard to check if an event is a chronicler event.
+ * Type guard to check if an event is a sentinel event.
  *
  * @param event - The event to check
- * @returns true if the event is a chronicler event
+ * @returns true if the event is a sentinel event
  */
-export function isChroniclerEvent(event: ServerEvent): event is ChroniclerEvent {
-  return CHRONICLER_EVENT_TYPES.has(event.type);
+export function isSentinelEvent(event: ServerEvent): event is SentinelEvent {
+  return SENTINEL_EVENT_TYPES.has(event.type);
 }
 
 /**
@@ -938,7 +937,7 @@ export function isConnectionStateEvent(event: ServerEvent): event is ConnectionS
 
 /**
  * Type guard to check if an event should be journaled.
- * Journaled events include server state, agentic backbone, and chronicler events.
+ * Journaled events include server state, agentic backbone, and sentinel events.
  *
  * @param event - The event to check
  * @returns true if the event should be journaled
@@ -951,21 +950,21 @@ export function isConnectionStateEvent(event: ServerEvent): event is ConnectionS
  */
 export function isJournaledEvent(
   event: ServerEvent,
-): event is ServerStateEvent | AgenticBackboneEvent | ChroniclerEvent {
-  return isServerStateEvent(event) || isAgenticBackboneEvent(event) || isChroniclerEvent(event);
+): event is ServerStateEvent | AgenticBackboneEvent | SentinelEvent {
+  return isServerStateEvent(event) || isAgenticBackboneEvent(event) || isSentinelEvent(event);
 }
 
 // Export client command types
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
-export type StartPhaseCommand = z.infer<typeof startPhaseCommandSchema>;
-export type NextPhaseCommand = z.infer<typeof nextPhaseCommandSchema>;
-export type SkipPhaseCommand = z.infer<typeof skipPhaseCommandSchema>;
-export type RedoPhaseCommand = z.infer<typeof redoPhaseCommandSchema>;
+export type StartCodonCommand = z.infer<typeof startCodonCommandSchema>;
+export type NextCodonCommand = z.infer<typeof nextCodonCommandSchema>;
+export type SkipCodonCommand = z.infer<typeof skipCodonCommandSchema>;
+export type RedoCodonCommand = z.infer<typeof redoCodonCommandSchema>;
 export type ShutdownCommand = z.infer<typeof shutdownCommandSchema>;
 export type ForceStopCommand = z.infer<typeof forceStopCommandSchema>;
 export type ListCheckpointsCommand = z.infer<typeof listCheckpointsCommandSchema>;
 export type RollbackToCheckpointCommand = z.infer<typeof rollbackToCheckpointCommandSchema>;
-export type RollbackToPhaseCommand = z.infer<typeof rollbackToPhaseCommandSchema>;
+export type RollbackToCodonCommand = z.infer<typeof rollbackToCodonCommandSchema>;
 export type RollbackToLastSuccessCommand = z.infer<typeof rollbackToLastSuccessCommandSchema>;
 export type PingCommand = z.infer<typeof pingCommandSchema>;
 export type PingBroadcastCommand = z.infer<typeof pingBroadcastCommandSchema>;
@@ -979,39 +978,39 @@ export type ClientCommandType = ClientCommand["type"];
 export type ProcessExit = z.infer<typeof processExitSchema>;
 export type FailureReason = z.infer<typeof failureReasonSchema>;
 export type CheckpointQueryInfo = z.infer<typeof checkpointQueryInfoSchema>;
-export type PhaseExecution = z.infer<typeof phaseExecutionSchema>;
+export type CodonExecution = z.infer<typeof codonExecutionSchema>;
 export type { FileNode }; // Re-export the interface
 
-// Map of event types to their data schemas (for chronicler validation)
+// Map of event types to their data schemas (for sentinel validation)
 export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "server.ready": serverReadyEventDataSchema,
   "state.snapshot": stateSnapshotEventDataSchema,
-  "phase.started": phaseStartedEventDataSchema,
-  "phase.completed": phaseCompletedEventDataSchema,
+  "codon.started": codonStartedEventDataSchema,
+  "codon.completed": codonCompletedEventDataSchema,
   "assistant.action": assistantActionEventDataSchema,
   "token.usage": tokenUsageEventDataSchema,
   "tool.result": toolResultEventDataSchema,
   "file.updated": fileUpdatedEventDataSchema,
   "filetree.updated": fileTreeUpdatedEventDataSchema,
   error: errorEventDataSchema,
-  "incomplete.phase": incompletePhaseEventDataSchema,
+  "incomplete.codon": incompleteCodonEventDataSchema,
   info: infoEventDataSchema,
   "server.idle": serverIdleEventDataSchema,
   "checkpoint.list": checkpointListEventDataSchema,
   "rollback.started": rollbackStartedEventDataSchema,
-  "rollback.phaseCheckpoint": rollbackPhaseCheckpointEventDataSchema,
-  "rollback.workspaceCleanup": rollbackWorkspaceCleanupEventDataSchema,
+  "rollback.codonCheckpoint": rollbackCodonCheckpointEventDataSchema,
+  "rollback.rigCleanup": rollbackRigCleanupEventDataSchema,
   "rollback.progress": rollbackProgressEventDataSchema,
   "rollback.completed": rollbackCompletedEventDataSchema,
   pong: pongEventDataSchema,
   "history.batch": historyBatchEventDataSchema,
   "state.transition": stateTransitionEventDataSchema,
-  "chronicler.loaded": chroniclerLoadedEventDataSchema,
-  "chronicler.unloaded": chroniclerUnloadedEventDataSchema,
-  "chronicler.error": chroniclerErrorEventDataSchema,
-  "chronicler.output": chroniclerOutputEventDataSchema,
-  "chronicler.triggered": chroniclerTriggeredEventDataSchema,
+  "sentinel.loaded": sentinelLoadedEventDataSchema,
+  "sentinel.unloaded": sentinelUnloadedEventDataSchema,
+  "sentinel.error": sentinelErrorEventDataSchema,
+  "sentinel.output": sentinelOutputEventDataSchema,
+  "sentinel.triggered": sentinelTriggeredEventDataSchema,
 };
 
-// List of all valid event types (for chronicler validation)
+// List of all valid event types (for sentinel validation)
 export const serverEventTypes = Object.keys(serverEventDataSchemas) as ServerEventType[];

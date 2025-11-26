@@ -1,9 +1,9 @@
 #!/bin/bash
 
-echo "🧹 Cleaning up Tadpole test environment..."
+echo "🧹 Cleaning up Strandweave test environment..."
 
 # First, check if lock file exists and use the PID from it
-LOCK_FILE="tests/test-area/.server.lock"
+LOCK_FILE="tests/test-area/.strandweave/runtime.lock"
 if [ -f "$LOCK_FILE" ]; then
     echo "Found lock file: $LOCK_FILE"
     SERVER_PID=$(cat "$LOCK_FILE" 2>/dev/null)
@@ -12,7 +12,7 @@ if [ -f "$LOCK_FILE" ]; then
         echo "Lock file contains PID: $SERVER_PID"
 
         # Verify this PID is actually our server by checking the command
-        if ps -p "$SERVER_PID" -o args= 2>/dev/null | grep -q "test-phases.config.json"; then
+        if ps -p "$SERVER_PID" -o args= 2>/dev/null | grep -q "test-codons.config.json"; then
             echo "✅ Found our test server process (PID: $SERVER_PID)"
             echo "Killing process..."
             kill -TERM "$SERVER_PID" 2>/dev/null || true
@@ -37,7 +37,7 @@ fi
 
 # Double-check: Look for any processes with our specific test config
 echo "Double-checking for test server processes..."
-TEST_SERVER_PIDS=$(ps aux | grep "test-phases.config.json" | grep -v grep | awk '{print $2}')
+TEST_SERVER_PIDS=$(ps aux | grep "test-codons.config.json" | grep -v grep | awk '{print $2}')
 
 if [ ! -z "$TEST_SERVER_PIDS" ]; then
     echo "⚠️  Found additional test server processes: $TEST_SERVER_PIDS"

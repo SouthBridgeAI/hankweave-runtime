@@ -1,12 +1,12 @@
-import type { TadpoleServer } from "./tadpole-server.js";
+import type { StrandweaveRuntime } from "./strandweave-runtime.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
   HandshakeRequest,
   HandshakeResponse,
-  NextPhaseCommand,
+  NextCodonCommand,
   ServerEvent,
-  SkipPhaseCommand,
+  SkipCodonCommand,
 } from "./types/types.js";
 import { ClientMode } from "./types/types.js";
 import { generateId } from "./utils.js";
@@ -61,7 +61,7 @@ const SYMBOLS = {
  * - Structured output with boxes and formatting
  *
  * Usage: Run server with --basic flag
- * Controls: [n] next phase, [s] skip current, [q] quit
+ * Controls: [n] next codon, [s] skip current, [q] quit
  */
 export class BasicTUI {
   private ws: WebSocket | null = null;
@@ -70,7 +70,7 @@ export class BasicTUI {
   private checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
   private waitingForCheckpoints = false;
 
-  constructor(private server: TadpoleServer) {
+  constructor(private server: StrandweaveRuntime) {
     this.connectToServer();
     this.setupKeyboardInput();
   }
@@ -212,27 +212,27 @@ export class BasicTUI {
         break;
       }
 
-      case "phase.started": {
-        console.log(`\n${timestamp} ${COLORS.cyan}${COLORS.bold}Phase Started${COLORS.reset}`);
+      case "codon.started": {
+        console.log(`\n${timestamp} ${COLORS.cyan}${COLORS.bold}Codon Started${COLORS.reset}`);
         this.drawBox(
-          event.data.phaseName,
+          event.data.codonName,
           [
             `Session: ${COLORS.dim}${event.data.sessionId}${COLORS.reset}`,
             ...(event.data.previousSessionId
               ? [`Continuing from: ${COLORS.dim}${event.data.previousSessionId}${COLORS.reset}`]
               : []),
-            ...(event.data.phaseDescription ? [`${event.data.phaseDescription}`] : []),
+            ...(event.data.codonDescription ? [`${event.data.codonDescription}`] : []),
           ],
           COLORS.cyan,
         );
         break;
       }
 
-      case "phase.completed": {
+      case "codon.completed": {
         const status = event.data.success ? COLORS.green : COLORS.red;
         const statusSymbol = event.data.success ? SYMBOLS.check : SYMBOLS.cross;
         console.log(
-          `\n${timestamp} ${status}${COLORS.bold}Phase Completed${COLORS.reset} ${status}${statusSymbol}${COLORS.reset}`,
+          `\n${timestamp} ${status}${COLORS.bold}Codon Completed${COLORS.reset} ${status}${statusSymbol}${COLORS.reset}`,
         );
 
         const details = [
@@ -253,7 +253,7 @@ export class BasicTUI {
           }
         }
 
-        this.drawBox(`Phase ${event.data.phaseId}`, details, status);
+        this.drawBox(`Codon ${event.data.codonId}`, details, status);
         break;
       }
 
@@ -371,7 +371,7 @@ export class BasicTUI {
             ...(event.data.context
               ? [`Context: ${COLORS.dim}${event.data.context}${COLORS.reset}`]
               : []),
-            ...(event.data.phase ? [`Phase: ${event.data.phase}`] : []),
+            ...(event.data.codon ? [`Codon: ${event.data.codon}`] : []),
             ...(event.data.code ? [`Code: ${event.data.code}`] : []),
             `Fatal: ${event.data.fatal ? `${COLORS.red}yes` : `${COLORS.green}no`}${COLORS.reset}`,
           ],
@@ -380,11 +380,11 @@ export class BasicTUI {
         break;
       }
 
-      case "incomplete.phase": {
+      case "incomplete.codon": {
         console.log(
-          `\n${timestamp} ${COLORS.yellow}${COLORS.bold}Incomplete Phase Detected${COLORS.reset}`,
+          `\n${timestamp} ${COLORS.yellow}${COLORS.bold}Incomplete Codon Detected${COLORS.reset}`,
         );
-        console.log(`  ${SYMBOLS.arrow} Phase: ${event.data.phaseName}`);
+        console.log(`  ${SYMBOLS.arrow} Codon: ${event.data.codonName}`);
         console.log(`  ${SYMBOLS.arrow} ${event.data.message}`);
         break;
       }
@@ -423,7 +423,7 @@ export class BasicTUI {
               event.data.checkpoints.map(
                 (cp, index) =>
                   `[${COLORS.bold}${index + 1}${COLORS.reset}] ${
-                    cp.phaseName
+                    cp.codonName
                   } ${COLORS.dim}(${cp.checkpointType})${COLORS.reset} ${
                     COLORS.gray
                   }${cp.sha.substring(0, 7)}${COLORS.reset}`,
@@ -437,9 +437,9 @@ export class BasicTUI {
 
       case "rollback.started": {
         console.log(`\n${timestamp} ${COLORS.yellow}${COLORS.bold}Rollback Started${COLORS.reset}`);
-        console.log(`  ${SYMBOLS.arrow} From: ${event.data.fromPhase} (run ${event.data.fromRun})`);
-        console.log(`  ${SYMBOLS.arrow} To: ${event.data.toPhase} (${event.data.checkpointType})`);
-        console.log(`  ${SYMBOLS.arrow} Processing ${event.data.phasesToProcess.length} phases`);
+        console.log(`  ${SYMBOLS.arrow} From: ${event.data.fromCodon} (run ${event.data.fromRun})`);
+        console.log(`  ${SYMBOLS.arrow} To: ${event.data.toCodon} (${event.data.checkpointType})`);
+        console.log(`  ${SYMBOLS.arrow} Processing ${event.data.codonsToProcess.length} codons`);
         break;
       }
 
@@ -452,13 +452,13 @@ export class BasicTUI {
         break;
       }
 
-      case "rollback.phaseCheckpoint": {
+      case "rollback.codonCheckpoint": {
         console.log(`\n${timestamp} ${COLORS.cyan}Checkpoint Applied${COLORS.reset}`);
         console.log(`  ${SYMBOLS.arrow} ${event.data.message}`);
         break;
       }
 
-      case "rollback.workspaceCleanup": {
+      case "rollback.rigCleanup": {
         const statusColor =
           event.data.status === "completed"
             ? COLORS.green
@@ -468,9 +468,9 @@ export class BasicTUI {
                 ? COLORS.yellow
                 : COLORS.blue;
         console.log(
-          `\n${timestamp} ${statusColor}Workspace Cleanup: ${event.data.status}${COLORS.reset}`,
+          `\n${timestamp} ${statusColor}Rig Cleanup: ${event.data.status}${COLORS.reset}`,
         );
-        console.log(`  ${SYMBOLS.arrow} Phase: ${event.data.phaseName}`);
+        console.log(`  ${SYMBOLS.arrow} Codon: ${event.data.codonName}`);
         if (event.data.successfulCleanups && event.data.successfulCleanups.length > 0) {
           console.log(`  ${SYMBOLS.check} Cleaned: ${event.data.successfulCleanups.join(", ")}`);
         }
@@ -493,7 +493,7 @@ export class BasicTUI {
           [
             `From run: ${event.data.fromRun}`,
             `To run: ${event.data.toRun}`,
-            `Phase: ${event.data.phaseName} (${event.data.checkpointType})`,
+            `Codon: ${event.data.codonName} (${event.data.checkpointType})`,
             `Checkpoint: ${COLORS.gray}${event.data.checkpoint.substring(0, 7)}${COLORS.reset}`,
           ],
           COLORS.green,
@@ -501,15 +501,13 @@ export class BasicTUI {
         break;
       }
 
-      // Chronicler Events
-      case "chronicler.loaded": {
-        console.log(
-          `\n${timestamp} ${COLORS.magenta}${COLORS.bold}Chronicler Loaded${COLORS.reset}`,
-        );
+      // Sentinel Events
+      case "sentinel.loaded": {
+        console.log(`\n${timestamp} ${COLORS.magenta}${COLORS.bold}Sentinel Loaded${COLORS.reset}`);
         this.drawBox(
-          `Chronicler: ${event.data.chroniclerId}`,
+          `Sentinel: ${event.data.sentinelId}`,
           [
-            `Phase: ${COLORS.dim}${event.data.phaseId}${COLORS.reset}`,
+            `Codon: ${COLORS.dim}${event.data.codonId}${COLORS.reset}`,
             `Model: ${COLORS.dim}${event.data.model}${COLORS.reset}`,
             `Trigger: ${COLORS.cyan}${event.data.triggerType}${COLORS.reset}`,
             `Strategy: ${COLORS.cyan}${event.data.executionStrategy}${COLORS.reset}`,
@@ -520,13 +518,13 @@ export class BasicTUI {
         break;
       }
 
-      case "chronicler.unloaded": {
+      case "sentinel.unloaded": {
         const reasonColor =
           event.data.reason === "fatal-error" || event.data.reason === "consecutive-failures"
             ? COLORS.red
             : COLORS.dim;
         console.log(
-          `\n${timestamp} ${reasonColor}Chronicler Unloaded${COLORS.reset}: ${COLORS.bold}${event.data.chroniclerId}${COLORS.reset}`,
+          `\n${timestamp} ${reasonColor}Sentinel Unloaded${COLORS.reset}: ${COLORS.bold}${event.data.sentinelId}${COLORS.reset}`,
         );
         console.log(`  ${SYMBOLS.arrow} Reason: ${event.data.reason}`);
         console.log(
@@ -536,21 +534,21 @@ export class BasicTUI {
         break;
       }
 
-      case "chronicler.triggered": {
+      case "sentinel.triggered": {
         console.log(
-          `\n${timestamp} ${COLORS.dim}${COLORS.italic}Chronicler Triggered: ${event.data.chroniclerId} (#${event.data.triggerNumber}, ${event.data.eventCount} events)${COLORS.reset}`,
+          `\n${timestamp} ${COLORS.dim}${COLORS.italic}Sentinel Triggered: ${event.data.sentinelId} (#${event.data.triggerNumber}, ${event.data.eventCount} events)${COLORS.reset}`,
         );
         break;
       }
 
-      case "chronicler.output": {
+      case "sentinel.output": {
         const outputContent =
           event.data.outputType === "structured"
             ? JSON.stringify(event.data.content, null, 2).split("\n")
             : [event.data.content as string];
 
         this.drawBox(
-          `Chronicler Output: ${event.data.chroniclerId}`,
+          `Sentinel Output: ${event.data.sentinelId}`,
           [
             ...outputContent,
             `${COLORS.dim}${"─".repeat(20)}${COLORS.reset}`,
@@ -562,10 +560,10 @@ export class BasicTUI {
         break;
       }
 
-      case "chronicler.error": {
-        console.log(`\n${timestamp} ${COLORS.red}${COLORS.bold}Chronicler Error${COLORS.reset}`);
+      case "sentinel.error": {
+        console.log(`\n${timestamp} ${COLORS.red}${COLORS.bold}Sentinel Error${COLORS.reset}`);
         this.drawBox(
-          `Chronicler Error: ${event.data.chroniclerId}`,
+          `Sentinel Error: ${event.data.sentinelId}`,
           [
             `Type: ${COLORS.yellow}${event.data.errorType}${COLORS.reset}`,
             `Message: ${event.data.message}`,
@@ -644,7 +642,7 @@ export class BasicTUI {
 
   private setupKeyboardInput(): void {
     console.log(`\n${COLORS.bold}Commands:${COLORS.reset}`);
-    console.log(`  ${COLORS.cyan}[n]${COLORS.reset} next phase`);
+    console.log(`  ${COLORS.cyan}[n]${COLORS.reset} next codon`);
     console.log(`  ${COLORS.cyan}[s]${COLORS.reset} skip current`);
     console.log(`  ${COLORS.cyan}[f]${COLORS.reset} force stop`);
     console.log(`  ${COLORS.cyan}[l]${COLORS.reset} list checkpoints`);
@@ -667,30 +665,30 @@ export class BasicTUI {
     stdin.on("data", async (key: string) => {
       switch (key) {
         case "n":
-          console.log(`\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next phase...${COLORS.reset}`);
+          console.log(`\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next codon...${COLORS.reset}`);
           this.sendCommand({
             id: generateId(),
-            type: "phase.next",
-          } as NextPhaseCommand);
+            type: "codon.next",
+          } as NextCodonCommand);
           break;
 
         case "s":
           console.log(
-            `\n${COLORS.yellow}${SYMBOLS.arrow} Skipping current phase...${COLORS.reset}`,
+            `\n${COLORS.yellow}${SYMBOLS.arrow} Skipping current codon...${COLORS.reset}`,
           );
           this.sendCommand({
             id: generateId(),
-            type: "phase.skip",
-          } as SkipPhaseCommand);
+            type: "codon.skip",
+          } as SkipCodonCommand);
           break;
 
         case "f":
           console.log(
-            `\n${COLORS.red}${SYMBOLS.arrow} Force stopping current phase...${COLORS.reset}`,
+            `\n${COLORS.red}${SYMBOLS.arrow} Force stopping current codon...${COLORS.reset}`,
           );
           this.sendCommand({
             id: generateId(),
-            type: "phase.forceStop",
+            type: "codon.forceStop",
             data: { reason: "User requested from TUI" },
           } as ClientCommand);
           break;
@@ -726,7 +724,7 @@ export class BasicTUI {
    */
   private async showRollbackMenu(): Promise<void> {
     console.log(`\n${COLORS.yellow}${COLORS.bold}Rollback Options${COLORS.reset}`);
-    console.log(`  ${COLORS.cyan}[1]${COLORS.reset} Rollback to last successful phase`);
+    console.log(`  ${COLORS.cyan}[1]${COLORS.reset} Rollback to last successful codon`);
     console.log(`  ${COLORS.cyan}[2]${COLORS.reset} List checkpoints and select`);
     console.log(`  ${COLORS.cyan}[c]${COLORS.reset} Cancel`);
 
@@ -734,7 +732,7 @@ export class BasicTUI {
 
     switch (response) {
       case "1":
-        await this.confirmAndRollback("last successful phase", async () => {
+        await this.confirmAndRollback("last successful codon", async () => {
           this.sendCommand({
             id: generateId(),
             type: "rollback.toLastSuccess",
@@ -806,7 +804,7 @@ export class BasicTUI {
       const timestamp = new Date(cp.timestamp).toLocaleTimeString();
       return [
         `${COLORS.cyan}[${index + 1}]${COLORS.reset} ${COLORS.bold}${
-          cp.phaseName
+          cp.codonName
         }${COLORS.reset} - ${cp.checkpointType} (${timestamp})`,
         `    SHA: ${COLORS.gray}${cp.sha.substring(0, 7)}...${COLORS.reset}`,
       ];
@@ -831,7 +829,7 @@ export class BasicTUI {
     }
 
     const selectedCheckpoint = data.checkpoints[choice - 1];
-    const target = `${selectedCheckpoint.phaseName} (${selectedCheckpoint.checkpointType})`;
+    const target = `${selectedCheckpoint.codonName} (${selectedCheckpoint.checkpointType})`;
 
     await this.confirmAndRollback(target, async () => {
       this.sendCommand({

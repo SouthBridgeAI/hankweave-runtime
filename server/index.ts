@@ -2,14 +2,14 @@
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
 import { CleanupCommand } from "./cleanup-command.js";
-import { validatePhaseConfig } from "./config.js";
+import { validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
-import { TadpoleServer } from "./tadpole-server.js";
+import { StrandweaveRuntime } from "./strandweave-runtime.js";
 
-// ============================================================================
+// -------------
 // Main Entry Point
-// ============================================================================
+// -------------
 
 async function main() {
   // Strict argument validation
@@ -42,7 +42,7 @@ async function main() {
   }
   const args = process.argv.slice(2);
   const configPath =
-    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "phases.json";
+    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "codon-sequence.json";
   const dataSourcePath = args.find((arg) => arg.startsWith("--data="))?.split("=")[1];
   const executionPath = args.find((arg) => arg.startsWith("--execution="))?.split("=")[1];
   const useSymlink = !args.includes("--copy");
@@ -64,12 +64,12 @@ async function main() {
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
-Tadpole Server - Phase Orchestration
+Strandweave Runtime - Codon Orchestration
 
 Usage: bun server/index.ts [options]
 
 Options:
-  --config=<path>           Path to phases configuration file (default: phases.json)
+  --config=<path>           Path to codon sequence configuration file (default: codon-sequence.json)
   --data=<path>             Path to data file or directory (default: current directory)
   --execution=<path>        Resume in specific execution directory
   --start-new               Force creation of a new execution directory
@@ -79,14 +79,14 @@ Options:
   --validate, -v            Validate configuration without running
   --cleanup                 Clean up execution directories
   -y                        Skip confirmation prompts
-  --no-autostart            Don't automatically start phases
-  --model=<sonnet|opus>     Override model for all phases (ignores per-phase settings)
+  --no-autostart            Don't automatically start codons
+  --model=<sonnet|opus>     Override model for all codons (ignores per-codon settings)
   --anthropic-base-url=<url> Custom Anthropic API base URL
   --without-proxy           Disable the proxy server
   --help, -h                Show this help message
 
 Execution Isolation:
-  Tadpole runs in an isolated execution directory separate from your data.
+  Strandweave runs in an isolated execution directory separate from your data.
   This enables clean rollbacks and multiple execution tracking.
 
   Your data is accessed via: <execution-dir>/read_only_data_source/
@@ -106,7 +106,7 @@ Examples:
   bun server/index.ts --data=/path/to/file.txt
 
   # Resume specific execution
-  bun server/index.ts --execution=/home/.tadpole-executions/1234-abc
+  bun server/index.ts --execution=/home/.strandweave-executions/1234-abc
 
   # Start fresh execution (ignore existing)
   bun server/index.ts --data=/path/to/project --start-new
@@ -120,7 +120,7 @@ Examples:
   # Clean up all executions for a data directory
   bun server/index.ts --cleanup --data=/path/to/project
 
-  # Override all phase models to use Opus
+  # Override all codon models to use Opus
   bun server/index.ts --model=opus
 
   # Run in basic TUI mode with Sonnet override
@@ -182,7 +182,7 @@ Examples:
     if (validateMode) {
       console.log(`\n🔍 Validating configuration: ${absoluteConfigPath}\n`);
 
-      const validationResult = await validatePhaseConfig(
+      const validationResult = await validateStrand(
         absoluteConfigPath,
         executionSetup.executionPath, // Changed from readOnlySourceData
       );
@@ -190,23 +190,23 @@ Examples:
       // Print summary
       console.log(`✅ Configuration is valid!\n`);
       console.log(`📋 Summary:`);
-      console.log(`  - Phases: ${validationResult.phaseCount}`);
+      console.log(`  - Codons: ${validationResult.codonCount}`);
       console.log(`  - Total prompt files: ${validationResult.promptFileCount}`);
       console.log(`  - Total system prompt files: ${validationResult.systemPromptFileCount}`);
-      console.log(`  - Workspace setup operations: ${validationResult.workspaceSetupCount}`);
-      console.log(`  - Phases with file watching: ${validationResult.watchingPhaseCount}`);
-      console.log(`  - Phases with checkpoints: ${validationResult.checkpointPhaseCount}`);
+      console.log(`  - Rig setup operations: ${validationResult.rigSetupCount}`);
+      console.log(`  - Codons with file watching: ${validationResult.trackingCodonCount}`);
+      console.log(`  - Codons with checkpoints: ${validationResult.checkpointCodonCount}`);
 
       // Display environment variables
       const hasSystemVars =
         Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
-      const hasPhaseVars = validationResult.environmentVariables.fromPhases.length > 0;
+      const hasCodonVars = validationResult.environmentVariables.fromCodons.length > 0;
 
-      if (hasSystemVars || hasPhaseVars) {
+      if (hasSystemVars || hasCodonVars) {
         console.log(`\n🔧 Environment Variables:`);
 
         if (hasSystemVars) {
-          console.log(`\n  From System (TADPOLE_ prefixed):`);
+          console.log(`\n  From System (STRANDWEAVE_ prefixed):`);
           for (const [key, value] of Object.entries(
             validationResult.environmentVariables.fromSystem,
           )) {
@@ -214,11 +214,11 @@ Examples:
           }
         }
 
-        if (hasPhaseVars) {
-          console.log(`\n  From Phase Configurations:`);
-          for (const phaseEnv of validationResult.environmentVariables.fromPhases) {
-            console.log(`    Phase "${phaseEnv.phaseName}" (${phaseEnv.phaseId}):`);
-            for (const [key, value] of Object.entries(phaseEnv.variables)) {
+        if (hasCodonVars) {
+          console.log(`\n  From Codon Configurations:`);
+          for (const codonEnv of validationResult.environmentVariables.fromCodons) {
+            console.log(`    Codon "${codonEnv.codonName}" (${codonEnv.codonId}):`);
+            for (const [key, value] of Object.entries(codonEnv.variables)) {
               console.log(`      - ${key}: ${value}`);
             }
           }
@@ -236,7 +236,7 @@ Examples:
     }
 
     // Normal server mode - validate config
-    const { phases, warnings } = await validatePhaseConfig(
+    const { codons, warnings } = await validateStrand(
       absoluteConfigPath,
       executionSetup.executionPath, // Changed from readOnlySourceData
     );
@@ -252,10 +252,10 @@ Examples:
 
     // Create server configuration by merging ExecutionSetup with other config
     const serverConfig = {
-      // This is where tadpole is running
+      // This is where strandweave is running
       cwd: originalCwd,
 
-      // Path to config file (for resolving relative chronicler paths)
+      // Path to config file (for resolving relative sentinel paths)
       configPath: absoluteConfigPath,
 
       // Required execution properties from ExecutionSetup
@@ -267,8 +267,8 @@ Examples:
       isResuming: executionSetup.isResuming,
       linkType: executionSetup.linkType,
 
-      // Required phases
-      phases,
+      // Required codons
+      codons,
 
       // Optional config (will use defaults if not provided)
       ...(anthropicBaseURL && { anthropicBaseURL }),
@@ -278,7 +278,7 @@ Examples:
       withoutProxy,
     };
 
-    const server = new TadpoleServer(serverConfig);
+    const server = new StrandweaveRuntime(serverConfig);
     await server.start();
 
     if (basicMode) {

@@ -1,0 +1,83 @@
+[
+  {
+    "id": "setup-codon",
+    "name": "Setup Codon",
+    "promptText": "Create a simple file at <%PROJECT_DIR%>/notes/initial.txt with the text 'Initial setup complete'.",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "rigSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p notes",
+          "workingDirectory": "project"
+        }
+      }
+    ],
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
+    "description": "Initial setup",
+    "trackedFiles": [
+      "notes/**/*"
+    ]
+  },
+  {
+    "type": "loop",
+    "id": "rig-setup-loop",
+    "name": "Loop with Rig Setup",
+    "description": "Test rig setup in loop codons",
+    "terminateOn": {
+      "type": "iterationLimit",
+      "limit": 2
+    },
+    "codons": [
+      {
+        "id": "loop-codon-with-setup",
+        "name": "Loop Codon with Rig Setup",
+        "promptText": "Write a short message to <%PROJECT_DIR%>/notes/message_<TIMESTAMP>.txt. Each iteration should be unique.",
+        "model": "sonnet",
+        "continuationMode": "continue-previous",
+        "rigSetup": [
+          {
+            "type": "command",
+            "command": {
+              "run": "cp nonexistent-source-file.txt notes/copied.txt",
+              "workingDirectory": "project"
+            },
+            "allowFailure": true
+          },
+          {
+            "type": "command",
+            "command": {
+              "run": "echo 'Rig setup for iteration' >> notes/setup_log.txt",
+              "workingDirectory": "project"
+            },
+            "allowFailure": false
+          }
+        ],
+        "appendSystemPromptFile": [
+          "./noTodosPrompt.md"
+        ],
+        "description": "Codon with rig setup that may fail",
+        "trackedFiles": [
+          "notes/**/*"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "final-codon",
+    "name": "Final Codon",
+    "promptText": "Create a summary file at <%PROJECT_DIR%>/notes/summary.txt that says 'All codons completed successfully'.",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "appendSystemPromptFile": [
+      "./noTodosPrompt.md"
+    ],
+    "description": "Final verification",
+    "trackedFiles": [
+      "notes/**/*"
+    ]
+  }
+]

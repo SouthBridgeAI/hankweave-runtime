@@ -79,7 +79,7 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "docs", "README.md"), "# Docs");
     await fs.promises.writeFile(path.join(tempDir, "package.json"), "{}");
 
-    // Add patterns incrementally (simulating multiple phases)
+    // Add patterns incrementally (simulating multiple codons)
     await checkpointGit.addPatterns(["src/**/*.ts"]);
     await checkpointGit.addPatterns(["*.md", "docs/**/*"]);
     await checkpointGit.addPatterns(["package.json"]);

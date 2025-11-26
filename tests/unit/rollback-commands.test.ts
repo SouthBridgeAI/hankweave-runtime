@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { clientCommandSchema } from "../../server/command-schemas";
-import { PhaseId } from "../../server/types/branded-types";
+import { CodonId } from "../../server/types/branded-types";
 
 describe("Rollback Command Schemas", () => {
   describe("checkpoint.list command", () => {
@@ -48,24 +48,24 @@ describe("Rollback Command Schemas", () => {
     });
   });
 
-  describe("phase.forceStop command", () => {
-    test("validates phase.forceStop with no data", () => {
+  describe("codon.forceStop command", () => {
+    test("validates codon.forceStop with no data", () => {
       const command = {
         id: "test-123",
-        type: "phase.forceStop",
+        type: "codon.forceStop",
       };
 
       const result = clientCommandSchema.safeParse(command);
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.type).toBe("phase.forceStop");
+        expect(result.data.type).toBe("codon.forceStop");
       }
     });
 
-    test("validates phase.forceStop with reason", () => {
+    test("validates codon.forceStop with reason", () => {
       const command = {
         id: "test-123",
-        type: "phase.forceStop",
+        type: "codon.forceStop",
         data: {
           reason: "User requested stop",
         },
@@ -74,8 +74,8 @@ describe("Rollback Command Schemas", () => {
       const result = clientCommandSchema.safeParse(command);
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.type).toBe("phase.forceStop");
-        if (result.data.type === "phase.forceStop") {
+        expect(result.data.type).toBe("codon.forceStop");
+        if (result.data.type === "codon.forceStop") {
           expect(result.data.data?.reason).toBe("User requested stop");
         }
       }
@@ -132,18 +132,18 @@ describe("Rollback Command Schemas", () => {
     });
   });
 
-  describe("rollback.toPhase command", () => {
-    test("validates rollback.toPhase with all checkpoint types", () => {
+  describe("rollback.toCodon command", () => {
+    test("validates rollback.toCodon with all checkpoint types", () => {
       const checkpointTypes: Array<
-        "start" | "end" | "workspace-setup" | "completed" | "error" | "skipped"
-      > = ["start", "end", "workspace-setup", "completed", "error", "skipped"];
+        "start" | "end" | "rig-setup" | "completed" | "error" | "skipped"
+      > = ["start", "end", "rig-setup", "completed", "error", "skipped"];
 
       for (const checkpointType of checkpointTypes) {
         const command = {
           id: "test-123",
-          type: "rollback.toPhase",
+          type: "rollback.toCodon",
           data: {
-            phaseId: "phase-1",
+            codonId: "codon-1",
             checkpointType,
           },
         };
@@ -151,9 +151,9 @@ describe("Rollback Command Schemas", () => {
         const result = clientCommandSchema.safeParse(command);
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.data.type).toBe("rollback.toPhase");
-          if (result.data.type === "rollback.toPhase") {
-            expect(result.data.data.phaseId).toBe(PhaseId("phase-1"));
+          expect(result.data.type).toBe("rollback.toCodon");
+          if (result.data.type === "rollback.toCodon") {
+            expect(result.data.data.codonId).toBe(CodonId("codon-1"));
             expect(result.data.data.checkpointType).toBe(checkpointType);
             expect(result.data.data.autoRestart).toBe(false); // default
           }
@@ -161,12 +161,12 @@ describe("Rollback Command Schemas", () => {
       }
     });
 
-    test("validates rollback.toPhase with autoRestart", () => {
+    test("validates rollback.toCodon with autoRestart", () => {
       const command = {
         id: "test-123",
-        type: "rollback.toPhase",
+        type: "rollback.toCodon",
         data: {
-          phaseId: "phase-1",
+          codonId: "codon-1",
           checkpointType: "completed",
           autoRestart: true,
         },
@@ -174,17 +174,17 @@ describe("Rollback Command Schemas", () => {
 
       const result = clientCommandSchema.safeParse(command);
       expect(result.success).toBe(true);
-      if (result.success && result.data.type === "rollback.toPhase") {
+      if (result.success && result.data.type === "rollback.toCodon") {
         expect(result.data.data.autoRestart).toBe(true);
       }
     });
 
-    test("rejects rollback.toPhase with invalid checkpoint type", () => {
+    test("rejects rollback.toCodon with invalid checkpoint type", () => {
       const command = {
         id: "test-123",
-        type: "rollback.toPhase",
+        type: "rollback.toCodon",
         data: {
-          phaseId: "phase-1",
+          codonId: "codon-1",
           checkpointType: "invalid-type",
         },
       };
@@ -193,12 +193,12 @@ describe("Rollback Command Schemas", () => {
       expect(result.success).toBe(false);
     });
 
-    test("rejects rollback.toPhase without required fields", () => {
+    test("rejects rollback.toCodon without required fields", () => {
       const command = {
         id: "test-123",
-        type: "rollback.toPhase",
+        type: "rollback.toCodon",
         data: {
-          phaseId: "phase-1",
+          codonId: "codon-1",
           // missing checkpointType
         },
       };

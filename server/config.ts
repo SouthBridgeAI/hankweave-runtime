@@ -1,28 +1,28 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { phaseChroniclerEntrySchema } from "./config-validation/chronicler.schema.js";
-import { PhaseId } from "./types/branded-types.js";
-import type { PhaseConfig, ServerConfig } from "./types/types.js";
+import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
+import { CodonId } from "./types/branded-types.js";
+import type { Codon, CodonConfig, RigSetupItem, ServerConfig } from "./types/types.js";
 
-// ============================================================================
+// -------------
 // Constants
-// ============================================================================
+// -------------
 
 export const TIMEOUTS = {
   RESULT_MESSAGE_MS: 30000, // 30 seconds to wait for result message
   PROCESS_KILL_GRACE_MS: 5000, // 5 seconds grace period before SIGKILL
   LOG_PARSER_DELAY_MS: 100, // 100ms delay for log parsing
-  PHASE_CLEANUP_DELAY_MS: 100, // 100ms delay for phase cleanup
+  CODON_CLEANUP_DELAY_MS: 100, // 100ms delay for codon cleanup
 } as const;
 
-// ============================================================================
+// -------------
 // Error Formatting
-// ============================================================================
+// -------------
 
 /**
  * Format Zod validation errors into a user-friendly message.
- * Provides context about which phase has the error and what field is affected.
+ * Provides context about which codon has the error and what field is affected.
  */
 function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
   const errors: string[] = [];
@@ -31,35 +31,40 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
     const path = issue.path;
     let errorMsg = "";
 
-    // Determine if this is a phase-level error
+    // Determine if this is a codon-level error
     if (path[0] === undefined && issue.code === "too_small") {
       errorMsg = `  - ${issue.message}`;
     } else if (typeof path[0] === "number") {
-      // This is an error in a specific phase
-      const phaseIndex = path[0];
-      const phaseData = Array.isArray(rawConfig) ? rawConfig[phaseIndex] : null;
-      const phaseId = phaseData?.id || `index ${phaseIndex}`;
-      const phaseName = phaseData?.name || "unnamed";
+      // This is an error in a specific codon
+      const codonIndex = path[0];
+      const codonData = Array.isArray(rawConfig) ? rawConfig[codonIndex] : null;
+      const codonId = codonData?.id || `index ${codonIndex}`;
+      const codonName = codonData?.name || "unnamed";
 
       if (path.length === 1) {
-        // Top-level phase error
-        errorMsg = `  - Phase "${phaseName}" (${phaseId}): ${issue.message}`;
+        // Top-level codon error
+        errorMsg = `  - Codon "${codonName}" (${codonId}): ${issue.message}`;
       } else {
         // Field-specific error
         const fieldPath = path.slice(1).join(".");
-        errorMsg = `  - Phase "${phaseName}" (${phaseId}) - ${fieldPath}: ${issue.message}`;
+        errorMsg = `  - Codon "${codonName}" (${codonId}) - ${fieldPath}: ${issue.message}`;
       }
     } else if (issue.code === "unrecognized_keys") {
       // Handle unrecognized keys specially
       const keys = (issue as z.ZodIssue & { keys?: string[] }).keys?.join(", ");
-      const phaseIndex = typeof path[0] === "number" ? path[0] : undefined;
-      const phaseData =
-        phaseIndex !== undefined && Array.isArray(rawConfig) ? rawConfig[phaseIndex] : null;
-      const phaseId = phaseData?.id || (phaseIndex !== undefined ? `index ${phaseIndex}` : "");
-      const phaseName = phaseData?.name || "unnamed";
+      const codonIndex = typeof path[0] === "number" ? path[0] : undefined;
+      const codonData =
+        codonIndex !== undefined && Array.isArray(rawConfig) ? rawConfig[codonIndex] : null;
+      const codonId = codonData?.id || (codonIndex !== undefined ? `index ${codonIndex}` : "");
+      const codonName = codonData?.name || "unnamed";
 
-      if (phaseIndex !== undefined) {
-        errorMsg = `  - Phase "${phaseName}" (${phaseId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, workspaceSetup, description, trackedFiles, env, outputFiles.`;
+      if (codonIndex !== undefined) {
+        const itemType = codonData?.type === "loop" ? "Loop" : "Codon";
+        const validFields =
+          codonData?.type === "loop"
+            ? "type, id, name, description, terminateOn, codons"
+            : "type, id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, rigSetup, description, trackedFiles, env, outputFiles, sentinels";
+        errorMsg = `  - ${itemType} "${codonName}" (${codonId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: ${validFields}.`;
       } else {
         errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
       }
@@ -75,18 +80,15 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
   return errors.join("\n");
 }
 
-// ============================================================================
+// -------------
 // Configuration Schema
-// ============================================================================
+// -------------
 
 const shellCommandWorkingDirectory = ["project"] as const;
 
-// when running workspace setup commands, it's useful to have "lastCopied" option
+// when running rig setup commands, it's useful to have "lastCopied" option
 // to coordinate with copy commands
-const workspaceSetupCommandWorkingDirectory = [
-  ...shellCommandWorkingDirectory,
-  "lastCopied",
-] as const;
+const rigSetupCommandWorkingDirectory = [...shellCommandWorkingDirectory, "lastCopied"] as const;
 
 const shellCommandSchema = z.object({
   type: z.literal("command"),
@@ -96,93 +98,188 @@ const shellCommandSchema = z.object({
   }),
 });
 
-const workspaceShellCommandSchema = shellCommandSchema.extend({
+const rigShellCommandSchema = shellCommandSchema.extend({
   command: shellCommandSchema.shape.command.extend({
-    workingDirectory: z.enum(workspaceSetupCommandWorkingDirectory).optional().default("project"),
+    workingDirectory: z.enum(rigSetupCommandWorkingDirectory).optional().default("project"),
   }),
 });
 
-const workspaceSetupItemSchema = z.discriminatedUnion("type", [
+const rigSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("copy"),
     copy: z.object({
       from: z.string().min(1, "Source path cannot be empty"),
       to: z.string().min(1, "Target path cannot be empty"),
     }),
+    allowFailure: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "If true, failure of this operation won't fail the codon. Recommended for rig setup in loop codons.",
+      ),
   }),
-  workspaceShellCommandSchema,
+  rigShellCommandSchema.extend({
+    allowFailure: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "If true, failure of this operation won't fail the codon. Recommended for rig setup in loop codons.",
+      ),
+  }),
 ]);
 
-// Output copy item schema (array of these under phase.outputFiles)
-const phaseOutputItemSchema = z
+// Output copy item schema (array of these under codon.outputFiles)
+const codonOutputItemSchema = z
   .object({
-    // An array of glob strings representing phase output files to copy
+    // An array of glob strings representing codon output files to copy
     copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
     // Optional shell commands to run before copying files. Cwd is executionPath
     beforeCopy: z.array(shellCommandSchema).optional(),
   })
   .strict();
 
-const phaseOutputSchema = z.array(phaseOutputItemSchema).optional();
+const codonOutputSchema = z.array(codonOutputItemSchema).optional();
 
-const phaseConfigSchema = z
-  .object({
-    id: z
-      .string()
-      .min(
-        1,
-        "Phase ID cannot be empty. This uniquely identifies your phase (e.g., 'phase-1', 'analysis'). Fix: Add a unique id field.",
-      ),
-    name: z
-      .string()
-      .min(
-        1,
-        "Phase name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
-      ),
-    promptFile: z.union([z.string(), z.array(z.string())]).optional(),
-    promptText: z.string().optional(),
-    appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
-    appendSystemPromptText: z.string().optional(),
-    model: z.enum(["sonnet", "opus"], {
-      errorMap: () => ({
-        message:
-          "Model must be either 'sonnet' or 'opus'. This determines which Claude model to use. Fix: Change model to 'sonnet' (faster, cheaper) or 'opus' (more capable).",
-      }),
+// -------------
+// Loop Termination Conditions
+// -------------
+
+/**
+ * Loop termination conditions define when a loop should stop iterating.
+ * - iterationLimit: Stop after a fixed number of iterations
+ * - contextExceeded: Stop when Claude signals context exhaustion
+ */
+const loopTerminationSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("iterationLimit"),
+    limit: z.number().int().min(1, "Iteration limit must be at least 1"),
+  }),
+  z.object({
+    type: z.literal("contextExceeded"),
+  }),
+]);
+
+// -------------
+// Codon and Loop Schemas
+// -------------
+
+/**
+ * Base codon object schema (before refinements).
+ * The type field is optional and defaults to "codon".
+ */
+const codonObjectSchema = z.object({
+  type: z.literal("codon").optional().default("codon"),
+  id: z
+    .string()
+    .min(
+      1,
+      "Codon ID cannot be empty. This uniquely identifies your codon (e.g., 'codon-1', 'analysis'). Fix: Add a unique id field.",
+    ),
+  name: z
+    .string()
+    .min(
+      1,
+      "Codon name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
+    ),
+  promptFile: z.union([z.string(), z.array(z.string())]).optional(),
+  promptText: z.string().optional(),
+  appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
+  appendSystemPromptText: z.string().optional(),
+  model: z.enum(["sonnet", "opus"], {
+    errorMap: () => ({
+      message:
+        "Model must be either 'sonnet' or 'opus'. This determines which Claude model to use. Fix: Change model to 'sonnet' (faster, cheaper) or 'opus' (more capable).",
     }),
-    continuationMode: z.enum(["fresh", "continue-previous"], {
-      errorMap: () => ({
-        message:
-          "continuationMode must be either 'fresh' or 'continue-previous'. This controls whether to start a new conversation or continue from the previous phase. Fix: Add continuationMode field with either 'fresh' (new conversation) or 'continue-previous' (maintain context).",
-      }),
+  }),
+  continuationMode: z.enum(["fresh", "continue-previous"], {
+    errorMap: () => ({
+      message:
+        "continuationMode must be either 'fresh' or 'continue-previous'. This controls whether to start a new conversation or continue from the previous codon. Fix: Add continuationMode field with either 'fresh' (new conversation) or 'continue-previous' (maintain context).",
     }),
-    workspaceSetup: z.array(workspaceSetupItemSchema).optional(),
-    description: z.string().optional(),
-    trackedFiles: z.array(z.string()).optional(),
-    env: z.record(z.string()).optional(),
-    outputFiles: phaseOutputSchema,
-    chroniclers: z.array(phaseChroniclerEntrySchema).optional(),
-  })
+  }),
+  rigSetup: z.array(rigSetupItemSchema).optional(),
+  description: z.string().optional(),
+  trackedFiles: z.array(z.string()).optional(),
+  env: z.record(z.string()).optional(),
+  outputFiles: codonOutputSchema,
+  sentinels: z.array(codonSentinelEntrySchema).optional(),
+});
+
+/**
+ * Single codon schema with refinements - represents one executable codon.
+ */
+const codonSchema = codonObjectSchema
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
     message:
-      "Either promptFile or promptText must be provided. The prompt tells Claude what to do in this phase. Fix: Add either promptFile (path to .md file) or promptText (inline prompt string).",
+      "Either promptFile or promptText must be provided. The prompt tells Claude what to do in this codon. Fix: Add either promptFile (path to .md file) or promptText (inline prompt string).",
   })
   .refine((data) => !(data.appendSystemPromptFile && data.appendSystemPromptText), {
     message:
       "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
   });
 
-const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one phase required");
+/**
+ * Loop schema - contains multiple codons that repeat.
+ * Only allows Codon children (no nested loops in v1).
+ *
+ * Note: We use a forward reference approach here to prevent circular dependencies.
+ * The codons array will be validated after the discriminated union is parsed.
+ */
+const loopSchema = z.object({
+  type: z.literal("loop"),
+  id: z
+    .string()
+    .min(
+      1,
+      "Loop ID cannot be empty. This uniquely identifies your loop (e.g., 'iterative-development'). Fix: Add a unique id field.",
+    ),
+  name: z
+    .string()
+    .min(
+      1,
+      "Loop name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
+    ),
+  description: z.string().optional(),
+  terminateOn: loopTerminationSchema,
+  codons: z
+    .array(
+      codonObjectSchema
+        .strict()
+        .refine((data) => data.promptFile || data.promptText, {
+          message:
+            "Either promptFile or promptText must be provided. The prompt tells Claude what to do in this codon. Fix: Add either promptFile (path to .md file) or promptText (inline prompt string).",
+        })
+        .refine((data) => !(data.appendSystemPromptFile && data.appendSystemPromptText), {
+          message:
+            "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
+        }),
+    )
+    .min(1, "Loop must contain at least one codon. Fix: Add codons to the loop."),
+});
 
-// ============================================================================
+/**
+ * CodonConfig is a discriminated union of Codon and Loop.
+ * Used in codon-sequence.json configuration.
+ */
+const codonConfigSchema = z.union([
+  codonSchema, // type: "codon" (or omitted, defaults to "codon")
+  loopSchema.strict(), // type: "loop"
+]);
+
+const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one codon required");
+
+// -------------
 // Default Configuration
-// ============================================================================
+// -------------
 
 /**
  * Default server configuration values.
- * Can be overridden by passing config to TadpoleServer constructor.
+ * Can be overridden by passing config to StrandweaveRuntime constructor.
  *
- * Note: execution paths and phases must be provided by the user, as well as cwd
+ * Note: execution paths and codons must be provided by the user, as well as cwd
  */
 export const DEFAULT_CONFIG: Omit<
   ServerConfig,
@@ -194,14 +291,14 @@ export const DEFAULT_CONFIG: Omit<
   | "isNewExecution"
   | "isResuming"
   | "linkType"
-  | "phases"
+  | "codons"
 > = {
   port: 7777,
   version: "1.0.0",
-  outputDirectory: "tadpole-results",
-  lockFile: ".tadpole/server.lock",
-  socketLogFile: ".tadpole/logs/websocket.log",
-  serverLogFile: ".tadpole/logs/server.log",
+  outputDirectory: "strandweave-results",
+  lockFile: ".strandweave/runtime.lock",
+  socketLogFile: ".strandweave/logs/websocket.log",
+  serverLogFile: ".strandweave/logs/server.log",
   costsPerMTok: {
     input: 3.0, // $3 per million input tokens
     inputCache: 3.75, // $3.75 per million tokens when creating cache
@@ -214,70 +311,86 @@ export const DEFAULT_CONFIG: Omit<
   toolResultTruncateLength: 2500, // Default truncation length for tool results
   withoutProxy: false, // Enable proxy by default
   handshakeHistoryLimit: 50, // Maximum recent events to include in handshake response
-  chronicler: {
+  sentinel: {
     enablePersistence: true,
     healthCheckGracePeriodMs: 2000, // 2 seconds
     waitForAllHealthChecks: false,
   },
 };
 
-// ============================================================================
+// -------------
 // Configuration Loading
-// ============================================================================
+// -------------
 
 /**
- * Load and validate phase configuration from a JSON file.
+ * Load and validate codon configuration from a JSON file.
  *
- * The file should contain an array of phase configurations.
- * Each phase is validated against the schema to ensure required
+ * The file should contain an array of codon configurations.
+ * Each codon is validated against the schema to ensure required
  * fields are present and either promptFile or promptText is provided.
  *
  * @param configPath - Path to the JSON configuration file
- * @returns Validated array of phase configurations
+ * @returns Validated array of codon configurations
  * @throws Error with detailed validation messages if config is invalid
  */
-export function loadPhaseConfig(configPath: string): PhaseConfig[] {
+export function loadCodonSequence(configPath: string): CodonConfig[] {
   try {
     const content = fs.readFileSync(configPath, "utf-8");
     const rawConfig = JSON.parse(content);
-
     // Validate the configuration
-    const result = phaseConfigArraySchema.safeParse(rawConfig);
+    const result = codonConfigArraySchema.safeParse(rawConfig);
     if (!result.success) {
       const errors = formatZodErrors(result.error, rawConfig);
-      throw new Error(`Invalid phase configuration:\n${errors}`);
+      throw new Error(`Invalid codon configuration:\n${errors}`);
     }
 
     // Resolve relative paths for promptFile and appendSystemPromptFile
     const configDir = path.dirname(configPath);
-    const resolvedConfig = result.data.map((phase) => {
-      const resolved = { ...phase };
+
+    /**
+     * Recursively resolve paths in a codon configuration.
+     * Handles both Codon and Loop types.
+     */
+    function resolveCodonOrLoopPaths(config: CodonConfig): CodonConfig {
+      // If it's a loop, resolve paths in nested codons
+      if (config.type === "loop") {
+        return {
+          ...config,
+          codons: config.codons.map((codon) => resolveCodonOrLoopPaths(codon) as Codon),
+        };
+      }
+
+      // It's a codon - resolve its paths
+      const resolved = { ...config };
 
       // Handle promptFile - can be string or array
-      if (phase.promptFile) {
-        if (Array.isArray(phase.promptFile)) {
-          resolved.promptFile = phase.promptFile.map((file) =>
+      if (resolved.promptFile) {
+        if (Array.isArray(resolved.promptFile)) {
+          resolved.promptFile = resolved.promptFile.map((file: string) =>
             path.isAbsolute(file) ? file : path.resolve(configDir, file),
           );
-        } else if (!path.isAbsolute(phase.promptFile)) {
-          resolved.promptFile = path.resolve(configDir, phase.promptFile);
+        } else if (!path.isAbsolute(resolved.promptFile)) {
+          resolved.promptFile = path.resolve(configDir, resolved.promptFile);
         }
       }
 
       // Handle appendSystemPromptFile - can be string or array
-      if (phase.appendSystemPromptFile) {
-        if (Array.isArray(phase.appendSystemPromptFile)) {
-          resolved.appendSystemPromptFile = phase.appendSystemPromptFile.map((file) =>
+      if (resolved.appendSystemPromptFile) {
+        if (Array.isArray(resolved.appendSystemPromptFile)) {
+          resolved.appendSystemPromptFile = resolved.appendSystemPromptFile.map((file: string) =>
             path.isAbsolute(file) ? file : path.resolve(configDir, file),
           );
-        } else if (!path.isAbsolute(phase.appendSystemPromptFile)) {
-          resolved.appendSystemPromptFile = path.resolve(configDir, phase.appendSystemPromptFile);
+        } else if (!path.isAbsolute(resolved.appendSystemPromptFile)) {
+          resolved.appendSystemPromptFile = path.resolve(
+            configDir,
+            resolved.appendSystemPromptFile,
+          );
         }
       }
 
-      // Handle workspaceSetup - resolve paths for copy operations
-      if (phase.workspaceSetup) {
-        resolved.workspaceSetup = phase.workspaceSetup.map((item) => {
+      // Handle rigSetup - resolve paths for copy operations
+      if (resolved.rigSetup) {
+        resolved.rigSetup = resolved.rigSetup.map((item: RigSetupItem) => {
           if (item.type === "copy" && item.copy) {
             return {
               ...item,
@@ -294,36 +407,62 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       }
 
       return resolved;
-    });
+    }
+
+    const resolvedConfig = result.data.map((config) =>
+      resolveCodonOrLoopPaths(config as CodonConfig),
+    );
 
     // Validate file existence, readability, and model names
     const validationErrors: string[] = [];
     const validModels = ["sonnet", "opus"];
 
-    for (const [index, phase] of resolvedConfig.entries()) {
+    /**
+     * Recursively validate a codon or loop configuration.
+     * @param config - Codon or Loop to validate
+     * @param context - Context string for error messages (e.g., "Loop 'my-loop' > Codon 'write-code'")
+     * @param index - Index of the codon within its parent
+     * @param isInLoop - Whether this codon is inside a loop
+     */
+    function validateCodonOrLoop(
+      config: CodonConfig,
+      context: string,
+      index: number,
+      _isInLoop = false,
+    ): void {
+      if (config.type === "loop") {
+        // Validate loop's nested codons recursively
+        for (const [codonIndex, codon] of config.codons.entries()) {
+          const codonContext = `Loop '${config.id}' > Codon ${codonIndex + 1} (${codon.id})`;
+          validateCodonOrLoop(codon, codonContext, codonIndex, true);
+        }
+        return;
+      }
+
+      // It's a codon - validate it
       // Validate model name
-      if (!validModels.includes(phase.model)) {
+      if (!validModels.includes(config.model)) {
         validationErrors.push(
-          `Phase ${index + 1} (${phase.id}): model "${
-            phase.model
+          `${context}: model "${
+            config.model
           }" is not valid. Must be one of: ${validModels.join(", ")}`,
         );
       }
 
       // Validate promptFile existence and readability
-      if (phase.promptFile) {
-        const promptFiles = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+      if (config.promptFile) {
+        const promptFiles = Array.isArray(config.promptFile)
+          ? config.promptFile
+          : [config.promptFile];
         for (const file of promptFiles) {
           if (!fs.existsSync(file)) {
-            validationErrors.push(
-              `Phase ${index + 1} (${phase.id}): promptFile "${file}" does not exist`,
-            );
+            validationErrors.push(`${context}: promptFile "${file}" does not exist`);
           } else {
             try {
               fs.readFileSync(file, "utf-8");
             } catch (error) {
               validationErrors.push(
-                `Phase ${index + 1} (${phase.id}): promptFile "${file}" is not readable: ${
+                `${context}: promptFile "${file}" is not readable: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -333,23 +472,19 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
       }
 
       // Validate appendSystemPromptFile existence and readability
-      if (phase.appendSystemPromptFile) {
-        const systemPromptFiles = Array.isArray(phase.appendSystemPromptFile)
-          ? phase.appendSystemPromptFile
-          : [phase.appendSystemPromptFile];
+      if (config.appendSystemPromptFile) {
+        const systemPromptFiles = Array.isArray(config.appendSystemPromptFile)
+          ? config.appendSystemPromptFile
+          : [config.appendSystemPromptFile];
         for (const file of systemPromptFiles) {
           if (!fs.existsSync(file)) {
-            validationErrors.push(
-              `Phase ${index + 1} (${phase.id}): appendSystemPromptFile "${file}" does not exist`,
-            );
+            validationErrors.push(`${context}: appendSystemPromptFile "${file}" does not exist`);
           } else {
             try {
               fs.readFileSync(file, "utf-8");
             } catch (error) {
               validationErrors.push(
-                `Phase ${index + 1} (${
-                  phase.id
-                }): appendSystemPromptFile "${file}" is not readable: ${
+                `${context}: appendSystemPromptFile "${file}" is not readable: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -358,100 +493,116 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
         }
       }
 
-      // Validate workspaceSetup items
-      if (phase.workspaceSetup) {
-        for (const [itemIndex, item] of phase.workspaceSetup.entries()) {
+      // Validate rigSetup items
+      if (config.rigSetup) {
+        for (const [itemIndex, item] of config.rigSetup.entries()) {
           if (item.type === "copy" && item.copy) {
             // Check if source exists
             if (!fs.existsSync(item.copy.from)) {
               validationErrors.push(
-                `Phase ${index + 1} (${phase.id}), workspace setup item ${
-                  itemIndex + 1
-                }: source path "${item.copy.from}" does not exist`,
+                `${context}, rig setup item ${itemIndex + 1}: source path "${
+                  item.copy.from
+                }" does not exist`,
               );
             }
           }
         }
       }
 
-      // Validate chroniclers
-      if (phase.chroniclers && phase.chroniclers.length > 0) {
-        const seenChroniclerIds = new Set<string>();
+      // Validate sentinels
+      if (config.sentinels && config.sentinels.length > 0) {
+        const seenSentinelIds = new Set<string>();
         const configDir = path.dirname(configPath);
 
-        for (const [chrIndex, entry] of phase.chroniclers.entries()) {
-          const entryLabel = `Phase ${index + 1} (${phase.id}), chronicler ${chrIndex + 1}`;
+        for (const [sentIndex, entry] of config.sentinels.entries()) {
+          const entryLabel = `Codon ${index + 1} (${config.id}), sentinel ${sentIndex + 1}`;
 
-          // Extract chronicler config to check ID
-          let chroniclerConfig: unknown;
-          if (typeof entry.chroniclerConfig === "string") {
+          // Extract sentinel config to check ID
+          let sentinelConfig: unknown;
+          if (typeof entry.sentinelConfig === "string") {
             // File reference - resolve and load
-            const resolvedPath = path.isAbsolute(entry.chroniclerConfig)
-              ? entry.chroniclerConfig
-              : path.resolve(configDir, entry.chroniclerConfig);
+            const resolvedPath = path.isAbsolute(entry.sentinelConfig)
+              ? entry.sentinelConfig
+              : path.resolve(configDir, entry.sentinelConfig);
 
             if (!fs.existsSync(resolvedPath)) {
-              const severity = entry.settings?.failPhaseIfNotLoaded ? "ERROR" : "WARNING";
+              const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
               validationErrors.push(
-                `${entryLabel}: Chronicler config file not found: ${entry.chroniclerConfig} [${severity}]`,
+                `${entryLabel}: Sentinel config file not found: ${entry.sentinelConfig} [${severity}]`,
               );
-              continue; // Skip further validation for this chronicler
+              continue; // Skip further validation for this sentinel
             }
 
             try {
               const content = fs.readFileSync(resolvedPath, "utf-8");
-              chroniclerConfig = JSON.parse(content);
+              sentinelConfig = JSON.parse(content);
             } catch (error) {
-              const severity = entry.settings?.failPhaseIfNotLoaded ? "ERROR" : "WARNING";
+              const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
               const errorMsg = error instanceof Error ? error.message : String(error);
               validationErrors.push(
-                `${entryLabel}: Failed to parse chronicler config file ${entry.chroniclerConfig}: ${errorMsg} [${severity}]`,
+                `${entryLabel}: Failed to parse sentinel config file ${entry.sentinelConfig}: ${errorMsg} [${severity}]`,
               );
               continue;
             }
           } else {
             // Inline config
-            chroniclerConfig = entry.chroniclerConfig;
+            sentinelConfig = entry.sentinelConfig;
           }
 
-          // Check for duplicate chronicler IDs
-          if (
-            chroniclerConfig &&
-            typeof chroniclerConfig === "object" &&
-            "id" in chroniclerConfig
-          ) {
-            const chroniclerId = (chroniclerConfig as { id: string }).id;
-            if (seenChroniclerIds.has(chroniclerId)) {
+          // Check for duplicate sentinel IDs
+          if (sentinelConfig && typeof sentinelConfig === "object" && "id" in sentinelConfig) {
+            const sentinelId = (sentinelConfig as { id: string }).id;
+            if (seenSentinelIds.has(sentinelId)) {
               validationErrors.push(
-                `${entryLabel}: Duplicate chronicler ID '${chroniclerId}' in phase ${phase.id}`,
+                `${entryLabel}: Duplicate sentinel ID '${sentinelId}' in codon ${config.id}`,
               );
             }
-            seenChroniclerIds.add(chroniclerId);
+            seenSentinelIds.add(sentinelId);
           }
         }
       }
     }
 
-    if (validationErrors.length > 0) {
-      throw new Error(`Phase configuration validation failed:\n${validationErrors.join("\n")}`);
+    // Validate all top-level items
+    for (const [index, config] of resolvedConfig.entries()) {
+      const context =
+        config.type === "loop"
+          ? `Loop ${index + 1} (${config.id})`
+          : `Codon ${index + 1} (${config.id})`;
+      validateCodonOrLoop(config as CodonConfig, context, index);
     }
 
-    // Transform string IDs to PhaseId branded types
-    return resolvedConfig.map((phase) => ({
-      ...phase,
-      id: PhaseId(phase.id),
-    }));
+    if (validationErrors.length > 0) {
+      throw new Error(`Codon configuration validation failed:\n${validationErrors.join("\n")}`);
+    }
+
+    // Transform string IDs to CodonId branded types (recursively for loops)
+    function transformIds(config: CodonConfig): CodonConfig {
+      if (config.type === "loop") {
+        return {
+          ...config,
+          id: CodonId(config.id as string),
+          codons: config.codons.map((codon) => transformIds(codon) as Codon),
+        };
+      }
+      return {
+        ...config,
+        id: CodonId(config.id as string),
+      };
+    }
+
+    return resolvedConfig.map((config) => transformIds(config as CodonConfig));
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`Failed to load phase config from ${configPath}: ${error.message}`);
+      throw new Error(`Failed to load codon config from ${configPath}: ${error.message}`);
     }
     throw error;
   }
 }
 
-// ============================================================================
+// -------------
 // Token Cost Calculation
-// ============================================================================
+// -------------
 
 /**
  * Calculate the cost in dollars for a given token usage.
@@ -484,33 +635,33 @@ export function calculateCost(
   return inputCost + cacheCreationCost + cacheReadCost + outputCost;
 }
 
-// ============================================================================
+// -------------
 // Enhanced Validation
-// ============================================================================
+// -------------
 
 export interface ValidationResult {
-  phases: PhaseConfig[];
-  phaseCount: number;
+  codons: CodonConfig[];
+  codonCount: number;
   promptFileCount: number;
   systemPromptFileCount: number;
-  workspaceSetupCount: number;
-  watchingPhaseCount: number;
-  checkpointPhaseCount: number;
+  rigSetupCount: number;
+  trackingCodonCount: number;
+  checkpointCodonCount: number;
   warnings: string[];
   environmentVariables: {
     fromSystem: Record<string, string>;
-    fromPhases: Array<{
-      phaseId: string;
-      phaseName: string;
+    fromCodons: Array<{
+      codonId: string;
+      codonName: string;
       variables: Record<string, string>;
     }>;
   };
 }
 
 /**
- * Validate phase configuration with enhanced checks.
+ * Validate strand configuration with enhanced checks.
  *
- * This performs all the validation of loadPhaseConfig plus additional
+ * This performs all the validation of loadCodonSequence plus additional
  * checks that are useful for pre-flight validation but not strictly
  * required for running.
  *
@@ -519,107 +670,183 @@ export interface ValidationResult {
  * @returns Validation result with statistics and warnings
  * @throws Error with detailed messages if validation fails
  */
-export async function validatePhaseConfig(
+export async function validateStrand(
   configPath: string,
   executionPath: string,
 ): Promise<ValidationResult> {
-  // First, use loadPhaseConfig to do basic validation
-  // This will throw if there are any structural issues
-  const phases = loadPhaseConfig(configPath);
+  const codons = loadCodonSequence(configPath);
 
   const result: ValidationResult = {
-    phases,
-    phaseCount: phases.length,
+    codons,
+    codonCount: 0, // Will be counted recursively
     promptFileCount: 0,
     systemPromptFileCount: 0,
-    workspaceSetupCount: 0,
-    watchingPhaseCount: 0,
-    checkpointPhaseCount: 0,
+    rigSetupCount: 0,
+    trackingCodonCount: 0,
+    checkpointCodonCount: 0,
     warnings: [],
     environmentVariables: {
       fromSystem: {},
-      fromPhases: [],
+      fromCodons: [],
     },
   };
 
-  // Collect TADPOLE_ prefixed environment variables from system
+  // Collect STRANDWEAVE_ prefixed environment variables from system
   for (const key in process.env) {
-    if (key.startsWith("TADPOLE_")) {
-      const newKey = key.substring("TADPOLE_".length);
+    if (key.startsWith("STRANDWEAVE_")) {
+      const newKey = key.substring("STRANDWEAVE_".length);
       result.environmentVariables.fromSystem[newKey] = process.env[key] || "";
     }
   }
 
-  // Additional validation checks
-  const phaseIds = new Set<string>();
-  const phaseNames = new Set<string>();
+  /**
+   * Recursively validate and collect statistics from a codon or loop.
+   * @param config - Codon or Loop to validate
+   * @param context - Context string for error messages (e.g., "Loop 'my-loop' > Codon 'write-code'")
+   * @param topLevelIndex - Index within top-level codons array (for continuation mode checks)
+   * @param isTopLevel - Whether this is a top-level config (not nested in a loop)
+   * @param codonIds - Set to track duplicate IDs across all codons
+   * @param codonNames - Set to track duplicate names (for warnings)
+   */
+  async function validateCodonOrLoopRecursive(
+    config: CodonConfig,
+    context: string,
+    topLevelIndex: number,
+    isTopLevel: boolean,
+    codonIds: Set<string>,
+    codonNames: Set<string>,
+  ): Promise<void> {
+    if (config.type === "loop") {
+      const loopLabel = context || `Loop ${topLevelIndex + 1} (${config.id})`;
 
-  for (const [index, phase] of phases.entries()) {
-    const phaseLabel = `Phase ${index + 1} (${phase.id})`;
+      // Check for duplicate loop ID at top level
+      if (codonIds.has(config.id)) {
+        throw new Error(`${loopLabel}: Duplicate loop ID "${config.id}"`);
+      }
+      codonIds.add(config.id);
+
+      // Validate codons within loop have unique IDs
+      const loopCodonIds = new Set<string>();
+      for (const codon of config.codons) {
+        if (loopCodonIds.has(codon.id)) {
+          throw new Error(`${loopLabel}: Duplicate codon ID "${codon.id}" within loop`);
+        }
+        loopCodonIds.add(codon.id);
+      }
+
+      // ContextExceeded loops cannot have codons with fresh continuationMode
+      // This would cause infinite loops since context never builds up
+      if (config.terminateOn.type === "contextExceeded") {
+        for (const codon of config.codons) {
+          if (codon.continuationMode === "fresh") {
+            throw new Error(
+              `${loopLabel}: Loop with contextExceeded termination cannot contain codons with continuationMode "fresh". ` +
+                `Codon "${codon.name}" (${codon.id}) has continuationMode "fresh", which would prevent context from building up ` +
+                `and cause an infinite loop. Change to "continue-previous" to allow context to accumulate.`,
+            );
+          }
+        }
+      }
+
+      // Recursively validate each codon in the loop
+      for (const [codonIndex, codon] of config.codons.entries()) {
+        const codonContext = `Loop '${config.id}' > Codon ${codonIndex + 1} (${codon.id})`;
+        await validateCodonOrLoopRecursive(
+          codon,
+          codonContext,
+          codonIndex,
+          false, // Not top-level
+          codonIds,
+          codonNames,
+        );
+      }
+
+      return;
+    }
+
+    // It's a codon - validate all codon-specific logic
+    const codon = config;
+    const codonLabel = context || `Codon ${topLevelIndex + 1} (${codon.id})`;
 
     // Check for duplicate IDs
-    if (phaseIds.has(phase.id)) {
-      throw new Error(`${phaseLabel}: Duplicate phase ID "${phase.id}"`);
+    if (codonIds.has(codon.id)) {
+      throw new Error(`${codonLabel}: Duplicate codon ID "${codon.id}"`);
     }
-    phaseIds.add(phase.id);
+    codonIds.add(codon.id);
 
     // Warn about duplicate names (not fatal)
-    if (phaseNames.has(phase.name)) {
-      result.warnings.push(`${phaseLabel}: Duplicate phase name "${phase.name}"`);
+    if (codonNames.has(codon.name)) {
+      result.warnings.push(`${codonLabel}: Duplicate codon name "${codon.name}"`);
     }
-    phaseNames.add(phase.name);
+    codonNames.add(codon.name);
 
-    // Collect phase environment variables
-    if (phase.env && Object.keys(phase.env).length > 0) {
-      result.environmentVariables.fromPhases.push({
-        phaseId: phase.id,
-        phaseName: phase.name,
-        variables: phase.env,
+    // Warn about rig setup in loop codons without allowFailure flag
+    if (!isTopLevel && codon.rigSetup && codon.rigSetup.length > 0) {
+      const hasItemsWithoutAllowFailure = codon.rigSetup.some((item) => !item.allowFailure);
+
+      if (hasItemsWithoutAllowFailure) {
+        result.warnings.push(
+          `${codonLabel}: rigSetup in loop codon should use 'allowFailure: true' ` +
+            `to prevent loop termination on setup failures. This is especially important ` +
+            `if subsequent iterations might fail (e.g., trying to copy files to where they already exist).`,
+        );
+      }
+    }
+
+    // Increment codon count
+    result.codonCount++;
+
+    // Collect codon environment variables
+    if (codon.env && Object.keys(codon.env).length > 0) {
+      result.environmentVariables.fromCodons.push({
+        codonId: codon.id,
+        codonName: codon.name,
+        variables: codon.env,
       });
     }
 
     // Count prompt files
-    if (phase.promptFile) {
-      const files = Array.isArray(phase.promptFile) ? phase.promptFile : [phase.promptFile];
+    if (codon.promptFile) {
+      const files = Array.isArray(codon.promptFile) ? codon.promptFile : [codon.promptFile];
       result.promptFileCount += files.length;
 
-      // Verify files are readable (loadPhaseConfig checks existence)
+      // Verify files are readable (loadCodonSequence checks existence)
       for (const file of files) {
         try {
           const stats = await fs.promises.stat(file);
           if (stats.size === 0) {
-            result.warnings.push(`${phaseLabel}: Prompt file "${file}" is empty`);
+            result.warnings.push(`${codonLabel}: Prompt file "${file}" is empty`);
           }
           if (stats.size > 1024 * 1024) {
             // 1MB
             result.warnings.push(
-              `${phaseLabel}: Prompt file "${file}" is large (${(stats.size / 1024 / 1024).toFixed(
+              `${codonLabel}: Prompt file "${file}" is large (${(stats.size / 1024 / 1024).toFixed(
                 2,
               )}MB)`,
             );
           }
         } catch (error) {
-          // Should not happen as loadPhaseConfig already checked
-          throw new Error(`${phaseLabel}: Cannot stat prompt file "${file}": ${error}`);
+          // Should not happen as loadCodonSequence already checked
+          throw new Error(`${codonLabel}: Cannot stat prompt file "${file}": ${error}`);
         }
       }
     }
 
     // Count system prompt files
-    if (phase.appendSystemPromptFile) {
-      const files = Array.isArray(phase.appendSystemPromptFile)
-        ? phase.appendSystemPromptFile
-        : [phase.appendSystemPromptFile];
+    if (codon.appendSystemPromptFile) {
+      const files = Array.isArray(codon.appendSystemPromptFile)
+        ? codon.appendSystemPromptFile
+        : [codon.appendSystemPromptFile];
       result.systemPromptFileCount += files.length;
     }
 
-    // Validate workspace setup
-    if (phase.workspaceSetup) {
-      result.workspaceSetupCount += phase.workspaceSetup.length;
+    // Validate rig setup
+    if (codon.rigSetup) {
+      result.rigSetupCount += codon.rigSetup.length;
 
-      for (const [itemIndex, item] of phase.workspaceSetup.entries()) {
+      for (const [itemIndex, item] of codon.rigSetup.entries()) {
         if (item.type === "copy" && item.copy) {
-          // Check source exists (already done by loadPhaseConfig)
+          // Check source exists (already done by loadCodonSequence)
           // Check target parent directory
           const targetPath = path.join(executionPath, item.copy.to);
           const targetParent = path.dirname(targetPath);
@@ -628,14 +855,14 @@ export async function validatePhaseConfig(
             const relativeParent = path.relative(executionPath, targetParent);
             if (relativeParent.startsWith("..")) {
               throw new Error(
-                `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
+                `${codonLabel}, rig setup item ${itemIndex + 1}: ` +
                   `Target path "${item.copy.to}" would write outside execution directory`,
               );
             }
           } catch (_error) {
             // Path resolution error
             throw new Error(
-              `${phaseLabel}, workspace setup item ${itemIndex + 1}: ` +
+              `${codonLabel}, rig setup item ${itemIndex + 1}: ` +
                 `Invalid target path "${item.copy.to}"`,
             );
           }
@@ -643,14 +870,14 @@ export async function validatePhaseConfig(
           // Warn if target already exists
           if (fs.existsSync(targetPath)) {
             result.warnings.push(
-              `${phaseLabel}: Copy target "${item.copy.to}" already exists and will be overwritten`,
+              `${codonLabel}: Copy target "${item.copy.to}" already exists and will be overwritten`,
             );
           }
         } else if (item.type === "command" && item.command) {
           // Basic command validation
           const command = item.command.run.trim();
           if (!command) {
-            throw new Error(`${phaseLabel}, workspace setup item ${itemIndex + 1}: Empty command`);
+            throw new Error(`${codonLabel}, rig setup item ${itemIndex + 1}: Empty command`);
           }
 
           // Warn about potentially dangerous commands
@@ -665,7 +892,7 @@ export async function validatePhaseConfig(
           for (const pattern of dangerousPatterns) {
             if (pattern.test(command)) {
               result.warnings.push(
-                `${phaseLabel}: Potentially dangerous command detected: "${command}"`,
+                `${codonLabel}: Potentially dangerous command detected: "${command}"`,
               );
               break;
             }
@@ -674,35 +901,77 @@ export async function validatePhaseConfig(
       }
     }
 
-    // Count phases with file tracking
-    if (phase.trackedFiles && phase.trackedFiles.length > 0) {
-      result.watchingPhaseCount++;
-      result.checkpointPhaseCount++;
+    // Count codons with file tracking
+    if (codon.trackedFiles && codon.trackedFiles.length > 0) {
+      result.trackingCodonCount++;
+      result.checkpointCodonCount++;
     }
 
-    // Validate continuation mode
-    if (phase.continuationMode === "continue-previous" && index === 0) {
-      result.warnings.push(
-        `${phaseLabel}: First phase has continuationMode "continue-previous" but there's no previous phase`,
-      );
-    }
-
-    // Check phase dependencies
-    if (phase.continuationMode === "continue-previous" && index > 0) {
-      const previousPhase = phases[index - 1];
-      // Warn if previous phase doesn't produce output that might be needed
-      if (!previousPhase.trackedFiles || previousPhase.trackedFiles.length === 0) {
+    // Validate continuation mode - only for top-level codons
+    if (isTopLevel) {
+      if (codon.continuationMode === "continue-previous" && topLevelIndex === 0) {
         result.warnings.push(
-          `${phaseLabel}: Continues from previous phase "${previousPhase.id}" ` +
-            `which doesn't track any files`,
+          `${codonLabel}: First codon has continuationMode "continue-previous" but there's no previous codon`,
         );
+      }
+
+      // Check codon dependencies
+      if (codon.continuationMode === "continue-previous" && topLevelIndex > 0) {
+        const previousConfig = codons[topLevelIndex - 1];
+
+        // Cannot continue from a contextExceeded loop
+        // The loop only terminates when context is exhausted, so there's nothing to continue from
+        if (
+          previousConfig.type === "loop" &&
+          previousConfig.terminateOn.type === "contextExceeded"
+        ) {
+          throw new Error(
+            `${codonLabel}: Cannot use continuationMode "continue-previous" after a loop with contextExceeded termination. ` +
+              `Loop "${previousConfig.name}" (${previousConfig.id}) terminates only when context is exhausted, ` +
+              `meaning there's no meaningful conversation to continue. Change to "fresh" to start a new conversation.`,
+          );
+        }
+
+        // Determine which codon to check based on whether previous config is a loop or codon
+        let codonToCheck: Codon;
+        let warningContext: string;
+
+        if (previousConfig.type === "loop") {
+          // For loops, check the last codon in the loop
+          codonToCheck = previousConfig.codons[previousConfig.codons.length - 1];
+          warningContext = `Continues from previous loop "${previousConfig.id}" whose last codon "${codonToCheck.id}"`;
+        } else {
+          codonToCheck = previousConfig;
+          warningContext = `Continues from previous codon "${codonToCheck.id}"`;
+        }
+
+        // Warn if the codon doesn't produce output that might be needed
+        if (!codonToCheck.trackedFiles || codonToCheck.trackedFiles.length === 0) {
+          result.warnings.push(`${codonLabel}: ${warningContext} doesn't track any files`);
+        }
       }
     }
   }
 
+  // Additional validation checks
+  const codonIds = new Set<string>();
+  const codonNames = new Set<string>();
+
+  // Recursively validate all codons and loops
+  for (const [index, config] of codons.entries()) {
+    await validateCodonOrLoopRecursive(
+      config,
+      "", // No context for top-level
+      index,
+      true, // Is top-level
+      codonIds,
+      codonNames,
+    );
+  }
+
   // Global warnings
-  if (result.phaseCount === 0) {
-    throw new Error("Configuration must contain at least one phase");
+  if (result.codonCount === 0) {
+    throw new Error("Configuration must contain at least one codon");
   }
 
   return result;

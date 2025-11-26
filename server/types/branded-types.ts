@@ -5,9 +5,9 @@
 // Helper type for branding
 type Branded<T, Brand> = T & { __brand: Brand };
 
-// Phase ID - references a phase configuration
-export type PhaseId = Branded<string, "PhaseId">;
-export const PhaseId = (id: string): PhaseId => id as PhaseId;
+// Codon ID - references a codon configuration
+export type CodonId = Branded<string, "CodonId">;
+export const CodonId = (id: string): CodonId => id as CodonId;
 
 // Session ID - Claude's session UUID
 export type SessionId = Branded<string, "SessionId">;

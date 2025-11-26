@@ -9,7 +9,7 @@ interface TestState {
 export function runInfoEventsTests(testState: TestState) {
   const infoEvents = testState.client?.getEventsByType("info") || [];
 
-  test("info event for phase continuation", () => {
+  test("info event for codon continuation", () => {
     const hasContinuationInfo = infoEvents.some(
       (e) => (e as InfoEvent).data?.message?.includes("Continuing from previous session") || false,
     );
@@ -23,9 +23,9 @@ export function runInfoEventsTests(testState: TestState) {
     expect(sessionStartEvents.length).toBe(3);
   });
 
-  test("info event for all phases completed", () => {
+  test("info event for all codons completed", () => {
     const hasCompletionInfo = infoEvents.some(
-      (e) => (e as InfoEvent).data?.message?.includes("All phases completed") || false,
+      (e) => (e as InfoEvent).data?.message?.includes("All codons completed") || false,
     );
     expect(hasCompletionInfo).toBe(true);
   });

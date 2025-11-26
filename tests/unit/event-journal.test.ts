@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { EventJournal } from "../../server/event-journal.js";
-import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import { MemoryEventStorage } from "../../server/storage/memory-event-storage.js";
-import { EventId } from "../../server/types/branded-types.js";
+import { EventJournal } from "../../server/event-journal";
+import type { ServerEvent } from "../../server/schemas/event-schemas";
+import { MemoryEventStorage } from "../../server/storage/memory-event-storage";
+import { EventId } from "../../server/types/branded-types";
 
 function createMockEvent(id: string, timestamp?: string): ServerEvent {
   return {
@@ -113,7 +113,7 @@ describe("EventJournal", () => {
       timestamp: new Date().toISOString(),
       type: "assistant.action",
       data: {
-        phaseId: "phase-1",
+        codonId: "codon-1",
         action: "message",
         content: "Test content",
       },
@@ -127,10 +127,10 @@ describe("EventJournal", () => {
     const serverStateEvent: ServerEvent = {
       id: EventId("test-event"),
       timestamp: new Date().toISOString(),
-      type: "phase.started",
+      type: "codon.started",
       data: {
-        phaseId: "test-phase",
-        phaseName: "Test Phase",
+        codonId: "test-codon",
+        codonName: "Test Codon",
         sessionId: "test-session",
         startTime: new Date().toISOString(),
       },

@@ -196,15 +196,15 @@ export class LlmProviderRegistry {
 
   private initializeProviders(): void {
     for (const def of PROVIDER_DEFINITIONS) {
-      // Check TADPOLE_CHRONICLER_ prefixed var first, then fall back to standard
-      const chroniclerEnvVar = `TADPOLE_CHRONICLER_${def.apiKeyEnvVar}`;
-      const apiKey = process.env[chroniclerEnvVar] || process.env[def.apiKeyEnvVar];
+      // Check STRANDWEAVE_SENTINEL_ prefixed var first, then fall back to standard
+      const sentinelEnvVar = `STRANDWEAVE_SENTINEL_${def.apiKeyEnvVar}`;
+      const apiKey = process.env[sentinelEnvVar] || process.env[def.apiKeyEnvVar];
 
       if (!apiKey) {
         const status: ProviderStatus = {
           status: "not-configured",
           id: def.id,
-          error: `No API key found (checked: ${chroniclerEnvVar}, ${def.apiKeyEnvVar})`,
+          error: `No API key found (checked: ${sentinelEnvVar}, ${def.apiKeyEnvVar})`,
         };
         this.providerStatus.set(def.id, status);
         this.logger?.log(`Provider ${def.id}: ${status.error}`, "debug");
@@ -212,7 +212,7 @@ export class LlmProviderRegistry {
       }
 
       // Log which env var was used (helpful for debugging)
-      const usedEnvVar = process.env[chroniclerEnvVar] ? chroniclerEnvVar : def.apiKeyEnvVar;
+      const usedEnvVar = process.env[sentinelEnvVar] ? sentinelEnvVar : def.apiKeyEnvVar;
 
       try {
         const provider = def.createProvider(apiKey);

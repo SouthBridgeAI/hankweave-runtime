@@ -11,6 +11,9 @@ workflows
 tests/test-area
 tests/test-results
 
+strandweave-results
+.strandweave
+
 logs
 _.log
 npm-debug.log_
@@ -185,6 +188,3 @@ dist
 
 # Finder (MacOS) folder config
 .DS_Store
-
-# Default tadpole output directory
-tadpole-results/

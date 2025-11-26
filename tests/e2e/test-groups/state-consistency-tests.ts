@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type {
-  PhaseStartedEvent,
+  CodonStartedEvent,
   ServerEvent,
   StateSnapshotEvent,
 } from "../../../server/types/types.js";
@@ -9,64 +9,64 @@ import type { TestWSClient } from "../../utils/test-helpers.js";
 interface TestState {
   client: TestWSClient | null;
   events: ServerEvent[];
-  phase1Started: PhaseStartedEvent | null;
-  phase2Started: PhaseStartedEvent | null;
-  phase3Started: PhaseStartedEvent | null;
+  codon1Started: CodonStartedEvent | null;
+  codon2Started: CodonStartedEvent | null;
+  codon3Started: CodonStartedEvent | null;
 }
 
 export function runStateConsistencyTests(testState: TestState) {
-  test("phase session IDs are consistent across all references", () => {
-    // Map phase to all its session IDs found in different places
+  test("codon session IDs are consistent across all references", () => {
+    // Map codon to all its session IDs found in different places
     const sessionIdMap = new Map<string, Set<string>>();
 
-    // From phase started events
+    // From codon started events
     testState.events.forEach((event) => {
-      if (event.type === "phase.started") {
-        const e = event as PhaseStartedEvent;
-        const phaseId = e.data?.phaseId;
+      if (event.type === "codon.started") {
+        const e = event as CodonStartedEvent;
+        const codonId = e.data?.codonId;
         const sessionId = e.data?.sessionId;
-        if (phaseId && sessionId) {
-          if (!sessionIdMap.has(phaseId)) sessionIdMap.set(phaseId, new Set());
-          sessionIdMap.get(phaseId)?.add(sessionId);
+        if (codonId && sessionId) {
+          if (!sessionIdMap.has(codonId)) sessionIdMap.set(codonId, new Set());
+          sessionIdMap.get(codonId)?.add(sessionId);
         }
       }
     });
 
-    // From completed phases in state snapshots
+    // From completed codons in state snapshots
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
     snapshots.forEach((event) => {
       const snapshot = event as StateSnapshotEvent;
-      snapshot.data?.completedPhases?.forEach((phase) => {
-        if (!sessionIdMap.has(phase.phaseId)) sessionIdMap.set(phase.phaseId, new Set());
-        if (phase.status === "completed" && phase.claudeSessionId) {
-          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
-        } else if (phase.status === "failed" && phase.claudeSessionId) {
-          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
-        } else if (phase.status === "skipped" && phase.claudeSessionId) {
-          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
-        } else if (phase.status === "running" && phase.claudeSessionId) {
-          sessionIdMap.get(phase.phaseId)?.add(phase.claudeSessionId);
+      snapshot.data?.completedCodons?.forEach((codon) => {
+        if (!sessionIdMap.has(codon.codonId)) sessionIdMap.set(codon.codonId, new Set());
+        if (codon.status === "completed" && codon.claudeSessionId) {
+          sessionIdMap.get(codon.codonId)?.add(codon.claudeSessionId);
+        } else if (codon.status === "failed" && codon.claudeSessionId) {
+          sessionIdMap.get(codon.codonId)?.add(codon.claudeSessionId);
+        } else if (codon.status === "skipped" && codon.claudeSessionId) {
+          sessionIdMap.get(codon.codonId)?.add(codon.claudeSessionId);
+        } else if (codon.status === "running" && codon.claudeSessionId) {
+          sessionIdMap.get(codon.codonId)?.add(codon.claudeSessionId);
         }
       });
     });
 
-    // Each phase should have exactly one session ID
-    sessionIdMap.forEach((sessionIds, _phaseId) => {
+    // Each codon should have exactly one session ID
+    sessionIdMap.forEach((sessionIds, _codonId) => {
       expect(sessionIds.size).toBe(1);
     });
   });
 
-  test("previousSessionId correctly chains phases", () => {
-    // Phase 2 should reference Phase 1's session ID
-    if (testState.phase2Started && testState.phase1Started) {
-      expect(testState.phase2Started.data?.previousSessionId).toBe(
-        testState.phase1Started.data?.sessionId,
+  test("previousSessionId correctly chains codons", () => {
+    // Codon 2 should reference Codon 1's session ID
+    if (testState.codon2Started && testState.codon1Started) {
+      expect(testState.codon2Started.data?.previousSessionId).toBe(
+        testState.codon1Started.data?.sessionId,
       );
     }
 
-    // Phase 3 should NOT reference Phase 2 (no continueFromPrevious)
-    if (testState.phase3Started) {
-      expect(testState.phase3Started.data?.previousSessionId).toBeUndefined();
+    // Codon 3 should NOT reference Codon 2 (no continueFromPrevious)
+    if (testState.codon3Started) {
+      expect(testState.codon3Started.data?.previousSessionId).toBeUndefined();
     }
   });
 

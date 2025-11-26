@@ -6,7 +6,7 @@ import { setupExecutionEnvironment } from "../../server/execution-setup.js";
 import { rimrafSimple } from "../utils/test-helpers.js";
 
 describe("Execution Setup - startNew flag", () => {
-  const TEST_BASE_DIR = path.join(os.tmpdir(), "tadpole-execution-setup-test");
+  const TEST_BASE_DIR = path.join(os.tmpdir(), "strandweave-execution-setup-test");
   const DATA_SOURCE_DIR = path.join(TEST_BASE_DIR, "data-source");
   const EXECUTION_DIR = path.join(TEST_BASE_DIR, "execution");
 
@@ -34,8 +34,8 @@ describe("Execution Setup - startNew flag", () => {
     // Clean up test directories
     await rimrafSimple(TEST_BASE_DIR);
 
-    // Also clean up any executions created in ~/.tadpole-executions
-    const executionRoot = path.join(os.homedir(), ".tadpole-executions");
+    // Also clean up any executions created in ~/.strandweave-executions
+    const executionRoot = path.join(os.homedir(), ".strandweave-executions");
     if (fs.existsSync(executionRoot) && dataHash) {
       const dirs = await fs.promises.readdir(executionRoot);
       // Only clean up test executions (those with our test data hash)
@@ -59,7 +59,9 @@ describe("Execution Setup - startNew flag", () => {
       expect(result.isResuming).toBe(false);
       expect(result.executionPath).toBe(EXECUTION_DIR);
       expect(fs.existsSync(EXECUTION_DIR)).toBe(true);
-      expect(fs.existsSync(path.join(EXECUTION_DIR, ".tadpole", "execution-meta.json"))).toBe(true);
+      expect(fs.existsSync(path.join(EXECUTION_DIR, ".strandweave", "execution-meta.json"))).toBe(
+        true,
+      );
     });
 
     it("should use empty directory with --start-new", async () => {
@@ -94,7 +96,7 @@ describe("Execution Setup - startNew flag", () => {
     it("should resume existing execution without --start-new", async () => {
       // First create an execution directory with metadata
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".tadpole");
+      const metaDir = path.join(EXECUTION_DIR, ".strandweave");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       // Calculate data hash for consistency
@@ -200,7 +202,7 @@ describe("Execution Setup - startNew flag", () => {
         startNew: true,
       });
 
-      const metaPath = path.join(EXECUTION_DIR, ".tadpole", "execution-meta.json");
+      const metaPath = path.join(EXECUTION_DIR, ".strandweave", "execution-meta.json");
       const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
 
       expect(meta.version).toBe("1.0.0");
@@ -268,7 +270,7 @@ describe("Execution Setup - startNew flag", () => {
     it("should prevent creating execution inside another execution directory", async () => {
       const nestedPath = path.join(
         os.homedir(),
-        ".tadpole-executions",
+        ".strandweave-executions",
         "existing-exec",
         "data",
         "nested",
@@ -283,7 +285,7 @@ describe("Execution Setup - startNew flag", () => {
       ).rejects.toThrow("Cannot create execution inside another execution directory");
 
       // Clean up
-      await rimrafSimple(path.join(os.homedir(), ".tadpole-executions", "existing-exec"));
+      await rimrafSimple(path.join(os.homedir(), ".strandweave-executions", "existing-exec"));
     });
 
     it("should prevent using data source as execution directory", async () => {
@@ -300,7 +302,7 @@ describe("Execution Setup - startNew flag", () => {
     it("should throw error when resuming with different data source", async () => {
       // Create execution directory with metadata for different data
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".tadpole");
+      const metaDir = path.join(EXECUTION_DIR, ".strandweave");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       const meta = {
@@ -385,14 +387,14 @@ describe("Execution Setup - startNew flag", () => {
       const { hashDataSource } = await import("../../server/data-hasher.js");
       const dataHash = await hashDataSource(DATA_SOURCE_DIR, 30000);
 
-      const executionRoot = path.join(os.homedir(), ".tadpole-executions");
+      const executionRoot = path.join(os.homedir(), ".strandweave-executions");
 
       // Create older execution
       const olderDir = path.join(executionRoot, `1000000-old-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(olderDir, { recursive: true });
-      await fs.promises.mkdir(path.join(olderDir, ".tadpole"), { recursive: true });
+      await fs.promises.mkdir(path.join(olderDir, ".strandweave"), { recursive: true });
       await fs.promises.writeFile(
-        path.join(olderDir, ".tadpole", "execution-meta.json"),
+        path.join(olderDir, ".strandweave", "execution-meta.json"),
         JSON.stringify({
           version: "1.0.0",
           dataHash,
@@ -403,9 +405,9 @@ describe("Execution Setup - startNew flag", () => {
       // Create newer execution
       const newerDir = path.join(executionRoot, `2000000-new-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(newerDir, { recursive: true });
-      await fs.promises.mkdir(path.join(newerDir, ".tadpole"), { recursive: true });
+      await fs.promises.mkdir(path.join(newerDir, ".strandweave"), { recursive: true });
       await fs.promises.writeFile(
-        path.join(newerDir, ".tadpole", "execution-meta.json"),
+        path.join(newerDir, ".strandweave", "execution-meta.json"),
         JSON.stringify({
           version: "1.0.0",
           dataHash,
@@ -433,7 +435,7 @@ describe("Execution Setup - startNew flag", () => {
 
       // Create execution with old timestamps
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".tadpole");
+      const metaDir = path.join(EXECUTION_DIR, ".strandweave");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       const { hashDataSource } = await import("../../server/data-hasher.js");
@@ -509,13 +511,13 @@ describe("Execution Setup - startNew flag", () => {
 
   describe("error handling during setup", () => {
     it("should handle errors during metadata write gracefully", async () => {
-      // Create execution directory but make .tadpole read-only
+      // Create execution directory but make .strandweave read-only
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const tadpoleDir = path.join(EXECUTION_DIR, ".tadpole");
-      await fs.promises.mkdir(tadpoleDir, { recursive: true });
+      const strandweaveDir = path.join(EXECUTION_DIR, ".strandweave");
+      await fs.promises.mkdir(strandweaveDir, { recursive: true });
 
       // Make directory read-only
-      await fs.promises.chmod(tadpoleDir, 0o444);
+      await fs.promises.chmod(strandweaveDir, 0o444);
 
       try {
         await setupExecutionEnvironment({
@@ -530,7 +532,7 @@ describe("Execution Setup - startNew flag", () => {
         expect(error).toBeTruthy();
       } finally {
         // Restore permissions for cleanup
-        await fs.promises.chmod(tadpoleDir, 0o755);
+        await fs.promises.chmod(strandweaveDir, 0o755);
       }
     });
   });

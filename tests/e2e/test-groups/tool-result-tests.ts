@@ -32,7 +32,7 @@ export function runToolResultTests(testState: TestState): void {
       expect(event.timestamp).toBeTruthy();
 
       // Validate data fields
-      expect(event.data.phaseId).toBeTruthy();
+      expect(event.data.codonId).toBeTruthy();
       expect(event.data.toolUseId).toMatch(/^toolu_[a-zA-Z0-9]+$/);
       expect(event.data.toolName).toBeTruthy();
       expect(typeof event.data.result).toBe("string"); // Result can be empty string
@@ -51,7 +51,7 @@ export function runToolResultTests(testState: TestState): void {
 
     const toolUseEvents = assistantEvents.map((e) => ({
       toolName: e.data.toolName,
-      phaseId: e.data.phaseId,
+      codonId: e.data.codonId,
       timestamp: new Date(e.timestamp).getTime(),
     }));
 
@@ -63,7 +63,7 @@ export function runToolResultTests(testState: TestState): void {
     // Every tool result should match a tool use
     for (const result of toolResultEvents) {
       const matchingUse = toolUseEvents.find(
-        (use) => use.toolName === result.data.toolName && use.phaseId === result.data.phaseId,
+        (use) => use.toolName === result.data.toolName && use.codonId === result.data.codonId,
       );
 
       expect(matchingUse).toBeTruthy();
@@ -111,7 +111,7 @@ export function runToolResultTests(testState: TestState): void {
       .filter((e) => e.type === "tool.result")
       .filter((e) => (e as ToolResultEvent).data.toolName === "Write") as ToolResultEvent[];
 
-    // Should have Write operations in test phases
+    // Should have Write operations in test codons
     expect(writeResults.length).toBeGreaterThan(0);
 
     for (const result of writeResults) {
@@ -133,25 +133,25 @@ export function runToolResultTests(testState: TestState): void {
     }
   });
 
-  test("should track tool results per phase", () => {
+  test("should track tool results per codon", () => {
     const toolResultEvents = testState.events.filter(
       (e) => e.type === "tool.result",
     ) as ToolResultEvent[];
 
-    // Group by phase
-    const resultsByPhase = new Map<string, ToolResultEvent[]>();
+    // Group by codon
+    const resultsByCodon = new Map<string, ToolResultEvent[]>();
     for (const event of toolResultEvents) {
-      const phaseResults = resultsByPhase.get(event.data.phaseId) || [];
-      phaseResults.push(event);
-      resultsByPhase.set(event.data.phaseId, phaseResults);
+      const codonResults = resultsByCodon.get(event.data.codonId) || [];
+      codonResults.push(event);
+      resultsByCodon.set(event.data.codonId, codonResults);
     }
 
-    // Each phase that uses tools should have results
-    expect(resultsByPhase.size).toBeGreaterThan(0);
+    // Each codon that uses tools should have results
+    expect(resultsByCodon.size).toBeGreaterThan(0);
 
-    // Log results per phase for debugging
-    for (const [phaseId, results] of resultsByPhase) {
-      console.log(`Phase ${phaseId}: ${results.length} tool results`);
+    // Log results per codon for debugging
+    for (const [codonId, results] of resultsByCodon) {
+      console.log(`Codon ${codonId}: ${results.length} tool results`);
     }
   });
 
@@ -171,8 +171,8 @@ export function runToolResultTests(testState: TestState): void {
   });
 
   test("should have consistent timing between tool use and result", () => {
-    // Map tool uses by phase
-    const toolUsesByPhase = new Map<
+    // Map tool uses by codon
+    const toolUsesByCodon = new Map<
       string,
       Array<{ toolName: string; timestamp: number; toolUseId?: string }>
     >();
@@ -180,19 +180,19 @@ export function runToolResultTests(testState: TestState): void {
     testState.events.forEach((e) => {
       if (e.type === "assistant.action" && e.data.action === "tool_use") {
         const assistantEvent = e as AssistantActionEvent;
-        const phaseUses = toolUsesByPhase.get(assistantEvent.data.phaseId) || [];
+        const codonUses = toolUsesByCodon.get(assistantEvent.data.codonId) || [];
         const toolUseId =
           typeof assistantEvent.data.toolInput === "object" &&
           assistantEvent.data.toolInput !== null &&
           "id" in assistantEvent.data.toolInput
             ? String(assistantEvent.data.toolInput.id)
             : undefined;
-        phaseUses.push({
+        codonUses.push({
           toolName: assistantEvent.data.toolName || "",
           timestamp: new Date(assistantEvent.timestamp).getTime(),
           toolUseId,
         });
-        toolUsesByPhase.set(assistantEvent.data.phaseId, phaseUses);
+        toolUsesByCodon.set(assistantEvent.data.codonId, codonUses);
       }
     });
 
@@ -202,11 +202,11 @@ export function runToolResultTests(testState: TestState): void {
     ) as ToolResultEvent[];
 
     for (const result of toolResultEvents) {
-      const phaseUses = toolUsesByPhase.get(result.data.phaseId) || [];
+      const codonUses = toolUsesByCodon.get(result.data.codonId) || [];
       const resultTime = new Date(result.timestamp).getTime();
 
       // Find the corresponding tool use
-      const _matchingUse = phaseUses.find(
+      const _matchingUse = codonUses.find(
         (use) =>
           use.toolName === result.data.toolName &&
           use.timestamp < resultTime &&
@@ -214,7 +214,7 @@ export function runToolResultTests(testState: TestState): void {
       );
 
       // There should be a tool use at or before this result
-      const hasToolUseBeforeOrAt = phaseUses.some(
+      const hasToolUseBeforeOrAt = codonUses.some(
         (use) => use.toolName === result.data.toolName && use.timestamp <= resultTime,
       );
 

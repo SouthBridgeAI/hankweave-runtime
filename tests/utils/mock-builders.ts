@@ -1,10 +1,11 @@
-import { PhaseId, type RunId, SessionId } from "../../server/types/branded-types.js";
+import { CodonId, type RunId, SessionId } from "../../server/types/branded-types.js";
 import type * as ST from "../../server/types/state-types.js";
 
 export class StateBuilder {
-  private state: ST.TadpoleState = {
+  private state: ST.StrandweaveState = {
     runs: [],
     currentRunId: null,
+    executionPlan: [],
   };
 
   withRun(run: Partial<ST.Run> & { runId: RunId }): this {
@@ -12,7 +13,7 @@ export class StateBuilder {
       runFolder: `/test/runs/${run.runId}`,
       gitBranch: `run-${run.runId}`,
       startingConditions: { type: "fresh" },
-      phases: [],
+      codons: [],
       status: "running",
       startTime: new Date().toISOString(),
       serverPid: process.pid,
@@ -27,31 +28,31 @@ export class StateBuilder {
     return this;
   }
 
-  withPhaseInRun(runId: RunId, phase: ST.PhaseExecution): this {
+  withCodonInRun(runId: RunId, codon: ST.CodonExecution): this {
     const run = this.state.runs.find((r) => r.runId === runId);
     if (run) {
-      run.phases.push(phase);
+      run.codons.push(codon);
     }
     return this;
   }
 
-  build(): ST.TadpoleState {
+  build(): ST.StrandweaveState {
     return JSON.parse(JSON.stringify(this.state));
   }
 }
 
-export function createCompletedPhase(
-  phaseId: string,
+export function createCompletedCodon(
+  codonId: string,
   sessionId: string,
   cost = 0.1,
-): ST.CompletedPhase {
+): ST.CompletedCodon {
   return {
-    phaseId: PhaseId(phaseId),
+    codonId: CodonId(codonId),
     startTime: new Date().toISOString(),
     status: "completed",
     endTime: new Date().toISOString(),
     claudeSessionId: SessionId(sessionId),
-    claudeLogPath: `phase-${phaseId}.log`,
+    claudeLogPath: `codon-${codonId}.log`,
     exitCode: 0,
     finalCost: cost,
     finalTokens: {
@@ -65,17 +66,17 @@ export function createCompletedPhase(
   };
 }
 
-export function createRunningPhase(
-  phaseId: string,
+export function createRunningCodon(
+  codonId: string,
   sessionId: string,
   currentCost = 0.05,
-): ST.RunningPhase {
+): ST.RunningCodon {
   return {
-    phaseId: PhaseId(phaseId),
+    codonId: CodonId(codonId),
     startTime: new Date().toISOString(),
     status: "running",
     claudePid: 12345,
-    claudeLogPath: `phase-${phaseId}.log`,
+    claudeLogPath: `codon-${codonId}.log`,
     claudeSessionId: SessionId(sessionId),
     currentCost,
     currentTokens: {
@@ -88,13 +89,13 @@ export function createRunningPhase(
   };
 }
 
-export function createFailedPhase(
-  phaseId: string,
+export function createFailedCodon(
+  codonId: string,
   failureReason: ST.FailureReason,
   partialCost = 0.03,
-): ST.FailedPhase {
+): ST.FailedCodon {
   return {
-    phaseId: PhaseId(phaseId),
+    codonId: CodonId(codonId),
     startTime: new Date().toISOString(),
     status: "failed",
     endTime: new Date().toISOString(),
@@ -110,6 +111,6 @@ export function createFailedPhase(
     },
     claudePid: 12345,
     claudeSessionId: SessionId("failed-session"),
-    claudeLogPath: `phase-${phaseId}.log`,
+    claudeLogPath: `codon-${codonId}.log`,
   };
 }

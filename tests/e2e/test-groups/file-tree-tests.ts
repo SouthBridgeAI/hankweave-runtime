@@ -79,7 +79,7 @@ export function runFileTreeTests(testState: TestState, testDir: string) {
 
     const fileTreeEvents = testState.client?.getEventsByType("filetree.updated") || [];
 
-    // Phase 3 watches typescript_code/src/**/*.ts, so the tree might only show src files
+    // Codon 3 watches typescript_code/src/**/*.ts, so the tree might only show src files
     let foundTsFiles = false;
     for (const event of fileTreeEvents.reverse()) {
       const treeEvent = event as FileTreeUpdatedEvent;

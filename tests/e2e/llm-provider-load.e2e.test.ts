@@ -241,7 +241,7 @@ describe("Provider Registry Performance", () => {
 
       const start = performance.now();
 
-      // Simulate high-frequency requests like those from active chroniclers
+      // Simulate high-frequency requests like those from active sentinels
       for (let i = 0; i < 10000; i++) {
         const modelName = i % 2 === 0 ? "claude-3-haiku-20240307" : "gpt-4o";
         registry.getProviderForModel(modelName);
@@ -259,7 +259,7 @@ describe("Provider Registry Performance", () => {
     it("should handle large cost calculation batches", () => {
       const registry = new MockLlmProviderRegistry();
 
-      // Test with realistic chronicler usage patterns
+      // Test with realistic sentinel usage patterns
       const start = performance.now();
 
       const models = ["claude-3-haiku-20240307", "gpt-4o-mini", "gemini-1.5-flash"];
@@ -292,13 +292,13 @@ describe("Provider Registry Performance", () => {
       registry.setProviderAvailable("anthropic", true);
       registry.setProviderAvailable("openai", true);
 
-      // Simulate concurrent chronicler load
+      // Simulate concurrent sentinel load
       const promises = [];
 
       for (let i = 0; i < 50; i++) {
         promises.push(
           (async () => {
-            // Simulate chronicler checking model availability and calculating costs
+            // Simulate sentinel checking model availability and calculating costs
             const model = i % 2 === 0 ? "claude-3-5-sonnet-20241022" : "gpt-4o-mini";
 
             registry.isModelAvailable(model);
@@ -316,7 +316,7 @@ describe("Provider Registry Performance", () => {
       const end = performance.now();
 
       const duration = end - start;
-      console.log(`50 concurrent chronicler simulations took ${duration.toFixed(2)}ms`);
+      console.log(`50 concurrent sentinel simulations took ${duration.toFixed(2)}ms`);
 
       // Should handle concurrent load well
       expect(duration).toBeLessThan(1000);
@@ -404,11 +404,11 @@ describe("Provider Registry Performance", () => {
   });
 
   describe("real-world load simulation", () => {
-    it("should handle realistic chronicler usage patterns", async () => {
+    it("should handle realistic sentinel usage patterns", async () => {
       const registry = new LlmProviderRegistry({ logger: mockLogger });
 
-      // Simulate chronicler manager with multiple chroniclers
-      const chroniclerConfigs = [
+      // Simulate sentinel manager with multiple sentinels
+      const sentinelConfigs = [
         { id: "narrator", model: "claude-3-haiku-20240307" },
         { id: "analyzer", model: "gpt-4o" },
         { id: "summarizer", model: "gemini-1.5-flash" },
@@ -418,17 +418,17 @@ describe("Provider Registry Performance", () => {
 
       const start = performance.now();
 
-      // Simulate chronicler initialization phase
-      for (const config of chroniclerConfigs) {
-        // Each chronicler checks model availability on startup
+      // Simulate sentinel initialization step
+      for (const config of sentinelConfigs) {
+        // Each sentinel checks model availability on startup
         registry.isModelAvailable(config.model);
         registry.getProviderForModel(config.model);
         registry.getModelInfo(config.model);
       }
 
-      // Simulate runtime usage - each chronicler processes events
+      // Simulate runtime usage - each sentinel processes events
       for (let event = 0; event < 200; event++) {
-        for (const config of chroniclerConfigs) {
+        for (const config of sentinelConfigs) {
           // Simulate LLM call and cost tracking
           const randomInputTokens = Math.floor(Math.random() * 2000) + 100;
           const randomOutputTokens = Math.floor(Math.random() * 500) + 50;
@@ -446,7 +446,7 @@ describe("Provider Registry Performance", () => {
       const duration = end - start;
 
       console.log(
-        `Realistic chronicler simulation (5 chroniclers, 200 events) took ${duration.toFixed(2)}ms`,
+        `Realistic sentinel simulation (5 sentinels, 200 events) took ${duration.toFixed(2)}ms`,
       );
 
       // Should handle realistic load efficiently

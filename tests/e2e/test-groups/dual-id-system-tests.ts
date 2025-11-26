@@ -1,23 +1,23 @@
 import { expect, test } from "bun:test";
-import type { PhaseStartedEvent, ServerEvent } from "../../../server/types/types.js";
+import type { CodonStartedEvent, ServerEvent } from "../../../server/types/types.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
   events: ServerEvent[];
-  phase1Started: PhaseStartedEvent | null;
-  phase2Started: PhaseStartedEvent | null;
-  phase3Started: PhaseStartedEvent | null;
+  codon1Started: CodonStartedEvent | null;
+  codon2Started: CodonStartedEvent | null;
+  codon3Started: CodonStartedEvent | null;
 }
 
 export function runDualIdSystemTests(testState: TestState) {
-  test("phase.started events only appear after Claude init", () => {
-    // For each phase, verify that phase.started comes after the info event about Claude starting
-    const phases = ["phase-1", "phase-2", "phase-3"];
+  test("codon.started events only appear after Claude init", () => {
+    // For each codon, verify that codon.started comes after the info event about Claude starting
+    const codons = ["codon-1", "codon-2", "codon-3"];
 
-    phases.forEach((phaseId) => {
-      const phaseEvents = testState.events.filter((e) => {
-        if (e.type === "phase.started" && e.data.phaseId === phaseId) {
+    codons.forEach((codonId) => {
+      const codonEvents = testState.events.filter((e) => {
+        if (e.type === "codon.started" && e.data.codonId === codonId) {
           return true;
         }
         if (e.type === "info") {
@@ -26,8 +26,8 @@ export function runDualIdSystemTests(testState: TestState) {
             msg.includes("Claude started with session ID:") &&
             testState.events.some(
               (pe) =>
-                pe.type === "phase.started" &&
-                pe.data.phaseId === phaseId &&
+                pe.type === "codon.started" &&
+                pe.data.codonId === codonId &&
                 msg.includes(pe.data.sessionId || ""),
             )
           );
@@ -35,31 +35,31 @@ export function runDualIdSystemTests(testState: TestState) {
         return false;
       });
 
-      if (phaseEvents.length >= 2) {
-        // Find the Claude started info event and phase.started event
-        const claudeStartedEvent = phaseEvents.find(
+      if (codonEvents.length >= 2) {
+        // Find the Claude started info event and codon.started event
+        const claudeStartedEvent = codonEvents.find(
           (e) => e.type === "info" && e.data.message.includes("Claude started with session ID:"),
         );
-        const phaseStartedEvent = phaseEvents.find((e) => e.type === "phase.started");
+        const codonStartedEvent = codonEvents.find((e) => e.type === "codon.started");
 
-        if (claudeStartedEvent && phaseStartedEvent) {
-          // Claude init should come before or at the same time as phase.started
+        if (claudeStartedEvent && codonStartedEvent) {
+          // Claude init should come before or at the same time as codon.started
           const claudeTime = new Date(claudeStartedEvent.timestamp).getTime();
-          const phaseTime = new Date(phaseStartedEvent.timestamp).getTime();
+          const codonTime = new Date(codonStartedEvent.timestamp).getTime();
 
           // They should be very close in time (within 100ms) since they're sent together
-          expect(Math.abs(phaseTime - claudeTime)).toBeLessThan(100);
+          expect(Math.abs(codonTime - claudeTime)).toBeLessThan(100);
         }
       }
     });
   });
 
   test("session IDs are always UUIDs, never timestamp-random format", () => {
-    // Check all phase.started events
-    const phaseStartedEvents = testState.events.filter((e) => e.type === "phase.started");
+    // Check all codon.started events
+    const codonStartedEvents = testState.events.filter((e) => e.type === "codon.started");
 
-    phaseStartedEvents.forEach((event) => {
-      if (event.type === "phase.started") {
+    codonStartedEvents.forEach((event) => {
+      if (event.type === "codon.started") {
         const sessionId = event.data.sessionId;
         if (sessionId) {
           // UUID v4 format: 8-4-4-4-12 characters
@@ -74,25 +74,25 @@ export function runDualIdSystemTests(testState: TestState) {
       }
     });
 
-    // Check completed phases in state snapshots
+    // Check completed codons in state snapshots
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
     snapshots.forEach((snapshot) => {
       if (snapshot.type === "state.snapshot") {
-        snapshot.data.completedPhases.forEach((phase) => {
-          // UUID format check - only for phases that have sessionId
+        snapshot.data.completedCodons.forEach((codon) => {
+          // UUID format check - only for codons that have sessionId
           if (
-            phase.status === "completed" ||
-            phase.status === "failed" ||
-            phase.status === "skipped"
+            codon.status === "completed" ||
+            codon.status === "failed" ||
+            codon.status === "skipped"
           ) {
             const uuidRegex =
               /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-            if (phase.status === "completed" && phase.claudeSessionId) {
-              expect(phase.claudeSessionId).toMatch(uuidRegex);
-            } else if (phase.status === "failed" && phase.claudeSessionId) {
-              expect(phase.claudeSessionId).toMatch(uuidRegex);
-            } else if (phase.status === "skipped" && phase.claudeSessionId) {
-              expect(phase.claudeSessionId).toMatch(uuidRegex);
+            if (codon.status === "completed" && codon.claudeSessionId) {
+              expect(codon.claudeSessionId).toMatch(uuidRegex);
+            } else if (codon.status === "failed" && codon.claudeSessionId) {
+              expect(codon.claudeSessionId).toMatch(uuidRegex);
+            } else if (codon.status === "skipped" && codon.claudeSessionId) {
+              expect(codon.claudeSessionId).toMatch(uuidRegex);
             }
           }
         });
@@ -100,21 +100,21 @@ export function runDualIdSystemTests(testState: TestState) {
     });
   });
 
-  test("no duplicate session IDs within a single phase execution", () => {
-    // Map to track all session IDs seen for each phase
-    const phaseSessionIds = new Map<string, Set<string>>();
+  test("no duplicate session IDs within a single codon execution", () => {
+    // Map to track all session IDs seen for each codon
+    const codonSessionIds = new Map<string, Set<string>>();
 
-    // Collect from phase.started events
+    // Collect from codon.started events
     testState.events.forEach((event) => {
-      if (event.type === "phase.started") {
-        const phaseId = event.data.phaseId;
+      if (event.type === "codon.started") {
+        const codonId = event.data.codonId;
         const sessionId = event.data.sessionId;
 
-        if (phaseId && sessionId) {
-          if (!phaseSessionIds.has(phaseId)) {
-            phaseSessionIds.set(phaseId, new Set());
+        if (codonId && sessionId) {
+          if (!codonSessionIds.has(codonId)) {
+            codonSessionIds.set(codonId, new Set());
           }
-          phaseSessionIds.get(phaseId)?.add(sessionId);
+          codonSessionIds.get(codonId)?.add(sessionId);
         }
       }
     });
@@ -126,22 +126,22 @@ export function runDualIdSystemTests(testState: TestState) {
         const match = msg.match(/Claude started with session ID: ([0-9a-f-]+)/i);
         if (match) {
           const sessionId = match[1];
-          // Find which phase this belongs to by looking at nearby events
+          // Find which codon this belongs to by looking at nearby events
           const eventIndex = testState.events.indexOf(event);
-          // Look for phase.started event within 5 events
+          // Look for codon.started event within 5 events
           for (
             let i = Math.max(0, eventIndex - 5);
             i < Math.min(testState.events.length, eventIndex + 5);
             i++
           ) {
             const nearbyEvent = testState.events[i];
-            if (nearbyEvent.type === "phase.started") {
-              const phaseId = nearbyEvent.data.phaseId;
-              if (phaseId) {
-                if (!phaseSessionIds.has(phaseId)) {
-                  phaseSessionIds.set(phaseId, new Set());
+            if (nearbyEvent.type === "codon.started") {
+              const codonId = nearbyEvent.data.codonId;
+              if (codonId) {
+                if (!codonSessionIds.has(codonId)) {
+                  codonSessionIds.set(codonId, new Set());
                 }
-                phaseSessionIds.get(phaseId)?.add(sessionId);
+                codonSessionIds.get(codonId)?.add(sessionId);
               }
               break;
             }
@@ -150,37 +150,37 @@ export function runDualIdSystemTests(testState: TestState) {
       }
     });
 
-    // Each phase should have exactly one unique session ID
-    phaseSessionIds.forEach((sessionIds, _phaseId) => {
+    // Each codon should have exactly one unique session ID
+    codonSessionIds.forEach((sessionIds, _codonId) => {
       expect(sessionIds.size).toBe(1);
     });
   });
 
-  test("previousSessionId is properly set for continued phases", () => {
-    // Phase 2 continues from Phase 1
-    if (testState.phase1Started && testState.phase2Started) {
-      expect(testState.phase2Started.data.previousSessionId).toBe(
-        testState.phase1Started.data.sessionId,
+  test("previousSessionId is properly set for continued codons", () => {
+    // Codon 2 continues from Codon 1
+    if (testState.codon1Started && testState.codon2Started) {
+      expect(testState.codon2Started.data.previousSessionId).toBe(
+        testState.codon1Started.data.sessionId,
       );
     }
 
-    // Phase 3 does NOT continue (based on test config)
-    if (testState.phase3Started) {
-      expect(testState.phase3Started.data.previousSessionId).toBeUndefined();
+    // Codon 3 does NOT continue (based on test config)
+    if (testState.codon3Started) {
+      expect(testState.codon3Started.data.previousSessionId).toBeUndefined();
     }
   });
 
-  test("phase.started event contains all required fields with valid UUIDs", () => {
-    const phaseStartedEvents = [
-      testState.phase1Started,
-      testState.phase2Started,
-      testState.phase3Started,
-    ].filter((e): e is PhaseStartedEvent => e !== null);
+  test("codon.started event contains all required fields with valid UUIDs", () => {
+    const codonStartedEvents = [
+      testState.codon1Started,
+      testState.codon2Started,
+      testState.codon3Started,
+    ].filter((e): e is CodonStartedEvent => e !== null);
 
-    phaseStartedEvents.forEach((event) => {
+    codonStartedEvents.forEach((event) => {
       // Required fields
-      expect(event.data).toHaveProperty("phaseId");
-      expect(event.data).toHaveProperty("phaseName");
+      expect(event.data).toHaveProperty("codonId");
+      expect(event.data).toHaveProperty("codonName");
       expect(event.data).toHaveProperty("sessionId");
       expect(event.data).toHaveProperty("startTime");
 
@@ -193,37 +193,37 @@ export function runDualIdSystemTests(testState: TestState) {
     });
   });
 
-  test("completed phases only include phases that received Claude session IDs", () => {
-    // In the happy path, all phases should complete with session IDs
+  test("completed codons only include codons that received Claude session IDs", () => {
+    // In the happy path, all codons should complete with session IDs
     const finalSnapshot = [...testState.events].reverse().find((e) => e.type === "state.snapshot");
 
     if (finalSnapshot?.type === "state.snapshot") {
-      // All completed phases should have valid UUID session IDs
-      finalSnapshot.data.completedPhases.forEach((phase) => {
+      // All completed codons should have valid UUID session IDs
+      finalSnapshot.data.completedCodons.forEach((codon) => {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        if (phase.status === "completed" && phase.claudeSessionId) {
-          expect(phase.claudeSessionId).toMatch(uuidRegex);
-        } else if (phase.status === "failed" && phase.claudeSessionId) {
-          expect(phase.claudeSessionId).toMatch(uuidRegex);
-        } else if (phase.status === "skipped" && phase.claudeSessionId) {
-          expect(phase.claudeSessionId).toMatch(uuidRegex);
+        if (codon.status === "completed" && codon.claudeSessionId) {
+          expect(codon.claudeSessionId).toMatch(uuidRegex);
+        } else if (codon.status === "failed" && codon.claudeSessionId) {
+          expect(codon.claudeSessionId).toMatch(uuidRegex);
+        } else if (codon.status === "skipped" && codon.claudeSessionId) {
+          expect(codon.claudeSessionId).toMatch(uuidRegex);
         }
       });
 
-      // Should have 3 completed phases in happy path
-      expect(finalSnapshot.data.completedPhases.length).toBe(3);
+      // Should have 3 completed codons in happy path
+      expect(finalSnapshot.data.completedCodons.length).toBe(3);
     }
   });
 
-  test("info events about Claude starting appear before phase.started", () => {
-    // For each phase, find the pair of events
-    ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
-      const phaseStarted = testState.events.find(
-        (e) => e.type === "phase.started" && e.data.phaseId === phaseId,
+  test("info events about Claude starting appear before codon.started", () => {
+    // For each codon, find the pair of events
+    ["codon-1", "codon-2", "codon-3"].forEach((codonId) => {
+      const codonStarted = testState.events.find(
+        (e) => e.type === "codon.started" && e.data.codonId === codonId,
       );
 
-      if (phaseStarted?.type === "phase.started") {
-        const sessionId = phaseStarted.data.sessionId;
+      if (codonStarted?.type === "codon.started") {
+        const sessionId = codonStarted.data.sessionId;
 
         // Find the corresponding info event
         const infoEvent = testState.events.find(
@@ -234,33 +234,33 @@ export function runDualIdSystemTests(testState: TestState) {
         expect(infoEvent).toBeDefined();
 
         if (infoEvent) {
-          // Info event should come before or at same time as phase.started
+          // Info event should come before or at same time as codon.started
           const infoIndex = testState.events.indexOf(infoEvent);
-          const phaseIndex = testState.events.indexOf(phaseStarted);
+          const codonIndex = testState.events.indexOf(codonStarted);
 
           // They should be close together (within a few events)
-          expect(Math.abs(phaseIndex - infoIndex)).toBeLessThanOrEqual(2);
+          expect(Math.abs(codonIndex - infoIndex)).toBeLessThanOrEqual(2);
         }
       }
     });
   });
 
-  test("state snapshots no longer include phaseExecutionId", () => {
+  test("state snapshots no longer include codonExecutionId", () => {
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
 
     snapshots.forEach((snapshot) => {
-      if (snapshot.type === "state.snapshot" && snapshot.data.currentPhase) {
-        // phaseExecutionId has been removed in the new state management system
-        expect(snapshot.data.currentPhase).not.toHaveProperty("phaseExecutionId");
+      if (snapshot.type === "state.snapshot" && snapshot.data.currentCodon) {
+        // codonExecutionId has been removed in the new state management system
+        expect(snapshot.data.currentCodon).not.toHaveProperty("codonExecutionId");
 
         // claudeSessionId only exists when status is "running" and should be UUID format
         if (
-          snapshot.data.currentPhase.status === "running" &&
-          snapshot.data.currentPhase.claudeSessionId
+          snapshot.data.currentCodon.status === "running" &&
+          snapshot.data.currentCodon.claudeSessionId
         ) {
           const uuidRegex =
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-          expect(snapshot.data.currentPhase.claudeSessionId).toMatch(uuidRegex);
+          expect(snapshot.data.currentCodon.claudeSessionId).toMatch(uuidRegex);
         }
       }
     });

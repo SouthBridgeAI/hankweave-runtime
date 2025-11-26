@@ -1,5 +1,5 @@
 import type { SessionId } from "./types/branded-types.js";
-import type { PhaseStatus } from "./types/state-types.js";
+import type { CodonStatus } from "./types/state-types.js";
 import type { FailureReason } from "./types/types.js";
 
 // Type guard functions to ensure metadata has required fields for specific transitions
@@ -25,13 +25,13 @@ export interface CompletedMetadata {
 export interface FailedMetadata {
   exitCode: number;
   failureReason: FailureReason;
-  failedDuring: PhaseStatus;
+  failedDuring: CodonStatus;
   checkpointSha?: string;
 }
 
 // Metadata for transitioning to skipped
 export interface SkippedMetadata {
-  skippedDuring: PhaseStatus;
+  skippedDuring: CodonStatus;
   checkpointSha?: string;
 }
 
@@ -91,7 +91,7 @@ export function hasSkippedMetadata(metadata: unknown): metadata is SkippedMetada
 // Validation error class
 export class MetadataValidationError extends Error {
   constructor(
-    public readonly transitionTo: PhaseStatus,
+    public readonly transitionTo: CodonStatus,
     public readonly missingFields: string[],
   ) {
     super(
@@ -104,7 +104,7 @@ export class MetadataValidationError extends Error {
 }
 
 // Validation function that throws descriptive errors
-export function validateTransitionMetadata(to: PhaseStatus, metadata: unknown): void {
+export function validateTransitionMetadata(to: CodonStatus, metadata: unknown): void {
   switch (to) {
     case "initializing":
       if (!hasInitializingMetadata(metadata)) {
@@ -172,7 +172,7 @@ export function validateTransitionMetadata(to: PhaseStatus, metadata: unknown): 
     // Other transitions don't require metadata
     case "preparing":
     case "starting":
-    case "completing-chroniclers":
+    case "completing-sentinels":
       break;
   }
 }

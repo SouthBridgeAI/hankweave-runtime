@@ -39,11 +39,15 @@ describe("LlmProviderRegistry", () => {
     });
 
     it("should handle missing API keys gracefully", () => {
-      // Clear all API keys
+      // Clear all API keys (both standard and sentinel-prefixed)
       delete process.env.ANTHROPIC_API_KEY;
       delete process.env.OPENAI_API_KEY;
       delete process.env.GOOGLE_API_KEY;
       delete process.env.GROQ_API_KEY;
+      delete process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY;
+      delete process.env.STRANDWEAVE_SENTINEL_OPENAI_API_KEY;
+      delete process.env.STRANDWEAVE_SENTINEL_GOOGLE_API_KEY;
+      delete process.env.STRANDWEAVE_SENTINEL_GROQ_API_KEY;
 
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
@@ -55,7 +59,7 @@ describe("LlmProviderRegistry", () => {
       const providerResult = registry.getProviderForModel("claude-3-5-sonnet-20241022");
       expect(providerResult.success).toBe(false);
       if (providerResult.success === false) {
-        expect(providerResult.reason).toBe("provider-unhealthy");
+        expect(providerResult.reason).toBe("provider-unavailable");
       }
     });
 
@@ -190,8 +194,8 @@ describe("LlmProviderRegistry", () => {
     it("should report providers as unavailable when API keys missing", () => {
       delete process.env.ANTHROPIC_API_KEY;
       delete process.env.OPENAI_API_KEY;
-      delete process.env.TADPOLE_CHRONICLER_ANTHROPIC_API_KEY;
-      delete process.env.TADPOLE_CHRONICLER_OPENAI_API_KEY;
+      delete process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY;
+      delete process.env.STRANDWEAVE_SENTINEL_OPENAI_API_KEY;
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
       const statuses = registry.getProviderStatus();
@@ -288,7 +292,7 @@ describe("LlmProviderRegistry", () => {
 
     it("should return error for providers of unavailable models", () => {
       delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.TADPOLE_CHRONICLER_ANTHROPIC_API_KEY;
+      delete process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY;
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
       const providerResult = registry.getProviderForModel("claude-3-5-sonnet-20241022");

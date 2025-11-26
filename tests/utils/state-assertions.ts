@@ -1,17 +1,17 @@
 import { expect } from "bun:test";
-import type { TadpoleState } from "../../server/types/state-types.js";
+import type { StrandweaveState } from "../../server/types/state-types";
 
-export function assertPhaseCompleted(state: TadpoleState, phaseId: string): void {
+export function assertCodonCompleted(state: StrandweaveState, codonId: string): void {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
   expect(currentRun).toBeDefined();
 
-  const phase = currentRun?.phases.find((p) => p.phaseId === phaseId);
-  expect(phase).toBeDefined();
-  expect(phase?.status).toBe("completed");
+  const codon = currentRun?.codons.find((p) => p.codonId === codonId);
+  expect(codon).toBeDefined();
+  expect(codon?.status).toBe("completed");
 }
 
 export function assertRunStatus(
-  state: TadpoleState,
+  state: StrandweaveState,
   status: "running" | "completed" | "failed" | "crashed",
 ): void {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
@@ -19,8 +19,8 @@ export function assertRunStatus(
   expect(currentRun?.status).toBe(status);
 }
 
-export function assertPhaseCount(
-  state: TadpoleState,
+export function assertCodonCount(
+  state: StrandweaveState,
   expectedCount: number,
   status?: "completed" | "failed" | "skipped",
 ): void {
@@ -28,32 +28,32 @@ export function assertPhaseCount(
   expect(currentRun).toBeDefined();
 
   if (status) {
-    const phases = currentRun?.phases.filter((p) => p.status === status);
-    expect(phases).toHaveLength(expectedCount);
+    const codons = currentRun?.codons.filter((p) => p.status === status);
+    expect(codons).toHaveLength(expectedCount);
   } else {
-    expect(currentRun?.phases).toHaveLength(expectedCount);
+    expect(currentRun?.codons).toHaveLength(expectedCount);
   }
 }
 
-export function assertPhaseCost(state: TadpoleState, phaseId: string, minCost: number): void {
+export function assertCodonCost(state: StrandweaveState, codonId: string, minCost: number): void {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
   expect(currentRun).toBeDefined();
 
-  const phase = currentRun?.phases.find((p) => p.phaseId === phaseId);
-  expect(phase).toBeDefined();
+  const codon = currentRun?.codons.find((p) => p.codonId === codonId);
+  expect(codon).toBeDefined();
 
   let cost = 0;
-  if (phase?.status === "completed" && phase && "finalCost" in phase) {
-    cost = phase.finalCost;
-  } else if (phase?.status === "failed" && phase && "partialCost" in phase) {
-    cost = phase.partialCost;
-  } else if (phase?.status === "running" && phase && "currentCost" in phase) {
-    cost = phase.currentCost;
+  if (codon?.status === "completed" && codon && "finalCost" in codon) {
+    cost = codon.finalCost;
+  } else if (codon?.status === "failed" && codon && "partialCost" in codon) {
+    cost = codon.partialCost;
+  } else if (codon?.status === "running" && codon && "currentCost" in codon) {
+    cost = codon.currentCost;
   }
 
   expect(cost).toBeGreaterThanOrEqual(minCost);
 }
 
-export function assertStateHasRuns(state: TadpoleState, expectedCount: number): void {
+export function assertStateHasRuns(state: StrandweaveState, expectedCount: number): void {
   expect(state.runs).toHaveLength(expectedCount);
 }

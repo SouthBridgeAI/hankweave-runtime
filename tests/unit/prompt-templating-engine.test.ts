@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { ServerEvent } from "../../server/schemas/event-schemas";
 import {
   type TemplateContext,
   TemplateRenderer,
-} from "../../server/chroniclers/prompt-templating-engine.js";
-import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import { PhaseId } from "../../server/types/branded-types.js";
+} from "../../server/sentinels/prompt-templating-engine";
+import { CodonId } from "../../server/types/branded-types";
 
 describe("TemplateRenderer", () => {
   let mockContext: TemplateContext;
@@ -17,7 +17,7 @@ describe("TemplateRenderer", () => {
         timestamp: "2025-01-19T10:00:00Z",
         type: "assistant.action",
         data: {
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           action: "tool_use",
           content: "Using tool: Read",
           toolName: "Read",
@@ -29,7 +29,7 @@ describe("TemplateRenderer", () => {
         timestamp: "2025-01-19T10:00:05Z",
         type: "tool.result",
         data: {
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           toolUseId: "toolu_123",
           toolName: "Read",
           result: "const app = express();",
@@ -54,10 +54,10 @@ describe("TemplateRenderer", () => {
 
     mockContext = {
       events: mockEvents,
-      phase: {
-        id: "test-phase",
-        name: "Test Phase",
-        description: "A test phase for validation",
+      codon: {
+        id: "test-codon",
+        name: "Test Codon",
+        description: "A test codon for validation",
         startTime: new Date("2025-01-19T09:00:00Z"),
       },
       world: {
@@ -72,9 +72,9 @@ describe("TemplateRenderer", () => {
 
   describe("Basic Template Rendering", () => {
     test("renders simple text template", async () => {
-      const template = "Hello <%= it.phase.name %>!";
+      const template = "Hello <%= it.codon.name %>!";
       const result = await TemplateRenderer.render(template, mockContext);
-      expect(result).toBe("Hello Test Phase!");
+      expect(result).toBe("Hello Test Codon!");
     });
 
     test("renders template with event data", async () => {
@@ -84,9 +84,9 @@ describe("TemplateRenderer", () => {
     });
 
     test("handles nested object access", async () => {
-      const template = "Phase: <%= it.phase.name %> (<%=  it.phase.id %>)";
+      const template = "Codon: <%= it.codon.name %> (<%=  it.codon.id %>)";
       const result = await TemplateRenderer.render(template, mockContext);
-      expect(result).toBe("Phase: Test Phase (test-phase)");
+      expect(result).toBe("Codon: Test Codon (test-codon)");
     });
   });
 
@@ -166,9 +166,9 @@ No tool activity
     });
 
     test("handles indented JSON output", async () => {
-      const template = `<%= JSON.stringify({phase: it.phase.name}, null, 2) %>`;
+      const template = `<%= JSON.stringify({codon: it.codon.name}, null, 2) %>`;
       const result = await TemplateRenderer.render(template, mockContext);
-      expect(result).toContain('{\n  "phase": "Test Phase"\n}');
+      expect(result).toContain('{\n  "codon": "Test Codon"\n}');
     });
   });
 
@@ -179,7 +179,7 @@ No tool activity
         timestamp: "2025-01-19T10:00:00Z",
         type: "tool.result",
         data: {
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           toolUseId: "toolu_456",
           toolName: "Write",
           result: "x".repeat(5000), // Large result
@@ -211,7 +211,7 @@ Truncated: <%= it.events[0].data.truncated %>`;
         timestamp: "2025-01-19T10:00:00Z",
         type: "assistant.action",
         data: {
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           action: "tool_use",
           content: "Using tool: Execute",
           toolName: "Execute",
@@ -258,13 +258,13 @@ Environment: <%= JSON.stringify(it.events[0].data.toolInput.env) %>`;
     test("handles undefined/null values gracefully", async () => {
       const contextWithNulls = {
         ...mockContext,
-        phase: {
-          ...mockContext.phase,
+        codon: {
+          ...mockContext.codon,
           description: undefined,
         },
       };
 
-      const template = `Description: <%= it.phase.description || 'None' %>`;
+      const template = `Description: <%= it.codon.description || 'None' %>`;
       const result = await TemplateRenderer.render(template, contextWithNulls);
       expect(result).toBe("Description: None");
     });
@@ -272,22 +272,22 @@ Environment: <%= JSON.stringify(it.events[0].data.toolInput.env) %>`;
 
   describe("Template Caching", () => {
     test("uses Eta's native caching", async () => {
-      const template = "Hello <%= it.phase.name %>!";
+      const template = "Hello <%= it.codon.name %>!";
 
       // First call - should compile and cache
       const result1 = await TemplateRenderer.render(template, mockContext);
-      expect(result1).toBe("Hello Test Phase!");
+      expect(result1).toBe("Hello Test Codon!");
 
       // Second call - should use cached version
       const result2 = await TemplateRenderer.render(template, mockContext);
-      expect(result2).toBe("Hello Test Phase!");
+      expect(result2).toBe("Hello Test Codon!");
 
       // Templates should work consistently with Eta's native caching
       expect(result1).toBe(result2);
     });
 
     test("cache can be reset", async () => {
-      const template = "Test <%= it.phase.name %>";
+      const template = "Test <%= it.codon.name %>";
       await TemplateRenderer.render(template, mockContext);
 
       // Just verify that reset doesn't throw errors
@@ -295,7 +295,7 @@ Environment: <%= JSON.stringify(it.events[0].data.toolInput.env) %>`;
 
       // Template should still work after reset
       const result = await TemplateRenderer.render(template, mockContext);
-      expect(result).toContain("Test Test Phase");
+      expect(result).toContain("Test Test Codon");
     });
   });
 
@@ -303,7 +303,7 @@ Environment: <%= JSON.stringify(it.events[0].data.toolInput.env) %>`;
     test("limits events to MAX_EVENTS_FOR_TEMPLATE", async () => {
       // Import the constant
       const { MAX_EVENTS_FOR_TEMPLATE } = await import(
-        "../../server/chroniclers/prompt-templating-engine.js"
+        "../../server/sentinels/prompt-templating-engine"
       );
 
       // Create more events than the limit
@@ -314,7 +314,7 @@ Environment: <%= JSON.stringify(it.events[0].data.toolInput.env) %>`;
           timestamp: "2025-01-19T10:00:00Z",
           type: "assistant.action",
           data: {
-            phaseId: PhaseId("test-phase"),
+            codonId: CodonId("test-codon"),
             action: "thinking",
             content: `Thought ${i}`,
           },
@@ -355,7 +355,7 @@ Result: <%= result %>`;
         timestamp: "2025-01-19T10:00:00Z",
         type: "token.usage",
         data: {
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           inputTokens: 1024,
           outputTokens: 512,
           cacheCreationTokens: 0,
@@ -377,13 +377,13 @@ Tokens: <%= it.events[0].data.inputTokens + it.events[0].data.outputTokens %>`;
       expect(result).toContain("Tokens: 1536");
     });
 
-    test("handles phase.completed events", async () => {
-      const phaseCompletedEvent: ServerEvent = {
+    test("handles codon.completed events", async () => {
+      const codonCompletedEvent: ServerEvent = {
         id: "evt-complete",
         timestamp: "2025-01-19T10:00:00Z",
-        type: "phase.completed",
+        type: "codon.completed",
         data: {
-          phaseId: PhaseId("test-phase"),
+          codonId: CodonId("test-codon"),
           success: true,
           cost: 0.123,
           duration: 300000,
@@ -393,15 +393,15 @@ Tokens: <%= it.events[0].data.inputTokens + it.events[0].data.outputTokens %>`;
 
       const context = {
         ...mockContext,
-        events: [phaseCompletedEvent],
+        events: [codonCompletedEvent],
       };
 
-      const template = `Phase completed: <%= it.events[0].data.success ? 'SUCCESS' : 'FAILED' %>
+      const template = `Codon completed: <%= it.events[0].data.success ? 'SUCCESS' : 'FAILED' %>
 Duration: <%= (it.events[0].data.duration / 1000).toFixed(1) %>s
 Cost: $<%= it.events[0].data.cost %>`;
 
       const result = await TemplateRenderer.render(template, context);
-      expect(result).toContain("Phase completed: SUCCESS");
+      expect(result).toContain("Codon completed: SUCCESS");
       expect(result).toContain("Duration: 300.0s");
       expect(result).toContain("Cost: $0.123");
     });
@@ -436,16 +436,16 @@ Severity: <%= it.events.find(e => e.type === 'error').data.severity.toUpperCase(
 
   describe("Date and Time Handling", () => {
     test("formats dates correctly", async () => {
-      const template = `Phase started: <%= it.phase.startTime.toISOString() %>
+      const template = `Codon started: <%= it.codon.startTime.toISOString() %>
 Current time: <%= it.world.currentTime.toISOString() %>`;
 
       const result = await TemplateRenderer.render(template, mockContext);
-      expect(result).toContain("Phase started: 2025-01-19T09:00:00.000Z");
+      expect(result).toContain("Codon started: 2025-01-19T09:00:00.000Z");
       expect(result).toContain("Current time: 2025-01-19T10:00:00.000Z");
     });
 
     test("calculates time differences", async () => {
-      const template = `Duration: <%= Math.floor((it.world.currentTime - it.phase.startTime) / 1000 / 60) %> minutes`;
+      const template = `Duration: <%= Math.floor((it.world.currentTime - it.codon.startTime) / 1000 / 60) %> minutes`;
       const result = await TemplateRenderer.render(template, mockContext);
       expect(result).toBe("Duration: 60 minutes");
     });
@@ -497,7 +497,7 @@ Data: <%= JSON.stringify(it.events[0].data) %>`;
           timestamp: "2025-01-19T10:00:00Z",
           type: "assistant.action",
           data: {
-            phaseId: PhaseId("test-phase"),
+            codonId: CodonId("test-codon"),
             action: "thinking",
             content: `Thought ${i}`,
           },

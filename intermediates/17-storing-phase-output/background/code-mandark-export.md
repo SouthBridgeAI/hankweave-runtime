@@ -1912,9 +1912,9 @@ import { z } from "zod";
 import { PhaseId } from "./types/branded-types.js";
 import type { PhaseConfig, ServerConfig } from "./types/types.js";
 
-// ============================================================================
+// -------------
 // Constants
-// ============================================================================
+// -------------
 
 export const TIMEOUTS = {
   RESULT_MESSAGE_MS: 30000, // 30 seconds to wait for result message
@@ -1923,9 +1923,9 @@ export const TIMEOUTS = {
   PHASE_CLEANUP_DELAY_MS: 100, // 100ms delay for phase cleanup
 } as const;
 
-// ============================================================================
+// -------------
 // Error Formatting
-// ============================================================================
+// -------------
 
 /**
  * Format Zod validation errors into a user-friendly message.
@@ -1982,9 +1982,9 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
   return errors.join("\n");
 }
 
-// ============================================================================
+// -------------
 // Configuration Schema
-// ============================================================================
+// -------------
 
 const workspaceSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
@@ -2050,9 +2050,9 @@ const phaseConfigSchema = z
 
 const phaseConfigArraySchema = z.array(phaseConfigSchema).min(1, "At least one phase required");
 
-// ============================================================================
+// -------------
 // Default Configuration
-// ============================================================================
+// -------------
 
 /**
  * Default server configuration values.
@@ -2088,9 +2088,9 @@ export const DEFAULT_CONFIG: Omit<
   toolResultTruncateLength: 2500, // Default truncation length for tool results
 };
 
-// ============================================================================
+// -------------
 // Configuration Loading
-// ============================================================================
+// -------------
 
 /**
  * Load and validate phase configuration from a JSON file.
@@ -2259,9 +2259,9 @@ export function loadPhaseConfig(configPath: string): PhaseConfig[] {
   }
 }
 
-// ============================================================================
+// -------------
 // Token Cost Calculation
-// ============================================================================
+// -------------
 
 /**
  * Calculate the cost in dollars for a given token usage.
@@ -2294,9 +2294,9 @@ export function calculateCost(
   return inputCost + cacheCreationCost + cacheReadCost + outputCost;
 }
 
-// ============================================================================
+// -------------
 // Enhanced Validation
-// ============================================================================
+// -------------
 
 export interface ValidationResult {
   phases: PhaseConfig[];
@@ -2946,9 +2946,9 @@ async function copyDirectory(src: string, dest: string): Promise<void> {
 </server/execution-setup.ts>
 
 <server/execution-thread.ts>
-// ============================================================================
+// -------------
 // execution-thread.ts - Clean implementation with simplified algorithm
-// ============================================================================
+// -------------
 
 import {
   isTerminalPhaseStatus,
@@ -2962,9 +2962,9 @@ import {
 import type { PhaseConfig } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
-// ============================================================================
+// -------------
 // Types
-// ============================================================================
+// -------------
 
 /**
  * Complete checkpoint information including git metadata
@@ -3013,9 +3013,9 @@ export interface ExecutionThread {
   nextPhaseId: PhaseId | null; // What phase should execute next, null if none
 }
 
-// ============================================================================
+// -------------
 // Main Analysis Function - Simplified Algorithm
-// ============================================================================
+// -------------
 
 /**
  * Analyze execution history to build a unified thread with all metadata.
@@ -3320,9 +3320,9 @@ function buildCheckpointInfo(
   return checkpoints;
 }
 
-// ============================================================================
+// -------------
 // Simple Query Functions
-// ============================================================================
+// -------------
 
 /**
  * Get the next phase to execute from a thread
@@ -3585,9 +3585,9 @@ import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { TadpoleServer } from "./tadpole-server.js";
 
-// ============================================================================
+// -------------
 // Main Entry Point
-// ============================================================================
+// -------------
 
 async function main() {
   // Strict argument validation
@@ -5330,9 +5330,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     });
   }
 
-  // ============================================================================
+  // -------------
   // Initialization & Server Management
-  // ============================================================================
+  // -------------
 
   /**
    * Initialize and start the WebSocket server.
@@ -5460,9 +5460,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     });
   }
 
-  // ============================================================================
+  // -------------
   // WebSocket Connection Management
-  // ============================================================================
+  // -------------
 
   private handleConnection(ws: ServerWebSocket<ClientData>): void {
     if (this.client) {
@@ -5542,9 +5542,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     this.shutdown("client disconnect");
   }
 
-  // ============================================================================
+  // -------------
   // Command Processing
-  // ============================================================================
+  // -------------
 
   async handleCommand(command: ClientCommand): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
@@ -5622,9 +5622,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  // ============================================================================
+  // -------------
   // Event & State Management
-  // ============================================================================
+  // -------------
 
   private sendEvent(event: ServerEvent): void {
     if (!this.client) return;
@@ -5742,9 +5742,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  // ============================================================================
+  // -------------
   // Phase Execution & Management
-  // ============================================================================
+  // -------------
 
   /**
    * Start execution of a specific phase.
@@ -6109,9 +6109,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     await this.startClaudeProcess(phase, previousSessionId);
   }
 
-  // ============================================================================
+  // -------------
   // Claude Process Management
-  // ============================================================================
+  // -------------
 
   /**
    * Spawn Claude CLI process for a phase using ClaudeProcessManager.
@@ -6845,9 +6845,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  // ============================================================================
+  // -------------
   // File Operations & Watching
-  // ============================================================================
+  // -------------
 
   private async handleFileToolCall<T extends ToolName>(
     toolName: T,
@@ -6966,9 +6966,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     } as FileTreeUpdatedEvent);
   }
 
-  // ============================================================================
+  // -------------
   // Error Handling
-  // ============================================================================
+  // -------------
 
   /**
    * Handle errors with appropriate severity and client notification.
@@ -7010,9 +7010,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  // ============================================================================
+  // -------------
   // Phase Status & Control
-  // ============================================================================
+  // -------------
 
   /**
    * Automatically start the next available phase if none is running.
@@ -8048,9 +8048,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  // ============================================================================
+  // -------------
   // Utility & Helper Methods
-  // ============================================================================
+  // -------------
 
   private cleanupCurrentPhase(): void {
     if (this.logParser) {
@@ -8123,9 +8123,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     await this.runCommand(cpCommand, this.config.executionPath);
   }
 
-  // ============================================================================
+  // -------------
   // Checkpoint Methods
-  // ============================================================================
+  // -------------
 
   /**
    * Initialize checkpoint system - check git availability and switch branch
@@ -8273,9 +8273,9 @@ export class TadpoleServer extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  // ============================================================================
+  // -------------
   // Shutdown & Cleanup
-  // ============================================================================
+  // -------------
 
   async shutdown(reason: string): Promise<void> {
     if (this.isShuttingDown) {
@@ -8496,17 +8496,17 @@ import path from "node:path";
 import { fileResolver } from "./file-resolver.js";
 import type { FileNode } from "./types/types.js";
 
-// ============================================================================
+// -------------
 // ID Generation
-// ============================================================================
+// -------------
 
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// ============================================================================
+// -------------
 // Logger
-// ============================================================================
+// -------------
 
 export class Logger {
   constructor(private logFile: string) {}
@@ -8545,9 +8545,9 @@ export class Logger {
   }
 }
 
-// ============================================================================
+// -------------
 // File System Utilities
-// ============================================================================
+// -------------
 
 /**
  * Build a hierarchical file tree from files matching a pattern.
@@ -8643,9 +8643,9 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
   return tree;
 }
 
-// ============================================================================
+// -------------
 // Shell Utilities
-// ============================================================================
+// -------------
 
 /**
  * Escape a string for safe use in shell commands.
@@ -8656,9 +8656,9 @@ export function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
-// ============================================================================
+// -------------
 // Error Utilities
-// ============================================================================
+// -------------
 
 /**
  * Type guard to check if a value is an Error instance.
@@ -8678,9 +8678,9 @@ export function toError(error: unknown): Error {
   return new Error(String(error));
 }
 
-// ============================================================================
+// -------------
 // Exhaustive Checking
-// ============================================================================
+// -------------
 
 /**
  * Exhaustive checking helper for switch statements.
@@ -8691,9 +8691,9 @@ export function assertNever(x: never): never {
   throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
 }
 
-// ============================================================================
+// -------------
 // Directory Utilities
-// ============================================================================
+// -------------
 
 /**
  * Calculate the total size of a directory recursively.
@@ -9188,9 +9188,9 @@ export class APITimeoutError extends TadpoleError {
 </server/types/error-types.ts>
 
 <server/types/state-types.ts>
-// ============================================================================
+// -------------
 // Tadpole State Management Types
-// ============================================================================
+// -------------
 
 import type { PhaseId, RunId, SessionId } from "./branded-types.js";
 import type { FailureReason, TokenUsage } from "./types.js";
@@ -9198,9 +9198,9 @@ import type { FailureReason, TokenUsage } from "./types.js";
 // Re-export types for use in other modules
 export type { PhaseId, RunId, SessionId, FailureReason, TokenUsage };
 
-// ============================================================================
+// -------------
 // Phase Execution States - Discriminated Union
-// ============================================================================
+// -------------
 
 /**
  * Phase execution status progression.
@@ -9366,9 +9366,9 @@ export interface RunningPhase extends BasePhase {
   assistantMessageCount: number;
 }
 
-// ============================================================================
+// -------------
 // Terminal States - Immutable once reached
-// ============================================================================
+// -------------
 
 /**
  * Phase completed successfully.
@@ -9561,9 +9561,9 @@ export type PhaseExecution =
   | FailedPhase
   | SkippedPhase;
 
-// ============================================================================
+// -------------
 // Run State
-// ============================================================================
+// -------------
 
 /**
  * Represents one server lifecycle (start → shutdown).
@@ -9687,9 +9687,9 @@ export type StartingConditions =
       reason?: "retry" | "rollback" | "continue";
     };
 
-// ============================================================================
+// -------------
 // Top-Level State
-// ============================================================================
+// -------------
 
 /**
  * Root state object for Tadpole.
@@ -9732,9 +9732,9 @@ export interface TadpoleState {
   // This avoids sync issues and keeps state minimal
 }
 
-// ============================================================================
+// -------------
 // State Transitions
-// ============================================================================
+// -------------
 
 /**
  * Defines which status transitions are legal.
@@ -10005,9 +10005,9 @@ export type StateTransition =
       };
     };
 
-// ============================================================================
+// -------------
 // State Manager Interface
-// ============================================================================
+// -------------
 
 /**
  * Central state management for Tadpole.
@@ -10236,9 +10236,9 @@ export interface RecoveryResult {
   message: string;
 }
 
-// ============================================================================
+// -------------
 // Latest Phase Info
-// ============================================================================
+// -------------
 
 /**
  * Information about the latest phase execution.
@@ -10273,9 +10273,9 @@ export interface LatestPhaseInfo {
   continueInCurrentRun: boolean;
 }
 
-// ============================================================================
+// -------------
 // Helper Functions
-// ============================================================================
+// -------------
 
 /**
  * Check if a phase status is terminal (no further transitions possible)
@@ -10467,26 +10467,26 @@ import type { logMessageSchema } from "./claude-session-schema.js";
 import type { ErrorSeverity } from "./error-types.js";
 import type { PhaseExecution } from "./state-types.js";
 
-// ============================================================================
+// -------------
 // Model Types
-// ============================================================================
+// -------------
 
 export type ModelName = "sonnet" | "opus";
 
 export type ContinuationMode = "fresh" | "continue-previous";
 
-// ============================================================================
+// -------------
 // Process Exit Types
-// ============================================================================
+// -------------
 
 export type ProcessExit =
   | { type: "success" }
   | { type: "error"; code: number }
   | { type: "killed"; signal: NodeJS.Signals };
 
-// ============================================================================
+// -------------
 // Failure Reason Types
-// ============================================================================
+// -------------
 
 /**
  * Represents the reason for a phase failure with retry eligibility information.
@@ -10501,17 +10501,17 @@ export interface FailureReason {
   message?: string;
 }
 
-// ============================================================================
+// -------------
 // Message ID Types
-// ============================================================================
+// -------------
 
 export type ClaudeMessageId = `msg_${string}`;
 export type UUIDMessageId = string; // Keep flexible for UUIDs
 export type MessageId = ClaudeMessageId | UUIDMessageId;
 
-// ============================================================================
+// -------------
 // Checkpoint Status Types
-// ============================================================================
+// -------------
 
 export const CHECKPOINT_STATUS = {
   WORKSPACE_SETUP: "workspace-setup",
@@ -10523,9 +10523,9 @@ export const CHECKPOINT_STATUS = {
 
 export type CheckpointStatus = (typeof CHECKPOINT_STATUS)[keyof typeof CHECKPOINT_STATUS];
 
-// ============================================================================
+// -------------
 // Server Configuration
-// ============================================================================
+// -------------
 
 /**
  * Workspace setup operation - either copy files/directories or run commands.
@@ -10720,9 +10720,9 @@ export interface ServerConfig {
   modelOverride?: ModelName;
 }
 
-// ============================================================================
+// -------------
 // Internal Types
-// ============================================================================
+// -------------
 
 /**
  * Token usage tracking for Claude API calls.
@@ -10772,9 +10772,9 @@ export type FileNode =
       children: FileNode[];
     };
 
-// ============================================================================
+// -------------
 // Server -> Client Events
-// ============================================================================
+// -------------
 
 /**
  * Sent immediately after client connection to indicate server is ready.
@@ -11189,9 +11189,9 @@ export type ServerEvent =
   | RollbackProgressEvent
   | RollbackCompletedEvent;
 
-// ============================================================================
+// -------------
 // Client -> Server Commands
-// ============================================================================
+// -------------
 
 /**
  * Start a specific phase by ID.
@@ -11328,9 +11328,9 @@ export type ClientCommand =
   | RollbackToPhaseCommand
   | RollbackToLastSuccessCommand;
 
-// ============================================================================
+// -------------
 // Synthetic Message Types
-// ============================================================================
+// -------------
 
 /**
  * Synthetic timeout message structure.
@@ -11363,9 +11363,9 @@ export function isSyntheticTimeout(msg: ClaudeLogMessage): msg is SyntheticTimeo
   );
 }
 
-// ============================================================================
+// -------------
 // Claude Log Types (from claude-session-schema)
-// ============================================================================
+// -------------
 
 export type ClaudeLogMessage = z.infer<typeof logMessageSchema>;
 

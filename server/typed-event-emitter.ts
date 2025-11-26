@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
-import type { PhaseId, RunId } from "./types/branded-types.js";
-import type { PhaseStatus, StateTransition } from "./types/state-types.js";
+import type { CodonId, RunId } from "./types/branded-types.js";
+import type { CodonStatus, StateTransition } from "./types/state-types.js";
 import type { ServerEvent } from "./types/types.js";
 
 /**
@@ -95,7 +95,7 @@ export interface ServerInternalEvents {
 
 // Define process manager event map
 export interface ProcessEvents {
-  exit: [code: number];
+  exit: [code: number, isContextExceeded: boolean];
   error: [error: Error];
   stdout: [data: string];
   stderr: [data: string];
@@ -105,11 +105,11 @@ export interface ProcessEvents {
 // Define state manager event map
 export interface StateManagerEvents {
   stateChanged: [StateTransition];
-  phaseRunning: [
+  codonRunning: [
     {
       runId: RunId;
-      phaseId: PhaseId;
-      from: PhaseStatus;
+      codonId: CodonId;
+      from: CodonStatus;
       to: "running";
       metadata?: Record<string, unknown>;
     },

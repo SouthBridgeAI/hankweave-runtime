@@ -2,9 +2,9 @@ import { expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type {
+  CodonCompletedEvent,
+  CodonStartedEvent,
   ErrorEvent,
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
   ServerEvent,
 } from "../../../server/types/types.js";
 import type { WebSocketLogEntry } from "../../../server/types/websocket-log-types.js";
@@ -13,12 +13,12 @@ import { WebSocketLogReader } from "../../../server/websocket-log-reader.js";
 interface TestState {
   executionPath?: string;
   events: ServerEvent[];
-  phase1Started: PhaseStartedEvent | null;
-  phase1Completed: PhaseCompletedEvent | null;
-  phase2Started: PhaseStartedEvent | null;
-  phase2Completed: PhaseCompletedEvent | null;
-  phase3Started: PhaseStartedEvent | null;
-  phase3Completed: PhaseCompletedEvent | null;
+  codon1Started: CodonStartedEvent | null;
+  codon1Completed: CodonCompletedEvent | null;
+  codon2Started: CodonStartedEvent | null;
+  codon2Completed: CodonCompletedEvent | null;
+  codon3Started: CodonStartedEvent | null;
+  codon3Completed: CodonCompletedEvent | null;
   errorEvents: ErrorEvent[];
 }
 
@@ -27,7 +27,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     if (!testState.executionPath) {
       throw new Error("Execution path not available");
     }
-    return path.join(testState.executionPath, ".tadpole/logs/websocket.log");
+    return path.join(testState.executionPath, ".strandweave/logs/websocket.log");
   };
 
   it("should create websocket.log file", () => {
@@ -65,61 +65,61 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     expect(serverReady.message.type).toBe("server.ready");
   });
 
-  it("should log phase.start commands", async () => {
+  it("should log codon.start commands", async () => {
     const logPath = getWebSocketLogPath();
     const reader = new WebSocketLogReader(logPath);
     await reader.readLog();
 
-    const phaseStartCommands = reader.filterByMessageType("phase.start");
-    // May have phase.start commands if not using autostart
-    if (phaseStartCommands.length > 0) {
-      phaseStartCommands.forEach((cmd) => {
+    const codonStartCommands = reader.filterByMessageType("codon.start");
+    // May have codon.start commands if not using autostart
+    if (codonStartCommands.length > 0) {
+      codonStartCommands.forEach((cmd) => {
         expect(cmd.direction).toBe("in");
-        expect(cmd.message.type).toBe("phase.start");
+        expect(cmd.message.type).toBe("codon.start");
       });
     }
   });
 
-  it("should log phase lifecycle events", async () => {
+  it("should log codon lifecycle events", async () => {
     const logPath = getWebSocketLogPath();
     const reader = new WebSocketLogReader(logPath);
     await reader.readLog();
 
-    // Check phase.started events
-    const phaseStartedEvents = reader.filterByMessageType("phase.started");
-    expect(phaseStartedEvents.length).toBe(3); // 3 phases
+    // Check codon.started events
+    const codonStartedEvents = reader.filterByMessageType("codon.started");
+    expect(codonStartedEvents.length).toBe(3); // 3 codons
 
-    phaseStartedEvents.forEach((event) => {
+    codonStartedEvents.forEach((event) => {
       expect(event.direction).toBe("out");
-      expect(event.message.type).toBe("phase.started");
+      expect(event.message.type).toBe("codon.started");
     });
 
-    // Check phase.completed events
-    const phaseCompletedEvents = reader.filterByMessageType("phase.completed");
-    expect(phaseCompletedEvents.length).toBe(3); // 3 phases
+    // Check codon.completed events
+    const codonCompletedEvents = reader.filterByMessageType("codon.completed");
+    expect(codonCompletedEvents.length).toBe(3); // 3 codons
 
-    phaseCompletedEvents.forEach((event) => {
+    codonCompletedEvents.forEach((event) => {
       expect(event.direction).toBe("out");
-      expect(event.message.type).toBe("phase.completed");
+      expect(event.message.type).toBe("codon.completed");
     });
   });
 
-  it("should track messages for each phase", async () => {
+  it("should track messages for each codon", async () => {
     const logPath = getWebSocketLogPath();
     const reader = new WebSocketLogReader(logPath);
     await reader.readLog();
 
-    // Phase 1 messages
-    const phase1Messages = reader.getPhaseMessages("phase-1");
-    expect(phase1Messages.length).toBeGreaterThan(0);
+    // Codon 1 messages
+    const codon1Messages = reader.getCodonMessages("codon-1");
+    expect(codon1Messages.length).toBeGreaterThan(0);
 
-    // Phase 2 messages
-    const phase2Messages = reader.getPhaseMessages("phase-2");
-    expect(phase2Messages.length).toBeGreaterThan(0);
+    // Codon 2 messages
+    const codon2Messages = reader.getCodonMessages("codon-2");
+    expect(codon2Messages.length).toBeGreaterThan(0);
 
-    // Phase 3 messages
-    const phase3Messages = reader.getPhaseMessages("phase-3");
-    expect(phase3Messages.length).toBeGreaterThan(0);
+    // Codon 3 messages
+    const codon3Messages = reader.getCodonMessages("codon-3");
+    expect(codon3Messages.length).toBeGreaterThan(0);
   });
 
   it("should track session IDs", async () => {
@@ -127,12 +127,12 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const reader = new WebSocketLogReader(logPath);
     await reader.readLog();
 
-    // Get session IDs from phase started events
-    const phaseStartedEvents = reader.filterByMessageType("phase.started");
+    // Get session IDs from codon started events
+    const codonStartedEvents = reader.filterByMessageType("codon.started");
     const sessionIds = new Set<string>();
 
-    phaseStartedEvents.forEach((event) => {
-      if (event.message.type === "phase.started") {
+    codonStartedEvents.forEach((event) => {
+      if (event.message.type === "codon.started") {
         const data = event.message.data;
         if (data?.sessionId) {
           sessionIds.add(data.sessionId);
@@ -304,14 +304,14 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const reader = new WebSocketLogReader(logPath);
     await reader.readLog();
 
-    // Export phase 1 messages
-    const phase1Messages = reader.getPhaseMessages("phase-1");
+    // Export codon 1 messages
+    const codon1Messages = reader.getCodonMessages("codon-1");
     if (!testState.executionPath) {
       throw new Error("Execution path not available");
     }
-    const exportPath = path.join(testState.executionPath, ".tadpole/logs/phase-1-export.jsonl");
+    const exportPath = path.join(testState.executionPath, ".strandweave/logs/codon-1-export.jsonl");
 
-    reader.exportToFile(phase1Messages, exportPath);
+    reader.exportToFile(codon1Messages, exportPath);
 
     // Verify export file exists and is valid
     expect(fs.existsSync(exportPath)).toBe(true);
@@ -320,7 +320,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     const exportedContent = fs.readFileSync(exportPath, "utf-8");
     const exportedLines = exportedContent.trim().split("\n");
 
-    expect(exportedLines.length).toBe(phase1Messages.length);
+    expect(exportedLines.length).toBe(codon1Messages.length);
 
     // Each line should be valid JSON
     exportedLines.forEach((line) => {
@@ -352,35 +352,35 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     expect(streamedCount).toBe(entries.length);
   });
 
-  it("should track message flow for complete phase execution", async () => {
+  it("should track message flow for complete codon execution", async () => {
     const logPath = getWebSocketLogPath();
     const reader = new WebSocketLogReader(logPath);
     await reader.readLog();
 
-    // For each phase, verify the expected message flow
-    ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
-      const phaseMessages = reader.getPhaseMessages(phaseId);
+    // For each codon, verify the expected message flow
+    ["codon-1", "codon-2", "codon-3"].forEach((codonId) => {
+      const codonMessages = reader.getCodonMessages(codonId);
 
-      // Should have phase.started
-      const started = phaseMessages.find((m) => {
-        if (m.message.type === "phase.started") {
-          return m.message.data?.phaseId === phaseId;
+      // Should have codon.started
+      const started = codonMessages.find((m) => {
+        if (m.message.type === "codon.started") {
+          return m.message.data?.codonId === codonId;
         }
         return false;
       });
       expect(started).toBeDefined();
 
-      // Should have phase.completed
-      const completed = phaseMessages.find((m) => {
-        if (m.message.type === "phase.completed") {
-          return m.message.data?.phaseId === phaseId;
+      // Should have codon.completed
+      const completed = codonMessages.find((m) => {
+        if (m.message.type === "codon.completed") {
+          return m.message.data?.codonId === codonId;
         }
         return false;
       });
       expect(completed).toBeDefined();
 
       // Should have some activity between start and complete
-      const activityMessages = phaseMessages.filter(
+      const activityMessages = codonMessages.filter(
         (m) =>
           m.message.type === "assistant.action" ||
           m.message.type === "token.usage" ||

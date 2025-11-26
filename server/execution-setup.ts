@@ -91,7 +91,7 @@ export async function setupExecutionEnvironment(options: {
       }
 
       // Prevent nested execution
-      if (executionPath.includes("/.tadpole-executions/") && executionPath.includes("/data")) {
+      if (executionPath.includes("/.strandweave-executions/") && executionPath.includes("/data")) {
         throw new Error("Cannot create execution inside another execution directory");
       }
 
@@ -101,7 +101,7 @@ export async function setupExecutionEnvironment(options: {
       }
 
       // Check if it has execution metadata
-      const metaPath = path.join(executionPath, ".tadpole", "execution-meta.json");
+      const metaPath = path.join(executionPath, ".strandweave", "execution-meta.json");
       if (fs.existsSync(metaPath)) {
         // Verify data hash matches
         const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
@@ -123,7 +123,7 @@ export async function setupExecutionEnvironment(options: {
     }
   } else {
     // Auto-detect or create execution directory
-    const executionRoot = path.join(os.homedir(), ".tadpole-executions");
+    const executionRoot = path.join(os.homedir(), ".strandweave-executions");
     await fs.promises.mkdir(executionRoot, { recursive: true });
 
     if (startNew) {
@@ -198,7 +198,7 @@ export async function setupExecutionEnvironment(options: {
   }
 
   // Create/update metadata
-  const metaDir = path.join(finalExecutionPath, ".tadpole");
+  const metaDir = path.join(finalExecutionPath, ".strandweave");
   await fs.promises.mkdir(metaDir, { recursive: true });
 
   const meta = {

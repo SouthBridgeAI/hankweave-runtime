@@ -5,17 +5,17 @@ import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
 
-// ============================================================================
+// -------------
 // ID Generation
-// ============================================================================
+// -------------
 
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// ============================================================================
+// -------------
 // Logger
-// ============================================================================
+// -------------
 
 export class Logger {
   constructor(private logFile: string) {}
@@ -90,9 +90,9 @@ export class Logger {
   }
 }
 
-// ============================================================================
+// -------------
 // File System Utilities
-// ============================================================================
+// -------------
 
 /**
  * Build a hierarchical file tree from files matching a pattern.
@@ -188,9 +188,9 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
   return tree;
 }
 
-// ============================================================================
+// -------------
 // Shell Utilities
-// ============================================================================
+// -------------
 
 /**
  * Escape a string for safe use in shell commands.
@@ -201,9 +201,9 @@ export function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
-// ============================================================================
+// -------------
 // Error Utilities
-// ============================================================================
+// -------------
 
 /**
  * Type guard to check if a value is an Error instance.
@@ -223,9 +223,9 @@ export function toError(error: unknown): Error {
   return new Error(String(error));
 }
 
-// ============================================================================
+// -------------
 // Type Utilities
-// ============================================================================
+// -------------
 
 /**
  * Helper type to check if two types are exactly equal at compile time.
@@ -241,9 +241,9 @@ export type AssertEqual<T, U> = (<G>() => G extends T ? 1 : 2) extends <G>() => 
   ? true
   : never;
 
-// ============================================================================
+// -------------
 // Exhaustive Checking
-// ============================================================================
+// -------------
 
 /**
  * Exhaustive checking helper for switch statements.
@@ -254,9 +254,9 @@ export function assertNever(x: never): never {
   throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
 }
 
-// ============================================================================
+// -------------
 // Directory Utilities
-// ============================================================================
+// -------------
 
 /**
  * Calculate the total size of a directory recursively.

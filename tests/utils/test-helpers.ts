@@ -1,20 +1,38 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import { createServer } from "node:net";
 import * as path from "node:path";
 import type { ClientCommand } from "../../server/command-schemas.js";
-import type { TadpoleState } from "../../server/types/state-types.js";
+import type { StrandweaveState } from "../../server/types/state-types.js";
 import type {
+  CodonCompletedEvent,
+  CodonStartedEvent,
   HandshakeRequest,
   HandshakeResponse,
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
   ServerEvent,
 } from "../../server/types/types.js";
 import { ClientMode } from "../../server/types/types.js";
 
-// ============================================================================
+/**
+ * Finds an available TCP port provided by the OS.
+ * Useful for running multiple server tests in parallel without collisions.
+ */
+export async function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, () => {
+      const address = server.address();
+      const port = typeof address === "string" ? 0 : address?.port || 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+// -------------
 // Colors for terminal output
-// ============================================================================
+// -------------
 export const colors = {
   reset: "\x1b[0m",
   green: "\x1b[32m",
@@ -24,9 +42,9 @@ export const colors = {
   gray: "\x1b[90m",
 };
 
-// ============================================================================
+// -------------
 // Test WebSocket Client
-// ============================================================================
+// -------------
 
 // Re-export for convenience
 export { ClientMode } from "../../server/types/types.js";
@@ -315,34 +333,34 @@ export class TestWSClient {
     });
   }
 
-  async waitForPhaseStart(
-    phaseId: string,
+  async waitForCodonStart(
+    codonId: string,
     timeout: number = 10000,
     afterTimestamp?: string,
-  ): Promise<PhaseStartedEvent> {
+  ): Promise<CodonStartedEvent> {
     // Use waitForEvent with proper filtering
     const event = await this.waitForEvent(
-      "phase.started",
+      "codon.started",
       timeout,
-      (e) => (e as PhaseStartedEvent).data?.phaseId === phaseId,
+      (e) => (e as CodonStartedEvent).data?.codonId === codonId,
       afterTimestamp,
     );
-    return event as PhaseStartedEvent;
+    return event as CodonStartedEvent;
   }
 
-  async waitForPhaseCompletion(
-    phaseId: string,
+  async waitForCodonCompletion(
+    codonId: string,
     timeout: number = 120000,
     afterTimestamp?: string,
-  ): Promise<PhaseCompletedEvent> {
+  ): Promise<CodonCompletedEvent> {
     // Use waitForEvent with proper filtering
     const event = await this.waitForEvent(
-      "phase.completed",
+      "codon.completed",
       timeout,
-      (e) => (e as PhaseCompletedEvent).data?.phaseId === phaseId,
+      (e) => (e as CodonCompletedEvent).data?.codonId === codonId,
       afterTimestamp,
     );
-    return event as PhaseCompletedEvent;
+    return event as CodonCompletedEvent;
   }
 
   getEvents(): ServerEvent[] {
@@ -410,18 +428,18 @@ export class TestWSClient {
   }
 }
 
-// ============================================================================
+// -------------
 // File System Utilities
-// ============================================================================
+// -------------
 export async function rimrafSimple(dirPath: string): Promise<void> {
   if (fs.existsSync(dirPath)) {
     fs.rmSync(dirPath, { recursive: true, force: true });
   }
 }
 
-// ============================================================================
+// -------------
 // Test Process Management
-// ============================================================================
+// -------------
 const activeServerProcesses: ChildProcess[] = [];
 let signalHandlersRegistered = false;
 
@@ -505,9 +523,9 @@ function registerSignalHandlers(): void {
   });
 }
 
-// ============================================================================
+// -------------
 // Test Setup Utilities
-// ============================================================================
+// -------------
 export interface TestDirectoryConfig {
   testDir: string;
   testResultsDir: string;
@@ -543,12 +561,12 @@ export async function setupTestDirectory(config: TestDirectoryConfig): Promise<v
   console.log(`  ✓ Test directory recreated`);
 }
 
-// ============================================================================
+// -------------
 // Server Management
-// ============================================================================
+// -------------
 export interface ServerConfig {
   testRunDir: string;
-  phasesConfig: string;
+  configFile: string;
   port: number;
   testMode: string;
   cwd: string;
@@ -561,7 +579,7 @@ export interface ServerConfig {
 }
 
 export function startServer(config: ServerConfig): ChildProcess {
-  console.log(`${colors.blue}Starting Tadpole server...${colors.reset}`);
+  console.log(`${colors.blue}Starting Strandweave server...${colors.reset}`);
 
   // Register signal handlers for cleanup
   registerSignalHandlers();
@@ -577,7 +595,7 @@ export function startServer(config: ServerConfig): ChildProcess {
   );
 
   // Build command arguments
-  const args = [serverPath, `--config=${config.phasesConfig}`, `--port=${config.port}`];
+  const args = [serverPath, `--config=${config.configFile}`, `--port=${config.port}`];
 
   // Run without proxy if specified
   if (config.withoutProxy) {
@@ -645,9 +663,9 @@ export function startServer(config: ServerConfig): ChildProcess {
   return serverProcess;
 }
 
-// ============================================================================
+// -------------
 // Test Result Preservation
-// ============================================================================
+// -------------
 export interface PreserveResultsConfig {
   testDir: string;
   testRunDir: string;
@@ -658,7 +676,7 @@ export async function preserveTestResults(config: PreserveResultsConfig): Promis
   console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
 
   // Copy the entire runs directory to preserve Claude logs with proper structure
-  const runsDir = path.join(config.testDir, ".tadpole/runs");
+  const runsDir = path.join(config.testDir, ".strandweave/runs");
   if (fs.existsSync(runsDir)) {
     const destRunsDir = path.join(config.testRunDir, "runs");
     copyDirectoryRecursive(runsDir, destRunsDir);
@@ -671,7 +689,7 @@ export async function preserveTestResults(config: PreserveResultsConfig): Promis
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           countLogs(fullPath);
-        } else if (entry.name.match(/^phase-.*-claude\.log$/)) {
+        } else if (entry.name.match(/^codon-.*-claude\.log$/)) {
           claudeLogCount++;
         }
       }
@@ -681,14 +699,14 @@ export async function preserveTestResults(config: PreserveResultsConfig): Promis
   }
 
   // Copy state.json
-  const stateFile = path.join(config.testDir, ".tadpole/state.json");
+  const stateFile = path.join(config.testDir, ".strandweave/state.json");
   if (fs.existsSync(stateFile)) {
     fs.copyFileSync(stateFile, path.join(config.testRunDir, "state.json"));
     console.log(`  ✓ Copied state.json`);
   }
 
   // Copy logs directory (for websocket.log and server.log)
-  const logsDir = path.join(config.testDir, ".tadpole/logs");
+  const logsDir = path.join(config.testDir, ".strandweave/logs");
   if (fs.existsSync(logsDir)) {
     const destLogsDir = path.join(config.testRunDir, "logs");
     copyDirectoryRecursive(logsDir, destLogsDir);
@@ -724,16 +742,16 @@ function copyDirectoryRecursive(src: string, dest: string): void {
   }
 }
 
-// ============================================================================
+// -------------
 // Timestamp Generation
-// ============================================================================
+// -------------
 export function generateTestTimestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5); // YYYY-MM-DDTHH-mm-ss
 }
 
-// ============================================================================
+// -------------
 // Cleanup Utilities
-// ============================================================================
+// -------------
 export interface CleanupConfig {
   testDir: string;
   testRunDir: string;
@@ -812,7 +830,7 @@ export async function cleanupLockFile(
   testDir: string,
   serverShutdownGracefully: boolean,
 ): Promise<void> {
-  const lockFile = path.join(testDir, ".tadpole/server.lock");
+  const lockFile = path.join(testDir, ".strandweave/runtime.lock");
   if (fs.existsSync(lockFile)) {
     if (serverShutdownGracefully) {
       console.log(
@@ -825,16 +843,16 @@ export async function cleanupLockFile(
   }
 }
 
-// ============================================================================
+// -------------
 // State Inspection Helpers for E2E Tests
-// ============================================================================
+// -------------
 
 /**
  * Get the server state by reading from the state file.
  * This is used in e2e tests where we don't have direct access to the server instance.
  */
-export async function getServerState(testDir: string): Promise<TadpoleState> {
-  const statePath = path.join(testDir, ".tadpole", "state.json");
+export async function getServerState(testDir: string): Promise<StrandweaveState> {
+  const statePath = path.join(testDir, ".strandweave", "state.json");
   if (!fs.existsSync(statePath)) {
     throw new Error("State file not found");
   }
@@ -865,11 +883,11 @@ export async function waitForRunStatus(
 }
 
 /**
- * Wait for a phase to reach a specific status.
+ * Wait for a codon to reach a specific status.
  */
-export async function waitForPhaseStatus(
+export async function waitForCodonStatus(
   testDir: string,
-  phaseId: string,
+  codonId: string,
   status: string,
   timeout = 10000,
 ): Promise<void> {
@@ -879,23 +897,23 @@ export async function waitForPhaseStatus(
       const state = await getServerState(testDir);
       const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
       if (currentRun) {
-        const phase = currentRun.phases.find((p) => p.phaseId === phaseId);
-        if (phase?.status === status) return;
+        const codon = currentRun.codons.find((p) => p.codonId === codonId);
+        if (codon?.status === status) return;
       }
     } catch {
       // State file might not exist yet
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Timeout waiting for phase ${phaseId} to reach status ${status}`);
+  throw new Error(`Timeout waiting for codon ${codonId} to reach status ${status}`);
 }
 
 /**
- * Get completed phases from the current or most recent run in state.
+ * Get completed codons from the current or most recent run in state.
  */
-export async function getCompletedPhasesFromState(testDir: string): Promise<
+export async function getCompletedCodonsFromState(testDir: string): Promise<
   Array<{
-    phaseId: string;
+    codonId: string;
     cost: number;
     sessionId: string;
   }>
@@ -907,10 +925,10 @@ export async function getCompletedPhasesFromState(testDir: string): Promise<
     (state.runs.length > 0 ? state.runs[0] : null);
   if (!run) return [];
 
-  return run.phases
+  return run.codons
     .filter((p) => p.status === "completed")
     .map((p) => ({
-      phaseId: p.phaseId,
+      codonId: p.codonId,
       cost: "finalCost" in p ? p.finalCost : 0,
       sessionId: "claudeSessionId" in p ? p.claudeSessionId : "unknown",
     }));
@@ -924,13 +942,13 @@ export async function getTotalCostFromState(testDir: string): Promise<number> {
   let total = 0;
 
   for (const run of state.runs) {
-    for (const phase of run.phases) {
-      if (phase.status === "completed" && "finalCost" in phase) {
-        total += phase.finalCost;
-      } else if (phase.status === "failed" && "partialCost" in phase) {
-        total += phase.partialCost;
-      } else if (phase.status === "running" && "currentCost" in phase) {
-        total += phase.currentCost;
+    for (const codon of run.codons) {
+      if (codon.status === "completed" && "finalCost" in codon) {
+        total += codon.finalCost;
+      } else if (codon.status === "failed" && "partialCost" in codon) {
+        total += codon.partialCost;
+      } else if (codon.status === "running" && "currentCost" in codon) {
+        total += codon.currentCost;
       }
     }
   }
@@ -939,14 +957,14 @@ export async function getTotalCostFromState(testDir: string): Promise<number> {
 }
 
 /**
- * Check if a phase exists in the current run.
+ * Check if a codon exists in the current run.
  */
-export async function phaseExistsInCurrentRun(testDir: string, phaseId: string): Promise<boolean> {
+export async function codonExistsInCurrentRun(testDir: string, codonId: string): Promise<boolean> {
   const state = await getServerState(testDir);
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
   if (!currentRun) return false;
 
-  return currentRun.phases.some((p) => p.phaseId === phaseId);
+  return currentRun.codons.some((p) => p.codonId === codonId);
 }
 
 /**

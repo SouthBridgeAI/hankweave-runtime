@@ -1,6 +1,6 @@
-# Understanding the Tadpole Execution Model
+# Understanding the Strandweave Execution Model
 
-This guide explains how Tadpole's execution model works, including the relationships between executions, data directories, symlinks, runs, and phases.
+This guide explains how Strandweave's execution model works, including the relationships between executions, data directories, symlinks, runs, and codons.
 
 ## Core Concepts Hierarchy
 
@@ -9,11 +9,11 @@ Data Source (Your Project or File)
     ↓
 Execution Directory (Isolated Environment)
     ├── read_only_data_source/ → symlink to Data Source or containing linked file
-    └── .tadpole/
+    └── .strandweave/
         ├── execution-meta.json
         └── state.json
             └── Runs[]
-                └── Phases[]
+                └── Codons[]
 ```
 
 ## 1. Data Source
@@ -26,7 +26,7 @@ Your original project directory or single file containing:
 - Or a single file (e.g., requirements document, data file)
 
 **Key Properties:**
-- **Read-only**: Never modified by Tadpole
+- **Read-only**: Never modified by Strandweave
 - **Location**: Can be anywhere on your filesystem
 - **Type**: Can be either a directory or a single file
 - **Identification**: Hashed to create a unique fingerprint
@@ -53,10 +53,10 @@ Where:
 
 ## 2. Execution Directory
 
-An isolated workspace where Tadpole operates:
+An isolated execution environment where Strandweave operates:
 
 ```
-~/.tadpole-executions/<timestamp>-<random>-<hash_prefix>/
+~/.strandweave-executions/<timestamp>-<random>-<hash_prefix>/
 ```
 
 ### Execution Directory Naming
@@ -120,7 +120,7 @@ Run = {
     startTime: ISO_timestamp,
     endTime: ISO_timestamp | null,
     status: "active" | "completed" | "crashed",
-    phases: PhaseExecution[],
+    codons: CodonExecution[],
     parent: RunId | null  // for rollback continuations
 }
 ```
@@ -131,23 +131,93 @@ Run = {
 RunId = T_ms + "-" + R_36(5)
 ```
 
-## 5. Phases
+## 5. Codons
 
-Phases are the atomic units of work:
+Codons are the atomic units of work:
 
-### Phase State Machine
+### Codon State Machine
 
 ```
 State transitions:
 preparing → starting → initializing → running → {completed, failed, skipped}
 ```
 
-## 6. Cost Calculations
+## 6. Loops and Execution Planning
+
+Loops allow codons to repeat multiple times. The execution planner handles loop expansion at runtime.
+
+For detailed loop configuration options, see [Loops in the Codon Configuration Guide](./codon-configuration-guide.md#loops).
+
+### Execution Plan
+
+The execution plan is a flattened list of all codons to execute, including expanded loop iterations:
+
+```
+ExecutionPlan = [
+    { codon: Codon, codonId: CodonId, loopContext?: LoopContext }
+]
+```
+
+### Lazy Loop Expansion
+
+Loops are expanded lazily—only one iteration at a time:
+
+```
+Initial:     [setup, work#0, finalize]
+After work#0: [setup, work#0, work#1, finalize]
+After work#1: [setup, work#0, work#1, work#2, finalize]
+...
+```
+
+This approach:
+- Keeps the plan manageable for long-running loops
+- Allows termination conditions to be evaluated after each iteration
+- Supports context-exceeded loops that run until Claude's context is full
+
+### Loop Context Tracking
+
+Each codon in a loop carries context about its position:
+
+```
+LoopContext = {
+    loopId: CodonId,       // ID of the parent loop
+    iteration: number,      // 0-indexed iteration number
+    codonIndexInLoop: number // Position within loop's codon array
+}
+```
+
+### Codon ID Generation for Loops
+
+Loop codons receive iteration-suffixed IDs:
+
+```
+CodonId = OriginalId + "#" + Iteration
+```
+
+Examples: `write-code#0`, `write-code#1`, `review#0`, `review#1`
+
+### Context Exceeded Handling
+
+When Claude's context window is exhausted, the behavior depends on the loop's termination condition:
+
+| Termination Type | Context Exceeded Behavior |
+|-----------------|--------------------------|
+| `iterationLimit` | Codon **fails** (error condition) |
+| `contextExceeded` | Codon **completes** (expected termination) |
+
+For `contextExceeded` loops:
+1. The current codon is marked as completed
+2. Remaining codons in the current iteration are removed from the plan
+3. Execution continues to the next item after the loop
+
+See [Validation Rules for contextExceeded Loops](./codon-configuration-guide.md#validation-rules-for-contextexceeded-loops) for configuration constraints.
+
+## 7. Cost Calculations
 
 ### Token Cost Formula
 
 ```
-C_phase = (T_in × R_in) + (T_out × R_out)
+C_codon = (T_in × R_in) + (T_out × R_out)
 ```
 
 Where:
@@ -159,10 +229,10 @@ Where:
 ### Total Execution Cost
 
 ```
-C_total = ∑(C_phase) for all phases in execution thread
+C_total = ∑(C_codon) for all codons in execution thread
 ```
 
-## 7. Execution Thread
+## 8. Execution Thread
 
 The logical sequence across multiple runs:
 
@@ -173,13 +243,13 @@ Thread = []
 current_run = latest_run
 
 while current_run:
-    for phase in reverse(current_run.phases):
-        if phase.id not in Thread.ids:
-            Thread.prepend(phase)
+    for codon in reverse(current_run.codons):
+        if codon.id not in Thread.ids:
+            Thread.prepend(codon)
 
     if current_run.parent:
         current_run = find_run(current_run.parent)
-        skip_phases_after(current_run.continuation_point)
+        skip_codons_after(current_run.continuation_point)
     else:
         break
 ```
@@ -222,20 +292,20 @@ find_executions(data_path):
 ### 1. Single Data, Multiple Executions
 ```
 /my-project/ (data)
-    → ~/.tadpole-executions/exec-1/ (approach A)
-    → ~/.tadpole-executions/exec-2/ (approach B)
-    → ~/.tadpole-executions/exec-3/ (approach C)
+    → ~/.strandweave-executions/exec-1/ (approach A)
+    → ~/.strandweave-executions/exec-2/ (approach B)
+    → ~/.strandweave-executions/exec-3/ (approach C)
 ```
 
 ### 2. File as Data Source
 ```
 /path/to/requirements.txt (file)
-    → ~/.tadpole-executions/exec-1/read_only_data_source/requirements.txt
+    → ~/.strandweave-executions/exec-1/read_only_data_source/requirements.txt
 ```
 
 ### 3. Execution Lifecycle
 ```
-Create → Link Data → Run Phases → Checkpoint → Complete/Rollback
+Create → Link Data → Run Codons → Checkpoint → Complete/Rollback
 ```
 
 ### 4. Rollback Creates New Run
@@ -281,7 +351,7 @@ bun run server --data=/path/to/project --copy
 ### Execution Space Usage
 Monitor with:
 ```bash
-du -sh ~/.tadpole-executions/*
+du -sh ~/.strandweave-executions/*
 ```
 
 Clean old executions:
@@ -305,36 +375,36 @@ This works consistently whether your data source is a file or directory.
 
 ## Output Files and Results Directory
 
-Tadpole can automatically copy files from the execution directory back to your project through the **tadpole-results** mechanism.
+Strandweave can automatically copy files from the execution directory back to your project through the **strandweave-results** mechanism.
 
 ### Results Directory Location
 
 Output files are copied to:
 ```
-<your_project_root>/tadpole-results/
+<your_project_root>/strandweave-results/
 ```
 
-This directory is automatically created and contains accumulated output from successful phases.
+This directory is automatically created and contains accumulated output from successful codons.
 
 ### Output File Flow
 
 ```
-Phase Execution → beforeCopy commands → copy patterns → tadpole-results/
+Codon Execution → beforeCopy commands → copy patterns → strandweave-results/
 ```
 
-1. **Phase executes** in the isolated execution directory
+1. **Codon executes** in the isolated execution directory
 2. **beforeCopy commands** run to prepare files (optional)  
 3. **Copy patterns** match files to copy
-4. **Files are copied** to `tadpole-results/` where you run the command from
-5. **Results accumulate** across multiple phases
+4. **Files are copied** to `strandweave-results/` where you run the command from
+5. **Results accumulate** across multiple codons
 
 ### Results vs Execution Directory
 
 | Location | Purpose | Persistence |
 |----------|---------|-------------|
-| `~/.tadpole-executions/<id>/` | Isolated workspace | Temporary |
-| `<project>/tadpole-results/` | User-accessible output | Persistent |
+| `~/.strandweave-executions/<id>/` | Isolated execution environment | Temporary |
+| `<project>/strandweave-results/` | User-accessible output | Persistent |
 
-The tadpole-results directory provides a clean interface to access phase outputs without navigating temporary execution directories.
+The strandweave-results directory provides a clean interface to access codon outputs without navigating temporary execution directories.
 
-**Note on Chronicler Outputs**: The `outputFiles` mechanism described above is for the main agent's phase outputs. Outputs from parallel Chronicler agents are handled separately. They can be configured via the `settings.outputPaths` in the phase's `chroniclers` array, or they will be auto-generated inside the `.tadpole/chroniclers/outputs/` directory. See the Chronicler configuration guides for more details.
+**Note on Sentinel Outputs**: The `outputFiles` mechanism described above is for the main agent's codon outputs. Outputs from parallel Sentinel agents are handled separately. They can be configured via the `settings.outputPaths` in the codon's `sentinels` array, or they will be auto-generated inside the `.strandweave/sentinels/outputs/` directory. See the Sentinel configuration guides for more details.

@@ -324,9 +324,9 @@ export const sessionMetadataSchema = z.object({
   model: modelSchema,
 });
 
-// ============================================================================
+// -------------
 // Claude API Request Schema
-// ============================================================================
+// -------------
 
 /**
  * Cache control configuration for message content

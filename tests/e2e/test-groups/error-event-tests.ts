@@ -15,7 +15,7 @@ export function runErrorEventTests(testState: TestState) {
 
       // Should have severity (from refactor plan)
       if (error.data?.severity) {
-        expect(["fatal", "phase", "operation", "warning"]).toContain(error.data.severity);
+        expect(["fatal", "codon", "operation", "warning"]).toContain(error.data.severity);
       }
 
       // Fatal errors should have context

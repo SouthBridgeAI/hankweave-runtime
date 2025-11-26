@@ -1,8 +1,8 @@
 /**
- * Tadpole Server Test Suite
+ * Strandweave Server Test Suite
  *
  * Directory Structure:
- * - config/   - Test configuration files (phases, models, etc.)
+ * - config/   - Test configuration files (codons, models, etc.)
  * - e2e/      - End-to-end integration tests
  * - utils/    - Test utilities and helpers
  *

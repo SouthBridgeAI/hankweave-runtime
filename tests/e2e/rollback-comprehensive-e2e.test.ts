@@ -19,41 +19,41 @@ import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PhaseId, RunId } from "../../server/types/branded-types";
-import type { Run, TadpoleState } from "../../server/types/state-types";
+import { CodonId, RunId } from "../../server/types/branded-types.js";
+import type { Run, StrandweaveState } from "../../server/types/state-types.js";
 import type {
   AssistantActionEvent,
   CheckpointListEvent,
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
+  CodonCompletedEvent,
+  CodonStartedEvent,
   RollbackCompletedEvent,
   RollbackProgressEvent,
   RollbackStartedEvent,
   ServerEvent,
   ServerIdleEvent,
-} from "../../server/types/types";
+} from "../../server/types/types.js";
 import { generateId } from "../../server/utils.js";
 import { getGitCommits, getGitShas } from "../utils/git-test-helpers.js";
 import { calculateCostFromUsage } from "../utils/test-data-helpers.js";
 import {
   colors,
   generateTestTimestamp,
+  getFreePort,
   setupTestDirectory,
   type TestDirectoryConfig,
   TestWSClient,
 } from "../utils/test-helpers.js";
 
-// ============================================================================
+// -------------
 // TEST CONFIGURATION
-// ============================================================================
+// -------------
 
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const EXECUTION_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-comprehensive");
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const SNAPSHOT_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-comprehensive-snapshots");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
-const SERVER_PORT = parseInt(process.env.tadpole_TEST_PORT || "7787", 10);
-const PHASES_CONFIG = path.join(TEST_ROOT, "tests/config/test-phases.config.json");
+const CODONS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons.config.json");
 
 const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `rollback-comprehensive-${TEST_TIMESTAMP}`);
@@ -64,14 +64,14 @@ const testDirConfig: TestDirectoryConfig = {
   testRunDir: TEST_RUN_DIR,
 };
 
-// ============================================================================
+// -------------
 // INTERFACES
-// ============================================================================
+// -------------
 
 interface TestSnapshot {
   name: string;
   directory: string;
-  state: TadpoleState;
+  state: StrandweaveState;
   events: ServerEvent[];
   checkpoints: CheckpointListEvent["data"]["checkpoints"];
   timestamp: string;
@@ -93,9 +93,9 @@ interface TestState {
   executionPath?: string;
 }
 
-// ============================================================================
+// -------------
 // HELPER CLASSES
-// ============================================================================
+// -------------
 
 /**
  * Enhanced WebSocket client with session ID tracking
@@ -103,46 +103,46 @@ interface TestState {
 class EnhancedTestWSClient extends TestWSClient {
   private sessionIdMap = new Map<string, string>();
 
-  async waitForPhaseStartWithSession(
-    phaseId: string,
+  async waitForCodonStartWithSession(
+    codonId: string,
     timeout: number = 30000,
     afterTimestamp?: string,
-  ): Promise<PhaseStartedEvent> {
+  ): Promise<CodonStartedEvent> {
     const event = await this.waitForEvent(
-      "phase.started",
+      "codon.started",
       timeout,
       (e) => {
-        const startedEvent = e as PhaseStartedEvent;
-        return startedEvent.data?.phaseId === phaseId;
+        const startedEvent = e as CodonStartedEvent;
+        return startedEvent.data?.codonId === codonId;
       },
       afterTimestamp,
     );
 
-    const phaseStartedEvent = event as PhaseStartedEvent;
-    this.sessionIdMap.set(phaseId, phaseStartedEvent.data.sessionId);
-    return phaseStartedEvent;
+    const codonStartedEvent = event as CodonStartedEvent;
+    this.sessionIdMap.set(codonId, codonStartedEvent.data.sessionId);
+    return codonStartedEvent;
   }
 
-  async waitForPhaseCompletionBySession(
-    phaseId: string,
+  async waitForCodonCompletionBySession(
+    codonId: string,
     timeout: number = 120000,
     afterTimestamp?: string,
-  ): Promise<PhaseCompletedEvent> {
+  ): Promise<CodonCompletedEvent> {
     const event = await this.waitForEvent(
-      "phase.completed",
+      "codon.completed",
       timeout,
       (e) => {
-        const completedEvent = e as PhaseCompletedEvent;
-        return completedEvent.data?.phaseId === phaseId;
+        const completedEvent = e as CodonCompletedEvent;
+        return completedEvent.data?.codonId === codonId;
       },
       afterTimestamp,
     );
 
-    return event as PhaseCompletedEvent;
+    return event as CodonCompletedEvent;
   }
 
-  getSessionId(phaseId: string): string | undefined {
-    return this.sessionIdMap.get(phaseId);
+  getSessionId(codonId: string): string | undefined {
+    return this.sessionIdMap.get(codonId);
   }
 
   clearSessionIds(): void {
@@ -150,9 +150,9 @@ class EnhancedTestWSClient extends TestWSClient {
   }
 }
 
-// ============================================================================
+// -------------
 // HELPER FUNCTIONS - File System Operations
-// ============================================================================
+// -------------
 
 /**
  * Recursively gets all file paths in a directory
@@ -170,7 +170,7 @@ async function getFilePaths(dir: string): Promise<string[]> {
 
 /**
  * Computes a hash for a directory's contents
- * Excludes .tadpole, data, and read_only_data_source directories
+ * Excludes .strandweave, data, and read_only_data_source directories
  */
 async function hashDirectory(dir: string): Promise<string> {
   if (!fs.existsSync(dir)) {
@@ -181,8 +181,8 @@ async function hashDirectory(dir: string): Promise<string> {
   const filePaths = allFilePaths.filter((filePath) => {
     const relativePath = path.relative(dir, filePath);
     return (
-      !relativePath.startsWith(`.tadpole${path.sep}`) &&
-      !relativePath.startsWith(".tadpole/") &&
+      !relativePath.startsWith(`.strandweave${path.sep}`) &&
+      !relativePath.startsWith(".strandweave/") &&
       !relativePath.startsWith(`data${path.sep}`) &&
       !relativePath.startsWith("data/") &&
       relativePath !== "data" &&
@@ -203,17 +203,17 @@ async function hashDirectory(dir: string): Promise<string> {
   return hash.digest("hex");
 }
 
-// ============================================================================
+// -------------
 // HELPER FUNCTIONS - Cost & State Analysis
-// ============================================================================
+// -------------
 
 /**
- * Reconstruct phase states from event stream
+ * Reconstruct codon states from event stream
  */
-function reconstructPhaseStatesFromEvents(events: ServerEvent[]): Map<
+function reconstructCodonStatesFromEvents(events: ServerEvent[]): Map<
   string,
   {
-    phaseId: string;
+    codonId: string;
     status: string;
     sessionId?: string;
     previousSessionId?: string;
@@ -221,36 +221,36 @@ function reconstructPhaseStatesFromEvents(events: ServerEvent[]): Map<
     assistantMessageCount: number;
   }
 > {
-  const phases = new Map();
+  const codons = new Map();
 
   for (const event of events) {
-    if (event.type === "phase.started") {
-      const data = event.data as PhaseStartedEvent["data"];
-      phases.set(data.phaseId, {
-        phaseId: data.phaseId,
+    if (event.type === "codon.started") {
+      const data = event.data as CodonStartedEvent["data"];
+      codons.set(data.codonId, {
+        codonId: data.codonId,
         status: "started",
         sessionId: data.sessionId,
         previousSessionId: data.previousSessionId,
         cost: 0,
         assistantMessageCount: 0,
       });
-    } else if (event.type === "phase.completed") {
-      const data = event.data as PhaseCompletedEvent["data"];
-      const phase = phases.get(data.phaseId);
-      if (phase) {
-        phase.status = data.success ? "completed" : "failed";
-        phase.cost = data.cost;
+    } else if (event.type === "codon.completed") {
+      const data = event.data as CodonCompletedEvent["data"];
+      const codon = codons.get(data.codonId);
+      if (codon) {
+        codon.status = data.success ? "completed" : "failed";
+        codon.cost = data.cost;
       }
     } else if (event.type === "assistant.action") {
       const data = event.data as AssistantActionEvent["data"];
-      const phase = phases.get(data.phaseId);
-      if (phase && data.action === "message") {
-        phase.assistantMessageCount++;
+      const codon = codons.get(data.codonId);
+      if (codon && data.action === "message") {
+        codon.assistantMessageCount++;
       }
     }
   }
 
-  return phases;
+  return codons;
 }
 
 /**
@@ -261,9 +261,9 @@ function isValidISO8601(timestamp: string): boolean {
   return date.toISOString() === timestamp;
 }
 
-// ============================================================================
+// -------------
 // SNAPSHOT CREATION
-// ============================================================================
+// -------------
 
 /**
  * Create a snapshot of the current execution state
@@ -284,7 +284,7 @@ async function createSnapshot(
   await fs.promises.cp(executionPath, snapshotPath, { recursive: true });
 
   // Get current state
-  const statePath = path.join(executionPath, ".tadpole/state.json");
+  const statePath = path.join(executionPath, ".strandweave/state.json");
   const state = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
   console.log(
     `${colors.gray}  State: ${state.runs.length} runs, current: ${state.currentRunId}${colors.reset}`,
@@ -318,9 +318,9 @@ async function createSnapshot(
   console.log(`${colors.green}✓ Snapshot created successfully${colors.reset}`);
 }
 
-// ============================================================================
+// -------------
 // MAIN EXECUTION FLOW
-// ============================================================================
+// -------------
 
 /**
  * Execute all rollback scenarios and create snapshots
@@ -348,6 +348,10 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   }
   console.log(`${colors.green}✓ Data source file exists: ${DATA_SOURCE_FILE}${colors.reset}`);
 
+  // Get a free port for this test run
+  const SERVER_PORT = await getFreePort();
+  console.log(`${colors.blue}Using dynamic port: ${SERVER_PORT}${colors.reset}`);
+
   // Start server
   console.log(`\n${colors.blue}Starting server with execution isolation...${colors.reset}`);
   const serverPath = path.resolve(
@@ -359,7 +363,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     "bun",
     [
       serverPath,
-      `--config=${PHASES_CONFIG}`,
+      `--config=${CODONS_CONFIG}`,
       `--port=${SERVER_PORT}`,
       `--data=${DATA_SOURCE_FILE}`,
       `--execution=${EXECUTION_DIR}`,
@@ -413,117 +417,117 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   expect(idleEvent.data.reason).toBe("startup");
   console.log(`${colors.green}✓ Server ready in idle mode${colors.reset}`);
 
-  // === SCENARIO 1: Run Phase 1-2, Skip Phase 3 ===
+  // === SCENARIO 1: Run Codon 1-2, Skip Codon 3 ===
   console.log(`\n${colors.blue}${"=".repeat(60)}${colors.reset}`);
-  console.log(`${colors.blue}SCENARIO 1: Run Phase 1-2, Skip Phase 3${colors.reset}`);
+  console.log(`${colors.blue}SCENARIO 1: Run Codon 1-2, Skip Codon 3${colors.reset}`);
   console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
-  // Run Phase 1
-  console.log(`${colors.blue}Starting Phase 1...${colors.reset}`);
-  const phase1StartTime = new Date().toISOString();
+  // Run Codon 1
+  console.log(`${colors.blue}Starting Codon 1...${colors.reset}`);
+  const codon1StartTime = new Date().toISOString();
 
   await testState.client.sendCommand({
     id: generateId(),
-    type: "phase.start",
-    data: { phaseId: PhaseId("phase-1") },
+    type: "codon.start",
+    data: { codonId: CodonId("codon-1") },
   });
 
-  const phase1Started = await (
+  const codon1Started = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseStartWithSession("phase-1", 30000, phase1StartTime);
+  ).waitForCodonStartWithSession("codon-1", 30000, codon1StartTime);
   console.log(
-    `${colors.green}✓ Phase 1 started (session: ${phase1Started.data.sessionId})${colors.reset}`,
+    `${colors.green}✓ Codon 1 started (session: ${codon1Started.data.sessionId})${colors.reset}`,
   );
 
-  const phase1Completed = await (
+  const codon1Completed = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseCompletionBySession("phase-1", 60000, phase1StartTime);
+  ).waitForCodonCompletionBySession("codon-1", 60000, codon1StartTime);
   console.log(
-    `${colors.green}✓ Phase 1 completed (cost: $${phase1Completed.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 1 completed (cost: $${codon1Completed.data.cost.toFixed(6)})${colors.reset}`,
   );
 
   await testState.client.waitForEvent("server.idle", 10000, (event) => {
     const idleEvent = event as ServerIdleEvent;
     return (
-      idleEvent.data?.reason === "phase-completed" && event.timestamp >= phase1Completed.timestamp
+      idleEvent.data?.reason === "codon-completed" && event.timestamp >= codon1Completed.timestamp
     );
   });
 
   await new Promise((resolve) => setTimeout(resolve, 1000));
 
-  // Run Phase 2
-  console.log(`\n${colors.blue}Starting Phase 2...${colors.reset}`);
-  const phase2StartTime = new Date().toISOString();
+  // Run Codon 2
+  console.log(`\n${colors.blue}Starting Codon 2...${colors.reset}`);
+  const codon2StartTime = new Date().toISOString();
 
   await testState.client.sendCommand({
     id: generateId(),
-    type: "phase.start",
-    data: { phaseId: PhaseId("phase-2") },
+    type: "codon.start",
+    data: { codonId: CodonId("codon-2") },
   });
 
-  const phase2Started = await (
+  const codon2Started = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseStartWithSession("phase-2", 30000, phase2StartTime);
+  ).waitForCodonStartWithSession("codon-2", 30000, codon2StartTime);
   console.log(
-    `${colors.green}✓ Phase 2 started (session: ${phase2Started.data.sessionId})${colors.reset}`,
+    `${colors.green}✓ Codon 2 started (session: ${codon2Started.data.sessionId})${colors.reset}`,
   );
 
-  const phase2Completed = await (
+  const codon2Completed = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseCompletionBySession("phase-2", 60000, phase2StartTime);
+  ).waitForCodonCompletionBySession("codon-2", 60000, codon2StartTime);
   console.log(
-    `${colors.green}✓ Phase 2 completed (cost: $${phase2Completed.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed.data.cost.toFixed(6)})${colors.reset}`,
   );
 
   await testState.client.waitForEvent("server.idle", 20000, (event) => {
     const idleEvent = event as ServerIdleEvent;
     return (
-      idleEvent.data?.reason === "phase-completed" && event.timestamp >= phase2Completed.timestamp
+      idleEvent.data?.reason === "codon-completed" && event.timestamp >= codon2Completed.timestamp
     );
   });
 
   await new Promise((resolve) => setTimeout(resolve, 1000));
 
-  // Start Phase 3 and skip it
-  console.log(`\n${colors.blue}Starting Phase 3 (will skip)...${colors.reset}`);
-  const phase3StartTime = new Date().toISOString();
+  // Start Codon 3 and skip it
+  console.log(`\n${colors.blue}Starting Codon 3 (will skip)...${colors.reset}`);
+  const codon3StartTime = new Date().toISOString();
 
   await testState.client.sendCommand({
     id: generateId(),
-    type: "phase.start",
-    data: { phaseId: PhaseId("phase-3") },
+    type: "codon.start",
+    data: { codonId: CodonId("codon-3") },
   });
 
-  const phase3Started = await (
+  const codon3Started = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseStartWithSession("phase-3", 30000, phase3StartTime);
+  ).waitForCodonStartWithSession("codon-3", 30000, codon3StartTime);
   console.log(
-    `${colors.green}✓ Phase 3 started (session: ${phase3Started.data.sessionId})${colors.reset}`,
+    `${colors.green}✓ Codon 3 started (session: ${codon3Started.data.sessionId})${colors.reset}`,
   );
 
   await testState.client.waitForEvent(
     "assistant.action",
     30000,
     (event) => event.type === "assistant.action",
-    phase3StartTime,
+    codon3StartTime,
   );
-  console.log(`${colors.gray}  Claude is active, now skipping phase${colors.reset}`);
+  console.log(`${colors.gray}  Claude is active, now skipping codon${colors.reset}`);
 
   await testState.client.sendCommand({
     id: generateId(),
-    type: "phase.skip",
+    type: "codon.skip",
   });
 
-  const phase3Skipped = await (
+  const codon3Skipped = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseCompletionBySession("phase-3", 10000, phase3StartTime);
-  expect(phase3Skipped.data.success).toBe(false);
-  console.log(`${colors.green}✓ Phase 3 skipped${colors.reset}`);
+  ).waitForCodonCompletionBySession("codon-3", 10000, codon3StartTime);
+  expect(codon3Skipped.data.success).toBe(false);
+  console.log(`${colors.green}✓ Codon 3 skipped${colors.reset}`);
 
   await testState.client.waitForEvent("server.idle", 10000, (event) => {
     const idleEvent = event as ServerIdleEvent;
     return (
-      idleEvent.data?.reason === "phase-completed" && event.timestamp >= phase3Skipped.timestamp
+      idleEvent.data?.reason === "codon-completed" && event.timestamp >= codon3Skipped.timestamp
     );
   });
 
@@ -534,16 +538,16 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     throw new Error("Execution path not set");
   }
   await createSnapshot(
-    "1-after-phase2-phase3-skipped",
+    "1-after-codon2-codon3-skipped",
     testState.executionPath,
     SNAPSHOT_DIR,
     testState.client,
     testState,
   );
 
-  // === SCENARIO 2: Rollback to Phase 1 ===
+  // === SCENARIO 2: Rollback to Codon 1 ===
   console.log(`\n${colors.blue}${"=".repeat(60)}${colors.reset}`);
-  console.log(`${colors.blue}SCENARIO 2: Rollback to Phase 1${colors.reset}`);
+  console.log(`${colors.blue}SCENARIO 2: Rollback to Codon 1${colors.reset}`);
   console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
   (testState.client as EnhancedTestWSClient).clearSessionIds();
@@ -562,14 +566,14 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     `${colors.green}✓ Found ${checkpointList1.data.checkpoints.length} checkpoints${colors.reset}`,
   );
 
-  console.log(`\n${colors.blue}Rolling back to Phase 1 completion...${colors.reset}`);
+  console.log(`\n${colors.blue}Rolling back to Codon 1 completion...${colors.reset}`);
   const rollbackCommandTime = new Date().toISOString();
 
   await testState.client.sendCommand({
     id: generateId(),
-    type: "rollback.toPhase",
+    type: "rollback.toCodon",
     data: {
-      phaseId: PhaseId("phase-1"),
+      codonId: CodonId("codon-1"),
       checkpointType: "completed",
       autoRestart: false,
     },
@@ -582,12 +586,12 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     rollbackCommandTime,
   )) as RollbackCompletedEvent;
   console.log(
-    `${colors.green}✓ Rolled back to ${rollback1.data.phaseName} (${rollback1.data.checkpointType})${colors.reset}`,
+    `${colors.green}✓ Rolled back to ${rollback1.data.codonName} (${rollback1.data.checkpointType})${colors.reset}`,
   );
 
   // SNAPSHOT 2
   await createSnapshot(
-    "2-after-rollback-to-phase1",
+    "2-after-rollback-to-codon1",
     testState.executionPath,
     SNAPSHOT_DIR,
     testState.client,
@@ -599,60 +603,60 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   console.log(`${colors.blue}SCENARIO 3: Continue from Rollback${colors.reset}`);
   console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
-  console.log(`\n${colors.blue}Starting Phase 2 manually...${colors.reset}`);
-  const phase2Scenario3StartTime = new Date().toISOString();
+  console.log(`\n${colors.blue}Starting Codon 2 manually...${colors.reset}`);
+  const codon2Scenario3StartTime = new Date().toISOString();
 
   await testState.client.sendCommand({
     id: generateId(),
-    type: "phase.start",
-    data: { phaseId: PhaseId("phase-2") },
+    type: "codon.start",
+    data: { codonId: CodonId("codon-2") },
   });
 
-  const phase2Started2 = await (
+  const codon2Started2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseStartWithSession("phase-2", 30000, phase2Scenario3StartTime);
+  ).waitForCodonStartWithSession("codon-2", 30000, codon2Scenario3StartTime);
   console.log(
-    `${colors.green}✓ Phase 2 started again (session: ${phase2Started2.data.sessionId})${colors.reset}`,
+    `${colors.green}✓ Codon 2 started again (session: ${codon2Started2.data.sessionId})${colors.reset}`,
   );
 
-  const phase2Completed2 = await (
+  const codon2Completed2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseCompletionBySession("phase-2", 60000, phase2Scenario3StartTime);
+  ).waitForCodonCompletionBySession("codon-2", 60000, codon2Scenario3StartTime);
   console.log(
-    `${colors.green}✓ Phase 2 completed (cost: $${phase2Completed2.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed2.data.cost.toFixed(6)})${colors.reset}`,
   );
 
   await testState.client.waitForEvent("server.idle", 10000, (event) => {
     const idleEvent = event as ServerIdleEvent;
     return (
-      idleEvent.data?.reason === "phase-completed" && event.timestamp >= phase2Completed2.timestamp
+      idleEvent.data?.reason === "codon-completed" && event.timestamp >= codon2Completed2.timestamp
     );
   });
 
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  // Run Phase 3 to completion
-  console.log(`\n${colors.blue}Starting Phase 3 (full run)...${colors.reset}`);
-  const phase3Scenario3StartTime = new Date().toISOString();
+  // Run Codon 3 to completion
+  console.log(`\n${colors.blue}Starting Codon 3 (full run)...${colors.reset}`);
+  const codon3Scenario3StartTime = new Date().toISOString();
 
   await testState.client.sendCommand({
     id: generateId(),
-    type: "phase.start",
-    data: { phaseId: PhaseId("phase-3") },
+    type: "codon.start",
+    data: { codonId: CodonId("codon-3") },
   });
 
-  const phase3Started2 = await (
+  const codon3Started2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseStartWithSession("phase-3", 30000, phase3Scenario3StartTime);
+  ).waitForCodonStartWithSession("codon-3", 30000, codon3Scenario3StartTime);
   console.log(
-    `${colors.green}✓ Phase 3 started (session: ${phase3Started2.data.sessionId})${colors.reset}`,
+    `${colors.green}✓ Codon 3 started (session: ${codon3Started2.data.sessionId})${colors.reset}`,
   );
 
-  const phase3Completed2 = await (
+  const codon3Completed2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForPhaseCompletionBySession("phase-3", 60000, phase3Scenario3StartTime);
+  ).waitForCodonCompletionBySession("codon-3", 60000, codon3Scenario3StartTime);
   console.log(
-    `${colors.green}✓ Phase 3 completed (cost: $${phase3Completed2.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 3 completed (cost: $${codon3Completed2.data.cost.toFixed(6)})${colors.reset}`,
   );
 
   // SNAPSHOT 3
@@ -689,7 +693,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const firstCheckpoint = sortedCheckpoints[0];
   console.log(
-    `${colors.gray}  Found first checkpoint: ${firstCheckpoint.phaseName} - ${firstCheckpoint.checkpointType}${colors.reset}`,
+    `${colors.gray}  Found first checkpoint: ${firstCheckpoint.codonName} - ${firstCheckpoint.checkpointType}${colors.reset}`,
   );
 
   console.log(`${colors.blue}Rolling back to the very beginning...${colors.reset}`);
@@ -713,7 +717,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     secondRollbackCommandTimestamp,
   )) as RollbackCompletedEvent;
   console.log(
-    `${colors.green}✓ Rolled back to ${rollback2.data.phaseName} (${rollback2.data.checkpointType})${colors.reset}`,
+    `${colors.green}✓ Rolled back to ${rollback2.data.codonName} (${rollback2.data.checkpointType})${colors.reset}`,
   );
 
   await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -766,9 +770,9 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   return testState.snapshots;
 }
 
-// ============================================================================
+// -------------
 // MAIN TEST SUITE
-// ============================================================================
+// -------------
 
 describe("Comprehensive Rollback E2E Test", () => {
   const testState: TestState = {
@@ -784,7 +788,7 @@ describe("Comprehensive Rollback E2E Test", () => {
 
     // Load git info for each snapshot for analysis tests
     for (const snapshot of testSnapshots) {
-      const gitDir = path.join(snapshot.directory, ".tadpole", "checkpoints", ".git");
+      const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
       if (fs.existsSync(gitDir)) {
         snapshot.git = {
           branches: [],
@@ -807,8 +811,8 @@ describe("Comprehensive Rollback E2E Test", () => {
         console.log(`\nVerifying snapshot: ${snapshot.name}`);
         expect(fs.existsSync(snapshot.directory)).toBe(true);
 
-        const tadpoleDir = path.join(snapshot.directory, ".tadpole");
-        expect(fs.existsSync(tadpoleDir)).toBe(true);
+        const strandweaveDir = path.join(snapshot.directory, ".strandweave");
+        expect(fs.existsSync(strandweaveDir)).toBe(true);
       });
     });
 
@@ -816,11 +820,11 @@ describe("Comprehensive Rollback E2E Test", () => {
       expect(testSnapshots.length).toBe(4);
 
       const snapshot1 = testSnapshots[0];
-      expect(snapshot1.name).toBe("1-after-phase2-phase3-skipped");
+      expect(snapshot1.name).toBe("1-after-codon2-codon3-skipped");
       expect(snapshot1.state.runs.length).toBe(1);
 
       const snapshot2 = testSnapshots[1];
-      expect(snapshot2.name).toBe("2-after-rollback-to-phase1");
+      expect(snapshot2.name).toBe("2-after-rollback-to-codon1");
       expect(snapshot2.state.runs.length).toBe(2);
 
       const snapshot3 = testSnapshots[2];
@@ -838,13 +842,11 @@ describe("Comprehensive Rollback E2E Test", () => {
       });
 
       const snapshot1Checkpoints = testSnapshots[0].checkpoints;
-      const hasWorkspaceSetup = snapshot1Checkpoints.some(
-        (cp) => cp.checkpointType === "workspace-setup",
-      );
+      const hasRigSetup = snapshot1Checkpoints.some((cp) => cp.checkpointType === "rig-setup");
       const hasCompleted = snapshot1Checkpoints.some((cp) => cp.checkpointType === "completed");
       const hasSkipped = snapshot1Checkpoints.some((cp) => cp.checkpointType === "skipped");
 
-      expect(hasWorkspaceSetup).toBe(true);
+      expect(hasRigSetup).toBe(true);
       expect(hasCompleted).toBe(true);
       expect(hasSkipped).toBe(true);
     });
@@ -856,8 +858,8 @@ describe("Comprehensive Rollback E2E Test", () => {
 
   describe("Priority 1: Critical Data Integrity & Core Rollback Logic", () => {
     test.each(testSnapshots)("1.1 State File Integrity: $name", (snapshot) => {
-      const statePath = path.join(snapshot.directory, ".tadpole", "state.json");
-      const backupPath = path.join(snapshot.directory, ".tadpole", "state.json.bak");
+      const statePath = path.join(snapshot.directory, ".strandweave", "state.json");
+      const backupPath = path.join(snapshot.directory, ".strandweave", "state.json.bak");
 
       expect(fs.existsSync(statePath)).toBe(true);
       expect(fs.existsSync(backupPath)).toBe(true);
@@ -874,7 +876,7 @@ describe("Comprehensive Rollback E2E Test", () => {
     });
 
     test.each(testSnapshots)("1.2 Git Repository Integrity: $name", (snapshot) => {
-      const gitDir = path.join(snapshot.directory, ".tadpole", "checkpoints", ".git");
+      const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
       expect(fs.existsSync(gitDir)).toBe(true);
 
       try {
@@ -888,15 +890,15 @@ describe("Comprehensive Rollback E2E Test", () => {
       const allCheckpointShas = new Set<string>();
 
       snapshot.state.runs.forEach((run: Run) => {
-        run.phases.forEach((phase) => {
-          if ("completionCheckpoint" in phase && phase.completionCheckpoint)
-            allCheckpointShas.add(phase.completionCheckpoint);
-          if ("errorCheckpoint" in phase && phase.errorCheckpoint)
-            allCheckpointShas.add(phase.errorCheckpoint);
-          if ("skipCheckpoint" in phase && phase.skipCheckpoint)
-            allCheckpointShas.add(phase.skipCheckpoint);
-          if ("workspaceSetupCheckpoint" in phase && phase.workspaceSetupCheckpoint)
-            allCheckpointShas.add(phase.workspaceSetupCheckpoint);
+        run.codons.forEach((codon) => {
+          if ("completionCheckpoint" in codon && codon.completionCheckpoint)
+            allCheckpointShas.add(codon.completionCheckpoint);
+          if ("errorCheckpoint" in codon && codon.errorCheckpoint)
+            allCheckpointShas.add(codon.errorCheckpoint);
+          if ("skipCheckpoint" in codon && codon.skipCheckpoint)
+            allCheckpointShas.add(codon.skipCheckpoint);
+          if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint)
+            allCheckpointShas.add(codon.rigSetupCheckpoint);
         });
       });
 
@@ -905,7 +907,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
 
       snapshot.state.runs.forEach((run) => {
-        const runFolder = path.join(snapshot.directory, ".tadpole", "runs", run.runId);
+        const runFolder = path.join(snapshot.directory, ".strandweave", "runs", run.runId);
         expect(fs.existsSync(runFolder)).toBe(true);
       });
     });
@@ -927,7 +929,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
       fs.mkdirSync(checkoutDir, { recursive: true });
 
-      const gitDir = path.join(snapshot1.directory, ".tadpole", "checkpoints", ".git");
+      const gitDir = path.join(snapshot1.directory, ".strandweave", "checkpoints", ".git");
       execSync(`git --git-dir=${gitDir} --work-tree=${checkoutDir} checkout ${targetSha} -- .`);
 
       const rolledBackHash = await hashDirectory(snapshot2.directory);
@@ -948,7 +950,7 @@ describe("Comprehensive Rollback E2E Test", () => {
 
       if (lastRun.startingConditions.type === "continuation") {
         expect(lastRun.startingConditions.source.runId).toBe(snapshot.state.runs[1].runId);
-        expect(lastRun.startingConditions.source.afterPhase).toBe(PhaseId("phase-1"));
+        expect(lastRun.startingConditions.source.afterCodon).toBe(CodonId("codon-1"));
       }
     });
   });
@@ -958,59 +960,59 @@ describe("Comprehensive Rollback E2E Test", () => {
   // ========================================================================
 
   describe("Priority 2: State Machine, Session & Costing Logic", () => {
-    test("2.1 Phase State Transitions: Skipped phase has correct data", () => {
+    test("2.1 Codon State Transitions: Skipped codon has correct data", () => {
       const snapshot = testSnapshots[0];
       const run = snapshot.state.runs[0];
-      const skippedPhase = run.phases.find((p) => p.phaseId === "phase-3");
+      const skippedCodon = run.codons.find((p) => p.codonId === "codon-3");
 
-      expect(skippedPhase?.status).toBe("skipped");
-      if (skippedPhase?.status === "skipped") {
-        expect(skippedPhase.assistantMessageCount).toBeGreaterThan(0);
-        expect(skippedPhase.skipCheckpoint).toBeDefined();
+      expect(skippedCodon?.status).toBe("skipped");
+      if (skippedCodon?.status === "skipped") {
+        expect(skippedCodon.assistantMessageCount).toBeGreaterThan(0);
+        expect(skippedCodon.skipCheckpoint).toBeDefined();
       }
     });
 
-    test("2.2 Session ID Chaining: Phase 2 continues from Phase 1", () => {
+    test("2.2 Session ID Chaining: Codon 2 continues from Codon 1", () => {
       const snapshot = testSnapshots[0];
 
-      const phase1Start = snapshot.events.find(
+      const codon1Start = snapshot.events.find(
         (e) =>
-          e.type === "phase.started" && (e.data as PhaseStartedEvent["data"]).phaseId === "phase-1",
-      ) as PhaseStartedEvent;
+          e.type === "codon.started" && (e.data as CodonStartedEvent["data"]).codonId === "codon-1",
+      ) as CodonStartedEvent;
 
-      const phase2Start = snapshot.events.find(
+      const codon2Start = snapshot.events.find(
         (e) =>
-          e.type === "phase.started" && (e.data as PhaseStartedEvent["data"]).phaseId === "phase-2",
-      ) as PhaseStartedEvent;
+          e.type === "codon.started" && (e.data as CodonStartedEvent["data"]).codonId === "codon-2",
+      ) as CodonStartedEvent;
 
-      expect(phase1Start).toBeDefined();
-      expect(phase2Start).toBeDefined();
-      expect(phase2Start.data.previousSessionId).toEqual(phase1Start.data.sessionId);
+      expect(codon1Start).toBeDefined();
+      expect(codon2Start).toBeDefined();
+      expect(codon2Start.data.previousSessionId).toEqual(codon1Start.data.sessionId);
     });
 
-    test("2.3 Cost Tracking Accuracy: Skipped phase cost is zero", () => {
+    test("2.3 Cost Tracking Accuracy: Skipped codon cost is zero", () => {
       const snapshot = testSnapshots[0];
 
-      const phase3Completed = snapshot.events.find(
+      const codon3Completed = snapshot.events.find(
         (e) =>
-          e.type === "phase.completed" &&
-          (e.data as PhaseCompletedEvent["data"]).phaseId === "phase-3",
-      ) as PhaseCompletedEvent;
+          e.type === "codon.completed" &&
+          (e.data as CodonCompletedEvent["data"]).codonId === "codon-3",
+      ) as CodonCompletedEvent;
 
-      expect(phase3Completed.data.cost).toBe(0);
+      expect(codon3Completed.data.cost).toBe(0);
     });
 
     test("2.4 Event Stream Reconciliation: Events match final state", () => {
       const snapshot = testSnapshots[0];
-      const reconstructedPhases = reconstructPhaseStatesFromEvents(snapshot.events);
+      const reconstructedCodons = reconstructCodonStatesFromEvents(snapshot.events);
 
       const run = snapshot.state.runs[0];
-      for (const phase of run.phases) {
-        const reconstructed = reconstructedPhases.get(phase.phaseId);
+      for (const codon of run.codons) {
+        const reconstructed = reconstructedCodons.get(codon.codonId);
         if (reconstructed) {
-          if (phase.status === "skipped") {
+          if (codon.status === "skipped") {
             expect(reconstructed.cost).toBe(0);
-          } else if (phase.status === "completed") {
+          } else if (codon.status === "completed") {
             expect(reconstructed.status).toBe("completed");
             expect(reconstructed.cost).toBeGreaterThan(0);
           }
@@ -1022,10 +1024,10 @@ describe("Comprehensive Rollback E2E Test", () => {
       const snapshot = testSnapshots[2];
       const run = snapshot.state.runs[0];
 
-      for (const phase of run.phases) {
-        if (phase.status === "completed") {
-          const expectedCost = calculateCostFromUsage(phase.finalTokens, "sonnet");
-          const actualCost = phase.finalCost;
+      for (const codon of run.codons) {
+        if (codon.status === "completed") {
+          const expectedCost = calculateCostFromUsage(codon.finalTokens, "sonnet");
+          const actualCost = codon.finalCost;
 
           const variance = Math.abs(actualCost - expectedCost) / expectedCost;
           expect(variance).toBeLessThan(0.2);
@@ -1042,7 +1044,7 @@ describe("Comprehensive Rollback E2E Test", () => {
   // ========================================================================
 
   describe("Priority 3: Filesystem & Artifact Validation", () => {
-    test("3.1 Phase Output File Presence: Correct files exist in each stage", () => {
+    test("3.1 Codon Output File Presence: Correct files exist in each stage", () => {
       const s1 = testSnapshots[0];
       const s3 = testSnapshots[2];
       const s4 = testSnapshots[3];
@@ -1059,14 +1061,14 @@ describe("Comprehensive Rollback E2E Test", () => {
 
     test.each(testSnapshots)("3.2 Orphaned Artifact Check: $name", (snapshot) => {
       const runIdsInState = new Set(snapshot.state.runs.map((r) => r.runId));
-      const runDirsOnDisk = fs.readdirSync(path.join(snapshot.directory, ".tadpole", "runs"));
+      const runDirsOnDisk = fs.readdirSync(path.join(snapshot.directory, ".strandweave", "runs"));
 
       for (const dir of runDirsOnDisk) {
         expect(runIdsInState.has(RunId(dir))).toBe(true);
       }
 
       for (const run of snapshot.state.runs) {
-        const runDir = path.join(snapshot.directory, ".tadpole", "runs", run.runId);
+        const runDir = path.join(snapshot.directory, ".strandweave", "runs", run.runId);
         expect(fs.existsSync(runDir)).toBe(true);
       }
     });
@@ -1077,57 +1079,57 @@ describe("Comprehensive Rollback E2E Test", () => {
       if (snapshot.checkpoints.length === 0) {
         const run = snapshot.state.runs[0];
 
-        const phase1 = run.phases.find((p) => p.phaseId === "phase-1");
-        expect(phase1?.status).toBe("completed");
-        if (phase1?.status === "completed") {
-          expect(phase1.completionCheckpoint).toBeDefined();
+        const codon1 = run.codons.find((p) => p.codonId === "codon-1");
+        expect(codon1?.status).toBe("completed");
+        if (codon1?.status === "completed") {
+          expect(codon1.completionCheckpoint).toBeDefined();
         }
 
-        const phase3 = run.phases.find((p) => p.phaseId === "phase-3");
-        expect(phase3?.status).toBe("skipped");
-        if (phase3?.status === "skipped" && "skipCheckpoint" in phase3) {
-          expect(phase3.skipCheckpoint).toBeDefined();
+        const codon3 = run.codons.find((p) => p.codonId === "codon-3");
+        expect(codon3?.status).toBe("skipped");
+        if (codon3?.status === "skipped" && "skipCheckpoint" in codon3) {
+          expect(codon3.skipCheckpoint).toBeDefined();
         }
         return;
       }
 
-      const p1checkpoints = snapshot.checkpoints.filter((cp) => cp.phaseId === "phase-1");
-      const p3checkpoints = snapshot.checkpoints.filter((cp) => cp.phaseId === "phase-3");
+      const p1checkpoints = snapshot.checkpoints.filter((cp) => cp.codonId === "codon-1");
+      const p3checkpoints = snapshot.checkpoints.filter((cp) => cp.codonId === "codon-3");
 
       expect(p1checkpoints.some((cp) => cp.checkpointType === "completed")).toBe(true);
       expect(p3checkpoints.some((cp) => cp.checkpointType === "skipped")).toBe(true);
 
       const aCheckpoint = snapshot.checkpoints[0];
-      const gitDir = path.join(snapshot.directory, ".tadpole", "checkpoints", ".git");
+      const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
       const msg = execSync(`git --git-dir=${gitDir} show -s --format=%B ${aCheckpoint.sha}`, {
         encoding: "utf-8",
       });
 
-      expect(msg).toContain(`Phase: ${aCheckpoint.phaseName}`);
+      expect(msg).toContain(`Codon: ${aCheckpoint.codonName}`);
       expect(msg).toContain(`Status: ${aCheckpoint.checkpointType}`);
     });
 
-    test("3.4 Log File Integrity: All phases have log files", () => {
+    test("3.4 Log File Integrity: All codons have log files", () => {
       for (const snapshot of testSnapshots) {
         for (const run of snapshot.state.runs) {
-          for (const phase of run.phases) {
-            if ("claudeLogPath" in phase && phase.claudeLogPath) {
-              const logPath = path.join(snapshot.directory, phase.claudeLogPath);
+          for (const codon of run.codons) {
+            if ("claudeLogPath" in codon && codon.claudeLogPath) {
+              const logPath = path.join(snapshot.directory, codon.claudeLogPath);
 
               if (
-                phase.status === "completed" ||
-                phase.status === "failed" ||
-                phase.status === "skipped"
+                codon.status === "completed" ||
+                codon.status === "failed" ||
+                codon.status === "skipped"
               ) {
                 let actualLogPath = logPath;
                 if (!fs.existsSync(logPath)) {
                   const runDir = path.dirname(logPath);
-                  const oldPattern = path.join(runDir, `phase-${phase.phaseId}-claude.log`);
+                  const oldPattern = path.join(runDir, `codon-${codon.codonId}-claude.log`);
                   if (fs.existsSync(oldPattern)) {
                     actualLogPath = oldPattern;
                   } else {
                     throw new Error(
-                      `Log file missing for ${phase.phaseId} in ${snapshot.name}: ${phase.claudeLogPath}`,
+                      `Log file missing for ${codon.codonId} in ${snapshot.name}: ${codon.claudeLogPath}`,
                     );
                   }
                 }
@@ -1181,7 +1183,7 @@ describe("Comprehensive Rollback E2E Test", () => {
               e.timestamp <= completedEvent.timestamp,
           ) as RollbackProgressEvent[];
 
-          const expectedProgressCount = startEvent.data.phasesToProcess.length + 1;
+          const expectedProgressCount = startEvent.data.codonsToProcess.length + 1;
           expect(progressEvents.length).toBe(expectedProgressCount);
 
           const steps = progressEvents.map((e) => e.data.currentStep);
@@ -1190,18 +1192,18 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
     });
 
-    test("4.3 Phase Event Completeness: Every started phase completes", () => {
+    test("4.3 Codon Event Completeness: Every started codon completes", () => {
       for (const snapshot of testSnapshots) {
-        const startedPhases = snapshot.events
-          .filter((e) => e.type === "phase.started")
-          .map((e) => (e as PhaseStartedEvent).data.phaseId);
+        const startedCodons = snapshot.events
+          .filter((e) => e.type === "codon.started")
+          .map((e) => (e as CodonStartedEvent).data.codonId);
 
-        const completedPhases = snapshot.events
-          .filter((e) => e.type === "phase.completed")
-          .map((e) => (e as PhaseCompletedEvent).data.phaseId);
+        const completedCodons = snapshot.events
+          .filter((e) => e.type === "codon.completed")
+          .map((e) => (e as CodonCompletedEvent).data.codonId);
 
-        for (const phaseId of startedPhases) {
-          expect(completedPhases).toContain(phaseId);
+        for (const codonId of startedCodons) {
+          expect(completedCodons).toContain(codonId);
         }
       }
     });
@@ -1223,7 +1225,7 @@ describe("Comprehensive Rollback E2E Test", () => {
     test("5.1 State-to-Filesystem Run Integrity", () => {
       for (const snapshot of testSnapshots) {
         for (const run of snapshot.state.runs) {
-          const expectedFolder = path.join(snapshot.directory, ".tadpole", "runs", run.runId);
+          const expectedFolder = path.join(snapshot.directory, ".strandweave", "runs", run.runId);
           expect(fs.existsSync(expectedFolder)).toBe(true);
         }
       }
@@ -1245,10 +1247,10 @@ describe("Comprehensive Rollback E2E Test", () => {
         const sessionIds = new Set<string>();
 
         for (const run of snapshot.state.runs) {
-          for (const phase of run.phases) {
-            if ("claudeSessionId" in phase && phase.claudeSessionId) {
-              expect(sessionIds.has(phase.claudeSessionId)).toBe(false);
-              sessionIds.add(phase.claudeSessionId);
+          for (const codon of run.codons) {
+            if ("claudeSessionId" in codon && codon.claudeSessionId) {
+              expect(sessionIds.has(codon.claudeSessionId)).toBe(false);
+              sessionIds.add(codon.claudeSessionId);
             }
           }
         }
@@ -1278,13 +1280,13 @@ describe("Comprehensive Rollback E2E Test", () => {
     test("6.1 Skip Behavior Preservation", () => {
       const snapshot = testSnapshots[0];
       const run = snapshot.state.runs[0];
-      const skippedPhase = run.phases.find((p) => p.phaseId === "phase-3");
+      const skippedCodon = run.codons.find((p) => p.codonId === "codon-3");
 
-      if (skippedPhase?.status === "skipped") {
-        expect("claudeSessionId" in skippedPhase && skippedPhase.claudeSessionId).toBeTruthy();
-        expect(skippedPhase.assistantMessageCount).toBeGreaterThan(0);
-        expect("partialCost" in skippedPhase).toBe(true);
-        expect("partialTokens" in skippedPhase).toBe(true);
+      if (skippedCodon?.status === "skipped") {
+        expect("claudeSessionId" in skippedCodon && skippedCodon.claudeSessionId).toBeTruthy();
+        expect(skippedCodon.assistantMessageCount).toBeGreaterThan(0);
+        expect("partialCost" in skippedCodon).toBe(true);
+        expect("partialTokens" in skippedCodon).toBe(true);
       }
     });
 
@@ -1297,7 +1299,7 @@ describe("Comprehensive Rollback E2E Test", () => {
         expect(Array.isArray(snapshot.state.runs)).toBe(true);
         expect(snapshot.state.runs.length).toBeGreaterThan(0);
 
-        const gitDir = path.join(snapshot.directory, ".tadpole", "checkpoints", ".git");
+        const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
         expect(fs.existsSync(gitDir)).toBe(true);
       }
     });
@@ -1320,8 +1322,15 @@ describe("Comprehensive Rollback E2E Test", () => {
   // ========================================================================
 
   describe("Priority 7: Additional Validation Tests", () => {
-    test("7.1 Resource Cleanup: Lock files removed", () => {
-      const mainLockFilePath = path.join(EXECUTION_DIR, ".tadpole", "server.lock");
+    test("7.1 Resource Cleanup: Lock files removed", async () => {
+      const mainLockFilePath = path.join(EXECUTION_DIR, ".strandweave", "runtime.lock");
+
+      // Poll for lock file removal (up to 2 seconds)
+      for (let i = 0; i < 20; i++) {
+        if (!fs.existsSync(mainLockFilePath)) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
       expect(fs.existsSync(mainLockFilePath)).toBe(false);
     });
 
@@ -1329,7 +1338,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       const stateSizes: Array<{ name: string; size: number }> = [];
 
       for (const snapshot of testSnapshots) {
-        const statePath = path.join(snapshot.directory, ".tadpole", "state.json");
+        const statePath = path.join(snapshot.directory, ".strandweave", "state.json");
         if (fs.existsSync(statePath)) {
           const stats = fs.statSync(statePath);
           stateSizes.push({ name: snapshot.name, size: stats.size });
@@ -1343,31 +1352,31 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
     });
 
-    test("7.3 Configuration Consistency: Phase configs valid", () => {
-      const expectedPhases = ["phase-1", "phase-2", "phase-3"];
+    test("7.3 Configuration Consistency: Codon configs valid", () => {
+      const expectedCodons = ["codon-1", "codon-2", "codon-3"];
 
       for (const snapshot of testSnapshots) {
         for (const run of snapshot.state.runs) {
-          const phaseIds = run.phases.map((p) => p.phaseId);
-          for (const expectedPhase of expectedPhases) {
-            if (phaseIds.includes(PhaseId(expectedPhase))) {
-              const phase = run.phases.find((p) => p.phaseId === PhaseId(expectedPhase));
-              expect(phase).toBeDefined();
+          const codonIds = run.codons.map((p) => p.codonId);
+          for (const expectedCodon of expectedCodons) {
+            if (codonIds.includes(CodonId(expectedCodon))) {
+              const codon = run.codons.find((p) => p.codonId === CodonId(expectedCodon));
+              expect(codon).toBeDefined();
             }
           }
         }
       }
     });
 
-    test("7.4 Workspace Setup Validation", () => {
+    test("7.4 Rig Setup Validation", () => {
       const snapshot1 = testSnapshots[0];
       const snapshot3 = testSnapshots[2];
       const snapshot4 = testSnapshots[3];
 
       const run1 = snapshot1.state.runs[0];
-      const phase3_s1 = run1.phases.find((p) => p.phaseId === "phase-3");
-      if (phase3_s1?.status === "skipped" && "workspaceSetupCheckpoint" in phase3_s1) {
-        expect(phase3_s1.workspaceSetupCheckpoint).toBeDefined();
+      const codon3_s1 = run1.codons.find((p) => p.codonId === "codon-3");
+      if (codon3_s1?.status === "skipped" && "rigSetupCheckpoint" in codon3_s1) {
+        expect(codon3_s1.rigSetupCheckpoint).toBeDefined();
         expect(fs.existsSync(path.join(snapshot1.directory, "typescript_code"))).toBe(true);
       }
 
@@ -1381,9 +1390,9 @@ describe("Comprehensive Rollback E2E Test", () => {
     test("7.5 Token Usage Patterns: Reasonable ratios", () => {
       for (const snapshot of testSnapshots) {
         for (const run of snapshot.state.runs) {
-          for (const phase of run.phases) {
-            if (phase.status === "completed") {
-              const tokens = phase.finalTokens;
+          for (const codon of run.codons) {
+            if (codon.status === "completed") {
+              const tokens = codon.finalTokens;
 
               expect(tokens.inputTokens).toBeGreaterThan(0);
               expect(tokens.outputTokens).toBeGreaterThan(0);
@@ -1491,24 +1500,24 @@ describe("Comprehensive Rollback E2E Test", () => {
   });
 
   // ========================================================================
-  // PRIORITY 8: Chronicler Rollback Behavior
+  // PRIORITY 8: Sentinel Rollback Behavior
   // ========================================================================
 
-  describe("Priority 8: Chronicler Rollback Behavior", () => {
-    test("8.1 Chronicler Outputs Persist Across Rollbacks", () => {
-      // Chroniclers are observers - their outputs should NOT be rolled back
+  describe("Priority 8: Sentinel Rollback Behavior", () => {
+    test("8.1 Sentinel Outputs Persist Across Rollbacks", () => {
+      // Sentinels are observers - their outputs should NOT be rolled back
       // They're observational logs, not part of execution state
 
       for (const snapshot of testSnapshots) {
-        const outputsDir = path.join(snapshot.directory, ".tadpole", "chronicler-outputs");
+        const outputsDir = path.join(snapshot.directory, ".strandweave", "sentinel-outputs");
 
         if (fs.existsSync(outputsDir)) {
-          // If chroniclers exist, their outputs should accumulate, never delete
-          const chroniclerDirs = fs.readdirSync(outputsDir);
+          // If sentinels exist, their outputs should accumulate, never delete
+          const sentinelDirs = fs.readdirSync(outputsDir);
 
-          for (const chrDir of chroniclerDirs) {
-            const chrOutputPath = path.join(outputsDir, chrDir);
-            const files = fs.readdirSync(chrOutputPath);
+          for (const sentinelDir of sentinelDirs) {
+            const sentinelOutputPath = path.join(outputsDir, sentinelDir);
+            const files = fs.readdirSync(sentinelOutputPath);
 
             // Each file should have unique timestamp (no overwriting)
             const timestamps = files
@@ -1523,45 +1532,45 @@ describe("Comprehensive Rollback E2E Test", () => {
             expect(uniqueTimestamps.size).toBe(timestamps.length);
 
             console.log(
-              `Chronicler ${chrDir}: ${files.length} output files with unique timestamps`,
+              `Sentinel ${sentinelDir}: ${files.length} output files with unique timestamps`,
             );
           }
         }
       }
     });
 
-    test("8.2 Chronicler State Separated Per Run", () => {
-      // Each run should have its own chronicler state entries
-      // Rollback creates a new run with fresh chronicler instances
+    test("8.2 Sentinel State Separated Per Run", () => {
+      // Each run should have its own sentinel state entries
+      // Rollback creates a new run with fresh sentinel instances
 
       for (const snapshot of testSnapshots) {
         for (const run of snapshot.state.runs) {
-          const phasesWithChroniclers = run.phases.filter(
+          const codonsWithSentinels = run.codons.filter(
             (p) =>
               (p.status === "completed" || p.status === "failed" || p.status === "skipped") &&
-              p.chroniclers,
+              p.sentinels,
           );
 
-          if (phasesWithChroniclers.length > 0) {
-            for (const phase of phasesWithChroniclers) {
+          if (codonsWithSentinels.length > 0) {
+            for (const codon of codonsWithSentinels) {
               if (
-                phase.status === "completed" ||
-                phase.status === "failed" ||
-                phase.status === "skipped"
+                codon.status === "completed" ||
+                codon.status === "failed" ||
+                codon.status === "skipped"
               ) {
-                expect(phase.chroniclers).toBeDefined();
-                if (phase.chroniclers) {
-                  expect(phase.chroniclers.executed).toBeDefined();
+                expect(codon.sentinels).toBeDefined();
+                if (codon.sentinels) {
+                  expect(codon.sentinels.executed).toBeDefined();
                 }
 
-                // Each chronicler state should have unique timestamps for this run
-                for (const chrState of phase.chroniclers?.executed ?? []) {
-                  expect(chrState.loadedAt).toBeDefined();
+                // Each sentinel state should have unique timestamps for this run
+                for (const sentinelState of codon.sentinels?.executed ?? []) {
+                  expect(sentinelState.loadedAt).toBeDefined();
                   // Status can be "active" or "unloaded" depending on timing
-                  expect(["active", "unloaded"]).toContain(chrState.status);
-                  // unloadReason only exists for unloaded chroniclers
-                  if (chrState.status === "unloaded") {
-                    expect(chrState.unloadReason).toBeDefined();
+                  expect(["active", "unloaded"]).toContain(sentinelState.status);
+                  // unloadReason only exists for unloaded sentinels
+                  if (sentinelState.status === "unloaded") {
+                    expect(sentinelState.unloadReason).toBeDefined();
                   }
                 }
               }
@@ -1572,18 +1581,18 @@ describe("Comprehensive Rollback E2E Test", () => {
     });
 
     test("8.3 Conversational History Survives Rollback", () => {
-      // Conversational chroniclers save history to disk
+      // Conversational sentinels save history to disk
       // These files should persist across rollbacks
 
       for (const snapshot of testSnapshots) {
-        const chroniclersDir = path.join(snapshot.directory, ".tadpole", "chroniclers");
+        const sentinelsDir = path.join(snapshot.directory, ".strandweave", "sentinels");
 
-        if (fs.existsSync(chroniclersDir)) {
-          const historyFiles = fs.readdirSync(chroniclersDir).filter((f) => f.endsWith(".json"));
+        if (fs.existsSync(sentinelsDir)) {
+          const historyFiles = fs.readdirSync(sentinelsDir).filter((f) => f.endsWith(".json"));
 
           // History files should exist and be valid JSON
           for (const histFile of historyFiles) {
-            const histPath = path.join(chroniclersDir, histFile);
+            const histPath = path.join(sentinelsDir, histFile);
             const content = fs.readFileSync(histPath, "utf-8");
 
             expect(() => JSON.parse(content)).not.toThrow();
@@ -1600,58 +1609,58 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
     });
 
-    test("8.4 Chronicler Costs Independent Per Run", () => {
-      // Each run's chronicler costs should be separate
+    test("8.4 Sentinel Costs Independent Per Run", () => {
+      // Each run's sentinel costs should be separate
       // Costs don't carry over or accumulate across rollbacks
 
-      const runsWithChroniclers = testSnapshots.flatMap((s) =>
+      const runsWithSentinels = testSnapshots.flatMap((s) =>
         s.state.runs.filter((r) =>
-          r.phases.some(
+          r.codons.some(
             (p) =>
               (p.status === "completed" || p.status === "failed" || p.status === "skipped") &&
-              p.chroniclers,
+              p.sentinels,
           ),
         ),
       );
 
-      if (runsWithChroniclers.length > 1) {
+      if (runsWithSentinels.length > 1) {
         // Verify each run has independent cost tracking
-        for (const run of runsWithChroniclers) {
-          for (const phase of run.phases) {
+        for (const run of runsWithSentinels) {
+          for (const codon of run.codons) {
             if (
-              (phase.status === "completed" ||
-                phase.status === "failed" ||
-                phase.status === "skipped") &&
-              phase.chroniclers
+              (codon.status === "completed" ||
+                codon.status === "failed" ||
+                codon.status === "skipped") &&
+              codon.sentinels
             ) {
-              // Chronicler costs should be >= 0 and independent
-              expect(phase.chroniclers.totalCost).toBeGreaterThanOrEqual(0);
+              // Sentinel costs should be >= 0 and independent
+              expect(codon.sentinels.totalCost).toBeGreaterThanOrEqual(0);
 
               // Individual costs should sum to total
-              const sum = phase.chroniclers.executed.reduce((acc, chr) => acc + chr.totalCost, 0);
-              expect(Math.abs(sum - phase.chroniclers.totalCost)).toBeLessThan(0.000001);
+              const sum = codon.sentinels.executed.reduce((acc, chr) => acc + chr.totalCost, 0);
+              expect(Math.abs(sum - codon.sentinels.totalCost)).toBeLessThan(0.000001);
             }
           }
         }
       }
     });
 
-    test("8.5 Chronicler Unload Events on Rollback", () => {
-      // When a run completes/fails, chroniclers should unload with phase-complete reason
+    test("8.5 Sentinel Unload Events on Rollback", () => {
+      // When a run completes/fails, sentinels should unload with codon-complete reason
       // This should happen even during rollback scenarios
 
       for (const snapshot of testSnapshots) {
-        const unloadEvents = snapshot.events.filter((e) => e.type === "chronicler.unloaded");
+        const unloadEvents = snapshot.events.filter((e) => e.type === "sentinel.unloaded");
 
         if (unloadEvents.length > 0) {
           for (const event of unloadEvents) {
-            // Type narrow to ChroniclerUnloadedEvent
-            if (event.type === "chronicler.unloaded") {
+            // Type narrow to SentinelUnloadedEvent
+            if (event.type === "sentinel.unloaded") {
               const data = event.data;
 
               // Should have valid unload reason
               expect([
-                "phase-complete",
+                "codon-complete",
                 "fatal-error",
                 "consecutive-failures",
                 "shutdown",
@@ -1663,7 +1672,7 @@ describe("Comprehensive Rollback E2E Test", () => {
             }
           }
 
-          console.log(`${snapshot.name}: ${unloadEvents.length} chronicler unload event(s)`);
+          console.log(`${snapshot.name}: ${unloadEvents.length} sentinel unload event(s)`);
         }
       }
     });

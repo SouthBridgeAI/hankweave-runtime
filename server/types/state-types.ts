@@ -1,22 +1,22 @@
-// ============================================================================
-// Tadpole State Management Types
-// ============================================================================
+// -------------
+// Strandweave State Management Types
+// -------------
 
-import type { PhaseId, RunId, SessionId } from "./branded-types.js";
+import type { CodonId, RunId, SessionId } from "./branded-types.js";
 import type { FailureReason, TokenUsage } from "./types.js";
 
 // Re-export types for use in other modules
-export type { PhaseId, RunId, SessionId, FailureReason, TokenUsage };
+export type { CodonId, RunId, SessionId, FailureReason, TokenUsage };
 
-// ============================================================================
-// Chronicler State
-// ============================================================================
+// -------------
+// Sentinel State
+// -------------
 
 /**
- * State tracking for a single chronicler within a phase.
- * Mutable structure updated in-place during phase execution.
+ * State tracking for a single sentinel within a codon.
+ * Mutable structure updated in-place during codon execution.
  */
-export interface ChroniclerState {
+export interface SentinelState {
   id: string;
   model: string;
   loadedAt: string;
@@ -27,62 +27,72 @@ export interface ChroniclerState {
   totalTriggers: number;
   totalCost: number;
   status: "active" | "unloaded";
-  unloadReason?: "phase-complete" | "fatal-error" | "consecutive-failures";
+  unloadReason?: "codon-complete" | "fatal-error" | "consecutive-failures";
 }
 
-// ============================================================================
-// Phase Execution States - Discriminated Union
-// ============================================================================
+// -------------
+// Codon Execution States - Discriminated Union
+// -------------
 
 /**
- * Phase execution status progression.
+ * Codon execution status progression.
  *
- * Normal flow: preparing → starting → initializing → running → completing-chroniclers → completed
+ * Normal flow: preparing → starting → initializing → running → completing-sentinels → completed
  * Can skip to "failed" or "skipped" from any non-terminal state.
  *
  * Intent: Track granular progress for better crash recovery and user feedback.
  */
-export type PhaseStatus =
-  | "preparing" // Workspace setup running (copy files, run commands)
+export type CodonStatus =
+  | "preparing" // Rig setup running (copy files, run commands)
   | "starting" // Spawning Claude process
   | "initializing" // Process started, waiting for session ID
   | "running" // Claude is working (have session ID)
-  | "completing-chroniclers" // Completing chronicler work (draining queues)
+  | "completing-sentinels" // Completing sentinel work (draining queues)
   | "completed" // Success - terminal state
   | "failed" // Failed - terminal state
   | "skipped"; // User skipped - terminal state
 
 /**
- * Base properties shared by all phase states.
- * These are set when the phase starts and never change.
+ * Base properties shared by all codon states.
+ * These are set when the codon starts and never change.
  */
-interface BasePhase {
+interface BaseCodon {
   /**
-   * Which phase configuration this execution is for.
-   * References the phase in phases.json.
+   * Which codon configuration this execution is for.
+   * References the codon in codon-sequence.json.
    *
-   * Used by: UI to show phase name, state queries for phase history
+   * Used by: UI to show codon name, state queries for codon history
    */
-  phaseId: PhaseId;
+  codonId: CodonId;
 
   /**
-   * When this phase execution started.
+   * When this codon execution started.
    * ISO 8601 timestamp.
    *
    * Used by: Duration calculations, UI timeline display
    */
   startTime: string;
+
+  /**
+   * Loop context if this codon is part of a loop iteration.
+   * Used for resuming loops after interruption and rollback.
+   */
+  loopContext?: {
+    loopId: CodonId; // ID of the loop this codon belongs to
+    iteration: number; // Which iteration (0-indexed: 0 = first, 1 = second, etc.)
+    codonIndexInLoop: number; // Position within loop.codons array
+  };
 }
 
 /**
- * Phase is preparing workspace (running workspace setup operations).
+ * Codon is preparing rig (running rig setup operations).
  *
  * Next states:
- * - starting: Workspace setup succeeded
+ * - starting: Rig setup succeeded
  * - failed: Copy failed, command failed, etc.
  * - skipped: User skipped during prep
  */
-export interface PreparingPhase extends BasePhase {
+export interface PreparingCodon extends BaseCodon {
   status: "preparing";
   // No Claude info yet - process not started
   // No costs yet - Claude not running
@@ -96,24 +106,24 @@ export interface PreparingPhase extends BasePhase {
  * - failed: Spawn failed (Claude not found, etc.)
  * - skipped: User skipped during startup
  */
-export interface StartingPhase extends BasePhase {
+export interface StartingCodon extends BaseCodon {
   status: "starting";
 
   /**
-   * Git commit SHA after workspace setup completed.
-   * Only set if phase config has workspaceSetup operations.
+   * Git commit SHA after rig setup completed.
+   * Only set if codon config has rigSetup operations.
    *
    * Used by: Rollback to know exact state after setup
-   * Edge case: May be undefined if no workspace setup configured
+   * Edge case: May be undefined if no rig setup configured
    */
-  workspaceSetupCheckpoint?: string;
+  rigSetupCheckpoint?: string;
 
   /**
-   * Chroniclers loaded for this phase.
-   * Set after chroniclers load during starting state.
+   * Sentinels loaded for this codon.
+   * Set after sentinels load during starting state.
    */
-  chroniclers?: {
-    loaded: ChroniclerState[];
+  sentinels?: {
+    loaded: SentinelState[];
     totalCost: number;
   };
 }
@@ -127,9 +137,9 @@ export interface StartingPhase extends BasePhase {
  * - failed: Process crashed before init
  * - skipped: User skipped during init
  */
-export interface InitializingPhase extends BasePhase {
+export interface InitializingCodon extends BaseCodon {
   status: "initializing";
-  workspaceSetupCheckpoint?: string;
+  rigSetupCheckpoint?: string;
 
   /**
    * Claude process ID for monitoring/cleanup.
@@ -141,27 +151,27 @@ export interface InitializingPhase extends BasePhase {
 
   /**
    * Path to Claude's JSONL log file.
-   * Relative to .tadpole directory.
-   * Example: "runs/1234-abc/phase-research-claude.log"
+   * Relative to .strandweave directory.
+   * Example: "runs/1234-abc/codon-research-claude.log"
    *
    * Used by: Log parser, debugging, cleanup
    */
   claudeLogPath: string;
 
   /**
-   * Session ID from previous phase if continuing.
-   * Only set if phase has continueFromPrevious: true.
+   * Session ID from previous codon if continuing.
+   * Only set if codon has continueFromPrevious: true.
    *
    * Used by: Claude CLI --resume flag
    */
   previousSessionId?: SessionId;
 
   /**
-   * Chroniclers loaded for this phase.
+   * Sentinels loaded for this codon.
    * Optional field added during starting state, carried forward to initializing.
    */
-  chroniclers?: {
-    loaded: ChroniclerState[];
+  sentinels?: {
+    loaded: SentinelState[];
     totalCost: number;
   };
 }
@@ -175,14 +185,14 @@ export interface InitializingPhase extends BasePhase {
  * - failed: Timeout, API error, crash
  * - skipped: User skipped
  */
-export interface RunningPhase extends BasePhase {
+export interface RunningCodon extends BaseCodon {
   status: "running";
-  workspaceSetupCheckpoint?: string;
+  rigSetupCheckpoint?: string;
   claudePid: number;
 
   /**
    * Claude's session UUID from init message.
-   * Required for continuation in later phases.
+   * Required for continuation in later codons.
    *
    * Used by: Continue functionality, logs correlation
    */
@@ -210,29 +220,29 @@ export interface RunningPhase extends BasePhase {
   /**
    * Number of assistant messages received.
    * Used to determine if Claude has established a conversation.
-   * Initialized to 0 when phase enters running state.
+   * Initialized to 0 when codon enters running state.
    *
    * Used by: Continue functionality to check if session is valid
    */
   assistantMessageCount: number;
 
   /**
-   * Chroniclers loaded for this phase.
+   * Sentinels loaded for this codon.
    * Updated in-place during execution.
    */
-  chroniclers?: {
-    loaded: ChroniclerState[];
+  sentinels?: {
+    loaded: SentinelState[];
     totalCost: number;
   };
 }
 
 /**
- * Phase is completing chronicler work.
+ * Codon is completing sentinel work.
  * Transient state between agent completion and final state.
  *
  * This state indicates:
  * - Main Claude agent has finished (process exited)
- * - Chronicler queues are being drained
+ * - Sentinel queues are being drained
  * - All pending LLM calls are completing
  * - Output files are being finalized
  *
@@ -241,9 +251,9 @@ export interface RunningPhase extends BasePhase {
  * - failed: Checkpoint creation failed
  * - skipped: Should not normally happen from this state
  */
-export interface CompletingChroniclersPhase extends BasePhase {
-  status: "completing-chroniclers";
-  workspaceSetupCheckpoint?: string;
+export interface CompletingSentinelsCodon extends BaseCodon {
+  status: "completing-sentinels";
+  rigSetupCheckpoint?: string;
   claudePid: number;
   claudeSessionId: SessionId;
   claudeLogPath: string;
@@ -267,30 +277,30 @@ export interface CompletingChroniclersPhase extends BasePhase {
   assistantMessageCount: number;
 
   /**
-   * Chroniclers being completed.
+   * Sentinels being completed.
    * States are updated in-place as work completes.
    */
-  chroniclers?: {
-    loaded: ChroniclerState[];
+  sentinels?: {
+    loaded: SentinelState[];
     totalCost: number;
   };
 }
 
-// ============================================================================
+// -------------
 // Terminal States - Immutable once reached
-// ============================================================================
+// -------------
 
 /**
- * Phase completed successfully.
+ * Codon completed successfully.
  * This is a terminal state - no further transitions possible.
  *
  * Immutability: All fields are final. To retry, start a new run.
  */
-export interface CompletedPhase extends BasePhase {
+export interface CompletedCodon extends BaseCodon {
   status: "completed";
 
   /**
-   * When phase completed. Used for duration calculation.
+   * When codon completed. Used for duration calculation.
    */
   endTime: string;
 
@@ -308,7 +318,7 @@ export interface CompletedPhase extends BasePhase {
 
   /**
    * Final cost from result message or last token update.
-   * This is the authoritative cost for this phase.
+   * This is the authoritative cost for this codon.
    *
    * Used by: Billing, cost reports
    * Edge case: May be from token updates if result message timed out
@@ -331,31 +341,31 @@ export interface CompletedPhase extends BasePhase {
   resultMessageReceived: boolean;
 
   // Checkpoints
-  workspaceSetupCheckpoint?: string;
+  rigSetupCheckpoint?: string;
 
   /**
    * Git commit after successful completion.
-   * Always created for successful phases.
+   * Always created for successful codons.
    *
    * Used by: Rollback target points
    */
   completionCheckpoint: string;
 
   /**
-   * Chroniclers that executed during this phase (final state).
-   * Field renamed from 'loaded' to 'executed' when phase completes.
+   * Sentinels that executed during this codon (final state).
+   * Field renamed from 'loaded' to 'executed' when codon completes.
    */
-  chroniclers?: {
-    executed: ChroniclerState[];
+  sentinels?: {
+    executed: SentinelState[];
     totalCost: number;
   };
 }
 
 /**
- * Phase failed with error.
+ * Codon failed with error.
  * Terminal state - must start new run to retry.
  */
-export interface FailedPhase extends BasePhase {
+export interface FailedCodon extends BaseCodon {
   status: "failed";
   endTime: string;
 
@@ -364,10 +374,10 @@ export interface FailedPhase extends BasePhase {
    * Helps understand how far we got.
    *
    * Used by: Error analysis, retry strategies
-   * Example: "preparing" means workspace setup failed
-   * Note: Can include "completing-chroniclers" if checkpoint creation fails during that phase
+   * Example: "preparing" means rig setup failed
+   * Note: Can include "completing-sentinels" if checkpoint creation fails during that codon
    */
-  failedDuring: "preparing" | "starting" | "initializing" | "running" | "completing-chroniclers";
+  failedDuring: "preparing" | "starting" | "initializing" | "running" | "completing-sentinels";
 
   // Claude info - only set if we got that far
   claudePid?: number;
@@ -403,7 +413,7 @@ export interface FailedPhase extends BasePhase {
   partialTokens: TokenUsage;
 
   // Checkpoints
-  workspaceSetupCheckpoint?: string;
+  rigSetupCheckpoint?: string;
 
   /**
    * Error checkpoint if created.
@@ -414,19 +424,19 @@ export interface FailedPhase extends BasePhase {
   errorCheckpoint?: string;
 
   /**
-   * Chroniclers that executed before failure.
+   * Sentinels that executed before failure.
    */
-  chroniclers?: {
-    executed: ChroniclerState[];
+  sentinels?: {
+    executed: SentinelState[];
     totalCost: number;
   };
 }
 
 /**
- * Phase was skipped by user.
+ * Codon was skipped by user.
  * Terminal state - represents user choice to skip.
  */
-export interface SkippedPhase extends BasePhase {
+export interface SkippedCodon extends BaseCodon {
   status: "skipped";
   endTime: string;
 
@@ -465,7 +475,7 @@ export interface SkippedPhase extends BasePhase {
   assistantMessageCount?: number;
 
   // Checkpoints
-  workspaceSetupCheckpoint?: string;
+  rigSetupCheckpoint?: string;
 
   /**
    * Skip checkpoint if any files were being tracked.
@@ -476,31 +486,31 @@ export interface SkippedPhase extends BasePhase {
   skipCheckpoint?: string;
 
   /**
-   * Chroniclers that executed before skip.
+   * Sentinels that executed before skip.
    */
-  chroniclers?: {
-    executed: ChroniclerState[];
+  sentinels?: {
+    executed: SentinelState[];
     totalCost: number;
   };
 }
 
 /**
- * Union of all possible phase states.
+ * Union of all possible codon states.
  * Use discriminated union on `status` field for type narrowing.
  */
-export type PhaseExecution =
-  | PreparingPhase
-  | StartingPhase
-  | InitializingPhase
-  | RunningPhase
-  | CompletingChroniclersPhase
-  | CompletedPhase
-  | FailedPhase
-  | SkippedPhase;
+export type CodonExecution =
+  | PreparingCodon
+  | StartingCodon
+  | InitializingCodon
+  | RunningCodon
+  | CompletingSentinelsCodon
+  | CompletedCodon
+  | FailedCodon
+  | SkippedCodon;
 
-// ============================================================================
+// -------------
 // Run State
-// ============================================================================
+// -------------
 
 /**
  * Represents one server lifecycle (start → shutdown).
@@ -517,7 +527,7 @@ export interface Run {
 
   /**
    * Absolute path where run files are stored.
-   * Example: "/project/.tadpole/runs/1234-abc"
+   * Example: "/project/.strandweave/runs/1234-abc"
    *
    * Used by: Log file storage, cleanup operations
    * Edge case: Folder might not exist if run failed early
@@ -541,19 +551,19 @@ export interface Run {
   startingConditions: StartingConditions;
 
   /**
-   * Ordered list of phase executions in this run.
-   * Append-only - new phases added as they start.
+   * Ordered list of codon executions in this run.
+   * Append-only - new codons added as they start.
    *
    * Used by: Progress tracking, cost calculation
-   * Invariant: Only one phase can be non-terminal at a time
+   * Invariant: Only one codon can be non-terminal at a time
    */
-  phases: PhaseExecution[];
+  codons: CodonExecution[];
 
   /**
    * Overall run status.
    * - running: Currently executing
-   * - completed: All phases done successfully
-   * - failed: Stopped due to phase failure
+   * - completed: All codons done successfully
+   * - failed: Stopped due to codon failure
    * - crashed: Detected on recovery
    *
    * Used by: Run selection, cleanup decisions
@@ -598,13 +608,13 @@ export type StartingConditions =
         runId: RunId;
 
         /**
-         * Which phase to continue after.
+         * Which codon to continue after.
          * null means start from beginning of that run.
          *
-         * Example: "phase-2" means start from phase-3
-         * Used by: Determining next phase to execute
+         * Example: "codon-2" means start from codon-3
+         * Used by: Determining next codon to execute
          */
-        afterPhase: PhaseId | null;
+        afterCodon: CodonId | null;
 
         /**
          * Git commit SHA we restored to.
@@ -624,20 +634,20 @@ export type StartingConditions =
       reason?: "retry" | "rollback" | "continue";
     };
 
-// ============================================================================
+// -------------
 // Top-Level State
-// ============================================================================
+// -------------
 
 /**
- * Root state object for Tadpole.
- * Stored in .tadpole/state.json.
+ * Root state object for Strandweave.
+ * Stored in .strandweave/state.json.
  *
  * Design decisions:
  * - Single file instead of per-run for simplicity
  * - No version field per user request
  * - No denormalized costs - computed when needed
  */
-export interface TadpoleState {
+export interface StrandweaveState {
   /**
    * All runs, newest first.
    * Append-only - runs are never removed from history.
@@ -659,19 +669,31 @@ export interface TadpoleState {
   /**
    * Initial checkpoint SHA from git repository initialization.
    * This is the empty commit created when the checkpoint system starts.
-   * Represents the project's clean state before any phases have executed.
+   * Represents the project's clean state before any codons have executed.
    *
    * Used by: Rollback to clean state, project-level rollback commands
    */
   initialCheckpoint?: string;
 
+  /**
+   * Current execution plan with all loop iterations expanded.
+   * This is the flattened plan that represents the actual execution sequence.
+   * Rebuilt on server start but persisted for crash recovery and debugging.
+   *
+   * Note: May be empty array during initialization before first run starts,
+   * but the field itself is always present.
+   *
+   * Used by: Codon execution, execution thread analysis, crash recovery
+   */
+  executionPlan: import("../execution-planner.js").ExecutionCodonEntry[];
+
   // No denormalized costs/tokens - computed from runs when needed
   // This avoids sync issues and keeps state minimal
 }
 
-// ============================================================================
+// -------------
 // State Transitions
-// ============================================================================
+// -------------
 
 /**
  * Defines which status transitions are legal.
@@ -682,12 +704,12 @@ export interface TadpoleState {
  * - Terminal states (completed/failed/skipped) have no valid transitions
  * - Must progress through states in order for normal execution
  */
-export const PhaseTransitions: Record<PhaseStatus, PhaseStatus[]> = {
+export const CodonTransitions: Record<CodonStatus, CodonStatus[]> = {
   preparing: ["starting", "failed", "skipped"],
   starting: ["initializing", "failed", "skipped"],
   initializing: ["running", "failed", "skipped"],
-  running: ["completing-chroniclers", "completed", "failed", "skipped"],
-  "completing-chroniclers": ["completed", "failed", "skipped"],
+  running: ["completing-sentinels", "completed", "failed", "skipped"],
+  "completing-sentinels": ["completed", "failed", "skipped"],
   completed: [], // Terminal - no transitions
   failed: [], // Terminal - no transitions
   skipped: [], // Terminal - no transitions
@@ -705,7 +727,7 @@ export type StateTransition =
 
   /**
    * New run started (fresh or from continuation point).
-   * Creates new Run entry with starting phase.
+   * Creates new Run entry with starting codon.
    *
    * Triggered by: Server startup
    * State changes:
@@ -725,9 +747,9 @@ export type StateTransition =
     }
 
   /**
-   * Run completed successfully (all phases done).
+   * Run completed successfully (all codons done).
    *
-   * Triggered by: Last phase completing successfully
+   * Triggered by: Last codon completing successfully
    * State changes:
    * - Sets run.status = "completed"
    * - Sets run.endTime
@@ -739,9 +761,9 @@ export type StateTransition =
     }
 
   /**
-   * Run failed (phase failed and server shutting down).
+   * Run failed (codon failed and server shutting down).
    *
-   * Triggered by: Phase failure, fatal error
+   * Triggered by: Codon failure, fatal error
    * State changes:
    * - Sets run.status = "failed"
    * - Sets run.endTime
@@ -759,51 +781,56 @@ export type StateTransition =
    * State changes:
    * - Sets run.status = "crashed"
    * - Sets run.endTime
-   * - Marks running phases as failed
+   * - Marks running codons as failed
    */
   | {
       type: "RunCrashed";
       data: {
         runId: RunId;
         detectedAt: string;
-        lastPhaseStatus: PhaseStatus;
+        lastCodonStatus: CodonStatus;
       };
     }
 
-  // ===== Phase Lifecycle =====
+  // ===== Codon Lifecycle =====
 
   /**
-   * New phase starting in current run.
+   * New codon starting in current run.
    *
    * Triggered by: User command or auto-advance
    * State changes:
-   * - Adds new PreparingPhase to run.phases
-   * Validation: No other phase currently running
+   * - Adds new PreparingCodon to run.codons
+   * Validation: No other codon currently running
    */
   | {
-      type: "PhaseStarted";
+      type: "CodonStarted";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
+        codonId: CodonId;
+        loopContext?: {
+          loopId: CodonId;
+          iteration: number;
+          codonIndexInLoop: number;
+        };
       };
     }
 
   /**
-   * Phase status changed (main state machine).
+   * Codon status changed (main state machine).
    *
-   * Triggered by: Various phase lifecycle events
+   * Triggered by: Various codon lifecycle events
    * State changes:
-   * - Updates phase status
+   * - Updates codon status
    * - Sets relevant fields based on transition
-   * Validation: Transition must be in PhaseTransitions map
+   * Validation: Transition must be in CodonTransitions map
    */
   | {
-      type: "PhaseTransitioned";
+      type: "CodonTransitioned";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
-        from: PhaseStatus;
-        to: PhaseStatus;
+        codonId: CodonId;
+        from: CodonStatus;
+        to: CodonStatus;
         metadata?: {
           // For starting → initializing
           claudePid?: number;
@@ -816,21 +843,24 @@ export type StateTransition =
           // For any → failed
           exitCode?: number;
           failureReason?: FailureReason;
-          failedDuring?: PhaseStatus;
+          failedDuring?: CodonStatus;
 
           // For any → skipped
-          skippedDuring?: PhaseStatus;
+          skippedDuring?: CodonStatus;
 
           // For completing → completed
           resultMessageReceived?: boolean;
 
-          // For running → completing-chroniclers
-          chroniclerCount?: number;
-          chroniclerIds?: string[];
+          // For running → completing-sentinels
+          sentinelCount?: number;
+          sentinelIds?: string[];
 
           // Checkpoint info
           checkpointSha?: string;
           checkpointBranch?: string;
+
+          // For marking context exceeded
+          contextExceeded?: boolean;
         };
       };
     }
@@ -850,7 +880,7 @@ export type StateTransition =
       type: "CostsUpdated";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
+        codonId: CodonId;
         cost: number; // New total cost
         tokens: TokenUsage; // New total tokens
       };
@@ -869,7 +899,7 @@ export type StateTransition =
       type: "CostsIncremented";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
+        codonId: CodonId;
         costDelta: number; // The amount to add to the cost
         tokensDelta: TokenUsage; // The tokens to add to the totals
       };
@@ -889,7 +919,7 @@ export type StateTransition =
       type: "AssistantMessageCountUpdated";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
+        codonId: CodonId;
         newCount: number; // New total count
       };
     }
@@ -899,16 +929,16 @@ export type StateTransition =
   /**
    * Git checkpoint created.
    *
-   * Triggered by: Workspace setup, completion, error, skip
+   * Triggered by: Rig setup, completion, error, skip
    * State changes:
-   * - Sets relevant checkpoint field in phase
+   * - Sets relevant checkpoint field in codon
    */
   | {
       type: "CheckpointCreated";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
-        checkpointType: "workspace-setup" | "completed" | "error" | "skipped";
+        codonId: CodonId;
+        checkpointType: "rig-setup" | "completed" | "error" | "skipped";
         sha: string;
         branch: string;
       };
@@ -929,40 +959,40 @@ export type StateTransition =
     }
 
   /**
-   * Phase final cost set from Claude's result message.
+   * Codon final cost set from Claude's result message.
    * This ensures the authoritative cost from Claude's result message
-   * is stored before the phase completes.
+   * is stored before the codon completes.
    *
    * Triggered by: Claude result message with final cost
    * State changes:
-   * - Updates currentCost and currentTokens in running phase
+   * - Updates currentCost and currentTokens in running codon
    */
   | {
-      type: "PhaseFinalCostSet";
+      type: "CodonFinalCostSet";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
+        codonId: CodonId;
         finalCost: number;
         finalTokens: TokenUsage;
       };
     }
 
   /**
-   * Chronicler states updated/initialized for a phase.
-   * Sets the initial chronicler state when chroniclers load,
-   * or updates states before phase completion.
+   * Sentinel states updated/initialized for a codon.
+   * Sets the initial sentinel state when sentinels load,
+   * or updates states before codon completion.
    *
-   * Triggered by: After chroniclers load, before completing-chroniclers transition
+   * Triggered by: After sentinels load, before completing-sentinels transition
    * State changes:
-   * - Sets/updates RunningPhase.chroniclers field
-   * - Updates CompletingChroniclersPhase.chroniclers field
+   * - Sets/updates RunningCodon.sentinels field
+   * - Updates CompletingSentinelsCodon.sentinels field
    */
   | {
-      type: "ChroniclerStatesUpdated";
+      type: "SentinelStatesUpdated";
       data: {
         runId: RunId;
-        phaseId: PhaseId;
-        chroniclerStates: ChroniclerState[];
+        codonId: CodonId;
+        sentinelStates: SentinelState[];
         totalCost: number;
       };
     };
@@ -973,12 +1003,12 @@ export type StateTransition =
  */
 export type StateTransitionType = StateTransition["type"];
 
-// ============================================================================
+// -------------
 // State Manager Interface
-// ============================================================================
+// -------------
 
 /**
- * Central state management for Tadpole.
+ * Central state management for Strandweave.
  * All state modifications go through this interface.
  *
  * Implementation notes:
@@ -1008,7 +1038,7 @@ export interface StateManager {
    *
    * Usage: const { runs, currentRunId } = stateManager.getState();
    */
-  getState(): Readonly<TadpoleState>;
+  getState(): Readonly<StrandweaveState>;
 
   // ===== State Modifications =====
 
@@ -1036,32 +1066,32 @@ export interface StateManager {
   getCurrentRun(): Run | null;
 
   /**
-   * Get the currently executing phase.
-   * @returns null if between phases or no run active
+   * Get the currently executing codon.
+   * @returns null if between codons or no run active
    */
-  getCurrentlyRunningPhase(): PhaseExecution | null;
+  getCurrentlyRunningCodon(): CodonExecution | null;
 
   /**
-   * Get specific phase in current run.
-   * Useful for checking if phase already executed.
+   * Get specific codon in current run.
+   * Useful for checking if codon already executed.
    *
-   * @param phaseId - Phase to look for
-   * @returns null if phase not found or no current run
+   * @param codonId - Codon to look for
+   * @returns null if codon not found or no current run
    */
-  getPhaseInCurrentRun(phaseId: PhaseId): PhaseExecution | null;
+  getCodonInCurrentRun(codonId: CodonId): CodonExecution | null;
 
   /**
-   * Determine which phase should execute next.
+   * Determine which codon should execute next.
    * Handles both fresh runs and continuations.
    *
    * Logic:
-   * - For fresh runs: First phase in config
-   * - For continuations: Phase after the continuation point
-   * - If all phases complete: null
+   * - For fresh runs: First codon in config
+   * - For continuations: Codon after the continuation point
+   * - If all codons complete: null
    *
-   * @returns null if all phases completed
+   * @returns null if all codons completed
    */
-  getNextPhaseToExecute(): Promise<PhaseId | null>;
+  getNextCodonToExecute(): Promise<CodonId | null>;
 
   // ===== Historical Queries =====
 
@@ -1077,7 +1107,7 @@ export interface StateManager {
 
   /**
    * Calculate total cost of current run.
-   * Includes all phases (successful, failed, partial).
+   * Includes all codons (successful, failed, partial).
    *
    * @returns 0 if no current run
    */
@@ -1104,13 +1134,13 @@ export interface StateManager {
 
   /**
    * Check if we can continue from a specific point.
-   * Validates that the source run and phase exist.
+   * Validates that the source run and codon exist.
    *
    * @param runId - Run to continue from
-   * @param afterPhase - Phase to continue after (null = from beginning)
+   * @param afterCodon - Codon to continue after (null = from beginning)
    * @returns true if valid continuation point
    */
-  canContinueFrom(runId: RunId, afterPhase: PhaseId | null): boolean;
+  canContinueFrom(runId: RunId, afterCodon: CodonId | null): boolean;
 
   /**
    * Get the checkpoint SHA for a continuation point.
@@ -1118,7 +1148,7 @@ export interface StateManager {
    *
    * @returns null if invalid continuation point
    */
-  getCheckpointForContinuation(runId: RunId, afterPhase: PhaseId | null): string | null;
+  getCheckpointForContinuation(runId: RunId, afterCodon: CodonId | null): string | null;
 
   // ===== Persistence Operations =====
 
@@ -1151,7 +1181,7 @@ export interface StateManager {
    *
    * Side effects:
    * - Transitions crashed runs to "crashed" status
-   * - Marks running phases as failed
+   * - Marks running codons as failed
    *
    * Recovery strategy:
    * - Check for orphaned run folders not in state
@@ -1187,7 +1217,7 @@ export interface StateValidation {
 }
 
 export interface ValidationError {
-  type: "missing_run" | "invalid_phase" | "corrupted_data";
+  type: "missing_run" | "invalid_codon" | "corrupted_data";
   message: string;
   context?: unknown;
 }
@@ -1204,35 +1234,35 @@ export interface RecoveryResult {
   message: string;
 }
 
-// ============================================================================
-// Latest Phase Info
-// ============================================================================
+// -------------
+// Latest Codon Info
+// -------------
 
 /**
- * Information about the latest phase execution.
+ * Information about the latest codon execution.
  * Used to determine the current position in the workflow.
  */
-export interface LatestPhaseInfo {
+export interface LatestCodonInfo {
   /**
-   * The phase execution object containing all phase details
+   * The codon execution object containing all codon details
    */
-  phase: PhaseExecution;
+  codon: CodonExecution;
 
   /**
-   * Which run this phase belongs to
+   * Which run this codon belongs to
    */
   runId: RunId;
 
   /**
-   * Current status of the phase (convenience field)
+   * Current status of the codon (convenience field)
    */
-  status: PhaseStatus;
+  status: CodonStatus;
 
   /**
-   * The next phase that should be executed (if any).
-   * null means all phases are complete or a new run is needed.
+   * The next codon that should be executed (if any).
+   * null means all codons are complete or a new run is needed.
    */
-  nextPhaseId: PhaseId | null;
+  nextCodonId: CodonId | null;
 
   /**
    * Whether to continue execution in the current run.
@@ -1241,46 +1271,46 @@ export interface LatestPhaseInfo {
   continueInCurrentRun: boolean;
 }
 
-// ============================================================================
+// -------------
 // Helper Functions
-// ============================================================================
+// -------------
 
 /**
- * Check if a phase status is terminal (no further transitions possible)
+ * Check if a codon status is terminal (no further transitions possible)
  */
-export function isTerminalPhaseStatus(status: PhaseStatus): boolean {
+export function isTerminalCodonStatus(status: CodonStatus): boolean {
   return status === "completed" || status === "failed" || status === "skipped";
 }
 
 /**
- * Calculate phase cost based on its status
+ * Calculate codon cost based on its status
  */
-export function getPhaseCost(phase: PhaseExecution): number {
-  switch (phase.status) {
+export function getCodonCost(codon: CodonExecution): number {
+  switch (codon.status) {
     case "completed":
-      return phase.finalCost;
+      return codon.finalCost;
     case "failed":
-      return phase.partialCost;
+      return codon.partialCost;
     case "skipped":
       return 0;
     case "running":
-      return phase.currentCost;
-    case "completing-chroniclers":
-      return phase.currentCost;
+      return codon.currentCost;
+    case "completing-sentinels":
+      return codon.currentCost;
     default:
       return 0;
   }
 }
 
 /**
- * Calculate phase tokens based on its status
+ * Calculate codon tokens based on its status
  */
-export function getPhaseTokens(phase: PhaseExecution): TokenUsage {
-  switch (phase.status) {
+export function getCodonTokens(codon: CodonExecution): TokenUsage {
+  switch (codon.status) {
     case "completed":
-      return phase.finalTokens;
+      return codon.finalTokens;
     case "failed":
-      return phase.partialTokens;
+      return codon.partialTokens;
     case "skipped":
       return {
         inputTokens: 0,
@@ -1289,9 +1319,9 @@ export function getPhaseTokens(phase: PhaseExecution): TokenUsage {
         cacheReadTokens: 0,
       };
     case "running":
-      return phase.currentTokens;
-    case "completing-chroniclers":
-      return phase.currentTokens;
+      return codon.currentTokens;
+    case "completing-sentinels":
+      return codon.currentTokens;
     default:
       return {
         inputTokens: 0,

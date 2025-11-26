@@ -4,8 +4,8 @@ import { rmSync } from "node:fs";
 import * as path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser";
 import { ClaudeProcessManager } from "../../server/claude-process-manager";
-import type { PhaseId } from "../../server/types/branded-types";
-import type { PhaseConfig } from "../../server/types/types";
+import type { CodonId } from "../../server/types/branded-types";
+import type { Codon } from "../../server/types/types";
 import { Logger } from "../../server/utils";
 
 describe("ClaudeProcessManager", () => {
@@ -24,7 +24,7 @@ describe("ClaudeProcessManager", () => {
     // Create a mock log parser
     mockLogParser = new ClaudeLogParser({
       logPath: path.join(tempDir, "mock.log"),
-      phaseId: "test-phase",
+      codonId: "test-codon",
       parsingInterval: 100,
     });
   });
@@ -103,7 +103,7 @@ describe("ClaudeProcessManager spawn behavior", () => {
     await fs.promises.mkdir(tempDir, { recursive: true });
 
     // Create project structure
-    await fs.promises.mkdir(path.join(tempDir, ".tadpole", "logs"), {
+    await fs.promises.mkdir(path.join(tempDir, ".strandweave", "logs"), {
       recursive: true,
     });
 
@@ -114,7 +114,7 @@ describe("ClaudeProcessManager spawn behavior", () => {
     // Create a mock log parser
     mockLogParser = new ClaudeLogParser({
       logPath: path.join(tempDir, "mock.log"),
-      phaseId: "test-phase",
+      codonId: "test-codon",
       parsingInterval: 100,
     });
   });
@@ -123,21 +123,21 @@ describe("ClaudeProcessManager spawn behavior", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("spawn requires valid phase config", async () => {
+  test("spawn requires valid codon config", async () => {
     const _manager = new ClaudeProcessManager(tempDir, logger, mockLogParser);
 
-    const invalidPhase: Partial<PhaseConfig> = {
-      id: "test-phase" as PhaseId,
-      name: "Test Phase",
+    const invalidCodon: Partial<Codon> = {
+      id: "test-codon" as CodonId,
+      name: "Test Codon",
       // Missing required 'model' field
     };
 
     // We should NOT actually spawn Claude in unit tests
-    // Just verify the phase validation happens before spawn
+    // Just verify the codon validation happens before spawn
     expect(() => {
-      // Check if the phase would be valid for spawning
-      if (!invalidPhase.model) throw new Error("Model is required");
-      if (!invalidPhase.promptFile && !invalidPhase.promptText)
+      // Check if the codon would be valid for spawning
+      if (!invalidCodon.model) throw new Error("Model is required");
+      if (!invalidCodon.promptFile && !invalidCodon.promptText)
         throw new Error("Prompt is required");
     }).toThrow("Model is required");
   });
@@ -145,36 +145,36 @@ describe("ClaudeProcessManager spawn behavior", () => {
   test("spawn validates model names", async () => {
     const _manager = new ClaudeProcessManager(tempDir, logger, mockLogParser);
 
-    const phaseWithInvalidModel = {
-      id: "test-phase",
-      name: "Test Phase",
+    const codonWithInvalidModel = {
+      id: "test-codon",
+      name: "Test Codon",
       model: "invalid-model",
       promptText: "Test prompt",
     };
 
     // Don't actually spawn Claude in unit tests
     // The ClaudeProcessManager doesn't validate models itself
-    // That validation happens in config.ts loadPhaseConfig
-    // This test just verifies the manager accepts the phase structure
-    expect(phaseWithInvalidModel.model).toBe("invalid-model");
-    expect(phaseWithInvalidModel.promptText).toBeDefined();
+    // That validation happens in config.ts loadCodonConfig
+    // This test just verifies the manager accepts the codon structure
+    expect(codonWithInvalidModel.model).toBe("invalid-model");
+    expect(codonWithInvalidModel.promptText).toBeDefined();
   });
 
   test("spawn handles missing prompt correctly", async () => {
     const _manager = new ClaudeProcessManager(tempDir, logger, mockLogParser);
 
-    const phaseWithoutPrompt: Partial<PhaseConfig> = {
-      id: "test-phase" as PhaseId,
-      name: "Test Phase",
+    const codonWithoutPrompt: Partial<Codon> = {
+      id: "test-codon" as CodonId,
+      name: "Test Codon",
       model: "opus",
       continuationMode: "fresh",
       // Missing both promptFile and promptText
     };
 
     // Don't actually spawn Claude in unit tests
-    // Just verify the phase validation
+    // Just verify the codon validation
     expect(() => {
-      if (!phaseWithoutPrompt.promptFile && !phaseWithoutPrompt.promptText) {
+      if (!codonWithoutPrompt.promptFile && !codonWithoutPrompt.promptText) {
         throw new Error("Either promptFile or promptText is required");
       }
     }).toThrow("Either promptFile or promptText is required");

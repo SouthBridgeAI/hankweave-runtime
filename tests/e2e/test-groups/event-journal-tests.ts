@@ -4,9 +4,9 @@ import { createReadStream } from "node:fs";
 import * as path from "node:path";
 import { createInterface } from "node:readline";
 import type {
+  CodonCompletedEvent,
+  CodonStartedEvent,
   ErrorEvent,
-  PhaseCompletedEvent,
-  PhaseStartedEvent,
   ServerEvent,
 } from "../../../server/schemas/event-schemas.js";
 
@@ -15,12 +15,12 @@ interface TestState {
   events: ServerEvent[];
   historyEvents: ServerEvent[];
   liveEvents: ServerEvent[];
-  phase1Started: PhaseStartedEvent | null;
-  phase1Completed: PhaseCompletedEvent | null;
-  phase2Started: PhaseStartedEvent | null;
-  phase2Completed: PhaseCompletedEvent | null;
-  phase3Started: PhaseStartedEvent | null;
-  phase3Completed: PhaseCompletedEvent | null;
+  codon1Started: CodonStartedEvent | null;
+  codon1Completed: CodonCompletedEvent | null;
+  codon2Started: CodonStartedEvent | null;
+  codon2Completed: CodonCompletedEvent | null;
+  codon3Started: CodonStartedEvent | null;
+  codon3Completed: CodonCompletedEvent | null;
   errorEvents: ErrorEvent[];
 }
 
@@ -61,12 +61,12 @@ function filterEventsByType<T extends ServerEvent>(events: ServerEvent[], type: 
 }
 
 /**
- * Filter events by phase ID
+ * Filter events by codon ID
  */
-function filterEventsByPhaseId(events: ServerEvent[], phaseId: string): ServerEvent[] {
+function filterEventsByCodonId(events: ServerEvent[], codonId: string): ServerEvent[] {
   return events.filter((e) => {
-    if ("data" in e && e.data && typeof e.data === "object" && "phaseId" in e.data) {
-      return e.data.phaseId === phaseId;
+    if ("data" in e && e.data && typeof e.data === "object" && "codonId" in e.data) {
+      return e.data.codonId === codonId;
     }
     return false;
   });
@@ -89,7 +89,7 @@ export function runEventJournalTests(testState: TestState): void {
     if (!testState.executionPath) {
       throw new Error("Execution path not available");
     }
-    return path.join(testState.executionPath, ".tadpole/events/events.jsonl");
+    return path.join(testState.executionPath, ".strandweave/events/events.jsonl");
   };
 
   it("should create event journal file", () => {
@@ -112,56 +112,56 @@ export function runEventJournalTests(testState: TestState): void {
     });
   });
 
-  it("should journal phase lifecycle events", async () => {
+  it("should journal codon lifecycle events", async () => {
     const journalPath = getEventJournalPath();
     const events = await readEventJournal(journalPath);
 
-    // Check phase.started events
-    const phaseStartedEvents = filterEventsByType<PhaseStartedEvent>(events, "phase.started");
-    expect(phaseStartedEvents.length).toBe(3); // 3 phases
+    // Check codon.started events
+    const codonStartedEvents = filterEventsByType<CodonStartedEvent>(events, "codon.started");
+    expect(codonStartedEvents.length).toBe(3); // 3 codons
 
-    phaseStartedEvents.forEach((event) => {
-      expect(event.type).toBe("phase.started");
-      expect(event.data).toHaveProperty("phaseId");
+    codonStartedEvents.forEach((event) => {
+      expect(event.type).toBe("codon.started");
+      expect(event.data).toHaveProperty("codonId");
       expect(event.data).toHaveProperty("sessionId");
     });
 
-    // Check phase.completed events
-    const phaseCompletedEvents = filterEventsByType<PhaseCompletedEvent>(events, "phase.completed");
-    expect(phaseCompletedEvents.length).toBe(3); // 3 phases
+    // Check codon.completed events
+    const codonCompletedEvents = filterEventsByType<CodonCompletedEvent>(events, "codon.completed");
+    expect(codonCompletedEvents.length).toBe(3); // 3 codons
 
-    phaseCompletedEvents.forEach((event) => {
-      expect(event.type).toBe("phase.completed");
-      expect(event.data).toHaveProperty("phaseId");
+    codonCompletedEvents.forEach((event) => {
+      expect(event.type).toBe("codon.completed");
+      expect(event.data).toHaveProperty("codonId");
     });
   });
 
-  it("should track events for each phase", async () => {
+  it("should track events for each codon", async () => {
     const journalPath = getEventJournalPath();
     const events = await readEventJournal(journalPath);
 
-    // Phase 1 events
-    const phase1Events = filterEventsByPhaseId(events, "phase-1");
-    expect(phase1Events.length).toBeGreaterThan(0);
+    // Codon 1 events
+    const codon1Events = filterEventsByCodonId(events, "codon-1");
+    expect(codon1Events.length).toBeGreaterThan(0);
 
-    // Phase 2 events
-    const phase2Events = filterEventsByPhaseId(events, "phase-2");
-    expect(phase2Events.length).toBeGreaterThan(0);
+    // Codon 2 events
+    const codon2Events = filterEventsByCodonId(events, "codon-2");
+    expect(codon2Events.length).toBeGreaterThan(0);
 
-    // Phase 3 events
-    const phase3Events = filterEventsByPhaseId(events, "phase-3");
-    expect(phase3Events.length).toBeGreaterThan(0);
+    // Codon 3 events
+    const codon3Events = filterEventsByCodonId(events, "codon-3");
+    expect(codon3Events.length).toBeGreaterThan(0);
   });
 
   it("should track session IDs in journal", async () => {
     const journalPath = getEventJournalPath();
     const events = await readEventJournal(journalPath);
 
-    // Get session IDs from phase started events
-    const phaseStartedEvents = filterEventsByType<PhaseStartedEvent>(events, "phase.started");
+    // Get session IDs from codon started events
+    const codonStartedEvents = filterEventsByType<CodonStartedEvent>(events, "codon.started");
     const sessionIds = new Set<string>();
 
-    phaseStartedEvents.forEach((event) => {
+    codonStartedEvents.forEach((event) => {
       if (event.data?.sessionId) {
         sessionIds.add(event.data.sessionId);
       }
@@ -253,34 +253,34 @@ export function runEventJournalTests(testState: TestState): void {
     }
   });
 
-  it("should verify complete phase execution flow in journal", async () => {
+  it("should verify complete codon execution flow in journal", async () => {
     const journalPath = getEventJournalPath();
     const events = await readEventJournal(journalPath);
 
-    // For each phase, verify the expected event flow
-    ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
-      const phaseEvents = filterEventsByPhaseId(events, phaseId);
+    // For each codon, verify the expected event flow
+    ["codon-1", "codon-2", "codon-3"].forEach((codonId) => {
+      const codonEvents = filterEventsByCodonId(events, codonId);
 
-      // Should have phase.started
-      const started = phaseEvents.find((e) => {
-        if (e.type === "phase.started") {
-          return e.data?.phaseId === phaseId;
+      // Should have codon.started
+      const started = codonEvents.find((e) => {
+        if (e.type === "codon.started") {
+          return e.data?.codonId === codonId;
         }
         return false;
       });
       expect(started).toBeDefined();
 
-      // Should have phase.completed
-      const completed = phaseEvents.find((e) => {
-        if (e.type === "phase.completed") {
-          return e.data?.phaseId === phaseId;
+      // Should have codon.completed
+      const completed = codonEvents.find((e) => {
+        if (e.type === "codon.completed") {
+          return e.data?.codonId === codonId;
         }
         return false;
       });
       expect(completed).toBeDefined();
 
       // Should have some activity between start and complete
-      const activityEvents = phaseEvents.filter(
+      const activityEvents = codonEvents.filter(
         (e) =>
           e.type === "assistant.action" || e.type === "token.usage" || e.type === "tool.result",
       );

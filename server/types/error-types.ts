@@ -1,11 +1,11 @@
 /**
- * Error severity levels for Tadpole server.
+ * Error severity levels for Strandweave server.
  */
 export enum ErrorSeverity {
   /** Fatal error - requires server shutdown */
   FATAL = "fatal",
-  /** Phase error - current phase fails but server continues */
-  PHASE = "phase",
+  /** Codon error - current codon fails but server continues */
+  CODON = "codon",
   /** Operation error - single operation fails */
   OPERATION = "operation",
   /** Warning - logged but no action taken */
@@ -15,7 +15,7 @@ export enum ErrorSeverity {
 /**
  * Custom error classes for different severity levels.
  */
-export class TadpoleError extends Error {
+export class StrandweaveError extends Error {
   constructor(
     message: string,
     public readonly severity: ErrorSeverity,
@@ -23,25 +23,25 @@ export class TadpoleError extends Error {
     public readonly context?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = "TadpoleError";
+    this.name = "StrandweaveError";
   }
 }
 
-export class FatalError extends TadpoleError {
+export class FatalError extends StrandweaveError {
   constructor(message: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.FATAL, "FATAL_ERROR", context);
     this.name = "FatalError";
   }
 }
 
-export class PhaseError extends TadpoleError {
-  constructor(message: string, phaseId: string, context?: Record<string, unknown>) {
-    super(message, ErrorSeverity.PHASE, "PHASE_ERROR", { ...context, phaseId });
-    this.name = "PhaseError";
+export class CodonError extends StrandweaveError {
+  constructor(message: string, codonId: string, context?: Record<string, unknown>) {
+    super(message, ErrorSeverity.CODON, "CODON_ERROR", { ...context, codonId });
+    this.name = "CodonError";
   }
 }
 
-export class OperationError extends TadpoleError {
+export class OperationError extends StrandweaveError {
   constructor(message: string, operation: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.OPERATION, "OPERATION_ERROR", {
       ...context,
@@ -51,12 +51,23 @@ export class OperationError extends TadpoleError {
   }
 }
 
-export class APITimeoutError extends TadpoleError {
-  constructor(phaseId: string, context?: Record<string, unknown>) {
-    super("Claude API request timed out", ErrorSeverity.PHASE, "API_TIMEOUT_ERROR", {
+export class APITimeoutError extends StrandweaveError {
+  constructor(codonId: string, context?: Record<string, unknown>) {
+    super("Claude API request timed out", ErrorSeverity.CODON, "API_TIMEOUT_ERROR", {
       ...context,
-      phaseId,
+      codonId,
     });
     this.name = "APITimeoutError";
+  }
+}
+
+export class ContextExceededError extends StrandweaveError {
+  constructor(
+    message: string,
+    public readonly originalError: unknown,
+    context?: Record<string, unknown>,
+  ) {
+    super(message, ErrorSeverity.CODON, "CONTEXT_EXCEEDED_ERROR", context);
+    this.name = "ContextExceededError";
   }
 }

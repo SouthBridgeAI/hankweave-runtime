@@ -180,13 +180,13 @@ The system includes comprehensive error handling:
 - **Middleware Errors**: Unhandled middleware errors result in 500 responses
 - **Process Lifecycle**: Proper cleanup of resources and graceful shutdown
 
-## Integration with Tadpole
+## Integration with Strandweave
 
-Within the Tadpole system, the LLM proxy serves as an optional component for:
+Within the Strandweave system, the LLM proxy serves as an optional component for:
 
 - **Request Monitoring**: Logging all Claude API interactions for debugging
 - **Cost Tracking**: Intercepting requests to track token usage and costs
 - **Request Modification**: Implementing organization-specific policies (token limits, model restrictions)
 - **Development Testing**: Providing a local endpoint for development and testing
 
-The proxy is automatically started by the `TadpoleServer` when proxy functionality is enabled, creating a transparent layer between Claude processes and the external API.
+The proxy is automatically started by the `StrandweaveServer` when proxy functionality is enabled, creating a transparent layer between Claude processes and the external API.

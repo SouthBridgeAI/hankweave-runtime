@@ -15,7 +15,7 @@ describe("CleanupCommand", () => {
     await fs.promises.mkdir(tempDir, { recursive: true });
 
     // Create mock execution root
-    executionRoot = path.join(tempDir, ".tadpole-executions");
+    executionRoot = path.join(tempDir, ".strandweave-executions");
     await fs.promises.mkdir(executionRoot, { recursive: true });
 
     // Create mock data source
@@ -60,8 +60,8 @@ describe("CleanupCommand", () => {
   test("removes execution directory by path", async () => {
     // Create a mock execution directory
     const executionDir = path.join(executionRoot, "1234567-abc-def123");
-    const tadpoleDir = path.join(executionDir, ".tadpole");
-    await fs.promises.mkdir(tadpoleDir, { recursive: true });
+    const strandweaveDir = path.join(executionDir, ".strandweave");
+    await fs.promises.mkdir(strandweaveDir, { recursive: true });
 
     // Create execution metadata
     const meta = {
@@ -74,7 +74,7 @@ describe("CleanupCommand", () => {
       lastUsed: new Date().toISOString(),
     };
     await fs.promises.writeFile(
-      path.join(tadpoleDir, "execution-meta.json"),
+      path.join(strandweaveDir, "execution-meta.json"),
       JSON.stringify(meta, null, 2),
     );
 
@@ -93,14 +93,16 @@ describe("CleanupCommand", () => {
   test("skips execution directory with running server", async () => {
     // Create a mock execution directory with lock file
     const executionDir = path.join(executionRoot, "1234567-abc-def123");
-    const tadpoleDir = path.join(executionDir, ".tadpole");
-    await fs.promises.mkdir(tadpoleDir, { recursive: true });
+    const strandweaveDir = path.join(executionDir, ".strandweave");
+    await fs.promises.mkdir(strandweaveDir, { recursive: true });
 
-    // Create lock file
+    // Create lock file with a DIFFERENT process pid (not our own)
+    // This simulates a running server in a different process
+    const differentPid = process.pid + 9999;
     await fs.promises.writeFile(
-      path.join(tadpoleDir, "server.lock"),
+      path.join(strandweaveDir, "runtime.lock"),
       JSON.stringify({
-        pid: process.pid,
+        pid: differentPid,
         runId: "test-run",
         startTime: new Date().toISOString(),
         lastHeartbeat: new Date().toISOString(),
@@ -138,8 +140,8 @@ describe("CleanupCommand", () => {
     const execDir2 = path.join(executionRoot, "2000000-bbb-def456");
 
     for (const dir of [execDir1, execDir2]) {
-      const tadpoleDir = path.join(dir, ".tadpole");
-      await fs.promises.mkdir(tadpoleDir, { recursive: true });
+      const strandweaveDir = path.join(dir, ".strandweave");
+      await fs.promises.mkdir(strandweaveDir, { recursive: true });
 
       const meta = {
         version: "1.0.0",
@@ -151,7 +153,7 @@ describe("CleanupCommand", () => {
         lastUsed: new Date().toISOString(),
       };
       await fs.promises.writeFile(
-        path.join(tadpoleDir, "execution-meta.json"),
+        path.join(strandweaveDir, "execution-meta.json"),
         JSON.stringify(meta, null, 2),
       );
     }

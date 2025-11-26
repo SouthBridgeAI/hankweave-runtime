@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { HistoryManager, simpleTokenCounter } from "../../server/chroniclers/history-manager.js";
-import { PhaseId } from "../../server/types/branded-types.js";
-import { Logger } from "../../server/utils.js";
+import { HistoryManager, simpleTokenCounter } from "../../server/sentinels/history-manager";
+import { CodonId } from "../../server/types/branded-types";
+import { Logger } from "../../server/utils";
 
 // Mock logger for testing
 class MockLogger extends Logger {
@@ -26,7 +26,7 @@ describe("HistoryManager", () => {
   beforeEach(async () => {
     // Create a temporary directory for testing
     const tempBase = tmpdir();
-    testDir = path.join(tempBase, `test-chroniclers-${Date.now()}`);
+    testDir = path.join(tempBase, `test-sentinels-${Date.now()}`);
     await fs.mkdir(testDir, { recursive: true });
     logger = new MockLogger();
   });
@@ -43,8 +43,8 @@ describe("HistoryManager", () => {
   describe("Basic Operations", () => {
     test("should create a HistoryManager and add message pairs", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -70,8 +70,8 @@ describe("HistoryManager", () => {
 
     test("should handle multiple conversation turns", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -87,8 +87,8 @@ describe("HistoryManager", () => {
 
   describe("History Loading", () => {
     test("should load history from existing file", async () => {
-      // Create a pre-populated history file with phase-scoped naming
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      // Create a pre-populated history file with codon-scoped naming
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       const existingHistory = [
         { role: "user", content: "Previous question" },
         { role: "assistant", content: "Previous answer" },
@@ -96,8 +96,8 @@ describe("HistoryManager", () => {
       await fs.writeFile(historyPath, JSON.stringify(existingHistory, null, 2));
 
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -116,12 +116,12 @@ describe("HistoryManager", () => {
     });
 
     test("should handle invalid history file", async () => {
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       await fs.writeFile(historyPath, "invalid json");
 
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -136,8 +136,8 @@ describe("HistoryManager", () => {
   describe("maxTurns Pruning", () => {
     test("should prune old turns when exceeding maxTurns", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 2 },
         testDir,
         logger,
@@ -166,8 +166,8 @@ describe("HistoryManager", () => {
   describe("maxTokens Pruning", () => {
     test("should prune old messages when exceeding maxTokens", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTokens", maxTokens: 20 }, // ~80 chars
         testDir,
         logger,
@@ -201,8 +201,8 @@ describe("HistoryManager", () => {
   describe("Memory-Only Mode", () => {
     test("should work without directory (memory-only mode)", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         undefined, // No directory
         logger,
@@ -213,8 +213,8 @@ describe("HistoryManager", () => {
       const messages = await historyManager.getMessagesToSend("System prompt");
       expect(messages).toHaveLength(3);
 
-      // Check that no file was created (using phase-scoped naming)
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      // Check that no file was created (using codon-scoped naming)
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       await expect(fs.access(historyPath)).rejects.toThrow();
     });
   });
@@ -222,8 +222,8 @@ describe("HistoryManager", () => {
   describe("Persistence and Recovery", () => {
     test("should save history after message pair addition", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -231,8 +231,8 @@ describe("HistoryManager", () => {
 
       await historyManager.addMessagePair("Question", "Answer");
 
-      // Check that file was created (with phase-scoped naming)
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      // Check that file was created (with codon-scoped naming)
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       const content = await fs.readFile(historyPath, "utf-8");
       const savedHistory = JSON.parse(content);
 
@@ -256,8 +256,8 @@ describe("HistoryManager", () => {
 
     test("should use atomic writes", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -265,16 +265,16 @@ describe("HistoryManager", () => {
 
       await historyManager.addMessagePair("Question", "Answer");
 
-      // Temp file should not exist after successful write (phase-scoped naming)
-      const tempPath = path.join(testDir, "test-chronicler-phase-test-phase.json.tmp");
+      // Temp file should not exist after successful write (codon-scoped naming)
+      const tempPath = path.join(testDir, "test-sentinel-codon-test-codon.json.tmp");
       await expect(fs.access(tempPath)).rejects.toThrow();
     });
 
     test("should recover history across instances", async () => {
       // First instance
       const historyManager1 = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -284,8 +284,8 @@ describe("HistoryManager", () => {
 
       // Second instance
       const historyManager2 = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -300,7 +300,7 @@ describe("HistoryManager", () => {
 
   describe("Message Type Validation", () => {
     test("should filter out invalid messages when loading", async () => {
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       // Use only 1 invalid message (< 20% corruption threshold: 1/9 = 11%)
       const mixedHistory = [
         { role: "user", content: "Valid user message 1" },
@@ -316,8 +316,8 @@ describe("HistoryManager", () => {
       await fs.writeFile(historyPath, JSON.stringify(mixedHistory, null, 2));
 
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -338,8 +338,8 @@ describe("HistoryManager", () => {
   describe("System Prompt Handling", () => {
     test("should always include fresh system prompt as first message", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -366,8 +366,8 @@ describe("HistoryManager", () => {
   describe("Skip Pruning Option", () => {
     test("should skip pruning when requested", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 1 },
         testDir,
         logger,
@@ -385,11 +385,11 @@ describe("HistoryManager", () => {
     });
   });
 
-  describe("Token Count Storage (Task 21)", () => {
+  describe("Token Count Storage", () => {
     test("should store actual token counts when provided", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -399,7 +399,7 @@ describe("HistoryManager", () => {
       await historyManager.addMessagePair("Question", "Answer", 100, 50);
 
       // Verify tokens were saved in file
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       const content = await fs.readFile(historyPath, "utf-8");
       const savedHistory = JSON.parse(content);
 
@@ -409,8 +409,8 @@ describe("HistoryManager", () => {
 
     test("should use actual token counts for pruning when available", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTokens", maxTokens: 40 }, // Threshold to trigger pruning
         testDir,
         logger,
@@ -433,7 +433,7 @@ describe("HistoryManager", () => {
     });
 
     test("should handle backward compatibility with old format (no tokens)", async () => {
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       const oldFormatHistory = [
         { role: "user", content: "Old format user" },
         { role: "assistant", content: "Old format assistant" },
@@ -441,8 +441,8 @@ describe("HistoryManager", () => {
       await fs.writeFile(historyPath, JSON.stringify(oldFormatHistory, null, 2));
 
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -454,9 +454,9 @@ describe("HistoryManager", () => {
     });
   });
 
-  describe("Corruption Detection (Task 22)", () => {
+  describe("Corruption Detection", () => {
     test("should detect and handle high corruption rate (>20%)", async () => {
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       // 3 invalid out of 5 = 60% corruption (exceeds 20% threshold)
       const corruptHistory = [
         { role: "user", content: "Valid message" },
@@ -468,8 +468,8 @@ describe("HistoryManager", () => {
       await fs.writeFile(historyPath, JSON.stringify(corruptHistory, null, 2));
 
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -487,7 +487,7 @@ describe("HistoryManager", () => {
     });
 
     test("should handle low corruption rate (<20%) gracefully", async () => {
-      const historyPath = path.join(testDir, "test-chronicler-phase-test-phase.json");
+      const historyPath = path.join(testDir, "test-sentinel-codon-test-codon.json");
       // 1 invalid out of 10 = 10% corruption (under threshold)
       const slightlyCorruptHistory = [
         { role: "user", content: "Message 1" },
@@ -504,8 +504,8 @@ describe("HistoryManager", () => {
       await fs.writeFile(historyPath, JSON.stringify(slightlyCorruptHistory, null, 2));
 
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -526,8 +526,8 @@ describe("HistoryManager", () => {
   describe("Structured Output Support", () => {
     test("should accept objects in addMessagePair and stringify them", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,
@@ -545,8 +545,8 @@ describe("HistoryManager", () => {
 
     test("should handle mixed string and object history", async () => {
       const historyManager = new HistoryManager(
-        "test-chronicler",
-        PhaseId("test-phase"),
+        "test-sentinel",
+        CodonId("test-codon"),
         { type: "maxTurns", maxTurns: 10 },
         testDir,
         logger,

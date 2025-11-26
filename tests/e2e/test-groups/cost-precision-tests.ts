@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type {
-  PhaseCompletedEvent,
+  CodonCompletedEvent,
   StateSnapshotEvent,
   TokenUsageEvent,
 } from "../../../server/types/types.js";
@@ -57,31 +57,31 @@ export function runCostPrecisionTests(testState: TestState) {
     });
   });
 
-  test("cumulative costs match sum of phase costs", () => {
+  test("cumulative costs match sum of codon costs", () => {
     // Get final state snapshot
     const snapshots = testState.client?.getEventsByType("state.snapshot") || [];
     const finalSnapshot = snapshots[snapshots.length - 1];
     const finalTotalCost = (finalSnapshot as StateSnapshotEvent)?.data?.totalCost || 0;
 
-    // Calculate sum of phase costs
-    const phaseCompletions = testState.client?.getEventsByType("phase.completed") || [];
-    const sumOfPhaseCosts = phaseCompletions.reduce((sum, event) => {
-      const completion = event as PhaseCompletedEvent;
+    // Calculate sum of codon costs
+    const codonCompletions = testState.client?.getEventsByType("codon.completed") || [];
+    const sumOfCodonCosts = codonCompletions.reduce((sum, event) => {
+      const completion = event as CodonCompletedEvent;
       return sum + (completion.data?.cost || 0);
     }, 0);
 
     // Check if values are within 5% of each other
-    const percentageDiff = Math.abs(finalTotalCost - sumOfPhaseCosts) / sumOfPhaseCosts;
+    const percentageDiff = Math.abs(finalTotalCost - sumOfCodonCosts) / sumOfCodonCosts;
 
     if (percentageDiff > 0.05) {
       console.log(
-        `Cumulative cost test failed: expected ${sumOfPhaseCosts}, got ${finalTotalCost}, difference: ${
+        `Cumulative cost test failed: expected ${sumOfCodonCosts}, got ${finalTotalCost}, difference: ${
           percentageDiff * 100
         }%`,
       );
     } else {
       console.log(
-        `Cumulative cost test passed: expected ${sumOfPhaseCosts}, got ${finalTotalCost}, difference: ${
+        `Cumulative cost test passed: expected ${sumOfCodonCosts}, got ${finalTotalCost}, difference: ${
           percentageDiff * 100
         }%`,
       );

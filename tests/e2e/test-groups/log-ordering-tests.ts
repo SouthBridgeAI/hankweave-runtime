@@ -5,8 +5,20 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runLogOrderingTests(testDir: string) {
   test("log messages maintain causal ordering", () => {
-    ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
-      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
+    // Find the run folder
+    const runsDir = path.join(testDir, ".strandweave/runs");
+    let runFolder = "";
+    if (fs.existsSync(runsDir)) {
+      const runFolders = fs.readdirSync(runsDir);
+      if (runFolders.length > 0) {
+        runFolder = path.join(runsDir, runFolders[0]);
+      }
+    }
+
+    if (!runFolder) return;
+
+    ["codon-1", "codon-2", "codon-3"].forEach((codonId) => {
+      const logPath = path.join(runFolder, `${codonId}-claude.log`);
       if (!fs.existsSync(logPath)) return;
 
       const entries = parseJSONL(fs.readFileSync(logPath, "utf-8"));
@@ -15,7 +27,7 @@ export function runLogOrderingTests(testDir: string) {
       expect(entries[0]?.type).toBe("system");
       expect(entries[0]?.subtype).toBe("init");
 
-      // Result should be last (if phase completed)
+      // Result should be last (if codon completed)
       const resultIndex = entries.findIndex((e) => e.type === "result");
       if (resultIndex !== -1) {
         expect(resultIndex).toBe(entries.length - 1);
@@ -31,9 +43,21 @@ export function runLogOrderingTests(testDir: string) {
   });
 
   test("stderr output is captured in logs", () => {
+    // Find the run folder
+    const runsDir = path.join(testDir, ".strandweave/runs");
+    let runFolder = "";
+    if (fs.existsSync(runsDir)) {
+      const runFolders = fs.readdirSync(runsDir);
+      if (runFolders.length > 0) {
+        runFolder = path.join(runsDir, runFolders[0]);
+      }
+    }
+
+    if (!runFolder) return;
+
     // Check for stderr entries in Claude logs
-    ["phase-1", "phase-2", "phase-3"].forEach((phaseId) => {
-      const logPath = path.join(testDir, `.tadpole/logs/log-${phaseId}.jsonl`);
+    ["codon-1", "codon-2", "codon-3"].forEach((codonId) => {
+      const logPath = path.join(runFolder, `${codonId}-claude.log`);
       if (fs.existsSync(logPath)) {
         const content = fs.readFileSync(logPath, "utf-8");
         // Look for stderr entries (if any errors occurred)
