@@ -1,0 +1,40 @@
+[
+  {
+    "id": "ingest",
+    "name": "Ingest Source Data",
+    "promptFile": "prompts/ingest.md",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "description": "Ingest and normalize upstream data files",
+    "trackedFiles": ["data/raw/**/*"],
+    "rigSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p data/normalized",
+          "workingDirectory": "project"
+        }
+      }
+    ],
+    "outputFiles": [
+      { "copy": ["data/normalized/**/*.json"] }
+    ],
+    "sentinels": [
+      { "sentinelConfig": "sentinels/data-health.json" }
+    ]
+  },
+  {
+    "id": "analyze",
+    "name": "Analyze Dataset",
+    "promptFile": [
+      "prompts/analyze/intro.md",
+      "prompts/analyze/steps.md"
+    ],
+    "appendSystemPromptFile": "prompts/system/formatting.md",
+    "model": "opus",
+    "continuationMode": "continue-previous",
+    "description": "Derive insights and note anomalies",
+    "trackedFiles": ["data/normalized/**/*"],
+    "env": { "STRICT_MODE": "true" }
+  }
+]

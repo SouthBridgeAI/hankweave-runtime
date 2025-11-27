@@ -1,0 +1,33 @@
+$schema: ./strandweave.schema.json
+version: "1.0.0"
+server:
+  port: 8081
+  withoutProxy: true
+paths:
+  outputDirectory: strandweave-inline-results
+  lockFile: .strandweave/runtime.lock
+  logs:
+    websocket: .strandweave/logs/websocket.log
+    server: .strandweave/logs/server.log
+workflow:
+  configFile: codex/config/codon-sequence.inline.json
+  autostart: false
+  dataHashTimeLimit: 8000
+llm:
+  defaultModel: opus
+  providers:
+    anthropic:
+      baseUrl: https://api.anthropic.com
+runtime:
+  logParsingInterval: 750
+  toolResultTruncateLength: 2000
+  handshakeHistoryLimit: 75
+  bun:
+    version: "1.1.15"
+docker:
+  enabled: true
+  image: ghcr.io/example/strandweave:latest
+sentinel:
+  enablePersistence: false
+  healthCheckGracePeriodMs: 1500
+  waitForAllHealthChecks: true
