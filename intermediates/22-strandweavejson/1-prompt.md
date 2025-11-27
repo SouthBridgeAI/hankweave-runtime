@@ -3,7 +3,7 @@ Below is a quick overview of different configurations sources currently used str
 - bun runtime version
 - docker usage
 - test replay data for llm providers
-- llm provider usersage
+- llm provider usage
 - etc etc
 
 ---
