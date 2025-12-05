@@ -6,7 +6,7 @@ import type { FailureReason } from "./types/types.js";
 
 // Metadata for transitioning to initializing
 export interface InitializingMetadata {
-  claudePid: number;
+  claudePid?: number; // Optional since SDK queries don't have a child process PID
   claudeLogPath: string;
 }
 
@@ -40,10 +40,11 @@ export function hasInitializingMetadata(metadata: unknown): metadata is Initiali
   return (
     typeof metadata === "object" &&
     metadata !== null &&
-    "claudePid" in metadata &&
     "claudeLogPath" in metadata &&
-    typeof (metadata as Record<string, unknown>).claudePid === "number" &&
-    typeof (metadata as Record<string, unknown>).claudeLogPath === "string"
+    typeof (metadata as Record<string, unknown>).claudeLogPath === "string" &&
+    // claudePid is optional - if present, must be a number
+    (!("claudePid" in metadata) ||
+      typeof (metadata as Record<string, unknown>).claudePid === "number")
   );
 }
 
@@ -112,7 +113,7 @@ export function validateTransitionMetadata(to: CodonStatus, metadata: unknown): 
         if (!metadata || typeof metadata !== "object") {
           missing.push("metadata object");
         } else {
-          if (!("claudePid" in metadata)) missing.push("claudePid");
+          // claudePid is now optional (SDK queries don't have child process PIDs)
           if (!("claudeLogPath" in metadata)) missing.push("claudeLogPath");
         }
         throw new MetadataValidationError(to, missing);

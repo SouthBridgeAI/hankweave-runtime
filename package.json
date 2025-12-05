@@ -38,6 +38,7 @@
     "@ai-sdk/google": "^2.0.7",
     "@ai-sdk/groq": "^2.0.11",
     "@ai-sdk/openai": "^2.0.18",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.59",
     "@biomejs/biome": "^2.0.6",
     "ai": "^5.0.15",
     "eta": "^3.5.0",

@@ -143,11 +143,12 @@ export interface InitializingCodon extends BaseCodon {
 
   /**
    * Claude process ID for monitoring/cleanup.
+   * Optional since SDK queries don't have child process PIDs.
    *
    * Used by: Process manager to kill on skip/shutdown
-   * Edge case: Process might already be dead
+   * Edge case: Process might already be dead, or using SDK (no PID)
    */
-  claudePid: number;
+  claudePid?: number;
 
   /**
    * Path to Claude's JSONL log file.
@@ -188,7 +189,7 @@ export interface InitializingCodon extends BaseCodon {
 export interface RunningCodon extends BaseCodon {
   status: "running";
   rigSetupCheckpoint?: string;
-  claudePid: number;
+  claudePid?: number; // Optional since SDK queries don't have child process PIDs
 
   /**
    * Claude's session UUID from init message.
@@ -254,7 +255,7 @@ export interface RunningCodon extends BaseCodon {
 export interface CompletingSentinelsCodon extends BaseCodon {
   status: "completing-sentinels";
   rigSetupCheckpoint?: string;
-  claudePid: number;
+  claudePid?: number; // Optional since SDK queries don't have child process PIDs
   claudeSessionId: SessionId;
   claudeLogPath: string;
   previousSessionId?: SessionId;

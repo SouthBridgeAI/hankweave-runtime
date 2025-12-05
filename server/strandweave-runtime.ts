@@ -1758,9 +1758,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
 
       const pid = this.processManager.getPid();
-      if (!pid) {
-        throw new Error("Failed to get Claude process PID");
-      }
+      // Note: pid may be undefined when using SDK (no child process)
 
       // Get the codon from current state to check for previousSessionId
       const _currentCodon = this.currentCodon;
@@ -1773,7 +1771,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           from: "starting",
           to: "initializing",
           metadata: {
-            claudePid: pid,
+            ...(pid !== undefined && { claudePid: pid }), // Only include if present
             claudeLogPath: path.relative(this.config.executionPath, logPath),
             ...(previousSessionId && {
               previousSessionId: SessionId(previousSessionId),
@@ -1781,6 +1779,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           },
         },
       });
+
+      // Start message iteration AFTER state transition to avoid race conditions
+      this.processManager.startMessageIteration();
 
       // Start log parsing with delay
       setTimeout(() => {
