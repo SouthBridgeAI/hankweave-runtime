@@ -382,3 +382,89 @@ export async function copyFiles(
     await fs.promises.cp(sourcePath, destPath, { recursive: true });
   }
 }
+
+// -------------
+// Object Utilities
+// -------------
+
+/**
+ * Deep merge multiple objects with proper handling of nested structures.
+ *
+ * Merging rules:
+ * - Plain objects are merged recursively
+ * - Arrays are replaced (not merged) - later values overwrite earlier ones
+ * - Primitives (string, number, boolean, null) are replaced
+ * - undefined values are skipped (don't overwrite existing values)
+ * - Later sources take precedence over earlier ones
+ *
+ * @param sources - Objects to merge, in priority order (later = higher priority)
+ * @returns Merged object with all properties from all sources
+ *
+ * @example
+ * const defaults = { port: 8080, sentinel: { enabled: true, timeout: 1000 } };
+ * const userConfig = { port: 3000, sentinel: { timeout: 5000 } };
+ * const merged = deepMerge(defaults, userConfig);
+ * // Result: { port: 3000, sentinel: { enabled: true, timeout: 5000 } }
+ */
+export function deepMerge<T extends Record<string, unknown>>(...sources: Array<T | undefined>): T {
+  const result = {} as T;
+
+  for (const source of sources) {
+    // Skip undefined sources
+    if (source === undefined) {
+      continue;
+    }
+
+    // Iterate over all keys in the source object
+    for (const key in source) {
+      // Skip if the key is not an own property
+      if (!Object.hasOwn(source, key)) {
+        continue;
+      }
+
+      const sourceValue = source[key];
+
+      // Skip undefined values - they don't overwrite existing values
+      if (sourceValue === undefined) {
+        continue;
+      }
+
+      const currentValue = result[key];
+
+      // If both values are plain objects, merge them recursively
+      if (isPlainObject(currentValue) && isPlainObject(sourceValue)) {
+        result[key] = deepMerge(
+          currentValue as Record<string, unknown>,
+          sourceValue as Record<string, unknown>,
+        ) as T[Extract<keyof T, string>];
+      } else {
+        // For all other cases (arrays, primitives, null), replace the value
+        result[key] = sourceValue;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Check if a value is a plain object (not an array, not null, not a class instance).
+ * Plain objects are created with {} or new Object().
+ *
+ * @param value - Value to check
+ * @returns true if the value is a plain object
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  // Check if it's an array
+  if (Array.isArray(value)) {
+    return false;
+  }
+
+  // Check if it's a plain object (created with {} or new Object())
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
