@@ -233,6 +233,7 @@ Loops allow the agent to iterate until a condition is met. This is useful for TD
 {
   "type": "loop",
   "id": "tdd-cycle",
+  "name: "Run TDD cycle",
   "terminateOn": { "type": "iterationLimit", "limit": 5 },
   "codons": [
     { "id": "write-test", ... },
