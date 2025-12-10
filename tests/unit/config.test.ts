@@ -5,6 +5,7 @@ import {
   calculateCost,
   DEFAULT_CONFIG,
   loadCodonSequence,
+  loadRuntimeConfig,
   loadStrandFile,
   validateStrand,
 } from "../../server/config";
@@ -1105,6 +1106,187 @@ describe("loadStrandFile", () => {
 
     createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
     expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+});
+
+describe("loadRuntimeConfig", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-test-runtime");
+  const runtimeConfigPath = path.join(tempDir, "strandweave.json");
+
+  beforeEach(() => {
+    cleanup(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    cleanup(tempDir);
+  });
+
+  test("returns empty object when file doesn't exist", () => {
+    const result = loadRuntimeConfig(path.join(tempDir, "nonexistent.json"));
+    expect(result).toEqual({});
+  });
+
+  test("loads valid runtime config with all fields", () => {
+    const runtimeContent = {
+      port: 8080,
+      autostart: true,
+      withoutProxy: false,
+      model: "opus",
+      anthropicBaseUrl: "https://api.example.com",
+      outputDirectory: "/tmp/output",
+      executionBaseDir: "/tmp/executions",
+      logParsingInterval: 2000,
+      dataHashTimeLimit: 10000,
+      sentinel: {
+        enablePersistence: true,
+        healthCheckGracePeriodMs: 5000,
+        waitForAllHealthChecks: false,
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.port).toBe(8080);
+    expect(result.autostart).toBe(true);
+    expect(result.withoutProxy).toBe(false);
+    expect(result.model).toBe("opus");
+    expect(result.anthropicBaseUrl).toBe("https://api.example.com");
+    expect(result.outputDirectory).toBe("/tmp/output");
+    expect(result.executionBaseDir).toBe("/tmp/executions");
+    expect(result.logParsingInterval).toBe(2000);
+    expect(result.dataHashTimeLimit).toBe(10000);
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 5000,
+      waitForAllHealthChecks: false,
+    });
+  });
+
+  test("loads minimal runtime config with only one field", () => {
+    const runtimeContent = {
+      port: 9000,
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.port).toBe(9000);
+    expect(result.autostart).toBeUndefined();
+    expect(result.model).toBeUndefined();
+  });
+
+  test("loads empty runtime config object", () => {
+    const runtimeContent = {};
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result).toEqual({});
+  });
+
+  test("throws error for invalid JSON", () => {
+    createTestFile(runtimeConfigPath, "{ invalid json }");
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Failed to load runtime config");
+  });
+
+  test("throws error for invalid port type", () => {
+    const runtimeContent = {
+      port: "8080", // Should be number
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for negative port", () => {
+    const runtimeContent = {
+      port: -100,
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for invalid model enum", () => {
+    const runtimeContent = {
+      model: "gpt-4", // Only "sonnet" and "opus" are valid
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for invalid URL format", () => {
+    const runtimeContent = {
+      anthropicBaseUrl: "not-a-valid-url",
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("validates sentinel nested object", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: true,
+        healthCheckGracePeriodMs: 1000,
+        waitForAllHealthChecks: true,
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 1000,
+      waitForAllHealthChecks: true,
+    });
+  });
+
+  test("throws error for invalid sentinel field type", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: "true", // Should be boolean
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for negative healthCheckGracePeriodMs", () => {
+    const runtimeContent = {
+      sentinel: {
+        healthCheckGracePeriodMs: -500,
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("allows partial sentinel config", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: false,
+        // Other fields optional
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.sentinel).toEqual({
+      enablePersistence: false,
+    });
   });
 });
 

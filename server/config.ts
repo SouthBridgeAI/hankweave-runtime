@@ -422,6 +422,48 @@ export function loadStrandFile(strandPath: string): z.infer<typeof strandFileSch
 }
 
 /**
+ * Load and validate runtime configuration from strandweave.json.
+ *
+ * This file is optional and provides runtime settings like port, model, sentinel config, etc.
+ * If the file doesn't exist, returns an empty object (all settings will use defaults or CLI overrides).
+ *
+ * @param runtimeConfigPath - Path to the strandweave.json file (optional, defaults to "strandweave.json" in cwd)
+ * @returns Parsed and validated runtime config, or empty object if file doesn't exist
+ * @throws Error with detailed validation messages if file exists but is invalid
+ */
+export function loadRuntimeConfig(runtimeConfigPath?: string): z.infer<typeof runtimeConfigSchema> {
+  const configPath = runtimeConfigPath || path.join(process.cwd(), "strandweave.json");
+
+  // If file doesn't exist, return empty object (runtime config is optional)
+  if (!fs.existsSync(configPath)) {
+    return {};
+  }
+
+  try {
+    const content = fs.readFileSync(configPath, "utf-8");
+    const rawConfig = JSON.parse(content);
+
+    // Validate with runtimeConfigSchema
+    const result = runtimeConfigSchema.safeParse(rawConfig);
+    if (!result.success) {
+      const errors = formatZodErrors(result.error, rawConfig);
+      throw new Error(`Invalid runtime config file:\n${errors}`);
+    }
+
+    return result.data;
+  } catch (error) {
+    // Re-throw validation errors
+    if (error instanceof Error && error.message.startsWith("Invalid runtime config")) {
+      throw error;
+    }
+    // For other errors (like invalid JSON), provide helpful message
+    throw new Error(
+      `Failed to load runtime config from ${configPath}: ${(error as Error).message}`,
+    );
+  }
+}
+
+/**
  * Load and validate codon configuration from a strand file.
  *
  * Loads the strand file (object format with {meta, recommendations, strand}),
