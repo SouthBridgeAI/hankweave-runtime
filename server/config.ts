@@ -464,6 +464,100 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): z.infer<typeof ru
 }
 
 /**
+ * Load configuration from STRANDWEAVE_RUNTIME_* environment variables.
+ *
+ * Parses environment variables with the STRANDWEAVE_RUNTIME_ prefix and converts them
+ * to the runtime config structure. Handles type conversions and nested paths.
+ *
+ * Environment variable mapping:
+ * - STRANDWEAVE_RUNTIME_PORT -> port (number)
+ * - STRANDWEAVE_RUNTIME_MODEL -> model (enum: "sonnet" | "opus")
+ * - STRANDWEAVE_RUNTIME_AUTOSTART -> autostart (boolean)
+ * - STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE -> sentinel.enablePersistence (boolean)
+ *
+ * Type conversions:
+ * - Numbers: Parsed from strings (e.g., "8080" -> 8080)
+ * - Booleans: "true"/"1" -> true, "false"/"0" -> false
+ * - Strings: Passed through as-is
+ *
+ * @returns Parsed config object from environment variables (validated against schema)
+ * @throws Error if environment variables contain invalid values
+ */
+export function loadStrandweaveRuntimeEnvVars(): z.infer<typeof runtimeConfigSchema> {
+  const config: Record<string, unknown> = {};
+
+  // Helper to convert snake_case to camelCase
+  const toCamelCase = (str: string): string => {
+    return str.toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+  };
+
+  // Helper to parse value based on expected type
+  const parseValue = (key: string, value: string): unknown => {
+    // Boolean fields
+    if (
+      key === "autostart" ||
+      key === "withoutProxy" ||
+      key === "enablePersistence" ||
+      key === "waitForAllHealthChecks"
+    ) {
+      return value === "true" || value === "1";
+    }
+
+    // Number fields
+    if (
+      key === "port" ||
+      key === "logParsingInterval" ||
+      key === "dataHashTimeLimit" ||
+      key === "healthCheckGracePeriodMs"
+    ) {
+      const num = Number(value);
+      if (Number.isNaN(num)) {
+        throw new Error(`Invalid number value for ${key}: "${value}"`);
+      }
+      return num;
+    }
+
+    // String fields (including URLs and enums - will be validated by schema)
+    return value;
+  };
+
+  // Process all STRANDWEAVE_RUNTIME_* environment variables
+  for (const [envKey, envValue] of Object.entries(process.env)) {
+    if (!envKey.startsWith("STRANDWEAVE_RUNTIME_") || !envValue) {
+      continue;
+    }
+
+    // Remove prefix: STRANDWEAVE_RUNTIME_PORT -> PORT
+    const withoutPrefix = envKey.substring("STRANDWEAVE_RUNTIME_".length);
+
+    // Handle nested sentinel config: SENTINEL_ENABLE_PERSISTENCE
+    if (withoutPrefix.startsWith("SENTINEL_")) {
+      const sentinelKey = withoutPrefix.substring("SENTINEL_".length);
+      const camelKey = toCamelCase(sentinelKey);
+
+      if (!config.sentinel) {
+        config.sentinel = {};
+      }
+
+      (config.sentinel as Record<string, unknown>)[camelKey] = parseValue(camelKey, envValue);
+    } else {
+      // Top-level config: PORT, MODEL, etc.
+      const camelKey = toCamelCase(withoutPrefix);
+      config[camelKey] = parseValue(camelKey, envValue);
+    }
+  }
+
+  // Validate against schema
+  const result = runtimeConfigSchema.safeParse(config);
+  if (!result.success) {
+    const errors = formatZodErrors(result.error, config);
+    throw new Error(`Invalid environment variable configuration:\n${errors}`);
+  }
+
+  return result.data;
+}
+
+/**
  * Load and validate codon configuration from a strand file.
  *
  * Loads the strand file (object format with {meta, recommendations, strand}),

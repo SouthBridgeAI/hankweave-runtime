@@ -7,10 +7,12 @@ import {
   loadCodonSequence,
   loadRuntimeConfig,
   loadStrandFile,
+  loadStrandweaveRuntimeEnvVars,
   validateStrand,
 } from "../../server/config";
 import { CodonId } from "../../server/types/branded-types";
 import type { CodonConfig, ModelName } from "../../server/types/types";
+import { captureEnv, restoreEnv } from "../utils/env-test-helpers";
 
 // -------------
 // Shared Test Helpers
@@ -1286,6 +1288,228 @@ describe("loadRuntimeConfig", () => {
 
     expect(result.sentinel).toEqual({
       enablePersistence: false,
+    });
+  });
+});
+
+describe("loadStrandweaveRuntimeEnvVars", () => {
+  let originalEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    // Capture current env state
+    originalEnv = captureEnv();
+    // Clear any STRANDWEAVE_RUNTIME_ vars before each test
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("STRANDWEAVE_RUNTIME_")) {
+        delete process.env[key];
+      }
+    }
+  });
+
+  afterEach(() => {
+    // Restore original env vars after each test
+    restoreEnv(originalEnv);
+  });
+
+  test("returns empty object when no STRANDWEAVE_RUNTIME_ env vars are set", () => {
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result).toEqual({});
+  });
+
+  test("parses single top-level port env var", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.port).toBe(8080);
+  });
+
+  test("parses single top-level model env var", () => {
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.model).toBe("opus");
+  });
+
+  test("parses boolean autostart env var (true)", () => {
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.autostart).toBe(true);
+  });
+
+  test("parses boolean autostart env var (false)", () => {
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.autostart).toBe(false);
+  });
+
+  test("parses boolean using numeric 1", () => {
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "1";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.autostart).toBe(true);
+  });
+
+  test("parses boolean using numeric 0", () => {
+    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "0";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.withoutProxy).toBe(false);
+  });
+
+  test("parses multiple top-level env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "9000";
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "sonnet";
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
+    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.port).toBe(9000);
+    expect(result.model).toBe("sonnet");
+    expect(result.autostart).toBe(true);
+    expect(result.withoutProxy).toBe(false);
+  });
+
+  test("parses URL env var", () => {
+    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.anthropicBaseUrl).toBe("https://api.example.com");
+  });
+
+  test("parses string paths", () => {
+    process.env.STRANDWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
+    process.env.STRANDWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.outputDirectory).toBe("/tmp/output");
+    expect(result.executionBaseDir).toBe("/tmp/executions");
+  });
+
+  test("parses nested sentinel env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 5000,
+      waitForAllHealthChecks: false,
+    });
+  });
+
+  test("parses mix of top-level and nested env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.port).toBe(8080);
+    expect(result.model).toBe("opus");
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 3000,
+    });
+  });
+
+  test("converts snake_case to camelCase", () => {
+    process.env.STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
+    process.env.STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.logParsingInterval).toBe(2000);
+    expect(result.dataHashTimeLimit).toBe(10000);
+  });
+
+  test("ignores non-STRANDWEAVE_RUNTIME_ prefixed env vars", () => {
+    process.env.PORT = "3000";
+    process.env.NODE_ENV = "test";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY = "sk-ant-sentinel";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result).toEqual({});
+  });
+
+  test("ignores empty STRANDWEAVE_RUNTIME_ env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result).toEqual({});
+  });
+
+  test("throws error for invalid number value", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "not-a-number";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      'Invalid number value for port: "not-a-number"',
+    );
+  });
+
+  test("throws error for invalid model enum", () => {
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "gpt-4";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("throws error for invalid URL format", () => {
+    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "not-a-url";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("throws error for negative port", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "-100";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("throws error for negative sentinel grace period", () => {
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "-500";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("handles all supported fields", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
+    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "false";
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
+    process.env.STRANDWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
+    process.env.STRANDWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
+    process.env.STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
+    process.env.STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+
+    expect(result.port).toBe(8080);
+    expect(result.autostart).toBe(true);
+    expect(result.withoutProxy).toBe(false);
+    expect(result.model).toBe("opus");
+    expect(result.anthropicBaseUrl).toBe("https://api.example.com");
+    expect(result.outputDirectory).toBe("/tmp/output");
+    expect(result.executionBaseDir).toBe("/tmp/executions");
+    expect(result.logParsingInterval).toBe(2000);
+    expect(result.dataHashTimeLimit).toBe(10000);
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 5000,
+      waitForAllHealthChecks: false,
     });
   });
 });
