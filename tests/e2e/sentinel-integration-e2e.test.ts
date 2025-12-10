@@ -33,8 +33,8 @@ import {
   ClientMode,
   colors,
   generateTestTimestamp,
-  type ServerConfig,
   startServer,
+  type TestServerConfig,
   TestWSClient,
 } from "../utils/test-helpers.js";
 
@@ -159,7 +159,7 @@ describe("Sentinel Integration: With Sentinels", () => {
     }
 
     // Start server
-    const serverConfig: ServerConfig = {
+    const serverConfig: TestServerConfig = {
       testRunDir: TEST_RUN_DIR,
       configFile: codonConfigPath,
       port: TEST_PORT,
@@ -606,7 +606,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     }
 
     // Start server
-    const serverConfig: ServerConfig = {
+    const serverConfig: TestServerConfig = {
       testRunDir: TEST_RUN_DIR,
       configFile: codonConfigPath,
       port: TEST_PORT,

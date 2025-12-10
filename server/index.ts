@@ -52,11 +52,11 @@ async function main() {
   const skipConfirmation = args.includes("-y");
   const noAutostart = args.includes("--no-autostart");
   const startNew = args.includes("--start-new");
-  const anthropicBaseURL = args
+  const anthropicBaseUrl = args
     .find((arg) => arg.startsWith("--anthropic-base-url="))
     ?.split("=")[1];
   const port = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
-  const modelOverride = args.find((arg) => arg.startsWith("--model="))?.split("=")[1] as
+  const model = args.find((arg) => arg.startsWith("--model="))?.split("=")[1] as
     | "sonnet"
     | "opus"
     | undefined;
@@ -271,9 +271,9 @@ Examples:
       codons,
 
       // Optional config (will use defaults if not provided)
-      ...(anthropicBaseURL && { anthropicBaseURL }),
+      ...(anthropicBaseUrl && { anthropicBaseUrl }),
       ...(port && { port: parseInt(port, 10) }),
-      ...(modelOverride && { modelOverride }),
+      ...(model && { model }),
       autostart: !noAutostart,
       withoutProxy,
     };

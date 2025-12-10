@@ -67,8 +67,8 @@ import type {
   HandshakeRequest,
   HandshakeResponse,
   RigShellCommand,
-  ServerConfig,
   ShellCommand,
+  StrandweaveConfig,
   TokenUsage,
 } from "./types/types.js";
 // Import remaining types from old file
@@ -103,7 +103,7 @@ import {
 export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private server: Server | null = null;
   private clients: Map<string, ServerWebSocket<ClientData>> = new Map();
-  public readonly config: ServerConfig;
+  public readonly config: StrandweaveConfig;
   private logger: Logger;
 
   // Proxy server
@@ -179,8 +179,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   private currentCodonSentinels = new Set<string>();
 
   constructor(
-    config: Omit<ServerConfig, keyof typeof DEFAULT_CONFIG> &
-      Partial<Pick<ServerConfig, keyof typeof DEFAULT_CONFIG>> & {
+    config: Omit<StrandweaveConfig, keyof typeof DEFAULT_CONFIG> &
+      Partial<Pick<StrandweaveConfig, keyof typeof DEFAULT_CONFIG>> & {
         codons: CodonConfig[];
       },
   ) {
@@ -188,7 +188,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
-    } as ServerConfig;
+    } as StrandweaveConfig;
 
     // Update logger to use execution path
     this.logger = new Logger(path.join(this.config.executionPath, this.config.serverLogFile));
@@ -374,7 +374,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.proxyRunner = new BunProxyRunner(
         "passthrough",
         proxyPort,
-        this.config.anthropicBaseURL || "https://api.anthropic.com",
+        this.config.anthropicBaseUrl || "https://api.anthropic.com",
         this.logger,
       );
       this.proxyRunner.start();
@@ -1730,7 +1730,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         this.logger,
         this.logParser,
         this.proxyRunner?.proxyUrl,
-        this.config.modelOverride,
+        this.config.model,
       );
 
       // Set up event handlers

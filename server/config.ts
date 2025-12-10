@@ -1,9 +1,10 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
 import { CodonId } from "./types/branded-types.js";
-import type { Codon, CodonConfig, RigSetupItem, ServerConfig } from "./types/types.js";
+import type { Codon, CodonConfig, RigSetupItem, StrandweaveConfig } from "./types/types.js";
 
 // -------------
 // Constants
@@ -272,6 +273,79 @@ const codonConfigSchema = z.union([
 const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one codon required");
 
 // -------------
+// New Config System Schemas
+// -------------
+
+/**
+ * Schema for strand metadata
+ */
+const strandMetaSchema = z.object({
+  name: z.string().min(1, "Strand name cannot be empty"),
+  version: z.string().min(1, "Strand version cannot be empty"),
+  description: z.string().optional(),
+  author: z.string().optional(),
+});
+
+/**
+ * Schema for architect's recommendations
+ */
+const strandRecommendationsSchema = z.object({
+  model: z.enum(["sonnet", "opus"]).optional(),
+  dataHashTimeLimit: z.number().int().positive().optional(),
+  sentinel: z
+    .object({
+      enablePersistence: z.boolean().optional(),
+      healthCheckGracePeriodMs: z.number().int().positive().optional(),
+      waitForAllHealthChecks: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * Schema for strand file (strand.json).
+ * Supports both object format and backward-compatible array format.
+ */
+export const strandFileSchema = z.union([
+  // Object format (new)
+  z.object({
+    meta: strandMetaSchema.optional(),
+    recommendations: strandRecommendationsSchema.optional(),
+    strand: codonConfigArraySchema,
+  }),
+  // Array format (backward compatible - treated as just the strand property)
+  codonConfigArraySchema,
+]);
+
+/**
+ * Schema for runtime configuration (strandweave.json)
+ */
+export const runtimeConfigSchema = z.object({
+  // Server Behaviors
+  port: z.number().int().positive().optional(),
+  autostart: z.boolean().optional(),
+  withoutProxy: z.boolean().optional(),
+
+  // Model & API
+  model: z.enum(["sonnet", "opus"]).optional(),
+  anthropicBaseUrl: z.string().url().optional(),
+
+  // Resources & Limits
+  outputDirectory: z.string().optional(),
+  executionBaseDir: z.string().optional(),
+  logParsingInterval: z.number().int().positive().optional(),
+  dataHashTimeLimit: z.number().int().positive().optional(),
+
+  // Sentinel System
+  sentinel: z
+    .object({
+      enablePersistence: z.boolean().optional(),
+      healthCheckGracePeriodMs: z.number().int().positive().optional(),
+      waitForAllHealthChecks: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+// -------------
 // Default Configuration
 // -------------
 
@@ -282,7 +356,7 @@ const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one c
  * Note: execution paths and codons must be provided by the user, as well as cwd
  */
 export const DEFAULT_CONFIG: Omit<
-  ServerConfig,
+  StrandweaveConfig,
   | "cwd"
   | "readOnlySourceDataPath"
   | "executionPath"
@@ -296,6 +370,7 @@ export const DEFAULT_CONFIG: Omit<
   port: 7777,
   version: "1.0.0",
   outputDirectory: "strandweave-results",
+  executionBaseDir: path.join(os.homedir(), ".strandweave-executions"),
   lockFile: ".strandweave/runtime.lock",
   socketLogFile: ".strandweave/logs/websocket.log",
   serverLogFile: ".strandweave/logs/server.log",
@@ -625,7 +700,7 @@ export function calculateCost(
     cacheCreationTokens: number;
     cacheReadTokens: number;
   },
-  costs: ServerConfig["costsPerMTok"],
+  costs: StrandweaveConfig["costsPerMTok"],
 ): number {
   const inputCost = (usage.inputTokens / 1_000_000) * costs.input;
   const cacheCreationCost = (usage.cacheCreationTokens / 1_000_000) * costs.inputCache;

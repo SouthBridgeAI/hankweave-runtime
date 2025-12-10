@@ -383,6 +383,120 @@ export interface Loop {
  */
 export type CodonConfig = Codon | Loop;
 
+// -------------
+// Strand Configuration (New Config System)
+// -------------
+
+/**
+ * Metadata for a strand file.
+ * Used for sharing, indexing, and documentation.
+ */
+export interface StrandMeta {
+  /** Human-readable name for the strand */
+  name: string;
+
+  /** Version number (e.g., "1.0.0") */
+  version: string;
+
+  /** Optional description of what this strand does */
+  description?: string;
+
+  /** Optional author information */
+  author?: string;
+}
+
+/**
+ * Architect's recommendations for optimal strand execution.
+ * These are "soft defaults" specific to this workflow logic.
+ * Priority Level 4 in the resolution hierarchy.
+ */
+export interface StrandRecommendations {
+  /** Recommended model for this strand (e.g., "This task needs high reasoning") */
+  model?: ModelName;
+
+  /** Recommended time limit for data hashing in milliseconds */
+  dataHashTimeLimit?: number;
+
+  /** Recommended sentinel system settings */
+  sentinel?: {
+    /** Whether to enable sentinel persistence */
+    enablePersistence?: boolean;
+
+    /** Grace period for sentinel health checks */
+    healthCheckGracePeriodMs?: number;
+
+    /** Whether to wait for all health checks before starting */
+    waitForAllHealthChecks?: boolean;
+  };
+}
+
+/**
+ * Strand file format (strand.json).
+ * Defines the workflow logic plus optional metadata and recommendations.
+ *
+ */
+export interface StrandFile {
+  /** Metadata for sharing/indexing (optional) */
+  meta?: StrandMeta;
+
+  /** Architect's recommendations for optimal execution (optional) */
+  recommendations?: StrandRecommendations;
+
+  /** The immutable logic sequence (required) */
+  strand: CodonConfig[];
+}
+
+/**
+ * Runtime configuration (strandweave.json).
+ * User's local preferences and environment-specific settings.
+ * Priority Level 3 in the resolution hierarchy.
+ *
+ */
+export interface RuntimeConfig {
+  // Server Behaviors
+  /** WebSocket server port */
+  port?: number;
+
+  /** If true, run immediately on client connect */
+  autostart?: boolean;
+
+  /** Bypass internal LLM proxy */
+  withoutProxy?: boolean;
+
+  // Model & API
+  /** User's preferred default model */
+  model?: ModelName;
+
+  /** Custom Anthropic API base URL (for corporate proxies) */
+  anthropicBaseUrl?: string;
+
+  // Resources & Limits
+  /** Where to put results (relative to CWD) */
+  outputDirectory?: string;
+
+  /** Where to create temp execution environments */
+  executionBaseDir?: string;
+
+  /** Interval for parsing Claude log files (milliseconds) */
+  logParsingInterval?: number;
+
+  /** Time limit for hashing directories (milliseconds) */
+  dataHashTimeLimit?: number;
+
+  // Sentinel System
+  /** Sentinel system configuration */
+  sentinel?: {
+    /** Enable filesystem persistence for sentinel outputs */
+    enablePersistence?: boolean;
+
+    /** Grace period to wait for provider health checks (milliseconds) */
+    healthCheckGracePeriodMs?: number;
+
+    /** Wait for all health checks before loading sentinels */
+    waitForAllHealthChecks?: boolean;
+  };
+}
+
 /**
  * Information for creating a checkpoint commit in the shadow git repository.
  *
@@ -412,12 +526,23 @@ export interface CheckpointInfo {
 
 /**
  * Main server configuration containing all runtime settings.
- * Most values have defaults in config.ts except execution paths and codons.
+ * Extends RuntimeConfig with all fields required (defaults filled in) plus additional internal/execution properties.
+ * This is the complete, finalized config assembled from all layers (CLI, env, files, defaults).
  */
-export interface ServerConfig {
-  /** WebSocket server port (default: 7777) */
-  port: number;
+export interface StrandweaveConfig
+  extends Omit<Required<RuntimeConfig>, "model" | "anthropicBaseUrl"> {
+  // Fields from RuntimeConfig that remain optional
+  /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
+  anthropicBaseUrl?: string;
 
+  /**
+   * Model setting - behavior depends on resolution layer:
+   * - If set via CLI/Env/RuntimeConfig (layers 1-3): Overrides ALL codon models globally
+   * - If set via Recommendations/Defaults (layers 4-5): Used as fallback for codons without model specified
+   */
+  model?: ModelName;
+
+  // Additional internal properties (not in RuntimeConfig)
   /** Server version for client compatibility checks */
   version: string;
 
@@ -436,10 +561,28 @@ export interface ServerConfig {
   /** Path to the codon configuration file (for resolving relative sentinel paths) */
   configPath?: string;
 
-  /** Output directory for generated files. Will be scoped to cwd */
-  outputDirectory: string;
+  /**
+   * Token cost configuration per million tokens.
+   * Used to calculate costs for each codon and total project cost.
+   */
+  costsPerMTok: {
+    /** Cost per million input tokens */
+    input: number;
+    /** Cost per million tokens when creating cache */
+    inputCache: number;
+    /** Cost per million tokens when reading from cache */
+    cacheRead: number;
+    /** Cost per million output tokens */
+    output: number;
+  };
 
-  // Execution paths (from ExecutionSetup)
+  /** Maximum length for tool result content before truncation (default: 2500) */
+  toolResultTruncateLength: number;
+
+  /** Maximum number of recent events to include in handshake response (default: 50) */
+  handshakeHistoryLimit: number;
+
+  // Execution-specific properties (from ExecutionSetup)
   /** Original data location (for reference only) */
   readOnlySourceDataPath: string;
   /** Primary directory where everything runs */
@@ -457,71 +600,6 @@ export interface ServerConfig {
 
   /** Array of codon configurations to execute */
   codons: CodonConfig[];
-
-  /**
-   * Token cost configuration per million tokens.
-   * Used to calculate costs for each codon and total project cost.
-   */
-  costsPerMTok: {
-    /** Cost per million input tokens */
-    input: number;
-    /** Cost per million tokens when creating cache */
-    inputCache: number;
-    /** Cost per million tokens when reading from cache */
-    cacheRead: number;
-    /** Cost per million output tokens */
-    output: number;
-  };
-
-  /** Interval in milliseconds for parsing Claude log files (default: 1000) */
-  logParsingInterval: number;
-
-  /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
-  anthropicBaseURL?: string;
-
-  /** Whether to automatically start codons (default: true) */
-  autostart: boolean;
-
-  /** Time limit for hashing directories in milliseconds (default: 5000) */
-  dataHashTimeLimit: number;
-
-  /** Maximum length for tool result content before truncation (default: 2500) */
-  toolResultTruncateLength: number;
-
-  /** Optional model override for all codons (ignores per-codon model settings) */
-  modelOverride?: ModelName;
-
-  /** Whether to disable the proxy server (default: false) */
-  withoutProxy: boolean;
-
-  /** Maximum number of recent events to include in handshake response (default: 50) */
-  handshakeHistoryLimit: number;
-
-  /**
-   * Sentinel system configuration.
-   * Controls behavior of SentinelManager for all codons.
-   */
-  sentinel: {
-    /**
-     * Enable filesystem persistence for sentinel outputs and history.
-     * Default: true
-     */
-    enablePersistence: boolean;
-
-    /**
-     * Grace period to wait for provider health checks before loading sentinels.
-     * Allows some providers to become available without blocking codon start.
-     * Default: 2000ms (2 seconds)
-     */
-    healthCheckGracePeriodMs: number;
-
-    /**
-     * Whether to wait for ALL provider health checks before proceeding.
-     * If false, uses grace period then continues.
-     * Default: false (don't block)
-     */
-    waitForAllHealthChecks: boolean;
-  };
 }
 
 // -------------

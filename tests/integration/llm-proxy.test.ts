@@ -6,7 +6,7 @@ import {
   startServer,
   cleanupTest,
   TestWSClient,
-  ServerConfig,
+  TestServerConfig,
   getFreePort,
 } from "../utils/test-helpers.js";
 import type { ChildProcess } from "node:child_process";
@@ -14,7 +14,7 @@ import type { ChildProcess } from "node:child_process";
 let configPath: string | undefined;
 
 const runTests = async (
-  config: ServerConfig,
+  config: TestServerConfig,
   tests: (executionDir?: string) => Promise<void>
 ) => {
   const tempDir = path.dirname(configPath!);

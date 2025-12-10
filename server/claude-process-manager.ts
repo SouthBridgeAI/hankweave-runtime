@@ -20,8 +20,8 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     private executionPath: string,
     private logger: Logger,
     private logParser: ClaudeLogParser,
-    private anthropicBaseURL?: string,
-    private modelOverride?: import("./types/types.js").ModelName,
+    private anthropicBaseUrl?: string,
+    private model?: import("./types/types.js").ModelName,
   ) {
     super();
   }
@@ -67,9 +67,9 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       }
     }
 
-    if (this.anthropicBaseURL) {
-      env.ANTHROPIC_BASE_URL = this.anthropicBaseURL;
-      this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseURL}`);
+    if (this.anthropicBaseUrl) {
+      env.ANTHROPIC_BASE_URL = this.anthropicBaseUrl;
+      this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseUrl}`);
     }
 
     // Add codon-specific environment variables from config
@@ -133,7 +133,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
    */
   private buildClaudeArgs(codon: Codon, previousSessionId: string | null): string[] {
     // Use model override if provided, otherwise use codon model
-    const model = this.modelOverride || codon.model;
+    const model = this.model || codon.model;
 
     const args = [
       "--verbose",
@@ -148,7 +148,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     ];
 
     // Log model usage
-    if (this.modelOverride) {
+    if (this.model) {
       this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
     }
 
