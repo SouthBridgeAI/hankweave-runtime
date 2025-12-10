@@ -33,7 +33,7 @@ A **Codon** is the atomic unit of work. It represents a single phase of a larger
 *   **A Context Strategy**: It can either start `fresh` (clean slate) or `continue-previous` (inherit the previous codon's conversation history).
 
 ### 2. The Strand
-A **Strand** is the sequence of Codons defined in a `codon-sequence.json` file. It represents the "DNA" of your workflow.
+A **Strand** is the sequence of Codons defined in a `strand.json` file. It represents the "DNA" of your workflow.
 
 ### 3. The Run
 A **Run** is a specific instance of executing a Strand against a dataset. Runs are persistent objects stored on disk. If a run crashes or is stopped, it can be resumed, inspected, or rolled back.
