@@ -5,6 +5,7 @@ import { z } from "zod";
 import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
 import { CodonId } from "./types/branded-types.js";
 import type { Codon, CodonConfig, RigSetupItem, StrandweaveConfig } from "./types/types.js";
+import { deepMerge } from "./utils.js";
 
 // -------------
 // Constants
@@ -555,6 +556,64 @@ export function loadStrandweaveRuntimeEnvVars(): z.infer<typeof runtimeConfigSch
   }
 
   return result.data;
+}
+
+/**
+ * Resolve final runtime configuration by merging all configuration layers.
+ *
+ * Configuration layers (in order of precedence, highest to lowest):
+ * 1. CLI arguments (passed as cliArgs parameter) - highest priority
+ * 2. Environment variables (STRANDWEAVE_RUNTIME_*)
+ * 3. Strand file recommendations (strand.json > recommendations)
+ * 4. Runtime config file (strandweave.json)
+ * 5. Default configuration (DEFAULT_CONFIG) - lowest priority
+ *
+ * @param options Configuration resolution options
+ * @param options.cliArgs CLI arguments to merge (highest priority)
+ * @param options.strandPath Path to strand.json file (for extracting recommendations)
+ * @param options.runtimeConfigPath Path to strandweave.json (defaults to ./strandweave.json)
+ * @returns Fully resolved StrandweaveConfig with all layers merged
+ */
+export function resolveSettings(options?: {
+  cliArgs?: Partial<StrandweaveConfig>;
+  strandPath?: string;
+  runtimeConfigPath?: string;
+}): Partial<StrandweaveConfig> {
+  const { cliArgs = {}, strandPath, runtimeConfigPath } = options || {};
+
+  // Layer 1 (base): Start with default configuration
+  let config: Partial<StrandweaveConfig> = { ...DEFAULT_CONFIG };
+
+  // Layer 2: Merge runtime config file (strandweave.json)
+  try {
+    const runtimeConfig = loadRuntimeConfig(runtimeConfigPath);
+    config = deepMerge(config, runtimeConfig);
+  } catch (_error) {
+    // Runtime config is optional, so silently continue if it doesn't exist
+    // (loadRuntimeConfig already returns {} for missing files)
+  }
+
+  // Layer 3: Merge strand file recommendations (if strand path provided)
+  if (strandPath) {
+    try {
+      const strandFile = loadStrandFile(strandPath);
+      if (strandFile.recommendations) {
+        config = deepMerge(config, strandFile.recommendations);
+      }
+    } catch (_error) {
+      // Strand file errors should not prevent config resolution
+      // The strand file is validated separately during codon loading
+    }
+  }
+
+  // Layer 4: Merge environment variables (STRANDWEAVE_RUNTIME_*)
+  const envConfig = loadStrandweaveRuntimeEnvVars();
+  config = deepMerge(config, envConfig);
+
+  // Layer 5 (highest priority): Merge CLI arguments
+  config = deepMerge(config, cliArgs);
+
+  return config;
 }
 
 /**

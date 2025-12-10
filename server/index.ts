@@ -2,10 +2,52 @@
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
 import { CleanupCommand } from "./cleanup-command.js";
-import { validateStrand } from "./config.js";
+import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
+import type { StrandweaveConfig } from "./types/types.js";
+
+// -------------
+// Helper Functions
+// -------------
+
+/**
+ * Parse CLI arguments into a structured config object for resolveSettings()
+ */
+function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
+  const cliArgs: Partial<StrandweaveConfig> = {};
+
+  // Parse port
+  const portArg = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
+  if (portArg) {
+    cliArgs.port = parseInt(portArg, 10);
+  }
+
+  // Parse model
+  const modelArg = args.find((arg) => arg.startsWith("--model="))?.split("=")[1];
+  if (modelArg) {
+    cliArgs.model = modelArg as "sonnet" | "opus";
+  }
+
+  // Parse anthropicBaseUrl
+  const baseUrlArg = args.find((arg) => arg.startsWith("--anthropic-base-url="))?.split("=")[1];
+  if (baseUrlArg) {
+    cliArgs.anthropicBaseUrl = baseUrlArg;
+  }
+
+  // Parse autostart (inverse of --no-autostart)
+  if (args.includes("--no-autostart")) {
+    cliArgs.autostart = false;
+  }
+
+  // Parse withoutProxy
+  if (args.includes("--without-proxy")) {
+    cliArgs.withoutProxy = true;
+  }
+
+  return cliArgs;
+}
 
 // -------------
 // Main Entry Point
@@ -50,17 +92,9 @@ async function main() {
   const validateMode = args.includes("--validate") || args.includes("-v");
   const cleanupMode = args.includes("--cleanup");
   const skipConfirmation = args.includes("-y");
-  const noAutostart = args.includes("--no-autostart");
   const startNew = args.includes("--start-new");
-  const anthropicBaseUrl = args
-    .find((arg) => arg.startsWith("--anthropic-base-url="))
-    ?.split("=")[1];
-  const port = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
-  const model = args.find((arg) => arg.startsWith("--model="))?.split("=")[1] as
-    | "sonnet"
-    | "opus"
-    | undefined;
-  const withoutProxy = args.includes("--without-proxy");
+  // Note: Config-related args (port, model, anthropicBaseUrl, autostart, withoutProxy)
+  // are now parsed by parseCliArgs() and handled by resolveSettings()
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
@@ -177,6 +211,18 @@ Examples:
     ? configPath
     : path.resolve(originalCwd, configPath);
 
+  // Parse CLI arguments into structured config
+  const cliArgs = parseCliArgs(args);
+
+  // Resolve settings from all 5 config layers
+  // (default config, runtime config, strand recommendations, env vars, CLI args)
+  // Note: We're now in the execution directory, so strandweave.json will be
+  // auto-discovered from process.cwd() if it exists
+  const resolvedConfig = resolveSettings({
+    cliArgs,
+    strandPath: absoluteConfigPath,
+  });
+
   try {
     // Validation mode
     if (validateMode) {
@@ -250,15 +296,15 @@ Examples:
       console.log();
     }
 
-    // Create server configuration by merging ExecutionSetup with other config
+    // Create server configuration by merging all config layers with execution properties
     const serverConfig = {
-      // This is where strandweave is running
+      // Start with resolved config from all 5 layers
+      // (default config, runtime config, strand recommendations, env vars, CLI args)
+      ...resolvedConfig,
+
+      // Override with execution-specific properties (these are not part of the config system)
       cwd: originalCwd,
-
-      // Path to config file (for resolving relative sentinel paths)
       configPath: absoluteConfigPath,
-
-      // Required execution properties from ExecutionSetup
       readOnlySourceDataPath: executionSetup.readOnlySourceDataPath,
       executionPath: executionSetup.executionPath,
       dataPathInExecutionDir: executionSetup.dataPathInExecutionDir,
@@ -267,15 +313,8 @@ Examples:
       isResuming: executionSetup.isResuming,
       linkType: executionSetup.linkType,
 
-      // Required codons
+      // Required: codons from validation
       codons,
-
-      // Optional config (will use defaults if not provided)
-      ...(anthropicBaseUrl && { anthropicBaseUrl }),
-      ...(port && { port: parseInt(port, 10) }),
-      ...(model && { model }),
-      autostart: !noAutostart,
-      withoutProxy,
     };
 
     const server = new StrandweaveRuntime(serverConfig);
