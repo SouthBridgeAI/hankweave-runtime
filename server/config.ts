@@ -980,8 +980,13 @@ export async function validateStrand(
   };
 
   // Collect STRANDWEAVE_ prefixed environment variables from system
+  // Exclude STRANDWEAVE_RUNTIME_* (server config) and STRANDWEAVE_SENTINEL_* (sentinel API keys)
   for (const key in process.env) {
-    if (key.startsWith("STRANDWEAVE_")) {
+    if (
+      key.startsWith("STRANDWEAVE_") &&
+      !key.startsWith("STRANDWEAVE_RUNTIME_") &&
+      !key.startsWith("STRANDWEAVE_SENTINEL_")
+    ) {
       const newKey = key.substring("STRANDWEAVE_".length);
       result.environmentVariables.fromSystem[newKey] = process.env[key] || "";
     }
