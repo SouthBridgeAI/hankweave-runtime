@@ -45,7 +45,8 @@ if (fs.existsSync(testConfigPath)) {
 
   // Parse and show codons
   try {
-    const codons = JSON.parse(fs.readFileSync(testConfigPath, "utf-8"));
+    const strandFile = JSON.parse(fs.readFileSync(testConfigPath, "utf-8"));
+    const codons = strandFile.strand || [];
     console.log(`\nCodons to run:`);
     codons.forEach(
       (codon: { id?: string; name?: string; model?: string; trackedFiles?: string[] }) => {

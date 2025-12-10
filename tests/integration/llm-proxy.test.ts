@@ -80,24 +80,26 @@ describe("LLM proxy", () => {
     writeFileSync(
       configPath,
       JSON.stringify(
-        [
-          {
-            id: "codon-1-analysis",
-            name: "Codon 1: Initial Analysis",
-            promptFile: "prompts/1-analyze.md",
-            model: "sonnet",
-            continuationMode: "fresh",
-            trackedFiles: ["src/**/*.ts", "analysis.md"],
-          },
-          {
-            id: "codon-2-implementation",
-            name: "Codon 2: Implementation",
-            promptFile: "prompts/2-implement.md",
-            model: "sonnet",
-            continuationMode: "continue-previous",
-            trackedFiles: ["src/**/*.ts"],
-          },
-        ],
+        {
+          strand: [
+            {
+              id: "codon-1-analysis",
+              name: "Codon 1: Initial Analysis",
+              promptFile: "prompts/1-analyze.md",
+              model: "sonnet",
+              continuationMode: "fresh",
+              trackedFiles: ["src/**/*.ts", "analysis.md"],
+            },
+            {
+              id: "codon-2-implementation",
+              name: "Codon 2: Implementation",
+              promptFile: "prompts/2-implement.md",
+              model: "sonnet",
+              continuationMode: "continue-previous",
+              trackedFiles: ["src/**/*.ts"],
+            },
+          ],
+        },
         null,
         2
       )

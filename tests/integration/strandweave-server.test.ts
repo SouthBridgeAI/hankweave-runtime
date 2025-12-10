@@ -109,7 +109,8 @@ describe("StrandweaveRuntime", () => {
     let codons = [];
     if (fs.existsSync(CODONS_CONFIG)) {
       try {
-        codons = JSON.parse(fs.readFileSync(CODONS_CONFIG, "utf-8"));
+        const strandFile = JSON.parse(fs.readFileSync(CODONS_CONFIG, "utf-8"));
+        codons = strandFile.strand || [];
       } catch (e) {
         console.warn("Could not load codon configs:", e);
       }

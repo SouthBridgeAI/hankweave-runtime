@@ -5,6 +5,7 @@ import {
   calculateCost,
   DEFAULT_CONFIG,
   loadCodonSequence,
+  loadStrandFile,
   validateStrand,
 } from "../../server/config";
 import { CodonId } from "../../server/types/branded-types";
@@ -32,6 +33,15 @@ const cleanup = (dir: string) => {
   if (fs.existsSync(dir)) {
     fs.rmSync(dir, { recursive: true });
   }
+};
+
+/**
+ * Helper to write a strand config file in the correct object format.
+ * Uses unknown type to allow test data with plain strings instead of branded types.
+ */
+const writeStrandConfig = (filePath: string, codons: unknown[]) => {
+  const strandFile = { strand: codons };
+  fs.writeFileSync(filePath, JSON.stringify(strandFile, null, 2));
 };
 
 // -------------
@@ -167,7 +177,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.codonCount).toBe(1);
@@ -213,7 +223,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.codonCount).toBe(2);
@@ -244,7 +254,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
   });
 
@@ -268,7 +278,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -288,7 +298,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -309,7 +319,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -339,7 +349,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.rigSetupCount).toBe(1);
@@ -371,7 +381,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.rigSetupCount).toBe(1);
@@ -402,7 +412,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Invalid target path");
   });
 
@@ -427,7 +437,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -448,7 +458,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -476,7 +486,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -515,7 +525,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -545,7 +555,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       "Command cannot be empty",
     );
@@ -559,7 +569,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow();
   });
 
@@ -608,7 +618,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     // Should count: 1 standalone + 2 in loop + 1 final = 4 total codons
@@ -646,7 +656,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
   });
 
@@ -681,7 +691,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate");
   });
 
@@ -709,7 +719,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     expect(() => loadCodonSequence(configPath)).toThrow(
       /Loop.*my-loop.*promptFile.*does not exist/,
     );
@@ -749,7 +759,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     // Should not throw, but should have warnings
@@ -780,7 +790,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
@@ -816,7 +826,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
@@ -852,7 +862,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
     // Should not throw
     expect(result.codonCount).toBe(2);
@@ -888,7 +898,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       /continue-previous.*contextExceeded.*context.*exhausted/i,
     );
@@ -924,7 +934,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
     // Should not throw
     expect(result.codonCount).toBe(2);
@@ -954,10 +964,147 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
     // Should not throw
     expect(result.codonCount).toBe(1);
+  });
+});
+
+describe("loadStrandFile", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-test-strand");
+  const strandPath = path.join(tempDir, "test-strand.json");
+
+  beforeEach(() => {
+    cleanup(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    cleanup(tempDir);
+  });
+
+  test("loads valid strand file with all fields", () => {
+    const strandContent = {
+      meta: {
+        name: "Test Strand",
+        version: "1.0.0",
+        description: "A test strand",
+        author: "Test Author",
+      },
+      recommendations: {
+        model: "sonnet" as ModelName,
+        dataHashTimeLimit: 10000,
+        sentinel: {
+          enablePersistence: false,
+          healthCheckGracePeriodMs: 1000,
+          waitForAllHealthChecks: true,
+        },
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    const result = loadStrandFile(strandPath);
+
+    expect(result.meta).toEqual(strandContent.meta);
+    expect(result.recommendations).toEqual(strandContent.recommendations);
+    expect(result.strand).toHaveLength(1);
+    expect(result.strand[0].id).toBe("test-codon");
+  });
+
+  test("loads strand file with only strand array (minimal)", () => {
+    const strandContent = {
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    const result = loadStrandFile(strandPath);
+
+    expect(result.meta).toBeUndefined();
+    expect(result.recommendations).toBeUndefined();
+    expect(result.strand).toHaveLength(1);
+  });
+
+  test("throws error for missing file", () => {
+    expect(() => loadStrandFile("/nonexistent/strand.json")).toThrow("Strand file not found");
+  });
+
+  test("throws error for invalid JSON", () => {
+    createTestFile(strandPath, "{ invalid json }");
+    expect(() => loadStrandFile(strandPath)).toThrow();
+  });
+
+  test("throws error for missing strand array", () => {
+    const strandContent = {
+      meta: {
+        name: "Test Strand",
+        version: "1.0.0",
+      },
+      // Missing strand array
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+
+  test("throws error for empty meta name", () => {
+    const strandContent = {
+      meta: {
+        name: "",
+        version: "1.0.0",
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    expect(() => loadStrandFile(strandPath)).toThrow();
+  });
+
+  test("validates recommendations model enum", () => {
+    const strandContent = {
+      recommendations: {
+        model: "invalid-model", // Invalid model
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
   });
 });
 
@@ -986,7 +1133,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(validConfig));
+    writeStrandConfig(configPath, validConfig);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1002,7 +1149,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1017,7 +1164,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1031,7 +1178,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(neitherConfig));
+    writeStrandConfig(configPath, neitherConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
 
     // Both provided - loadCodonSequence doesn't actually validate this case, it just uses promptFile if both are provided
@@ -1047,7 +1194,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(bothConfig));
+    writeStrandConfig(configPath, bothConfig);
     // This actually doesn't throw - it just uses promptFile
     const result = loadCodonSequence(configPath);
     const codon = result[0];
@@ -1073,7 +1220,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(bothConfig));
+    writeStrandConfig(configPath, bothConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1089,7 +1236,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     const codon = result[0];
@@ -1112,7 +1259,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     const codon = result[0];
@@ -1140,7 +1287,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidRigConfig));
+    writeStrandConfig(configPath, invalidRigConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1155,7 +1302,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1177,7 +1324,7 @@ describe("loadCodonSequence", () => {
         },
       ];
 
-      fs.writeFileSync(configPath, JSON.stringify(config));
+      writeStrandConfig(configPath, config);
       expect(() => loadCodonSequence(configPath)).toThrow();
 
       // Restore permissions for cleanup
@@ -1214,7 +1361,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1260,7 +1407,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1311,7 +1458,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(3);
@@ -1346,7 +1493,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1390,7 +1537,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1413,7 +1560,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1431,7 +1578,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow("at least one codon");
   });
 
@@ -1456,7 +1603,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1482,7 +1629,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow("at least 1");
   });
 
@@ -1519,7 +1666,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1545,7 +1692,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1571,7 +1718,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1610,7 +1757,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     // Should load successfully
@@ -1645,7 +1792,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);

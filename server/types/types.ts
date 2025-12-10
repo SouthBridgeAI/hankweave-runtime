@@ -379,7 +379,7 @@ export interface Loop {
 
 /**
  * CodonConfig is a discriminated union of Codon and Loop.
- * This is the top-level configuration type used in codon-sequence.json.
+ * This is the top-level configuration type used in strand.json.
  */
 export type CodonConfig = Codon | Loop;
 

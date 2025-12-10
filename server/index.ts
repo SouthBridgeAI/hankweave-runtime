@@ -42,7 +42,7 @@ async function main() {
   }
   const args = process.argv.slice(2);
   const configPath =
-    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "codon-sequence.json";
+    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "strand.json";
   const dataSourcePath = args.find((arg) => arg.startsWith("--data="))?.split("=")[1];
   const executionPath = args.find((arg) => arg.startsWith("--execution="))?.split("=")[1];
   const useSymlink = !args.includes("--copy");
@@ -69,7 +69,7 @@ Strandweave Runtime - Codon Orchestration
 Usage: bun server/index.ts [options]
 
 Options:
-  --config=<path>           Path to codon sequence configuration file (default: codon-sequence.json)
+  --config=<path>           Path to strand configuration file (default: strand.json)
   --data=<path>             Path to data file or directory (default: current directory)
   --execution=<path>        Resume in specific execution directory
   --start-new               Force creation of a new execution directory

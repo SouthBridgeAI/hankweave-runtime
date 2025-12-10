@@ -263,7 +263,7 @@ const loopSchema = z.object({
 
 /**
  * CodonConfig is a discriminated union of Codon and Loop.
- * Used in codon-sequence.json configuration.
+ * Used in strand.json configuration.
  */
 const codonConfigSchema = z.union([
   codonSchema, // type: "codon" (or omitted, defaults to "codon")
@@ -303,18 +303,13 @@ const strandRecommendationsSchema = z.object({
 
 /**
  * Schema for strand file (strand.json).
- * Supports both object format and backward-compatible array format.
+ * Must contain a strand array, with optional meta and recommendations.
  */
-export const strandFileSchema = z.union([
-  // Object format (new)
-  z.object({
-    meta: strandMetaSchema.optional(),
-    recommendations: strandRecommendationsSchema.optional(),
-    strand: codonConfigArraySchema,
-  }),
-  // Array format (backward compatible - treated as just the strand property)
-  codonConfigArraySchema,
-]);
+export const strandFileSchema = z.object({
+  meta: strandMetaSchema.optional(),
+  recommendations: strandRecommendationsSchema.optional(),
+  strand: codonConfigArraySchema,
+});
 
 /**
  * Schema for runtime configuration (strandweave.json)
@@ -398,26 +393,49 @@ export const DEFAULT_CONFIG: Omit<
 // -------------
 
 /**
- * Load and validate codon configuration from a JSON file.
+ * Load and parse a strand file (strand.json).
+ * Returns the structured file with meta, recommendations, and strand (codons array).
  *
- * The file should contain an array of codon configurations.
- * Each codon is validated against the schema to ensure required
- * fields are present and either promptFile or promptText is provided.
+ * @param strandPath - Path to the strand.json file
+ * @returns Parsed and validated strand file (with un-branded IDs from Zod)
+ * @throws Error with detailed validation messages if file is invalid
+ */
+export function loadStrandFile(strandPath: string): z.infer<typeof strandFileSchema> {
+  try {
+    const content = fs.readFileSync(strandPath, "utf-8");
+    const rawConfig = JSON.parse(content);
+
+    // Validate with strandFileSchema
+    const result = strandFileSchema.safeParse(rawConfig);
+    if (!result.success) {
+      const errors = formatZodErrors(result.error, rawConfig);
+      throw new Error(`Invalid strand file:\n${errors}`);
+    }
+
+    return result.data;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Strand file not found: ${strandPath}`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Load and validate codon configuration from a strand file.
  *
- * @param configPath - Path to the JSON configuration file
- * @returns Validated array of codon configurations
+ * Loads the strand file (object format with {meta, recommendations, strand}),
+ * extracts the strand (codons array), and resolves relative file paths.
+ *
+ * @param configPath - Path to the strand JSON configuration file
+ * @returns Validated array of codon configurations with resolved paths
  * @throws Error with detailed validation messages if config is invalid
  */
 export function loadCodonSequence(configPath: string): CodonConfig[] {
   try {
-    const content = fs.readFileSync(configPath, "utf-8");
-    const rawConfig = JSON.parse(content);
-    // Validate the configuration
-    const result = codonConfigArraySchema.safeParse(rawConfig);
-    if (!result.success) {
-      const errors = formatZodErrors(result.error, rawConfig);
-      throw new Error(`Invalid codon configuration:\n${errors}`);
-    }
+    // Load and validate strand file
+    const strandFile = loadStrandFile(configPath);
+    const rawCodons = strandFile.strand;
 
     // Resolve relative paths for promptFile and appendSystemPromptFile
     const configDir = path.dirname(configPath);
@@ -484,7 +502,7 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
       return resolved;
     }
 
-    const resolvedConfig = result.data.map((config) =>
+    const resolvedConfig = rawCodons.map((config) =>
       resolveCodonOrLoopPaths(config as CodonConfig),
     );
 
