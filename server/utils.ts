@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import glob from "fast-glob";
+import merge from "lodash.merge";
 import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
@@ -390,11 +391,13 @@ export async function copyFiles(
 /**
  * Deep merge multiple objects with proper handling of nested structures.
  *
+ * Uses lodash.merge for deep merging. Note that arrays are merged by index
+ * (not replaced entirely).
+ *
  * Merging rules:
  * - Plain objects are merged recursively
- * - Arrays are replaced (not merged) - later values overwrite earlier ones
+ * - Arrays are merged by index (e.g., [1,2,3] + [4,5] = [4,5,3])
  * - Primitives (string, number, boolean, null) are replaced
- * - undefined values are skipped (don't overwrite existing values)
  * - Later sources take precedence over earlier ones
  *
  * @param sources - Objects to merge, in priority order (later = higher priority)
@@ -407,64 +410,5 @@ export async function copyFiles(
  * // Result: { port: 3000, sentinel: { enabled: true, timeout: 5000 } }
  */
 export function deepMerge<T extends Record<string, unknown>>(...sources: Array<T | undefined>): T {
-  const result = {} as T;
-
-  for (const source of sources) {
-    // Skip undefined sources
-    if (source === undefined) {
-      continue;
-    }
-
-    // Iterate over all keys in the source object
-    for (const key in source) {
-      // Skip if the key is not an own property
-      if (!Object.hasOwn(source, key)) {
-        continue;
-      }
-
-      const sourceValue = source[key];
-
-      // Skip undefined values - they don't overwrite existing values
-      if (sourceValue === undefined) {
-        continue;
-      }
-
-      const currentValue = result[key];
-
-      // If both values are plain objects, merge them recursively
-      if (isPlainObject(currentValue) && isPlainObject(sourceValue)) {
-        result[key] = deepMerge(
-          currentValue as Record<string, unknown>,
-          sourceValue as Record<string, unknown>,
-        ) as T[Extract<keyof T, string>];
-      } else {
-        // For all other cases (arrays, primitives, null), replace the value
-        result[key] = sourceValue;
-      }
-    }
-  }
-
-  return result;
-}
-
-/**
- * Check if a value is a plain object (not an array, not null, not a class instance).
- * Plain objects are created with {} or new Object().
- *
- * @param value - Value to check
- * @returns true if the value is a plain object
- */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  // Check if it's an array
-  if (Array.isArray(value)) {
-    return false;
-  }
-
-  // Check if it's a plain object (created with {} or new Object())
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
+  return merge({}, ...sources) as T;
 }

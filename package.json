@@ -28,7 +28,8 @@
     "cleanup:force": "bun server/index.ts --cleanup --config=strand.json -y"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/lodash.merge": "^4.6.9"
   },
   "peerDependencies": {
     "typescript": "^5.9.2"
@@ -43,6 +44,7 @@
     "eta": "^3.5.0",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",
+    "lodash.merge": "^4.6.2",
     "minimatch": "^10.0.1",
     "simple-git": "^3.28.0",
     "zod": "^3.25.74"
