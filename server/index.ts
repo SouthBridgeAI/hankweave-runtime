@@ -5,6 +5,7 @@ import { CleanupCommand } from "./cleanup-command.js";
 import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
+import { initProject } from "./init-command.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
 import type { StrandweaveConfig } from "./types/types.js";
 
@@ -73,6 +74,7 @@ async function main() {
     /^--port=\d+$/,
     /^--model=(sonnet|opus)$/,
     /^--without-proxy$/,
+    /^--init$/,
     /^--help$/,
     /^-h$/,
   ];
@@ -93,6 +95,7 @@ async function main() {
   const cleanupMode = args.includes("--cleanup");
   const skipConfirmation = args.includes("-y");
   const startNew = args.includes("--start-new");
+  const initMode = args.includes("--init");
   // Note: Config-related args (port, model, anthropicBaseUrl, autostart, withoutProxy)
   // are now parsed by parseCliArgs() and handled by resolveSettings()
 
@@ -103,6 +106,7 @@ Strandweave Runtime - Codon Orchestration
 Usage: bun server/index.ts [options]
 
 Options:
+  --init                    Initialize a new Strandweave project in current directory
   --config=<path>           Path to strand configuration file (default: strand.json)
   --data=<path>             Path to data file or directory (default: current directory)
   --execution=<path>        Resume in specific execution directory
@@ -161,6 +165,17 @@ Examples:
   bun server/index.ts --basic --model=sonnet
 `);
     process.exit(0);
+  }
+
+  // Handle init mode
+  if (initMode) {
+    try {
+      await initProject(process.cwd());
+      process.exit(0);
+    } catch (error) {
+      console.error(`\n❌ Init failed: ${(error as Error).message}\n`);
+      process.exit(1);
+    }
   }
 
   // Resolve data source path

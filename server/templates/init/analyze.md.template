@@ -1,0 +1,13 @@
+# Project Analysis
+
+Please analyze the files in the data directory and create a comprehensive analysis report.
+
+Your analysis should include:
+
+1. **Overview**: What type of project is this?
+2. **Structure**: How is the code organized?
+3. **Key Technologies**: What frameworks, libraries, or tools are being used?
+4. **Potential Issues**: Any code smells, anti-patterns, or areas for improvement?
+5. **Recommendations**: Suggestions for next steps or improvements
+
+Please create your analysis in a file called `analysis.md` in the execution directory.

@@ -50,6 +50,36 @@ bun install
 bun run validate
 ```
 
+### Quick Start - Initialize a New Workflow
+
+The fastest way to get started is to use the `--init` command to create a new workflow project:
+
+```bash
+# Create a new directory for your workflow
+mkdir my-workflow
+cd my-workflow
+
+# Initialize with template files
+strandweave --init
+
+# This creates:
+#   - strand.json           (workflow configuration)
+#   - prompts/analyze.md    (prompt template)
+#   - .gitignore            (git ignore patterns)
+#   - README.md             (quick start guide)
+
+# Run the workflow with your data
+strandweave --config=strand.json --data=/path/to/your/project
+```
+
+The generated workflow includes a simple analysis codon that reads your data and creates an analysis report. You can customize the `strand.json` and prompts to build more complex workflows.
+
+**What gets created:**
+- **strand.json** - Basic workflow with one analysis codon, using the [object format](./codon-configuration-guide.md#strand-file-format)
+- **prompts/analyze.md** - Template prompt asking Claude to analyze project files
+- **.gitignore** - Ignores execution directories and output files
+- **README.md** - Instructions for running and customizing your workflow
+
 ## Command-Line Interface
 
 The server is controlled via a command-line interface that offers various options to customize its behavior.

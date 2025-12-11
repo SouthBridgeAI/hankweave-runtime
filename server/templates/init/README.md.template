@@ -1,0 +1,16 @@
+# Strandweave Project
+
+This project was initialized with `strandweave init`.
+
+- `strand.json` - Main workflow configuration
+- `prompts/analyze.md` - Prompt template for analysis
+- `.gitignore` - Ignore patterns for version control
+
+## Customization
+
+Edit `strand.json` to customize your workflow:
+- Add more codons to the `strand` array
+- Change the `model` (sonnet or opus)
+- Add `rigSetup` to prepare your environment
+- Configure `trackedFiles` to monitor specific files
+- Use `recommendations` to suggest runtime settings
