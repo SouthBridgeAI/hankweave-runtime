@@ -1221,7 +1221,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // pull existing history for the codon and see if we had run rig setup for it
     // git seems the best source of rig setup related info
-    const codonHistory = await this.stateManager.getCodonHistory(codon.id);
+    const codonHistory = await this.stateManager.getCodonHistory(CodonId(codon.id));
     let rigSetupCheckpoint: string | undefined;
     for (const entry of codonHistory) {
       if ("rigSetupCheckpoint" in entry.codon && entry.codon.rigSetupCheckpoint) {
@@ -1457,7 +1457,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         type: "CodonTransitioned",
         data: {
           runId: this.currentRunId,
-          codonId: codon.id,
+          codonId: CodonId(codon.id),
           from: "starting",
           to: "failed",
           metadata: {
@@ -4252,7 +4252,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     if (reason !== "all codons completed" && this.checkpointingEnabled && this.currentCodon) {
       await this.createCheckpoint({
         status: "exit",
-        codonId: this.currentCodon.codon.id,
+        codonId: CodonId(this.currentCodon.codon.id),
         codonName: this.currentCodon.codon.name,
         runId: this.currentRunId || RunId("unknown"),
         timestamp: new Date().toISOString(),

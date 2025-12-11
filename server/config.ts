@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
 import { CodonId } from "./types/branded-types.js";
-import type { Codon, CodonConfig, RigSetupItem, StrandweaveConfig } from "./types/types.js";
+import type { ModelName } from "./types/types.js";
 import { deepMerge } from "./utils.js";
 
 // -------------
@@ -92,7 +92,7 @@ const shellCommandWorkingDirectory = ["project"] as const;
 // to coordinate with copy commands
 const rigSetupCommandWorkingDirectory = [...shellCommandWorkingDirectory, "lastCopied"] as const;
 
-const shellCommandSchema = z.object({
+export const shellCommandSchema = z.object({
   type: z.literal("command"),
   command: z.object({
     run: z.string().min(1, "Command cannot be empty"),
@@ -100,13 +100,13 @@ const shellCommandSchema = z.object({
   }),
 });
 
-const rigShellCommandSchema = shellCommandSchema.extend({
+export const rigShellCommandSchema = shellCommandSchema.extend({
   command: shellCommandSchema.shape.command.extend({
     workingDirectory: z.enum(rigSetupCommandWorkingDirectory).optional().default("project"),
   }),
 });
 
-const rigSetupItemSchema = z.discriminatedUnion("type", [
+export const rigSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("copy"),
     copy: z.object({
@@ -153,7 +153,7 @@ const codonOutputSchema = z.array(codonOutputItemSchema).optional();
  * - iterationLimit: Stop after a fixed number of iterations
  * - contextExceeded: Stop when Claude signals context exhaustion
  */
-const loopTerminationSchema = z.discriminatedUnion("type", [
+export const loopTerminationSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("iterationLimit"),
     limit: z.number().int().min(1, "Iteration limit must be at least 1"),
@@ -212,7 +212,7 @@ const codonObjectSchema = z.object({
 /**
  * Single codon schema with refinements - represents one executable codon.
  */
-const codonSchema = codonObjectSchema
+export const codonSchema = codonObjectSchema
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
     message:
@@ -230,7 +230,7 @@ const codonSchema = codonObjectSchema
  * Note: We use a forward reference approach here to prevent circular dependencies.
  * The codons array will be validated after the discriminated union is parsed.
  */
-const loopSchema = z.object({
+export const loopSchema = z.object({
   type: z.literal("loop"),
   id: z
     .string()
@@ -266,7 +266,7 @@ const loopSchema = z.object({
  * CodonConfig is a discriminated union of Codon and Loop.
  * Used in strand.json configuration.
  */
-const codonConfigSchema = z.union([
+export const codonConfigSchema = z.union([
   codonSchema, // type: "codon" (or omitted, defaults to "codon")
   loopSchema.strict(), // type: "loop"
 ]);
@@ -280,7 +280,7 @@ const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one c
 /**
  * Schema for strand metadata
  */
-const strandMetaSchema = z.object({
+export const strandMetaSchema = z.object({
   name: z.string().min(1, "Strand name cannot be empty"),
   version: z.string().min(1, "Strand version cannot be empty"),
   description: z.string().optional(),
@@ -290,17 +290,20 @@ const strandMetaSchema = z.object({
 /**
  * Schema for architect's recommendations
  */
-const strandRecommendationsSchema = z.object({
-  model: z.enum(["sonnet", "opus"]).optional(),
-  dataHashTimeLimit: z.number().int().positive().optional(),
-  sentinel: z
-    .object({
-      enablePersistence: z.boolean().optional(),
-      healthCheckGracePeriodMs: z.number().int().positive().optional(),
-      waitForAllHealthChecks: z.boolean().optional(),
-    })
-    .optional(),
-});
+export const strandRecommendationsSchema = z
+  .object({
+    model: z.enum(["sonnet", "opus"]).optional(),
+    dataHashTimeLimit: z.number().int().positive().optional(),
+    sentinel: z
+      .object({
+        enablePersistence: z.boolean().optional(),
+        healthCheckGracePeriodMs: z.number().int().positive().optional(),
+        waitForAllHealthChecks: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
 /**
  * Schema for strand file (strand.json).
@@ -315,31 +318,128 @@ export const strandFileSchema = z.object({
 /**
  * Schema for runtime configuration (strandweave.json)
  */
-export const runtimeConfigSchema = z.object({
-  // Server Behaviors
-  port: z.number().int().positive().optional(),
-  autostart: z.boolean().optional(),
-  withoutProxy: z.boolean().optional(),
+export const runtimeConfigSchema = z
+  .object({
+    // Server Behaviors
+    port: z.number().int().positive().optional(),
+    autostart: z.boolean().optional(),
+    withoutProxy: z.boolean().optional(),
 
-  // Model & API
-  model: z.enum(["sonnet", "opus"]).optional(),
-  anthropicBaseUrl: z.string().url().optional(),
+    // Model & API
+    model: z.enum(["sonnet", "opus"]).optional(),
+    anthropicBaseUrl: z.string().url().optional(),
 
-  // Resources & Limits
-  outputDirectory: z.string().optional(),
-  executionBaseDir: z.string().optional(),
-  logParsingInterval: z.number().int().positive().optional(),
-  dataHashTimeLimit: z.number().int().positive().optional(),
+    // Resources & Limits
+    outputDirectory: z.string().optional(),
+    executionBaseDir: z.string().optional(),
+    logParsingInterval: z.number().int().positive().optional(),
+    dataHashTimeLimit: z.number().int().positive().optional(),
 
-  // Sentinel System
-  sentinel: z
-    .object({
-      enablePersistence: z.boolean().optional(),
-      healthCheckGracePeriodMs: z.number().int().positive().optional(),
-      waitForAllHealthChecks: z.boolean().optional(),
-    })
-    .optional(),
-});
+    // Sentinel System
+    sentinel: z
+      .object({
+        enablePersistence: z.boolean().optional(),
+        healthCheckGracePeriodMs: z.number().int().positive().optional(),
+        waitForAllHealthChecks: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+// -------------
+// Inferred Types from Schemas
+// -------------
+
+export type ShellCommand = z.input<typeof shellCommandSchema>;
+export type RigShellCommand = z.input<typeof rigShellCommandSchema>;
+export type RigSetupItem = z.input<typeof rigSetupItemSchema>;
+export type LoopTermination = z.infer<typeof loopTerminationSchema>;
+export type Codon = z.input<typeof codonSchema>;
+export type Loop = z.input<typeof loopSchema>;
+export type CodonConfig = z.input<typeof codonConfigSchema>;
+export type StrandMeta = z.infer<typeof strandMetaSchema>;
+export type StrandRecommendations = z.infer<typeof strandRecommendationsSchema>;
+export type StrandFile = z.infer<typeof strandFileSchema>;
+export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
+
+/**
+ * Main server configuration containing all runtime settings.
+ * Extends RuntimeConfig with all fields required (defaults filled in) plus additional internal/execution properties.
+ * This is the complete, finalized config assembled from all layers (CLI, env, files, defaults).
+ */
+export interface StrandweaveConfig
+  extends Omit<Required<RuntimeConfig>, "model" | "anthropicBaseUrl"> {
+  // Fields from RuntimeConfig that remain optional
+  /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
+  anthropicBaseUrl?: string;
+
+  /**
+   * Model setting - behavior depends on resolution layer:
+   * - If set via CLI/Env/RuntimeConfig (layers 1-3): Overrides ALL codon models globally
+   * - If set via Recommendations/Defaults (layers 4-5): Used as fallback for codons without model specified
+   */
+  model?: ModelName;
+
+  // Additional internal properties (not in RuntimeConfig)
+  /** Server version for client compatibility checks */
+  version: string;
+
+  /** Path to lock file preventing multiple server instances */
+  lockFile: string;
+
+  /** Path to WebSocket traffic log file */
+  socketLogFile: string;
+
+  /** Path to general server log file */
+  serverLogFile: string;
+
+  /** Current working directory for the server process */
+  cwd: string;
+
+  /** Path to the codon configuration file (for resolving relative sentinel paths) */
+  configPath?: string;
+
+  /**
+   * Token cost configuration per million tokens.
+   * Used to calculate costs for each codon and total project cost.
+   */
+  costsPerMTok: {
+    /** Cost per million input tokens */
+    input: number;
+    /** Cost per million tokens when creating cache */
+    inputCache: number;
+    /** Cost per million tokens when reading from cache */
+    cacheRead: number;
+    /** Cost per million output tokens */
+    output: number;
+  };
+
+  /** Maximum length for tool result content before truncation (default: 2500) */
+  toolResultTruncateLength: number;
+
+  /** Maximum number of recent events to include in handshake response (default: 50) */
+  handshakeHistoryLimit: number;
+
+  // Execution-specific properties (from ExecutionSetup)
+  /** Original data location (for reference only) */
+  readOnlySourceDataPath: string;
+  /** Primary directory where everything runs */
+  executionPath: string;
+  /** executionPath + '/data' - ONLY for setup */
+  dataPathInExecutionDir: string;
+  /** Hash of the data directory structure */
+  dataHash: string;
+  /** Whether this is a new execution */
+  isNewExecution: boolean;
+  /** Whether we're resuming an existing execution */
+  isResuming: boolean;
+  /** How data is linked (symlink or copy) */
+  linkType: "symlink" | "copy";
+
+  /** Array of codon configurations to execute */
+  codons: CodonConfig[];
+}
 
 // -------------
 // Default Configuration

@@ -1109,6 +1109,78 @@ describe("loadStrandFile", () => {
     createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
     expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
   });
+
+  test("throws error on typos in recommendations", () => {
+    // With .strict() mode enabled, typos in recommendations are caught
+    // and users get immediate feedback instead of silent failures.
+    const strandContent = {
+      recommendations: {
+        modle: "opus", // Typo! Should be "model"
+        dataHashTimeLimit: 10000, // Valid field
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    // Should throw with helpful error message about unrecognized keys
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+
+  test("throws error on multiple typos in recommendations", () => {
+    const strandContent = {
+      recommendations: {
+        modle: "opus", // Typo! Should be "model"
+        dataHashTimeLimittt: 10000, // Typo! Should be "dataHashTimeLimit"
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+
+  test("throws error on typos in recommendations.sentinel", () => {
+    const strandContent = {
+      recommendations: {
+        model: "opus",
+        sentinel: {
+          enablePersistence: true,
+          healthCheckGracePeriodMsss: 5000, // Typo! Should be "healthCheckGracePeriodMs"
+        },
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
 });
 
 describe("loadRuntimeConfig", () => {
@@ -1289,6 +1361,28 @@ describe("loadRuntimeConfig", () => {
     expect(result.sentinel).toEqual({
       enablePersistence: false,
     });
+  });
+
+  test("throws error on typos in runtime config", () => {
+    const runtimeContent = {
+      port: 8080,
+      modell: "opus", // Typo! Should be "model"
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error on typos in runtime config sentinel", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: true,
+        healthCheckGracePeriodMss: 1000, // Typo! Should be "healthCheckGracePeriodMs"
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
   });
 });
 
