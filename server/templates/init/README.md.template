@@ -1,6 +1,6 @@
-# Strandweave Project
+# Strand
 
-This project was initialized with `strandweave init`.
+This strand was initialized with `strandweave init`.
 
 - `strand.json` - Main workflow configuration
 - `prompts/analyze.md` - Prompt template for analysis

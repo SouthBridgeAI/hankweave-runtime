@@ -1,6 +1,6 @@
 Consult different `.md` files discussing config redesign in @intermediates/22-strandweavejson/.
 
-output few different examples of strandwewave.json with a few variations:
+output few different examples of strandweave.json with a few variations:
 
 - assuming external `codon-sequence.json`
 - with embedded `codon-sequence.json`

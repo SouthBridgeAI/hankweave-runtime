@@ -106,7 +106,7 @@ Strandweave Runtime - Codon Orchestration
 Usage: bun server/index.ts [options]
 
 Options:
-  --init                    Initialize a new Strandweave project in current directory
+  --init                    Initialize a new strand in current directory
   --config=<path>           Path to strand configuration file (default: strand.json)
   --data=<path>             Path to data file or directory (default: current directory)
   --execution=<path>        Resume in specific execution directory

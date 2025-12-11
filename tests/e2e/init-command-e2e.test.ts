@@ -22,9 +22,9 @@ describe("init command e2e", () => {
 
   afterAll(() => {
     // Clean up test directory
-    if (fs.existsSync(INIT_TEST_DIR)) {
-      fs.rmSync(INIT_TEST_DIR, { recursive: true, force: true });
-    }
+    // if (fs.existsSync(INIT_TEST_DIR)) {
+    //   fs.rmSync(INIT_TEST_DIR, { recursive: true, force: true });
+    // }
   });
 
   test("init command creates all required files", async () => {
@@ -55,13 +55,16 @@ describe("init command e2e", () => {
     // Verify success
     expect(exitCode).toBe(0);
     expect(stderr).toBe("");
-    expect(stdout).toContain("Initialized Strandweave project");
+    expect(stdout).toContain("Initialized strand");
 
     // Verify files were created
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "strand.json"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, ".gitignore"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
+    expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample1.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample2.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/notes.txt"))).toBe(true);
 
     // Verify strand.json is valid JSON and has expected structure
     const strandContent = fs.readFileSync(path.join(INIT_TEST_DIR, "strand.json"), "utf-8");
@@ -110,21 +113,15 @@ describe("init command e2e", () => {
   });
 
   test("generated strand can be executed successfully", async () => {
-    // Create a simple data file for the workflow to analyze
-    const dataFile = path.join(INIT_TEST_DIR, "sample-data.txt");
-    fs.writeFileSync(
-      dataFile,
-      "This is a sample data file for testing the init workflow.\nIt contains some text to analyze.",
-    );
-
     const configPath = path.join(INIT_TEST_DIR, "strand.json");
     const serverEntry = path.join(TEST_ROOT, "server/index.ts");
+    const dataDir = path.join(INIT_TEST_DIR, "data");
 
-    // Spawn server directly with correct data path
+    // Spawn server using the data directory created by init
     // Don't specify --execution, let the server create its own execution directory
     const child = spawn(
       "bun",
-      [serverEntry, "--basic", `--config=${configPath}`, `--data=${dataFile}`, "--port=7888"],
+      [serverEntry, "--basic", `--config=${configPath}`, `--data=${dataDir}`, "--port=7888"],
       {
         cwd: INIT_TEST_DIR,
         stdio: ["ignore", "pipe", "pipe"],
