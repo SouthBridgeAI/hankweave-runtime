@@ -93,32 +93,48 @@ const shellCommandWorkingDirectory = ["project"] as const;
 const rigSetupCommandWorkingDirectory = [...shellCommandWorkingDirectory, "lastCopied"] as const;
 
 export const shellCommandSchema = z.object({
-  type: z.literal("command"),
+  type: z.literal("command").describe("Type of setup operation"),
   command: z.object({
-    run: z.string().min(1, "Command cannot be empty"),
-    workingDirectory: z.enum(shellCommandWorkingDirectory).optional().default("project"),
+    run: z.string().min(1, "Command cannot be empty").describe("Shell command to execute"),
+    workingDirectory: z
+      .enum(shellCommandWorkingDirectory)
+      .optional()
+      .default("project")
+      .describe("Working directory for command execution (default: 'project')"),
   }),
 });
 
 export const rigShellCommandSchema = shellCommandSchema.extend({
   command: shellCommandSchema.shape.command.extend({
-    workingDirectory: z.enum(rigSetupCommandWorkingDirectory).optional().default("project"),
+    workingDirectory: z
+      .enum(rigSetupCommandWorkingDirectory)
+      .optional()
+      .default("project")
+      .describe("Working directory for command execution (default: 'project')"),
   }),
 });
 
 export const rigSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
-    type: z.literal("copy"),
+    type: z.literal("copy").describe("Type of setup operation"),
     copy: z.object({
-      from: z.string().min(1, "Source path cannot be empty"),
-      to: z.string().min(1, "Target path cannot be empty"),
+      from: z
+        .string()
+        .min(1, "Source path cannot be empty")
+        .describe("Source path (relative to config file or absolute)"),
+      to: z
+        .string()
+        .min(1, "Target path cannot be empty")
+        .describe(
+          "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: '../templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: '../templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: '../config.json', to: 'src/config.json' → copies file; from: '../config.json', to: 'src/settings.json' → copies file with rename",
+        ),
     }),
     allowFailure: z
       .boolean()
       .optional()
       .default(false)
       .describe(
-        "If true, failure of this operation won't fail the codon. Recommended for rig setup in loop codons.",
+        "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., copying files that don't exist yet).",
       ),
   }),
   rigShellCommandSchema.extend({
@@ -127,7 +143,7 @@ export const rigSetupItemSchema = z.discriminatedUnion("type", [
       .optional()
       .default(false)
       .describe(
-        "If true, failure of this operation won't fail the codon. Recommended for rig setup in loop codons.",
+        "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., running commands that might not succeed initially).",
       ),
   }),
 ]);
@@ -135,10 +151,14 @@ export const rigSetupItemSchema = z.discriminatedUnion("type", [
 // Output copy item schema (array of these under codon.outputFiles)
 const codonOutputItemSchema = z
   .object({
-    // An array of glob strings representing codon output files to copy
-    copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
-    // Optional shell commands to run before copying files. Cwd is executionPath
-    beforeCopy: z.array(shellCommandSchema).optional(),
+    copy: z
+      .array(z.string())
+      .min(1, "The 'copy' array cannot be empty.")
+      .describe("Glob patterns to copy from execution directory to output directory"),
+    beforeCopy: z
+      .array(shellCommandSchema)
+      .optional()
+      .describe("Optional commands to run before copying (run in executionPath)"),
   })
   .strict();
 
@@ -172,41 +192,92 @@ export const loopTerminationSchema = z.discriminatedUnion("type", [
  * The type field is optional and defaults to "codon".
  */
 const codonObjectSchema = z.object({
-  type: z.literal("codon").optional().default("codon"),
+  type: z
+    .literal("codon")
+    .optional()
+    .default("codon")
+    .describe("Type discriminator - optional, defaults to 'codon'"),
   id: z
     .string()
     .min(
       1,
       "Codon ID cannot be empty. This uniquely identifies your codon (e.g., 'codon-1', 'analysis'). Fix: Add a unique id field.",
-    ),
+    )
+    .describe("Unique identifier for this codon (e.g., 'codon-1', 'data-analysis')"),
   name: z
     .string()
     .min(
       1,
       "Codon name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
+    )
+    .describe("Human-readable name displayed in UI and logs"),
+  promptFile: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .describe("Path to a file containing the prompt (mutually exclusive with promptText)"),
+  promptText: z
+    .string()
+    .optional()
+    .describe("Inline prompt text (mutually exclusive with promptFile)"),
+  appendSystemPromptFile: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .describe(
+      "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText)",
     ),
-  promptFile: z.union([z.string(), z.array(z.string())]).optional(),
-  promptText: z.string().optional(),
-  appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
-  appendSystemPromptText: z.string().optional(),
-  model: z.enum(["sonnet", "opus"], {
-    errorMap: () => ({
-      message:
-        "Model must be either 'sonnet' or 'opus'. This determines which Claude model to use. Fix: Change model to 'sonnet' (faster, cheaper) or 'opus' (more capable).",
-    }),
-  }),
-  continuationMode: z.enum(["fresh", "continue-previous"], {
-    errorMap: () => ({
-      message:
-        "continuationMode must be either 'fresh' or 'continue-previous'. This controls whether to start a new conversation or continue from the previous codon. Fix: Add continuationMode field with either 'fresh' (new conversation) or 'continue-previous' (maintain context).",
-    }),
-  }),
-  rigSetup: z.array(rigSetupItemSchema).optional(),
-  description: z.string().optional(),
-  trackedFiles: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
-  outputFiles: codonOutputSchema,
-  sentinels: z.array(codonSentinelEntrySchema).optional(),
+  appendSystemPromptText: z
+    .string()
+    .optional()
+    .describe(
+      "Inline system prompt text to append (mutually exclusive with appendSystemPromptFile)",
+    ),
+  model: z
+    .enum(["sonnet", "opus"], {
+      errorMap: () => ({
+        message:
+          "Model must be either 'sonnet' or 'opus'. This determines which Claude model to use. Fix: Change model to 'sonnet' (faster, cheaper) or 'opus' (more capable).",
+      }),
+    })
+    .describe("Claude model to use (e.g., 'claude-3-opus-20240229', 'sonnet')"),
+  continuationMode: z
+    .enum(["fresh", "continue-previous"], {
+      errorMap: () => ({
+        message:
+          "continuationMode must be either 'fresh' or 'continue-previous'. This controls whether to start a new conversation or continue from the previous codon. Fix: Add continuationMode field with either 'fresh' (new conversation) or 'continue-previous' (maintain context).",
+      }),
+    })
+    .describe(
+      "How this codon should handle continuation from previous codons. 'fresh': Start a new session (default for most cases). 'continue-previous': Continue from the previous codon's session, maintaining context and conversation history. The previous codon must have completed successfully.",
+    ),
+  rigSetup: z
+    .array(rigSetupItemSchema)
+    .optional()
+    .describe(
+      "Rig setup operations to run before codon starts. Each operation must complete successfully for codon to start.",
+    ),
+  description: z
+    .string()
+    .optional()
+    .describe("Optional description shown to users about what this codon does"),
+  trackedFiles: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Glob patterns for files to track during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved using gitignore rules for consistency.",
+    ),
+  env: z
+    .record(z.string())
+    .optional()
+    .describe("Optional environment variables to set for the Claude process"),
+  outputFiles: codonOutputSchema.describe(
+    "Optional output copy steps to run after codon completion: files to copy out from a completed codon, with optional pre-copy commands.",
+  ),
+  sentinels: z
+    .array(codonSentinelEntrySchema)
+    .optional()
+    .describe(
+      "Sentinels to run during this codon. Sentinels are parallel observation agents that process the event stream. Each entry is a wrapper object with sentinelConfig (portable sentinel configuration, file or inline) and settings (codon-specific settings like output paths and load requirements). This wrapper pattern keeps sentinel configs reusable across codons.",
+    ),
 });
 
 /**
@@ -231,21 +302,26 @@ export const codonSchema = codonObjectSchema
  * The codons array will be validated after the discriminated union is parsed.
  */
 export const loopSchema = z.object({
-  type: z.literal("loop"),
+  type: z.literal("loop").describe("Type discriminator - required for loops"),
   id: z
     .string()
     .min(
       1,
       "Loop ID cannot be empty. This uniquely identifies your loop (e.g., 'iterative-development'). Fix: Add a unique id field.",
-    ),
+    )
+    .describe("Unique identifier for this loop (e.g., 'iterative-development')"),
   name: z
     .string()
     .min(
       1,
       "Loop name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
-    ),
-  description: z.string().optional(),
-  terminateOn: loopTerminationSchema,
+    )
+    .describe("Human-readable name displayed in UI and logs"),
+  description: z
+    .string()
+    .optional()
+    .describe("Optional description shown to users about what this loop does"),
+  terminateOn: loopTerminationSchema.describe("Termination condition for the loop"),
   codons: z
     .array(
       codonObjectSchema
@@ -259,7 +335,10 @@ export const loopSchema = z.object({
             "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
         }),
     )
-    .min(1, "Loop must contain at least one codon. Fix: Add codons to the loop."),
+    .min(1, "Loop must contain at least one codon. Fix: Add codons to the loop.")
+    .describe(
+      "Array of codons to execute in each iteration. Only Codon objects allowed (no nested loops).",
+    ),
 });
 
 /**
@@ -281,10 +360,16 @@ const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one c
  * Schema for strand metadata
  */
 export const strandMetaSchema = z.object({
-  name: z.string().min(1, "Strand name cannot be empty"),
-  version: z.string().min(1, "Strand version cannot be empty"),
-  description: z.string().optional(),
-  author: z.string().optional(),
+  name: z
+    .string()
+    .min(1, "Strand name cannot be empty")
+    .describe("Human-readable name for the strand"),
+  version: z
+    .string()
+    .min(1, "Strand version cannot be empty")
+    .describe("Version number (e.g., '1.0.0')"),
+  description: z.string().optional().describe("Optional description of what this strand does"),
+  author: z.string().optional().describe("Optional author information"),
 });
 
 /**
@@ -292,16 +377,36 @@ export const strandMetaSchema = z.object({
  */
 export const strandRecommendationsSchema = z
   .object({
-    model: z.enum(["sonnet", "opus"]).optional(),
-    dataHashTimeLimit: z.number().int().positive().optional(),
+    model: z
+      .enum(["sonnet", "opus"])
+      .optional()
+      .describe("Recommended model for this strand (e.g., 'This task needs high reasoning')"),
+    dataHashTimeLimit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Recommended time limit for data hashing in milliseconds"),
     sentinel: z
       .object({
-        enablePersistence: z.boolean().optional(),
-        healthCheckGracePeriodMs: z.number().int().positive().optional(),
-        waitForAllHealthChecks: z.boolean().optional(),
+        enablePersistence: z
+          .boolean()
+          .optional()
+          .describe("Whether to enable sentinel persistence"),
+        healthCheckGracePeriodMs: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Grace period for sentinel health checks"),
+        waitForAllHealthChecks: z
+          .boolean()
+          .optional()
+          .describe("Whether to wait for all health checks before starting"),
       })
       .strict()
-      .optional(),
+      .optional()
+      .describe("Recommended sentinel system settings"),
   })
   .strict();
 
@@ -310,9 +415,11 @@ export const strandRecommendationsSchema = z
  * Must contain a strand array, with optional meta and recommendations.
  */
 export const strandFileSchema = z.object({
-  meta: strandMetaSchema.optional(),
-  recommendations: strandRecommendationsSchema.optional(),
-  strand: codonConfigArraySchema,
+  meta: strandMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
+  recommendations: strandRecommendationsSchema
+    .optional()
+    .describe("Architect's recommendations for optimal execution (optional)"),
+  strand: codonConfigArraySchema.describe("The immutable logic sequence (required)"),
 });
 
 /**
@@ -321,29 +428,55 @@ export const strandFileSchema = z.object({
 export const runtimeConfigSchema = z
   .object({
     // Server Behaviors
-    port: z.number().int().positive().optional(),
-    autostart: z.boolean().optional(),
-    withoutProxy: z.boolean().optional(),
+    port: z.number().int().positive().optional().describe("WebSocket server port"),
+    autostart: z.boolean().optional().describe("If true, run immediately on client connect"),
+    withoutProxy: z.boolean().optional().describe("Bypass internal LLM proxy"),
 
     // Model & API
-    model: z.enum(["sonnet", "opus"]).optional(),
-    anthropicBaseUrl: z.string().url().optional(),
+    model: z.enum(["sonnet", "opus"]).optional().describe("User's preferred default model"),
+    anthropicBaseUrl: z
+      .string()
+      .url()
+      .optional()
+      .describe("Custom Anthropic API base URL (for corporate proxies)"),
 
     // Resources & Limits
-    outputDirectory: z.string().optional(),
-    executionBaseDir: z.string().optional(),
-    logParsingInterval: z.number().int().positive().optional(),
-    dataHashTimeLimit: z.number().int().positive().optional(),
+    outputDirectory: z.string().optional().describe("Where to put results (relative to CWD)"),
+    executionBaseDir: z.string().optional().describe("Where to create temp execution environments"),
+    logParsingInterval: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Interval for parsing Claude log files (milliseconds)"),
+    dataHashTimeLimit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Time limit for hashing directories (milliseconds)"),
 
     // Sentinel System
     sentinel: z
       .object({
-        enablePersistence: z.boolean().optional(),
-        healthCheckGracePeriodMs: z.number().int().positive().optional(),
-        waitForAllHealthChecks: z.boolean().optional(),
+        enablePersistence: z
+          .boolean()
+          .optional()
+          .describe("Enable filesystem persistence for sentinel outputs"),
+        healthCheckGracePeriodMs: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Grace period to wait for provider health checks (milliseconds)"),
+        waitForAllHealthChecks: z
+          .boolean()
+          .optional()
+          .describe("Wait for all health checks before loading sentinels"),
       })
       .strict()
-      .optional(),
+      .optional()
+      .describe("Sentinel system configuration"),
   })
   .strict();
 
