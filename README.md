@@ -33,6 +33,7 @@ A **Codon** is the atomic unit of work. It represents a single phase of a larger
 *   **A Context Strategy**: It can either start `fresh` (clean slate) or `continue-previous` (inherit the previous codon's conversation history).
 
 ### 2. The Strand
+
 A **Strand** is the sequence of Codons defined in a `strand.json` file. It represents the "DNA" of your workflow.
 
 ### 3. The Run
@@ -143,10 +144,10 @@ mkdir my-agent-workflow
 cd my-agent-workflow
 
 # 2. Initialize with template files
-bun /path/to/strandweave/server/index.ts --init
+strandweave --init
 
 # 3. Run the workflow on your data
-bun /path/to/strandweave/server/index.ts --config=strand.json --data=/path/to/your/project
+strandweave --config=strand.json --data=/path/to/your/project
 ```
 
 The `--init` command creates:
