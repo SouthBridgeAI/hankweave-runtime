@@ -4,7 +4,8 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { generateTestTimestamp } from "../utils/test-helpers.js";
+import { launchStrandweave } from "../utils/strandweave-server-test-helpers.js";
+import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
 
 // Test configuration
 const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -114,68 +115,40 @@ describe("init command e2e", () => {
 
   test("generated strand can be executed successfully", async () => {
     const configPath = path.join(INIT_TEST_DIR, "strand.json");
-    const serverEntry = path.join(TEST_ROOT, "server/index.ts");
     const dataDir = path.join(INIT_TEST_DIR, "data");
 
-    // Spawn server using the data directory created by init
-    // Don't specify --execution, let the server create its own execution directory
-    const child = spawn(
-      "bun",
-      [serverEntry, "--basic", `--config=${configPath}`, `--data=${dataDir}`, "--port=7888"],
-      {
-        cwd: INIT_TEST_DIR,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    // Get a free port for the server
+    const port = await getFreePort();
 
-    let completed = false;
-
-    child.stdout?.on("data", (data) => {
-      const text = data.toString();
-      console.log(`[Init E2E] ${text.trim()}`);
-
-      // Check if codon completed
-      if (text.includes("Codon completed") || text.includes('"type":"codon.completed"')) {
-        completed = true;
-      }
+    // Launch server using the data directory created by init
+    // Use INIT_TEST_DIR as both cwd (for output files) and execution directory
+    const server = await launchStrandweave({
+      configPath,
+      dataDir,
+      port,
+      cwd: INIT_TEST_DIR,
+      executionDir: INIT_TEST_DIR,
+      reuseTestDirectory: true, // Don't clean the directory - it has our init files
+      logPrefix: "[Init E2E]",
     });
 
-    child.stderr?.on("data", (data) => {
-      const text = data.toString();
-      console.error(`[Init E2E ERROR] ${text.trim()}`);
-    });
+    try {
+      // Wait for the run to complete
+      await server.waitForRunToComplete(120000);
 
-    // Wait for completion or timeout
-    const timeout = 120000; // 2 minutes
-    const startTime = Date.now();
+      // Verify that the analysis file was created in strandweave-results
+      const resultsDir = path.join(INIT_TEST_DIR, "strandweave-results");
+      expect(fs.existsSync(resultsDir)).toBe(true);
 
-    while (!completed && Date.now() - startTime < timeout) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const analysisFile = path.join(resultsDir, "analysis.md");
+      expect(fs.existsSync(analysisFile)).toBe(true);
 
-      // Check if process exited
-      if (child.exitCode !== null) {
-        break;
-      }
+      // Verify analysis file has content
+      const analysisContent = fs.readFileSync(analysisFile, "utf-8");
+      expect(analysisContent.length).toBeGreaterThan(0);
+    } finally {
+      // Clean up server
+      await server.stop(10000);
     }
-
-    // Wait a bit more for file operations to complete
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Kill process if still running
-    if (child.exitCode === null) {
-      child.kill("SIGTERM");
-      await once(child, "exit");
-    }
-
-    // Verify that the analysis file was created in strandweave-results
-    const resultsDir = path.join(INIT_TEST_DIR, "strandweave-results");
-    expect(fs.existsSync(resultsDir)).toBe(true);
-
-    const analysisFile = path.join(resultsDir, "analysis.md");
-    expect(fs.existsSync(analysisFile)).toBe(true);
-
-    // Verify analysis file has content
-    const analysisContent = fs.readFileSync(analysisFile, "utf-8");
-    expect(analysisContent.length).toBeGreaterThan(0);
   }, 150000); // 2.5 minute timeout for this test
 });
