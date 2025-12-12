@@ -4,8 +4,8 @@ import path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { minimatch } from "minimatch";
 import { CheckpointGit } from "./checkpoint-git.js";
+import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
-import { ClaudeProcessManager } from "./claude-process-manager.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { EventJournal } from "./event-journal.js";
@@ -149,7 +149,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: Date;
       }
     | undefined;
-  private processManager: ClaudeProcessManager | undefined;
+  private processManager: ClaudeAgentSDKManager | undefined; // ClaudeProcessManager | undefined;
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingCodon = false;
@@ -1725,7 +1725,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       });
 
       // Create process manager with the log parser
-      this.processManager = new ClaudeProcessManager(
+      this.processManager = new ClaudeAgentSDKManager(
+        // new ClaudeProcessManager(
         this.config.executionPath,
         this.logger,
         this.logParser,
