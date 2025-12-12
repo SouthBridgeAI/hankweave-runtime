@@ -286,6 +286,55 @@ describe("Loop E2E Test", () => {
       expect(codon3State).toBeDefined();
       expect(codon3State?.loopContext).toBeUndefined();
 
+      // Verify log files exist for each loop iteration and are not overwritten
+      // Logs are stored in .strandweave/runs/{runId}/ directory
+      const runId = currentRun.runId;
+      const runFolder = path.join(executionPath, ".strandweave", "runs", runId);
+      expect(fs.existsSync(runFolder)).toBe(true);
+
+      // Check that each codon has its own log file
+      // Log files are named {codon.id}-claude.log with # replaced by -
+      const expectedLogFiles = [
+        "codon-1-claude.log",
+        "write-poem-0-claude.log",
+        "review-poem-0-claude.log",
+        "write-poem-1-claude.log",
+        "review-poem-1-claude.log",
+        "codon-3-claude.log",
+      ];
+
+      for (const logFile of expectedLogFiles) {
+        const logPath = path.join(runFolder, logFile);
+        expect(fs.existsSync(logPath)).toBe(true); // Log file should exist
+
+        // Verify log file is not empty
+        const stats = fs.statSync(logPath);
+        expect(stats.size).toBeGreaterThan(0); // Log file should not be empty
+      }
+
+      // Verify that loop iteration log files contain different content (not overwritten)
+      const writePoemLog0 = fs.readFileSync(
+        path.join(runFolder, "write-poem-0-claude.log"),
+        "utf-8",
+      );
+      const writePoemLog1 = fs.readFileSync(
+        path.join(runFolder, "write-poem-1-claude.log"),
+        "utf-8",
+      );
+
+      // The logs should be different (different sessions, different content)
+      expect(writePoemLog0).not.toBe(writePoemLog1); // write-poem#0 and write-poem#1 logs should differ
+
+      // Verify session IDs in the logs match the codon events
+      // Each log should contain references to its own session ID
+      if (writePoemCodon0?.data.sessionId) {
+        expect(writePoemLog0).toContain(writePoemCodon0.data.sessionId); // write-poem#0 log should contain its session ID
+      }
+
+      if (writePoemCodon1?.data.sessionId) {
+        expect(writePoemLog1).toContain(writePoemCodon1.data.sessionId); // write-poem#1 log should contain its session ID
+      }
+
       // Server will shutdown automatically, wait for connection close
       await strandweave.waitForConnectionClose(5000);
     } finally {

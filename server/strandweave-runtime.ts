@@ -1711,7 +1711,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       await fs.promises.mkdir(runFolder, { recursive: true });
 
       // Modify log path to use run folder
-      const logPath = path.join(runFolder, `${codon.id}-claude.log`);
+      // Use codonId (runtime ID with iteration suffix) instead of codon.id (base config ID)
+      // Replace # with - for safer file names
+      const logFileName = `${codonId.replace(/#/g, "-")}-claude.log`;
+      const logPath = path.join(runFolder, logFileName);
 
       // Create log parser first
       this.logParser = new ClaudeLogParser({
