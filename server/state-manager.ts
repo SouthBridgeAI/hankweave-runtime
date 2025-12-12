@@ -905,16 +905,18 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
           case "initializing": {
             // TypeScript knows metadata is valid from validateTransition
-            if (!metadata || typeof metadata !== "object" || !("claudeLogPath" in metadata)) {
+            if (
+              !metadata ||
+              typeof metadata !== "object" ||
+              !("claudePid" in metadata) ||
+              !("claudeLogPath" in metadata)
+            ) {
               throw new Error("Invalid metadata for initializing transition");
             }
             const initializingCodon: ST.InitializingCodon = {
               ...(currentCodon as ST.StartingCodon),
               status: "initializing",
-              // claudePid is optional (SDK queries don't have child process PIDs)
-              ...("claudePid" in metadata && metadata.claudePid !== undefined
-                ? { claudePid: metadata.claudePid as number }
-                : {}),
+              claudePid: metadata.claudePid as number,
               claudeLogPath: metadata.claudeLogPath as string,
               previousSessionId:
                 metadata.previousSessionId ||
