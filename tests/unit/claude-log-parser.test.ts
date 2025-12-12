@@ -571,4 +571,84 @@ describe("Claude Log Parser", () => {
       expect(messages).toHaveLength(0);
     });
   });
+
+  describe("SDK log format compatibility", () => {
+    test("should parse real SDK-generated log file", () => {
+      // Use the real SDK log file from comparison tests
+      const sdkLogPath = path.join(__dirname, "../test-data/claude-logs/agent-sdk/sdk-log.jsonl");
+
+      const parser = new ClaudeLogParser({
+        logPath: sdkLogPath,
+        codonId: "sdk-test",
+        parsingInterval: 50,
+      });
+
+      const messages = parser.getAllMessages();
+
+      // The SDK log contains 16 messages total
+      expect(messages.length).toBe(16);
+
+      // Count message types
+      const messageCounts = {
+        system: 0,
+        assistant: 0,
+        user: 0,
+        result: 0,
+      };
+
+      for (const msg of messages) {
+        messageCounts[msg.type]++;
+      }
+
+      // Verify expected breakdown:
+      // 1 system.init
+      // 8 assistant messages (1 text + 7 tool_use)
+      // 6 user messages (tool_result responses)
+      // 1 result message
+      expect(messageCounts.system).toBe(1);
+      expect(messageCounts.assistant).toBe(8);
+      expect(messageCounts.user).toBe(6);
+      expect(messageCounts.result).toBe(1);
+
+      // Verify system.init message parsed correctly
+      const initMessage = messages[0];
+      expect(initMessage.type).toBe("system");
+      if (initMessage.type === "system") {
+        expect(initMessage.subtype).toBe("init");
+        expect(initMessage.session_id).toBeTruthy();
+        expect(initMessage.model).toBe("claude-sonnet-4-5-20250929");
+        expect(initMessage.tools.length).toBeGreaterThan(0);
+        expect(initMessage.cwd).toBeTruthy();
+      }
+
+      // Verify assistant messages parsed correctly
+      const firstAssistantMessage = messages.find((m) => m.type === "assistant");
+      expect(firstAssistantMessage).toBeDefined();
+      if (firstAssistantMessage && firstAssistantMessage.type === "assistant") {
+        expect(firstAssistantMessage.message.id).toBeTruthy();
+        expect(firstAssistantMessage.message.role).toBe("assistant");
+        expect(firstAssistantMessage.message.model).toBe("claude-sonnet-4-5-20250929");
+        expect(firstAssistantMessage.message.content).toBeDefined();
+      }
+
+      // Verify user messages parsed correctly
+      const firstUserMessage = messages.find((m) => m.type === "user");
+      expect(firstUserMessage).toBeDefined();
+      if (firstUserMessage && firstUserMessage.type === "user") {
+        expect(firstUserMessage.message.role).toBe("user");
+        expect(firstUserMessage.message.content).toBeDefined();
+      }
+
+      // Verify result message parsed correctly
+      const resultMessage = messages[messages.length - 1];
+      expect(resultMessage.type).toBe("result");
+      if (resultMessage.type === "result") {
+        expect(resultMessage.subtype).toBe("success");
+        expect(resultMessage.is_error).toBe(false);
+        expect(resultMessage.total_cost_usd).toBeGreaterThan(0);
+        expect(resultMessage.num_turns).toBeGreaterThan(0);
+        expect(resultMessage.duration_ms).toBeGreaterThan(0);
+      }
+    });
+  });
 });
