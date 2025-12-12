@@ -373,6 +373,29 @@ export const strandMetaSchema = z.object({
 });
 
 /**
+ * Shared schema for sentinel system settings.
+ * Used in both recommendations and runtime config.
+ */
+const sentinelSettingsSchema = z
+  .object({
+    enablePersistence: z
+      .boolean()
+      .optional()
+      .describe("Enable filesystem persistence for sentinel outputs"),
+    healthCheckGracePeriodMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Grace period for sentinel health checks (milliseconds)"),
+    waitForAllHealthChecks: z
+      .boolean()
+      .optional()
+      .describe("Wait for all health checks before loading sentinels"),
+  })
+  .strict();
+
+/**
  * Schema for architect's recommendations
  */
 export const strandRecommendationsSchema = z
@@ -387,26 +410,7 @@ export const strandRecommendationsSchema = z
       .positive()
       .optional()
       .describe("Recommended time limit for data hashing in milliseconds"),
-    sentinel: z
-      .object({
-        enablePersistence: z
-          .boolean()
-          .optional()
-          .describe("Whether to enable sentinel persistence"),
-        healthCheckGracePeriodMs: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe("Grace period for sentinel health checks"),
-        waitForAllHealthChecks: z
-          .boolean()
-          .optional()
-          .describe("Whether to wait for all health checks before starting"),
-      })
-      .strict()
-      .optional()
-      .describe("Recommended sentinel system settings"),
+    sentinel: sentinelSettingsSchema.optional().describe("Recommended sentinel system settings"),
   })
   .strict();
 
@@ -457,26 +461,7 @@ export const runtimeConfigSchema = z
       .describe("Time limit for hashing directories (milliseconds)"),
 
     // Sentinel System
-    sentinel: z
-      .object({
-        enablePersistence: z
-          .boolean()
-          .optional()
-          .describe("Enable filesystem persistence for sentinel outputs"),
-        healthCheckGracePeriodMs: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe("Grace period to wait for provider health checks (milliseconds)"),
-        waitForAllHealthChecks: z
-          .boolean()
-          .optional()
-          .describe("Wait for all health checks before loading sentinels"),
-      })
-      .strict()
-      .optional()
-      .describe("Sentinel system configuration"),
+    sentinel: sentinelSettingsSchema.optional().describe("Sentinel system configuration"),
   })
   .strict();
 
