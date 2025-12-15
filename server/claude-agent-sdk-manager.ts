@@ -21,8 +21,8 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private executionPath: string,
     private logger: Logger,
     private logParser: ClaudeLogParser,
-    private anthropicBaseURL?: string,
-    private modelOverride?: import("./types/types.js").ModelName,
+    private anthropicBaseUrl?: string,
+    private model?: import("./types/types.js").ModelName,
   ) {
     super();
   }
@@ -87,7 +87,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    */
   private buildSDKOptions(codon: Codon, previousSessionId: string | null): Options {
     // Use model override if provided, otherwise use codon model
-    const model = this.modelOverride || codon.model;
+    const model = this.model || codon.model;
 
     const options: Options = {
       model: this.mapModelName(model),
@@ -115,35 +115,38 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
 
-    // Handle environment variables
-    if (codon.env) {
-      this.logger.log("Applying codon-specific environment variables...");
-      options.env = codon.env;
-    }
-
-    // Initialize env object if not already set
+    // Initialize env object (SDK doesn't inherit all process.env, only what we explicitly pass)
     if (!options.env) options.env = {};
 
-    // Add STRANDWEAVE_ prefixed variables from server environment
+    // Pass through STRANDWEAVE_ prefixed variables from server environment
+    // Exclude STRANDWEAVE_RUNTIME_* (server config) and STRANDWEAVE_SENTINEL_* (sentinel API keys)
     for (const key in process.env) {
-      if (key.startsWith("STRANDWEAVE_")) {
+      if (
+        key.startsWith("STRANDWEAVE_") &&
+        !key.startsWith("STRANDWEAVE_RUNTIME_") &&
+        !key.startsWith("STRANDWEAVE_SENTINEL_")
+      ) {
         const newKey = key.substring("STRANDWEAVE_".length);
         options.env[newKey] = process.env[key];
         this.logger.log(`Passing through env var: ${newKey}`);
       }
     }
 
-    // Pass through authentication-related environment variables
-    const authEnvVars = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"];
-    for (const key of authEnvVars) {
-      if (process.env[key]) {
-        options.env[key] = process.env[key];
-        this.logger.log(`Passing through auth env var: ${key}`);
-      }
+    // Apply anthropicBaseUrl if provided
+    if (this.anthropicBaseUrl) {
+      options.env.ANTHROPIC_BASE_URL = this.anthropicBaseUrl;
+      this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseUrl}`);
+    }
+
+    // Add codon-specific environment variables from config
+    // These will override any existing variables with the same name
+    if (codon.env) {
+      this.logger.log("Applying codon-specific environment variables...");
+      Object.assign(options.env, codon.env);
     }
 
     // Log model usage
-    if (this.modelOverride) {
+    if (this.model) {
       this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
     }
 
