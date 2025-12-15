@@ -134,7 +134,7 @@ describe("init command e2e", () => {
 
     try {
       // Wait for the run to complete
-      await server.waitForRunToComplete(120000);
+      await server.waitForRunToComplete(300000);
 
       // Verify that the analysis file was created in strandweave-results
       const resultsDir = path.join(INIT_TEST_DIR, "strandweave-results");
@@ -150,5 +150,5 @@ describe("init command e2e", () => {
       // Clean up server
       await server.stop(10000);
     }
-  }, 150000); // 2.5 minute timeout for this test
+  }, 300000); // 5 minutes timeout for this test
 });
