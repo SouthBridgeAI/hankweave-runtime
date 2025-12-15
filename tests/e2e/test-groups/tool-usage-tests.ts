@@ -27,8 +27,8 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
     expect(toolCounts.Write || 0).toBeGreaterThanOrEqual(4);
   });
 
-  test("at least 1 LS tool use", () => {
-    expect(toolCounts.LS || 0).toBeGreaterThanOrEqual(1);
+  test("at least 1 Glob tool use", () => {
+    expect(toolCounts.Glob || 0).toBeGreaterThanOrEqual(1);
   });
 
   test("at least 2 Read tool uses", () => {

@@ -16,33 +16,22 @@ export function runDualIdSystemTests(testState: TestState) {
     const codons = ["codon-1", "codon-2", "codon-3"];
 
     codons.forEach((codonId) => {
-      const codonEvents = testState.events.filter((e) => {
-        if (e.type === "codon.started" && e.data.codonId === codonId) {
-          return true;
-        }
-        if (e.type === "info") {
-          const msg = e.data.message || "";
-          return (
-            msg.includes("Claude started with session ID:") &&
-            testState.events.some(
-              (pe) =>
-                pe.type === "codon.started" &&
-                pe.data.codonId === codonId &&
-                msg.includes(pe.data.sessionId || ""),
-            )
-          );
-        }
-        return false;
-      });
+      // Find the codon.started event for this codon
+      const codonStartedEvent = testState.events.find(
+        (e) => e.type === "codon.started" && e.data.codonId === codonId,
+      );
 
-      if (codonEvents.length >= 2) {
-        // Find the Claude started info event and codon.started event
-        const claudeStartedEvent = codonEvents.find(
-          (e) => e.type === "info" && e.data.message.includes("Claude started with session ID:"),
+      if (codonStartedEvent?.type === "codon.started") {
+        const sessionId = codonStartedEvent.data.sessionId;
+
+        // Find the Claude started info event for this specific codon
+        const claudeStartedEvent = testState.events.find(
+          (e) =>
+            e.type === "info" &&
+            e.data.message === `Claude started codon ${codonId} with session ID: ${sessionId}`,
         );
-        const codonStartedEvent = codonEvents.find((e) => e.type === "codon.started");
 
-        if (claudeStartedEvent && codonStartedEvent) {
+        if (claudeStartedEvent) {
           // Claude init should come before or at the same time as codon.started
           const claudeTime = new Date(claudeStartedEvent.timestamp).getTime();
           const codonTime = new Date(codonStartedEvent.timestamp).getTime();
@@ -123,29 +112,14 @@ export function runDualIdSystemTests(testState: TestState) {
     testState.events.forEach((event) => {
       if (event.type === "info") {
         const msg = event.data.message || "";
-        const match = msg.match(/Claude started with session ID: ([0-9a-f-]+)/i);
+        const match = msg.match(/Claude started codon ([\w-]+) with session ID: ([0-9a-f-]+)/i);
         if (match) {
-          const sessionId = match[1];
-          // Find which codon this belongs to by looking at nearby events
-          const eventIndex = testState.events.indexOf(event);
-          // Look for codon.started event within 5 events
-          for (
-            let i = Math.max(0, eventIndex - 5);
-            i < Math.min(testState.events.length, eventIndex + 5);
-            i++
-          ) {
-            const nearbyEvent = testState.events[i];
-            if (nearbyEvent.type === "codon.started") {
-              const codonId = nearbyEvent.data.codonId;
-              if (codonId) {
-                if (!codonSessionIds.has(codonId)) {
-                  codonSessionIds.set(codonId, new Set());
-                }
-                codonSessionIds.get(codonId)?.add(sessionId);
-              }
-              break;
-            }
+          const codonId = match[1];
+          const sessionId = match[2];
+          if (!codonSessionIds.has(codonId)) {
+            codonSessionIds.set(codonId, new Set());
           }
+          codonSessionIds.get(codonId)?.add(sessionId);
         }
       }
     });
@@ -225,10 +199,11 @@ export function runDualIdSystemTests(testState: TestState) {
       if (codonStarted?.type === "codon.started") {
         const sessionId = codonStarted.data.sessionId;
 
-        // Find the corresponding info event
+        // Find the corresponding info event for this specific codon
         const infoEvent = testState.events.find(
           (e) =>
-            e.type === "info" && e.data.message === `Claude started with session ID: ${sessionId}`,
+            e.type === "info" &&
+            e.data.message === `Claude started codon ${codonId} with session ID: ${sessionId}`,
         );
 
         expect(infoEvent).toBeDefined();

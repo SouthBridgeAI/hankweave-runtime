@@ -1866,7 +1866,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: new Date().toISOString(),
         type: "info",
         data: {
-          message: `Claude started with session ID: ${msg.session_id}`,
+          message: `Claude started codon ${codonId} with session ID: ${msg.session_id}`,
         },
       } as InfoEvent);
     }
