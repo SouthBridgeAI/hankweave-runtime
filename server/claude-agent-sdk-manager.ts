@@ -118,6 +118,14 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     // Initialize env object (SDK doesn't inherit all process.env, only what we explicitly pass)
     if (!options.env) options.env = {};
 
+    // Pass through essential system environment variables that Claude Code SDK needs
+    const essentialVars = ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "LC_ALL"];
+    for (const key of essentialVars) {
+      if (process.env[key]) {
+        options.env[key] = process.env[key];
+      }
+    }
+
     // Pass through critical environment variables that Claude Code SDK needs
     for (const key in process.env) {
       // Pass through CLAUDE_CODE_* variables (OAuth authentication, etc.)
