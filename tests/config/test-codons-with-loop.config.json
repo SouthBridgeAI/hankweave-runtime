@@ -1,4 +1,4 @@
-[
+{"strand": [
   {
     "id": "codon-1",
     "name": "Codon 1: TestCodon1",
@@ -125,4 +125,4 @@
       "typescript_code/package.json"
     ]
   }
-]
+]}

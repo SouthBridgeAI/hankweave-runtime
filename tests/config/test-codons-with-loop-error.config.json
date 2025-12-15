@@ -1,4 +1,4 @@
-[
+{"strand": [
   {
     "id": "setup-codon",
     "name": "Setup Codon",
@@ -85,4 +85,4 @@
       "notes/**/*"
     ]
   }
-]
+]}

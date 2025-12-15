@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import glob from "fast-glob";
+import merge from "lodash.merge";
 import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
@@ -381,4 +382,33 @@ export async function copyFiles(
     // The recursive option handles both files and directories uniformly
     await fs.promises.cp(sourcePath, destPath, { recursive: true });
   }
+}
+
+// -------------
+// Object Utilities
+// -------------
+
+/**
+ * Deep merge multiple objects with proper handling of nested structures.
+ *
+ * Uses lodash.merge for deep merging. Note that arrays are merged by index
+ * (not replaced entirely).
+ *
+ * Merging rules:
+ * - Plain objects are merged recursively
+ * - Arrays are merged by index (e.g., [1,2,3] + [4,5] = [4,5,3])
+ * - Primitives (string, number, boolean, null) are replaced
+ * - Later sources take precedence over earlier ones
+ *
+ * @param sources - Objects to merge, in priority order (later = higher priority)
+ * @returns Merged object with all properties from all sources
+ *
+ * @example
+ * const defaults = { port: 8080, sentinel: { enabled: true, timeout: 1000 } };
+ * const userConfig = { port: 3000, sentinel: { timeout: 5000 } };
+ * const merged = deepMerge(defaults, userConfig);
+ * // Result: { port: 3000, sentinel: { enabled: true, timeout: 5000 } }
+ */
+export function deepMerge<T extends Record<string, unknown>>(...sources: Array<T | undefined>): T {
+  return merge({}, ...sources) as T;
 }

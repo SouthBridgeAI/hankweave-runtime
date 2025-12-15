@@ -67,8 +67,8 @@ import type {
   HandshakeRequest,
   HandshakeResponse,
   RigShellCommand,
-  ServerConfig,
   ShellCommand,
+  StrandweaveConfig,
   TokenUsage,
 } from "./types/types.js";
 // Import remaining types from old file
@@ -103,7 +103,7 @@ import {
 export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private server: Server | null = null;
   private clients: Map<string, ServerWebSocket<ClientData>> = new Map();
-  public readonly config: ServerConfig;
+  public readonly config: StrandweaveConfig;
   private logger: Logger;
 
   // Proxy server
@@ -179,8 +179,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   private currentCodonSentinels = new Set<string>();
 
   constructor(
-    config: Omit<ServerConfig, keyof typeof DEFAULT_CONFIG> &
-      Partial<Pick<ServerConfig, keyof typeof DEFAULT_CONFIG>> & {
+    config: Omit<StrandweaveConfig, keyof typeof DEFAULT_CONFIG> &
+      Partial<Pick<StrandweaveConfig, keyof typeof DEFAULT_CONFIG>> & {
         codons: CodonConfig[];
       },
   ) {
@@ -188,7 +188,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
-    } as ServerConfig;
+    } as StrandweaveConfig;
 
     // Update logger to use execution path
     this.logger = new Logger(path.join(this.config.executionPath, this.config.serverLogFile));
@@ -374,7 +374,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.proxyRunner = new BunProxyRunner(
         "passthrough",
         proxyPort,
-        this.config.anthropicBaseURL || "https://api.anthropic.com",
+        this.config.anthropicBaseUrl || "https://api.anthropic.com",
         this.logger,
       );
       this.proxyRunner.start();
@@ -1221,7 +1221,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // pull existing history for the codon and see if we had run rig setup for it
     // git seems the best source of rig setup related info
-    const codonHistory = await this.stateManager.getCodonHistory(codon.id);
+    const codonHistory = await this.stateManager.getCodonHistory(CodonId(codon.id));
     let rigSetupCheckpoint: string | undefined;
     for (const entry of codonHistory) {
       if ("rigSetupCheckpoint" in entry.codon && entry.codon.rigSetupCheckpoint) {
@@ -1457,7 +1457,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         type: "CodonTransitioned",
         data: {
           runId: this.currentRunId,
-          codonId: codon.id,
+          codonId: CodonId(codon.id),
           from: "starting",
           to: "failed",
           metadata: {
@@ -1733,7 +1733,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         this.logger,
         this.logParser,
         this.proxyRunner?.proxyUrl,
-        this.config.modelOverride,
+        this.config.model,
       );
 
       // Set up event handlers
@@ -4255,7 +4255,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     if (reason !== "all codons completed" && this.checkpointingEnabled && this.currentCodon) {
       await this.createCheckpoint({
         status: "exit",
-        codonId: this.currentCodon.codon.id,
+        codonId: CodonId(this.currentCodon.codon.id),
         codonName: this.currentCodon.codon.name,
         runId: this.currentRunId || RunId("unknown"),
         timestamp: new Date().toISOString(),

@@ -4,6 +4,22 @@ import type { CodonId } from "./branded-types.js";
 import type { AssistantMessage, logMessageSchema, ResultMessage } from "./claude-session-schema.js";
 import type { SentinelConfig } from "./sentinel-types.js";
 
+// Re-export types from config.ts (inferred from Zod schemas)
+export type {
+  Codon,
+  CodonConfig,
+  Loop,
+  LoopTermination,
+  RigSetupItem,
+  RigShellCommand,
+  RuntimeConfig,
+  ShellCommand,
+  StrandFile,
+  StrandMeta,
+  StrandRecommendations,
+  StrandweaveConfig,
+} from "../config.js";
+
 // -------------
 // Model Types
 // -------------
@@ -113,89 +129,6 @@ export const CHECKPOINT_STATUS = {
 export type CheckpointStatus = (typeof CHECKPOINT_STATUS)[keyof typeof CHECKPOINT_STATUS];
 
 // -------------
-// Server Configuration
-// -------------
-
-type ShellCommandWorkingDirectory = "project";
-type RigShellCommandWorkingDirectory = ShellCommandWorkingDirectory | "lastCopied";
-
-export type ShellCommand = {
-  /** Type of setup operation */
-  type: "command";
-  /** For command operations */
-  command: {
-    /** Shell command to execute */
-    run: string;
-    /** Working directory for command execution (default: "project") */
-    workingDirectory?: ShellCommandWorkingDirectory;
-  };
-};
-
-export type RigShellCommand = {
-  /** Type of setup operation */
-  type: "command";
-  /** For command operations */
-  command: {
-    /** Shell command to execute */
-    run: string;
-    /** Working directory for command execution (default: "project") */
-    workingDirectory?: RigShellCommandWorkingDirectory;
-  };
-};
-
-/**
- * Rig setup operation - either copy files/directories or run commands.
- */
-export type RigSetupItem =
-  | {
-      /** Type of setup operation */
-      type: "copy";
-      /** For copy operations */
-      copy: {
-        /** Source path (relative to config file or absolute) */
-        from: string;
-        /**
-         * Target path relative to projectPath (parent directory must exist).
-         * Always specifies the full target path including name.
-         * Examples:
-         * - from: "../templates/foo", to: "src/foo" → copies directory foo to src/foo
-         * - from: "../templates/foo", to: "src/bar" → copies directory foo as src/bar
-         * - from: "../config.json", to: "src/config.json" → copies file
-         * - from: "../config.json", to: "src/settings.json" → copies file with rename
-         */
-        to: string;
-      };
-      /**
-       * If true, failure of this operation won't fail the codon (default: false).
-       * Recommended for rig setup in loop codons where operations might
-       * fail in some iterations (e.g., copying files that don't exist yet).
-       */
-      allowFailure?: boolean;
-    }
-  | (RigShellCommand & {
-      /**
-       * If true, failure of this operation won't fail the codon (default: false).
-       * Recommended for rig setup in loop codons where operations might
-       * fail in some iterations (e.g., running commands that might not succeed initially).
-       */
-      allowFailure?: boolean;
-    });
-
-// -------------
-// Loop Termination Conditions
-// -------------
-
-/**
- * Loop termination conditions define when a loop should stop iterating.
- * - iterationLimit: Stop after a fixed number of iterations
- * - contextExceeded: Stop when Claude signals context exhaustion
- */
-export type LoopTermination =
-  | { type: "iterationLimit"; limit: number }
-  | { type: "contextExceeded" };
-// Future: | { type: "budgetExhausted"; budget: number; budgetType: "tokens" | "time" }
-
-// -------------
 // Codon and Loop Types
 // -------------
 
@@ -272,118 +205,6 @@ export interface CodonSentinelEntry {
 }
 
 /**
- * Configuration for a single codon in the Strandweave workflow.
- * A codon represents a discrete task for Claude to perform, with its own
- * prompt, model settings, and optional file watching.
- */
-export interface Codon {
-  /** Type discriminator - optional, defaults to "codon" */
-  type?: "codon";
-
-  /** Unique identifier for this codon (e.g., "codon-1", "data-analysis") */
-  id: CodonId;
-
-  /** Human-readable name displayed in UI and logs */
-  name: string;
-
-  /** Path to a file containing the prompt (mutually exclusive with promptText) */
-  promptFile?: string | string[];
-
-  /** Inline prompt text (mutually exclusive with promptFile) */
-  promptText?: string;
-
-  /** Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText) */
-  appendSystemPromptFile?: string | string[];
-
-  /** Inline system prompt text to append (mutually exclusive with appendSystemPromptFile) */
-  appendSystemPromptText?: string;
-
-  /** Claude model to use (e.g., "claude-3-opus-20240229", "sonnet") */
-  model: ModelName;
-
-  /**
-   * How this codon should handle continuation from previous codons.
-   * - "fresh": Start a new session (default for most cases)
-   * - "continue-previous": Continue from the previous codon's session,
-   *   maintaining context and conversation history. The previous codon must
-   *   have completed successfully.
-   */
-  continuationMode: ContinuationMode;
-
-  /**
-   * Rig setup operations to run before codon starts.
-   * Each operation must complete successfully for codon to start.
-   */
-  rigSetup?: RigSetupItem[];
-
-  /** Optional description shown to users about what this codon does */
-  description?: string;
-
-  /**
-   * Glob patterns for files to track during codon execution.
-   * These files will be:
-   * - Watched for changes and streamed to the client
-   * - Tracked in the git-based checkpoint system
-   * - Resolved using gitignore rules for consistency
-   */
-  trackedFiles?: string[];
-
-  /** Optional environment variables to set for the Claude process */
-  env?: Record<string, string>;
-
-  /** Optional output copy steps to run after codon completion: files to copy out from a completed codon, with optional pre-copy commands. */
-  outputFiles?: {
-    /** Glob patterns to copy from execution directory to output directory */
-    copy: string[];
-    /** Optional commands to run before copying (run in executionPath) */
-    beforeCopy?: ShellCommand[];
-  }[];
-
-  /**
-   * Sentinels to run during this codon.
-   * Sentinels are parallel observation agents that process the event stream.
-   *
-   * Each entry is a wrapper object with:
-   * - sentinelConfig: Portable sentinel configuration (file or inline)
-   * - settings: Codon-specific settings (output paths, load requirements)
-   *
-   * This wrapper pattern keeps sentinel configs reusable across codons.
-   */
-  sentinels?: CodonSentinelEntry[];
-}
-
-/**
- * Loop configuration - contains multiple codons that repeat.
- * Loops flatten at runtime into individual codon executions.
- * Nested loops are not supported in v1.
- */
-export interface Loop {
-  /** Type discriminator - required for loops */
-  type: "loop";
-
-  /** Unique identifier for this loop (e.g., "iterative-development") */
-  id: CodonId;
-
-  /** Human-readable name displayed in UI and logs */
-  name: string;
-
-  /** Optional description shown to users about what this loop does */
-  description?: string;
-
-  /** Termination condition for the loop */
-  terminateOn: LoopTermination;
-
-  /** Array of codons to execute in each iteration. Only Codon objects allowed (no nested loops). */
-  codons: Codon[];
-}
-
-/**
- * CodonConfig is a discriminated union of Codon and Loop.
- * This is the top-level configuration type used in codon-sequence.json.
- */
-export type CodonConfig = Codon | Loop;
-
-/**
  * Information for creating a checkpoint commit in the shadow git repository.
  *
  * The checkpoint system creates a shadow git repo in `.strandweave/checkpoints/` that tracks
@@ -408,120 +229,6 @@ export interface CheckpointInfo {
 
   /** Duration in milliseconds (only for completed/error/skipped codons) */
   duration?: number;
-}
-
-/**
- * Main server configuration containing all runtime settings.
- * Most values have defaults in config.ts except execution paths and codons.
- */
-export interface ServerConfig {
-  /** WebSocket server port (default: 7777) */
-  port: number;
-
-  /** Server version for client compatibility checks */
-  version: string;
-
-  /** Path to lock file preventing multiple server instances */
-  lockFile: string;
-
-  /** Path to WebSocket traffic log file */
-  socketLogFile: string;
-
-  /** Path to general server log file */
-  serverLogFile: string;
-
-  /** Current working directory for the server process */
-  cwd: string;
-
-  /** Path to the codon configuration file (for resolving relative sentinel paths) */
-  configPath?: string;
-
-  /** Output directory for generated files. Will be scoped to cwd */
-  outputDirectory: string;
-
-  // Execution paths (from ExecutionSetup)
-  /** Original data location (for reference only) */
-  readOnlySourceDataPath: string;
-  /** Primary directory where everything runs */
-  executionPath: string;
-  /** executionPath + '/data' - ONLY for setup */
-  dataPathInExecutionDir: string;
-  /** Hash of the data directory structure */
-  dataHash: string;
-  /** Whether this is a new execution */
-  isNewExecution: boolean;
-  /** Whether we're resuming an existing execution */
-  isResuming: boolean;
-  /** How data is linked (symlink or copy) */
-  linkType: "symlink" | "copy";
-
-  /** Array of codon configurations to execute */
-  codons: CodonConfig[];
-
-  /**
-   * Token cost configuration per million tokens.
-   * Used to calculate costs for each codon and total project cost.
-   */
-  costsPerMTok: {
-    /** Cost per million input tokens */
-    input: number;
-    /** Cost per million tokens when creating cache */
-    inputCache: number;
-    /** Cost per million tokens when reading from cache */
-    cacheRead: number;
-    /** Cost per million output tokens */
-    output: number;
-  };
-
-  /** Interval in milliseconds for parsing Claude log files (default: 1000) */
-  logParsingInterval: number;
-
-  /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
-  anthropicBaseURL?: string;
-
-  /** Whether to automatically start codons (default: true) */
-  autostart: boolean;
-
-  /** Time limit for hashing directories in milliseconds (default: 5000) */
-  dataHashTimeLimit: number;
-
-  /** Maximum length for tool result content before truncation (default: 2500) */
-  toolResultTruncateLength: number;
-
-  /** Optional model override for all codons (ignores per-codon model settings) */
-  modelOverride?: ModelName;
-
-  /** Whether to disable the proxy server (default: false) */
-  withoutProxy: boolean;
-
-  /** Maximum number of recent events to include in handshake response (default: 50) */
-  handshakeHistoryLimit: number;
-
-  /**
-   * Sentinel system configuration.
-   * Controls behavior of SentinelManager for all codons.
-   */
-  sentinel: {
-    /**
-     * Enable filesystem persistence for sentinel outputs and history.
-     * Default: true
-     */
-    enablePersistence: boolean;
-
-    /**
-     * Grace period to wait for provider health checks before loading sentinels.
-     * Allows some providers to become available without blocking codon start.
-     * Default: 2000ms (2 seconds)
-     */
-    healthCheckGracePeriodMs: number;
-
-    /**
-     * Whether to wait for ALL provider health checks before proceeding.
-     * If false, uses grace period then continues.
-     * Default: false (don't block)
-     */
-    waitForAllHealthChecks: boolean;
-  };
 }
 
 // -------------

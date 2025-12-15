@@ -6,7 +6,7 @@ import { type ExecutionCodonEntry, ExecutionPlanner } from "./execution-planner.
 import { analyzeExecutionThread, type ExecutionThread } from "./execution-thread.js";
 import { MetadataValidationError, validateTransitionMetadata } from "./state-transition-guards.js";
 import { type StateManagerEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import type { CodonId, RunId } from "./types/branded-types.js";
+import { type CodonId, CodonId as CodonIdConstructor, type RunId } from "./types/branded-types.js";
 import type * as ST from "./types/state-types.js";
 import { CodonTransitions, getCodonCost, isTerminalCodonStatus } from "./types/state-types.js";
 import type { CodonConfig } from "./types/types.js";
@@ -614,7 +614,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
       // This treats each config as a single execution entry with no loop context
       effectivePlan = (this.codonConfigs || []).map((config) => ({
         codon: config.type === "loop" ? config.codons[0] : config,
-        codonId: config.id,
+        codonId: CodonIdConstructor(config.id),
         loopContext: undefined,
       }));
     }

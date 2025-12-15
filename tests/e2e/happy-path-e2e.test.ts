@@ -16,8 +16,8 @@ import {
   getCompletedCodonsFromState,
   getFreePort,
   getTotalCostFromState,
-  type ServerConfig,
   startServer,
+  type TestServerConfig,
   TestWSClient,
 } from "../utils/test-helpers.js";
 // New test groups
@@ -86,7 +86,7 @@ import type {
 import { connectStrandweaveClient } from "../utils/strandweave-server-test-helpers.js";
 
 // Server configuration - Updated for execution isolation
-const serverConfig: ServerConfig = {
+const serverConfig: TestServerConfig = {
   testRunDir: TEST_RUN_DIR,
   configFile: CODONS_CONFIG,
   port: 0, // Will be set dynamically

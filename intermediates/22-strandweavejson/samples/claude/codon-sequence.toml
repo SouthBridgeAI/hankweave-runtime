@@ -1,0 +1,86 @@
+# Codon Sequence Configuration
+# Defines the workflow of codons to execute
+
+# Note: TOML arrays of tables use [[array.name]] syntax
+# This represents the codon sequence as an array
+
+[[codons]]
+id = "data-parser"
+name = "Data Parser"
+promptFile = "prompts/parse-data.md"
+model = "sonnet"
+continuationMode = "fresh"
+description = "Parse and validate input data files"
+trackedFiles = ["data/**/*.json", "data/**/*.csv"]
+
+[[codons.rigSetup]]
+type = "command"
+
+[codons.rigSetup.command]
+run = "mkdir -p output"
+workingDirectory = "project"
+
+[[codons.outputFiles]]
+copy = ["output/parsed_data.json"]
+
+[[codons.sentinels]]
+sentinelConfig = "sentinels/error-detector.json"
+
+# Loop codon
+[[codons]]
+type = "loop"
+id = "validation-loop"
+name = "Data Validation Loop"
+description = "Iteratively validate and fix data issues"
+
+[codons.terminateOn]
+type = "iterationLimit"
+limit = 3
+
+# Nested codons within the loop
+[[codons.codons]]
+id = "validate-data"
+name = "Validate Data"
+promptText = "Validate the parsed data in <%PROJECT_DIR%>/output/parsed_data.json and report any issues."
+model = "sonnet"
+continuationMode = "continue-previous"
+trackedFiles = ["output/**/*"]
+
+[codons.codons.env]
+VALIDATION_STRICT = "true"
+
+[[codons.codons]]
+id = "fix-issues"
+name = "Fix Issues"
+promptFile = "prompts/fix-issues.md"
+model = "opus"
+continuationMode = "continue-previous"
+trackedFiles = ["output/**/*"]
+
+# Final codon
+[[codons]]
+id = "generate-report"
+name = "Generate Report"
+promptFile = ["prompts/report-intro.md", "prompts/report-template.md"]
+appendSystemPromptFile = "prompts/formatting-rules.md"
+model = "sonnet"
+continuationMode = "fresh"
+description = "Generate final report from validated data"
+trackedFiles = ["reports/**/*"]
+
+[[codons.rigSetup]]
+type = "copy"
+
+[codons.rigSetup.copy]
+from = "templates/report-structure"
+to = "reports"
+
+[[codons.outputFiles]]
+copy = ["reports/final_report.md"]
+
+[[codons.outputFiles.beforeCopy]]
+type = "command"
+
+[codons.outputFiles.beforeCopy.command]
+run = "date >> reports/generated_at.txt"
+workingDirectory = "project"

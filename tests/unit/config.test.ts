@@ -5,10 +5,14 @@ import {
   calculateCost,
   DEFAULT_CONFIG,
   loadCodonSequence,
+  loadRuntimeConfig,
+  loadStrandFile,
+  loadStrandweaveRuntimeEnvVars,
   validateStrand,
 } from "../../server/config";
 import { CodonId } from "../../server/types/branded-types";
 import type { CodonConfig, ModelName } from "../../server/types/types";
+import { captureEnv, restoreEnv } from "../utils/env-test-helpers";
 
 // -------------
 // Shared Test Helpers
@@ -32,6 +36,15 @@ const cleanup = (dir: string) => {
   if (fs.existsSync(dir)) {
     fs.rmSync(dir, { recursive: true });
   }
+};
+
+/**
+ * Helper to write a strand config file in the correct object format.
+ * Uses unknown type to allow test data with plain strings instead of branded types.
+ */
+const writeStrandConfig = (filePath: string, codons: unknown[]) => {
+  const strandFile = { strand: codons };
+  fs.writeFileSync(filePath, JSON.stringify(strandFile, null, 2));
 };
 
 // -------------
@@ -167,7 +180,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.codonCount).toBe(1);
@@ -213,7 +226,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.codonCount).toBe(2);
@@ -244,7 +257,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
   });
 
@@ -268,7 +281,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -288,7 +301,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -309,7 +322,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -339,7 +352,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.rigSetupCount).toBe(1);
@@ -371,7 +384,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.rigSetupCount).toBe(1);
@@ -402,7 +415,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Invalid target path");
   });
 
@@ -427,7 +440,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -448,7 +461,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -476,7 +489,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -515,7 +528,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     expect(result.warnings).toHaveLength(1);
@@ -545,7 +558,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       "Command cannot be empty",
     );
@@ -559,7 +572,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow();
   });
 
@@ -608,7 +621,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     // Should count: 1 standalone + 2 in loop + 1 final = 4 total codons
@@ -646,7 +659,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
   });
 
@@ -681,7 +694,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate");
   });
 
@@ -709,7 +722,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     expect(() => loadCodonSequence(configPath)).toThrow(
       /Loop.*my-loop.*promptFile.*does not exist/,
     );
@@ -749,7 +762,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
 
     // Should not throw, but should have warnings
@@ -780,7 +793,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
@@ -816,7 +829,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
@@ -852,7 +865,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
     // Should not throw
     expect(result.codonCount).toBe(2);
@@ -888,7 +901,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
       /continue-previous.*contextExceeded.*context.*exhausted/i,
     );
@@ -924,7 +937,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
     // Should not throw
     expect(result.codonCount).toBe(2);
@@ -954,10 +967,644 @@ describe("validateStrand", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = await validateStrand(configPath, projectPath);
     // Should not throw
     expect(result.codonCount).toBe(1);
+  });
+});
+
+describe("loadStrandFile", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-test-strand");
+  const strandPath = path.join(tempDir, "test-strand.json");
+
+  beforeEach(() => {
+    cleanup(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    cleanup(tempDir);
+  });
+
+  test("loads valid strand file with all fields", () => {
+    const strandContent = {
+      meta: {
+        name: "Test Strand",
+        version: "1.0.0",
+        description: "A test strand",
+        author: "Test Author",
+      },
+      recommendations: {
+        model: "sonnet" as ModelName,
+        dataHashTimeLimit: 10000,
+        sentinel: {
+          enablePersistence: false,
+          healthCheckGracePeriodMs: 1000,
+          waitForAllHealthChecks: true,
+        },
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    const result = loadStrandFile(strandPath);
+
+    expect(result.meta).toEqual(strandContent.meta);
+    expect(result.recommendations).toEqual(strandContent.recommendations);
+    expect(result.strand).toHaveLength(1);
+    expect(result.strand[0].id).toBe("test-codon");
+  });
+
+  test("loads strand file with only strand array (minimal)", () => {
+    const strandContent = {
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    const result = loadStrandFile(strandPath);
+
+    expect(result.meta).toBeUndefined();
+    expect(result.recommendations).toBeUndefined();
+    expect(result.strand).toHaveLength(1);
+  });
+
+  test("throws error for missing file", () => {
+    expect(() => loadStrandFile("/nonexistent/strand.json")).toThrow("Strand file not found");
+  });
+
+  test("throws error for invalid JSON", () => {
+    createTestFile(strandPath, "{ invalid json }");
+    expect(() => loadStrandFile(strandPath)).toThrow();
+  });
+
+  test("throws error for missing strand array", () => {
+    const strandContent = {
+      meta: {
+        name: "Test Strand",
+        version: "1.0.0",
+      },
+      // Missing strand array
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+
+  test("throws error for empty meta name", () => {
+    const strandContent = {
+      meta: {
+        name: "",
+        version: "1.0.0",
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    expect(() => loadStrandFile(strandPath)).toThrow();
+  });
+
+  test("validates recommendations model enum", () => {
+    const strandContent = {
+      recommendations: {
+        model: "invalid-model", // Invalid model
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+
+  test("throws error on typos in recommendations", () => {
+    // With .strict() mode enabled, typos in recommendations are caught
+    // and users get immediate feedback instead of silent failures.
+    const strandContent = {
+      recommendations: {
+        modle: "opus", // Typo! Should be "model"
+        dataHashTimeLimit: 10000, // Valid field
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    // Should throw with helpful error message about unrecognized keys
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+
+  test("throws error on multiple typos in recommendations", () => {
+    const strandContent = {
+      recommendations: {
+        modle: "opus", // Typo! Should be "model"
+        dataHashTimeLimittt: 10000, // Typo! Should be "dataHashTimeLimit"
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+
+  test("throws error on typos in recommendations.sentinel", () => {
+    const strandContent = {
+      recommendations: {
+        model: "opus",
+        sentinel: {
+          enablePersistence: true,
+          healthCheckGracePeriodMsss: 5000, // Typo! Should be "healthCheckGracePeriodMs"
+        },
+      },
+      strand: [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "sonnet" as ModelName,
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ],
+    };
+
+    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+
+    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+  });
+});
+
+describe("loadRuntimeConfig", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-test-runtime");
+  const runtimeConfigPath = path.join(tempDir, "strandweave.json");
+
+  beforeEach(() => {
+    cleanup(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    cleanup(tempDir);
+  });
+
+  test("returns empty object when file doesn't exist", () => {
+    const result = loadRuntimeConfig(path.join(tempDir, "nonexistent.json"));
+    expect(result).toEqual({});
+  });
+
+  test("loads valid runtime config with all fields", () => {
+    const runtimeContent = {
+      port: 8080,
+      autostart: true,
+      withoutProxy: false,
+      model: "opus",
+      anthropicBaseUrl: "https://api.example.com",
+      outputDirectory: "/tmp/output",
+      executionBaseDir: "/tmp/executions",
+      logParsingInterval: 2000,
+      dataHashTimeLimit: 10000,
+      sentinel: {
+        enablePersistence: true,
+        healthCheckGracePeriodMs: 5000,
+        waitForAllHealthChecks: false,
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.port).toBe(8080);
+    expect(result.autostart).toBe(true);
+    expect(result.withoutProxy).toBe(false);
+    expect(result.model).toBe("opus");
+    expect(result.anthropicBaseUrl).toBe("https://api.example.com");
+    expect(result.outputDirectory).toBe("/tmp/output");
+    expect(result.executionBaseDir).toBe("/tmp/executions");
+    expect(result.logParsingInterval).toBe(2000);
+    expect(result.dataHashTimeLimit).toBe(10000);
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 5000,
+      waitForAllHealthChecks: false,
+    });
+  });
+
+  test("loads minimal runtime config with only one field", () => {
+    const runtimeContent = {
+      port: 9000,
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.port).toBe(9000);
+    expect(result.autostart).toBeUndefined();
+    expect(result.model).toBeUndefined();
+  });
+
+  test("loads empty runtime config object", () => {
+    const runtimeContent = {};
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result).toEqual({});
+  });
+
+  test("throws error for invalid JSON", () => {
+    createTestFile(runtimeConfigPath, "{ invalid json }");
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Failed to load runtime config");
+  });
+
+  test("throws error for invalid port type", () => {
+    const runtimeContent = {
+      port: "8080", // Should be number
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for negative port", () => {
+    const runtimeContent = {
+      port: -100,
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for invalid model enum", () => {
+    const runtimeContent = {
+      model: "gpt-4", // Only "sonnet" and "opus" are valid
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for invalid URL format", () => {
+    const runtimeContent = {
+      anthropicBaseUrl: "not-a-valid-url",
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("validates sentinel nested object", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: true,
+        healthCheckGracePeriodMs: 1000,
+        waitForAllHealthChecks: true,
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 1000,
+      waitForAllHealthChecks: true,
+    });
+  });
+
+  test("throws error for invalid sentinel field type", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: "true", // Should be boolean
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error for negative healthCheckGracePeriodMs", () => {
+    const runtimeContent = {
+      sentinel: {
+        healthCheckGracePeriodMs: -500,
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("allows partial sentinel config", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: false,
+        // Other fields optional
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+
+    const result = loadRuntimeConfig(runtimeConfigPath);
+
+    expect(result.sentinel).toEqual({
+      enablePersistence: false,
+    });
+  });
+
+  test("throws error on typos in runtime config", () => {
+    const runtimeContent = {
+      port: 8080,
+      modell: "opus", // Typo! Should be "model"
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+
+  test("throws error on typos in runtime config sentinel", () => {
+    const runtimeContent = {
+      sentinel: {
+        enablePersistence: true,
+        healthCheckGracePeriodMss: 1000, // Typo! Should be "healthCheckGracePeriodMs"
+      },
+    };
+
+    createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+    expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid runtime config file");
+  });
+});
+
+describe("loadStrandweaveRuntimeEnvVars", () => {
+  let originalEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    // Capture current env state
+    originalEnv = captureEnv();
+    // Clear any STRANDWEAVE_RUNTIME_ vars before each test
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("STRANDWEAVE_RUNTIME_")) {
+        delete process.env[key];
+      }
+    }
+  });
+
+  afterEach(() => {
+    // Restore original env vars after each test
+    restoreEnv(originalEnv);
+  });
+
+  test("returns empty object when no STRANDWEAVE_RUNTIME_ env vars are set", () => {
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result).toEqual({});
+  });
+
+  test("parses single top-level port env var", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.port).toBe(8080);
+  });
+
+  test("parses single top-level model env var", () => {
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.model).toBe("opus");
+  });
+
+  test("parses boolean autostart env var (true)", () => {
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.autostart).toBe(true);
+  });
+
+  test("parses boolean autostart env var (false)", () => {
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.autostart).toBe(false);
+  });
+
+  test("parses boolean using numeric 1", () => {
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "1";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.autostart).toBe(true);
+  });
+
+  test("parses boolean using numeric 0", () => {
+    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "0";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.withoutProxy).toBe(false);
+  });
+
+  test("parses multiple top-level env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "9000";
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "sonnet";
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
+    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.port).toBe(9000);
+    expect(result.model).toBe("sonnet");
+    expect(result.autostart).toBe(true);
+    expect(result.withoutProxy).toBe(false);
+  });
+
+  test("parses URL env var", () => {
+    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.anthropicBaseUrl).toBe("https://api.example.com");
+  });
+
+  test("parses string paths", () => {
+    process.env.STRANDWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
+    process.env.STRANDWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.outputDirectory).toBe("/tmp/output");
+    expect(result.executionBaseDir).toBe("/tmp/executions");
+  });
+
+  test("parses nested sentinel env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 5000,
+      waitForAllHealthChecks: false,
+    });
+  });
+
+  test("parses mix of top-level and nested env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.port).toBe(8080);
+    expect(result.model).toBe("opus");
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 3000,
+    });
+  });
+
+  test("converts snake_case to camelCase", () => {
+    process.env.STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
+    process.env.STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result.logParsingInterval).toBe(2000);
+    expect(result.dataHashTimeLimit).toBe(10000);
+  });
+
+  test("ignores non-STRANDWEAVE_RUNTIME_ prefixed env vars", () => {
+    process.env.PORT = "3000";
+    process.env.NODE_ENV = "test";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY = "sk-ant-sentinel";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result).toEqual({});
+  });
+
+  test("ignores empty STRANDWEAVE_RUNTIME_ env vars", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+    expect(result).toEqual({});
+  });
+
+  test("throws error for invalid number value", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "not-a-number";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      'Invalid number value for port: "not-a-number"',
+    );
+  });
+
+  test("throws error for invalid model enum", () => {
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "gpt-4";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("throws error for invalid URL format", () => {
+    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "not-a-url";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("throws error for negative port", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "-100";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("throws error for negative sentinel grace period", () => {
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "-500";
+
+    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+      "Invalid environment variable configuration",
+    );
+  });
+
+  test("handles all supported fields", () => {
+    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
+    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
+    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "false";
+    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
+    process.env.STRANDWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
+    process.env.STRANDWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
+    process.env.STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
+    process.env.STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.STRANDWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
+
+    const result = loadStrandweaveRuntimeEnvVars();
+
+    expect(result.port).toBe(8080);
+    expect(result.autostart).toBe(true);
+    expect(result.withoutProxy).toBe(false);
+    expect(result.model).toBe("opus");
+    expect(result.anthropicBaseUrl).toBe("https://api.example.com");
+    expect(result.outputDirectory).toBe("/tmp/output");
+    expect(result.executionBaseDir).toBe("/tmp/executions");
+    expect(result.logParsingInterval).toBe(2000);
+    expect(result.dataHashTimeLimit).toBe(10000);
+    expect(result.sentinel).toEqual({
+      enablePersistence: true,
+      healthCheckGracePeriodMs: 5000,
+      waitForAllHealthChecks: false,
+    });
   });
 });
 
@@ -986,7 +1633,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(validConfig));
+    writeStrandConfig(configPath, validConfig);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1002,7 +1649,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1017,7 +1664,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1031,7 +1678,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(neitherConfig));
+    writeStrandConfig(configPath, neitherConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
 
     // Both provided - loadCodonSequence doesn't actually validate this case, it just uses promptFile if both are provided
@@ -1047,7 +1694,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(bothConfig));
+    writeStrandConfig(configPath, bothConfig);
     // This actually doesn't throw - it just uses promptFile
     const result = loadCodonSequence(configPath);
     const codon = result[0];
@@ -1073,7 +1720,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(bothConfig));
+    writeStrandConfig(configPath, bothConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1089,7 +1736,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     const codon = result[0];
@@ -1112,7 +1759,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     const codon = result[0];
@@ -1140,7 +1787,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidRigConfig));
+    writeStrandConfig(configPath, invalidRigConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1155,7 +1802,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1177,7 +1824,7 @@ describe("loadCodonSequence", () => {
         },
       ];
 
-      fs.writeFileSync(configPath, JSON.stringify(config));
+      writeStrandConfig(configPath, config);
       expect(() => loadCodonSequence(configPath)).toThrow();
 
       // Restore permissions for cleanup
@@ -1214,7 +1861,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1260,7 +1907,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1311,7 +1958,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(3);
@@ -1346,7 +1993,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1390,7 +2037,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -1413,7 +2060,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1431,7 +2078,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow("at least one codon");
   });
 
@@ -1456,7 +2103,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1482,7 +2129,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow("at least 1");
   });
 
@@ -1519,7 +2166,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1545,7 +2192,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1571,7 +2218,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
+    writeStrandConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -1610,7 +2257,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     // Should load successfully
@@ -1645,7 +2292,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    fs.writeFileSync(configPath, JSON.stringify(config));
+    writeStrandConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);

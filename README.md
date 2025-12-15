@@ -33,7 +33,8 @@ A **Codon** is the atomic unit of work. It represents a single phase of a larger
 *   **A Context Strategy**: It can either start `fresh` (clean slate) or `continue-previous` (inherit the previous codon's conversation history).
 
 ### 2. The Strand
-A **Strand** is the sequence of Codons defined in a `codon-sequence.json` file. It represents the "DNA" of your workflow.
+
+A **Strand** is the sequence of Codons defined in a `strand.json` file. It represents the "DNA" of your workflow.
 
 ### 3. The Run
 A **Run** is a specific instance of executing a Strand against a dataset. Runs are persistent objects stored on disk. If a run crashes or is stopped, it can be resumed, inspected, or rolled back.
@@ -133,7 +134,33 @@ bun test tests/e2e/happy-path-e2e.test.ts
 
 To run Strandweave effectively, you should treat it as an external tool acting on your data.
 
-### 1. Prepare Your Workspace
+### Quick Start (Recommended)
+
+The fastest way to get started is with the `--init` command:
+
+```bash
+# 1. Create and enter a new workspace directory
+mkdir my-agent-workflow
+cd my-agent-workflow
+
+# 2. Initialize with template files
+strandweave --init
+
+# 3. Run the workflow on your data
+strandweave --config=strand.json --data=/path/to/your/project
+```
+
+The `--init` command creates:
+- **strand.json** - Workflow configuration with a basic analysis codon
+- **prompts/analyze.md** - Template prompt for analysis
+- **.gitignore** - Ignores execution directories and outputs
+- **README.md** - Quick start guide
+
+### Manual Setup
+
+Alternatively, you can create your workflow configuration manually:
+
+#### 1. Prepare Your Workspace
 
 Do not run this inside the Strandweave repo (unless developing it). Create a separate workspace.
 
@@ -142,53 +169,63 @@ mkdir my-agent-workflow
 cd my-agent-workflow
 ```
 
-### 2. Create a Codon Configuration
+#### 2. Create a Strand Configuration
 
-Create a file named `sequence.json`. This defines your workflow.
+Create a file named `strand.json`. This defines your workflow using the object format:
 
 ```json
-[
-  {
-    "id": "phase-1-analysis",
-    "name": "Analyze Codebase",
-    "model": "sonnet",
-    "continuationMode": "fresh",
-    "promptText": "Read the source files in <%DATA_DIR%> and write a summary to analysis.md",
-    "trackedFiles": ["analysis.md"],
-    "outputFiles": [
-      {
-        "copy": ["analysis.md"] 
-      }
-    ]
+{
+  "meta": {
+    "name": "My Workflow",
+    "version": "1.0.0",
+    "description": "Analyze and refactor codebase"
   },
-  {
-    "id": "phase-2-refactor",
-    "name": "Refactor Code",
-    "model": "sonnet",
-    "continuationMode": "continue-previous",
-    "promptText": "Based on your analysis, refactor the code structure.",
-    "trackedFiles": ["src/**/*.ts"]
-  }
-]
+  "recommendations": {
+    "model": "sonnet"
+  },
+  "strand": [
+    {
+      "id": "phase-1-analysis",
+      "name": "Analyze Codebase",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptText": "Read the source files in <%DATA_DIR%> and write a summary to analysis.md",
+      "trackedFiles": ["analysis.md"],
+      "outputFiles": [
+        {
+          "copy": ["analysis.md"]
+        }
+      ]
+    },
+    {
+      "id": "phase-2-refactor",
+      "name": "Refactor Code",
+      "model": "sonnet",
+      "continuationMode": "continue-previous",
+      "promptText": "Based on your analysis, refactor the code structure.",
+      "trackedFiles": ["src/**/*.ts"]
+    }
+  ]
+}
 ```
 
-### 3. Run the Server
+#### 3. Run the Server
 
 You need to point the server to two things:
-1.  `--config`: The sequence file you just created.
-2.  `--data`: The target project or file you want to process.
+1. `--config`: The strand file you just created
+2. `--data`: The target project or file you want to process
 
 **Recommendation**: Use the `--validate` flag first to check your config.
 
 ```bash
 # From your workspace, referencing the strandweave repo you cloned
-bun /path/to/strandweave/server/index.ts --validate --config=./sequence.json --data=./my-target-project/
+bun /path/to/strandweave/server/index.ts --validate --config=./strand.json --data=./my-target-project/
 ```
 
 If valid, run the server with the **TUI (Terminal UI)**. We also recommend `--start-new` to ensure you aren't resuming an old stale session.
 
 ```bash
-bun /path/to/strandweave/server/index.ts --basic --start-new --config=./sequence.json --data=./my-target-project/
+bun /path/to/strandweave/server/index.ts --basic --start-new --config=./strand.json --data=./my-target-project/
 ```
 
 ### 4. Interactive Controls
@@ -233,7 +270,6 @@ Loops allow the agent to iterate until a condition is met. This is useful for TD
 {
   "type": "loop",
   "id": "tdd-cycle",
-  "name: "Run TDD cycle",
   "terminateOn": { "type": "iterationLimit", "limit": 5 },
   "codons": [
     { "id": "write-test", ... },

@@ -1,0 +1,12 @@
+# Strandweave execution directories
+.strandweave/
+
+# Output files
+strandweave-results/
+
+# Environment
+.env
+.env.local
+
+# Node
+node_modules/

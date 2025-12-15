@@ -1,0 +1,14 @@
+# Development Notes
+
+## TODO
+- Add more example workflows
+- Improve error handling
+- Add unit tests for core functionality
+
+## Ideas
+- Support for parallel codon execution
+- Integration with other AI providers
+- Web-based workflow designer
+
+## Known Issues
+- None at this time

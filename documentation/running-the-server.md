@@ -46,9 +46,39 @@ cd strandweave
 bun install
 
 # 3. Verify the installation and a sample configuration file
-# This command validates the default codon-sequence.json without starting the server
+# This command validates the default strand.json without starting the server
 bun run validate
 ```
+
+### Quick Start - Initialize a New Workflow
+
+The fastest way to get started is to use the `--init` command to create a new workflow project:
+
+```bash
+# Create a new directory for your workflow
+mkdir my-workflow
+cd my-workflow
+
+# Initialize with template files
+strandweave --init
+
+# This creates:
+#   - strand.json           (workflow configuration)
+#   - prompts/analyze.md    (prompt template)
+#   - .gitignore            (git ignore patterns)
+#   - README.md             (quick start guide)
+
+# Run the workflow with your data
+strandweave --config=strand.json --data=/path/to/your/project
+```
+
+The generated workflow includes a simple analysis codon that reads your data and creates an analysis report. You can customize the `strand.json` and prompts to build more complex workflows.
+
+**What gets created:**
+- **strand.json** - Basic workflow with one analysis codon, using the [object format](./codon-configuration-guide.md#strand-file-format)
+- **prompts/analyze.md** - Template prompt asking Claude to analyze project files
+- **.gitignore** - Ignores execution directories and output files
+- **README.md** - Instructions for running and customizing your workflow
 
 ## Command-Line Interface
 
@@ -80,9 +110,9 @@ The server's behavior can be fine-tuned with the following command-line flags:
 
 #### Configuration & Data Options
 
--   **`--config=<path>`**: Specifies the path to your codon configuration file. This defines the entire workflow.
-    -   **Default**: `codon-sequence.json`
-    -   **Example**: `bun run server --config=workflows/my-project/codon-sequence.json`
+-   **`--config=<path>`**: Specifies the path to your strand configuration file. This defines the entire workflow.
+    -   **Default**: `strand.json`
+    -   **Example**: `bun run server --config=workflows/my-project/strand.json`
 
 -   **`--data=<path>`**: Path to your data source (file or directory). Strandweave will create an isolated execution environment with your data accessible at `<execution-dir>/read_only_data_source/`.
     -   **Default**: Current directory
@@ -186,7 +216,7 @@ bun run server --cleanup --data=/path/to/project
 This is the standard operational mode, designed for integration with programmatic clients (e.g., a web-based UI, an IDE extension).
 
 ```bash
-bun run server --config=codon-sequence.json
+bun run server --config=strand.json
 ```
 
 In this mode, the server:
@@ -200,7 +230,7 @@ In this mode, the server:
 The Basic Terminal UI (TUI) is an interactive, console-based client perfect for local development, testing, and debugging.
 
 ```bash
-bun run server:basic --config=codon-sequence.json
+bun run server:basic --config=strand.json
 ```
 
 The TUI provides:
@@ -222,7 +252,7 @@ The TUI provides:
 A read-only mode that provides a comprehensive analysis of your configuration file. It's highly recommended to run this before starting a complex workflow.
 
 ```bash
-bun run validate --config=codon-sequence.json
+bun run validate --config=strand.json
 ```
 
 The validation process checks for:
@@ -233,54 +263,375 @@ The validation process checks for:
 
 ## Environment Variables
 
-### Main Agent Environment Variables
+Strandweave uses three distinct environment variable prefixes for different purposes:
 
-You can pass environment variables to the Claude process in two ways:
+### 1. Runtime Configuration (`STRANDWEAVE_RUNTIME_*`)
 
-1.  **System Environment Variables**: Any environment variable on your system prefixed with `STRANDWEAVE_` will be passed to the Claude process with the prefix removed. This is a secure way to inject secrets like API keys without hardcoding them.
-    ```bash
-    export STRANDWEAVE_CUSTOM_API_KEY=secret123
-    # Claude process will see CUSTOM_API_KEY=secret123
-    ```
+These environment variables configure the Strandweave server itself (port, model, sentinel settings, etc.). They are part of the [5-layer configuration system](#configuration-system).
 
-    **Why STRANDWEAVE?** The prefix serves as a namespace to:
-    - Prevent accidental exposure of sensitive system variables
-    - Make it clear which variables are intended for Claude
-    - Avoid conflicts with existing environment variables
-    - Maintain consistency with the project naming
+```bash
+export STRANDWEAVE_RUNTIME_PORT=8080
+export STRANDWEAVE_RUNTIME_MODEL=opus
+export STRANDWEAVE_RUNTIME_WITHOUT_PROXY=true
+export STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE=false
+```
 
-2.  **Codon-Specific Variables**: You can define an `env` object within a codon's configuration to set variables that are only active during that codon. These will override any system-provided variables with the same name.
-    ```json
-    {
-      "id": "codon-1",
-      "env": {
-        "API_ENDPOINT": "https://staging.api.com",
-        "DEBUG": "true"
-      }
-    }
-    ```
+See the [Configuration System](#configuration-system) section below for complete details and all available options.
 
-### Sentinel Environment Variables
+### 2. Main Agent Environment (`STRANDWEAVE_*`)
 
-Sentinels use a different set of environment variables for their LLM API keys. This allows you to use separate API accounts for sentinels.
+Any environment variable prefixed with `STRANDWEAVE_` will be passed to the Claude process with the prefix removed, **except** for:
+- `STRANDWEAVE_RUNTIME_*` - These configure the server itself, not passed to Claude
+- `STRANDWEAVE_SENTINEL_*` - These are sentinel API keys, not passed to Claude
 
-**Sentinel-Specific API Keys** (with `STRANDWEAVE_SENTINEL_` prefix) examples:
-- `STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY`
-- `STRANDWEAVE_SENTINEL_OPENAI_API_KEY`
-- `STRANDWEAVE_SENTINEL_GROQ_API_KEY`
-- `STRANDWEAVE_SENTINEL_GOOGLE_API_KEY`
+```bash
+export STRANDWEAVE_CUSTOM_API_KEY=secret123
+export STRANDWEAVE_DB_URL=postgres://localhost/mydb
+# Claude process will see:
+# CUSTOM_API_KEY=secret123
+# DB_URL=postgres://localhost/mydb
+```
+
+**Why STRANDWEAVE prefix?** This serves as a namespace to:
+- Prevent accidental exposure of sensitive system variables
+- Make it clear which variables are intended for Claude
+- Avoid conflicts with existing environment variables
+
+You can also define **codon-specific variables** in your strand configuration that override system variables:
+```json
+{
+  "id": "codon-1",
+  "env": {
+    "API_ENDPOINT": "https://staging.api.com",
+    "DEBUG": "true"
+  }
+}
+```
+
+### 3. Sentinel API Keys (`STRANDWEAVE_SENTINEL_*`)
+
+Sentinels use separate environment variables for their LLM API keys, allowing you to use separate API accounts:
+
+```bash
+export STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY=sk-ant-...
+export STRANDWEAVE_SENTINEL_OPENAI_API_KEY=sk-...
+export STRANDWEAVE_SENTINEL_GROQ_API_KEY=gsk_...
+export STRANDWEAVE_SENTINEL_GOOGLE_API_KEY=...
+```
 
 If these are not set, sentinels fall back to the standard variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
 
-For complete details on sentinel environment variables and use cases, see the [Sentinel Configuration Guide](./sentinels/configuration-guide.md#environment-variables).
+For complete details on sentinel configuration, see the [Sentinel Configuration Guide](./sentinels/configuration-guide.md#environment-variables).
+
+## Configuration System
+
+Strandweave uses a flexible 5-layer configuration system that allows you to configure server settings through multiple sources, with a clear precedence order.
+
+### Configuration Resolution Order
+
+Settings are merged in this order (later layers override earlier ones):
+
+1. **Default Configuration** - Built-in defaults
+2. **Runtime Config File** - `strandweave.json` in execution directory
+3. **Strand File Recommendations** - `recommendations` section in your strand.json
+4. **Environment Variables** - `STRANDWEAVE_RUNTIME_*` prefixed variables
+5. **CLI Arguments** - Command-line flags (highest priority)
+
+This layered approach gives you flexibility:
+- Set project-wide defaults in `strandweave.json`
+- Recommend settings for specific workflows in strand files
+- Override with environment variables for CI/CD
+- Use CLI flags for one-off changes
+
+### Layer 1: Default Configuration
+
+These are the built-in defaults used when no other configuration is provided:
+
+```typescript
+{
+  port: 7777,
+  version: "1.0.0",
+  outputDirectory: "strandweave-results",
+  executionBaseDir: "~/.strandweave-executions",
+  autostart: true,
+  withoutProxy: false,
+  logParsingInterval: 1000,
+  dataHashTimeLimit: 60000,
+
+  // Sentinel configuration
+  sentinel: {
+    enablePersistence: true,
+    healthCheckGracePeriodMs: 2000,
+    waitForAllHealthChecks: false
+  },
+
+  // Cost tracking (per million tokens)
+  costsPerMTok: {
+    input: 3.0,
+    inputCache: 3.75,
+    cacheRead: 0.3,
+    output: 15.0
+  }
+}
+```
+
+### Layer 2: Runtime Config File (`strandweave.json`)
+
+Create a `strandweave.json` file in your execution directory for project-wide settings. This file is optional but useful for setting defaults that apply across multiple strand files.
+
+**Location**: The file is auto-discovered in the current execution directory (`process.cwd()`).
+
+**Example** `strandweave.json`:
+```json
+{
+  "port": 8080,
+  "model": "sonnet",
+  "autostart": false,
+  "logParsingInterval": 2000,
+  "sentinel": {
+    "enablePersistence": false,
+    "healthCheckGracePeriodMs": 3000
+  }
+}
+```
+
+**Available Fields**:
+- `port` (number) - WebSocket server port
+- `model` ("sonnet" | "opus") - Default model for all codons
+- `autostart` (boolean) - Auto-start first codon on client connect
+- `withoutProxy` (boolean) - Disable the LLM proxy server
+- `anthropicBaseUrl` (string) - Custom Anthropic API endpoint
+- `logParsingInterval` (number) - How often to check for new log entries (ms)
+- `dataHashTimeLimit` (number) - Max time for data hashing (ms)
+- `sentinel` (object) - Sentinel configuration:
+  - `enablePersistence` (boolean) - Enable sentinel state persistence
+  - `healthCheckGracePeriodMs` (number) - Grace period for health checks
+  - `waitForAllHealthChecks` (boolean) - Wait for all sentinels before starting codon
+
+### Layer 3: Strand File Recommendations
+
+Your strand configuration file can include a `recommendations` section that suggests settings for that specific workflow:
+
+**Example** `strand.json`:
+```json
+{
+  "meta": {
+    "name": "My Workflow",
+    "version": "1.0.0",
+    "description": "A complex workflow that needs specific settings",
+    "author": "Your Name"
+  },
+  "recommendations": {
+    "model": "opus",
+    "dataHashTimeLimit": 15000,
+    "sentinel": {
+      "enablePersistence": true
+    }
+  },
+  "strand": [
+    {
+      "id": "codon-1",
+      "name": "First Codon",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptText": "Do something"
+    }
+  ]
+}
+```
+
+**Why use recommendations?**
+- Share optimal settings with your team
+- Document the intended configuration for a workflow
+- Users can still override with environment variables or CLI args
+
+**Available Fields**: Same as runtime config file (see Layer 2 above).
+
+### Layer 4: Environment Variables
+
+Use `STRANDWEAVE_RUNTIME_*` prefixed environment variables for deployment-specific or CI/CD configuration:
+
+**Naming Convention**:
+- Use `SNAKE_CASE` for environment variable names
+- Prefix with `STRANDWEAVE_RUNTIME_`
+- For nested config (like sentinel settings), use additional underscores
+
+**Examples**:
+```bash
+# Basic settings
+export STRANDWEAVE_RUNTIME_PORT=9000
+export STRANDWEAVE_RUNTIME_MODEL=opus
+export STRANDWEAVE_RUNTIME_AUTOSTART=false
+export STRANDWEAVE_RUNTIME_WITHOUT_PROXY=true
+export STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL=https://custom.api.com
+
+# Timing settings
+export STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL=2000
+export STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT=30000
+
+# Sentinel settings (nested)
+export STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE=false
+export STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS=5000
+export STRANDWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS=true
+```
+
+**Type Conversion**:
+- Boolean fields: `"true"`, `"false"`, `"1"`, or `"0"`
+- Number fields: Parsed as integers or floats
+- String fields: Used as-is
+
+### Layer 5: CLI Arguments (Highest Priority)
+
+Command-line arguments override all other configuration layers:
+
+```bash
+# Override port
+bun run server --port=9999
+
+# Override model
+bun run server --model=opus
+
+# Disable autostart
+bun run server --no-autostart
+
+# Disable proxy
+bun run server --without-proxy
+
+# Custom API endpoint
+bun run server --anthropic-base-url=https://custom.api.com
+```
+
+**Available CLI Flags**:
+- `--port=<number>` - Server port
+- `--model=<sonnet|opus>` - Default model
+- `--no-autostart` - Don't auto-start codons
+- `--without-proxy` - Disable LLM proxy
+- `--anthropic-base-url=<url>` - Custom API endpoint
+
+See [Command-Line Options](#command-line-options) for complete list.
+
+### Configuration Resolution Examples
+
+#### Example 1: Simple Override Chain
+
+```bash
+# Layer 1: Default port is 7777
+# Layer 2: strandweave.json sets port to 8080
+# Layer 3: strand.json recommendations don't specify port
+# Layer 4: STRANDWEAVE_RUNTIME_PORT=9000
+# Layer 5: --port=9999
+
+# Result: Port is 9999 (CLI wins)
+```
+
+#### Example 2: Partial Overrides
+
+```bash
+# Layer 1: Default config
+# Layer 2: strandweave.json
+{
+  "port": 8080,
+  "model": "sonnet",
+  "autostart": false
+}
+
+# Layer 3: strand.json recommendations
+{
+  "model": "opus"  // Override model only
+}
+
+# Layer 4: STRANDWEAVE_RUNTIME_WITHOUT_PROXY=true
+
+# Result:
+{
+  "port": 8080,           // From Layer 2
+  "model": "opus",        // From Layer 3 (overrides Layer 2)
+  "autostart": false,     // From Layer 2
+  "withoutProxy": true    // From Layer 4
+}
+```
+
+#### Example 3: Nested Configuration Merging
+
+```bash
+# Layer 2: strandweave.json
+{
+  "sentinel": {
+    "enablePersistence": true,
+    "healthCheckGracePeriodMs": 1000
+  }
+}
+
+# Layer 3: strand.json recommendations
+{
+  "sentinel": {
+    "enablePersistence": false,  // Override this field
+    "waitForAllHealthChecks": true  // Add new field
+  }
+}
+
+# Layer 4: Env vars
+export STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS=3000
+
+# Result (deep merged):
+{
+  "sentinel": {
+    "enablePersistence": false,      // From Layer 3
+    "healthCheckGracePeriodMs": 3000, // From Layer 4
+    "waitForAllHealthChecks": true   // From Layer 3
+  }
+}
+```
+
+### Best Practices
+
+**1. Use the Right Layer for Each Setting**:
+- **Defaults**: Don't configure (use built-in defaults)
+- **Project-wide**: Put in `strandweave.json`
+- **Workflow-specific**: Put in strand file `recommendations`
+- **Deployment/CI**: Use environment variables
+- **One-off testing**: Use CLI arguments
+
+**2. Document Recommendations**:
+```json
+{
+  "meta": {
+    "name": "High-Memory Workflow",
+    "version": "1.0.0",
+    "description": "This workflow processes large files and needs extended timeouts"
+  },
+  "recommendations": {
+    "dataHashTimeLimit": 120000,
+    "model": "opus"
+  }
+}
+```
+
+**3. Environment-Specific Config**:
+```bash
+# .env.development
+STRANDWEAVE_RUNTIME_PORT=7777
+STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL=500
+
+# .env.production
+STRANDWEAVE_RUNTIME_PORT=8080
+STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL=2000
+STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE=true
+```
+
+**4. Verify Configuration**:
+Use the validate command to see the effective configuration:
+```bash
+bun run validate --config=strand.json --port=9999
+```
 
 ## Typical Workflows
 
 ### Automated Execution (Fresh Start)
 
 This is the most common workflow.
-1.  Define your entire workflow in a `codon-sequence.json` file.
-2.  Start the server: `bun run server --config=my-codon-sequence.json`.
+1.  Define your entire workflow in a `strand.json` file.
+2.  Start the server: `bun run server --config=my-strand.json`.
 3.  Connect your client. The server will automatically start the first codon and continue through the sequence until all codons are complete, then shut down.
 
 ### Interactive Development & Manual Control
