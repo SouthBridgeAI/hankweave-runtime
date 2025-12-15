@@ -3,18 +3,111 @@
 This guide covers all the ways you can configure codons in Strandweave Runner, from simple single-codon workflows to complex multi-codon automations with rig setup, file tracking, and environment management.
 
 ## Table of Contents
-1. [Basic Codon Structure](#basic-codon-structure)
-2. [Prompt Configuration](#prompt-configuration)
-3. [Model Selection](#model-selection)
-4. [Continuation Modes](#continuation-modes)
-5. [Loops](#loops)
-6. [Rig Setup](#rig-setup)
-7. [File Tracking](#file-tracking)
-8. [Environment Variables](#environment-variables)
-9. [Output Configuration](#output-configuration)
-10. [Complete Examples](#complete-examples)
-11. [Best Practices](#best-practices)
-12. [Common Patterns](#common-patterns)
+1. [Strand File Format](#strand-file-format)
+2. [Basic Codon Structure](#basic-codon-structure)
+3. [Prompt Configuration](#prompt-configuration)
+4. [Model Selection](#model-selection)
+5. [Continuation Modes](#continuation-modes)
+6. [Loops](#loops)
+7. [Rig Setup](#rig-setup)
+8. [File Tracking](#file-tracking)
+9. [Environment Variables](#environment-variables)
+10. [Output Configuration](#output-configuration)
+11. [Complete Examples](#complete-examples)
+12. [Best Practices](#best-practices)
+13. [Common Patterns](#common-patterns)
+
+## Strand File Format
+
+Strand configuration files (typically named `strand.json`) use an object format that includes optional metadata, runtime recommendations, and the codon sequence:
+
+```json
+{
+  "meta": {
+    "name": "My Workflow",
+    "version": "1.0.0",
+    "description": "A workflow for analyzing and refactoring code",
+    "author": "Your Name"
+  },
+  "recommendations": {
+    "model": "opus",
+    "dataHashTimeLimit": 15000,
+    "sentinel": {
+      "enablePersistence": true
+    }
+  },
+  "strand": [
+    {
+      "id": "codon-1",
+      "name": "First Codon",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptText": "Do something"
+    }
+  ]
+}
+```
+
+**Required Top-Level Fields**:
+- `strand` - Array of codon configurations (or loops containing codons)
+
+**Optional Top-Level Fields**:
+- `meta` - Metadata about the workflow:
+  - `name` (required if meta is present) - Human-readable name for the workflow
+  - `version` (required if meta is present) - Version string (e.g., "1.0.0", "2.1.3-beta")
+  - `description` (optional) - Description of the workflow's purpose
+  - `author` (optional) - Author name or organization
+- `recommendations` - Suggested runtime settings for this workflow
+  - These are part of the [5-layer configuration system](./running-the-server.md#configuration-system)
+  - Users can override recommendations with environment variables or CLI flags
+  - See [Runtime Configuration](./running-the-server.md#layer-3-strand-file-recommendations) for available fields
+
+**Minimal Example**:
+```json
+{
+  "strand": [
+    {
+      "id": "analyze",
+      "name": "Analyze Code",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptFile": "./prompts/analyze.md"
+    }
+  ]
+}
+```
+
+**Example with Complete Metadata**:
+```json
+{
+  "meta": {
+    "name": "Full Stack Migration Workflow",
+    "version": "2.1.0",
+    "description": "Migrates a legacy JavaScript application to TypeScript with full test coverage",
+    "author": "Engineering Team at Southbridge"
+  },
+  "recommendations": {
+    "model": "sonnet",
+    "dataHashTimeLimit": 120000
+  },
+  "strand": [
+    {
+      "id": "analyze",
+      "name": "Analyze Legacy Code",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./prompts/analyze-legacy.md"
+    },
+    {
+      "id": "migrate",
+      "name": "Perform Migration",
+      "model": "sonnet",
+      "continuationMode": "continue-previous",
+      "promptFile": "./prompts/migrate-to-typescript.md"
+    }
+  ]
+}
+```
 
 ## Basic Codon Structure
 

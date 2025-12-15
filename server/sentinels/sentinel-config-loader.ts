@@ -49,7 +49,7 @@ export class SentinelConfigLoader {
    *
    * @param entries - Array of sentinel entries (wrapper objects)
    * @param codonId - ID of the codon (for error messages)
-   * @param codonConfigDir - Directory containing codon-sequence.json (for resolving relative paths)
+   * @param codonConfigDir - Directory containing strand.json (for resolving relative paths)
    * @returns Load result with successful configs and errors
    */
   loadConfigsForCodon(

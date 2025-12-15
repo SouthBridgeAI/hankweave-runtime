@@ -564,7 +564,7 @@ export async function setupTestDirectory(config: TestDirectoryConfig): Promise<v
 // -------------
 // Server Management
 // -------------
-export interface ServerConfig {
+export interface TestServerConfig {
   testRunDir: string;
   configFile: string;
   port: number;
@@ -578,7 +578,7 @@ export interface ServerConfig {
   withoutProxy?: boolean; // Run server without proxy
 }
 
-export function startServer(config: ServerConfig): ChildProcess {
+export function startServer(config: TestServerConfig): ChildProcess {
   console.log(`${colors.blue}Starting Strandweave server...${colors.reset}`);
 
   // Register signal handlers for cleanup

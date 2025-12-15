@@ -172,6 +172,8 @@ export interface LaunchServerOptions {
   configPath?: string;
   /** Explicit execution directory path (default: auto-generated tests/test-area/execution-{timestamp}) */
   executionDir?: string;
+  /** Custom data directory path (default: tests/config/poem_guides.txt) */
+  dataDir?: string;
 }
 
 /**
@@ -347,10 +349,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * - Connects a WebSocket client with `ClientMode.READANDWRITE` mode
  * - Sets up event tracking and helper methods
  *
- * The server uses these predefined paths:
- * - Config: `tests/config/test-codons.config.json`
- * - Data: `tests/config/poem_guides.txt`
- * - Execution: `tests/test-area/execution-{timestamp}`
+ * The server uses these default paths (customizable via options):
+ * - Config: `tests/config/test-codons.config.json` (or custom via `configPath`)
+ * - Data: `tests/config/poem_guides.txt` (or custom via `dataDir`)
+ * - Execution: `tests/test-area/execution-{timestamp}` (or custom via `executionDir`)
  * - Results: `tests/test-results/basic-server-{timestamp}`
  *
  * @param options - Server launch options
@@ -367,6 +369,15 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * } finally {
  *   await server.stop();
  * }
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Using custom data directory
+ * const server = await launchStrandweave({
+ *   dataDir: "path/to/custom/data",
+ *   configPath: "path/to/custom/config.json",
+ * });
  * ```
  *
  * @example
@@ -399,7 +410,9 @@ export async function launchStrandweave(
   const configPath = options.configPath
     ? path.resolve(cwd, options.configPath)
     : path.resolve(cwd, TEST_CONFIG_RELATIVE_PATH);
-  const dataSourcePath = path.resolve(cwd, TEST_DATA_RELATIVE_PATH);
+  const dataSourcePath = options.dataDir
+    ? path.resolve(cwd, options.dataDir)
+    : path.resolve(cwd, TEST_DATA_RELATIVE_PATH);
   const testResultsDir = path.resolve(cwd, TEST_RESULTS_RELATIVE_DIR);
   const testAreaDir = path.resolve(cwd, TEST_AREA_RELATIVE_DIR);
 
@@ -426,7 +439,9 @@ export async function launchStrandweave(
     });
   }
 
-  const serverEntry = path.resolve(cwd, "server/index.ts");
+  // Always use DEFAULT_CWD (project root) to find server entry,
+  // but use cwd for spawn working directory (which affects where output files go)
+  const serverEntry = path.resolve(DEFAULT_CWD, "server/index.ts");
   const spawnArgs = [
     serverEntry,
     "--basic",

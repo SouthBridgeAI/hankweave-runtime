@@ -1,9 +1,11 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
 import { CodonId } from "./types/branded-types.js";
-import type { Codon, CodonConfig, RigSetupItem, ServerConfig } from "./types/types.js";
+import type { ModelName } from "./types/types.js";
+import { deepMerge } from "./utils.js";
 
 // -------------
 // Constants
@@ -90,33 +92,49 @@ const shellCommandWorkingDirectory = ["project"] as const;
 // to coordinate with copy commands
 const rigSetupCommandWorkingDirectory = [...shellCommandWorkingDirectory, "lastCopied"] as const;
 
-const shellCommandSchema = z.object({
-  type: z.literal("command"),
+export const shellCommandSchema = z.object({
+  type: z.literal("command").describe("Type of setup operation"),
   command: z.object({
-    run: z.string().min(1, "Command cannot be empty"),
-    workingDirectory: z.enum(shellCommandWorkingDirectory).optional().default("project"),
+    run: z.string().min(1, "Command cannot be empty").describe("Shell command to execute"),
+    workingDirectory: z
+      .enum(shellCommandWorkingDirectory)
+      .optional()
+      .default("project")
+      .describe("Working directory for command execution (default: 'project')"),
   }),
 });
 
-const rigShellCommandSchema = shellCommandSchema.extend({
+export const rigShellCommandSchema = shellCommandSchema.extend({
   command: shellCommandSchema.shape.command.extend({
-    workingDirectory: z.enum(rigSetupCommandWorkingDirectory).optional().default("project"),
+    workingDirectory: z
+      .enum(rigSetupCommandWorkingDirectory)
+      .optional()
+      .default("project")
+      .describe("Working directory for command execution (default: 'project')"),
   }),
 });
 
-const rigSetupItemSchema = z.discriminatedUnion("type", [
+export const rigSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
-    type: z.literal("copy"),
+    type: z.literal("copy").describe("Type of setup operation"),
     copy: z.object({
-      from: z.string().min(1, "Source path cannot be empty"),
-      to: z.string().min(1, "Target path cannot be empty"),
+      from: z
+        .string()
+        .min(1, "Source path cannot be empty")
+        .describe("Source path (relative to config file or absolute)"),
+      to: z
+        .string()
+        .min(1, "Target path cannot be empty")
+        .describe(
+          "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: '../templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: '../templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: '../config.json', to: 'src/config.json' → copies file; from: '../config.json', to: 'src/settings.json' → copies file with rename",
+        ),
     }),
     allowFailure: z
       .boolean()
       .optional()
       .default(false)
       .describe(
-        "If true, failure of this operation won't fail the codon. Recommended for rig setup in loop codons.",
+        "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., copying files that don't exist yet).",
       ),
   }),
   rigShellCommandSchema.extend({
@@ -125,7 +143,7 @@ const rigSetupItemSchema = z.discriminatedUnion("type", [
       .optional()
       .default(false)
       .describe(
-        "If true, failure of this operation won't fail the codon. Recommended for rig setup in loop codons.",
+        "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., running commands that might not succeed initially).",
       ),
   }),
 ]);
@@ -133,10 +151,14 @@ const rigSetupItemSchema = z.discriminatedUnion("type", [
 // Output copy item schema (array of these under codon.outputFiles)
 const codonOutputItemSchema = z
   .object({
-    // An array of glob strings representing codon output files to copy
-    copy: z.array(z.string()).min(1, "The 'copy' array cannot be empty."),
-    // Optional shell commands to run before copying files. Cwd is executionPath
-    beforeCopy: z.array(shellCommandSchema).optional(),
+    copy: z
+      .array(z.string())
+      .min(1, "The 'copy' array cannot be empty.")
+      .describe("Glob patterns to copy from execution directory to output directory"),
+    beforeCopy: z
+      .array(shellCommandSchema)
+      .optional()
+      .describe("Optional commands to run before copying (run in executionPath)"),
   })
   .strict();
 
@@ -151,7 +173,7 @@ const codonOutputSchema = z.array(codonOutputItemSchema).optional();
  * - iterationLimit: Stop after a fixed number of iterations
  * - contextExceeded: Stop when Claude signals context exhaustion
  */
-const loopTerminationSchema = z.discriminatedUnion("type", [
+export const loopTerminationSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("iterationLimit"),
     limit: z.number().int().min(1, "Iteration limit must be at least 1"),
@@ -170,47 +192,98 @@ const loopTerminationSchema = z.discriminatedUnion("type", [
  * The type field is optional and defaults to "codon".
  */
 const codonObjectSchema = z.object({
-  type: z.literal("codon").optional().default("codon"),
+  type: z
+    .literal("codon")
+    .optional()
+    .default("codon")
+    .describe("Type discriminator - optional, defaults to 'codon'"),
   id: z
     .string()
     .min(
       1,
       "Codon ID cannot be empty. This uniquely identifies your codon (e.g., 'codon-1', 'analysis'). Fix: Add a unique id field.",
-    ),
+    )
+    .describe("Unique identifier for this codon (e.g., 'codon-1', 'data-analysis')"),
   name: z
     .string()
     .min(
       1,
       "Codon name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
+    )
+    .describe("Human-readable name displayed in UI and logs"),
+  promptFile: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .describe("Path to a file containing the prompt (mutually exclusive with promptText)"),
+  promptText: z
+    .string()
+    .optional()
+    .describe("Inline prompt text (mutually exclusive with promptFile)"),
+  appendSystemPromptFile: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .describe(
+      "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText)",
     ),
-  promptFile: z.union([z.string(), z.array(z.string())]).optional(),
-  promptText: z.string().optional(),
-  appendSystemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
-  appendSystemPromptText: z.string().optional(),
-  model: z.enum(["sonnet", "opus"], {
-    errorMap: () => ({
-      message:
-        "Model must be either 'sonnet' or 'opus'. This determines which Claude model to use. Fix: Change model to 'sonnet' (faster, cheaper) or 'opus' (more capable).",
-    }),
-  }),
-  continuationMode: z.enum(["fresh", "continue-previous"], {
-    errorMap: () => ({
-      message:
-        "continuationMode must be either 'fresh' or 'continue-previous'. This controls whether to start a new conversation or continue from the previous codon. Fix: Add continuationMode field with either 'fresh' (new conversation) or 'continue-previous' (maintain context).",
-    }),
-  }),
-  rigSetup: z.array(rigSetupItemSchema).optional(),
-  description: z.string().optional(),
-  trackedFiles: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
-  outputFiles: codonOutputSchema,
-  sentinels: z.array(codonSentinelEntrySchema).optional(),
+  appendSystemPromptText: z
+    .string()
+    .optional()
+    .describe(
+      "Inline system prompt text to append (mutually exclusive with appendSystemPromptFile)",
+    ),
+  model: z
+    .enum(["sonnet", "opus"], {
+      errorMap: () => ({
+        message:
+          "Model must be either 'sonnet' or 'opus'. This determines which Claude model to use. Fix: Change model to 'sonnet' (faster, cheaper) or 'opus' (more capable).",
+      }),
+    })
+    .describe("Claude model to use (e.g., 'claude-3-opus-20240229', 'sonnet')"),
+  continuationMode: z
+    .enum(["fresh", "continue-previous"], {
+      errorMap: () => ({
+        message:
+          "continuationMode must be either 'fresh' or 'continue-previous'. This controls whether to start a new conversation or continue from the previous codon. Fix: Add continuationMode field with either 'fresh' (new conversation) or 'continue-previous' (maintain context).",
+      }),
+    })
+    .describe(
+      "How this codon should handle continuation from previous codons. 'fresh': Start a new session (default for most cases). 'continue-previous': Continue from the previous codon's session, maintaining context and conversation history. The previous codon must have completed successfully.",
+    ),
+  rigSetup: z
+    .array(rigSetupItemSchema)
+    .optional()
+    .describe(
+      "Rig setup operations to run before codon starts. Each operation must complete successfully for codon to start.",
+    ),
+  description: z
+    .string()
+    .optional()
+    .describe("Optional description shown to users about what this codon does"),
+  trackedFiles: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Glob patterns for files to track during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved using gitignore rules for consistency.",
+    ),
+  env: z
+    .record(z.string())
+    .optional()
+    .describe("Optional environment variables to set for the Claude process"),
+  outputFiles: codonOutputSchema.describe(
+    "Optional output copy steps to run after codon completion: files to copy out from a completed codon, with optional pre-copy commands.",
+  ),
+  sentinels: z
+    .array(codonSentinelEntrySchema)
+    .optional()
+    .describe(
+      "Sentinels to run during this codon. Sentinels are parallel observation agents that process the event stream. Each entry is a wrapper object with sentinelConfig (portable sentinel configuration, file or inline) and settings (codon-specific settings like output paths and load requirements). This wrapper pattern keeps sentinel configs reusable across codons.",
+    ),
 });
 
 /**
  * Single codon schema with refinements - represents one executable codon.
  */
-const codonSchema = codonObjectSchema
+export const codonSchema = codonObjectSchema
   .strict()
   .refine((data) => data.promptFile || data.promptText, {
     message:
@@ -228,22 +301,27 @@ const codonSchema = codonObjectSchema
  * Note: We use a forward reference approach here to prevent circular dependencies.
  * The codons array will be validated after the discriminated union is parsed.
  */
-const loopSchema = z.object({
-  type: z.literal("loop"),
+export const loopSchema = z.object({
+  type: z.literal("loop").describe("Type discriminator - required for loops"),
   id: z
     .string()
     .min(
       1,
       "Loop ID cannot be empty. This uniquely identifies your loop (e.g., 'iterative-development'). Fix: Add a unique id field.",
-    ),
+    )
+    .describe("Unique identifier for this loop (e.g., 'iterative-development')"),
   name: z
     .string()
     .min(
       1,
       "Loop name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
-    ),
-  description: z.string().optional(),
-  terminateOn: loopTerminationSchema,
+    )
+    .describe("Human-readable name displayed in UI and logs"),
+  description: z
+    .string()
+    .optional()
+    .describe("Optional description shown to users about what this loop does"),
+  terminateOn: loopTerminationSchema.describe("Termination condition for the loop"),
   codons: z
     .array(
       codonObjectSchema
@@ -257,19 +335,229 @@ const loopSchema = z.object({
             "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
         }),
     )
-    .min(1, "Loop must contain at least one codon. Fix: Add codons to the loop."),
+    .min(1, "Loop must contain at least one codon. Fix: Add codons to the loop.")
+    .describe(
+      "Array of codons to execute in each iteration. Only Codon objects allowed (no nested loops).",
+    ),
 });
 
 /**
  * CodonConfig is a discriminated union of Codon and Loop.
- * Used in codon-sequence.json configuration.
+ * Used in strand.json configuration.
  */
-const codonConfigSchema = z.union([
+export const codonConfigSchema = z.union([
   codonSchema, // type: "codon" (or omitted, defaults to "codon")
   loopSchema.strict(), // type: "loop"
 ]);
 
 const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one codon required");
+
+// -------------
+// New Config System Schemas
+// -------------
+
+/**
+ * Schema for strand metadata
+ */
+export const strandMetaSchema = z.object({
+  name: z
+    .string()
+    .min(1, "Strand name cannot be empty")
+    .describe("Human-readable name for the strand"),
+  version: z
+    .string()
+    .min(1, "Strand version cannot be empty")
+    .describe("Version number (e.g., '1.0.0')"),
+  description: z.string().optional().describe("Optional description of what this strand does"),
+  author: z.string().optional().describe("Optional author information"),
+});
+
+/**
+ * Shared schema for sentinel system settings.
+ * Used in both recommendations and runtime config.
+ */
+const sentinelSettingsSchema = z
+  .object({
+    enablePersistence: z
+      .boolean()
+      .optional()
+      .describe("Enable filesystem persistence for sentinel outputs"),
+    healthCheckGracePeriodMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Grace period for sentinel health checks (milliseconds)"),
+    waitForAllHealthChecks: z
+      .boolean()
+      .optional()
+      .describe("Wait for all health checks before loading sentinels"),
+  })
+  .strict();
+
+/**
+ * Schema for architect's recommendations
+ */
+export const strandRecommendationsSchema = z
+  .object({
+    model: z
+      .enum(["sonnet", "opus"])
+      .optional()
+      .describe("Recommended model for this strand (e.g., 'This task needs high reasoning')"),
+    dataHashTimeLimit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Recommended time limit for data hashing in milliseconds"),
+    sentinel: sentinelSettingsSchema.optional().describe("Recommended sentinel system settings"),
+  })
+  .strict();
+
+/**
+ * Schema for strand file (strand.json).
+ * Must contain a strand array, with optional meta and recommendations.
+ */
+export const strandFileSchema = z.object({
+  meta: strandMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
+  recommendations: strandRecommendationsSchema
+    .optional()
+    .describe("Architect's recommendations for optimal execution (optional)"),
+  strand: codonConfigArraySchema.describe("The immutable logic sequence (required)"),
+});
+
+/**
+ * Schema for runtime configuration (strandweave.json)
+ */
+export const runtimeConfigSchema = z
+  .object({
+    // Server Behaviors
+    port: z.number().int().positive().optional().describe("WebSocket server port"),
+    autostart: z.boolean().optional().describe("If true, run immediately on client connect"),
+    withoutProxy: z.boolean().optional().describe("Bypass internal LLM proxy"),
+
+    // Model & API
+    model: z.enum(["sonnet", "opus"]).optional().describe("User's preferred default model"),
+    anthropicBaseUrl: z
+      .string()
+      .url()
+      .optional()
+      .describe("Custom Anthropic API base URL (for corporate proxies)"),
+
+    // Resources & Limits
+    outputDirectory: z.string().optional().describe("Where to put results (relative to CWD)"),
+    executionBaseDir: z.string().optional().describe("Where to create temp execution environments"),
+    logParsingInterval: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Interval for parsing Claude log files (milliseconds)"),
+    dataHashTimeLimit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Time limit for hashing directories (milliseconds)"),
+
+    // Sentinel System
+    sentinel: sentinelSettingsSchema.optional().describe("Sentinel system configuration"),
+  })
+  .strict();
+
+// -------------
+// Inferred Types from Schemas
+// -------------
+
+export type ShellCommand = z.input<typeof shellCommandSchema>;
+export type RigShellCommand = z.input<typeof rigShellCommandSchema>;
+export type RigSetupItem = z.input<typeof rigSetupItemSchema>;
+export type LoopTermination = z.infer<typeof loopTerminationSchema>;
+export type Codon = z.input<typeof codonSchema>;
+export type Loop = z.input<typeof loopSchema>;
+export type CodonConfig = z.input<typeof codonConfigSchema>;
+export type StrandMeta = z.infer<typeof strandMetaSchema>;
+export type StrandRecommendations = z.infer<typeof strandRecommendationsSchema>;
+export type StrandFile = z.infer<typeof strandFileSchema>;
+export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
+
+/**
+ * Main server configuration containing all runtime settings.
+ * Extends RuntimeConfig with all fields required (defaults filled in) plus additional internal/execution properties.
+ * This is the complete, finalized config assembled from all layers (CLI, env, files, defaults).
+ */
+export interface StrandweaveConfig
+  extends Omit<Required<RuntimeConfig>, "model" | "anthropicBaseUrl"> {
+  // Fields from RuntimeConfig that remain optional
+  /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
+  anthropicBaseUrl?: string;
+
+  /**
+   * Model setting - behavior depends on resolution layer:
+   * - If set via CLI/Env/RuntimeConfig (layers 1-3): Overrides ALL codon models globally
+   * - If set via Recommendations/Defaults (layers 4-5): Used as fallback for codons without model specified
+   */
+  model?: ModelName;
+
+  // Additional internal properties (not in RuntimeConfig)
+  /** Server version for client compatibility checks */
+  version: string;
+
+  /** Path to lock file preventing multiple server instances */
+  lockFile: string;
+
+  /** Path to WebSocket traffic log file */
+  socketLogFile: string;
+
+  /** Path to general server log file */
+  serverLogFile: string;
+
+  /** Current working directory for the server process */
+  cwd: string;
+
+  /** Path to the codon configuration file (for resolving relative sentinel paths) */
+  configPath?: string;
+
+  /**
+   * Token cost configuration per million tokens.
+   * Used to calculate costs for each codon and total project cost.
+   */
+  costsPerMTok: {
+    /** Cost per million input tokens */
+    input: number;
+    /** Cost per million tokens when creating cache */
+    inputCache: number;
+    /** Cost per million tokens when reading from cache */
+    cacheRead: number;
+    /** Cost per million output tokens */
+    output: number;
+  };
+
+  /** Maximum length for tool result content before truncation (default: 2500) */
+  toolResultTruncateLength: number;
+
+  /** Maximum number of recent events to include in handshake response (default: 50) */
+  handshakeHistoryLimit: number;
+
+  // Execution-specific properties (from ExecutionSetup)
+  /** Original data location (for reference only) */
+  readOnlySourceDataPath: string;
+  /** Primary directory where everything runs */
+  executionPath: string;
+  /** executionPath + '/data' - ONLY for setup */
+  dataPathInExecutionDir: string;
+  /** Hash of the data directory structure */
+  dataHash: string;
+  /** Whether this is a new execution */
+  isNewExecution: boolean;
+  /** Whether we're resuming an existing execution */
+  isResuming: boolean;
+  /** How data is linked (symlink or copy) */
+  linkType: "symlink" | "copy";
+
+  /** Array of codon configurations to execute */
+  codons: CodonConfig[];
+}
 
 // -------------
 // Default Configuration
@@ -282,7 +570,7 @@ const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one c
  * Note: execution paths and codons must be provided by the user, as well as cwd
  */
 export const DEFAULT_CONFIG: Omit<
-  ServerConfig,
+  StrandweaveConfig,
   | "cwd"
   | "readOnlySourceDataPath"
   | "executionPath"
@@ -296,6 +584,7 @@ export const DEFAULT_CONFIG: Omit<
   port: 7777,
   version: "1.0.0",
   outputDirectory: "strandweave-results",
+  executionBaseDir: path.join(os.homedir(), ".strandweave-executions"),
   lockFile: ".strandweave/runtime.lock",
   socketLogFile: ".strandweave/logs/websocket.log",
   serverLogFile: ".strandweave/logs/server.log",
@@ -323,26 +612,243 @@ export const DEFAULT_CONFIG: Omit<
 // -------------
 
 /**
- * Load and validate codon configuration from a JSON file.
+ * Load and parse a strand file (strand.json).
+ * Returns the structured file with meta, recommendations, and strand (codons array).
  *
- * The file should contain an array of codon configurations.
- * Each codon is validated against the schema to ensure required
- * fields are present and either promptFile or promptText is provided.
+ * @param strandPath - Path to the strand.json file
+ * @returns Parsed and validated strand file (with un-branded IDs from Zod)
+ * @throws Error with detailed validation messages if file is invalid
+ */
+export function loadStrandFile(strandPath: string): z.infer<typeof strandFileSchema> {
+  try {
+    const content = fs.readFileSync(strandPath, "utf-8");
+    const rawConfig = JSON.parse(content);
+
+    // Validate with strandFileSchema
+    const result = strandFileSchema.safeParse(rawConfig);
+    if (!result.success) {
+      const errors = formatZodErrors(result.error, rawConfig);
+      throw new Error(`Invalid strand file:\n${errors}`);
+    }
+
+    return result.data;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Strand file not found: ${strandPath}`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Load and validate runtime configuration from strandweave.json.
  *
- * @param configPath - Path to the JSON configuration file
- * @returns Validated array of codon configurations
+ * This file is optional and provides runtime settings like port, model, sentinel config, etc.
+ * If the file doesn't exist, returns an empty object (all settings will use defaults or CLI overrides).
+ *
+ * @param runtimeConfigPath - Path to the strandweave.json file (optional, defaults to "strandweave.json" in cwd)
+ * @returns Parsed and validated runtime config, or empty object if file doesn't exist
+ * @throws Error with detailed validation messages if file exists but is invalid
+ */
+export function loadRuntimeConfig(runtimeConfigPath?: string): z.infer<typeof runtimeConfigSchema> {
+  const configPath = runtimeConfigPath || path.join(process.cwd(), "strandweave.json");
+
+  // If file doesn't exist, return empty object (runtime config is optional)
+  if (!fs.existsSync(configPath)) {
+    return {};
+  }
+
+  try {
+    const content = fs.readFileSync(configPath, "utf-8");
+    const rawConfig = JSON.parse(content);
+
+    // Validate with runtimeConfigSchema
+    const result = runtimeConfigSchema.safeParse(rawConfig);
+    if (!result.success) {
+      const errors = formatZodErrors(result.error, rawConfig);
+      throw new Error(`Invalid runtime config file:\n${errors}`);
+    }
+
+    return result.data;
+  } catch (error) {
+    // Re-throw validation errors
+    if (error instanceof Error && error.message.startsWith("Invalid runtime config")) {
+      throw error;
+    }
+    // For other errors (like invalid JSON), provide helpful message
+    throw new Error(
+      `Failed to load runtime config from ${configPath}: ${(error as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Load configuration from STRANDWEAVE_RUNTIME_* environment variables.
+ *
+ * Parses environment variables with the STRANDWEAVE_RUNTIME_ prefix and converts them
+ * to the runtime config structure. Handles type conversions and nested paths.
+ *
+ * Environment variable mapping:
+ * - STRANDWEAVE_RUNTIME_PORT -> port (number)
+ * - STRANDWEAVE_RUNTIME_MODEL -> model (enum: "sonnet" | "opus")
+ * - STRANDWEAVE_RUNTIME_AUTOSTART -> autostart (boolean)
+ * - STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE -> sentinel.enablePersistence (boolean)
+ *
+ * Type conversions:
+ * - Numbers: Parsed from strings (e.g., "8080" -> 8080)
+ * - Booleans: "true"/"1" -> true, "false"/"0" -> false
+ * - Strings: Passed through as-is
+ *
+ * @returns Parsed config object from environment variables (validated against schema)
+ * @throws Error if environment variables contain invalid values
+ */
+export function loadStrandweaveRuntimeEnvVars(): z.infer<typeof runtimeConfigSchema> {
+  const config: Record<string, unknown> = {};
+
+  // Helper to convert snake_case to camelCase
+  const toCamelCase = (str: string): string => {
+    return str.toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+  };
+
+  // Helper to parse value based on expected type
+  const parseValue = (key: string, value: string): unknown => {
+    // Boolean fields
+    if (
+      key === "autostart" ||
+      key === "withoutProxy" ||
+      key === "enablePersistence" ||
+      key === "waitForAllHealthChecks"
+    ) {
+      return value === "true" || value === "1";
+    }
+
+    // Number fields
+    if (
+      key === "port" ||
+      key === "logParsingInterval" ||
+      key === "dataHashTimeLimit" ||
+      key === "healthCheckGracePeriodMs"
+    ) {
+      const num = Number(value);
+      if (Number.isNaN(num)) {
+        throw new Error(`Invalid number value for ${key}: "${value}"`);
+      }
+      return num;
+    }
+
+    // String fields (including URLs and enums - will be validated by schema)
+    return value;
+  };
+
+  // Process all STRANDWEAVE_RUNTIME_* environment variables
+  for (const [envKey, envValue] of Object.entries(process.env)) {
+    if (!envKey.startsWith("STRANDWEAVE_RUNTIME_") || !envValue) {
+      continue;
+    }
+
+    // Remove prefix: STRANDWEAVE_RUNTIME_PORT -> PORT
+    const withoutPrefix = envKey.substring("STRANDWEAVE_RUNTIME_".length);
+
+    // Handle nested sentinel config: SENTINEL_ENABLE_PERSISTENCE
+    if (withoutPrefix.startsWith("SENTINEL_")) {
+      const sentinelKey = withoutPrefix.substring("SENTINEL_".length);
+      const camelKey = toCamelCase(sentinelKey);
+
+      if (!config.sentinel) {
+        config.sentinel = {};
+      }
+
+      (config.sentinel as Record<string, unknown>)[camelKey] = parseValue(camelKey, envValue);
+    } else {
+      // Top-level config: PORT, MODEL, etc.
+      const camelKey = toCamelCase(withoutPrefix);
+      config[camelKey] = parseValue(camelKey, envValue);
+    }
+  }
+
+  // Validate against schema
+  const result = runtimeConfigSchema.safeParse(config);
+  if (!result.success) {
+    const errors = formatZodErrors(result.error, config);
+    throw new Error(`Invalid environment variable configuration:\n${errors}`);
+  }
+
+  return result.data;
+}
+
+/**
+ * Resolve final runtime configuration by merging all configuration layers.
+ *
+ * Configuration layers (in order of precedence, highest to lowest):
+ * 1. CLI arguments (passed as cliArgs parameter) - highest priority
+ * 2. Environment variables (STRANDWEAVE_RUNTIME_*)
+ * 3. Strand file recommendations (strand.json > recommendations)
+ * 4. Runtime config file (strandweave.json)
+ * 5. Default configuration (DEFAULT_CONFIG) - lowest priority
+ *
+ * @param options Configuration resolution options
+ * @param options.cliArgs CLI arguments to merge (highest priority)
+ * @param options.strandPath Path to strand.json file (for extracting recommendations)
+ * @param options.runtimeConfigPath Path to strandweave.json (defaults to ./strandweave.json)
+ * @returns Fully resolved StrandweaveConfig with all layers merged
+ */
+export function resolveSettings(options?: {
+  cliArgs?: Partial<StrandweaveConfig>;
+  strandPath?: string;
+  runtimeConfigPath?: string;
+}): Partial<StrandweaveConfig> {
+  const { cliArgs = {}, strandPath, runtimeConfigPath } = options || {};
+
+  // Layer 1 (base): Start with default configuration
+  let config: Partial<StrandweaveConfig> = { ...DEFAULT_CONFIG };
+
+  // Layer 2: Merge runtime config file (strandweave.json)
+  try {
+    const runtimeConfig = loadRuntimeConfig(runtimeConfigPath);
+    config = deepMerge(config, runtimeConfig);
+  } catch (_error) {
+    // Runtime config is optional, so silently continue if it doesn't exist
+    // (loadRuntimeConfig already returns {} for missing files)
+  }
+
+  // Layer 3: Merge strand file recommendations (if strand path provided)
+  if (strandPath) {
+    try {
+      const strandFile = loadStrandFile(strandPath);
+      if (strandFile.recommendations) {
+        config = deepMerge(config, strandFile.recommendations);
+      }
+    } catch (_error) {
+      // Strand file errors should not prevent config resolution
+      // The strand file is validated separately during codon loading
+    }
+  }
+
+  // Layer 4: Merge environment variables (STRANDWEAVE_RUNTIME_*)
+  const envConfig = loadStrandweaveRuntimeEnvVars();
+  config = deepMerge(config, envConfig);
+
+  // Layer 5 (highest priority): Merge CLI arguments
+  config = deepMerge(config, cliArgs);
+
+  return config;
+}
+
+/**
+ * Load and validate codon configuration from a strand file.
+ *
+ * Loads the strand file (object format with {meta, recommendations, strand}),
+ * extracts the strand (codons array), and resolves relative file paths.
+ *
+ * @param configPath - Path to the strand JSON configuration file
+ * @returns Validated array of codon configurations with resolved paths
  * @throws Error with detailed validation messages if config is invalid
  */
 export function loadCodonSequence(configPath: string): CodonConfig[] {
   try {
-    const content = fs.readFileSync(configPath, "utf-8");
-    const rawConfig = JSON.parse(content);
-    // Validate the configuration
-    const result = codonConfigArraySchema.safeParse(rawConfig);
-    if (!result.success) {
-      const errors = formatZodErrors(result.error, rawConfig);
-      throw new Error(`Invalid codon configuration:\n${errors}`);
-    }
+    // Load and validate strand file
+    const strandFile = loadStrandFile(configPath);
+    const rawCodons = strandFile.strand;
 
     // Resolve relative paths for promptFile and appendSystemPromptFile
     const configDir = path.dirname(configPath);
@@ -409,7 +915,7 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
       return resolved;
     }
 
-    const resolvedConfig = result.data.map((config) =>
+    const resolvedConfig = rawCodons.map((config) =>
       resolveCodonOrLoopPaths(config as CodonConfig),
     );
 
@@ -625,7 +1131,7 @@ export function calculateCost(
     cacheCreationTokens: number;
     cacheReadTokens: number;
   },
-  costs: ServerConfig["costsPerMTok"],
+  costs: StrandweaveConfig["costsPerMTok"],
 ): number {
   const inputCost = (usage.inputTokens / 1_000_000) * costs.input;
   const cacheCreationCost = (usage.cacheCreationTokens / 1_000_000) * costs.inputCache;
@@ -692,8 +1198,13 @@ export async function validateStrand(
   };
 
   // Collect STRANDWEAVE_ prefixed environment variables from system
+  // Exclude STRANDWEAVE_RUNTIME_* (server config) and STRANDWEAVE_SENTINEL_* (sentinel API keys)
   for (const key in process.env) {
-    if (key.startsWith("STRANDWEAVE_")) {
+    if (
+      key.startsWith("STRANDWEAVE_") &&
+      !key.startsWith("STRANDWEAVE_RUNTIME_") &&
+      !key.startsWith("STRANDWEAVE_SENTINEL_")
+    ) {
       const newKey = key.substring("STRANDWEAVE_".length);
       result.environmentVariables.fromSystem[newKey] = process.env[key] || "";
     }

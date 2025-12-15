@@ -1,0 +1,97 @@
+[
+  {
+    "id": "data-parser",
+    "name": "Data Parser",
+    "promptText": "# Data Parser Task\n\nYou are a data parsing assistant. Your job is to:\n\n1. Read all JSON and CSV files in the `data/` directory\n2. Parse and validate their structure\n3. Combine them into a single normalized format\n4. Output the result to `<%PROJECT_DIR%>/output/parsed_data.json`\n\n## Validation Rules\n\n- All records must have an `id` field\n- Date fields must be in ISO 8601 format\n- Numeric fields must not contain strings\n\n## Output Format\n\n```json\n{\n  \"records\": [...],\n  \"metadata\": {\n    \"source_files\": [...],\n    \"record_count\": number,\n    \"parsed_at\": \"ISO date\"\n  }\n}\n```",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "description": "Parse and validate input data files",
+    "trackedFiles": [
+      "data/**/*.json",
+      "data/**/*.csv"
+    ],
+    "rigSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p output",
+          "workingDirectory": "project"
+        }
+      }
+    ],
+    "outputFiles": [
+      {
+        "copy": ["output/parsed_data.json"]
+      }
+    ],
+    "sentinels": [
+      {
+        "sentinelConfig": "sentinels/error-detector.json"
+      }
+    ]
+  },
+  {
+    "type": "loop",
+    "id": "validation-loop",
+    "name": "Data Validation Loop",
+    "description": "Iteratively validate and fix data issues",
+    "terminateOn": {
+      "type": "iterationLimit",
+      "limit": 3
+    },
+    "codons": [
+      {
+        "id": "validate-data",
+        "name": "Validate Data",
+        "promptText": "Validate the parsed data in <%PROJECT_DIR%>/output/parsed_data.json and report any issues.\n\nCheck for:\n- Missing required fields\n- Invalid data types\n- Duplicate IDs\n- Referential integrity violations\n\nCreate a validation report at <%PROJECT_DIR%>/output/validation_report.json",
+        "model": "sonnet",
+        "continuationMode": "continue-previous",
+        "trackedFiles": ["output/**/*"],
+        "env": {
+          "VALIDATION_STRICT": "true"
+        }
+      },
+      {
+        "id": "fix-issues",
+        "name": "Fix Issues",
+        "promptText": "# Fix Data Issues\n\nReview the validation report at `<%PROJECT_DIR%>/output/validation_report.json` and fix any issues found.\n\n## Fix Strategies\n\n1. **Missing fields**: Add default values or derive from other fields\n2. **Invalid types**: Attempt type coercion or flag for manual review\n3. **Duplicates**: Keep first occurrence, log removed duplicates\n4. **Referential issues**: Create placeholder records or remove orphans\n\n## Output\n\nUpdate `<%PROJECT_DIR%>/output/parsed_data.json` with fixes applied.\nLog all changes to `<%PROJECT_DIR%>/output/fix_log.json`.",
+        "model": "opus",
+        "continuationMode": "continue-previous",
+        "trackedFiles": ["output/**/*"]
+      }
+    ]
+  },
+  {
+    "id": "generate-report",
+    "name": "Generate Report",
+    "promptText": "# Report Generation\n\nGenerate a comprehensive final report from the validated data.\n\n## Report Sections\n\n1. **Executive Summary** - High-level overview of data processed\n2. **Data Quality** - Summary of validation results and fixes applied\n3. **Statistics** - Key metrics and aggregations\n4. **Recommendations** - Suggestions for data quality improvements\n\n## Formatting Rules\n\n- Use markdown formatting throughout\n- Include tables for statistical data\n- Add charts descriptions where appropriate\n- Keep the executive summary under 200 words\n\nOutput the report to `<%PROJECT_DIR%>/reports/final_report.md`",
+    "appendSystemPromptText": "Always format dates as YYYY-MM-DD. Use consistent heading levels. Include a table of contents for reports longer than 500 words.",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "description": "Generate final report from validated data",
+    "trackedFiles": ["reports/**/*"],
+    "rigSetup": [
+      {
+        "type": "copy",
+        "copy": {
+          "from": "templates/report-structure",
+          "to": "reports"
+        }
+      }
+    ],
+    "outputFiles": [
+      {
+        "copy": ["reports/final_report.md"],
+        "beforeCopy": [
+          {
+            "type": "command",
+            "command": {
+              "run": "date >> reports/generated_at.txt",
+              "workingDirectory": "project"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

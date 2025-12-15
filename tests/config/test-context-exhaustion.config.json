@@ -1,4 +1,4 @@
-[
+{"strand": [
   {
     "id": "initial-setup",
     "name": "Initial Setup Codon",
@@ -54,4 +54,4 @@
     "appendSystemPromptFile": ["./noTodosPrompt.md"],
     "outputFiles": []
   }
-]
+]}

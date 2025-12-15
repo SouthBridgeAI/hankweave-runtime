@@ -2,8 +2,7 @@
 // Execution Planner - Pure planning logic for codon and loop execution
 // ============================================================================
 
-import type { CodonId } from "./types/branded-types.js";
-import { CodonId as CodonIdConstructor } from "./types/branded-types.js";
+import { CodonId, CodonId as CodonIdConstructor } from "./types/branded-types.js";
 import type { Codon, CodonConfig, Loop } from "./types/types.js";
 
 /**
@@ -49,7 +48,7 @@ export class ExecutionPlanner {
         // Regular codon - no loop context
         plan.push({
           codon: config,
-          codonId: config.id,
+          codonId: CodonId(config.id),
         });
       }
     }
@@ -193,9 +192,9 @@ export class ExecutionPlanner {
   private createIterationPlan(config: Loop, iteration: number): ExecutionCodonEntry[] {
     return config.codons.map((codon, codonIndexInLoop) => ({
       codon,
-      codonId: this.generateIterationCodonId(codon.id, iteration),
+      codonId: this.generateIterationCodonId(CodonId(codon.id), iteration),
       loopContext: {
-        loopId: config.id,
+        loopId: CodonId(config.id),
         iteration,
         codonIndexInLoop,
       },

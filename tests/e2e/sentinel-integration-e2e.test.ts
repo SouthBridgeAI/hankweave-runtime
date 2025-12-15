@@ -33,8 +33,8 @@ import {
   ClientMode,
   colors,
   generateTestTimestamp,
-  type ServerConfig,
   startServer,
+  type TestServerConfig,
   TestWSClient,
 } from "../utils/test-helpers.js";
 
@@ -151,7 +151,7 @@ describe("Sentinel Integration: With Sentinels", () => {
     ];
 
     const codonConfigPath = path.join(configDir, "codons.json");
-    fs.writeFileSync(codonConfigPath, JSON.stringify(codonsConfig, null, 2));
+    fs.writeFileSync(codonConfigPath, JSON.stringify({ strand: codonsConfig }, null, 2));
 
     // Ensure test run directory exists
     if (!fs.existsSync(TEST_RUN_DIR)) {
@@ -159,7 +159,7 @@ describe("Sentinel Integration: With Sentinels", () => {
     }
 
     // Start server
-    const serverConfig: ServerConfig = {
+    const serverConfig: TestServerConfig = {
       testRunDir: TEST_RUN_DIR,
       configFile: codonConfigPath,
       port: TEST_PORT,
@@ -598,7 +598,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     ];
 
     const codonConfigPath = path.join(configDir, "codons.json");
-    fs.writeFileSync(codonConfigPath, JSON.stringify(codonsConfig, null, 2));
+    fs.writeFileSync(codonConfigPath, JSON.stringify({ strand: codonsConfig }, null, 2));
 
     // Ensure test run directory exists
     if (!fs.existsSync(TEST_RUN_DIR)) {
@@ -606,7 +606,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     }
 
     // Start server
-    const serverConfig: ServerConfig = {
+    const serverConfig: TestServerConfig = {
       testRunDir: TEST_RUN_DIR,
       configFile: codonConfigPath,
       port: TEST_PORT,

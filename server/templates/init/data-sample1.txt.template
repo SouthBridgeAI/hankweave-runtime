@@ -1,0 +1,13 @@
+# Project Overview
+
+This is a sample project for demonstrating the strandweave workflow system.
+
+## Key Features
+- Multi-step AI workflows
+- Flexible codon configuration
+- File tracking and persistence
+
+## Getting Started
+1. Review the strand.json configuration
+2. Customize prompts in the prompts/ directory
+3. Run your workflow with strandweave

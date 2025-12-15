@@ -1,0 +1,99 @@
+[
+  {
+    "id": "data-parser",
+    "name": "Data Parser",
+    "prompt": "This is a dummy prompt file for parsing data.\n",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "description": "Parse and validate input data files",
+    "trackedFiles": [
+      "data/**/*.json",
+      "data/**/*.csv"
+    ],
+    "rigSetup": [
+      {
+        "type": "command",
+        "command": {
+          "run": "mkdir -p output",
+          "workingDirectory": "project"
+        }
+      }
+    ],
+    "outputFiles": [
+      {
+        "copy": ["output/parsed_data.json"]
+      }
+    ],
+    "sentinels": [
+      {
+        "sentinel": {
+          "description": "This is a dummy sentinel configuration for detecting errors."
+        }
+      }
+    ]
+  },
+  {
+    "type": "loop",
+    "id": "validation-loop",
+    "name": "Data Validation Loop",
+    "description": "Iteratively validate and fix data issues",
+    "terminateOn": {
+      "type": "iterationLimit",
+      "limit": 3
+    },
+    "codons": [
+      {
+        "id": "validate-data",
+        "name": "Validate Data",
+        "promptText": "Validate the parsed data in <%PROJECT_DIR%>/output/parsed_data.json and report any issues.",
+        "model": "sonnet",
+        "continuationMode": "continue-previous",
+        "trackedFiles": ["output/**/*"],
+        "env": {
+          "VALIDATION_STRICT": "true"
+        }
+      },
+      {
+        "id": "fix-issues",
+        "name": "Fix Issues",
+        "prompt": "This is a dummy prompt file for fixing issues.\n",
+        "model": "opus",
+        "continuationMode": "continue-previous",
+        "trackedFiles": ["output/**/*"]
+      }
+    ]
+  },
+  {
+    "id": "generate-report",
+    "name": "Generate Report",
+    "prompt": "This is a dummy prompt file for the report introduction.\nThis is a dummy prompt file for the report template.\n",
+    "appendSystemPrompt": "This is a dummy prompt file for formatting rules.\n",
+    "model": "sonnet",
+    "continuationMode": "fresh",
+    "description": "Generate final report from validated data",
+    "trackedFiles": ["reports/**/*"],
+    "rigSetup": [
+      {
+        "type": "copy",
+        "copy": {
+          "from": "templates/report-structure",
+          "to": "reports"
+        }
+      }
+    ],
+    "outputFiles": [
+      {
+        "copy": ["reports/final_report.md"],
+        "beforeCopy": [
+          {
+            "type": "command",
+            "command": {
+              "run": "date >> reports/generated_at.txt",
+              "workingDirectory": "project"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

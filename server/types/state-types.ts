@@ -59,7 +59,7 @@ export type CodonStatus =
 interface BaseCodon {
   /**
    * Which codon configuration this execution is for.
-   * References the codon in codon-sequence.json.
+   * References the codon in strand.json.
    *
    * Used by: UI to show codon name, state queries for codon history
    */
