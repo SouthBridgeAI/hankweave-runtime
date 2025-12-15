@@ -238,8 +238,9 @@ export function toError(error: unknown): Error {
  * // Ensure all event types are categorized
  * const _check: AssertEqual<EventType, CategoryA | CategoryB> = true;
  */
-export type AssertEqual<T, U> =
-  (<G>() => G extends T ? 1 : 2) extends <G>() => G extends U ? 1 : 2 ? true : never;
+export type AssertEqual<T, U> = (<G>() => G extends T ? 1 : 2) extends <G>() => G extends U ? 1 : 2
+  ? true
+  : never;
 
 // -------------
 // Exhaustive Checking

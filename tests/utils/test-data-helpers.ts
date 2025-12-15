@@ -9,15 +9,17 @@ export interface ClaudeLogEntry {
   type: string;
   subtype?: string;
   session_id?: string;
-  message?: {
-    usage?: {
-      input_tokens?: number;
-      output_tokens?: number;
-      cache_creation_input_tokens?: number;
-      cache_read_input_tokens?: number;
-    };
-    content?: Array<{ type?: string }>;
-  };
+  message?:
+    | string
+    | {
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_creation_input_tokens?: number;
+          cache_read_input_tokens?: number;
+        };
+        content?: Array<{ type?: string }>;
+      };
   usage?: {
     input_tokens?: number;
     output_tokens?: number;

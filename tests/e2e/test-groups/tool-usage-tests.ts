@@ -72,11 +72,13 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
 
         // Count assistant messages in logs
         const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");
-        const logToolUses = logAssistantMessages.filter((e) =>
-          e.message?.content?.some(
-            (c: { type?: string; name?: string }) =>
-              c.type === "tool_use" && c.name !== "TodoWrite",
-          ),
+        const logToolUses = logAssistantMessages.filter(
+          (e) =>
+            typeof e.message === "object" &&
+            e.message?.content?.some(
+              (c: { type?: string; name?: string }) =>
+                c.type === "tool_use" && c.name !== "TodoWrite",
+            ),
         ).length;
 
         // Count WebSocket events for this codon

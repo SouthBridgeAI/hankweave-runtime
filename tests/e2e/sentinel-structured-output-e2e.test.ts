@@ -367,7 +367,7 @@ describe("Structured Output E2E (Real Providers)", () => {
       // CRITICAL: Validate enum value is from allowed set
       expect(generatedEnum).toBeDefined();
       expect(typeof generatedEnum).toBe("string");
-      expect(allowedValues).toContain(generatedEnum);
+      expect(allowedValues).toContain(generatedEnum as string);
 
       console.log(`✅ Enum output: "${generatedEnum}"`);
     },

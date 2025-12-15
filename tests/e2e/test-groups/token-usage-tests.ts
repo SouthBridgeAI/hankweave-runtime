@@ -33,7 +33,7 @@ export function runTokenUsageTests(testState: TestState, testDir: string) {
 
           // Get all assistant messages with usage for this codon
           const assistantMessages = logEntries.filter(
-            (e) => e.type === "assistant" && e.message?.usage,
+            (e) => e.type === "assistant" && typeof e.message === "object" && e.message?.usage,
           );
 
           // Get the result message

@@ -29,7 +29,7 @@ export function runSessionContinuityTests(testDir: string) {
       )?.session_id;
       const codon2Resume = codon2Entries.find((e) => e.type === "system" && e.subtype === "info");
 
-      if (codon2Resume?.message && codon1SessionId) {
+      if (codon2Resume?.message && typeof codon2Resume.message === "string" && codon1SessionId) {
         expect(codon2Resume.message).toContain(codon1SessionId);
       }
     }

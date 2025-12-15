@@ -156,134 +156,138 @@ describe("Real Claude Logs Validation", () => {
   }
 
   describe("Log file parsing", () => {
-    test.each(
-      logFiles.map((f) => [getRelativePath(f), f]),
-    )("should parse all entries in %s", async (relativePath, logPath) => {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n").filter((line) => line.trim());
+    test.each(logFiles.map((f) => [getRelativePath(f), f]))(
+      "should parse all entries in %s",
+      async (relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
 
-      let validCount = 0;
-      let invalidCount = 0;
-      const errors: Array<{ line: number; error: string }> = [];
+        let validCount = 0;
+        let invalidCount = 0;
+        const errors: Array<{ line: number; error: string }> = [];
 
-      for (let i = 0; i < lines.length; i++) {
-        try {
-          const parsed = JSON.parse(lines[i]);
-          const result = logMessageSchema.safeParse(parsed);
+        for (let i = 0; i < lines.length; i++) {
+          try {
+            const parsed = JSON.parse(lines[i]);
+            const result = logMessageSchema.safeParse(parsed);
 
-          if (result.success) {
-            validCount++;
-          } else {
+            if (result.success) {
+              validCount++;
+            } else {
+              invalidCount++;
+              errors.push({
+                line: i + 1,
+                error: result.error.errors.map((e) => e.message).join(", "),
+              });
+            }
+          } catch (e) {
             invalidCount++;
             errors.push({
               line: i + 1,
-              error: result.error.errors.map((e) => e.message).join(", "),
+              error: e instanceof Error ? e.message : "Invalid JSON",
             });
           }
-        } catch (e) {
-          invalidCount++;
-          errors.push({
-            line: i + 1,
-            error: e instanceof Error ? e.message : "Invalid JSON",
+        }
+
+        // Log errors for debugging
+        if (errors.length > 0) {
+          console.log(`\nErrors in ${relativePath}:`);
+          errors.slice(0, 5).forEach((err) => {
+            console.log(`  Line ${err.line}: ${err.error}`);
           });
-        }
-      }
-
-      // Log errors for debugging
-      if (errors.length > 0) {
-        console.log(`\nErrors in ${relativePath}:`);
-        errors.slice(0, 5).forEach((err) => {
-          console.log(`  Line ${err.line}: ${err.error}`);
-        });
-        if (errors.length > 5) {
-          console.log(`  ... and ${errors.length - 5} more errors`);
-        }
-      }
-
-      expect(validCount).toBeGreaterThan(0);
-      expect(invalidCount).toBe(0); // All entries should be valid
-    });
-
-    test.each(
-      logFiles.map((f) => [getRelativePath(f), f]),
-    )("should have required message types in %s", (_relativePath, logPath) => {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n").filter((line) => line.trim());
-
-      const messageTypes = new Set<string>();
-      let hasInit = false;
-      let hasResult = false;
-
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line);
-          const result = logMessageSchema.safeParse(parsed);
-
-          if (result.success) {
-            const msg = result.data;
-            messageTypes.add(msg.type);
-
-            if (msg.type === "system" && msg.subtype === "init") {
-              hasInit = true;
-            } else if (msg.type === "result") {
-              hasResult = true;
-            }
+          if (errors.length > 5) {
+            console.log(`  ... and ${errors.length - 5} more errors`);
           }
-        } catch {
-          // Skip invalid lines
         }
-      }
 
-      expect(hasInit).toBe(true); // Should have initialization
-      expect(hasResult).toBe(true); // Should have result
-      expect(messageTypes.size).toBeGreaterThan(1); // Should have multiple message types
-    });
+        expect(validCount).toBeGreaterThan(0);
+        expect(invalidCount).toBe(0); // All entries should be valid
+      },
+    );
+
+    test.each(logFiles.map((f) => [getRelativePath(f), f]))(
+      "should have required message types in %s",
+      (_relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
+
+        const messageTypes = new Set<string>();
+        let hasInit = false;
+        let hasResult = false;
+
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
+
+            if (result.success) {
+              const msg = result.data;
+              messageTypes.add(msg.type);
+
+              if (msg.type === "system" && msg.subtype === "init") {
+                hasInit = true;
+              } else if (msg.type === "result") {
+                hasResult = true;
+              }
+            }
+          } catch {
+            // Skip invalid lines
+          }
+        }
+
+        expect(hasInit).toBe(true); // Should have initialization
+        expect(hasResult).toBe(true); // Should have result
+        expect(messageTypes.size).toBeGreaterThan(1); // Should have multiple message types
+      },
+    );
   });
 
   describe("Session data extraction", () => {
-    test.each(
-      logFiles.map((f) => [getRelativePath(f), f]),
-    )("should extract session ID from %s", (_relativePath, logPath) => {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n").filter((line) => line.trim());
+    test.each(logFiles.map((f) => [getRelativePath(f), f]))(
+      "should extract session ID from %s",
+      (_relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
 
-      let sessionId: string | null = null;
+        let sessionId: string | null = null;
 
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line);
-          const result = logMessageSchema.safeParse(parsed);
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
 
-          if (result.success && result.data.type === "system" && result.data.subtype === "init") {
-            sessionId = result.data.session_id;
-            break;
+            if (result.success && result.data.type === "system" && result.data.subtype === "init") {
+              sessionId = result.data.session_id;
+              break;
+            }
+          } catch {
+            // Skip invalid lines
           }
-        } catch {
-          // Skip invalid lines
         }
-      }
 
-      expect(sessionId).toBeTruthy();
-      expect(sessionId).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-      );
-    });
+        expect(sessionId).toBeTruthy();
+        expect(sessionId).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
+      },
+    );
 
-    test.each(
-      logFiles.map((f) => [getRelativePath(f), f]),
-    )("should calculate costs from %s", (_relativePath, logPath) => {
-      const state = parseLogForTesting(logPath, {
-        input: 3,
-        output: 15,
-        inputCache: 3.75,
-        cacheRead: 0.3,
-      });
+    test.each(logFiles.map((f) => [getRelativePath(f), f]))(
+      "should calculate costs from %s",
+      (_relativePath, logPath) => {
+        const state = parseLogForTesting(logPath, {
+          input: 3,
+          output: 15,
+          inputCache: 3.75,
+          cacheRead: 0.3,
+        });
 
-      expect(state.sessionId).toBeTruthy();
-      expect(state.cost).toBeGreaterThanOrEqual(0);
-      expect(state.tokens.inputTokens).toBeGreaterThanOrEqual(0);
-      expect(state.tokens.outputTokens).toBeGreaterThanOrEqual(0);
-    });
+        expect(state.sessionId).toBeTruthy();
+        expect(state.cost).toBeGreaterThanOrEqual(0);
+        expect(state.tokens.inputTokens).toBeGreaterThanOrEqual(0);
+        expect(state.tokens.outputTokens).toBeGreaterThanOrEqual(0);
+      },
+    );
   });
 
   describe("API Timeout Detection", () => {
@@ -293,79 +297,81 @@ describe("Real Claude Logs Validation", () => {
       return content.includes("API Error: Request timed out.");
     });
 
-    test.each(
-      timeoutLogs.map((f) => [getRelativePath(f), f]),
-    )("should detect timeout error in %s", (_relativePath, logPath) => {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n").filter((line) => line.trim());
+    test.each(timeoutLogs.map((f) => [getRelativePath(f), f]))(
+      "should detect timeout error in %s",
+      (_relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
 
-      let foundTimeoutInAssistant = false;
-      let foundTimeoutInResult = false;
-      let timeoutMessage: AssistantMessage | null = null;
-      let resultMessage: ResultMessage | null = null;
+        let foundTimeoutInAssistant = false;
+        let foundTimeoutInResult = false;
+        let timeoutMessage: AssistantMessage | null = null;
+        let resultMessage: ResultMessage | null = null;
 
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line);
-          const result = logMessageSchema.safeParse(parsed);
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
 
-          if (result.success) {
-            const msg = result.data;
+            if (result.success) {
+              const msg = result.data;
 
-            // Check assistant message for timeout (including synthetic messages)
-            if (msg.type === "assistant") {
-              const content = msg.message.content;
-              let hasTimeoutText = false;
+              // Check assistant message for timeout (including synthetic messages)
+              if (msg.type === "assistant") {
+                const content = msg.message.content;
+                let hasTimeoutText = false;
 
-              if (Array.isArray(content)) {
-                hasTimeoutText = content.some(
-                  (item) => item.type === "text" && item.text === "API Error: Request timed out.",
-                );
-              } else if (typeof content === "string") {
-                hasTimeoutText = content === "API Error: Request timed out.";
+                if (Array.isArray(content)) {
+                  hasTimeoutText = content.some(
+                    (item) => item.type === "text" && item.text === "API Error: Request timed out.",
+                  );
+                } else if (typeof content === "string") {
+                  hasTimeoutText = content === "API Error: Request timed out.";
+                }
+
+                if (hasTimeoutText) {
+                  foundTimeoutInAssistant = true;
+                  timeoutMessage = msg;
+                }
               }
 
-              if (hasTimeoutText) {
-                foundTimeoutInAssistant = true;
-                timeoutMessage = msg;
+              // Check result message for timeout
+              if (msg.type === "result" && msg.result === "API Error: Request timed out.") {
+                foundTimeoutInResult = true;
+                resultMessage = msg;
               }
             }
-
-            // Check result message for timeout
-            if (msg.type === "result" && msg.result === "API Error: Request timed out.") {
-              foundTimeoutInResult = true;
-              resultMessage = msg;
-            }
+          } catch {
+            // Skip invalid lines
           }
-        } catch {
-          // Skip invalid lines
         }
-      }
 
-      expect(foundTimeoutInAssistant).toBe(true);
-      expect(foundTimeoutInResult).toBe(true);
-      expect(timeoutMessage).toBeTruthy();
-      expect(resultMessage).toBeTruthy();
-      // Can be either "error" subtype or "success" with is_error=true
-      expect(resultMessage?.is_error).toBe(true);
-    });
+        expect(foundTimeoutInAssistant).toBe(true);
+        expect(foundTimeoutInResult).toBe(true);
+        expect(timeoutMessage).toBeTruthy();
+        expect(resultMessage).toBeTruthy();
+        // Can be either "error" subtype or "success" with is_error=true
+        expect(resultMessage?.is_error).toBe(true);
+      },
+    );
 
-    test.each(
-      timeoutLogs.map((f) => [getRelativePath(f), f]),
-    )("should parse timeout codon state correctly for %s", (_relativePath, logPath) => {
-      const state = parseLogForTesting(logPath, {
-        input: 3,
-        output: 15,
-        inputCache: 3.75,
-        cacheRead: 0.3,
-      });
+    test.each(timeoutLogs.map((f) => [getRelativePath(f), f]))(
+      "should parse timeout codon state correctly for %s",
+      (_relativePath, logPath) => {
+        const state = parseLogForTesting(logPath, {
+          input: 3,
+          output: 15,
+          inputCache: 3.75,
+          cacheRead: 0.3,
+        });
 
-      expect(state.success).toBe(false); // Codon failed due to timeout
-      expect(state.sessionId).toBeTruthy(); // Should have a session ID
-      expect(state.cost).toBeGreaterThan(0); // Should have some cost
-      expect(state.tokens.inputTokens).toBeGreaterThanOrEqual(0);
-      expect(state.tokens.outputTokens).toBeGreaterThanOrEqual(0);
-    });
+        expect(state.success).toBe(false); // Codon failed due to timeout
+        expect(state.sessionId).toBeTruthy(); // Should have a session ID
+        expect(state.cost).toBeGreaterThan(0); // Should have some cost
+        expect(state.tokens.inputTokens).toBeGreaterThanOrEqual(0);
+        expect(state.tokens.outputTokens).toBeGreaterThanOrEqual(0);
+      },
+    );
   });
 
   describe("Log Parser with real files", () => {
@@ -490,134 +496,137 @@ describe("Real Claude Logs Validation", () => {
       expect(logsWithToolResults.length).toBeGreaterThan(0);
     });
 
-    test.each(
-      logsWithToolResults.map((f) => [getRelativePath(f), f]),
-    )("should parse tool results in %s", (_relativePath, logPath) => {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n").filter((line) => line.trim());
+    test.each(logsWithToolResults.map((f) => [getRelativePath(f), f]))(
+      "should parse tool results in %s",
+      (_relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
 
-      const toolResults: Array<{
-        toolUseId: string;
-        content: unknown; // Tool result content can have various shapes
-        isError: boolean;
-      }> = [];
+        const toolResults: Array<{
+          toolUseId: string;
+          content: unknown; // Tool result content can have various shapes
+          isError: boolean;
+        }> = [];
 
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line);
-          const result = logMessageSchema.safeParse(parsed);
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
 
-          if (result.success && result.data.type === "user") {
-            const msg = result.data as UserMessage;
+            if (result.success && result.data.type === "user") {
+              const msg = result.data as UserMessage;
+              if (Array.isArray(msg.message.content)) {
+                for (const item of msg.message.content) {
+                  if (item.type === "tool_result") {
+                    toolResults.push({
+                      toolUseId: item.tool_use_id,
+                      content: item.content,
+                      isError: false, // Tool results themselves don't have is_error property
+                    });
+                  }
+                }
+              }
+            }
+          } catch {
+            // Skip invalid lines
+          }
+        }
+
+        // Should have found at least one tool result
+        expect(toolResults.length).toBeGreaterThan(0);
+
+        // Check tool result structure
+        for (const toolResult of toolResults) {
+          expect(toolResult.toolUseId).toBeTruthy();
+          expect(toolResult.toolUseId).toMatch(/^toolu_[a-zA-Z0-9]+$/);
+          expect(typeof toolResult.isError).toBe("boolean");
+
+          // Content can be string, array, or object
+          expect(toolResult.content).toBeDefined();
+        }
+      },
+    );
+
+    test.each(logsWithToolResults.map((f) => [getRelativePath(f), f]))(
+      "should have diverse tool result content types in %s",
+      (_relativePath, logPath) => {
+        const content = fs.readFileSync(logPath, "utf-8");
+        const lines = content.split("\n").filter((line) => line.trim());
+
+        const contentTypes = new Set<string>();
+
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const result = logMessageSchema.safeParse(parsed);
+
+            if (result.success && result.data.type === "user") {
+              const msg = result.data as UserMessage;
+              if (Array.isArray(msg.message.content)) {
+                for (const item of msg.message.content) {
+                  if (item.type === "tool_result") {
+                    const contentType = Array.isArray(item.content) ? "array" : typeof item.content;
+                    contentTypes.add(contentType);
+                  }
+                }
+              }
+            }
+          } catch {
+            // Skip invalid lines
+          }
+        }
+
+        // Log content type distribution
+        console.log(`Tool result content types in ${_relativePath}:`, Array.from(contentTypes));
+
+        // Most logs should have string content at minimum
+        expect(contentTypes.has("string")).toBe(true);
+      },
+    );
+
+    test.each(logsWithToolResults.slice(0, 3).map((f) => [getRelativePath(f), f]))(
+      "should track tool results with parser callback in %s",
+      async (_relativePath, logPath) => {
+        const toolResults: Array<{
+          toolUseId: string;
+          contentType: string;
+          isError: boolean;
+        }> = [];
+
+        const parser = new ClaudeLogParser({
+          logPath,
+          codonId: "test-codon",
+          parsingInterval: 50,
+          onUserMessage: (msg: UserMessage) => {
             if (Array.isArray(msg.message.content)) {
               for (const item of msg.message.content) {
                 if (item.type === "tool_result") {
                   toolResults.push({
                     toolUseId: item.tool_use_id,
-                    content: item.content,
-                    isError: false, // Tool results themselves don't have is_error property
+                    contentType: Array.isArray(item.content) ? "array" : typeof item.content,
+                    isError: false, // Tool results don't have is_error property
                   });
                 }
               }
             }
-          }
-        } catch {
-          // Skip invalid lines
+          },
+        });
+
+        parser.start();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        parser.stop();
+
+        // Should have captured tool results
+        expect(toolResults.length).toBeGreaterThan(0);
+
+        // Verify structure
+        for (const result of toolResults) {
+          expect(result.toolUseId).toMatch(/^toolu_[a-zA-Z0-9]+$/);
+          expect(["string", "object", "array"]).toContain(result.contentType);
+          expect(typeof result.isError).toBe("boolean");
         }
-      }
-
-      // Should have found at least one tool result
-      expect(toolResults.length).toBeGreaterThan(0);
-
-      // Check tool result structure
-      for (const toolResult of toolResults) {
-        expect(toolResult.toolUseId).toBeTruthy();
-        expect(toolResult.toolUseId).toMatch(/^toolu_[a-zA-Z0-9]+$/);
-        expect(typeof toolResult.isError).toBe("boolean");
-
-        // Content can be string, array, or object
-        expect(toolResult.content).toBeDefined();
-      }
-    });
-
-    test.each(
-      logsWithToolResults.map((f) => [getRelativePath(f), f]),
-    )("should have diverse tool result content types in %s", (_relativePath, logPath) => {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n").filter((line) => line.trim());
-
-      const contentTypes = new Set<string>();
-
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line);
-          const result = logMessageSchema.safeParse(parsed);
-
-          if (result.success && result.data.type === "user") {
-            const msg = result.data as UserMessage;
-            if (Array.isArray(msg.message.content)) {
-              for (const item of msg.message.content) {
-                if (item.type === "tool_result") {
-                  const contentType = Array.isArray(item.content) ? "array" : typeof item.content;
-                  contentTypes.add(contentType);
-                }
-              }
-            }
-          }
-        } catch {
-          // Skip invalid lines
-        }
-      }
-
-      // Log content type distribution
-      console.log(`Tool result content types in ${_relativePath}:`, Array.from(contentTypes));
-
-      // Most logs should have string content at minimum
-      expect(contentTypes.has("string")).toBe(true);
-    });
-
-    test.each(
-      logsWithToolResults.slice(0, 3).map((f) => [getRelativePath(f), f]),
-    )("should track tool results with parser callback in %s", async (_relativePath, logPath) => {
-      const toolResults: Array<{
-        toolUseId: string;
-        contentType: string;
-        isError: boolean;
-      }> = [];
-
-      const parser = new ClaudeLogParser({
-        logPath,
-        codonId: "test-codon",
-        parsingInterval: 50,
-        onUserMessage: (msg: UserMessage) => {
-          if (Array.isArray(msg.message.content)) {
-            for (const item of msg.message.content) {
-              if (item.type === "tool_result") {
-                toolResults.push({
-                  toolUseId: item.tool_use_id,
-                  contentType: Array.isArray(item.content) ? "array" : typeof item.content,
-                  isError: false, // Tool results don't have is_error property
-                });
-              }
-            }
-          }
-        },
-      });
-
-      parser.start();
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      parser.stop();
-
-      // Should have captured tool results
-      expect(toolResults.length).toBeGreaterThan(0);
-
-      // Verify structure
-      for (const result of toolResults) {
-        expect(result.toolUseId).toMatch(/^toolu_[a-zA-Z0-9]+$/);
-        expect(["string", "object", "array"]).toContain(result.contentType);
-        expect(typeof result.isError).toBe("boolean");
-      }
-    });
+      },
+    );
 
     test.skipIf(logsWithToolResults.length === 0)("should handle error tool results", () => {
       let foundErrorResult = false;

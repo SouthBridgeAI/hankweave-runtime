@@ -101,7 +101,7 @@ import {
  * - Event streaming to clients
  */
 export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
-  private server: Server | null = null;
+  private server: Server<ClientData> | null = null;
   private clients: Map<string, ServerWebSocket<ClientData>> = new Map();
   public readonly config: StrandweaveConfig;
   private logger: Logger;
@@ -502,7 +502,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Start Bun WebSocket server
-    this.server = Bun.serve<ClientData, undefined>({
+    this.server = Bun.serve<ClientData>({
       port: this.config.port,
       idleTimeout: 0, // No timeout for WebSocket server
       websocket: {
@@ -512,7 +512,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       },
       fetch(req, server) {
         // Upgrade to WebSocket
-        if (server.upgrade(req)) {
+        const now = new Date();
+        if (
+          server.upgrade(req, {
+            data: {
+              id: "", // Will be set by handleConnection
+              connectionTime: now,
+              lastActivity: now,
+              handshakeComplete: false,
+            },
+          })
+        ) {
           return;
         }
         return new Response("WebSocket server only", { status: 400 });

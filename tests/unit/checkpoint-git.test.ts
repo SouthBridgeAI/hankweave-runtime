@@ -474,7 +474,9 @@ describe("CheckpointGit", () => {
     const lastCommit = await new Response(proc.stdout).text();
 
     expect(lastCommit).toContain("Marker commit");
-    expect(lastCommit).toContain(firstCommit?.substring(0, 7));
+    if (firstCommit) {
+      expect(lastCommit).toContain(firstCommit.substring(0, 7));
+    }
   });
 
   test("handles concurrent git operations gracefully", async () => {
