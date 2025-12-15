@@ -68,44 +68,76 @@ export function runRaceConditionTests(testState: TestState) {
   });
 
   test("rapid codon transitions maintain separate codonExecutionIds", () => {
-    // Since state snapshots are only sent after codon completion (when currentCodon is null),
-    // we need to look at codon.started events which contain the session IDs that prove
-    // separate codon executions occurred
-    const codonStartedEvents = testState.events.filter((e) => e.type === "codon.started");
-
-    const sessionIds = new Set<string>();
-
-    codonStartedEvents.forEach((event) => {
-      if (event.type === "codon.started" && event.data.sessionId) {
-        // Each session ID should be unique (proves separate codon executions)
-        expect(sessionIds.has(event.data.sessionId)).toBe(false);
-        sessionIds.add(event.data.sessionId);
-      }
-    });
-
-    // Should have seen at least 3 different session IDs (one per codon)
-    expect(sessionIds.size).toBeGreaterThanOrEqual(3);
-
-    // Additionally verify that completed codons each have unique session IDs
+    // Get completed codons from final snapshot to check session continuation
     const finalSnapshot = [...testState.events].reverse().find((e) => e.type === "state.snapshot");
 
-    if (finalSnapshot?.type === "state.snapshot" && finalSnapshot.data.completedCodons) {
-      const completedSessionIds = new Set<string>();
-      finalSnapshot.data.completedCodons.forEach((codon) => {
-        if (codon.status === "completed" && codon.claudeSessionId) {
-          expect(completedSessionIds.has(codon.claudeSessionId)).toBe(false);
-          completedSessionIds.add(codon.claudeSessionId);
-        } else if (codon.status === "failed" && codon.claudeSessionId) {
-          expect(completedSessionIds.has(codon.claudeSessionId)).toBe(false);
-          completedSessionIds.add(codon.claudeSessionId);
-        } else if (codon.status === "skipped" && codon.claudeSessionId) {
-          expect(completedSessionIds.has(codon.claudeSessionId)).toBe(false);
-          completedSessionIds.add(codon.claudeSessionId);
-        }
-      });
+    if (!finalSnapshot || finalSnapshot.type !== "state.snapshot") {
+      throw new Error("No final snapshot found");
+    }
 
-      // Completed codons should also have unique session IDs
-      expect(completedSessionIds.size).toBe(finalSnapshot.data.completedCodons.length);
+    const completedCodons = finalSnapshot.data.completedCodons;
+    expect(completedCodons.length).toBeGreaterThanOrEqual(3);
+
+    // Find codons by ID (not by array index, since they may not be in execution order)
+    const codon1 = completedCodons.find((c) => c.codonId === "codon-1");
+    const codon2 = completedCodons.find((c) => c.codonId === "codon-2");
+    const codon3 = completedCodons.find((c) => c.codonId === "codon-3");
+
+    // Ensure all codons exist
+    expect(codon1).toBeDefined();
+    expect(codon2).toBeDefined();
+    expect(codon3).toBeDefined();
+
+    // Codon 1 uses "fresh" continuation mode - should have its own session ID and NO previousSessionId
+    expect(codon1?.claudeSessionId).toBeDefined();
+    expect(codon1?.previousSessionId).toBeUndefined();
+
+    // Codon 2 uses "continue-previous" continuation mode - should have:
+    // - The SAME session ID as codon 1 (Claude Agent SDK reuses the session ID when continuing)
+    // - A previousSessionId that matches codon 1's session ID (tracking the continuation)
+    expect(codon2?.claudeSessionId).toBeDefined();
+    expect(codon2?.previousSessionId).toBeDefined();
+    expect(codon2?.previousSessionId).toBe(codon1?.claudeSessionId);
+    expect(codon2?.claudeSessionId).toBe(codon1?.claudeSessionId); // Same session, continuing
+
+    // Codon 3 uses "fresh" continuation mode - should have its own session ID and NO previousSessionId
+    expect(codon3?.claudeSessionId).toBeDefined();
+    expect(codon3?.previousSessionId).toBeUndefined();
+    // Codon 3 should have a different session ID from the shared session of codons 1 and 2
+    expect(codon3?.claudeSessionId).not.toBe(codon1?.claudeSessionId);
+
+    // Additionally verify via codon.started events
+    const codonStartedEvents = testState.events.filter((e) => e.type === "codon.started");
+    expect(codonStartedEvents.length).toBeGreaterThanOrEqual(3);
+
+    // Find events by codon ID
+    const startedEvent1 = codonStartedEvents.find(
+      (e) => e.type === "codon.started" && e.data.codonId === "codon-1",
+    );
+    const startedEvent2 = codonStartedEvents.find(
+      (e) => e.type === "codon.started" && e.data.codonId === "codon-2",
+    );
+    const startedEvent3 = codonStartedEvents.find(
+      (e) => e.type === "codon.started" && e.data.codonId === "codon-3",
+    );
+
+    if (startedEvent1?.type === "codon.started" && codon1?.claudeSessionId) {
+      expect(startedEvent1.data.sessionId).toBe(codon1.claudeSessionId);
+      expect(startedEvent1.data.previousSessionId).toBeUndefined();
+    }
+
+    if (
+      startedEvent2?.type === "codon.started" &&
+      codon2?.claudeSessionId &&
+      codon1?.claudeSessionId
+    ) {
+      expect(startedEvent2.data.sessionId).toBe(codon2.claudeSessionId);
+      expect(startedEvent2.data.previousSessionId).toBe(codon1.claudeSessionId);
+    }
+
+    if (startedEvent3?.type === "codon.started" && codon3?.claudeSessionId) {
+      expect(startedEvent3.data.sessionId).toBe(codon3.claudeSessionId);
+      expect(startedEvent3.data.previousSessionId).toBeUndefined();
     }
   });
 }

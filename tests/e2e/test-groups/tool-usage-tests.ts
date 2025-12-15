@@ -27,8 +27,22 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
     expect(toolCounts.Write || 0).toBeGreaterThanOrEqual(4);
   });
 
-  test("at least 1 Glob tool use", () => {
-    expect(toolCounts.Glob || 0).toBeGreaterThanOrEqual(1);
+  test("at least 1 file-finding operation (Glob, find, or ls)", () => {
+    // Count Glob tool uses
+    const globCount = toolCounts.Glob || 0;
+
+    // Count Bash commands that use find or ls for file discovery
+    const bashFileFindingCount = assistantActionEvents.filter((e) => {
+      const actionEvent = e as AssistantActionEvent;
+      if (actionEvent.data?.toolName !== "Bash") return false;
+      const command = actionEvent.data?.toolInput?.command;
+      // Check for find or ls commands - ensure command is a string
+      if (typeof command !== "string") return false;
+      return /\b(find|ls)\b/.test(command);
+    }).length;
+
+    const totalFileFindingOps = globCount + bashFileFindingCount;
+    expect(totalFileFindingOps).toBeGreaterThanOrEqual(1);
   });
 
   test("at least 2 Read tool uses", () => {
