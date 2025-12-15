@@ -489,6 +489,7 @@ export class BunProxyRunner {
 
     this.server = Bun.serve({
       port: this.port,
+      idleTimeout: 0, // No timeout - Claude API requests can take a long time
       async fetch(request: Request): Promise<Response> {
         const url = new URL(request.url);
         const pathname = url.pathname + url.search;

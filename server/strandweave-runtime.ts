@@ -504,6 +504,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     // Start Bun WebSocket server
     this.server = Bun.serve<ClientData, undefined>({
       port: this.config.port,
+      idleTimeout: 0, // No timeout for WebSocket server
       websocket: {
         open: (ws) => this.handleConnection(ws),
         message: (ws, message) => this.handleMessage(ws, message),
