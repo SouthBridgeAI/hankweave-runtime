@@ -1,15 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  type Options,
-  query,
-  type SDKMessage,
-} from "@anthropic-ai/claude-agent-sdk";
+import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
-import {
-  type ProcessEvents,
-  TypedEventEmitter,
-} from "./typed-event-emitter.js";
+import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
@@ -29,7 +22,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
-    private model?: import("./types/types.js").ModelName
+    private model?: import("./types/types.js").ModelName,
   ) {
     super();
   }
@@ -42,22 +35,14 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * @param previousSessionId - Session ID to continue from (if any)
    * @param logPath - Custom log file path (optional, defaults to .strandweave/logs/)
    */
-  async spawn(
-    codon: Codon,
-    previousSessionId: string | null,
-    logPath?: string
-  ): Promise<string> {
+  async spawn(codon: Codon, previousSessionId: string | null, logPath?: string): Promise<string> {
     if (this.abortController) {
       throw new Error("Session already running");
     }
 
     // Use provided logPath or default to .strandweave/logs/
     const actualLogPath =
-      logPath ||
-      path.join(
-        this.executionPath,
-        `.strandweave/logs/log-${codon.id}-sdk.jsonl`
-      );
+      logPath || path.join(this.executionPath, `.strandweave/logs/log-${codon.id}-sdk.jsonl`);
 
     // Ensure log directory exists
     const logsDir = path.dirname(actualLogPath);
@@ -76,9 +61,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
     this.logger.log(`Starting Claude Agent SDK for codon ${codon.id}`);
     this.logger.log(`Working directory: ${this.executionPath}`);
-    this.logger.log(
-      `Prompt content (${promptContent.length} chars):\n${promptContent}`
-    );
+    this.logger.log(`Prompt content (${promptContent.length} chars):\n${promptContent}`);
 
     // Create abort controller
     this.abortController = new AbortController();
@@ -87,9 +70,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     // Generate synthetic PID for compatibility with ClaudeProcessManager API
     // Use a high range (900000+) to avoid conflicts with real PIDs
     this.syntheticPid = 900000 + Math.floor(Math.random() * 99999);
-    this.logger.log(
-      `Generated synthetic PID: ${this.syntheticPid} for SDK session`
-    );
+    this.logger.log(`Generated synthetic PID: ${this.syntheticPid} for SDK session`);
 
     // Start the query in the background
     this.runQuery(promptContent, options, codon.id).catch((error) => {
@@ -104,10 +85,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
   /**
    * Build SDK options from codon configuration.
    */
-  private buildSDKOptions(
-    codon: Codon,
-    previousSessionId: string | null
-  ): Options {
+  private buildSDKOptions(codon: Codon, previousSessionId: string | null): Options {
     // Use model override if provided, otherwise use codon model
     const model = this.model || codon.model;
 
@@ -133,19 +111,29 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         preset: "claude_code",
         append: systemPrompt,
       };
-      this.logger.log(
-        `Added system prompt to Claude (${systemPrompt.length} chars)`
-      );
+      this.logger.log(`Added system prompt to Claude (${systemPrompt.length} chars)`);
       this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
 
     // Initialize env object (SDK doesn't inherit all process.env, only what we explicitly pass)
     if (!options.env) options.env = {};
 
-    // Pass through STRANDWEAVE_ prefixed variables from server environment
-    // Exclude STRANDWEAVE_RUNTIME_* (server config) and STRANDWEAVE_SENTINEL_* (sentinel API keys)
+    // Pass through critical environment variables that Claude Code SDK needs
     for (const key in process.env) {
-      if (
+      // Pass through CLAUDE_CODE_* variables (OAuth authentication, etc.)
+      if (key.startsWith("CLAUDE_CODE_")) {
+        options.env[key] = process.env[key];
+        this.logger.log(`Passing through Claude Code env var: ${key}`);
+      }
+      // Pass through specific ANTHROPIC_* variables that won't conflict with OAuth
+      // Exclude ANTHROPIC_API_KEY to avoid conflicts with CLAUDE_CODE_OAUTH_TOKEN
+      else if (key.startsWith("ANTHROPIC_") && key !== "ANTHROPIC_API_KEY") {
+        options.env[key] = process.env[key];
+        this.logger.log(`Passing through Anthropic env var: ${key}`);
+      }
+      // Pass through STRANDWEAVE_* variables (with prefix stripped)
+      // Exclude STRANDWEAVE_RUNTIME_* (server config) and STRANDWEAVE_SENTINEL_* (sentinel API keys)
+      else if (
         key.startsWith("STRANDWEAVE_") &&
         !key.startsWith("STRANDWEAVE_RUNTIME_") &&
         !key.startsWith("STRANDWEAVE_SENTINEL_")
@@ -156,12 +144,10 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       }
     }
 
-    // Apply anthropicBaseUrl if provided
+    // Apply anthropicBaseUrl if provided (overrides any ANTHROPIC_BASE_URL from env)
     if (this.anthropicBaseUrl) {
       options.env.ANTHROPIC_BASE_URL = this.anthropicBaseUrl;
-      this.logger.log(
-        `Using custom Anthropic base URL: ${this.anthropicBaseUrl}`
-      );
+      this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseUrl}`);
     }
 
     // Add codon-specific environment variables from config
@@ -173,9 +159,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
     // Log model usage
     if (this.model) {
-      this.logger.log(
-        `Using model override: ${model} (codon config specified: ${codon.model})`
-      );
+      this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
     }
 
     return options;
@@ -219,10 +203,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       return content
         .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
         .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-        .replace(
-          /<%DATA_DIR%>/g,
-          path.join(this.executionPath, "read_only_data_source")
-        );
+        .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
     }
 
     return null;
@@ -235,9 +216,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     let promptContent: string;
 
     if (codon.promptFile) {
-      const files = Array.isArray(codon.promptFile)
-        ? codon.promptFile
-        : [codon.promptFile];
+      const files = Array.isArray(codon.promptFile) ? codon.promptFile : [codon.promptFile];
       const parts: string[] = [];
       for (const file of files) {
         parts.push(fs.readFileSync(file, "utf-8"));
@@ -252,20 +231,13 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     return promptContent
       .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
       .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-      .replace(
-        /<%DATA_DIR%>/g,
-        path.join(this.executionPath, "read_only_data_source")
-      );
+      .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
   }
 
   /**
    * Run the query and process messages.
    */
-  private async runQuery(
-    promptContent: string,
-    options: Options,
-    codonId: string
-  ): Promise<void> {
+  private async runQuery(promptContent: string, options: Options, codonId: string): Promise<void> {
     try {
       const queryGenerator = query({ prompt: promptContent, options });
 
@@ -335,16 +307,14 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
       // Look for result messages with errors
       const resultErrors = allMessages.filter(
-        (msg) => msg.type === "result" && msg.subtype === "error"
+        (msg) => msg.type === "result" && msg.subtype === "error",
       );
 
       if (resultErrors.length > 0) {
         lines.push("\nLog file analysis:");
         for (const msg of resultErrors) {
           if (msg.type === "result") {
-            lines.push(
-              `- Result error: ${msg.result || "No details available"}`
-            );
+            lines.push(`- Result error: ${msg.result || "No details available"}`);
             if (msg.usage) {
               lines.push(`  Usage: ${JSON.stringify(msg.usage)}`);
             }
@@ -353,9 +323,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       }
 
       // Get last few assistant messages for context
-      const assistantMessages = allMessages.filter(
-        (msg) => msg.type === "assistant"
-      );
+      const assistantMessages = allMessages.filter((msg) => msg.type === "assistant");
       if (assistantMessages.length > 0) {
         const lastMessage = assistantMessages[assistantMessages.length - 1];
         if (lastMessage.type === "assistant") {
@@ -366,9 +334,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
               if (block.type === "text") {
                 // Truncate long messages
                 const text =
-                  block.text.length > 500
-                    ? `${block.text.slice(0, 500)}...`
-                    : block.text;
+                  block.text.length > 500 ? `${block.text.slice(0, 500)}...` : block.text;
                 lines.push(`  ${text}`);
               } else if (block.type === "tool_use") {
                 lines.push(`  [Tool use: ${block.name}]`);
@@ -378,9 +344,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         }
       }
     } catch (parseError) {
-      lines.push(
-        `\nFailed to parse log file: ${(parseError as Error).message}`
-      );
+      lines.push(`\nFailed to parse log file: ${(parseError as Error).message}`);
     }
 
     return lines.join("\n");
@@ -389,9 +353,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
   /**
    * Convert SDK message to JSONL format matching claude-session-schema.
    */
-  private convertSDKMessageToJSONL(
-    message: SDKMessage
-  ): Record<string, unknown> | null {
+  private convertSDKMessageToJSONL(message: SDKMessage): Record<string, unknown> | null {
     switch (message.type) {
       case "system":
         if (message.subtype === "init") {
@@ -510,10 +472,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         return null;
 
       default:
-        this.logger.log(
-          `Unknown message type: ${(message as SDKMessage).type}`,
-          "error"
-        );
+        this.logger.log(`Unknown message type: ${(message as SDKMessage).type}`, "error");
         return null;
     }
   }
