@@ -97,6 +97,14 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       settingSources: ["user"],
     };
 
+    // Use custom Claude Code executable path if provided
+    if (process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE) {
+      options.pathToClaudeCodeExecutable = process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
+      this.logger.log(
+        `Using custom Claude Code executable: ${process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE}`,
+      );
+    }
+
     // Handle continuation
     if (codon.continuationMode === "continue-previous" && previousSessionId) {
       options.continue = true;
