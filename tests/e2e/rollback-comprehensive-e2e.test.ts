@@ -443,7 +443,9 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     testState.client as EnhancedTestWSClient
   ).waitForCodonCompletionBySession("codon-1", 60000, codon1StartTime);
   console.log(
-    `${colors.green}✓ Codon 1 completed (cost: $${codon1Completed.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 1 completed (cost: $${codon1Completed.data.cost.toFixed(6)})${
+      colors.reset
+    }`,
   );
 
   await testState.client.waitForEvent("server.idle", 10000, (event) => {
@@ -476,7 +478,9 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     testState.client as EnhancedTestWSClient
   ).waitForCodonCompletionBySession("codon-2", 60000, codon2StartTime);
   console.log(
-    `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed.data.cost.toFixed(6)})${
+      colors.reset
+    }`,
   );
 
   await testState.client.waitForEvent("server.idle", 20000, (event) => {
@@ -623,7 +627,9 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     testState.client as EnhancedTestWSClient
   ).waitForCodonCompletionBySession("codon-2", 60000, codon2Scenario3StartTime);
   console.log(
-    `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed2.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed2.data.cost.toFixed(6)})${
+      colors.reset
+    }`,
   );
 
   await testState.client.waitForEvent("server.idle", 10000, (event) => {
@@ -656,7 +662,9 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     testState.client as EnhancedTestWSClient
   ).waitForCodonCompletionBySession("codon-3", 60000, codon3Scenario3StartTime);
   console.log(
-    `${colors.green}✓ Codon 3 completed (cost: $${codon3Completed2.data.cost.toFixed(6)})${colors.reset}`,
+    `${colors.green}✓ Codon 3 completed (cost: $${codon3Completed2.data.cost.toFixed(6)})${
+      colors.reset
+    }`,
   );
 
   // SNAPSHOT 3
@@ -1242,17 +1250,24 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
     });
 
-    test("5.3 Session ID Uniqueness", () => {
+    test("5.3 Session ID Continuation Integrity", () => {
       for (const snapshot of testSnapshots) {
-        const sessionIds = new Set<string>();
-
         for (const run of snapshot.state.runs) {
+          if (run.codons.length === 0) {
+            // Run created by rollback but no codons have executed yet
+            continue;
+          }
+
+          const sessionIds = new Set<string>();
+
           for (const codon of run.codons) {
             if ("claudeSessionId" in codon && codon.claudeSessionId) {
-              expect(sessionIds.has(codon.claudeSessionId)).toBe(false);
+              console.log("Adding session ID:", codon.claudeSessionId);
               sessionIds.add(codon.claudeSessionId);
             }
           }
+          // since codon 1 -> codon 2 is a continuation, there should be 2 unique session IDs (codon 1 and codon 3)
+          expect(sessionIds.size).toEqual(2);
         }
       }
     });
