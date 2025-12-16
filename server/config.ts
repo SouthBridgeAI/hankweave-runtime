@@ -609,7 +609,7 @@ export const DEFAULT_CONFIG: Omit<
   toolResultTruncateLength: 2500, // Default truncation length for tool results
   withoutProxy: false, // Enable proxy by default
   handshakeHistoryLimit: 50, // Maximum recent events to include in handshake response
-  idleTimeout: 20, // 20 seconds idle timeout for WebSocket and proxy servers (0-255)
+  idleTimeout: 0, // 0 seconds idle timeout (ie no timeout) for WebSocket and proxy servers (0-255)
   sentinel: {
     enablePersistence: true,
     healthCheckGracePeriodMs: 2000, // 2 seconds
