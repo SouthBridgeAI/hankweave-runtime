@@ -101,7 +101,7 @@ import {
  * - Event streaming to clients
  */
 export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
-  private server: Server<ClientData> | null = null;
+  private server: Server | null = null;
   private clients: Map<string, ServerWebSocket<ClientData>> = new Map();
   public readonly config: StrandweaveConfig;
   private logger: Logger;
@@ -149,7 +149,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: Date;
       }
     | undefined;
-  private processManager: ClaudeAgentSDKManager | undefined; // ClaudeProcessManager | undefined;
+  private processManager: ClaudeAgentSDKManager | undefined;
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingCodon = false;
@@ -502,7 +502,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Start Bun WebSocket server
-    this.server = Bun.serve<ClientData>({
+    this.server = Bun.serve<ClientData, undefined>({
       port: this.config.port,
       idleTimeout: 0, // No timeout for WebSocket server
       websocket: {
@@ -1740,7 +1740,6 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
       // Create process manager with the log parser
       this.processManager = new ClaudeAgentSDKManager(
-        // new ClaudeProcessManager(
         this.config.executionPath,
         this.logger,
         this.logParser,

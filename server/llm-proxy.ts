@@ -1,5 +1,4 @@
 import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
-import type { ClientData } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
 /**
@@ -449,7 +448,7 @@ export function createPassthroughProxy({
  * Currently supports only "passthrough" proxy mode.
  */
 export class BunProxyRunner {
-  private server?: Bun.Server<ClientData>;
+  private server?: Bun.Server;
 
   /**
    * Create a new Bun proxy runner
