@@ -368,129 +368,43 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
   /**
    * Convert SDK message to JSONL format matching claude-session-schema.
+   * SDK messages already have the correct structure, so we mostly just filter out
+   * unwanted message types and handle edge cases.
    */
   private convertSDKMessageToJSONL(message: SDKMessage): Record<string, unknown> | null {
-    switch (message.type) {
-      case "system":
-        if (message.subtype === "init") {
-          return {
-            type: "system",
-            subtype: "init",
-            cwd: message.cwd,
-            session_id: message.session_id,
-            tools: message.tools,
-            mcp_servers: message.mcp_servers || [],
-            model: message.model,
-            permissionMode: message.permissionMode,
-            apiKeySource: message.apiKeySource || "none",
-            // Include additional fields from SDK
-            uuid: message.uuid,
-            claude_code_version: message.claude_code_version,
-            output_style: message.output_style,
-            agents: message.agents || [],
-            skills: message.skills || [],
-            plugins: message.plugins || [],
-            slash_commands: message.slash_commands || [],
-            betas: message.betas || [],
-          };
-        } else if (message.subtype === "hook_response") {
-          // Include hook response messages
-          return {
-            type: "system",
-            subtype: "hook_response",
-            session_id: message.session_id,
-            uuid: message.uuid,
-            hook_name: message.hook_name,
-            hook_event: message.hook_event,
-            stdout: message.stdout,
-            stderr: message.stderr,
-            exit_code: message.exit_code,
-          };
-        } else if (message.subtype === "compact_boundary") {
-          return {
-            type: "system",
-            subtype: "compact_boundary",
-            compact_metadata: message.compact_metadata,
-            uuid: message.uuid,
-            session_id: message.session_id,
-          };
-        } else if (message.subtype === "status") {
-          return {
-            type: "system",
-            subtype: "status",
-            status: message.status,
-            uuid: message.uuid,
-            session_id: message.session_id,
-          };
-        }
-        // Skip unknown system message subtypes
-        return null;
-
-      case "assistant":
-        return {
-          type: "assistant",
-          message: {
-            id: message.message.id,
-            type: "message",
-            role: "assistant",
-            model: message.message.model,
-            content: message.message.content,
-            usage: message.message.usage,
-            stop_reason: message.message.stop_reason,
-            stop_sequence: message.message.stop_sequence,
-          },
-          parent_tool_use_id: message.parent_tool_use_id,
-          session_id: message.session_id,
-          uuid: message.uuid,
-        };
-
-      case "user":
-        // Skip replay messages to avoid duplicates
-        if ("isReplay" in message && message.isReplay) {
-          return null;
-        }
-        return {
-          type: "user",
-          message: {
-            role: "user",
-            content: message.message.content,
-          },
-          parent_tool_use_id: message.parent_tool_use_id,
-          session_id: message.session_id,
-          uuid: message.uuid,
-        };
-
-      case "result":
-        return {
-          type: "result",
-          subtype: message.subtype,
-          is_error: message.is_error,
-          duration_ms: message.duration_ms,
-          duration_api_ms: message.duration_api_ms,
-          num_turns: message.num_turns,
-          result: message.subtype === "success" ? message.result : "",
-          session_id: message.session_id,
-          total_cost_usd: message.total_cost_usd,
-          usage: message.usage,
-          uuid: message.uuid,
-        };
-
-      case "stream_event":
-        // Skip streaming events for now - they're not in the JSONL schema
-        return null;
-
-      case "tool_progress":
-        // Skip tool progress messages
-        return null;
-
-      case "auth_status":
-        // Skip auth status messages
-        return null;
-
-      default:
-        this.logger.log(`Unknown message type: ${(message as SDKMessage).type}`, "error");
-        return null;
+    // Filter out message types not supported by the JSONL schema
+    if (
+      message.type === "stream_event" ||
+      message.type === "tool_progress" ||
+      message.type === "auth_status"
+    ) {
+      return null;
     }
+
+    // Filter out replay user messages (already in the conversation history)
+    if (message.type === "user" && "isReplay" in message && message.isReplay) {
+      return null;
+    }
+
+    // Filter out unknown system message subtypes
+    if (
+      message.type === "system" &&
+      !["init", "hook_response", "compact_boundary", "status"].includes(message.subtype)
+    ) {
+      return null;
+    }
+
+    // Handle result messages: error subtypes don't have a 'result' field in SDK,
+    // but our schema requires it, so we provide an empty string
+    if (message.type === "result" && message.subtype !== "success") {
+      return {
+        ...message,
+        result: "",
+      };
+    }
+
+    // Pass through the message as-is (SDK format already matches our schema)
+    return message as Record<string, unknown>;
   }
 
   /**
