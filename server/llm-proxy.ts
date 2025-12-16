@@ -448,7 +448,7 @@ export function createPassthroughProxy({
  * Currently supports only "passthrough" proxy mode.
  */
 export class BunProxyRunner {
-  private server?: Bun.Server;
+  private server?: Bun.Server<unknown>;
 
   /**
    * Create a new Bun proxy runner

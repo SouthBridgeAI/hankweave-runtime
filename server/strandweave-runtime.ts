@@ -101,7 +101,7 @@ import {
  * - Event streaming to clients
  */
 export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
-  private server: Server | null = null;
+  private server: Server<unknown> | null = null;
   private clients: Map<string, ServerWebSocket<ClientData>> = new Map();
   public readonly config: StrandweaveConfig;
   private logger: Logger;
@@ -503,7 +503,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Start Bun WebSocket server
-    this.server = Bun.serve<ClientData, undefined>({
+    this.server = Bun.serve<ClientData>({
       port: this.config.port,
       idleTimeout: this.config.idleTimeout,
       websocket: {
