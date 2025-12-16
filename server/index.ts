@@ -47,6 +47,12 @@ function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
     cliArgs.withoutProxy = true;
   }
 
+  // Parse idleTimeout
+  const idleTimeoutArg = args.find((arg) => arg.startsWith("--idle-timeout="))?.split("=")[1];
+  if (idleTimeoutArg) {
+    cliArgs.idleTimeout = parseInt(idleTimeoutArg, 10);
+  }
+
   return cliArgs;
 }
 
@@ -74,6 +80,7 @@ async function main() {
     /^--port=\d+$/,
     /^--model=(sonnet|opus)$/,
     /^--without-proxy$/,
+    /^--idle-timeout=\d+$/,
     /^--init$/,
     /^--help$/,
     /^-h$/,
@@ -121,6 +128,7 @@ Options:
   --model=<sonnet|opus>     Override model for all codons (ignores per-codon settings)
   --anthropic-base-url=<url> Custom Anthropic API base URL
   --without-proxy           Disable the proxy server
+  --idle-timeout=<seconds>  Idle timeout for WebSocket and proxy servers in seconds (0-255, default: 20)
   --help, -h                Show this help message
 
 Execution Isolation:

@@ -459,6 +459,15 @@ export const runtimeConfigSchema = z
       .positive()
       .optional()
       .describe("Time limit for hashing directories (milliseconds)"),
+    idleTimeout: z
+      .number()
+      .int()
+      .min(0, "Idle timeout must be at least 0")
+      .max(255, "Idle timeout must be at most 255")
+      .optional()
+      .describe(
+        "Idle timeout for WebSocket and proxy servers in seconds (0-255). This is the maximum amount of time a connection is allowed to be idle before the server closes it. A connection is idling if there is no data sent or received.",
+      ),
 
     // Sentinel System
     sentinel: sentinelSettingsSchema.optional().describe("Sentinel system configuration"),
@@ -600,6 +609,7 @@ export const DEFAULT_CONFIG: Omit<
   toolResultTruncateLength: 2500, // Default truncation length for tool results
   withoutProxy: false, // Enable proxy by default
   handshakeHistoryLimit: 50, // Maximum recent events to include in handshake response
+  idleTimeout: 20, // 20 seconds idle timeout for WebSocket and proxy servers (0-255)
   sentinel: {
     enablePersistence: true,
     healthCheckGracePeriodMs: 2000, // 2 seconds
@@ -727,7 +737,8 @@ export function loadStrandweaveRuntimeEnvVars(): z.infer<typeof runtimeConfigSch
       key === "port" ||
       key === "logParsingInterval" ||
       key === "dataHashTimeLimit" ||
-      key === "healthCheckGracePeriodMs"
+      key === "healthCheckGracePeriodMs" ||
+      key === "idleTimeout"
     ) {
       const num = Number(value);
       if (Number.isNaN(num)) {

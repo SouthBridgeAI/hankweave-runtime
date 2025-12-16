@@ -376,6 +376,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         proxyPort,
         this.config.anthropicBaseUrl || "https://api.anthropic.com",
         this.logger,
+        this.config.idleTimeout,
       );
       this.proxyRunner.start();
     } else {
@@ -504,7 +505,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     // Start Bun WebSocket server
     this.server = Bun.serve<ClientData, undefined>({
       port: this.config.port,
-      idleTimeout: 0, // No timeout for WebSocket server
+      idleTimeout: this.config.idleTimeout,
       websocket: {
         open: (ws) => this.handleConnection(ws),
         message: (ws, message) => this.handleMessage(ws, message),

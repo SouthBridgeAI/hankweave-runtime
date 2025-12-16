@@ -357,6 +357,7 @@ These are the built-in defaults used when no other configuration is provided:
   withoutProxy: false,
   logParsingInterval: 1000,
   dataHashTimeLimit: 60000,
+  idleTimeout: 20,
 
   // Sentinel configuration
   sentinel: {
@@ -388,6 +389,7 @@ Create a `strandweave.json` file in your execution directory for project-wide se
   "model": "sonnet",
   "autostart": false,
   "logParsingInterval": 2000,
+  "idleTimeout": 30,
   "sentinel": {
     "enablePersistence": false,
     "healthCheckGracePeriodMs": 3000
@@ -403,6 +405,7 @@ Create a `strandweave.json` file in your execution directory for project-wide se
 - `anthropicBaseUrl` (string) - Custom Anthropic API endpoint
 - `logParsingInterval` (number) - How often to check for new log entries (ms)
 - `dataHashTimeLimit` (number) - Max time for data hashing (ms)
+- `idleTimeout` (number) - Idle timeout for WebSocket and proxy servers in seconds (0-255). Maximum time a connection can be idle before the server closes it.
 - `sentinel` (object) - Sentinel configuration:
   - `enablePersistence` (boolean) - Enable sentinel state persistence
   - `healthCheckGracePeriodMs` (number) - Grace period for health checks
@@ -468,6 +471,7 @@ export STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL=https://custom.api.com
 # Timing settings
 export STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL=2000
 export STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT=30000
+export STRANDWEAVE_RUNTIME_IDLE_TIMEOUT=30
 
 # Sentinel settings (nested)
 export STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE=false
@@ -499,6 +503,9 @@ bun run server --without-proxy
 
 # Custom API endpoint
 bun run server --anthropic-base-url=https://custom.api.com
+
+# Set idle timeout to 30 seconds
+bun run server --idle-timeout=30
 ```
 
 **Available CLI Flags**:
@@ -507,6 +514,7 @@ bun run server --anthropic-base-url=https://custom.api.com
 - `--no-autostart` - Don't auto-start codons
 - `--without-proxy` - Disable LLM proxy
 - `--anthropic-base-url=<url>` - Custom API endpoint
+- `--idle-timeout=<seconds>` - Idle timeout in seconds (0-255)
 
 See [Command-Line Options](#command-line-options) for complete list.
 

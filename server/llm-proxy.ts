@@ -456,12 +456,14 @@ export class BunProxyRunner {
    * @param port - Port number to listen on
    * @param proxyToUrl - Target URL to proxy requests to
    * @param logger - Logger instance for debugging and monitoring
+   * @param idleTimeout - Idle timeout in seconds (0-255, 0 for no timeout)
    */
   constructor(
     private proxy: "passthrough",
     private port: number,
     private proxyToUrl: string,
     private logger: Logger,
+    private idleTimeout: number = 0,
   ) {}
 
   /**
@@ -489,7 +491,7 @@ export class BunProxyRunner {
 
     this.server = Bun.serve({
       port: this.port,
-      idleTimeout: 0, // No timeout - Claude API requests can take a long time
+      idleTimeout: this.idleTimeout,
       async fetch(request: Request): Promise<Response> {
         const url = new URL(request.url);
         const pathname = url.pathname + url.search;
