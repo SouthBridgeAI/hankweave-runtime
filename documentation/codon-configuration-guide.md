@@ -657,6 +657,19 @@ Claude will see these as:
 - `GITHUB_TOKEN=ghp_xxxxx`
 - `API_ENDPOINT=https://api.example.com`
 
+### Claude Code Authentication Variables
+These environment variables configure authentication for the Claude Agent SDK:
+```bash
+# OAuth token (recommended)
+export CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token
+
+# Custom Claude Code executable path (optional)
+# If not set, uses the SDK's bundled version
+export CLAUDE_PATH_TO_CLAUDE_EXECUTABLE=/path/to/claude
+```
+
+For authentication setup instructions, see [Running the Server - Authentication](./running-the-server.md#prerequisites).
+
 **Note**: Sentinels use a different set of environment variables (`STRANDWEAVE_SENTINEL_*` prefix) for their LLM API keys. See the [Sentinel Configuration Guide](./sentinels/configuration-guide.md#environment-variables) for details.
 
 ## Configuring Sentinels
