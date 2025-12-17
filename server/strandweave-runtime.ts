@@ -9,7 +9,10 @@ import { ClaudeLogParser } from "./claude-log-parser.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { EventJournal } from "./event-journal.js";
-import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
+import {
+  analyzeExecutionThread,
+  findContinuationSessionId,
+} from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { BunProxyRunner } from "./llm-proxy.js";
 // Import event types from new schema file
@@ -38,7 +41,10 @@ import { SentinelConfigLoader } from "./sentinels/sentinel-config-loader.js";
 import { SentinelManager } from "./sentinels/sentinel-manager.js";
 import { StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
-import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
+import {
+  type ServerInternalEvents,
+  TypedEventEmitter,
+} from "./typed-event-emitter.js";
 import { CodonId, EventId, RunId, SessionId } from "./types/branded-types.js";
 import type {
   AssistantMessage,
@@ -182,7 +188,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     config: Omit<StrandweaveConfig, keyof typeof DEFAULT_CONFIG> &
       Partial<Pick<StrandweaveConfig, keyof typeof DEFAULT_CONFIG>> & {
         codons: CodonConfig[];
-      },
+      }
   ) {
     super();
     this.config = {
@@ -191,15 +197,23 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     } as StrandweaveConfig;
 
     // Update logger to use execution path
-    this.logger = new Logger(path.join(this.config.executionPath, this.config.serverLogFile));
+    this.logger = new Logger(
+      path.join(this.config.executionPath, this.config.serverLogFile)
+    );
     this.serverStartTime = new Date();
 
     // Initialize state manager with execution path
     const strandweaveDir = path.join(this.config.executionPath, ".strandweave");
-    this.stateManager = new StateManager(strandweaveDir, this.logger, this.config.codons);
+    this.stateManager = new StateManager(
+      strandweaveDir,
+      this.logger,
+      this.config.codons
+    );
 
     // Initialize Event Journal with file-based storage
-    this.eventJournal = new EventJournal(new FileEventStorage(path.join(strandweaveDir, "events")));
+    this.eventJournal = new EventJournal(
+      new FileEventStorage(path.join(strandweaveDir, "events"))
+    );
 
     // Initialize sentinel config loader (stateful, with cache)
     this.sentinelConfigLoader = new SentinelConfigLoader(this.logger);
@@ -234,7 +248,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               codonName: entry.codon.name,
               codonDescription: entry.codon.description,
               sessionId: codon.claudeSessionId,
-              previousSessionId: "previousSessionId" in codon ? codon.previousSessionId : undefined,
+              previousSessionId:
+                "previousSessionId" in codon
+                  ? codon.previousSessionId
+                  : undefined,
               startTime: codon.startTime,
             },
           } as CodonStartedEvent);
@@ -278,7 +295,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       if (isServerStateEvent(event) || isAgenticBackboneEvent(event)) {
         // Fire-and-forget pattern - don't block event emission
         this.sentinelManager.handleEvent(event).catch((error) => {
-          this.logger.log(`Error in sentinel event handling: ${error}`, "error");
+          this.logger.log(
+            `Error in sentinel event handling: ${error}`,
+            "error"
+          );
         });
       }
     });
@@ -289,7 +309,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
    * This provides an audit trail of all state machine transitions.
    */
   private emitStateTransitionEvent(
-    transition: import("./types/state-types.js").StateTransition,
+    transition: import("./types/state-types.js").StateTransition
   ): void {
     // Extract relevant IDs from transition data
     let runId: string | undefined;
@@ -302,26 +322,27 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       codonId = transition.data.codonId as string;
     }
 
-    const stateTransitionEvent: import("./schemas/event-schemas.js").StateTransitionEvent = {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "state.transition",
-      data: {
-        transitionType: transition.type,
-        runId,
-        codonId,
-        transition: {
-          type: transition.type,
-          data: transition.data as Record<string, unknown>,
+    const stateTransitionEvent: import("./schemas/event-schemas.js").StateTransitionEvent =
+      {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "state.transition",
+        data: {
+          transitionType: transition.type,
+          runId,
+          codonId,
+          transition: {
+            type: transition.type,
+            data: transition.data as Record<string, unknown>,
+          },
+          resultingState: {
+            currentRunId: this.stateManager.getState().currentRunId,
+            runCount: this.stateManager.getState().runs.length,
+            totalCost: this.stateManager.getTotalCost(),
+            currentRunCost: this.stateManager.getCurrentRunCost(),
+          },
         },
-        resultingState: {
-          currentRunId: this.stateManager.getState().currentRunId,
-          runCount: this.stateManager.getState().runs.length,
-          totalCost: this.stateManager.getTotalCost(),
-          currentRunCost: this.stateManager.getCurrentRunCost(),
-        },
-      },
-    };
+      };
 
     // Emit as a server state event - will be journaled but NOT sent to clients
     this.emit("event", stateTransitionEvent);
@@ -363,7 +384,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
    */
   async start(): Promise<void> {
     this.logger.log(
-      `Starting Strandweave Runtime v${this.config.version} in ${this.config.executionPath}`,
+      `Starting Strandweave Runtime v${this.config.version} in ${this.config.executionPath}`
     );
 
     // Start proxy server first (if not disabled)
@@ -376,7 +397,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         proxyPort,
         this.config.anthropicBaseUrl || "https://api.anthropic.com",
         this.logger,
-        this.config.idleTimeout,
+        this.config.idleTimeout
       );
       this.proxyRunner.start();
     } else {
@@ -411,14 +432,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Parse lock file for enhanced data
       try {
         const lockInfo = JSON.parse(lockData);
-        const heartbeatAge = Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
+        const heartbeatAge =
+          Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
 
         // First check if the process is actually running
         const processRunning = this.isProcessRunning(lockInfo.pid);
 
         if (!processRunning) {
           // Process is not running - this is a crash regardless of heartbeat age
-          this.logger.log(`Found lock file from dead process (PID: ${lockInfo.pid}), removing...`);
+          this.logger.log(
+            `Found lock file from dead process (PID: ${lockInfo.pid}), removing...`
+          );
           fs.unlinkSync(this.config.lockFile);
 
           // Mark the run as crashed
@@ -434,7 +458,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           }
         } else if (heartbeatAge > 120000) {
           // Process is running but heartbeat is stale (> 2 minutes)
-          this.logger.log(`Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`);
+          this.logger.log(
+            `Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`
+          );
           fs.unlinkSync(this.config.lockFile);
 
           // Mark the run as crashed
@@ -458,14 +484,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             this.logger.log(`Recovering run ${this.currentRunId}`);
           } else {
             throw new Error(
-              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`,
+              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`
             );
           }
         }
       } catch (_e) {
         // Old format lock file - just PID
         throw new Error(
-          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`,
+          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`
         );
       }
     }
@@ -492,11 +518,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           try {
             await this.checkpointGit.switchToBranch(currentRun.gitBranch);
           } catch (error) {
-            this.logger.log(`Failed to switch to run branch: ${error}`, "error");
+            this.logger.log(
+              `Failed to switch to run branch: ${error}`,
+              "error"
+            );
           }
         } else {
           this.logger.log(
-            `Fresh run ${currentRun.runId} - branch will be created on first checkpoint`,
+            `Fresh run ${currentRun.runId} - branch will be created on first checkpoint`
           );
         }
       }
@@ -540,7 +569,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.shutdown("uncaughtException");
     });
     process.on("unhandledRejection", (reason, promise) => {
-      this.logger.log(`Unhandled rejection at: ${promise}, reason: ${reason}`, "error");
+      this.logger.log(
+        `Unhandled rejection at: ${promise}, reason: ${reason}`,
+        "error"
+      );
       this.shutdown("unhandledRejection");
     });
   }
@@ -570,7 +602,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async handleHandshake(
     ws: ServerWebSocket<ClientData>,
-    request: HandshakeRequest,
+    request: HandshakeRequest
   ): Promise<void> {
     const { mode, sendPreviousEvents = false } = request.data;
 
@@ -597,7 +629,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       totalEvents,
       hasMore,
     } = sendPreviousEvents
-      ? await this.eventJournal.getMostRecentEvents(this.config.handshakeHistoryLimit)
+      ? await this.eventJournal.getMostRecentEvents(
+          this.config.handshakeHistoryLimit
+        )
       : {
           events: [],
           totalEvents: await this.eventJournal.getTotalEvents(),
@@ -607,7 +641,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.logger.log(
       `Sending ${recentEvents.length} events (of ${totalEvents} total) to client ${clientId}` +
         (sendPreviousEvents ? " (limited history)" : " (no history)") +
-        (hasMore ? " with additional history available via download" : ""),
+        (hasMore ? " with additional history available via download" : "")
     );
 
     // Send handshake response
@@ -622,7 +656,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     };
 
     ws.send(JSON.stringify(response));
-    this.logger.log(`Handshake complete for client ${clientId} (${grantedMode})`);
+    this.logger.log(
+      `Handshake complete for client ${clientId} (${grantedMode})`
+    );
 
     // Send initial events now that handshake is complete
     const serverReadyEvent: ServerReadyEvent = {
@@ -657,7 +693,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
   }
 
-  private handleMessage(ws: ServerWebSocket<ClientData>, message: string | Buffer): void {
+  private handleMessage(
+    ws: ServerWebSocket<ClientData>,
+    message: string | Buffer
+  ): void {
     try {
       ws.data.lastActivity = new Date();
 
@@ -682,7 +721,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               fatal: false,
             },
           } as ErrorEvent,
-          ws,
+          ws
         );
         return;
       }
@@ -690,7 +729,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       const result = clientCommandSchema.safeParse(parsed);
 
       if (!result.success) {
-        this.logger.log(`Invalid client command: ${result.error.message}`, "error");
+        this.logger.log(
+          `Invalid client command: ${result.error.message}`,
+          "error"
+        );
         this.emit(
           "event",
           {
@@ -702,13 +744,16 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               fatal: false,
             },
           } as ErrorEvent,
-          ws,
+          ws
         );
         return;
       }
       this.handleCommand(result.data, ws);
     } catch (error) {
-      this.logger.log(`Error parsing command: ${toError(error).message}`, "error");
+      this.logger.log(
+        `Error parsing command: ${toError(error).message}`,
+        "error"
+      );
     }
   }
 
@@ -729,7 +774,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async handleCommand(
     command: ClientCommand,
-    sender: ServerWebSocket<ClientData>,
+    sender: ServerWebSocket<ClientData>
   ): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
 
@@ -737,7 +782,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     if (this.isRollingBack && !this.READ_ONLY_COMMANDS.has(command.type)) {
       this.logger.log(
         `Client ${sender.data.id} attempted state-modifying command while rollback is in progress`,
-        "error",
+        "error"
       );
       this.emit(
         "event",
@@ -746,7 +791,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           timestamp: new Date().toISOString(),
           type: "error",
           data: {
-            message: "Cannot execute state-modifying commands while rollback is in progress",
+            message:
+              "Cannot execute state-modifying commands while rollback is in progress",
             context: `Attempted command: ${command.type}`,
             codon: this.currentCodon?.codon.id,
             fatal: false,
@@ -754,7 +800,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             code: "ROLLBACK_IN_PROGRESS",
           },
         } as ErrorEvent,
-        sender,
+        sender
       );
       return;
     }
@@ -765,7 +811,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       if (!sender.data.handshakeComplete) {
         this.logger.log(
           `Client ${sender.data.id} attempted state-modifying command without handshake`,
-          "error",
+          "error"
         );
         this.emit(
           "event",
@@ -774,7 +820,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             timestamp: new Date().toISOString(),
             type: "error",
             data: {
-              message: "Cannot execute state-modifying commands without handshake",
+              message:
+                "Cannot execute state-modifying commands without handshake",
               context: `Attempted command: ${command.type}`,
               codon: this.currentCodon?.codon.id,
               fatal: false,
@@ -782,7 +829,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               code: "HANDSHAKE_REQUIRED",
             },
           } as ErrorEvent,
-          sender,
+          sender
         );
         return;
       }
@@ -791,7 +838,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       if (sender.data.mode === ClientMode.READONLY) {
         this.logger.log(
           `Client ${sender.data.id} attempted state-modifying command in read-only mode`,
-          "error",
+          "error"
         );
         this.emit(
           "event",
@@ -800,7 +847,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             timestamp: new Date().toISOString(),
             type: "error",
             data: {
-              message: "Cannot execute state-modifying commands in read-only mode",
+              message:
+                "Cannot execute state-modifying commands in read-only mode",
               context: `Attempted command: ${command.type}`,
               codon: this.currentCodon?.codon.id,
               fatal: false,
@@ -808,7 +856,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               code: "INSUFFICIENT_PERMISSIONS",
             },
           } as ErrorEvent,
-          sender,
+          sender
         );
         return;
       }
@@ -816,7 +864,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     switch (command.type) {
       case "codon.start": {
-        await this.startCodon(command.data.codonId, command.data.skipPreCommands);
+        await this.startCodon(
+          command.data.codonId,
+          command.data.skipPreCommands
+        );
         break;
       }
 
@@ -847,7 +898,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       case "rollback.toCheckpoint":
         await this.rollbackToCheckpoint(
           command.data.checkpointSha,
-          command.data.autoRestart ?? false,
+          command.data.autoRestart ?? false
         );
         break;
 
@@ -855,7 +906,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         await this.rollbackToCodon(
           command.data.codonId,
           command.data.checkpointType,
-          command.data.autoRestart ?? false,
+          command.data.autoRestart ?? false
         );
         break;
 
@@ -885,7 +936,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // Ping Commands (for testing)
   // -------------
 
-  private handlePing(commandId: string, sender?: ServerWebSocket<ClientData>): void {
+  private handlePing(
+    commandId: string,
+    sender?: ServerWebSocket<ClientData>
+  ): void {
     this.logger.log(`Handling ping command: ${commandId}`);
 
     // Send pong response only to the sender
@@ -903,11 +957,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // pong is a connection state event - send to specific client only, don't journal
       this.emit("event", pongEvent, sender);
     } else {
-      this.logger.log("Ping command received but no valid sender provided", "error");
+      this.logger.log(
+        "Ping command received but no valid sender provided",
+        "error"
+      );
     }
   }
 
-  private handlePingBroadcast(commandId: string, sender?: ServerWebSocket<ClientData>): void {
+  private handlePingBroadcast(
+    commandId: string,
+    sender?: ServerWebSocket<ClientData>
+  ): void {
     this.logger.log(`Handling ping.broadcast command: ${commandId}`);
 
     const senderClientId = sender?.data.id || "unknown";
@@ -939,10 +999,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async handleHistorySync(
     command: import("./schemas/event-schemas.js").HistorySyncCommand,
-    sender?: ServerWebSocket<ClientData>,
+    sender?: ServerWebSocket<ClientData>
   ): Promise<void> {
     if (!sender?.data.handshakeComplete) {
-      this.logger.log("History sync command received but sender not ready", "error");
+      this.logger.log(
+        "History sync command received but sender not ready",
+        "error"
+      );
       return;
     }
 
@@ -985,7 +1048,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   private sendHistoryBatch(
     sender: ServerWebSocket<ClientData>,
     events: ServerEvent[],
-    hasMore: boolean,
+    hasMore: boolean
   ): void {
     const historyBatchEvent: HistoryBatchEvent = {
       id: EventId(generateId()),
@@ -999,11 +1062,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     try {
       sender.send(JSON.stringify(historyBatchEvent));
-      this.logger.log(`Sent ${events.length} events to client ${sender.data.id}`);
+      this.logger.log(
+        `Sent ${events.length} events to client ${sender.data.id}`
+      );
     } catch (error) {
       this.logger.log(
         `Failed to send history batch to client ${sender.data.id}: ${error}`,
-        "error",
+        "error"
       );
       this.clients.delete(sender.data.id);
     }
@@ -1024,12 +1089,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   emit<K extends keyof ServerInternalEvents>(
     event: K,
     data: ServerInternalEvents[K][0],
-    target?: ServerWebSocket<ClientData>,
+    target?: ServerWebSocket<ClientData>
   ): boolean {
     if (event !== "event") {
       // Should relax this restriction eventually
       this.logger.log(`Unsupported event type emitted: ${event}`, "error");
-      throw new Error(`Unsupported event type: ${event}. Can only emit "event" events.`);
+      throw new Error(
+        `Unsupported event type: ${event}. Can only emit "event" events.`
+      );
     }
 
     const serverEvent = data as ServerEvent;
@@ -1039,9 +1106,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const isConnectionState = isConnectionStateEvent(serverEvent);
 
     // this should never happen due to compile time checks, but...
-    if (!isServerState && !isAgenticBackbone && !isSentinel && !isConnectionState) {
+    if (
+      !isServerState &&
+      !isAgenticBackbone &&
+      !isSentinel &&
+      !isConnectionState
+    ) {
       // This should never happen - all ServerEvents should be categorized
-      this.logger.log(`Unknown event type: ${(serverEvent as ServerEvent).type}`, "error");
+      this.logger.log(
+        `Unknown event type: ${(serverEvent as ServerEvent).type}`,
+        "error"
+      );
       throw new Error(`Unknown event: ${(serverEvent as ServerEvent).type}`);
     }
 
@@ -1049,7 +1124,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     if (isConnectionState && !target) {
       this.logger.log(
         `Connection state event ${serverEvent.type} requires a target client but none provided`,
-        "error",
+        "error"
       );
       return false;
     }
@@ -1061,7 +1136,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.eventJournalAppendQueue = this.eventJournalAppendQueue
         .then(() => this.eventJournal.append(serverEvent))
         .catch((error) => {
-          this.logger.log(`Error appending event to journal: ${error}`, "error");
+          this.logger.log(
+            `Error appending event to journal: ${error}`,
+            "error"
+          );
         });
 
       // Broadcast to all connected clients that have completed handshake
@@ -1071,7 +1149,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           try {
             client.send(JSON.stringify(serverEvent));
           } catch (error) {
-            this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
+            this.logger.log(
+              `Failed to send event to client ${client.data.id}: ${error}`,
+              "error"
+            );
           }
         }
       }
@@ -1079,7 +1160,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       try {
         target?.send(JSON.stringify(serverEvent));
       } catch (error) {
-        this.logger.log(`Failed to send event to client ${target?.data.id}: ${error}`, "error");
+        this.logger.log(
+          `Failed to send event to client ${target?.data.id}: ${error}`,
+          "error"
+        );
       }
     }
 
@@ -1089,7 +1173,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async sendStateSnapshot(): Promise<void> {
     const totalCost = this.stateManager.getTotalCost();
-    const totalTime = this.serverStartTime ? Date.now() - this.serverStartTime.getTime() : 0;
+    const totalTime = this.serverStartTime
+      ? Date.now() - this.serverStartTime.getTime()
+      : 0;
 
     // Get terminal codons using execution thread
     const terminalCodons = await this.getTerminalCodonsForSnapshot();
@@ -1130,10 +1216,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
    * Start a new run and create necessary infrastructure
    */
   private async startNewRun(
-    startingConditions?: import("./types/state-types.js").StartingConditions,
+    startingConditions?: import("./types/state-types.js").StartingConditions
   ): Promise<void> {
-    const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
-    const runFolder = path.join(this.config.executionPath, ".strandweave", "runs", runId);
+    const runId = RunId(
+      `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+    );
+    const runFolder = path.join(
+      this.config.executionPath,
+      ".strandweave",
+      "runs",
+      runId
+    );
 
     // Create run folder
     await fs.promises.mkdir(runFolder, { recursive: true });
@@ -1215,14 +1308,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
    * 6. Send codon.started event
    * 7. Spawn Claude process with prompt
    */
-  private async startCodon(codonId: CodonId, skipPreCommands?: boolean): Promise<void> {
+  private async startCodon(
+    codonId: CodonId,
+    skipPreCommands?: boolean
+  ): Promise<void> {
     // Look up in execution plan (Step 4 of looping codons plan)
     const entry = this.stateManager.getCodonById(codonId);
     if (!entry) {
       await this.handleError(
         new Error(`Unknown codon: ${codonId}`),
         "startCodon",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -1233,17 +1329,24 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // pull existing history for the codon and see if we had run rig setup for it
     // git seems the best source of rig setup related info
-    const codonHistory = await this.stateManager.getCodonHistory(CodonId(codon.id));
+    const codonHistory = await this.stateManager.getCodonHistory(
+      CodonId(codon.id)
+    );
     let rigSetupCheckpoint: string | undefined;
     for (const entry of codonHistory) {
-      if ("rigSetupCheckpoint" in entry.codon && entry.codon.rigSetupCheckpoint) {
+      if (
+        "rigSetupCheckpoint" in entry.codon &&
+        entry.codon.rigSetupCheckpoint
+      ) {
         rigSetupCheckpoint = entry.codon.rigSetupCheckpoint;
         break;
       }
     }
 
     if (rigSetupCheckpoint) {
-      this.logger.log(`Found existing rig setup checkpoint: ${rigSetupCheckpoint}`);
+      this.logger.log(
+        `Found existing rig setup checkpoint: ${rigSetupCheckpoint}`
+      );
     }
 
     // Check if codon already running via state manager (single source of truth)
@@ -1252,7 +1355,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       await this.handleError(
         new Error(`Codon already running: ${currentCodon.codonId}`),
         "startCodon",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -1260,10 +1363,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     // Check if this codon was already attempted in current run
     const currentRun = this.stateManager.getCurrentRun();
     if (currentRun) {
-      const previousAttempt = currentRun.codons.find((p) => p.codonId === codonId);
+      const previousAttempt = currentRun.codons.find(
+        (p) => p.codonId === codonId
+      );
       if (previousAttempt && isTerminalCodonStatus(previousAttempt.status)) {
         // Codon was already attempted and finished - start new run
-        this.logger.log(`Codon ${codonId} was already attempted in current run, starting new run`);
+        this.logger.log(
+          `Codon ${codonId} was already attempted in current run, starting new run`
+        );
 
         // Complete current run
         this.stateManager.transition({
@@ -1289,7 +1396,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     // Create codon started transition (fire-and-forget)
 
     if (!this.currentRunId) {
-      await this.handleError(new Error("No active run"), "startCodon", ErrorSeverity.FATAL);
+      await this.handleError(
+        new Error("No active run"),
+        "startCodon",
+        ErrorSeverity.FATAL
+      );
       return;
     }
 
@@ -1307,7 +1418,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       await this.handleError(
         new Error("No active run during codon start"),
         "startCodon",
-        ErrorSeverity.FATAL,
+        ErrorSeverity.FATAL
       );
       return;
     }
@@ -1321,12 +1432,15 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       for (const [index, item] of codon.rigSetup.entries()) {
         try {
           if (item.type === "copy" && item.copy) {
-            const targetPath = path.join(this.config.executionPath, item.copy.to);
+            const targetPath = path.join(
+              this.config.executionPath,
+              item.copy.to
+            );
             this.logger.log(`Copying ${item.copy.from} to ${targetPath}`);
             // Check if target path already exists
             if (fs.existsSync(targetPath)) {
               this.logger.log(
-                `Warning: Target path already exists: ${targetPath}. Removing it before copying.`,
+                `Warning: Target path already exists: ${targetPath}. Removing it before copying.`
               );
               // TODO: let's discuss if this is too controversial
               // Remove the existing directory/file recursively
@@ -1345,7 +1459,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               item.command.workingDirectory === "lastCopied" && lastCopiedPath
                 ? lastCopiedPath
                 : this.config.executionPath;
-            this.logger.log(`Ran command in ${resolvedWorkingDir}: ${item.command.run}`);
+            this.logger.log(
+              `Ran command in ${resolvedWorkingDir}: ${item.command.run}`
+            );
           }
         } catch (error) {
           const errorMessage = toError(error).message;
@@ -1357,7 +1473,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               `Rig setup operation failed (allowFailure=true) at item ${
                 index + 1
               } (${JSON.stringify(item)}): ${errorMessage}`,
-              "info",
+              "info"
             );
 
             // Emit non-fatal warning event
@@ -1367,7 +1483,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               type: "error",
               data: {
                 message: `Rig setup operation failed but continuing (allowFailure=true): ${errorMessage}`,
-                context: `Codon ${codon.id} - ${item.type} operation (item ${index + 1})`,
+                context: `Codon ${codon.id} - ${item.type} operation (item ${
+                  index + 1
+                })`,
                 codon: codon.id,
                 fatal: false,
                 severity: ErrorSeverity.OPERATION,
@@ -1380,8 +1498,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
           // Fatal error - operation does not allow failure
           this.logger.log(
-            `Rig setup failed at item ${index + 1} (${JSON.stringify(item)}): ${errorMessage}`,
-            "error",
+            `Rig setup failed at item ${index + 1} (${JSON.stringify(
+              item
+            )}): ${errorMessage}`,
+            "error"
           );
 
           // Set failure reason with detailed information
@@ -1415,7 +1535,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             type: "error",
             data: {
               message: `Rig setup failed: ${errorMessage}`,
-              context: `Codon ${codon.id} - ${item.type} operation (item ${index + 1})`,
+              context: `Codon ${codon.id} - ${item.type} operation (item ${
+                index + 1
+              })`,
               codon: codon.id,
               fatal: true,
               severity: ErrorSeverity.FATAL,
@@ -1427,7 +1549,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           await this.handleError(
             toError(error),
             `Rig setup item ${index + 1}`,
-            ErrorSeverity.FATAL,
+            ErrorSeverity.FATAL
           );
           return;
         }
@@ -1501,13 +1623,15 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     for (const error of sentinelResult.errors.filter((e) => !e.fatal)) {
       this.logger.log(
         `Non-required sentinel failed to load (${error.ref}): ${error.error}`,
-        "info",
+        "info"
       );
     }
 
     // Add checkpoint patterns - accumulate from all codons up to current
     // This ensures resume functionality works correctly
-    const currentCodonIndex = this.config.codons.findIndex((p) => p.id === codon.id);
+    const currentCodonIndex = this.config.codons.findIndex(
+      (p) => p.id === codon.id
+    );
     if (currentCodonIndex >= 0) {
       // Accumulate patterns from all codons up to and including current
       for (let i = 0; i <= currentCodonIndex; i++) {
@@ -1544,7 +1668,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         state,
         undefined, // No checkpoint data needed for session lookup
         undefined, // Use latest run
-        this.logger,
+        this.logger
       );
 
       const sessionId = findContinuationSessionId(thread, codonId, state);
@@ -1552,7 +1676,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
       if (previousSessionId) {
         this.logger.log(
-          `Codon ${codonId} will continue from previous session: ${previousSessionId}`,
+          `Codon ${codonId} will continue from previous session: ${previousSessionId}`
         );
 
         // Send info event about continuation
@@ -1618,7 +1742,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       status: "initializing",
       codonId: codonId,
       codon,
-      previousSessionId: previousSessionId ? SessionId(previousSessionId) : undefined, // Store for codon.started event
+      previousSessionId: previousSessionId
+        ? SessionId(previousSessionId)
+        : undefined, // Store for codon.started event
       startTime: new Date(),
       codonCost: 0,
       codonTokens: {
@@ -1643,7 +1769,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Use the unified file resolver to get files respecting gitignore
       const resolvedFiles = await fileResolver.resolveFiles(
         this.config.executionPath,
-        codon.trackedFiles,
+        codon.trackedFiles
       );
 
       // Get file contents for each resolved file
@@ -1657,7 +1783,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             content,
             lastModified: stats.mtime.toISOString(),
           };
-        }),
+        })
       );
 
       // Only send events if we have files
@@ -1678,7 +1804,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
         // Store most recent file
         const mostRecent = files.reduce((latest, file) =>
-          new Date(file.lastModified) > new Date(latest.lastModified) ? file : latest,
+          new Date(file.lastModified) > new Date(latest.lastModified)
+            ? file
+            : latest
         );
         this.recentFileAccess = {
           path: mostRecent.path,
@@ -1700,7 +1828,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // -------------
 
   /**
-   * Spawn Claude CLI process for a codon using ClaudeProcessManager.
+   * Spawn Claude CLI process for a codon using ClaudeAgentSDKManager.
    *
    * @param codonId - Runtime codon ID (e.g., "review#0", "review#1" for loops)
    * @param codon - Codon configuration (not Loop - loops must be expanded first)
@@ -1709,7 +1837,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   private async startClaudeProcess(
     codonId: CodonId,
     codon: Codon,
-    previousSessionId: string | null,
+    previousSessionId: string | null
   ): Promise<void> {
     try {
       // Get run folder from state
@@ -1745,27 +1873,38 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         this.logger,
         this.logParser,
         this.proxyRunner?.proxyUrl,
-        this.config.model,
+        this.config.model
       );
 
       // Set up event handlers
 
-      this.processManager.on("exit", (code: number, isContextExceeded: boolean) => {
-        if (isContextExceeded) {
-          this.logger.log(
-            `[STRANDWEAVE-SERVER] Context exceeded error detected for codon ${codonId}`,
-            "error",
-          );
+      this.processManager.on(
+        "exit",
+        (code: number, isContextExceeded: boolean) => {
+          if (isContextExceeded) {
+            this.logger.log(
+              `[STRANDWEAVE-SERVER] Context exceeded error detected for codon ${codonId}`,
+              "error"
+            );
+          }
+          this.handleCodonComplete(code, isContextExceeded);
         }
-        this.handleCodonComplete(code, isContextExceeded);
-      });
+      );
 
       this.processManager.on("error", (error: Error) => {
-        this.handleError(error, `Claude process for codon ${codonId}`, ErrorSeverity.FATAL);
+        this.handleError(
+          error,
+          `Claude process for codon ${codonId}`,
+          ErrorSeverity.FATAL
+        );
       });
 
       // Spawn process with custom log path
-      const _logPathResult = await this.processManager.spawn(codon, previousSessionId, logPath);
+      const _logPathResult = await this.processManager.spawn(
+        codon,
+        previousSessionId,
+        logPath
+      );
 
       // Transition to initializing (fire-and-forget)
       if (!this.currentRunId) {
@@ -1868,7 +2007,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       };
 
       // Log the session ID update
-      this.logger.log(`Claude started codon ${codonId} with session ID: ${msg.session_id}`);
+      this.logger.log(
+        `Claude started codon ${codonId} with session ID: ${msg.session_id}`
+      );
 
       // Send existing info event
       this.emit("event", {
@@ -1885,10 +2026,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   private handleAssistantMessage(msg: AssistantMessage, codonId: string): void {
     // Track that we've received an assistant message
     if (this.currentRunId) {
-      const currentCodon = this.stateManager.getCodonInCurrentRun(CodonId(codonId));
+      const currentCodon = this.stateManager.getCodonInCurrentRun(
+        CodonId(codonId)
+      );
       const currentCount =
         currentCodon && "assistantMessageCount" in currentCodon
-          ? (currentCodon.assistantMessageCount ?? 0)
+          ? currentCodon.assistantMessageCount ?? 0
           : 0;
 
       this.stateManager.transition({
@@ -1903,7 +2046,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // Use type guard to check for synthetic timeout messages
     if (isSyntheticTimeout(msg as ClaudeLogMessage)) {
-      this.logger.log(`API timeout detected in synthetic message for codon ${codonId}`, "error");
+      this.logger.log(
+        `API timeout detected in synthetic message for codon ${codonId}`,
+        "error"
+      );
 
       const timeoutError = new APITimeoutError(codonId, {
         message: "API Error: Request timed out.",
@@ -1955,8 +2101,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         this.currentCodon.codonCost += costDelta;
         this.currentCodon.codonTokens.inputTokens += usageDelta.inputTokens;
         this.currentCodon.codonTokens.outputTokens += usageDelta.outputTokens;
-        this.currentCodon.codonTokens.cacheCreationTokens += usageDelta.cacheCreationTokens;
-        this.currentCodon.codonTokens.cacheReadTokens += usageDelta.cacheReadTokens;
+        this.currentCodon.codonTokens.cacheCreationTokens +=
+          usageDelta.cacheCreationTokens;
+        this.currentCodon.codonTokens.cacheReadTokens +=
+          usageDelta.cacheReadTokens;
       }
 
       // Fire cost INCREMENT transition (fire-and-forget)
@@ -1975,10 +2123,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
       this.logger.log(
         `Codon ${codonId} token update - Call cost: $${costDelta.toFixed(
-          4,
+          4
         )}, Running total: $${this.currentCodon?.codonCost.toFixed(4) || 0} ` +
           `(${usageDelta.inputTokens} in, ${usageDelta.outputTokens} out, ` +
-          `${usageDelta.cacheCreationTokens} cache create, ${usageDelta.cacheReadTokens} cache read)`,
+          `${usageDelta.cacheCreationTokens} cache create, ${usageDelta.cacheReadTokens} cache read)`
       );
 
       // Send token.usage event with the delta cost
@@ -2078,11 +2226,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         const fileTools: ToolName[] = ["Read", "Write", "Edit", "MultiEdit"];
         if (fileTools.includes(toolItem.name as ToolName)) {
           // Call async function without awaiting to avoid blocking
-          this.handleFileToolCall(toolItem.name as ToolName, toolItem.input).catch((err) => {
+          this.handleFileToolCall(
+            toolItem.name as ToolName,
+            toolItem.input
+          ).catch((err) => {
             this.handleError(
               toError(err),
               `handleFileToolCall(${toolItem.name})`,
-              ErrorSeverity.OPERATION,
+              ErrorSeverity.OPERATION
             );
           });
         }
@@ -2113,7 +2264,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // Check for API timeout in result (can be error subtype OR success with is_error=true)
     if (msg.result === "API Error: Request timed out." && msg.is_error) {
-      this.logger.log(`API timeout detected in result message for codon ${codonId}`, "error");
+      this.logger.log(
+        `API timeout detected in result message for codon ${codonId}`,
+        "error"
+      );
 
       const timeoutError = new APITimeoutError(codonId, {
         message: msg.result,
@@ -2157,13 +2311,19 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           cacheReadTokens: msg.usage.cache_read_input_tokens || 0,
         };
 
-        const finalCost = msg.total_cost_usd || calculateCost(finalUsage, this.config.costsPerMTok);
+        const finalCost =
+          msg.total_cost_usd ||
+          calculateCost(finalUsage, this.config.costsPerMTok);
 
         const accumulatedCost = this.currentCodon?.codonCost || 0; // Still useful for logging
         if (Math.abs(accumulatedCost - finalCost) > 0.0001) {
           this.logger.log(
-            `Codon ${codonId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(4)}, ` +
-              `Final: $${finalCost.toFixed(4)} (using final from result message)`,
+            `Codon ${codonId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(
+              4
+            )}, ` +
+              `Final: $${finalCost.toFixed(
+                4
+              )} (using final from result message)`
           );
         }
 
@@ -2207,7 +2367,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         if (!toolUse) {
           this.logger.log(
             `Tool result without matching tool use: ${toolResult.tool_use_id}`,
-            "info",
+            "info"
           );
           continue;
         }
@@ -2226,7 +2386,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             .filter((c) => c.type === "text")
             .map((c) => c.text)
             .join("\n");
-        } else if (toolResult.content && typeof toolResult.content === "object") {
+        } else if (
+          toolResult.content &&
+          typeof toolResult.content === "object"
+        ) {
           // Check if it's an error result
           if ("is_error" in toolResult.content) {
             isError = toolResult.content.is_error === true;
@@ -2265,7 +2428,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
   }
 
-  private async handleCodonComplete(exitCode: number, isContextExceeded: boolean): Promise<void> {
+  private async handleCodonComplete(
+    exitCode: number,
+    isContextExceeded: boolean
+  ): Promise<void> {
     // Get the current codon from the in-memory state first
     if (!this.currentCodon) return;
 
@@ -2273,17 +2439,23 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const wasSkipped = this.isSkippingCodon;
 
     // Now get the codon from state manager to ensure we have the latest status
-    const currentCodon = this.stateManager.getCodonInCurrentRun(CodonId(codonId));
+    const currentCodon = this.stateManager.getCodonInCurrentRun(
+      CodonId(codonId)
+    );
     if (!currentCodon || isTerminalCodonStatus(currentCodon.status)) return;
 
     // Get current status before any transitions
     const currentStatus = currentCodon.status;
 
     // Wait for 2x the log parsing interval to ensure log parser catches up with final messages
-    await new Promise((resolve) => setTimeout(resolve, this.config.logParsingInterval * 2));
+    await new Promise((resolve) =>
+      setTimeout(resolve, this.config.logParsingInterval * 2)
+    );
 
     // Re-fetch the specific codon after potential transition to completing
-    const updatedCodon = this.stateManager.getCodonInCurrentRun(CodonId(codonId));
+    const updatedCodon = this.stateManager.getCodonInCurrentRun(
+      CodonId(codonId)
+    );
     if (!updatedCodon) return;
 
     // Codon 2: Transition to completing-sentinels if we have any sentinels
@@ -2335,7 +2507,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     // Codon 2: Capture final sentinel states after completing work
     if (this.currentRunId && sentinelCount > 0) {
       const sentinelStates = this.sentinelManager.getSentinelStates();
-      const totalCost = sentinelStates.reduce((sum, state) => sum + state.totalCost, 0);
+      const totalCost = sentinelStates.reduce(
+        (sum, state) => sum + state.totalCost,
+        0
+      );
 
       this.stateManager.transition({
         type: "SentinelStatesUpdated",
@@ -2347,7 +2522,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         },
       });
 
-      this.logger.log(`Updated final state for ${sentinelStates.length} sentinel(s)`, "debug");
+      this.logger.log(
+        `Updated final state for ${sentinelStates.length} sentinel(s)`,
+        "debug"
+      );
 
       // Wait for this transition to complete before continuing
       await this.stateManager.waitForPendingTransitions();
@@ -2361,12 +2539,15 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         sentinelCostMap[id] = cost;
       }
 
-      const totalSentinelCost = Object.values(sentinelCostMap).reduce((a, b) => a + b, 0);
+      const totalSentinelCost = Object.values(sentinelCostMap).reduce(
+        (a, b) => a + b,
+        0
+      );
       this.logger.log(
         `Sentinel costs: ${JSON.stringify(
-          sentinelCostMap,
+          sentinelCostMap
         )} (total: $${totalSentinelCost.toFixed(6)})`,
-        "info",
+        "info"
       );
     }
 
@@ -2378,7 +2559,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       finalStatus = "failed";
     } else if (exitCode === 0 && this.resultMessageReceived) {
       finalStatus = "completed"; // Result message with exit 0 = completed
-    } else if (isContextExceeded && this.stateManager.isContextExceededAcceptable(codonId)) {
+    } else if (
+      isContextExceeded &&
+      this.stateManager.isContextExceededAcceptable(codonId)
+    ) {
       // Context exceeded in a loop that terminates on context exceeded = completed
       finalStatus = "completed";
 
@@ -2408,8 +2592,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           finalStatus === "completed"
             ? "completed"
             : finalStatus === "skipped"
-              ? "skipped"
-              : "error";
+            ? "skipped"
+            : "error";
 
         const commitInfo = await this.createCheckpoint({
           status: checkpointType,
@@ -2438,7 +2622,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // Re-fetch codon status after completing-sentinels transition (if it happened)
     const codonBeforeFinalTransition =
-      sentinelCount > 0 ? this.stateManager.getCodonInCurrentRun(CodonId(codonId)) : updatedCodon;
+      sentinelCount > 0
+        ? this.stateManager.getCodonInCurrentRun(CodonId(codonId))
+        : updatedCodon;
 
     // Final transition (fire-and-forget)
     if (this.currentRunId && codonBeforeFinalTransition) {
@@ -2473,14 +2659,19 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     await this.stateManager.waitForPendingTransitions();
 
     // Get the final persisted state for the codon
-    const finalCodonState = this.stateManager.getCodonInCurrentRun(CodonId(codonId));
+    const finalCodonState = this.stateManager.getCodonInCurrentRun(
+      CodonId(codonId)
+    );
 
     // Authoritatively get the cost from the final state object
     let finalCost = 0;
     if (finalCodonState) {
       if (finalCodonState.status === "completed") {
         finalCost = finalCodonState.finalCost;
-      } else if (finalCodonState.status === "failed" || finalCodonState.status === "skipped") {
+      } else if (
+        finalCodonState.status === "failed" ||
+        finalCodonState.status === "skipped"
+      ) {
         finalCost = finalCodonState.partialCost;
       }
     }
@@ -2501,9 +2692,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           finalStatus === "skipped"
             ? { type: "error", code: exitCode }
             : exitCode === 0
-              ? { type: "success" }
-              : { type: "error", code: exitCode },
-        failureReason: finalStatus === "failed" ? this.codonFailureReason : undefined,
+            ? { type: "success" }
+            : { type: "error", code: exitCode },
+        failureReason:
+          finalStatus === "failed" ? this.codonFailureReason : undefined,
       },
     } as CodonCompletedEvent);
 
@@ -2511,21 +2703,26 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     await this.sendStateSnapshot();
 
     if (finalStatus === "completed" && this.currentCodon.codon.outputFiles) {
-      for (const [groupIndex, outItem] of this.currentCodon.codon.outputFiles.entries()) {
+      for (const [
+        groupIndex,
+        outItem,
+      ] of this.currentCodon.codon.outputFiles.entries()) {
         let beforeCopySuccess = false;
         try {
           if (outItem.beforeCopy && outItem.beforeCopy.length > 0) {
             this.logger.log(
-              `Running ${outItem.beforeCopy.length} beforeCopy command(s) for codon ${
+              `Running ${
+                outItem.beforeCopy.length
+              } beforeCopy command(s) for codon ${
                 this.currentCodon.codon.id
-              } (group ${groupIndex + 1})`,
+              } (group ${groupIndex + 1})`
             );
 
             for (const [index, command] of outItem.beforeCopy.entries()) {
               this.logger.log(
                 `Running beforeCopy command ${index + 1}/${
                   outItem.beforeCopy.length
-                }: ${command.command.run}`,
+                }: ${command.command.run}`
               );
               await this.runCommand(command);
             }
@@ -2533,7 +2730,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             this.logger.log(
               `Completed all beforeCopy commands for codon ${
                 this.currentCodon.codon.id
-              } (group ${groupIndex + 1})`,
+              } (group ${groupIndex + 1})`
             );
           }
 
@@ -2543,12 +2740,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             this.config.executionPath,
             outItem.copy,
             path.join(this.config.cwd, this.config.outputDirectory),
-            this.logger,
+            this.logger
           );
         } catch (error) {
           await this.handleError(
             new Error(`Copy group ${groupIndex} failed with: ${String(error)}`),
-            beforeCopySuccess ? "codonOutputCopyFiles" : "codonOutputBeforeCopy",
+            beforeCopySuccess ? "codonOutputCopyFiles" : "codonOutputBeforeCopy"
           );
           // Continue to next output group
         }
@@ -2568,7 +2765,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.cleanupCurrentCodon();
 
     // Handle next steps
-    if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
+    if (
+      (finalStatus === "completed" || finalStatus === "skipped") &&
+      !this.isShuttingDown
+    ) {
       if (this.config.autostart) {
         await this.autoStartNextCodon();
       } else {
@@ -2585,7 +2785,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
     } else if (finalStatus === "failed" && !this.isShuttingDown) {
       if (this.codonFailureReason?.retriable) {
-        this.logger.log(`Codon failed with retriable error. Server remains active.`);
+        this.logger.log(
+          `Codon failed with retriable error. Server remains active.`
+        );
       } else {
         // Non-retriable failure - shut down run
         if (this.currentRunId) {
@@ -2607,7 +2809,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async handleFileToolCall<T extends ToolName>(
     toolName: T,
-    toolInput: Record<string, unknown> | undefined,
+    toolInput: Record<string, unknown> | undefined
   ): Promise<void> {
     if (this.watchedPatterns.length === 0) return;
 
@@ -2673,7 +2875,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         try {
           content = fs.readFileSync(fullPath, "utf-8");
         } catch (error) {
-          this.logger.log(`Error reading file ${filePath}: ${toError(error).message}`, "error");
+          this.logger.log(
+            `Error reading file ${filePath}: ${toError(error).message}`,
+            "error"
+          );
           return;
         }
       }
@@ -2708,7 +2913,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // Build file tree for all watched patterns
     const allTrees = await Promise.all(
-      this.watchedPatterns.map((pattern) => buildFileTree(this.config.executionPath, pattern)),
+      this.watchedPatterns.map((pattern) =>
+        buildFileTree(this.config.executionPath, pattern)
+      )
     );
 
     // Merge all trees into one
@@ -2732,12 +2939,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   private async handleError(
     error: Error,
     context: string,
-    severity: ErrorSeverity = ErrorSeverity.OPERATION,
+    severity: ErrorSeverity = ErrorSeverity.OPERATION
   ): Promise<void> {
     // Always log
     this.logger.log(
       `[${severity}] ${context}: ${error.message}`,
-      severity === ErrorSeverity.FATAL ? "error" : "info",
+      severity === ErrorSeverity.FATAL ? "error" : "info"
     );
 
     // Always send to client
@@ -2777,16 +2984,20 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const thread = await this.stateManager.getExecutionThread();
 
     this.logger.log(
-      `[autoStartNextCodon] Called - hasRunningCodon: ${thread.hasRunningCodon}, isShuttingDown: ${this.isShuttingDown}`,
+      `[autoStartNextCodon] Called - hasRunningCodon: ${thread.hasRunningCodon}, isShuttingDown: ${this.isShuttingDown}`
     );
 
     if (thread.hasRunningCodon || this.isShuttingDown) {
-      this.logger.log(`[autoStartNextCodon] Returning early - codon running or shutting down`);
+      this.logger.log(
+        `[autoStartNextCodon] Returning early - codon running or shutting down`
+      );
       return; // Codon already running or shutting down
     }
 
     const nextCodonId = thread.nextCodonId;
-    this.logger.log(`[autoStartNextCodon] ExecutionThread returned nextCodonId: ${nextCodonId}`);
+    this.logger.log(
+      `[autoStartNextCodon] ExecutionThread returned nextCodonId: ${nextCodonId}`
+    );
 
     if (!nextCodonId) {
       this.logger.log("[autoStartNextCodon] No more codons to run");
@@ -2831,7 +3042,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       await this.handleError(
         new Error("Cannot start next codon while current codon is running"),
         "startNextCodon",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -2839,13 +3050,15 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const nextCodonId = thread.nextCodonId;
 
     if (nextCodonId) {
-      this.logger.log(`[startNextCodon] Advancing to next codon: ${nextCodonId}`);
+      this.logger.log(
+        `[startNextCodon] Advancing to next codon: ${nextCodonId}`
+      );
       await this.startCodon(nextCodonId);
     } else {
       await this.handleError(
         new Error("No more codons to run"),
         "startNextCodon",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
     }
   }
@@ -2855,7 +3068,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       await this.handleError(
         new Error("No codon is currently running"),
         "skipCurrentCodon",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -2875,7 +3088,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       await this.handleError(
         new Error("Cannot redo while codon is running"),
         "redoCurrentCodon",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
       return;
     }
@@ -2883,13 +3096,15 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     if (thread.codons.length > 0) {
       // Redo the most recently executed codon, whatever its status
       const lastAttemptedCodon = thread.codons[0];
-      this.logger.log(`[redoCurrentCodon] Redoing last codon: ${lastAttemptedCodon.codon.codonId}`);
+      this.logger.log(
+        `[redoCurrentCodon] Redoing last codon: ${lastAttemptedCodon.codon.codonId}`
+      );
       await this.startCodon(lastAttemptedCodon.codon.codonId);
     } else {
       await this.handleError(
         new Error("No codon has been run yet to redo."),
         "redoCurrentCodon",
-        ErrorSeverity.OPERATION,
+        ErrorSeverity.OPERATION
       );
     }
   }
@@ -2918,7 +3133,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const checkpoints: import("./types/types.js").CheckpointQueryInfo[] = [];
 
     for (const codon of targetRun.codons) {
-      const codonConfig = this.config.codons.find((p) => p.id === codon.codonId);
+      const codonConfig = this.config.codons.find(
+        (p) => p.id === codon.codonId
+      );
       const codonName = codonConfig?.name || codon.codonId;
 
       // Rig setup checkpoint
@@ -2946,7 +3163,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
 
       // Error checkpoint
-      if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
+      if (
+        codon.status === "failed" &&
+        "errorCheckpoint" in codon &&
+        codon.errorCheckpoint
+      ) {
         checkpoints.push({
           codonId: codon.codonId,
           codonName,
@@ -2958,7 +3179,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
 
       // Skip checkpoint
-      if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
+      if (
+        codon.status === "skipped" &&
+        "skipCheckpoint" in codon &&
+        codon.skipCheckpoint
+      ) {
         checkpoints.push({
           codonId: codon.codonId,
           codonName,
@@ -3000,7 +3225,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       return;
     }
 
-    this.logger.log(`Force stopping codon ${currentCodon.codonId}: ${reason || "user request"}`);
+    this.logger.log(
+      `Force stopping codon ${currentCodon.codonId}: ${
+        reason || "user request"
+      }`
+    );
 
     // Set the force stopping flag
     this.isForceStopping = true;
@@ -3052,7 +3281,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   /**
    * Rollback to a specific checkpoint SHA (supports partial matching)
    */
-  private async rollbackToCheckpoint(sha: string, autoRestart: boolean): Promise<void> {
+  private async rollbackToCheckpoint(
+    sha: string,
+    autoRestart: boolean
+  ): Promise<void> {
     // Check if codon is running
     const currentCodon = this.stateManager.getCurrentlyRunningCodon();
     if (currentCodon && !isTerminalCodonStatus(currentCodon.status)) {
@@ -3061,7 +3293,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message: "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
+          message:
+            "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
           codon: currentCodon.codonId,
           fatal: false,
         },
@@ -3075,7 +3308,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       state,
       undefined, // No checkpoint validation needed for search
       undefined, // Use latest run
-      this.logger,
+      this.logger
     );
 
     // Find all matching checkpoints across the thread
@@ -3114,7 +3347,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
 
       // Check error checkpoint
-      if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
+      if (
+        codon.status === "failed" &&
+        "errorCheckpoint" in codon &&
+        codon.errorCheckpoint
+      ) {
         if (codon.errorCheckpoint.startsWith(sha)) {
           matches.push({
             threadCodon,
@@ -3126,7 +3363,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
 
       // Check skip checkpoint
-      if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
+      if (
+        codon.status === "skipped" &&
+        "skipCheckpoint" in codon &&
+        codon.skipCheckpoint
+      ) {
         if (codon.skipCheckpoint.startsWith(sha)) {
           matches.push({
             threadCodon,
@@ -3156,7 +3397,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Ambiguous SHA - provide helpful error message
       const matchDetails = matches
         .map((m) => {
-          const codonConfig = this.config.codons.find((p) => p.id === m.threadCodon.codon.codonId);
+          const codonConfig = this.config.codons.find(
+            (p) => p.id === m.threadCodon.codon.codonId
+          );
           const codonName = codonConfig?.name || m.threadCodon.codon.codonId;
           return `  - ${m.fullSha.substring(0, 7)}... (${codonName} - ${
             m.checkpointType
@@ -3183,7 +3426,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       match.codonIndex,
       match.fullSha,
       match.checkpointType,
-      autoRestart,
+      autoRestart
     );
   }
 
@@ -3192,8 +3435,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
    */
   private async rollbackToCodon(
     codonId: CodonId,
-    checkpointType: "start" | "end" | "rig-setup" | "completed" | "error" | "skipped",
-    autoRestart: boolean,
+    checkpointType:
+      | "start"
+      | "end"
+      | "rig-setup"
+      | "completed"
+      | "error"
+      | "skipped",
+    autoRestart: boolean
   ): Promise<void> {
     // Check if codon is running
     const currentCodon = this.stateManager.getCurrentlyRunningCodon();
@@ -3203,7 +3452,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message: "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
+          message:
+            "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
           codon: currentCodon.codonId,
           fatal: false,
         },
@@ -3217,11 +3467,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       state,
       undefined, // No checkpoint validation needed for search
       undefined, // Use latest run
-      this.logger,
+      this.logger
     );
 
     // Find the codon in the thread
-    let targetThreadCodon: import("./execution-thread.js").ThreadCodon | null = null;
+    let targetThreadCodon: import("./execution-thread.js").ThreadCodon | null =
+      null;
     let targetCodonIndex = -1;
 
     for (let i = 0; i < thread.codons.length; i++) {
@@ -3248,15 +3499,26 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const targetCodon = targetThreadCodon.codon;
 
     // Resolve checkpoint type aliases
-    let actualCheckpointType: "rig-setup" | "completed" | "error" | "skipped" | undefined;
+    let actualCheckpointType:
+      | "rig-setup"
+      | "completed"
+      | "error"
+      | "skipped"
+      | undefined;
     let sha: string | null = null;
 
     if (checkpointType === "start") {
       // Find first checkpoint in codon
-      if ("rigSetupCheckpoint" in targetCodon && targetCodon.rigSetupCheckpoint) {
+      if (
+        "rigSetupCheckpoint" in targetCodon &&
+        targetCodon.rigSetupCheckpoint
+      ) {
         sha = targetCodon.rigSetupCheckpoint;
         actualCheckpointType = "rig-setup";
-      } else if (targetCodon.status === "completed" && targetCodon.completionCheckpoint) {
+      } else if (
+        targetCodon.status === "completed" &&
+        targetCodon.completionCheckpoint
+      ) {
         sha = targetCodon.completionCheckpoint;
         actualCheckpointType = "completed";
       } else if (
@@ -3276,7 +3538,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
     } else if (checkpointType === "end") {
       // Find last checkpoint in codon based on status
-      if (targetCodon.status === "completed" && targetCodon.completionCheckpoint) {
+      if (
+        targetCodon.status === "completed" &&
+        targetCodon.completionCheckpoint
+      ) {
         sha = targetCodon.completionCheckpoint;
         actualCheckpointType = "completed";
       } else if (
@@ -3293,21 +3558,34 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       ) {
         sha = targetCodon.skipCheckpoint;
         actualCheckpointType = "skipped";
-      } else if ("rigSetupCheckpoint" in targetCodon && targetCodon.rigSetupCheckpoint) {
+      } else if (
+        "rigSetupCheckpoint" in targetCodon &&
+        targetCodon.rigSetupCheckpoint
+      ) {
         // Fallback to rig setup if no end checkpoint
         sha = targetCodon.rigSetupCheckpoint;
         actualCheckpointType = "rig-setup";
       }
     } else {
       // Direct checkpoint type specified
-      actualCheckpointType = checkpointType as "rig-setup" | "completed" | "error" | "skipped";
+      actualCheckpointType = checkpointType as
+        | "rig-setup"
+        | "completed"
+        | "error"
+        | "skipped";
 
       switch (checkpointType) {
         case "rig-setup":
-          sha = "rigSetupCheckpoint" in targetCodon ? targetCodon.rigSetupCheckpoint || null : null;
+          sha =
+            "rigSetupCheckpoint" in targetCodon
+              ? targetCodon.rigSetupCheckpoint || null
+              : null;
           break;
         case "completed":
-          sha = targetCodon.status === "completed" ? targetCodon.completionCheckpoint : null;
+          sha =
+            targetCodon.status === "completed"
+              ? targetCodon.completionCheckpoint
+              : null;
           break;
         case "error":
           sha =
@@ -3337,7 +3615,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       return;
     }
 
-    await this.executeRollback(thread, targetCodonIndex, sha, actualCheckpointType, autoRestart);
+    await this.executeRollback(
+      thread,
+      targetCodonIndex,
+      sha,
+      actualCheckpointType,
+      autoRestart
+    );
   }
 
   /**
@@ -3352,7 +3636,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message: "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
+          message:
+            "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
           codon: currentCodon.codonId,
           fatal: false,
         },
@@ -3366,7 +3651,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       state,
       undefined, // No checkpoint validation needed for search
       undefined, // Use latest run
-      this.logger,
+      this.logger
     );
 
     // Find last completed codon in the thread
@@ -3383,8 +3668,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       if (lastCompleted.codon.status === "completed") {
         this.logger.log(
           `Found last successfully completed thread codon to rollback to: ${JSON.stringify(
-            lastCompleted,
-          )}`,
+            lastCompleted
+          )}`
         );
 
         // Rollback to last successful codon
@@ -3393,14 +3678,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           lastCompletedIndex,
           lastCompleted.codon.completionCheckpoint,
           "completed",
-          autoRestart,
+          autoRestart
         );
         return;
       }
     }
 
     this.logger.log(
-      "Did not find any successful codon to rollback to. Going to look for a checkpoint in the thread.",
+      "Did not find any successful codon to rollback to. Going to look for a checkpoint in the thread."
     );
 
     // No successful codons - find the first checkpoint in the thread
@@ -3421,13 +3706,23 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         firstCheckpointIndex = i;
         firstCheckpointSha = codon.completionCheckpoint;
         firstCheckpointType = "completed";
-        this.logger.log(`Found completion checkpoint in codon ${codon.codonId}`);
-      } else if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
+        this.logger.log(
+          `Found completion checkpoint in codon ${codon.codonId}`
+        );
+      } else if (
+        codon.status === "failed" &&
+        "errorCheckpoint" in codon &&
+        codon.errorCheckpoint
+      ) {
         firstCheckpointIndex = i;
         firstCheckpointSha = codon.errorCheckpoint;
         firstCheckpointType = "error";
         this.logger.log(`Found error checkpoint in codon ${codon.codonId}`);
-      } else if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
+      } else if (
+        codon.status === "skipped" &&
+        "skipCheckpoint" in codon &&
+        codon.skipCheckpoint
+      ) {
         firstCheckpointIndex = i;
         firstCheckpointSha = codon.skipCheckpoint;
         firstCheckpointType = "skipped";
@@ -3435,13 +3730,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
     }
 
-    if (firstCheckpointIndex >= 0 && firstCheckpointSha && firstCheckpointType) {
+    if (
+      firstCheckpointIndex >= 0 &&
+      firstCheckpointSha &&
+      firstCheckpointType
+    ) {
       await this.executeRollback(
         thread,
         firstCheckpointIndex,
         firstCheckpointSha,
         firstCheckpointType,
-        autoRestart,
+        autoRestart
       );
     } else {
       this.logger.log("No checkpoints found in execution history", "error");
@@ -3465,19 +3764,21 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     targetCodonIndex: number,
     sha: string,
     checkpointType: string,
-    autoRestart: boolean,
+    autoRestart: boolean
   ): Promise<void> {
     const targetThreadCodon = thread.codons[targetCodonIndex];
     if (!targetThreadCodon) {
       throw new Error(`Invalid target codon index: ${targetCodonIndex}`);
     }
 
-    const codonConfig = this.config.codons.find((p) => p.id === targetThreadCodon.codon.codonId);
+    const codonConfig = this.config.codons.find(
+      (p) => p.id === targetThreadCodon.codon.codonId
+    );
     const codonName = codonConfig?.name || targetThreadCodon.codon.codonId;
 
     this.logger.log(
       `Starting codon-by-codon rollback to ${checkpointType} checkpoint ${sha} ` +
-        `in codon ${targetThreadCodon.codon.codonId} (${codonName})`,
+        `in codon ${targetThreadCodon.codon.codonId} (${codonName})`
     );
 
     // Set the rollback flag
@@ -3491,7 +3792,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       sha,
       checkpointType,
       codonName,
-      autoRestart,
+      autoRestart
     ).finally(() => {
       this.isRollingBack = false;
     });
@@ -3506,7 +3807,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     targetSha: string,
     checkpointType: string,
     targetCodonName: string,
-    autoRestart: boolean,
+    autoRestart: boolean
   ): Promise<void> {
     // 1. Clean up current codon state
     this.cleanupCurrentCodon();
@@ -3522,7 +3823,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // 3. Emit rollback started event
     const fromRun = thread.codons[0]?.runId || targetThreadCodon.runId;
-    const fromCodon = thread.codons[0]?.codon.codonId || targetThreadCodon.codon.codonId;
+    const fromCodon =
+      thread.codons[0]?.codon.codonId || targetThreadCodon.codon.codonId;
 
     this.emit("event", {
       id: EventId(generateId()),
@@ -3564,7 +3866,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         await this.checkpointGit.resetToCheckpoint(checkpoint.sha);
 
         // Emit checkpoint event
-        const codonConfig = this.config.codons.find((p) => p.id === threadCodon.codon.codonId);
+        const codonConfig = this.config.codons.find(
+          (p) => p.id === threadCodon.codon.codonId
+        );
         this.emit("event", {
           id: EventId(generateId()),
           timestamp: new Date().toISOString(),
@@ -3626,7 +3930,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     await this.stateManager.waitForPendingTransitions();
 
     // 8. Start new continuation run
-    const afterCodon = checkpointType === "rig-setup" ? null : targetThreadCodon.codon.codonId;
+    const afterCodon =
+      checkpointType === "rig-setup" ? null : targetThreadCodon.codon.codonId;
 
     await this.startNewRun({
       type: "continuation",
@@ -3640,11 +3945,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // 9. Restore checkpoint patterns
     const targetCodonConfigIndex = this.config.codons.findIndex(
-      (p) => p.id === targetThreadCodon.codon.codonId,
+      (p) => p.id === targetThreadCodon.codon.codonId
     );
     if (targetCodonConfigIndex >= 0) {
       const includeTarget = checkpointType === "rig-setup";
-      const maxIndex = includeTarget ? targetCodonConfigIndex : targetCodonConfigIndex - 1;
+      const maxIndex = includeTarget
+        ? targetCodonConfigIndex
+        : targetCodonConfigIndex - 1;
 
       for (let i = 0; i <= maxIndex; i++) {
         const codonConfig = this.config.codons[i];
@@ -3695,15 +4002,25 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   /**
    * Get the last checkpoint for a codon
    */
-  private getLastCheckpointForCodon(codon: CodonExecution): { sha: string; type: string } | null {
+  private getLastCheckpointForCodon(
+    codon: CodonExecution
+  ): { sha: string; type: string } | null {
     // Priority: completed > error > skipped > rig-setup
     if (codon.status === "completed" && codon.completionCheckpoint) {
       return { sha: codon.completionCheckpoint, type: "completed" };
     }
-    if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
+    if (
+      codon.status === "failed" &&
+      "errorCheckpoint" in codon &&
+      codon.errorCheckpoint
+    ) {
       return { sha: codon.errorCheckpoint, type: "error" };
     }
-    if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
+    if (
+      codon.status === "skipped" &&
+      "skipCheckpoint" in codon &&
+      codon.skipCheckpoint
+    ) {
       return { sha: codon.skipCheckpoint, type: "skipped" };
     }
     if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
@@ -3738,7 +4055,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   /**
    * Clean up rig directories created by a codon
    */
-  private async cleanupCodonRigDirectories(codon: CodonExecution): Promise<void> {
+  private async cleanupCodonRigDirectories(
+    codon: CodonExecution
+  ): Promise<void> {
     const directories = this.getRigSetupDirectories(codon.codonId);
     if (directories.length === 0) return;
 
@@ -3775,7 +4094,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         }
       } catch (error) {
         const errorMessage = toError(error).message;
-        this.logger.log(`Failed to remove rig directory ${dir}: ${errorMessage}`, "error");
+        this.logger.log(
+          `Failed to remove rig directory ${dir}: ${errorMessage}`,
+          "error"
+        );
         failedCleanups.push({ directory: dir, error: errorMessage });
       }
     }
@@ -3795,7 +4117,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           status,
           successfulCleanups,
           failedCleanups,
-          error: failedCleanups.map((f) => `${f.directory}: ${f.error}`).join(", "),
+          error: failedCleanups
+            .map((f) => `${f.directory}: ${f.error}`)
+            .join(", "),
         },
       } as import("./types/types.js").RollbackRigCleanupEvent);
     } else {
@@ -3828,7 +4152,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
    */
   private async loadSentinelsForCodon(
     codon: Codon,
-    runtimeCodonId: CodonId,
+    runtimeCodonId: CodonId
   ): Promise<{
     loaded: string[];
     errors: { ref: string; error: string; fatal: boolean }[];
@@ -3842,7 +4166,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     this.logger.log(
       `Loading ${codon.sentinels.length} sentinel config(s) for codon ${runtimeCodonId}`,
-      "info",
+      "info"
     );
 
     // Use config loader to parse and validate
@@ -3853,11 +4177,14 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const loadResult = this.sentinelConfigLoader.loadConfigsForCodon(
       codon.sentinels,
       codon.id,
-      codonConfigDir,
+      codonConfigDir
     );
 
     if (loadResult.errors.length > 0) {
-      this.logger.log(`${loadResult.errors.length} sentinel config(s) failed to load`, "info");
+      this.logger.log(
+        `${loadResult.errors.length} sentinel config(s) failed to load`,
+        "info"
+      );
     }
 
     if (loadResult.configs.length === 0) {
@@ -3872,12 +4199,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         const config = lc.config;
 
         // Merge reportToWebsocket settings (codon overrides sentinel)
-        if (lc.config.reportToWebsocket || lc.outputPaths || lc.failCodonIfNotLoaded) {
+        if (
+          lc.config.reportToWebsocket ||
+          lc.outputPaths ||
+          lc.failCodonIfNotLoaded
+        ) {
           // Create a merged config with codon-level reportToWebsocket override
           const codonReportSettings = codon.sentinels?.find(
             (entry) =>
-              (typeof entry.sentinelConfig === "object" && entry.sentinelConfig.id === config.id) ||
-              typeof entry.sentinelConfig === "string",
+              (typeof entry.sentinelConfig === "object" &&
+                entry.sentinelConfig.id === config.id) ||
+              typeof entry.sentinelConfig === "string"
           )?.settings?.reportToWebsocket;
 
           if (codonReportSettings) {
@@ -3900,7 +4232,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       const configDirs = loadResult.configs.map((lc) => lc.configDirectory);
 
       // Build output paths map from codon-level settings
-      const outputPathsMap = new Map<string, { logFile?: string; lastValueFile?: string }>();
+      const outputPathsMap = new Map<
+        string,
+        { logFile?: string; lastValueFile?: string }
+      >();
       for (const lc of loadResult.configs) {
         if (lc.outputPaths) {
           outputPathsMap.set(lc.config.id, lc.outputPaths);
@@ -3908,14 +4243,18 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
 
       // SentinelManager internally unloads previous codon's sentinels
-      await this.sentinelManager.loadSentinelsForCodon(configs, runtimeCodonId, {
-        configDirectory: configDirs[0],
-        runStartTime: new Date(),
-        executionPath: this.config.executionPath,
-        outputPathsMap: outputPathsMap.size > 0 ? outputPathsMap : undefined,
-        // Note: llmCallOverride and llmObjectCallOverride are only used in tests
-        // In production, SentinelManager uses its own provider registry
-      });
+      await this.sentinelManager.loadSentinelsForCodon(
+        configs,
+        runtimeCodonId,
+        {
+          configDirectory: configDirs[0],
+          runStartTime: new Date(),
+          executionPath: this.config.executionPath,
+          outputPathsMap: outputPathsMap.size > 0 ? outputPathsMap : undefined,
+          // Note: llmCallOverride and llmObjectCallOverride are only used in tests
+          // In production, SentinelManager uses its own provider registry
+        }
+      );
 
       // Track loaded sentinel IDs
       this.currentCodonSentinels.clear();
@@ -3923,7 +4262,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         this.currentCodonSentinels.add(config.id);
       }
 
-      this.logger.log(`Successfully loaded ${configs.length} sentinel instance(s)`, "info");
+      this.logger.log(
+        `Successfully loaded ${configs.length} sentinel instance(s)`,
+        "info"
+      );
 
       // Codon 2: Emit sentinel.loaded events
       for (const loadedConfig of loadResult.configs) {
@@ -3948,7 +4290,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Codon 2: Capture initial sentinel states in codon state
       if (this.currentRunId && configs.length > 0) {
         const sentinelStates = this.sentinelManager.getSentinelStates();
-        const totalCost = sentinelStates.reduce((sum, state) => sum + state.totalCost, 0);
+        const totalCost = sentinelStates.reduce(
+          (sum, state) => sum + state.totalCost,
+          0
+        );
 
         this.stateManager.transition({
           type: "SentinelStatesUpdated",
@@ -3960,7 +4305,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           },
         });
 
-        this.logger.log(`Captured initial state for ${sentinelStates.length} sentinel(s)`, "debug");
+        this.logger.log(
+          `Captured initial state for ${sentinelStates.length} sentinel(s)`,
+          "debug"
+        );
       }
 
       return {
@@ -3971,7 +4319,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       const errorMsg = `Failed to instantiate sentinels in SentinelManager: ${error}`;
 
       // Treat as fatal if all loaded configs had failCodonIfNotLoaded=true
-      const allRequired = loadResult.configs.every((lc) => lc.failCodonIfNotLoaded);
+      const allRequired = loadResult.configs.every(
+        (lc) => lc.failCodonIfNotLoaded
+      );
 
       return {
         loaded: [],
@@ -4001,7 +4351,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Ensure log stream is closed
       this.processManager
         .closeLogStream()
-        .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
+        .catch((err) =>
+          this.logger.log(`Error closing log stream: ${err}`, "error")
+        );
       this.processManager = undefined;
     }
 
@@ -4019,7 +4371,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async runCommand(
     shellCommand: ShellCommand | RigShellCommand | string,
-    lastCopiedPath?: string,
+    lastCopiedPath?: string
   ): Promise<void> {
     // Handle working directory resolution
     let workingDir: string;
@@ -4073,7 +4425,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     const targetParent = path.dirname(to);
     const parentStats = await fs.promises.stat(targetParent).catch(() => null);
     if (!parentStats || !parentStats.isDirectory()) {
-      throw new Error(`Target parent directory does not exist: ${targetParent}`);
+      throw new Error(
+        `Target parent directory does not exist: ${targetParent}`
+      );
     }
 
     // Check if target already exists
@@ -4083,7 +4437,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Copy using cp command with recursive flag
-    await this.runCommand(`cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`);
+    await this.runCommand(
+      `cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`
+    );
   }
 
   // -------------
@@ -4102,7 +4458,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Initialize checkpoint git
-    this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
+    this.checkpointGit = new CheckpointGit(
+      this.config.executionPath,
+      this.logger
+    );
     await this.checkpointGit.initialize();
 
     // Provide checkpoint git to state manager for git operations
@@ -4133,7 +4492,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // Initialize repository on first tracked patterns
     if (!this.checkpointGit) {
-      this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
+      this.checkpointGit = new CheckpointGit(
+        this.config.executionPath,
+        this.logger
+      );
       await this.checkpointGit.initialize();
     }
 
@@ -4145,20 +4507,24 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   /**
    * Create a checkpoint commit
    */
-  private async createCheckpoint(info: CheckpointInfo): Promise<string | undefined> {
+  private async createCheckpoint(
+    info: CheckpointInfo
+  ): Promise<string | undefined> {
     if (!this.checkpointingEnabled || !this.checkpointGit) {
       this.logger.log(
         `[CHECKPOINT-DEBUG] Checkpoint creation skipped - enabled: ${
           this.checkpointingEnabled
-        }, git: ${!!this.checkpointGit}`,
+        }, git: ${!!this.checkpointGit}`
       );
       return;
     }
 
     this.logger.log(
-      `[CHECKPOINT-DEBUG] Creating checkpoint for codon ${info.codonId} with status ${info.status}`,
+      `[CHECKPOINT-DEBUG] Creating checkpoint for codon ${info.codonId} with status ${info.status}`
     );
-    this.logger.log(`[CHECKPOINT-DEBUG] Checkpoint info: ${JSON.stringify(info)}`);
+    this.logger.log(
+      `[CHECKPOINT-DEBUG] Checkpoint info: ${JSON.stringify(info)}`
+    );
 
     try {
       // Format commit message
@@ -4186,11 +4552,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       await this.checkpointGit.switchToBranch(branchName);
       const commitHash = await this.checkpointGit.commit(commitMessage);
 
-      this.logger.log(`[CHECKPOINT-DEBUG] Checkpoint commit returned: ${commitHash}`);
+      this.logger.log(
+        `[CHECKPOINT-DEBUG] Checkpoint commit returned: ${commitHash}`
+      );
 
       if (commitHash) {
         this.logger.log(
-          `[CHECKPOINT-DEBUG] Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`,
+          `[CHECKPOINT-DEBUG] Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`
         );
 
         // Fire checkpoint created transition to store SHA in state
@@ -4198,13 +4566,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           info.status === "rig-setup"
             ? "rig-setup"
             : info.status === "completed"
-              ? "completed"
-              : info.status === "error"
-                ? "error"
-                : "skipped";
+            ? "completed"
+            : info.status === "error"
+            ? "error"
+            : "skipped";
 
         this.logger.log(
-          `[CHECKPOINT-DEBUG] Firing CheckpointCreated transition with type: ${checkpointType}`,
+          `[CHECKPOINT-DEBUG] Firing CheckpointCreated transition with type: ${checkpointType}`
         );
 
         if (this.currentRunId) {
@@ -4222,14 +4590,16 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
         return commitHash;
       } else {
-        this.logger.log(`[CHECKPOINT-DEBUG] No commit hash returned from checkpoint.commit()`);
+        this.logger.log(
+          `[CHECKPOINT-DEBUG] No commit hash returned from checkpoint.commit()`
+        );
       }
     } catch (error) {
       // Handle disk full or other git errors
       this.logger.log(
         `[CHECKPOINT-DEBUG] Checkpoint failed: ${toError(error).message}. ` +
           "Disabling checkpointing for this session.",
-        "error",
+        "error"
       );
       this.checkpointingEnabled = false;
     }
@@ -4264,7 +4634,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.isShuttingDown = true;
 
     // Create exit checkpoint if not shutting down normally (all codons completed)
-    if (reason !== "all codons completed" && this.checkpointingEnabled && this.currentCodon) {
+    if (
+      reason !== "all codons completed" &&
+      this.checkpointingEnabled &&
+      this.currentCodon
+    ) {
       await this.createCheckpoint({
         status: "exit",
         codonId: CodonId(this.currentCodon.codon.id),
