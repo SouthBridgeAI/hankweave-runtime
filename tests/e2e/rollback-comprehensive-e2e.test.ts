@@ -1319,13 +1319,16 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
     });
 
-    test("6.3 Checkpoint Ordering: Chronological", () => {
+    test("6.3 Checkpoint Ordering: Reverse Chronological (newest first)", () => {
+      // Checkpoints are returned in reverse chronological order (newest first)
+      // for better UX - users typically want to rollback to recent checkpoints
       for (const snapshot of testSnapshots) {
         if (snapshot.checkpoints.length > 1) {
           for (let i = 1; i < snapshot.checkpoints.length; i++) {
             const prev = new Date(snapshot.checkpoints[i - 1].timestamp);
             const curr = new Date(snapshot.checkpoints[i].timestamp);
-            expect(curr.getTime()).toBeGreaterThanOrEqual(prev.getTime());
+            // Each checkpoint should be older than or equal to the previous one (descending order)
+            expect(curr.getTime()).toBeLessThanOrEqual(prev.getTime());
           }
         }
       }

@@ -506,7 +506,55 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     if (!thread?.failed && !this.currentRunId) {
       // Start a new run if needed
-      await this.startNewRun();
+      // Check if there's an existing execution thread with completed codons
+      // If so, create a continuation run instead of a fresh run
+      let lastCompletedCodon = thread?.codons.find((tc) => tc.codon.status === "completed");
+
+      // If the thread is empty (e.g., latest run is an empty fresh run),
+      // search directly through state runs to find the last completed codon
+      if (!lastCompletedCodon && thread?.codons.length === 0) {
+        const state = this.stateManager.getState();
+        for (const run of state.runs) {
+          // Skip empty runs
+          if (run.codons.length === 0) continue;
+
+          // Find the last completed codon in this run (codons are in chronological order)
+          for (let i = run.codons.length - 1; i >= 0; i--) {
+            const codon = run.codons[i];
+            if (codon.status === "completed" && codon.completionCheckpoint) {
+              this.logger.log(
+                `Thread was empty, found last completed codon by searching state: ${codon.codonId} in run ${run.runId}`,
+              );
+              // Create a minimal structure to use below
+              lastCompletedCodon = {
+                codon: codon,
+                runId: run.runId,
+              } as import("./execution-thread.js").ThreadCodon;
+              break;
+            }
+          }
+          if (lastCompletedCodon) break;
+        }
+      }
+
+      if (lastCompletedCodon && lastCompletedCodon.codon.status === "completed") {
+        // Create continuation from last completed codon
+        this.logger.log(
+          `Resuming from last completed codon: ${lastCompletedCodon.codon.codonId} in run ${lastCompletedCodon.runId}`,
+        );
+        await this.startNewRun({
+          type: "continuation",
+          source: {
+            runId: lastCompletedCodon.runId,
+            afterCodon: lastCompletedCodon.codon.codonId,
+            checkpointSha: lastCompletedCodon.codon.completionCheckpoint,
+          },
+          reason: "continue",
+        });
+      } else {
+        // No completed codons - start fresh
+        await this.startNewRun();
+      }
 
       // Now switch to the new run's branch if we have checkpoints
       const currentRun = this.stateManager.getCurrentRun();
@@ -566,13 +614,28 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     process.on("SIGTERM", () => this.shutdown("SIGTERM"));
     process.on("uncaughtException", (error) => {
       this.logger.log(`Uncaught exception: ${error.message}`, "error");
+      if (error.stack) {
+        this.logger.log(`Stack trace:\n${error.stack}`, "error");
+      }
       this.shutdown("uncaughtException");
     });
     process.on("unhandledRejection", (reason, promise) => {
-      this.logger.log(
-        `Unhandled rejection at: ${promise}, reason: ${reason}`,
-        "error"
-      );
+      this.logger.log(`Unhandled rejection at: ${promise}, reason: ${reason}`, "error");
+      // Log the full stack trace if the reason is an Error
+      if (reason instanceof Error) {
+        this.logger.log(`Error name: ${reason.name}`, "error");
+        this.logger.log(`Error message: ${reason.message}`, "error");
+        if (reason.stack) {
+          this.logger.log(`Stack trace:\n${reason.stack}`, "error");
+        }
+      } else if (reason && typeof reason === "object") {
+        // Try to extract any useful info from non-Error objects
+        try {
+          this.logger.log(`Reason object: ${JSON.stringify(reason, null, 2)}`, "error");
+        } catch {
+          this.logger.log(`Reason (unstringifiable): ${String(reason)}`, "error");
+        }
+      }
       this.shutdown("unhandledRejection");
     });
   }
@@ -693,10 +756,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
   }
 
+<<<<<<< HEAD
   private handleMessage(
     ws: ServerWebSocket<ClientData>,
     message: string | Buffer
   ): void {
+=======
+  private async handleMessage(
+    ws: ServerWebSocket<ClientData>,
+    message: string | Buffer,
+  ): Promise<void> {
+>>>>>>> 72657e2 (Checkpointing fixes (#49))
     try {
       ws.data.lastActivity = new Date();
 
@@ -748,11 +818,27 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         );
         return;
       }
-      this.handleCommand(result.data, ws);
+      // Await handleCommand to properly catch any errors from async operations
+      await this.handleCommand(result.data, ws);
     } catch (error) {
-      this.logger.log(
-        `Error parsing command: ${toError(error).message}`,
-        "error"
+      const err = toError(error);
+      this.logger.log(`Error handling command: ${err.message}`, "error");
+      if (err.stack) {
+        this.logger.log(`Stack trace: ${err.stack}`, "error");
+      }
+      // Emit error event to client
+      this.emit(
+        "event",
+        {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "error",
+          data: {
+            message: `Command execution failed: ${err.message}`,
+            fatal: false,
+          },
+        } as ErrorEvent,
+        ws,
       );
     }
   }
@@ -3112,9 +3198,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   }
 
   /**
-   * List available checkpoints
+   * List available checkpoints.
+   *
+   * Lists ALL checkpoints across ALL runs (not just current execution thread),
+   * allowing rollback to any historical checkpoint including those from
+   * previously rolled-back timelines. If a specific runId is provided,
+   * filters to just that run's checkpoints.
    */
   private async listCheckpoints(runId?: string): Promise<void> {
+    const state = this.stateManager.getState();
+
+    // Get the target run for metadata (gitBranch, runId to report)
     const targetRun = runId
       ? this.stateManager.getRun(RunId(runId))
       : this.stateManager.getCurrentRun();
@@ -3134,68 +3228,69 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     const checkpoints: import("./types/types.js").CheckpointQueryInfo[] = [];
 
-    for (const codon of targetRun.codons) {
-      const codonConfig = this.config.codons.find(
-        (p) => p.id === codon.codonId
-      );
-      const codonName = codonConfig?.name || codon.codonId;
+    // If a specific runId is provided, only list that run's checkpoints
+    // Otherwise, list ALL checkpoints from ALL runs (not just current thread)
+    const runsToProcess = runId ? state.runs.filter((r) => r.runId === runId) : state.runs;
 
-      // Rig setup checkpoint
-      if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
-        checkpoints.push({
-          codonId: codon.codonId,
-          codonName,
-          checkpointType: "rig-setup",
-          sha: codon.rigSetupCheckpoint,
-          status: codon.status,
-          timestamp: codon.startTime,
-        });
-      }
+    // Process runs in reverse order (oldest first) so checkpoints are in chronological order
+    // Then we'll reverse at the end to show most recent first
+    for (const run of [...runsToProcess].reverse()) {
+      for (const codon of run.codons) {
+        const codonConfig = this.config.codons.find((p) => p.id === codon.codonId);
+        const codonName = codonConfig?.name || codon.codonId;
 
-      // Completion checkpoint
-      if (codon.status === "completed" && codon.completionCheckpoint) {
-        checkpoints.push({
-          codonId: codon.codonId,
-          codonName,
-          checkpointType: "completed",
-          sha: codon.completionCheckpoint,
-          status: codon.status,
-          timestamp: codon.endTime,
-        });
-      }
+        // Rig setup checkpoint
+        if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
+          checkpoints.push({
+            codonId: codon.codonId,
+            codonName,
+            checkpointType: "rig-setup",
+            sha: codon.rigSetupCheckpoint,
+            status: codon.status,
+            timestamp: codon.startTime,
+          });
+        }
 
-      // Error checkpoint
-      if (
-        codon.status === "failed" &&
-        "errorCheckpoint" in codon &&
-        codon.errorCheckpoint
-      ) {
-        checkpoints.push({
-          codonId: codon.codonId,
-          codonName,
-          checkpointType: "error",
-          sha: codon.errorCheckpoint,
-          status: codon.status,
-          timestamp: codon.endTime,
-        });
-      }
+        // Completion checkpoint
+        if (codon.status === "completed" && codon.completionCheckpoint) {
+          checkpoints.push({
+            codonId: codon.codonId,
+            codonName,
+            checkpointType: "completed",
+            sha: codon.completionCheckpoint,
+            status: codon.status,
+            timestamp: codon.endTime,
+          });
+        }
 
-      // Skip checkpoint
-      if (
-        codon.status === "skipped" &&
-        "skipCheckpoint" in codon &&
-        codon.skipCheckpoint
-      ) {
-        checkpoints.push({
-          codonId: codon.codonId,
-          codonName,
-          checkpointType: "skipped",
-          sha: codon.skipCheckpoint,
-          status: codon.status,
-          timestamp: codon.endTime,
-        });
+        // Error checkpoint
+        if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
+          checkpoints.push({
+            codonId: codon.codonId,
+            codonName,
+            checkpointType: "error",
+            sha: codon.errorCheckpoint,
+            status: codon.status,
+            timestamp: codon.endTime,
+          });
+        }
+
+        // Skip checkpoint
+        if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
+          checkpoints.push({
+            codonId: codon.codonId,
+            codonName,
+            checkpointType: "skipped",
+            sha: codon.skipCheckpoint,
+            status: codon.status,
+            timestamp: codon.endTime,
+          });
+        }
       }
     }
+
+    // Reverse to show most recent first
+    checkpoints.reverse();
 
     this.emit("event", {
       id: EventId(generateId()),
@@ -3282,6 +3377,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   /**
    * Rollback to a specific checkpoint SHA (supports partial matching)
+   *
+   * Searches ALL runs in state.json, not just the current execution thread,
+   * allowing rollback to any historical checkpoint including those from
+   * previously rolled-back timelines.
    */
   private async rollbackToCheckpoint(
     sha: string,
@@ -3304,7 +3403,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       return;
     }
 
-    // Build execution thread to search across all runs
+    // Build execution thread for current timeline
     const state = this.stateManager.getState();
     const thread = await analyzeExecutionThread(
       state,
@@ -3381,6 +3480,85 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
     });
 
+    // If not found in current thread, search ALL runs (allows rollback to old timelines)
+    if (matches.length === 0) {
+      this.logger.log(`SHA ${sha} not found in current thread, searching all historical runs...`);
+
+      // Search through all runs in state
+      for (const run of state.runs) {
+        for (let codonIndex = 0; codonIndex < run.codons.length; codonIndex++) {
+          const codon = run.codons[codonIndex];
+
+          // Create a synthetic ThreadCodon for compatibility
+          const syntheticThreadCodon: import("./execution-thread.js").ThreadCodon = {
+            codon,
+            runId: run.runId,
+            runStatus: run.status,
+            runStartTime: run.startTime,
+            runEndTime: run.endTime || null,
+            gitBranch: run.gitBranch,
+            globalIndex: -1, // Not relevant for historical search
+            runIndex: codonIndex,
+            codonIndexInRun: codonIndex,
+            validatedCheckpoints: [],
+            continuationSessionId: null,
+          };
+
+          // Check rig setup checkpoint
+          if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
+            if (codon.rigSetupCheckpoint.startsWith(sha)) {
+              matches.push({
+                threadCodon: syntheticThreadCodon,
+                checkpointType: "rig-setup",
+                fullSha: codon.rigSetupCheckpoint,
+                codonIndex: codonIndex,
+              });
+            }
+          }
+
+          // Check completion checkpoint
+          if (codon.status === "completed" && codon.completionCheckpoint) {
+            if (codon.completionCheckpoint.startsWith(sha)) {
+              matches.push({
+                threadCodon: syntheticThreadCodon,
+                checkpointType: "completed",
+                fullSha: codon.completionCheckpoint,
+                codonIndex: codonIndex,
+              });
+            }
+          }
+
+          // Check error checkpoint
+          if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
+            if (codon.errorCheckpoint.startsWith(sha)) {
+              matches.push({
+                threadCodon: syntheticThreadCodon,
+                checkpointType: "error",
+                fullSha: codon.errorCheckpoint,
+                codonIndex: codonIndex,
+              });
+            }
+          }
+
+          // Check skip checkpoint
+          if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
+            if (codon.skipCheckpoint.startsWith(sha)) {
+              matches.push({
+                threadCodon: syntheticThreadCodon,
+                checkpointType: "skipped",
+                fullSha: codon.skipCheckpoint,
+                codonIndex: codonIndex,
+              });
+            }
+          }
+        }
+      }
+
+      if (matches.length > 0) {
+        this.logger.log(`Found ${matches.length} match(es) in historical runs`);
+      }
+    }
+
     // Handle matches
     if (matches.length === 0) {
       this.emit("event", {
@@ -3388,7 +3566,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: new Date().toISOString(),
         type: "error",
         data: {
-          message: `Checkpoint ${sha} not found in execution history`,
+          message: `Checkpoint ${sha} not found in any run (current or historical)`,
           fatal: false,
         },
       } as ErrorEvent);
@@ -3423,13 +3601,182 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
     // Single match found - proceed with rollback
     const match = matches[0];
-    await this.executeRollback(
-      thread,
-      match.codonIndex,
-      match.fullSha,
-      match.checkpointType,
-      autoRestart
+    try {
+      // Check if the match is from the current execution thread
+      const isInCurrentThread = thread.codons.some(
+        (tc) =>
+          tc.runId === match.threadCodon.runId &&
+          tc.codon.codonId === match.threadCodon.codon.codonId,
+      );
+
+      if (isInCurrentThread) {
+        // Find the correct index in the current thread
+        const threadIndex = thread.codons.findIndex(
+          (tc) =>
+            tc.runId === match.threadCodon.runId &&
+            tc.codon.codonId === match.threadCodon.codon.codonId,
+        );
+
+        this.logger.log(
+          `Executing rollback to ${match.fullSha.substring(0, 7)} (${
+            match.checkpointType
+          }) at thread index ${threadIndex}`,
+        );
+        await this.executeRollback(
+          thread,
+          threadIndex,
+          match.fullSha,
+          match.checkpointType,
+          autoRestart,
+        );
+      } else {
+        // Historical checkpoint from an old run - use direct rollback
+        this.logger.log(
+          `Executing direct rollback to historical checkpoint ${match.fullSha.substring(
+            0,
+            7,
+          )} (${match.checkpointType}) from run ${match.threadCodon.runId}`,
+        );
+        await this.executeDirectRollback(
+          match.threadCodon,
+          match.fullSha,
+          match.checkpointType,
+          autoRestart,
+        );
+      }
+    } catch (error) {
+      const err = toError(error);
+      this.logger.log(`Rollback failed: ${err.message}`, "error");
+      if (err.stack) {
+        this.logger.log(`Stack trace: ${err.stack}`, "error");
+      }
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          message: `Rollback failed: ${err.message}`,
+          fatal: false,
+        },
+      } as ErrorEvent);
+      throw error; // Re-throw to propagate to command handler
+    }
+  }
+
+  /**
+   * Execute a direct rollback to a historical checkpoint from an old run.
+   * This is simpler than the codon-by-codon rollback - it just:
+   * 1. Resets git to the checkpoint
+   * 2. Creates a new continuation run from that point
+   */
+  private async executeDirectRollback(
+    targetCodon: import("./execution-thread.js").ThreadCodon,
+    sha: string,
+    checkpointType: string,
+    autoRestart: boolean,
+  ): Promise<void> {
+    const codonConfig = this.config.codons.find((p) => p.id === targetCodon.codon.codonId);
+    const codonName = codonConfig?.name || targetCodon.codon.codonId;
+
+    this.logger.log(
+      `Direct rollback to ${checkpointType} checkpoint ${sha} ` +
+        `in codon ${targetCodon.codon.codonId} (${codonName}) from run ${targetCodon.runId}`,
     );
+
+    // Set the rollback flag
+    this.isRollingBack = true;
+
+    try {
+      // 1. Clean up current codon state
+      this.cleanupCurrentCodon();
+
+      // 2. Get current run info for events
+      const currentRun = this.stateManager.getCurrentRun();
+      const fromRun = currentRun?.runId || targetCodon.runId;
+      const fromCodon = currentRun?.codons[0]?.codonId || targetCodon.codon.codonId;
+
+      // 3. Emit rollback started event
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "rollback.started",
+        data: {
+          fromRun,
+          fromCodon,
+          toCodon: targetCodon.codon.codonId,
+          toCheckpoint: sha,
+          checkpointType,
+          codonsToProcess: [targetCodon.codon.codonId], // Direct rollback, just one codon
+        },
+      } as import("./types/types.js").RollbackStartedEvent);
+
+      // 4. Complete current run as rollback
+      if (currentRun && currentRun.status !== "completed") {
+        this.stateManager.transition({
+          type: "RunCompleted",
+          data: {
+            runId: currentRun.runId,
+          },
+        });
+        await this.stateManager.waitForPendingTransitions();
+      }
+
+      // 5. Reset git to the target checkpoint
+      if (this.checkpointGit) {
+        this.logger.log(`Resetting to checkpoint ${sha.substring(0, 7)}`);
+        await this.checkpointGit.resetToCheckpoint(sha);
+
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "rollback.codonCheckpoint",
+          data: {
+            codonId: targetCodon.codon.codonId,
+            codonName,
+            checkpointType,
+            checkpoint: sha,
+            message: `Reset to ${codonName} ${checkpointType} checkpoint`,
+          },
+        } as import("./types/types.js").RollbackCodonCheckpointEvent);
+      }
+
+      // 6. Start new continuation run
+      const afterCodon = checkpointType === "rig-setup" ? null : targetCodon.codon.codonId;
+      await this.startNewRun({
+        type: "continuation",
+        source: {
+          runId: targetCodon.runId,
+          afterCodon: afterCodon ? CodonId(afterCodon) : null,
+          checkpointSha: sha,
+        },
+        reason: "rollback",
+      });
+
+      // 7. Emit rollback completed event
+      const newRun = this.stateManager.getCurrentRun();
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "rollback.completed",
+        data: {
+          fromRun,
+          toRun: newRun?.runId || targetCodon.runId,
+          codonId: targetCodon.codon.codonId,
+          codonName,
+          checkpointType,
+          checkpoint: sha,
+          autoRestart,
+        },
+      } as import("./types/types.js").RollbackCompletedEvent);
+
+      // 8. Auto-restart if requested
+      if (autoRestart && newRun) {
+        this.logger.log("Auto-starting next codon after rollback");
+        await this.autoStartNextCodon();
+      }
+    } finally {
+      this.isRollingBack = false;
+    }
   }
 
   /**

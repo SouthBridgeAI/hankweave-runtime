@@ -101,7 +101,15 @@ export class BasicTUI {
 
         // Handle regular server events
         const serverEvent = message as ServerEvent;
-        this.handleServerEvent(serverEvent);
+        // handleServerEvent is async - catch any errors to prevent unhandled rejections
+        this.handleServerEvent(serverEvent).catch((error) => {
+          console.error(
+            `${COLORS.red}[TUI ERROR] Error handling server event ${serverEvent.type}: ${error}${COLORS.reset}`,
+          );
+          if (error instanceof Error && error.stack) {
+            console.error(`${COLORS.red}${error.stack}${COLORS.reset}`);
+          }
+        });
       } catch (error) {
         console.error(
           `${COLORS.red}${SYMBOLS.cross} Failed to parse server message:${COLORS.reset}`,
@@ -663,58 +671,67 @@ export class BasicTUI {
     stdin.setEncoding("utf8");
 
     stdin.on("data", async (key: string) => {
-      switch (key) {
-        case "n":
-          console.log(`\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next codon...${COLORS.reset}`);
-          this.sendCommand({
-            id: generateId(),
-            type: "codon.next",
-          } as NextCodonCommand);
-          break;
+      try {
+        switch (key) {
+          case "n":
+            console.log(
+              `\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next codon...${COLORS.reset}`,
+            );
+            this.sendCommand({
+              id: generateId(),
+              type: "codon.next",
+            } as NextCodonCommand);
+            break;
 
-        case "s":
-          console.log(
-            `\n${COLORS.yellow}${SYMBOLS.arrow} Skipping current codon...${COLORS.reset}`,
-          );
-          this.sendCommand({
-            id: generateId(),
-            type: "codon.skip",
-          } as SkipCodonCommand);
-          break;
+          case "s":
+            console.log(
+              `\n${COLORS.yellow}${SYMBOLS.arrow} Skipping current codon...${COLORS.reset}`,
+            );
+            this.sendCommand({
+              id: generateId(),
+              type: "codon.skip",
+            } as SkipCodonCommand);
+            break;
 
-        case "f":
-          console.log(
-            `\n${COLORS.red}${SYMBOLS.arrow} Force stopping current codon...${COLORS.reset}`,
-          );
-          this.sendCommand({
-            id: generateId(),
-            type: "codon.forceStop",
-            data: { reason: "User requested from TUI" },
-          } as ClientCommand);
-          break;
+          case "f":
+            console.log(
+              `\n${COLORS.red}${SYMBOLS.arrow} Force stopping current codon...${COLORS.reset}`,
+            );
+            this.sendCommand({
+              id: generateId(),
+              type: "codon.forceStop",
+              data: { reason: "User requested from TUI" },
+            } as ClientCommand);
+            break;
 
-        case "l":
-          console.log(
-            `\n${COLORS.magenta}${SYMBOLS.arrow} Requesting checkpoint list...${COLORS.reset}`,
-          );
-          this.sendCommand({
-            id: generateId(),
-            type: "checkpoint.list",
-          });
-          break;
+          case "l":
+            console.log(
+              `\n${COLORS.magenta}${SYMBOLS.arrow} Requesting checkpoint list...${COLORS.reset}`,
+            );
+            this.sendCommand({
+              id: generateId(),
+              type: "checkpoint.list",
+            });
+            break;
 
-        case "r":
-          await this.showRollbackMenu();
-          break;
+          case "r":
+            await this.showRollbackMenu();
+            break;
 
-        case "q":
-        case "\u0003": // Ctrl+C
-          console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Shutting down...${COLORS.reset}`);
-          if (this.ws) {
-            this.ws.close();
-          }
-          this.server.shutdown("user request");
-          break;
+          case "q":
+          case "\u0003": // Ctrl+C
+            console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Shutting down...${COLORS.reset}`);
+            if (this.ws) {
+              this.ws.close();
+            }
+            this.server.shutdown("user request");
+            break;
+        }
+      } catch (error) {
+        console.error(`${COLORS.red}[TUI ERROR] Keyboard handler error: ${error}${COLORS.reset}`);
+        if (error instanceof Error && error.stack) {
+          console.error(`${COLORS.red}${error.stack}${COLORS.reset}`);
+        }
       }
     });
   }
@@ -761,27 +778,38 @@ export class BasicTUI {
    * Confirm rollback with effects
    */
   private async confirmAndRollback(target: string, action: () => Promise<void>): Promise<void> {
-    console.log(`\n${COLORS.yellow}${COLORS.bold}Rollback Confirmation${COLORS.reset}`);
-    this.drawBox(
-      `Rollback to: ${target}`,
-      [
-        `${COLORS.yellow}This will:${COLORS.reset}`,
-        `  ${SYMBOLS.dot} End the current run`,
-        `  ${SYMBOLS.dot} Reset project files to checkpoint state`,
-        `  ${SYMBOLS.dot} Start a new continuation run`,
-        `  ${SYMBOLS.dot} Preserve all history in state.json`,
-        "",
-        `Continue? ${COLORS.cyan}(y/N)${COLORS.reset}:`,
-      ],
-      COLORS.yellow,
-    );
+    try {
+      console.log(`\n${COLORS.yellow}${COLORS.bold}Rollback Confirmation${COLORS.reset}`);
+      this.drawBox(
+        `Rollback to: ${target}`,
+        [
+          `${COLORS.yellow}This will:${COLORS.reset}`,
+          `  ${SYMBOLS.dot} End the current run`,
+          `  ${SYMBOLS.dot} Reset project files to checkpoint state`,
+          `  ${SYMBOLS.dot} Start a new continuation run`,
+          `  ${SYMBOLS.dot} Preserve all history in state.json`,
+          "",
+          `Continue? ${COLORS.cyan}(y/N)${COLORS.reset}:`,
+        ],
+        COLORS.yellow,
+      );
 
-    const response = await this.waitForKey();
+      const response = await this.waitForKey();
+      const responseStr = typeof response === "string" ? response : String(response);
 
-    if (response === "y" || response === "Y") {
-      await action();
-    } else {
-      console.log(`\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`);
+      if (responseStr === "y" || responseStr === "Y") {
+        console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Initiating rollback...${COLORS.reset}`);
+        await action();
+      } else {
+        console.log(`\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`);
+      }
+    } catch (error) {
+      console.error(
+        `${COLORS.red}[TUI ERROR] Rollback confirmation error: ${error}${COLORS.reset}`,
+      );
+      if (error instanceof Error && error.stack) {
+        console.error(`${COLORS.red}${error.stack}${COLORS.reset}`);
+      }
     }
   }
 
@@ -789,58 +817,99 @@ export class BasicTUI {
    * Show interactive checkpoint selection menu
    */
   private async showCheckpointSelection(data: CheckpointListEvent["data"]): Promise<void> {
-    if (data.checkpoints.length === 0) {
+    try {
+      if (!data || !data.checkpoints || data.checkpoints.length === 0) {
+        console.log(`\n${COLORS.red}${SYMBOLS.cross} No checkpoints found${COLORS.reset}`);
+        return;
+      }
+
       console.log(
-        `\n${COLORS.red}${SYMBOLS.cross} No checkpoints found in current run${COLORS.reset}`,
+        `\n${COLORS.magenta}${COLORS.bold}Select Checkpoint to Rollback To${COLORS.reset}`,
       );
-      return;
+      console.log(
+        `${COLORS.dim}(${data.checkpoints.length} checkpoints, most recent first → oldest last)${COLORS.reset}`,
+      );
+      console.log(
+        `${COLORS.yellow}${COLORS.bold}NOTE:${COLORS.reset} ${COLORS.yellow}Lower numbers = more recent, Higher numbers = older${COLORS.reset}\n`,
+      );
+
+      const checkpointLines = data.checkpoints.flatMap((cp, index) => {
+        // Defensive checks for checkpoint data
+        const codonName = cp?.codonName || "Unknown";
+        const checkpointType = cp?.checkpointType || "unknown";
+        const sha = cp?.sha || "????????";
+        const timestamp = cp?.timestamp ? new Date(cp.timestamp).toLocaleTimeString() : "unknown";
+
+        // Add visual indicator for position
+        const positionLabel =
+          index === 0
+            ? `${COLORS.green}(most recent)${COLORS.reset}`
+            : index === data.checkpoints.length - 1
+              ? `${COLORS.yellow}(oldest)${COLORS.reset}`
+              : "";
+
+        return [
+          `${COLORS.cyan}[${index + 1}]${COLORS.reset} ${COLORS.bold}${codonName}${COLORS.reset} - ${checkpointType} (${timestamp}) ${positionLabel}`,
+          `    SHA: ${COLORS.gray}${sha.substring(0, 7)}...${COLORS.reset}`,
+        ];
+      });
+
+      checkpointLines.push(`${COLORS.cyan}[c]${COLORS.reset} Cancel`);
+
+      this.drawBox("Available Checkpoints", checkpointLines, COLORS.magenta);
+      console.log(`\n${COLORS.bold}Enter checkpoint number to rollback to:${COLORS.reset} `);
+
+      // Use line input for multi-digit checkpoint numbers
+      const response = await this.waitForLine();
+
+      if (response === "c" || response === "C") {
+        console.log(`\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`);
+        return;
+      }
+
+      const choice = parseInt(response, 10);
+      if (Number.isNaN(choice) || choice < 1 || choice > data.checkpoints.length) {
+        console.log(
+          `\n${COLORS.red}${SYMBOLS.cross} Invalid selection: "${response}"${COLORS.reset}`,
+        );
+        return;
+      }
+
+      const selectedCheckpoint = data.checkpoints[choice - 1];
+
+      // Defensive check for selected checkpoint
+      if (!selectedCheckpoint) {
+        console.log(
+          `\n${COLORS.red}${SYMBOLS.cross} Error: Could not find checkpoint at index ${choice - 1}${COLORS.reset}`,
+        );
+        return;
+      }
+
+      if (!selectedCheckpoint.sha) {
+        console.log(
+          `\n${COLORS.red}${SYMBOLS.cross} Error: Selected checkpoint has no SHA${COLORS.reset}`,
+        );
+        return;
+      }
+
+      const target = `${selectedCheckpoint.codonName || "Unknown"} (${selectedCheckpoint.checkpointType || "unknown"})`;
+
+      await this.confirmAndRollback(target, async () => {
+        this.sendCommand({
+          id: generateId(),
+          type: "rollback.toCheckpoint",
+          data: {
+            checkpointSha: selectedCheckpoint.sha,
+            autoRestart: false,
+          },
+        } as ClientCommand);
+      });
+    } catch (error) {
+      console.error(`${COLORS.red}[TUI ERROR] Checkpoint selection error: ${error}${COLORS.reset}`);
+      if (error instanceof Error && error.stack) {
+        console.error(`${COLORS.red}${error.stack}${COLORS.reset}`);
+      }
     }
-
-    console.log(
-      `\n${COLORS.magenta}${COLORS.bold}Select Checkpoint${COLORS.reset} (run ${data.runId}):`,
-    );
-
-    const checkpointLines = data.checkpoints.flatMap((cp, index) => {
-      const timestamp = new Date(cp.timestamp).toLocaleTimeString();
-      return [
-        `${COLORS.cyan}[${index + 1}]${COLORS.reset} ${COLORS.bold}${
-          cp.codonName
-        }${COLORS.reset} - ${cp.checkpointType} (${timestamp})`,
-        `    SHA: ${COLORS.gray}${cp.sha.substring(0, 7)}...${COLORS.reset}`,
-      ];
-    });
-
-    checkpointLines.push(`${COLORS.cyan}[c]${COLORS.reset} Cancel`);
-
-    this.drawBox("Available Checkpoints", checkpointLines, COLORS.magenta);
-    console.log(`\n${COLORS.bold}Enter your choice:${COLORS.reset} `);
-
-    const response = await this.waitForKey();
-
-    if (response === "c" || response === "C") {
-      console.log(`\n${COLORS.red}${SYMBOLS.cross} Rollback cancelled${COLORS.reset}`);
-      return;
-    }
-
-    const choice = parseInt(response, 10);
-    if (Number.isNaN(choice) || choice < 1 || choice > data.checkpoints.length) {
-      console.log(`\n${COLORS.red}${SYMBOLS.cross} Invalid selection${COLORS.reset}`);
-      return;
-    }
-
-    const selectedCheckpoint = data.checkpoints[choice - 1];
-    const target = `${selectedCheckpoint.codonName} (${selectedCheckpoint.checkpointType})`;
-
-    await this.confirmAndRollback(target, async () => {
-      this.sendCommand({
-        id: generateId(),
-        type: "rollback.toCheckpoint",
-        data: {
-          checkpointSha: selectedCheckpoint.sha,
-          autoRestart: false,
-        },
-      } as ClientCommand);
-    });
   }
 
   /**
@@ -853,6 +922,66 @@ export class BasicTUI {
         resolve(key);
       };
       process.stdin.once("data", handler);
+    });
+  }
+
+  /**
+   * Wait for a line of input (until Enter is pressed)
+   * Used for multi-digit checkpoint selection
+   *
+   * Note: Accumulates characters in raw mode instead of using readline
+   * to avoid mode-switching issues in Bun runtime.
+   */
+  private waitForLine(): Promise<string> {
+    return new Promise((resolve) => {
+      let buffer = "";
+
+      const handler = (key: string) => {
+        // Handle Enter key (CR or LF)
+        if (key === "\r" || key === "\n") {
+          process.stdin.removeListener("data", handler);
+          console.log(); // Move to next line
+          resolve(buffer.trim());
+          return;
+        }
+
+        // Handle backspace
+        if (key === "\x7f" || key === "\b") {
+          if (buffer.length > 0) {
+            buffer = buffer.slice(0, -1);
+            // Move cursor back, overwrite with space, move back again
+            process.stdout.write("\b \b");
+          }
+          return;
+        }
+
+        // Handle Ctrl+C
+        if (key === "\x03") {
+          process.stdin.removeListener("data", handler);
+          console.log();
+          resolve("c"); // Treat as cancel
+          return;
+        }
+
+        // Handle Escape
+        if (key === "\x1b") {
+          process.stdin.removeListener("data", handler);
+          console.log();
+          resolve("c"); // Treat as cancel
+          return;
+        }
+
+        // Ignore other control characters
+        if (key.charCodeAt(0) < 32) {
+          return;
+        }
+
+        // Accumulate printable characters
+        buffer += key;
+        process.stdout.write(key);
+      };
+
+      process.stdin.on("data", handler);
     });
   }
 }
