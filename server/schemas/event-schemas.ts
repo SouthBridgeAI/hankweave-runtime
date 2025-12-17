@@ -171,6 +171,18 @@ export const tokenUsageEventDataSchema = z.object({
   cacheCreationTokens: z.number(),
   cacheReadTokens: z.number(),
   totalCost: z.number(),
+  modelUsage: z
+    .record(
+      z.string(),
+      z.object({
+        inputTokens: z.number(),
+        outputTokens: z.number(),
+        cacheReadInputTokens: z.number().optional(),
+        cacheCreationInputTokens: z.number().optional(),
+        costUSD: z.number(),
+      }),
+    )
+    .optional(),
 });
 
 export const toolResultEventDataSchema = z.object({

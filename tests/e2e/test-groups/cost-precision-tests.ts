@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { DEFAULT_CONFIG, getModelFamily } from "../../../server/config.js";
 import type {
   CodonCompletedEvent,
   StateSnapshotEvent,
@@ -30,12 +31,48 @@ export function runCostPrecisionTests(testState: TestState) {
           expect(decimals).toBeGreaterThanOrEqual(4);
         }
 
-        // Verify cost calculation (based on config.ts defaults)
-        const expectedCost =
-          (data.inputTokens / 1_000_000) * 3.0 +
-          (data.outputTokens / 1_000_000) * 15.0 +
-          (data.cacheCreationTokens / 1_000_000) * 3.75 +
-          (data.cacheReadTokens / 1_000_000) * 0.3;
+        // Verify cost calculation
+        let expectedCost: number;
+
+        // If modelUsage is available (multi-model scenario), recalculate using per-model rates
+        if (data.modelUsage) {
+          expectedCost = Object.entries(data.modelUsage).reduce((sum, [modelId, usage]) => {
+            // Extract model family (sonnet/haiku/opus) from full model ID
+            const modelFamily = getModelFamily(modelId);
+            const costs = DEFAULT_CONFIG.modelCosts[modelFamily];
+
+            if (!costs) {
+              console.warn(
+                `Unknown model family "${modelFamily}" from model ID "${modelId}". Using default sonnet rates.`,
+              );
+              return (
+                sum +
+                (usage.inputTokens / 1_000_000) * DEFAULT_CONFIG.costsPerMTok.input +
+                (usage.outputTokens / 1_000_000) * DEFAULT_CONFIG.costsPerMTok.output +
+                ((usage.cacheCreationInputTokens || 0) / 1_000_000) *
+                  DEFAULT_CONFIG.costsPerMTok.inputCache +
+                ((usage.cacheReadInputTokens || 0) / 1_000_000) *
+                  DEFAULT_CONFIG.costsPerMTok.cacheRead
+              );
+            }
+
+            // Calculate cost for this model using its specific rates
+            const modelCost =
+              (usage.inputTokens / 1_000_000) * costs.input +
+              (usage.outputTokens / 1_000_000) * costs.output +
+              ((usage.cacheCreationInputTokens || 0) / 1_000_000) * costs.inputCache +
+              ((usage.cacheReadInputTokens || 0) / 1_000_000) * costs.cacheRead;
+
+            return sum + modelCost;
+          }, 0);
+        } else {
+          // Fallback: single-model calculation (based on config.ts defaults for sonnet)
+          expectedCost =
+            (data.inputTokens / 1_000_000) * 3.0 +
+            (data.outputTokens / 1_000_000) * 15.0 +
+            (data.cacheCreationTokens / 1_000_000) * 3.75 +
+            (data.cacheReadTokens / 1_000_000) * 0.3;
+        }
 
         // Check if values are within 5% of expected
         const percentageDiff = Math.abs(data.totalCost - expectedCost) / expectedCost;
