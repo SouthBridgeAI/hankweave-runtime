@@ -65,13 +65,40 @@ export class ExecutionThread {
     public nextCodonId: CodonId | null = null,
   ) {}
 
+  /**
+   * Check if the execution thread is in a failed state.
+   *
+   * The thread is considered failed only if:
+   * 1. The most recent codon explicitly has status "failed"
+   * 2. OR the run crashed/failed while a codon was still running (non-terminal state)
+   *
+   * Historical runs being marked as "failed" (e.g., due to server shutdown after
+   * successful codon completion) should NOT cause the thread to be considered failed.
+   */
   get failed(): boolean {
-    return this.codons.some(
-      (threadCodon) =>
-        threadCodon.codon.status === "failed" ||
-        threadCodon.runStatus === "failed" ||
-        threadCodon.runStatus === "crashed",
-    );
+    // If there are no codons, the thread is not failed
+    if (this.codons.length === 0) {
+      return false;
+    }
+
+    // Check only the most recent codon (index 0, since thread is in reverse order)
+    const mostRecent = this.codons[0];
+
+    // Thread is failed if the most recent codon explicitly failed
+    if (mostRecent.codon.status === "failed") {
+      return true;
+    }
+
+    // Thread is failed if the run crashed/failed while a codon was still running
+    // (codon wasn't terminal when run ended)
+    if (
+      (mostRecent.runStatus === "failed" || mostRecent.runStatus === "crashed") &&
+      !isTerminalCodonStatus(mostRecent.codon.status)
+    ) {
+      return true;
+    }
+
+    return false;
   }
 }
 

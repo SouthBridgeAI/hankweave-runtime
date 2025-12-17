@@ -304,6 +304,46 @@ export class CheckpointGit {
   }
 
   /**
+   * Create a new branch from a specific SHA and switch to it.
+   * This preserves the old branch's history (unlike git reset --hard).
+   * @param branchName Name for the new branch
+   * @param sha The commit SHA to start the branch from
+   */
+  async createBranchFromSha(branchName: string, sha: string): Promise<void> {
+    if (!this.git) {
+      throw new Error("Git repository not initialized");
+    }
+
+    // Verify the SHA exists (search all branches)
+    const allShas = await this.getAllCheckpointShas();
+    const fullSha = [...allShas].find((s) => s.startsWith(sha));
+
+    if (!fullSha) {
+      throw new Error(`Checkpoint ${sha} not found in repository`);
+    }
+
+    try {
+      const branches = await this.git.branch();
+
+      // If branch already exists, delete it first (it will be recreated)
+      if (branches.all.includes(branchName)) {
+        // Switch to a safe branch first if we're on the branch we want to delete
+        if (branches.current === branchName) {
+          await this.git.checkout(fullSha); // Detached HEAD
+        }
+        await this.git.branch(["-D", branchName]);
+      }
+
+      // Create new branch from the target SHA and switch to it
+      await this.git.checkout(["-b", branchName, fullSha]);
+      this.logger.log(`Created branch ${branchName} from ${sha.substring(0, 7)}`);
+    } catch (error) {
+      this.logger.log(`Failed to create branch from SHA: ${error}`, "error");
+      throw error;
+    }
+  }
+
+  /**
    * Get all checkpoint SHAs from the repository
    * @returns Set of all commit SHAs in the repository
    */
@@ -319,6 +359,26 @@ export class CheckpointGit {
     } catch (error) {
       this.logger.log(`Failed to get checkpoint SHAs: ${error}`, "error");
       return new Set();
+    }
+  }
+
+  /**
+   * Check if a specific commit SHA exists in the repository
+   * @param sha Full or partial SHA to check
+   * @returns true if the commit exists, false otherwise
+   */
+  async commitExists(sha: string): Promise<boolean> {
+    if (!this.git) {
+      return false;
+    }
+
+    try {
+      // Use cat-file to check if the commit exists
+      const result = await this.git.raw(["cat-file", "-t", sha]);
+      return result.trim() === "commit";
+    } catch {
+      // If cat-file fails, the commit doesn't exist
+      return false;
     }
   }
 
@@ -384,57 +444,32 @@ export class CheckpointGit {
   }
 
   /**
-   * Reset to a specific checkpoint
+   * Reset to a specific checkpoint.
+   *
+   * IMPORTANT: This uses `git checkout` to a detached HEAD state instead of
+   * `git reset --hard`. This preserves the old branch's history so you can
+   * still access old checkpoints from previous timelines.
    */
   async resetToCheckpoint(sha: string): Promise<void> {
     if (!this.git) {
       throw new Error("Git repository not initialized");
     }
 
-    this.logger.log(`[CHECKPOINT-DEBUG] Starting reset to checkpoint ${sha}`);
-
-    // Verify SHA exists
+    // Verify SHA exists - search ALL branches, not just current
     try {
-      const log = await this.git.log();
-      this.logger.log(`[CHECKPOINT-DEBUG] Found ${log.all.length} commits in log`);
+      const allShas = await this.getAllCheckpointShas();
+      const fullSha = [...allShas].find((s) => s.startsWith(sha));
 
-      const commit = log.all.find((c) => c.hash.startsWith(sha));
-
-      if (!commit) {
-        this.logger.log(`[CHECKPOINT-DEBUG] Available commits:`);
-        log.all.forEach((c, i) => {
-          this.logger.log(
-            `[CHECKPOINT-DEBUG]   ${i + 1}. ${c.hash.substring(0, 7)} - ${c.message}`,
-          );
-        });
+      if (!fullSha) {
         throw new Error(`Checkpoint ${sha} not found in repository`);
       }
 
-      this.logger.log(`[CHECKPOINT-DEBUG] Found target commit: ${commit.hash} - ${commit.message}`);
-
-      // Check current status before reset
-      const statusBefore = await this.git.status();
-      this.logger.log(
-        `[CHECKPOINT-DEBUG] Status before reset - staged: ${statusBefore.staged.length}, modified: ${statusBefore.modified.length}, not_added: ${statusBefore.not_added.length}`,
-      );
-
-      // Hard reset to preserve exact file state
-      const resetResult = await this.git.reset(["--hard", sha]);
-      this.logger.log(`[CHECKPOINT-DEBUG] Git reset result: ${resetResult}`);
-
-      // Check status after reset
-      const statusAfter = await this.git.status();
-      this.logger.log(
-        `[CHECKPOINT-DEBUG] Status after reset - staged: ${statusAfter.staged.length}, modified: ${statusAfter.modified.length}, not_added: ${statusAfter.not_added.length}`,
-      );
-
-      // Show what files are in the working directory after reset
-      const currentHead = await this.git.revparse(["HEAD"]);
-      this.logger.log(`[CHECKPOINT-DEBUG] Current HEAD after reset: ${currentHead}`);
-
-      this.logger.log(`[CHECKPOINT-DEBUG] Reset to checkpoint ${sha}: ${commit.message}`);
+      // Use checkout with --force to go to the target SHA in detached HEAD mode
+      // This preserves the old branch's commits (unlike git reset --hard)
+      await this.git.checkout(["--force", fullSha]);
+      this.logger.log(`Checked out checkpoint ${sha.substring(0, 7)} (detached HEAD)`);
     } catch (error) {
-      this.logger.log(`[CHECKPOINT-DEBUG] Reset failed: ${error}`);
+      this.logger.log(`Checkout to checkpoint failed: ${error}`, "error");
       throw new Error(
         `Failed to reset to checkpoint: ${error instanceof Error ? error.message : String(error)}`,
       );
