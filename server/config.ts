@@ -530,6 +530,9 @@ export interface StrandweaveConfig
   /**
    * Token cost configuration per million tokens.
    * Used to calculate costs for each codon and total project cost.
+   *
+   * For backwards compatibility, this contains default rates (for sonnet).
+   * Use modelCosts for per-model pricing when validating multi-model scenarios.
    */
   costsPerMTok: {
     /** Cost per million input tokens */
@@ -540,6 +543,24 @@ export interface StrandweaveConfig
     cacheRead: number;
     /** Cost per million output tokens */
     output: number;
+  };
+
+  /**
+   * Per-model token cost configuration.
+   * Maps model families to their pricing. Model IDs like "claude-sonnet-4-5-20250929"
+   * are mapped to families like "sonnet" for pricing lookups.
+   */
+  modelCosts: {
+    [modelFamily: string]: {
+      /** Cost per million input tokens */
+      input: number;
+      /** Cost per million tokens when creating cache */
+      inputCache: number;
+      /** Cost per million tokens when reading from cache */
+      cacheRead: number;
+      /** Cost per million output tokens */
+      output: number;
+    };
   };
 
   /** Maximum length for tool result content before truncation (default: 2500) */
@@ -602,6 +623,26 @@ export const DEFAULT_CONFIG: Omit<
     inputCache: 3.75, // $3.75 per million tokens when creating cache
     cacheRead: 0.3, // $0.30 per million tokens from cache
     output: 15.0, // $15 per million output tokens
+  },
+  modelCosts: {
+    sonnet: {
+      input: 3.0,
+      inputCache: 3.75,
+      cacheRead: 0.3,
+      output: 15.0,
+    },
+    haiku: {
+      input: 1.0,
+      inputCache: 1.25,
+      cacheRead: 0.1,
+      output: 5.0,
+    },
+    opus: {
+      input: 5.0,
+      inputCache: 6.25,
+      cacheRead: 0.5,
+      output: 25.0,
+    },
   },
   logParsingInterval: 1000, // Check for new log entries every second
   autostart: true, // Default to current behavior
@@ -1120,6 +1161,24 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
 // -------------
 // Token Cost Calculation
 // -------------
+
+/**
+ * Extract model family (sonnet, haiku, opus) from full model ID.
+ * Maps model IDs like "claude-sonnet-4-5-20250929" to "sonnet" for pricing lookups.
+ *
+ * @param modelId - Full model ID (e.g., "claude-sonnet-4-5-20250929")
+ * @returns Model family name (e.g., "sonnet"), or the original ID if no family is detected
+ */
+export function getModelFamily(modelId: string): string {
+  const lowerModelId = modelId.toLowerCase();
+
+  if (lowerModelId.includes("sonnet")) return "sonnet";
+  if (lowerModelId.includes("haiku")) return "haiku";
+  if (lowerModelId.includes("opus")) return "opus";
+
+  // Fallback to the original model ID if we can't determine the family
+  return modelId;
+}
 
 /**
  * Calculate the cost in dollars for a given token usage.
