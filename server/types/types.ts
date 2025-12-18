@@ -24,7 +24,9 @@ export type {
 // Model Types
 // -------------
 
-export type ModelName = "sonnet" | "opus";
+// ModelName supports any string to work with different shims (Claude, Gemini, etc.)
+// Known Claude models are preserved for autocomplete
+export type ModelName = "sonnet" | "opus" | (string & {});
 
 export type ContinuationMode = "fresh" | "continue-previous";
 

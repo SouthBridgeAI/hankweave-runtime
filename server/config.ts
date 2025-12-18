@@ -232,13 +232,11 @@ const codonObjectSchema = z.object({
       "Inline system prompt text to append (mutually exclusive with appendSystemPromptFile)",
     ),
   model: z
-    .enum(["sonnet", "opus"], {
-      errorMap: () => ({
-        message:
-          "Model must be either 'sonnet' or 'opus'. This determines which Claude model to use. Fix: Change model to 'sonnet' (faster, cheaper) or 'opus' (more capable).",
-      }),
-    })
-    .describe("Claude model to use (e.g., 'claude-3-opus-20240229', 'sonnet')"),
+    .string()
+    .min(1, "Model cannot be empty")
+    .describe(
+      "Model to use for this codon. Can be a Claude model ('sonnet', 'opus'), Gemini model ('gemini-2.0-flash-exp', 'flash'), or any other model supported by the configured shim.",
+    ),
   continuationMode: z
     .enum(["fresh", "continue-previous"], {
       errorMap: () => ({
@@ -401,9 +399,11 @@ const sentinelSettingsSchema = z
 export const strandRecommendationsSchema = z
   .object({
     model: z
-      .enum(["sonnet", "opus"])
+      .string()
       .optional()
-      .describe("Recommended model for this strand (e.g., 'This task needs high reasoning')"),
+      .describe(
+        "Recommended model for this strand (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')",
+      ),
     dataHashTimeLimit: z
       .number()
       .int()
