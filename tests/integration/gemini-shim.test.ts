@@ -6,6 +6,103 @@ import { ShimProcessManager } from "../../server/shim-process-manager.js";
 import type { Codon } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
 
+/**
+ * Helper function to run a complete session: creates manager, spawns process,
+ * waits for completion, extracts session ID, and cleans up.
+ */
+async function runSessionToCompletion(
+  tempDir: string,
+  executionPath: string,
+  logger: Logger,
+  geminiShimPath: string,
+  codon: Codon,
+  previousSessionId: string | null,
+  timeoutMs: number = 60000
+): Promise<{
+  sessionId: string;
+  logPath: string;
+  allMessages: any[];
+}> {
+  console.log(`\n  Setting up session for codon: ${codon.id}...`);
+
+  // Create log path - use the same path for both parser and spawn
+  const sessionLogPath = path.join(tempDir, `session-${codon.id}.jsonl`);
+
+  // Create log parser
+  const logParser = new ClaudeLogParser({
+    logPath: sessionLogPath,
+    codonId: codon.id,
+    parsingInterval: 100,
+  });
+
+  // Create manager
+  const manager = new ShimProcessManager(executionPath, logger, logParser);
+
+  console.log(`  Spawning gemini shim for ${codon.id}...`);
+
+  // Spawn process - pass the same logPath so parser and manager use the same file
+  const command = ["bun", "run", geminiShimPath];
+  const actualLogPath = await manager.spawn(command, codon, previousSessionId, sessionLogPath);
+  console.log(`    ✓ Spawned gemini shim, log: ${actualLogPath}`);
+
+  console.log(`  Waiting for completion...`);
+
+  // Wait for completion
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      manager.kill("SIGTERM").catch(console.error);
+      reject(new Error(`Session ${codon.id} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    manager.on("exit", (code, contextExceeded) => {
+      clearTimeout(timeout);
+      console.log(`    ✓ Session completed (exit code: ${code})`);
+      if (contextExceeded) {
+        console.log("    ⚠️  Context exceeded");
+      }
+      resolve();
+    });
+
+    manager.on("error", (error) => {
+      clearTimeout(timeout);
+      console.error(`    ✗ Session error:`, error);
+      reject(error);
+    });
+  });
+
+  // Extract session ID from log
+  console.log(`  Extracting session ID from log...`);
+  const logContent = await fs.promises.readFile(actualLogPath, "utf-8");
+  const lines = logContent.trim().split("\n");
+
+  let sessionId: string | undefined;
+  for (const line of lines) {
+    const entry = JSON.parse(line);
+    if (entry.type === "system" && entry.session_id) {
+      sessionId = entry.session_id;
+      break;
+    }
+  }
+
+  if (!sessionId) {
+    throw new Error(`No session ID found in log for ${codon.id}`);
+  }
+  console.log(`    ✓ Session ID: ${sessionId}`);
+
+  // Get all messages before stopping parser
+  const allMessages = logParser.getAllMessages();
+  console.log(`    ✓ Log parser found ${allMessages.length} messages`);
+
+  // Stop parser
+  logParser.stop();
+
+  return {
+    sessionId,
+    logPath: actualLogPath,
+    allMessages,
+  };
+}
+
 describe("Gemini Shim Integration Test", () => {
   let tempDir: string;
   let executionPath: string;
@@ -56,17 +153,6 @@ describe("Gemini Shim Integration Test", () => {
       return;
     }
 
-    console.log("\n  Step 1: Setting up ShimProcessManager...");
-
-    const sessionLogPath = path.join(tempDir, "gemini-session.jsonl");
-    const logParser = new ClaudeLogParser({
-      logPath: sessionLogPath,
-      codonId: "gemini-test-codon",
-      parsingInterval: 100,
-    });
-
-    const manager = new ShimProcessManager(executionPath, logger, logParser);
-
     const codon: Codon = {
       type: "codon",
       id: "gemini-test-codon",
@@ -76,41 +162,16 @@ describe("Gemini Shim Integration Test", () => {
       continuationMode: "fresh",
     };
 
-    console.log("\n  Step 2: Spawning gemini shim...");
+    const { logPath: actualLogPath, allMessages } = await runSessionToCompletion(
+      tempDir,
+      executionPath,
+      logger,
+      geminiShimPath,
+      codon,
+      null
+    );
 
-    // Command to execute: ["bun", "run", "<path-to-shim>"]
-    const command = ["bun", "run", geminiShimPath];
-
-    const actualLogPath = await manager.spawn(command, codon, null);
-    expect(actualLogPath).toBeTruthy();
-    console.log(`    ✓ Spawned gemini shim, log: ${actualLogPath}`);
-
-    console.log("\n  Step 3: Waiting for completion...");
-
-    // Wait for completion
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        manager.kill("SIGTERM").catch(console.error);
-        reject(new Error("Gemini session timed out after 60 seconds"));
-      }, 60000);
-
-      manager.on("exit", (code, contextExceeded) => {
-        clearTimeout(timeout);
-        console.log(`    ✓ Gemini session completed (exit code: ${code})`);
-        if (contextExceeded) {
-          console.log("    ⚠️  Context exceeded");
-        }
-        resolve();
-      });
-
-      manager.on("error", (error) => {
-        clearTimeout(timeout);
-        console.error(`    ✗ Gemini session error:`, error);
-        reject(error);
-      });
-    });
-
-    console.log("\n  Step 4: Verifying log file exists and has content...");
+    console.log("\n  Verifying log file exists and has content...");
 
     // Verify log file was created and has content
     expect(fs.existsSync(actualLogPath)).toBe(true);
@@ -123,11 +184,7 @@ describe("Gemini Shim Integration Test", () => {
     expect(lines.length).toBeGreaterThan(0);
     console.log(`    ✓ Log has ${lines.length} lines`);
 
-    console.log("\n  Step 5: Verifying ClaudeLogParser parsed messages...");
-
-    // Get all messages from the log parser
-    const allMessages = logParser.getAllMessages();
-    console.log(`    ✓ Log parser found ${allMessages.length} messages`);
+    console.log("\n  Verifying ClaudeLogParser parsed messages...");
 
     // Verify we have messages
     expect(allMessages.length).toBeGreaterThan(0);
@@ -180,13 +237,10 @@ describe("Gemini Shim Integration Test", () => {
       }
     }
 
-    // Cleanup
-    logParser.stop();
-
     console.log("\n✅ Test passed: Can spawn gemini shim and get response\n");
   }, 120000); // 2 minute timeout for the whole test
 
-  test.only("gemini shim with continuation mode", async () => {
+  test("gemini shim with continuation mode", async () => {
     console.log("\n📝 Test: Gemini shim with continuation mode");
 
     // Check if GOOGLE_API_KEY or GEMINI_API_KEY is set
@@ -202,14 +256,6 @@ describe("Gemini Shim Integration Test", () => {
     // =====================================
     console.log("\n  Step 1: Running first session...");
 
-    const logParser1 = new ClaudeLogParser({
-      logPath: path.join(tempDir, "parser1.jsonl"),
-      codonId: "gemini-test-codon-1",
-      parsingInterval: 100,
-    });
-
-    const manager1 = new ShimProcessManager(executionPath, logger, logParser1);
-
     const codon1: Codon = {
       type: "codon",
       id: "gemini-test-codon-1",
@@ -220,58 +266,21 @@ describe("Gemini Shim Integration Test", () => {
       continuationMode: "fresh",
     };
 
-    const command = ["bun", "run", geminiShimPath];
+    const { sessionId: firstSessionId } = await runSessionToCompletion(
+      tempDir,
+      executionPath,
+      logger,
+      geminiShimPath,
+      codon1,
+      null
+    );
 
-    const actualLogPath1 = await manager1.spawn(command, codon1, null);
-
-    let firstSessionId: string | undefined;
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        manager1.kill("SIGTERM").catch(console.error);
-        reject(new Error("First session timed out after 60 seconds"));
-      }, 60000);
-
-      manager1.on("exit", () => {
-        clearTimeout(timeout);
-        console.log(`    ✓ First session completed`);
-        resolve();
-      });
-
-      manager1.on("error", (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-    });
-
-    // Parse the log to get session ID
-    const logContent1 = await fs.promises.readFile(actualLogPath1, "utf-8");
-    const lines1 = logContent1.trim().split("\n");
-    for (const line of lines1) {
-      const entry = JSON.parse(line);
-      if (entry.type === "system" && entry.session_id) {
-        firstSessionId = entry.session_id;
-        break;
-      }
-    }
-
-    expect(firstSessionId).toBeTruthy();
     console.log(`    ✓ First session ID: ${firstSessionId}`);
-
-    logParser1.stop();
 
     // =====================================
     // Step 2: Run continuation session
     // =====================================
     console.log("\n  Step 2: Running continuation session...");
-
-    const logParser2 = new ClaudeLogParser({
-      logPath: path.join(tempDir, "parser2.jsonl"),
-      codonId: "gemini-test-codon-2",
-      parsingInterval: 100,
-    });
-
-    const manager2 = new ShimProcessManager(executionPath, logger, logParser2);
 
     const codon2: Codon = {
       type: "codon",
@@ -283,44 +292,15 @@ describe("Gemini Shim Integration Test", () => {
       continuationMode: "continue-previous",
     };
 
-    const actualLogPath2 = await manager2.spawn(
-      command,
+    const { sessionId: continuationSessionId } = await runSessionToCompletion(
+      tempDir,
+      executionPath,
+      logger,
+      geminiShimPath,
       codon2,
-      firstSessionId || null
+      firstSessionId
     );
 
-    let continuationSessionId: string | undefined;
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        manager2.kill("SIGTERM").catch(console.error);
-        reject(new Error("Continuation session timed out after 60 seconds"));
-      }, 60000);
-
-      manager2.on("exit", () => {
-        clearTimeout(timeout);
-        console.log(`    ✓ Continuation session completed`);
-        resolve();
-      });
-
-      manager2.on("error", (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-    });
-
-    // Parse the log to get session ID
-    const logContent2 = await fs.promises.readFile(actualLogPath2, "utf-8");
-    const lines2 = logContent2.trim().split("\n");
-    for (const line of lines2) {
-      const entry = JSON.parse(line);
-      if (entry.type === "system" && entry.session_id) {
-        continuationSessionId = entry.session_id;
-        break;
-      }
-    }
-
-    expect(continuationSessionId).toBeTruthy();
     console.log(`    ✓ Continuation session ID: ${continuationSessionId}`);
 
     // =====================================
@@ -331,8 +311,6 @@ describe("Gemini Shim Integration Test", () => {
     console.log("    ✓ Session IDs match!");
     console.log(`      First:        ${firstSessionId}`);
     console.log(`      Continuation: ${continuationSessionId}`);
-
-    logParser2.stop();
 
     console.log("\n✅ Test passed: Gemini shim with continuation mode\n");
   }, 180000); // 3 minute timeout for the whole test
