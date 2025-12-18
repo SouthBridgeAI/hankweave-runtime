@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Server, ServerWebSocket } from "bun";
 import { minimatch } from "minimatch";
 import { CheckpointGit } from "./checkpoint-git.js";
-import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
@@ -36,6 +36,7 @@ import {
 } from "./schemas/event-schemas.js";
 import { SentinelConfigLoader } from "./sentinels/sentinel-config-loader.js";
 import { SentinelManager } from "./sentinels/sentinel-manager.js";
+import { ShimProcessManager } from "./shim-process-manager.js";
 import { StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
@@ -149,7 +150,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: Date;
       }
     | undefined;
-  private processManager: ClaudeAgentSDKManager | undefined;
+  private processManager: ShimProcessManager | undefined;
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingCodon = false;
@@ -1819,12 +1820,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       });
 
       // Create process manager with the log parser
-      this.processManager = new ClaudeAgentSDKManager(
+      this.processManager = new ShimProcessManager(
         this.config.executionPath,
         this.logger,
         this.logParser,
         this.proxyRunner?.proxyUrl,
-        this.config.model,
+        "gemini-2.5-pro", // Hardcoded model override for gemini shim
       );
 
       // Set up event handlers
@@ -1844,7 +1845,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       });
 
       // Spawn process with custom log path
-      const _logPathResult = await this.processManager.spawn(codon, previousSessionId, logPath);
+      // Resolve shim path relative to this module's location (not process.cwd())
+      // since the process spawns with cwd=executionPath
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
+      const _logPathResult = await this.processManager.spawn(
+        ["bun", shimPath], // Hardcoded gemini shim command (absolute path from module location)
+        codon,
+        previousSessionId,
+        logPath,
+      );
 
       // Transition to initializing (fire-and-forget)
       if (!this.currentRunId) {

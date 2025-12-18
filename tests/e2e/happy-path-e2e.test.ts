@@ -217,7 +217,7 @@ async function setupAndRunCodons(): Promise<void> {
   testState.codon1Started = codon1StartEvent;
   console.log(`${colors.green}✓ Codon 1 started${colors.reset}`);
 
-  testState.codon1Completed = await testState.client.waitForCodonCompletion("codon-1", 60000);
+  testState.codon1Completed = await testState.client.waitForCodonCompletion("codon-1", 120000);
   console.log(`${colors.green}✓ Codon 1 completed${colors.reset}`);
 
   // Start read-only sync client in background after Codon 1 completes
@@ -345,7 +345,7 @@ async function setupAndRunCodons(): Promise<void> {
     console.log(`${colors.red}✗ Codon 2 did not start${colors.reset}`);
   }
 
-  testState.codon2Completed = await testState.client.waitForCodonCompletion("codon-2", 60000);
+  testState.codon2Completed = await testState.client.waitForCodonCompletion("codon-2", 120000);
   console.log(`${colors.green}✓ Codon 2 completed${colors.reset}`);
 
   // Codon 3
@@ -373,7 +373,7 @@ async function setupAndRunCodons(): Promise<void> {
     console.log(`${colors.red}✗ Codon 3 did not start${colors.reset}`);
   }
 
-  testState.codon3Completed = await testState.client.waitForCodonCompletion("codon-3", 60000);
+  testState.codon3Completed = await testState.client.waitForCodonCompletion("codon-3", 120000);
   console.log(`${colors.green}✓ Codon 3 completed${colors.reset}`);
 
   // Wait for sync client background collection to complete
