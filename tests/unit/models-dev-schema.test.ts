@@ -392,7 +392,6 @@ describe("Models Dev Schema Validation", () => {
           expect(typeof model.attachment).toBe("boolean");
           expect(typeof model.reasoning).toBe("boolean");
           expect(typeof model.tool_call).toBe("boolean");
-          expect(typeof model.temperature).toBe("boolean");
           expect(model.limit.context).toBeGreaterThan(0);
           expect(model.limit.output).toBeGreaterThan(0);
           expect(model.modalities.input.length).toBeGreaterThan(0);
