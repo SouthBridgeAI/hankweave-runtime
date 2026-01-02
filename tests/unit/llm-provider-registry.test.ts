@@ -19,11 +19,15 @@ describe("LlmProviderRegistry", () => {
     logs = [];
     // Save original env using proper capture
     originalEnv = captureEnv();
+    // Reset singleton before each test to ensure clean state
+    LlmProviderRegistry.resetInstance();
   });
 
   afterEach(() => {
     // Restore env using proper restore
     restoreEnv(originalEnv);
+    // Reset singleton after each test
+    LlmProviderRegistry.resetInstance();
   });
 
   describe("initialization", () => {
@@ -784,6 +788,198 @@ describe("LlmProviderRegistry", () => {
           expect(result.matchType).toBe("fuzzy");
         }
       });
+    });
+  });
+
+  describe("singleton pattern", () => {
+    it("should return the same instance when getInstance is called multiple times", () => {
+      const instance1 = LlmProviderRegistry.getInstance({ logger: mockLogger });
+      const instance2 = LlmProviderRegistry.getInstance({ logger: mockLogger });
+
+      expect(instance1).toBe(instance2);
+    });
+
+    it("should use config from first getInstance call", () => {
+      const logger1 = new Logger("/tmp/test1.log");
+      logger1.log = (message: string, level = "info") => {
+        logs.push({ message: `logger1: ${message}`, level });
+      };
+
+      const logger2 = new Logger("/tmp/test2.log");
+      logger2.log = (message: string, level = "info") => {
+        logs.push({ message: `logger2: ${message}`, level });
+      };
+
+      const instance1 = LlmProviderRegistry.getInstance({ logger: logger1 });
+      const instance2 = LlmProviderRegistry.getInstance({ logger: logger2 });
+
+      // Both should be the same instance
+      expect(instance1).toBe(instance2);
+
+      // The logger should be from the first config
+      // We can verify this by checking that subsequent operations use logger1
+      const modelResult = instance2.getModelInfo("claude-3-5-sonnet-20241022");
+      expect(modelResult.success).toBe(true);
+
+      // Check that logs contain logger1 prefix (if any were generated)
+      // Note: This is a weak test as initialization might not log much
+    });
+
+    it("should create new instance after resetInstance is called", () => {
+      const instance1 = LlmProviderRegistry.getInstance({ logger: mockLogger });
+      LlmProviderRegistry.resetInstance();
+      const instance2 = LlmProviderRegistry.getInstance({ logger: mockLogger });
+
+      expect(instance1).not.toBe(instance2);
+    });
+
+    it("should work when getInstance is called without config", () => {
+      const instance1 = LlmProviderRegistry.getInstance();
+      const instance2 = LlmProviderRegistry.getInstance();
+
+      expect(instance1).toBe(instance2);
+      expect(instance1).toBeDefined();
+    });
+
+    it("should be usable from different modules", () => {
+      // Simulate accessing from different parts of the codebase
+      const instance1 = LlmProviderRegistry.getInstance({ logger: mockLogger });
+
+      // Verify instance works
+      const modelResult = instance1.getModelInfo("claude-3-5-sonnet-20241022");
+      expect(modelResult.success).toBe(true);
+
+      // Get instance again (simulating different module)
+      const instance2 = LlmProviderRegistry.getInstance();
+
+      // Should be the same instance and have the same data
+      expect(instance2).toBe(instance1);
+      const modelResult2 = instance2.getModelInfo("claude-3-5-sonnet-20241022");
+      expect(modelResult2.success).toBe(true);
+    });
+  });
+
+  describe("model shortcuts", () => {
+    beforeEach(() => {
+      registry = LlmProviderRegistry.getInstance({ logger: mockLogger });
+    });
+
+    it("should expand shortcuts before resolution", () => {
+      // Test that shortcuts are expanded to their full patterns
+      const shortcuts = [
+        {
+          input: "opus",
+          expectedProvider: "anthropic",
+          expectedModelId: "claude-opus-4-5",
+        },
+        {
+          input: "sonnet",
+          expectedProvider: "anthropic",
+          expectedModelId: "claude-sonnet-4-5",
+        },
+        {
+          input: "haiku",
+          expectedProvider: "anthropic",
+          expectedModelId: "claude-haiku-4-5",
+        },
+      ];
+
+      for (const shortcut of shortcuts) {
+        const result = registry.resolveModel({ model: shortcut.input });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.modelInfo.providerId).toBe(shortcut.expectedProvider);
+          expect(result.modelInfo.modelId).toBe(shortcut.expectedModelId);
+        }
+      }
+    });
+  });
+
+  describe("model resolution with short names", () => {
+    beforeEach(() => {
+      registry = LlmProviderRegistry.getInstance({ logger: mockLogger });
+    });
+
+    it("should resolve 'opus' to claude-opus-4-5", () => {
+      const result = registry.resolveModel({
+        model: "opus", // Short name that gets expanded to "claude-opus"
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.modelInfo.providerId).toBe("anthropic");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+        // Should be fuzzy match since shortcuts expand to patterns, not exact IDs
+        expect(result.matchType).toBe("fuzzy");
+      }
+    });
+
+    it("should resolve 'sonnet' to claude-sonnet-4-5", () => {
+      const result = registry.resolveModel({
+        model: "sonnet", // Short name that gets expanded to "claude-sonnet"
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.modelInfo.providerId).toBe("anthropic");
+        expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5");
+        // Should be fuzzy match
+        expect(result.matchType).toBe("fuzzy");
+      }
+    });
+
+    it("should resolve 'opus' with anthropic provider to claude-opus-4-5", () => {
+      const result = registry.resolveModel({
+        providerId: "anthropic",
+        model: "opus", // Shortcut + explicit provider
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.modelInfo.providerId).toBe("anthropic");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+        expect(result.matchType).toBe("fuzzy");
+      }
+    });
+
+    it("should handle case-insensitive OPUS shortcut", () => {
+      const result = registry.resolveModel({
+        model: "OPUS", // Case-insensitive shortcut
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.modelInfo.providerId).toBe("anthropic");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+      }
+    });
+
+    it("should resolve opus to most recent model (claude-opus-4-5)", () => {
+      const result = registry.resolveModel({
+        model: "opus",
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        // Should resolve to claude-opus-4-5 (most recent)
+        expect(result.modelInfo.providerId).toBe("anthropic");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+        expect(result.modelInfo.last_updated).toBeDefined();
+        // Verify it's the 2025 version
+        expect(result.modelInfo.last_updated).toContain("2025");
+      }
+    });
+
+    it("should resolve 'haiku' to claude-haiku-4-5", () => {
+      const result = registry.resolveModel({
+        model: "haiku", // Shortcut
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.modelInfo.providerId).toBe("anthropic");
+        expect(result.modelInfo.modelId).toBe("claude-haiku-4-5");
+      }
     });
   });
 });

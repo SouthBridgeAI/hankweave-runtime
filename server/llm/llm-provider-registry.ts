@@ -67,6 +67,18 @@ export interface LlmProviderRegistryConfig {
 }
 
 export class LlmProviderRegistry {
+  private static instance: LlmProviderRegistry | null = null;
+
+  /**
+   * Common shortcuts for model names that map to search patterns.
+   * These are expanded before model resolution to improve matching.
+   */
+  private static readonly MODEL_SHORTCUTS: Record<string, string> = {
+    opus: "claude-opus",
+    sonnet: "claude-sonnet",
+    haiku: "claude-haiku",
+  };
+
   private providers = new Map<string, Provider>();
   private models = new Map<string, ModelInfo>();
   private uniqueModels = new Set<string>(); // Track unique model IDs
@@ -89,6 +101,27 @@ export class LlmProviderRegistry {
         this.logger?.log(`Background health checks failed: ${err}`, "error");
       });
     }
+  }
+
+  /**
+   * Get the singleton instance of LlmProviderRegistry.
+   * Creates a new instance with the provided config if one doesn't exist.
+   *
+   * @param config - Configuration for the registry (only used on first call)
+   * @returns The singleton instance
+   */
+  public static getInstance(config?: LlmProviderRegistryConfig): LlmProviderRegistry {
+    if (!LlmProviderRegistry.instance) {
+      LlmProviderRegistry.instance = new LlmProviderRegistry(config);
+    }
+    return LlmProviderRegistry.instance;
+  }
+
+  /**
+   * Reset the singleton instance (primarily for testing).
+   */
+  public static resetInstance(): void {
+    LlmProviderRegistry.instance = null;
   }
 
   // === Initialization ===
@@ -669,8 +702,14 @@ export class LlmProviderRegistry {
     model: string;
     ignoreBlockList?: boolean;
   }): ResolveModelResult {
-    const { providerId, model, ignoreBlockList = true } = input;
+    let { providerId, model, ignoreBlockList = true } = input;
     const FUZZY_THRESHOLD = 0.6;
+
+    // Apply shortcuts: expand common short names to search patterns
+    const modelLowercase = model.toLowerCase();
+    if (LlmProviderRegistry.MODEL_SHORTCUTS[modelLowercase]) {
+      model = LlmProviderRegistry.MODEL_SHORTCUTS[modelLowercase];
+    }
 
     // Helper to check if a model is blocked (case-insensitive)
     const isBlocked = (modelInfo: ModelInfo): boolean => {
