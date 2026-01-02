@@ -1,11 +1,10 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Server, ServerWebSocket } from "bun";
 import { minimatch } from "minimatch";
 import { CheckpointGit } from "./checkpoint-git.js";
-import { ClaudeLogParser } from "./claude-log-parser.js";
+import { CodonRunner } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { EventJournal } from "./event-journal.js";
@@ -36,7 +35,6 @@ import {
 } from "./schemas/event-schemas.js";
 import { SentinelConfigLoader } from "./sentinels/sentinel-config-loader.js";
 import { SentinelManager } from "./sentinels/sentinel-manager.js";
-import { ShimProcessManager } from "./shim-process-manager.js";
 import { StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
@@ -150,11 +148,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: Date;
       }
     | undefined;
-  private processManager: ShimProcessManager | undefined;
+  private currentCodonRunner: CodonRunner | undefined;
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingCodon = false;
-  private logParser: ClaudeLogParser | null = null;
 
   // Checkpoint-related properties
   private checkpointGit: CheckpointGit | null = null;
@@ -1771,22 +1768,22 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
     }
 
-    // Start Claude process
-    await this.startClaudeProcess(codonId, codon, previousSessionId);
+    // Run the codon
+    await this.runCodon(codonId, codon, previousSessionId);
   }
 
   // -------------
-  // Claude Process Management
+  // Codon Execution
   // -------------
 
   /**
-   * Spawn Claude CLI process for a codon using ClaudeProcessManager.
+   * Execute a codon using CodonRunner.
    *
    * @param codonId - Runtime codon ID (e.g., "review#0", "review#1" for loops)
    * @param codon - Codon configuration (not Loop - loops must be expanded first)
    * @param previousSessionId - Session to continue from (if any)
    */
-  private async startClaudeProcess(
+  private async runCodon(
     codonId: CodonId,
     codon: Codon,
     previousSessionId: string | null,
@@ -1802,74 +1799,42 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Ensure run folder exists
       await fs.promises.mkdir(runFolder, { recursive: true });
 
-      // Modify log path to use run folder
+      // Calculate log path to use run folder
       // Use codonId (runtime ID with iteration suffix) instead of codon.id (base config ID)
       // Replace # with - for safer file names
       const logFileName = `${codonId.replace(/#/g, "-")}-claude.log`;
       const logPath = path.join(runFolder, logFileName);
 
-      // Create log parser first
-      this.logParser = new ClaudeLogParser({
-        logPath,
-        codonId: codonId,
-        parsingInterval: this.config.logParsingInterval,
-        onSystemMessage: (msg) => this.handleSystemMessage(msg, codonId),
-        onAssistantMessage: (msg) => this.handleAssistantMessage(msg, codonId),
-        onUserMessage: (msg) => this.handleUserMessage(msg, codonId),
-        onResultMessage: (msg) => this.handleResultMessage(msg, codonId),
-      });
-
-      // Create process manager with the log parser
-      this.processManager = new ShimProcessManager(
-        this.config.executionPath,
-        this.logger,
-        this.logParser,
-        this.proxyRunner?.proxyUrl,
-        "gemini-3-pro-preview", // Hardcoded model override for gemini shim
-      );
-
-      // Set up event handlers
-
-      this.processManager.on("exit", (code: number, isContextExceeded: boolean) => {
-        if (isContextExceeded) {
-          this.logger.log(
-            `[STRANDWEAVE-SERVER] Context exceeded error detected for codon ${codonId}`,
-            "error",
-          );
-        }
-        this.handleCodonComplete(code, isContextExceeded);
-      });
-
-      this.processManager.on("error", (error: Error) => {
-        this.handleError(error, `Claude process for codon ${codonId}`, ErrorSeverity.FATAL);
-      });
-
-      // Spawn process with custom log path
-      // Resolve shim path relative to this module's location (not process.cwd())
-      // since the process spawns with cwd=executionPath
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = path.dirname(__filename);
-      const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
-      const _logPathResult = await this.processManager.spawn(
-        ["bun", shimPath], // Hardcoded gemini shim command (absolute path from module location)
+      // Create runner for this codon
+      this.currentCodonRunner = new CodonRunner({
         codon,
-        previousSessionId,
-        logPath,
+        codonId,
+        executionPath: this.config.executionPath,
+        logger: this.logger,
+        logParsingInterval: this.config.logParsingInterval,
+        anthropicBaseUrl: this.proxyRunner?.proxyUrl,
+        logPath, // Pass the run-specific log path
+      });
+
+      // Subscribe to runner events
+      this.setupCodonRunnerEventHandlers(codonId);
+
+      // Start execution
+      await this.currentCodonRunner.run(
+        previousSessionId ? SessionId(previousSessionId) : undefined,
       );
 
-      // Transition to initializing (fire-and-forget)
+      // Validate process started
       if (!this.currentRunId) {
         throw new Error("No active run while starting Claude process");
       }
 
-      const pid = this.processManager.getPid();
+      const pid = this.currentCodonRunner.getPid();
       if (!pid) {
-        throw new Error("Failed to get Claude process PID");
+        throw new Error("Failed to get process PID");
       }
 
-      // Get the codon from current state to check for previousSessionId
-      const _currentCodon = this.currentCodon;
-
+      // Transition to initializing (fire-and-forget)
       this.stateManager.transition({
         type: "CodonTransitioned",
         data: {
@@ -1886,12 +1851,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           },
         },
       });
-
-      // Start log parsing with delay
-      setTimeout(() => {
-        this.logParser?.start();
-      }, TIMEOUTS.LOG_PARSER_DELAY_MS);
     } catch (error) {
+      // Clean up runner if initialization fails
+      if (this.currentCodonRunner) {
+        await this.currentCodonRunner.cleanup();
+        this.currentCodonRunner = undefined;
+      }
+
       // Transition to failed (fire-and-forget) if we have a run
       if (this.currentRunId) {
         this.stateManager.transition({
@@ -1915,6 +1881,47 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.cleanupCurrentCodon();
       throw error;
     }
+  }
+
+  /**
+   * Set up event handlers for the current codon runner
+   */
+  private setupCodonRunnerEventHandlers(codonId: CodonId): void {
+    if (!this.currentCodonRunner) {
+      throw new Error("Cannot setup handlers: no current codon runner");
+    }
+
+    // Process lifecycle events
+    this.currentCodonRunner.on("exit", (code: number, isContextExceeded: boolean) => {
+      if (isContextExceeded) {
+        this.logger.log(
+          `[STRANDWEAVE-SERVER] Context exceeded error detected for codon ${codonId}`,
+          "error",
+        );
+      }
+      this.handleCodonComplete(code, isContextExceeded);
+    });
+
+    this.currentCodonRunner.on("error", (error: Error) => {
+      this.handleError(error, `Process for codon ${codonId}`, ErrorSeverity.FATAL);
+    });
+
+    // Log parser events (forwarded through runner)
+    this.currentCodonRunner.on("systemMessage", (msg: SystemMessage) => {
+      this.handleSystemMessage(msg, codonId);
+    });
+
+    this.currentCodonRunner.on("assistantMessage", (msg: AssistantMessage) => {
+      this.handleAssistantMessage(msg, codonId);
+    });
+
+    this.currentCodonRunner.on("userMessage", (msg: UserMessage) => {
+      this.handleUserMessage(msg, codonId);
+    });
+
+    this.currentCodonRunner.on("resultMessage", (msg: ResultMessage) => {
+      this.handleResultMessage(msg, codonId);
+    });
   }
 
   private handleSystemMessage(msg: SystemMessage, codonId: string): void {
@@ -1960,13 +1967,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Log the session ID update
       this.logger.log(`Claude started codon ${codonId} with session ID: ${msg.session_id}`);
 
-      // Send existing info event
+      // Send info event with codon ID
       this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
         type: "info",
         data: {
-          message: `Claude started with session ID: ${msg.session_id}`,
+          message: `Claude started codon ${codonId} with session ID: ${msg.session_id}`,
         },
       } as InfoEvent);
     }
@@ -2022,9 +2029,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         },
       } as ErrorEvent);
 
-      // Process manager will handle the cleanup
-      if (this.processManager) {
-        this.processManager.kill();
+      // Runner will handle the cleanup
+      if (this.currentCodonRunner) {
+        this.currentCodonRunner.kill();
       }
 
       return; // Stop processing
@@ -2124,9 +2131,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             },
           } as ErrorEvent);
 
-          // Process manager will handle the cleanup
-          if (this.processManager) {
-            this.processManager.kill();
+          // Runner will handle the cleanup
+          if (this.currentCodonRunner) {
+            this.currentCodonRunner.kill();
           }
 
           return; // Stop processing further messages
@@ -2953,8 +2960,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.logger.log(`Skipping codon ${this.currentCodon.codonId}`);
     this.isSkippingCodon = true;
 
-    if (this.processManager) {
-      await this.processManager.kill("SIGTERM");
+    if (this.currentCodonRunner) {
+      await this.currentCodonRunner.kill("SIGTERM");
     }
   }
 
@@ -3140,8 +3147,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Kill the process (if exists)
-    if (this.processManager) {
-      await this.processManager.kill("SIGTERM");
+    if (this.currentCodonRunner) {
+      await this.currentCodonRunner.kill("SIGTERM");
     }
 
     // Clean up codon state
@@ -4352,18 +4359,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // -------------
 
   private cleanupCurrentCodon(): void {
-    if (this.logParser) {
-      this.logParser.stop();
-      this.logParser = null;
-    }
-
-    if (this.processManager) {
-      this.processManager.removeAllListeners();
-      // Ensure log stream is closed
-      this.processManager
-        .closeLogStream()
-        .catch((err) => this.logger.log(`Error closing log stream: ${err}`, "error"));
-      this.processManager = undefined;
+    // Clean up runner (handles both logParser and processManager)
+    if (this.currentCodonRunner) {
+      this.currentCodonRunner
+        .cleanup()
+        .catch((err) => this.logger.log(`Error cleaning up codon runner: ${err}`, "error"));
+      this.currentCodonRunner = undefined;
     }
 
     this.watchedPatterns = [];
@@ -4617,9 +4618,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.logger.log(`Shutting down server: ${reason}`);
 
     // Kill any running process immediately before setting shutdown flag
-    if (this.processManager && this.currentCodon) {
-      this.logger.log("Killing current Claude process for shutdown");
-      await this.processManager.kill("SIGTERM");
+    if (this.currentCodonRunner && this.currentCodon) {
+      this.logger.log("Killing current codon runner for shutdown");
+      await this.currentCodonRunner.kill("SIGTERM");
     }
 
     this.isShuttingDown = true;
