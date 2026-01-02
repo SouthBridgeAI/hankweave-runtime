@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
+import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { type Codon, isContextExceeded } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
@@ -22,7 +23,7 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
-    private model?: import("./types/types.js").ModelName,
+    private model?: ModelInfo,
   ) {
     super();
   }
@@ -151,13 +152,16 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
    */
   private buildShimArgs(codon: Codon, previousSessionId: string | null): string[] {
     // Use model override if provided, otherwise use codon model
-    const model = this.model || codon.model;
+    const modelInfo = this.model || codon.model;
+    const modelId = modelInfo.modelId;
 
-    const args = ["--model", model, "-p"];
+    const args = ["--model", modelId, "-p"];
 
     // Log model usage
     if (this.model) {
-      this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
+      this.logger.log(
+        `Using model override: ${modelInfo.modelId} (codon config specified: ${codon.model.modelId})`,
+      );
     }
 
     if (codon.continuationMode === "continue-previous" && previousSessionId) {

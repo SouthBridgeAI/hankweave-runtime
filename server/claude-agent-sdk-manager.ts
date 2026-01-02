@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
+import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -22,7 +23,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
-    private model?: import("./types/types.js").ModelName,
+    private model?: ModelInfo,
   ) {
     super();
   }
@@ -87,10 +88,10 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    */
   private buildSDKOptions(codon: Codon, previousSessionId: string | null): Options {
     // Use model override if provided, otherwise use codon model
-    const model = this.model || codon.model;
+    const modelInfo = this.model || codon.model;
 
     const options: Options = {
-      model: this.mapModelName(model),
+      model: modelInfo.modelId,
       cwd: this.executionPath,
       permissionMode: "bypassPermissions",
       abortController: this.abortController,
@@ -175,23 +176,12 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
     // Log model usage
     if (this.model) {
-      this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
+      this.logger.log(
+        `Using model override: ${modelInfo.modelId} (codon config specified: ${codon.model.modelId})`,
+      );
     }
 
     return options;
-  }
-
-  /**
-   * Map our model names to SDK model names.
-   */
-  private mapModelName(model: string): string {
-    // Map short names to full model names
-    const modelMap: Record<string, string> = {
-      sonnet: "claude-sonnet-4-5-20250929",
-      opus: "claude-opus-4-5-20251101",
-    };
-
-    return modelMap[model] || model;
   }
 
   /**

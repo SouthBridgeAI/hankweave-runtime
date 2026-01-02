@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
+import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { ShimProcessManager } from "./shim-process-manager.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { CodonId, SessionId } from "./types/branded-types.js";
@@ -83,14 +84,18 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
-   * Detect if the model is an Anthropic model (Claude)
+   * Check if a model can be run by CodonRunner.
+   *
+   * CodonRunner supports:
+   * - Anthropic models via ClaudeAgentSDKManager
+   * - Google models via ShimProcessManager (gemini shim)
+   *
+   * @param model - The ModelInfo to check
+   * @returns true if the model can be executed, false otherwise
    */
-  private isAnthropicModel(model: string): boolean {
-    // Check for common Anthropic model names
-    const anthropicKeywords = ["sonnet", "opus", "claude"];
-    const modelLower = model.toLowerCase();
-
-    return anthropicKeywords.some((keyword) => modelLower.includes(keyword));
+  static canRun(model: ModelInfo): boolean {
+    const supportedProviders = ["anthropic", "google"];
+    return supportedProviders.includes(model.providerId.toLowerCase());
   }
 
   /**
@@ -114,32 +119,42 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    * Create process manager (SDK or Shim) based on model type with event forwarding
    */
   private createProcessManager(): ShimProcessManager | ClaudeAgentSDKManager {
-    const model = this.config.codon.model;
-    const isAnthropicModel = this.isAnthropicModel(model);
+    const modelInfo = this.config.codon.model;
+
+    // Determine if this is an Anthropic model using providerId
+    const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
 
     let processManager: ShimProcessManager | ClaudeAgentSDKManager;
 
     if (isAnthropicModel) {
       // Use Claude Agent SDK for Anthropic models
-      this.config.logger.log(`Using Claude Agent SDK for Anthropic model: ${model}`, "info");
+      this.config.logger.log(
+        `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+        "info",
+      );
 
       processManager = new ClaudeAgentSDKManager(
         this.config.executionPath,
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
-        model,
+        // TODO: look into this
+        undefined, // No runtime model override (would come from runtime config)
       );
     } else {
       // Use Shim for non-Anthropic models (e.g., Gemini)
-      this.config.logger.log(`Using Gemini shim for model: ${model}`, "info");
+      this.config.logger.log(
+        `Using shim for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+        "info",
+      );
 
       processManager = new ShimProcessManager(
         this.config.executionPath,
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
-        "gemini-3-pro-preview", // Hardcoded model override for gemini shim
+        // TODO: look into this
+        undefined, // No runtime model override (would come from runtime config)
       );
     }
 

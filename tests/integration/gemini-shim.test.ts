@@ -5,6 +5,7 @@ import { ClaudeLogParser } from "../../server/claude-log-parser.js";
 import { ShimProcessManager } from "../../server/shim-process-manager.js";
 import type { Codon } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
+import { createTestCodon } from "../utils/test-codon-factory.js";
 
 /**
  * Helper function to run a complete session: creates manager, spawns process,
@@ -153,14 +154,13 @@ describe("Gemini Shim Integration Test", () => {
       return;
     }
 
-    const codon: Codon = {
-      type: "codon",
+    const codon = createTestCodon({
       id: "gemini-test-codon",
       name: "Gemini Test Session",
       promptText: "Say 'Hello from Gemini' and nothing else.",
       model: "gemini-2.5-flash",
       continuationMode: "fresh",
-    };
+    });
 
     const { logPath: actualLogPath, allMessages } = await runSessionToCompletion(
       tempDir,
@@ -256,15 +256,14 @@ describe("Gemini Shim Integration Test", () => {
     // =====================================
     console.log("\n  Step 1: Running first session...");
 
-    const codon1: Codon = {
-      type: "codon",
+    const codon1 = createTestCodon({
       id: "gemini-test-codon-1",
       name: "First Gemini Session",
       promptText:
         "Remember the number 42. Say 'Number saved' and nothing else.",
       model: "gemini-2.5-flash",
       continuationMode: "fresh",
-    };
+    });
 
     const { sessionId: firstSessionId } = await runSessionToCompletion(
       tempDir,
@@ -282,15 +281,14 @@ describe("Gemini Shim Integration Test", () => {
     // =====================================
     console.log("\n  Step 2: Running continuation session...");
 
-    const codon2: Codon = {
-      type: "codon",
+    const codon2 = createTestCodon({
       id: "gemini-test-codon-2",
       name: "Continuation Gemini Session",
       promptText:
         "What number did I tell you to remember? Reply with just the number.",
       model: "gemini-2.5-flash",
       continuationMode: "continue-previous",
-    };
+    });
 
     const { sessionId: continuationSessionId } = await runSessionToCompletion(
       tempDir,

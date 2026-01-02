@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { ClaudeAgentSDKManager } from "../../server/claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import type { Codon } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
+import { createTestCodon } from "../utils/test-codon-factory.js";
 
 describe("ClaudeAgentSDKManager Integration Test", () => {
   let tempDir: string;
@@ -50,14 +50,13 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
       const manager1 = new ClaudeAgentSDKManager(executionPath, logger, logParser1);
 
-      const codon1: Codon = {
-        type: "codon",
+      const codon1 = createTestCodon({
         id: "test-codon-1",
         name: "First Session",
         promptText: "Say 'Hello from first session' and nothing else.",
         model: "sonnet",
         continuationMode: "fresh",
-      };
+      });
 
       const actualLogPath1 = await manager1.spawn(codon1, null);
       expect(actualLogPath1).toBeTruthy();
@@ -107,14 +106,13 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
       const manager2 = new ClaudeAgentSDKManager(executionPath, logger, logParser2);
 
-      const codon2: Codon = {
-        type: "codon",
+      const codon2 = createTestCodon({
         id: "test-codon-2",
         name: "Continuation Session",
         promptText: "Say 'Hello from continuation session' and nothing else.",
         model: "sonnet",
         continuationMode: "continue-previous",
-      };
+      });
 
       const actualLogPath2 = await manager2.spawn(codon2, firstSessionId || null);
       expect(actualLogPath2).toBeTruthy();
@@ -183,14 +181,13 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
       const manager1 = new ClaudeAgentSDKManager(executionPath, logger, logParser1);
 
-      const codon1: Codon = {
-        type: "codon",
+      const codon1 = createTestCodon({
         id: "fresh-test-codon-1",
         name: "First Fresh Session",
         promptText: "Say 'Hello from first fresh session' and nothing else.",
         model: "sonnet",
         continuationMode: "fresh",
-      };
+      });
 
       await manager1.spawn(codon1, null);
 
@@ -230,14 +227,13 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
       const manager2 = new ClaudeAgentSDKManager(executionPath, logger, logParser2);
 
-      const codon2: Codon = {
-        type: "codon",
+      const codon2 = createTestCodon({
         id: "fresh-test-codon-2",
         name: "Second Fresh Session",
         promptText: "Say 'Hello from second fresh session' and nothing else.",
         model: "sonnet",
         continuationMode: "fresh", // Fresh mode, not continuation
-      };
+      });
 
       // Even though we pass the previous session ID, it should be ignored
       await manager2.spawn(codon2, firstSessionId || null);

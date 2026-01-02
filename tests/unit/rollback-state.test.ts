@@ -6,6 +6,7 @@ import { StateManager } from "../../server/state-manager";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
 import type { CodonConfig } from "../../server/types/types";
 import { Logger } from "../../server/utils";
+import { createTestCodon } from "../utils/test-codon-factory.js";
 
 describe("Rollback State Management", () => {
   let stateManager: StateManager;
@@ -20,30 +21,30 @@ describe("Rollback State Management", () => {
   }
 
   const testCodons: CodonConfig[] = [
-    {
-      id: CodonId("codon-1"),
+    createTestCodon({
+      id: "codon-1",
       name: "Test Codon 1",
       promptText: "Test prompt 1",
       model: "sonnet",
       continuationMode: "fresh",
       trackedFiles: ["*.txt"],
-    },
-    {
-      id: CodonId("codon-2"),
+    }),
+    createTestCodon({
+      id: "codon-2",
       name: "Test Codon 2",
       promptText: "Test prompt 2",
       model: "sonnet",
       continuationMode: "continue-previous",
       trackedFiles: ["*.md"],
-    },
-    {
-      id: CodonId("codon-3"),
+    }),
+    createTestCodon({
+      id: "codon-3",
       name: "Test Codon 3",
       promptText: "Test prompt 3",
       model: "opus",
       continuationMode: "fresh",
       trackedFiles: ["src/**/*.ts"],
-    },
+    }),
   ];
 
   beforeEach(async () => {

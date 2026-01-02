@@ -3,18 +3,20 @@ import { type ExecutionCodonEntry, ExecutionPlanner } from "../../server/executi
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type { CodonExecution, Run } from "../../server/types/state-types.js";
 import type { Codon, CodonConfig, Loop } from "../../server/types/types.js";
+import { createTestCodon } from "../utils/test-codon-factory.js";
 
 // ============================================================================
 // Test Fixtures
 // ============================================================================
 
-const createCodon = (id: string, name: string): Codon => ({
-  id: CodonId(id),
-  name,
-  model: "sonnet",
-  continuationMode: "fresh",
-  promptText: `Prompt for ${name}`,
-});
+const createCodon = (id: string, name: string): Codon =>
+  createTestCodon({
+    id,
+    name,
+    model: "sonnet",
+    continuationMode: "fresh",
+    promptText: `Prompt for ${name}`,
+  });
 
 const createLoop = (
   id: string,

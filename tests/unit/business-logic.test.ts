@@ -7,29 +7,33 @@ import { CodonId, RunId } from "../../server/types/branded-types.js";
 import type { Codon } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
 import { createCompletedCodon, StateBuilder } from "../utils/mock-builders.js";
+import { createTestCodon } from "../utils/test-codon-factory.js";
 
 describe("StateManager - getNextCodonToExecute", () => {
   let tempDir: string;
   let stateManager: StateManager;
   const mockCodons: Codon[] = [
-    {
-      id: CodonId("codon-1"),
+    createTestCodon({
+      id: "codon-1",
       name: "Codon 1",
       model: "sonnet",
       continuationMode: "fresh",
-    },
-    {
-      id: CodonId("codon-2"),
+      promptText: "Test prompt 1",
+    }),
+    createTestCodon({
+      id: "codon-2",
       name: "Codon 2",
       model: "sonnet",
       continuationMode: "fresh",
-    },
-    {
-      id: CodonId("codon-3"),
+      promptText: "Test prompt 2",
+    }),
+    createTestCodon({
+      id: "codon-3",
       name: "Codon 3",
       model: "sonnet",
       continuationMode: "fresh",
-    },
+      promptText: "Test prompt 3",
+    }),
   ];
 
   beforeEach(async () => {

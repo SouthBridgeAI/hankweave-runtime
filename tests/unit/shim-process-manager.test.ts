@@ -163,13 +163,13 @@ describe("ShimProcessManager spawn behavior", () => {
   test("spawn handles missing prompt correctly", async () => {
     const _manager = new ShimProcessManager(tempDir, logger, mockLogParser);
 
-    const codonWithoutPrompt: Partial<Codon> = {
+    const codonWithoutPrompt = {
       id: "test-codon" as CodonId,
       name: "Test Codon",
       model: "opus",
       continuationMode: "fresh",
       // Missing both promptFile and promptText
-    };
+    } as unknown as Partial<Codon>;
 
     // Don't actually spawn shims in unit tests
     // Just verify the codon validation

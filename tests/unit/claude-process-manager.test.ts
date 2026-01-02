@@ -163,13 +163,13 @@ describe("ClaudeProcessManager spawn behavior", () => {
   test("spawn handles missing prompt correctly", async () => {
     const _manager = new ClaudeProcessManager(tempDir, logger, mockLogParser);
 
-    const codonWithoutPrompt: Partial<Codon> = {
+    const codonWithoutPrompt = {
       id: "test-codon" as CodonId,
       name: "Test Codon",
       model: "opus",
       continuationMode: "fresh",
       // Missing both promptFile and promptText
-    };
+    } as unknown as Partial<Codon>;
 
     // Don't actually spawn Claude in unit tests
     // Just verify the codon validation
