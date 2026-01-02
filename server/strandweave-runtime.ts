@@ -1825,7 +1825,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         this.logger,
         this.logParser,
         this.proxyRunner?.proxyUrl,
-        "gemini-2.5-pro", // Hardcoded model override for gemini shim
+        "gemini-3-pro-preview", // Hardcoded model override for gemini shim
       );
 
       // Set up event handlers
