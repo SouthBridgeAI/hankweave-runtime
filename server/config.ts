@@ -2,7 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { validateModel } from "./config-validation/model-validator.js";
 import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
+import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
+import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { CodonId } from "./types/branded-types.js";
 import type { ModelName } from "./types/types.js";
 import { deepMerge } from "./utils.js";
@@ -184,6 +187,35 @@ export const loopTerminationSchema = z.discriminatedUnion("type", [
 ]);
 
 // -------------
+// Model Validation Helpers
+// -------------
+
+/**
+ * Reusable model validation refinement.
+ * Returns true if model is valid or undefined, false otherwise.
+ */
+function modelValidationRefinement(model: string | undefined): boolean {
+  if (!model) return true;
+  const registry = LlmProviderRegistry.getInstance();
+  const result = validateModel(model, registry);
+  return result.valid;
+}
+
+/**
+ * Reusable model validation error message generator.
+ * Used in Zod refinements to provide consistent error messages.
+ */
+function modelValidationError(model: string | undefined) {
+  const registry = LlmProviderRegistry.getInstance();
+  if (!model) throw new Error("Unreachable");
+  const result = validateModel(model, registry);
+  return {
+    message: `Invalid model '${model}': ${result.reason}`,
+    path: ["model"],
+  };
+}
+
+// -------------
 // Codon and Loop Schemas
 // -------------
 
@@ -279,7 +311,12 @@ const codonObjectSchema = z.object({
 });
 
 /**
- * Single codon schema with refinements - represents one executable codon.
+ * Single codon schema with refinements and model resolution.
+ * Represents one executable codon.
+ *
+ * NOTE: This schema TRANSFORMS the model field from string to ModelInfo object.
+ * This is different from config schemas (strandRecommendationsSchema, runtimeConfigSchema)
+ * which keep model as string to allow for config layer merging.
  */
 export const codonSchema = codonObjectSchema
   .strict()
@@ -290,6 +327,26 @@ export const codonSchema = codonObjectSchema
   .refine((data) => !(data.appendSystemPromptFile && data.appendSystemPromptText), {
     message:
       "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
+  })
+  .transform((codon, ctx) => {
+    const registry = LlmProviderRegistry.getInstance();
+    const result = validateModel(codon.model, registry);
+
+    if (!result.valid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid model '${codon.model}': ${result.reason}`,
+        path: ["model"],
+      });
+      return z.NEVER;
+    }
+
+    // Replace model string with ModelInfo object
+    // This transformation is specific to codons - config schemas keep model as string
+    return {
+      ...codon,
+      model: result.modelInfo,
+    };
   });
 
 /**
@@ -321,18 +378,7 @@ export const loopSchema = z.object({
     .describe("Optional description shown to users about what this loop does"),
   terminateOn: loopTerminationSchema.describe("Termination condition for the loop"),
   codons: z
-    .array(
-      codonObjectSchema
-        .strict()
-        .refine((data) => data.promptFile || data.promptText, {
-          message:
-            "Either promptFile or promptText must be provided. The prompt tells Claude what to do in this codon. Fix: Add either promptFile (path to .md file) or promptText (inline prompt string).",
-        })
-        .refine((data) => !(data.appendSystemPromptFile && data.appendSystemPromptText), {
-          message:
-            "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
-        }),
-    )
+    .array(codonSchema)
     .min(1, "Loop must contain at least one codon. Fix: Add codons to the loop.")
     .describe(
       "Array of codons to execute in each iteration. Only Codon objects allowed (no nested loops).",
@@ -395,6 +441,10 @@ const sentinelSettingsSchema = z
 
 /**
  * Schema for architect's recommendations
+ *
+ * NOTE: This schema keeps model as a STRING (does NOT transform to ModelInfo).
+ * This allows recommendations to be merged with other config layers during resolveSettings().
+ * The model string is validated but not transformed, maintaining flexibility for config merging.
  */
 export const strandRecommendationsSchema = z
   .object({
@@ -412,7 +462,11 @@ export const strandRecommendationsSchema = z
       .describe("Recommended time limit for data hashing in milliseconds"),
     sentinel: sentinelSettingsSchema.optional().describe("Recommended sentinel system settings"),
   })
-  .strict();
+  .strict()
+  .refine(
+    (recommendations) => modelValidationRefinement(recommendations.model),
+    (recommendations) => modelValidationError(recommendations.model),
+  );
 
 /**
  * Schema for strand file (strand.json).
@@ -428,6 +482,11 @@ export const strandFileSchema = z.object({
 
 /**
  * Schema for runtime configuration (strandweave.json)
+ *
+ * NOTE: This schema keeps model as a STRING (does NOT transform to ModelInfo).
+ * This allows runtime config to be merged with other config layers (CLI args, env vars, defaults)
+ * during resolveSettings(). The model string is validated but not transformed, maintaining
+ * flexibility for the config merging process.
  */
 export const runtimeConfigSchema = z
   .object({
@@ -437,7 +496,13 @@ export const runtimeConfigSchema = z
     withoutProxy: z.boolean().optional().describe("Bypass internal LLM proxy"),
 
     // Model & API
-    model: z.enum(["sonnet", "opus"]).optional().describe("User's preferred default model"),
+    model: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "User's preferred default model. Can be a short name like 'sonnet' or 'opus', a Gemini model like 'gemini-2.0-flash', or any model supported by the configured providers. Validation happens at runtime via LLMRegistry.",
+      ),
     anthropicBaseUrl: z
       .string()
       .url()
@@ -472,7 +537,11 @@ export const runtimeConfigSchema = z
     // Sentinel System
     sentinel: sentinelSettingsSchema.optional().describe("Sentinel system configuration"),
   })
-  .strict();
+  .strict()
+  .refine(
+    (config) => modelValidationRefinement(config.model),
+    (config) => modelValidationError(config.model),
+  );
 
 // -------------
 // Inferred Types from Schemas
@@ -480,12 +549,23 @@ export const runtimeConfigSchema = z
 
 export type ShellCommand = z.input<typeof shellCommandSchema>;
 export type RigShellCommand = z.input<typeof rigShellCommandSchema>;
-export type RigSetupItem = z.input<typeof rigSetupItemSchema>;
+export type RigSetupItem = z.output<typeof rigSetupItemSchema>;
 export type LoopTermination = z.infer<typeof loopTerminationSchema>;
-export type Codon = z.input<typeof codonSchema>;
-export type Loop = z.input<typeof loopSchema>;
-export type CodonConfig = z.input<typeof codonConfigSchema>;
+
+// After parsing through Zod, model fields in Codons are transformed to ModelInfo
+// Use z.output to get the type after transforms
+// Explicitly type model as ModelInfo since the transform can't infer it from dynamic require()
+export type Codon = Omit<z.infer<typeof codonObjectSchema>, "model"> & {
+  model: ModelInfo;
+};
+export type Loop = Omit<z.infer<typeof loopSchema>, "codons"> & {
+  codons: Codon[];
+};
+export type CodonConfig = Codon | Loop;
 export type StrandMeta = z.infer<typeof strandMetaSchema>;
+
+// RuntimeConfig and StrandRecommendations keep model as string (no transform in schemas)
+// This allows for config merging with raw string values
 export type StrandRecommendations = z.infer<typeof strandRecommendationsSchema>;
 export type StrandFile = z.infer<typeof strandFileSchema>;
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
@@ -701,7 +781,7 @@ export function loadStrandFile(strandPath: string): z.infer<typeof strandFileSch
  * @returns Parsed and validated runtime config, or empty object if file doesn't exist
  * @throws Error with detailed validation messages if file exists but is invalid
  */
-export function loadRuntimeConfig(runtimeConfigPath?: string): z.infer<typeof runtimeConfigSchema> {
+export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
   const configPath = runtimeConfigPath || path.join(process.cwd(), "strandweave.json");
 
   // If file doesn't exist, return empty object (runtime config is optional)
@@ -753,7 +833,7 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): z.infer<typeof ru
  * @returns Parsed config object from environment variables (validated against schema)
  * @throws Error if environment variables contain invalid values
  */
-export function loadStrandweaveRuntimeEnvVars(): z.infer<typeof runtimeConfigSchema> {
+export function loadStrandweaveRuntimeEnvVars(): RuntimeConfig {
   const config: Record<string, unknown> = {};
 
   // Helper to convert snake_case to camelCase
@@ -908,6 +988,7 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
     /**
      * Recursively resolve paths in a codon configuration.
      * Handles both Codon and Loop types.
+     * Works with transformed types (after Zod parsing).
      */
     function resolveCodonOrLoopPaths(config: CodonConfig): CodonConfig {
       // If it's a loop, resolve paths in nested codons
@@ -971,9 +1052,9 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
       resolveCodonOrLoopPaths(config as CodonConfig),
     );
 
-    // Validate file existence, readability, and model names
+    // Validate file existence and readability
+    // Note: Model validation happens at a later stage via LLMProviderRegistry
     const validationErrors: string[] = [];
-    const validModels = ["sonnet", "opus"];
 
     /**
      * Recursively validate a codon or loop configuration.
@@ -998,15 +1079,6 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
       }
 
       // It's a codon - validate it
-      // Validate model name
-      if (!validModels.includes(config.model)) {
-        validationErrors.push(
-          `${context}: model "${
-            config.model
-          }" is not valid. Must be one of: ${validModels.join(", ")}`,
-        );
-      }
-
       // Validate promptFile existence and readability
       if (config.promptFile) {
         const promptFiles = Array.isArray(config.promptFile)

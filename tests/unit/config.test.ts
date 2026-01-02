@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -10,8 +10,10 @@ import {
   loadStrandweaveRuntimeEnvVars,
   validateStrand,
 } from "../../server/config";
+import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
 import { CodonId } from "../../server/types/branded-types";
-import type { CodonConfig, ModelName } from "../../server/types/types";
+import type { ModelName } from "../../server/types/types";
+import { Logger } from "../../server/utils";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers";
 
 // -------------
@@ -50,6 +52,330 @@ const writeStrandConfig = (filePath: string, codons: unknown[]) => {
 // -------------
 // Tests
 // -------------
+
+// -------------
+// Model Validation Tests
+// -------------
+
+describe("Model Validation", () => {
+  beforeAll(() => {
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
+  });
+
+  describe("in codonSchema (transforms to ModelInfo)", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-codon-model-test");
+    const configPath = path.join(tempDir, "test-config.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("accepts valid Claude model shortcuts (sonnet, opus, haiku)", () => {
+      const models = ["sonnet", "opus", "haiku"];
+
+      for (const model of models) {
+        const config = [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ];
+
+        writeStrandConfig(configPath, config);
+        const result = loadCodonSequence(configPath);
+
+        expect(result).toHaveLength(1);
+        const codon = result[0];
+        if (codon.type !== "loop") {
+          expect(codon.model).toBeDefined();
+          expect(codon.model.modelId).toContain(model);
+        }
+      }
+    });
+
+    test("accepts valid Gemini models", () => {
+      const models = ["gemini-2.5-flash"];
+
+      for (const model of models) {
+        const config = [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ];
+
+        writeStrandConfig(configPath, config);
+        const result = loadCodonSequence(configPath);
+
+        expect(result).toHaveLength(1);
+        const codon = result[0];
+        if (codon.type !== "loop") {
+          expect(codon.model).toBeDefined();
+          expect(typeof codon.model.modelId).toBe("string");
+        }
+      }
+    });
+
+    test("throws error for invalid model", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "invalid-model-xyz",
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ];
+
+      writeStrandConfig(configPath, config);
+      expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
+    });
+
+    test("throws error for empty model string", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "",
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ];
+
+      writeStrandConfig(configPath, config);
+      expect(() => loadCodonSequence(configPath)).toThrow();
+    });
+
+    test("validates model in loop codons", () => {
+      const config = [
+        {
+          type: "loop",
+          id: "test-loop",
+          name: "Test Loop",
+          terminateOn: {
+            type: "iterationLimit" as const,
+            limit: 2,
+          },
+          codons: [
+            {
+              id: "loop-codon",
+              name: "Loop Codon",
+              model: "invalid-loop-model",
+              continuationMode: "fresh" as const,
+              promptText: "Test prompt",
+            },
+          ],
+        },
+      ];
+
+      writeStrandConfig(configPath, config);
+      expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
+    });
+  });
+
+  describe("in strandRecommendationsSchema (keeps as string)", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-recommendations-model-test");
+    const strandPath = path.join(tempDir, "test-strand.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("accepts valid model in recommendations", () => {
+      const models = ["sonnet", "opus", "haiku"];
+
+      for (const model of models) {
+        const strandContent = {
+          recommendations: {
+            model,
+          },
+          strand: [
+            {
+              id: "test-codon",
+              name: "Test Codon",
+              model: "sonnet" as ModelName,
+              continuationMode: "fresh" as const,
+              promptText: "Test prompt",
+            },
+          ],
+        };
+
+        createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+        const result = loadStrandFile(strandPath);
+
+        // Model should stay as string in recommendations
+        expect(result.recommendations?.model).toBe(model);
+        expect(typeof result.recommendations?.model).toBe("string");
+      }
+    });
+
+    test("throws error for invalid model in recommendations", () => {
+      const strandContent = {
+        recommendations: {
+          model: "gpt-4-turbo",
+        },
+        strand: [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model: "sonnet" as ModelName,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ],
+      };
+
+      createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+      expect(() => loadStrandFile(strandPath)).toThrow("Invalid");
+    });
+
+    test("allows undefined model in recommendations", () => {
+      const strandContent = {
+        recommendations: {
+          dataHashTimeLimit: 5000,
+          // No model field
+        },
+        strand: [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model: "sonnet" as ModelName,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ],
+      };
+
+      createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+      const result = loadStrandFile(strandPath);
+
+      expect(result.recommendations?.model).toBeUndefined();
+    });
+  });
+
+  describe("in runtimeConfigSchema (keeps as string)", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-runtime-model-test");
+    const runtimeConfigPath = path.join(tempDir, "strandweave.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("accepts valid model in runtime config", () => {
+      const models = ["sonnet", "opus", "haiku", "gemini-2.5-flash"];
+
+      for (const model of models) {
+        const runtimeContent = {
+          model,
+          port: 8080,
+        };
+
+        createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+        const result = loadRuntimeConfig(runtimeConfigPath);
+
+        // Model should stay as string in runtime config
+        expect(result.model).toBe(model);
+        expect(typeof result.model).toBe("string");
+      }
+    });
+
+    test("throws error for invalid model in runtime config", () => {
+      const runtimeContent = {
+        model: "this is not a model", // Invalid - not in registry
+        port: 8080,
+      };
+
+      createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+      expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid");
+    });
+
+    test("allows undefined model in runtime config", () => {
+      const runtimeContent = {
+        port: 8080,
+        // No model field
+      };
+
+      createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+      const result = loadRuntimeConfig(runtimeConfigPath);
+
+      expect(result.model).toBeUndefined();
+    });
+
+    test("throws error for empty model string in runtime config", () => {
+      const runtimeContent = {
+        model: "",
+        port: 8080,
+      };
+
+      createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+      expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow();
+    });
+  });
+
+  describe("model validation error messages", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-model-error-test");
+    const configPath = path.join(tempDir, "test-config.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("provides helpful error message for invalid model", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "nonexistent-model",
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ];
+
+      writeStrandConfig(configPath, config);
+
+      try {
+        loadCodonSequence(configPath);
+        throw new Error("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        const message = (error as Error).message;
+        expect(message).toContain("Invalid model");
+        expect(message).toContain("nonexistent-model");
+      }
+    });
+  });
+});
 
 describe("calculateCost", () => {
   const costs = DEFAULT_CONFIG.costsPerMTok;
@@ -161,10 +487,18 @@ describe("validateStrand", () => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
     fs.mkdirSync(projectPath, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("validates basic configuration successfully", async () => {
@@ -559,8 +893,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
+    // Union schema reports "Invalid input" at top level, nested errors contain "Command cannot be empty"
     await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
-      "Command cannot be empty",
+      "Failed to load codon config",
     );
   });
 
@@ -981,10 +1316,18 @@ describe("loadStrandFile", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("loads valid strand file with all fields", () => {
@@ -1020,7 +1363,10 @@ describe("loadStrandFile", () => {
     const result = loadStrandFile(strandPath);
 
     expect(result.meta).toEqual(strandContent.meta);
-    expect(result.recommendations).toEqual(strandContent.recommendations);
+    // Check recommendations fields (model stays as string)
+    expect(result.recommendations?.model).toBe("sonnet");
+    expect(result.recommendations?.dataHashTimeLimit).toBe(10000);
+    expect(result.recommendations?.sentinel).toEqual(strandContent.recommendations.sentinel);
     expect(result.strand).toHaveLength(1);
     expect(result.strand[0].id).toBe("test-codon");
   });
@@ -1190,10 +1536,18 @@ describe("loadRuntimeConfig", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("returns empty object when file doesn't exist", () => {
@@ -1616,16 +1970,25 @@ describe("loadCodonSequence", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("loads valid configuration", () => {
-    const validConfig: CodonConfig[] = [
+    // Input data (before Zod parsing) - don't type as CodonConfig since that's the output type
+    const validConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1637,7 +2000,17 @@ describe("loadCodonSequence", () => {
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject(validConfig[0]);
+    expect(result[0].type).toBe("codon");
+
+    // Model is transformed to ModelInfo, so check other fields
+    const codon = result[0] as import("../../server/types/types.js").Codon;
+    expect(codon.id).toBe("test-codon");
+    expect(codon.name).toBe("Test Codon");
+    expect(codon.promptText).toBe("Test prompt");
+    expect(codon.continuationMode).toBe("fresh");
+    // Check that model was transformed and validated
+    expect(codon.model).toBeDefined();
+    expect(codon.model.modelId).toContain("opus");
   });
 
   test("throws on missing required fields", () => {
@@ -1654,11 +2027,11 @@ describe("loadCodonSequence", () => {
   });
 
   test("throws on invalid model names", () => {
-    const invalidConfig: CodonConfig[] = [
+    const invalidConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
-        model: "invalid-model-name" as ModelName, // Intentionally invalid for testing
+        model: "invalid-model-name", // Intentionally invalid for testing
         continuationMode: "fresh",
         promptText: "Test prompt",
       },
@@ -1683,9 +2056,9 @@ describe("loadCodonSequence", () => {
 
     // Both provided - loadCodonSequence doesn't actually validate this case, it just uses promptFile if both are provided
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
-    const bothConfig: CodonConfig[] = [
+    const bothConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1708,9 +2081,9 @@ describe("loadCodonSequence", () => {
   test("validates appendSystemPromptFile XOR appendSystemPromptText", () => {
     // Both provided
     createTestFile(path.join(tempDir, "system.md"), "System prompt");
-    const bothConfig: CodonConfig[] = [
+    const bothConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1726,9 +2099,9 @@ describe("loadCodonSequence", () => {
 
   test("resolves relative paths correctly", () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
-    const config: CodonConfig[] = [
+    const config = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1749,9 +2122,9 @@ describe("loadCodonSequence", () => {
     createTestFile(path.join(tempDir, "prompt1.md"), "Prompt 1");
     createTestFile(path.join(tempDir, "prompt2.md"), "Prompt 2");
 
-    const config: CodonConfig[] = [
+    const config = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1792,9 +2165,9 @@ describe("loadCodonSequence", () => {
   });
 
   test("throws on non-existent prompt files", () => {
-    const config: CodonConfig[] = [
+    const config = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1814,9 +2187,9 @@ describe("loadCodonSequence", () => {
     if (process.platform !== "win32") {
       fs.chmodSync(promptPath, 0o000);
 
-      const config: CodonConfig[] = [
+      const config = [
         {
-          id: CodonId("test-codon"),
+          id: "test-codon",
           name: "Test Codon",
           model: "opus",
           continuationMode: "fresh",
