@@ -75,7 +75,6 @@ export function runCostPrecisionTests(testState: TestState, _configPath: string)
               cacheReadTokens: data.cacheReadTokens || 0,
               cacheCreationTokens: data.cacheCreationTokens || 0,
             };
-            console.log(`Usage for calculation:`, usageForCalc);
 
             const modelCost = registry.calculateCost(modelId, usageForCalc);
 
