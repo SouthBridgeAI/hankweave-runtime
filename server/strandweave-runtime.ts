@@ -2284,6 +2284,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             codonId,
             ...finalUsage,
             totalCost: finalCost,
+            // Include per-model usage if available (for multi-model scenarios)
+            ...(msg.modelUsage ? { modelUsage: msg.modelUsage } : {}),
           },
         } as TokenUsageEvent);
       }
