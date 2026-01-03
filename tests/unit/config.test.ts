@@ -543,7 +543,7 @@ describe("validateStrand", () => {
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "sonnet",
+        model: "opus", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt2.md",
         appendSystemPromptFile: "./system.md",
@@ -817,7 +817,7 @@ describe("validateStrand", () => {
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "sonnet",
+        model: "opus", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
@@ -856,7 +856,7 @@ describe("validateStrand", () => {
       {
         id: "codon-after-loop",
         name: "Codon After Loop",
-        model: "sonnet",
+        model: "opus", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
@@ -941,7 +941,7 @@ describe("validateStrand", () => {
           {
             id: "loop-codon-2",
             name: "Loop Codon 2",
-            model: "sonnet",
+            model: "opus", // Same model for continue-previous
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -950,7 +950,7 @@ describe("validateStrand", () => {
       {
         id: "final-codon",
         name: "Final Codon",
-        model: "sonnet",
+        model: "opus", // Match last codon in loop
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
@@ -1192,7 +1192,7 @@ describe("validateStrand", () => {
           {
             id: "codon-2",
             name: "Codon 2",
-            model: "sonnet",
+            model: "opus", // Same model for continue-previous
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -1306,6 +1306,213 @@ describe("validateStrand", () => {
     const result = await validateStrand(configPath, projectPath);
     // Should not throw
     expect(result.codonCount).toBe(1);
+  });
+
+  test("allows two codons with different models and fresh continuationMode", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "codon-1",
+        name: "First Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "codon-2",
+        name: "Second Codon",
+        model: "sonnet", // Different model
+        continuationMode: "fresh", // Fresh mode is OK
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath);
+    // Should not throw
+    expect(result.codonCount).toBe(2);
+  });
+
+  test("throws when codon with continue-previous has different model from previous codon", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "codon-1",
+        name: "First Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "codon-2",
+        name: "Second Codon",
+        model: "sonnet", // Different model
+        continuationMode: "continue-previous", // This should fail
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+      /continue-previous.*model differs.*session ID/i,
+    );
+  });
+
+  test("throws when codon after loop has different model with continue-previous", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon",
+            name: "Loop Codon",
+            model: "opus", // Loop uses opus
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+      {
+        id: "after-loop",
+        name: "After Loop",
+        model: "sonnet", // Different model
+        continuationMode: "continue-previous", // This should fail
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+      /continue-previous.*model differs.*session ID/i,
+    );
+  });
+
+  test("throws when codon after loop with multiple codons has different model", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "haiku",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "opus", // Last codon in loop uses opus
+            continuationMode: "continue-previous",
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+      {
+        id: "after-loop",
+        name: "After Loop",
+        model: "sonnet", // Different from last codon in loop
+        continuationMode: "continue-previous", // This should fail
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+      /continue-previous.*model differs.*session ID/i,
+    );
+  });
+
+  test("throws when codons inside loop have different models with continue-previous", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "haiku",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "opus", // Different model
+            continuationMode: "continue-previous", // This should fail
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+      /continue-previous.*model differs.*previous codon in loop.*session ID/i,
+    );
+  });
+
+  test("allows codons inside loop with different models when using fresh", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "haiku",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "opus", // Different model
+            continuationMode: "fresh", // Fresh mode is OK
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath);
+    // Should not throw
+    expect(result.codonCount).toBe(2);
   });
 });
 

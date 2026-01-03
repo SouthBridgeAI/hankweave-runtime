@@ -1379,6 +1379,19 @@ export async function validateStrand(
         }
       }
 
+      // Validate model compatibility within loop codons
+      for (const [codonIndex, codon] of config.codons.entries()) {
+        if (codon.continuationMode === "continue-previous" && codonIndex > 0) {
+          const previousCodon = config.codons[codonIndex - 1];
+          if (codon.model.modelId !== previousCodon.model.modelId) {
+            throw new Error(
+              `${loopLabel} > Codon ${codonIndex + 1} (${codon.id}): Cannot use continuationMode "continue-previous" when model differs from previous codon in loop. ` +
+                `Different models cannot share the same session ID. Change to "fresh" to start a new conversation with a different model.`,
+            );
+          }
+        }
+      }
+
       // Recursively validate each codon in the loop
       for (const [codonIndex, codon] of config.codons.entries()) {
         const codonContext = `Loop '${config.id}' > Codon ${codonIndex + 1} (${codon.id})`;
@@ -1574,6 +1587,14 @@ export async function validateStrand(
         } else {
           codonToCheck = previousConfig;
           warningContext = `Continues from previous codon "${codonToCheck.id}"`;
+        }
+
+        // Error if models don't match - cannot share session ID between different models
+        if (codon.model.modelId !== codonToCheck.model.modelId) {
+          throw new Error(
+            `${codonLabel}: Cannot use continuationMode "continue-previous" when model differs from previous codon. ` +
+              `Different models cannot share the same session ID. Change to "fresh" to start a new conversation with a different model.`,
+          );
         }
 
         // Warn if the codon doesn't produce output that might be needed
