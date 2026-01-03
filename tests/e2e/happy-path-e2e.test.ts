@@ -845,7 +845,7 @@ describe("Strandweave E2E Test", () => {
   });
 
   describe("Cost Precision", () => {
-    runCostPrecisionTests(testState);
+    runCostPrecisionTests(testState, CODONS_CONFIG);
   });
 
   describe("File System Edge Cases", () => {

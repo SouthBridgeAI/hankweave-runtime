@@ -6,10 +6,11 @@ import { minimatch } from "minimatch";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { CodonRunner } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
-import { calculateCost, DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
+import { DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { EventJournal } from "./event-journal.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
+import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { BunProxyRunner } from "./llm-proxy.js";
 // Import event types from new schema file
 import type {
@@ -176,6 +177,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   private sentinelConfigLoader: SentinelConfigLoader;
   private currentCodonSentinels = new Set<string>();
 
+  // LLM registry for cost calculations
+  private llmRegistry: LlmProviderRegistry;
+
   constructor(
     config: Omit<StrandweaveConfig, keyof typeof DEFAULT_CONFIG> &
       Partial<Pick<StrandweaveConfig, keyof typeof DEFAULT_CONFIG>> & {
@@ -210,6 +214,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       waitForHealthChecks: this.config.sentinel.waitForAllHealthChecks,
       rootDirectory: this.config.executionPath, // Ensure sentinel files are in execution directory
     });
+
+    // Get LLM registry instance for cost calculations
+    this.llmRegistry = LlmProviderRegistry.getInstance();
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -2045,7 +2052,26 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         cacheReadTokens: msg.message.usage.cache_read_input_tokens || 0,
       };
 
-      const costDelta = calculateCost(usageDelta, this.config.costsPerMTok);
+      // Calculate cost delta using LLM registry
+      let costDelta = 0;
+      const modelId = this.currentCodon?.codon.model.modelId;
+
+      if (modelId) {
+        const calculatedCost = this.llmRegistry.calculateCost(modelId, {
+          inputTokens: usageDelta.inputTokens,
+          outputTokens: usageDelta.outputTokens,
+          cacheReadTokens: usageDelta.cacheReadTokens,
+          cacheCreationTokens: usageDelta.cacheCreationTokens,
+        });
+
+        if (calculatedCost !== null) {
+          costDelta = calculatedCost;
+        } else {
+          this.logger.log(`Cannot calculate incremental cost for model: ${modelId}`, "debug");
+        }
+      } else {
+        this.logger.log("Cannot calculate incremental cost: no model ID in current codon", "debug");
+      }
 
       // This part is fine, it updates the transient in-memory state for now
       if (this.currentCodon && this.currentCodon.status === "running") {
@@ -2087,6 +2113,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           codonId,
           ...usageDelta,
           totalCost: costDelta, // This event should report the delta cost
+          modelId: this.currentCodon?.codon.model.modelId, // For single-model scenarios
         },
       } as TokenUsageEvent);
     }
@@ -2254,7 +2281,41 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           cacheReadTokens: msg.usage.cache_read_input_tokens || 0,
         };
 
-        const finalCost = msg.total_cost_usd || calculateCost(finalUsage, this.config.costsPerMTok);
+        // Get final cost: prefer CLI-provided, fallback to registry calculation, then accumulated cost
+        let finalCost = msg.total_cost_usd;
+
+        if (finalCost === undefined) {
+          const modelId = this.currentCodon?.codon.model.modelId;
+
+          if (modelId) {
+            const calculatedCost = this.llmRegistry.calculateCost(modelId, {
+              inputTokens: finalUsage.inputTokens,
+              outputTokens: finalUsage.outputTokens,
+              cacheReadTokens: finalUsage.cacheReadTokens,
+              cacheCreationTokens: finalUsage.cacheCreationTokens,
+            });
+
+            if (calculatedCost !== null) {
+              finalCost = calculatedCost;
+            } else {
+              // Fall back to accumulated cost if registry lookup fails
+              const accumulatedCost = this.currentCodon?.codonCost || 0;
+              this.logger.log(
+                `Cannot calculate final cost for model: ${modelId}, using accumulated cost: $${accumulatedCost.toFixed(4)}`,
+                "debug",
+              );
+              finalCost = accumulatedCost;
+            }
+          } else {
+            // Fall back to accumulated cost if no model ID
+            const accumulatedCost = this.currentCodon?.codonCost || 0;
+            this.logger.log(
+              `Cannot calculate final cost: no model ID, using accumulated cost: $${accumulatedCost.toFixed(4)}`,
+              "debug",
+            );
+            finalCost = accumulatedCost;
+          }
+        }
 
         const accumulatedCost = this.currentCodon?.codonCost || 0; // Still useful for logging
         if (Math.abs(accumulatedCost - finalCost) > 0.0001) {
@@ -2286,6 +2347,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             totalCost: finalCost,
             // Include per-model usage if available (for multi-model scenarios)
             ...(msg.modelUsage ? { modelUsage: msg.modelUsage } : {}),
+            // Include modelId for single-model scenarios (when modelUsage is not present)
+            ...(!msg.modelUsage ? { modelId: this.currentCodon?.codon.model.modelId } : {}),
           },
         } as TokenUsageEvent);
       }
