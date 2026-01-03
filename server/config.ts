@@ -1230,28 +1230,6 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
   }
 }
 
-// -------------
-// Token Cost Calculation
-// -------------
-
-/**
- * Extract model family (sonnet, haiku, opus) from full model ID.
- * Maps model IDs like "claude-sonnet-4-5-20250929" to "sonnet" for pricing lookups.
- *
- * @param modelId - Full model ID (e.g., "claude-sonnet-4-5-20250929")
- * @returns Model family name (e.g., "sonnet"), or the original ID if no family is detected
- */
-export function getModelFamily(modelId: string): string {
-  const lowerModelId = modelId.toLowerCase();
-
-  if (lowerModelId.includes("sonnet")) return "sonnet";
-  if (lowerModelId.includes("haiku")) return "haiku";
-  if (lowerModelId.includes("opus")) return "opus";
-
-  // Fallback to the original model ID if we can't determine the family
-  return modelId;
-}
-
 /**
  * Calculate the cost in dollars for a given token usage.
  *
