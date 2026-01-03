@@ -110,7 +110,10 @@ describe("LLM Provider Health Checks (E2E)", () => {
         const expectedCost =
           (inputTokens / 1_000_000) * inputCost + (outputTokens / 1_000_000) * outputCost;
 
-        const actualCost = registry.calculateCost(modelId, inputTokens, outputTokens);
+        const actualCost = registry.calculateCost(modelId, {
+          inputTokens,
+          outputTokens,
+        });
 
         if (actualCost !== null) {
           expect(actualCost).toBeCloseTo(expectedCost, 6);

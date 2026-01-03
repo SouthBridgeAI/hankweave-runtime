@@ -161,11 +161,10 @@ describe("LlmProviderRegistry", () => {
     });
 
     it("should calculate costs correctly", () => {
-      const cost = registry.calculateCost(
-        "claude-3-5-sonnet-20241022",
-        1000, // 1K input tokens
-        500, // 500 output tokens
-      );
+      const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+        inputTokens: 1000, // 1K input tokens
+        outputTokens: 500, // 500 output tokens
+      });
 
       // Cost should be: (1000/1M * 3.00) + (500/1M * 15.00)
       // = 0.003 + 0.0075 = 0.0105
@@ -173,12 +172,18 @@ describe("LlmProviderRegistry", () => {
     });
 
     it("should return null for unknown models", () => {
-      const cost = registry.calculateCost("unknown-model", 1000, 500);
+      const cost = registry.calculateCost("unknown-model", {
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
       expect(cost).toBeNull();
     });
 
     it("should handle zero token counts", () => {
-      const cost = registry.calculateCost("claude-3-5-sonnet-20241022", 0, 0);
+      const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+        inputTokens: 0,
+        outputTokens: 0,
+      });
       expect(cost).toBe(0);
     });
 
@@ -1018,7 +1023,10 @@ describe("MockLlmProviderRegistry", () => {
   });
 
   it("should calculate mock costs correctly", () => {
-    const cost = mockRegistry.calculateCost("claude-3-5-sonnet-20241022", 1000, 500);
+    const cost = mockRegistry.calculateCost("claude-3-5-sonnet-20241022", {
+      inputTokens: 1000,
+      outputTokens: 500,
+    });
     expect(cost).toBeCloseTo(0.0105, 6); // Same calculation as real registry
   });
 

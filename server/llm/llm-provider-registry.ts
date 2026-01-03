@@ -848,23 +848,41 @@ export class LlmProviderRegistry {
   }
 
   /**
-   * Calculate cost for a given token usage.
+   * Calculate cost for a given token usage with full cache support.
+   *
+   * @param modelName - Model identifier (will be resolved via registry)
+   * @param usage - Token usage breakdown
+   * @returns Cost in USD, or null if model not found or no pricing data available
    */
   public calculateCost(
     modelName: string,
-    inputTokens: number,
-    outputTokens: number,
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheCreationTokens?: number;
+    },
   ): number | null {
     const result = this.getModelInfo(modelName);
-    if (!result.success) return null;
+    if (!result.success) {
+      this.logger?.log(`Cannot calculate cost: model not found: ${modelName}`, "debug");
+      return null;
+    }
 
-    const info = result.info;
-    const inputCost = parseFloat(((inputTokens / 1_000_000) * (info.cost?.input || 0)).toFixed(10));
-    const outputCost = parseFloat(
-      ((outputTokens / 1_000_000) * (info.cost?.output || 0)).toFixed(10),
-    );
+    const cost = result.info.cost;
+    if (!cost) {
+      this.logger?.log(`Cannot calculate cost: no pricing data for ${modelName}`, "debug");
+      return null;
+    }
 
-    return inputCost + outputCost;
+    // Calculate each component
+    // Note: ModelInfo uses cache_read and cache_write naming
+    const inputCost = (usage.inputTokens / 1_000_000) * (cost.input || 0);
+    const outputCost = (usage.outputTokens / 1_000_000) * (cost.output || 0);
+    const cacheReadCost = ((usage.cacheReadTokens || 0) / 1_000_000) * (cost.cache_read || 0);
+    const cacheWriteCost = ((usage.cacheCreationTokens || 0) / 1_000_000) * (cost.cache_write || 0);
+
+    return inputCost + outputCost + cacheReadCost + cacheWriteCost;
   }
 
   /**
