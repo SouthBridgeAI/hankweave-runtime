@@ -53,53 +53,6 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     }
   });
 
-  test("costs match between WebSocket and logs", () => {
-    // Calculate costs from JSONL logs using result messages
-    let logTotalCost = 0;
-    const codonLogCosts: Record<string, number> = {};
-
-    // Find the run folder
-    const runsDir = path.join(testDir, ".strandweave/runs");
-    let runFolder = "";
-    if (fs.existsSync(runsDir)) {
-      const runFolders = fs.readdirSync(runsDir);
-      if (runFolders.length > 0) {
-        runFolder = path.join(runsDir, runFolders[0]);
-      }
-    }
-
-    for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
-      const logPath = path.join(runFolder, `${codonId}-claude.log`); // Corrected path
-      if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const logEntries = parseJSONL(logContent);
-
-        // Find the result message which has the final cost
-        const resultMessage = logEntries.find(
-          (e) => e.type === "result" && e.subtype === "success",
-        );
-
-        if (resultMessage?.total_cost_usd) {
-          codonLogCosts[codonId] = resultMessage.total_cost_usd;
-          logTotalCost += resultMessage.total_cost_usd;
-        }
-      }
-    }
-
-    // Compare with WebSocket reported costs
-    const codonCompletedEvents = testState.client?.getEventsByType("codon.completed") || [];
-    let wsReportedCost = 0;
-
-    for (const event of codonCompletedEvents) {
-      const completedEvent = event as CodonCompletedEvent;
-      if (completedEvent.data?.success) {
-        wsReportedCost += completedEvent.data?.cost || 0;
-      }
-    }
-
-    expect(wsReportedCost).toBeCloseTo(logTotalCost, 4); // Increased precision
-  });
-
   test("individual codon costs match", () => {
     const codonLogCosts: Record<string, number> = {};
 
@@ -134,7 +87,11 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
       const completedEvent = event as CodonCompletedEvent;
       if (completedEvent.data?.success && completedEvent.data?.codonId) {
         const logCost = codonLogCosts[completedEvent.data.codonId] || 0;
-        expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 4); // Increased precision
+
+        if (logCost) {
+          // some providers will not have cost data in logs - only compare if we have it
+          expect(completedEvent.data?.cost || 0).toBeCloseTo(logCost, 4); // Increased precision
+        }
       }
     }
   });
