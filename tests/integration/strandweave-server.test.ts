@@ -136,12 +136,6 @@ describe("StrandweaveRuntime", () => {
         healthCheckGracePeriodMs: 0,
         waitForAllHealthChecks: false,
       },
-      costsPerMTok: {
-        input: 3.0,
-        inputCache: 0.3,
-        cacheRead: 0.3,
-        output: 15.0,
-      },
       logParsingInterval: 1000,
       dataHashTimeLimit: 5000,
       toolResultTruncateLength: 2500,

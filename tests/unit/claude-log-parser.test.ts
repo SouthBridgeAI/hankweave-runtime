@@ -2,27 +2,20 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import { calculateCost } from "../../server/config.js";
+import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { AssistantMessage, ResultMessage } from "../../server/types/claude-session-schema.js";
 import { logMessageSchema } from "../../server/types/claude-session-schema.js";
 import type { TokenUsage } from "../../server/types/types.js";
 
 // Local helper for testing log parsing - replaces the removed loadCodonStateFromLog
-function parseLogForTesting(
-  logPath: string,
-  costsPerMTok: {
-    input: number;
-    output: number;
-    inputCache: number;
-    cacheRead: number;
-  },
-): {
+function parseLogForTesting(logPath: string): {
   sessionId: string | null;
   success: boolean;
   cost: number;
   tokens: TokenUsage;
 } {
   let sessionId: string | null = null;
+  let modelId: string | null = null;
   let success = false;
   const tokens: TokenUsage & { _totalCost?: number } = {
     inputTokens: 0,
@@ -51,6 +44,7 @@ function parseLogForTesting(
 
         if (entry.type === "system" && entry.subtype === "init") {
           sessionId = entry.session_id;
+          modelId = entry.model;
         }
 
         if (entry.type === "result") {
@@ -88,12 +82,23 @@ function parseLogForTesting(
       }
     }
 
-    // Use the total cost from result message if available, otherwise calculate
+    // Use the total cost from result message if available, otherwise calculate using LLM registry
     const tokensWithCost = tokens as TokenUsage & { _totalCost?: number };
-    const cost =
-      tokensWithCost._totalCost !== undefined
-        ? tokensWithCost._totalCost
-        : calculateCost(tokens, costsPerMTok);
+    let cost = 0;
+
+    if (tokensWithCost._totalCost !== undefined) {
+      cost = tokensWithCost._totalCost;
+    } else if (modelId) {
+      // Use LLM registry to calculate cost based on model
+      const registry = LlmProviderRegistry.getInstance();
+      const calculatedCost = registry.calculateCost(modelId, {
+        inputTokens: tokens.inputTokens,
+        outputTokens: tokens.outputTokens,
+        cacheReadTokens: tokens.cacheReadTokens,
+        cacheCreationTokens: tokens.cacheCreationTokens,
+      });
+      cost = calculatedCost ?? 0;
+    }
 
     // Clean up temporary property
     if (tokensWithCost._totalCost !== undefined) {
@@ -292,12 +297,7 @@ describe("Claude Log Parser", () => {
 
       fs.writeFileSync(logPath, logContent);
 
-      const state = parseLogForTesting(logPath, {
-        input: 15,
-        output: 75,
-        inputCache: 18.75,
-        cacheRead: 1.5,
-      });
+      const state = parseLogForTesting(logPath);
 
       expect(state.sessionId).toBe("374bf5fd-dc81-4fe4-bb06-a92b30c79227");
       expect(state.success).toBe(false); // Codon failed due to timeout

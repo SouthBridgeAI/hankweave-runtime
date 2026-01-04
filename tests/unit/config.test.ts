@@ -2,8 +2,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:te
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  calculateCost,
-  DEFAULT_CONFIG,
   loadCodonSequence,
   loadRuntimeConfig,
   loadStrandFile,
@@ -374,106 +372,6 @@ describe("Model Validation", () => {
         expect(message).toContain("nonexistent-model");
       }
     });
-  });
-});
-
-describe("calculateCost", () => {
-  const costs = DEFAULT_CONFIG.costsPerMTok;
-
-  test("calculates zero cost for zero tokens", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    expect(result).toBe(0);
-  });
-
-  test("calculates cost for only input tokens", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1000,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    expect(result).toBe(costs.input / 1000);
-  });
-
-  test("calculates cost for only output tokens", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 0,
-        outputTokens: 1000,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    expect(result).toBe(costs.output / 1000);
-  });
-
-  test("calculates cost for mixed token types", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1000,
-        outputTokens: 2000,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    const expected = (costs.input + 2 * costs.output) / 1000;
-    expect(result).toBe(expected);
-  });
-
-  test("handles very large token counts without overflow", () => {
-    const largeTokens = Number.MAX_SAFE_INTEGER / 1000;
-    expect(() =>
-      calculateCost(
-        {
-          inputTokens: largeTokens,
-          outputTokens: largeTokens,
-          cacheCreationTokens: largeTokens,
-          cacheReadTokens: largeTokens,
-        },
-        costs,
-      ),
-    ).not.toThrow();
-  });
-
-  test("maintains precision to 6 decimal places", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1234,
-        outputTokens: 5678,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    const expected = (1234 * costs.input + 5678 * costs.output) / 1_000_000;
-    expect(result).toBeCloseTo(expected, 6);
-  });
-
-  test("calculates cache tokens correctly", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1000,
-        outputTokens: 1000,
-        cacheCreationTokens: 500,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    const expected = (costs.input + costs.output + 0.5 * costs.inputCache) / 1000;
-    expect(result).toBe(expected);
   });
 });
 

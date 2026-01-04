@@ -607,42 +607,6 @@ export interface StrandweaveConfig
   /** Path to the codon configuration file (for resolving relative sentinel paths) */
   configPath?: string;
 
-  /**
-   * Token cost configuration per million tokens.
-   * Used to calculate costs for each codon and total project cost.
-   *
-   * For backwards compatibility, this contains default rates (for sonnet).
-   * Use modelCosts for per-model pricing when validating multi-model scenarios.
-   */
-  costsPerMTok: {
-    /** Cost per million input tokens */
-    input: number;
-    /** Cost per million tokens when creating cache */
-    inputCache: number;
-    /** Cost per million tokens when reading from cache */
-    cacheRead: number;
-    /** Cost per million output tokens */
-    output: number;
-  };
-
-  /**
-   * Per-model token cost configuration.
-   * Maps model families to their pricing. Model IDs like "claude-sonnet-4-5-20250929"
-   * are mapped to families like "sonnet" for pricing lookups.
-   */
-  modelCosts: {
-    [modelFamily: string]: {
-      /** Cost per million input tokens */
-      input: number;
-      /** Cost per million tokens when creating cache */
-      inputCache: number;
-      /** Cost per million tokens when reading from cache */
-      cacheRead: number;
-      /** Cost per million output tokens */
-      output: number;
-    };
-  };
-
   /** Maximum length for tool result content before truncation (default: 2500) */
   toolResultTruncateLength: number;
 
@@ -698,32 +662,6 @@ export const DEFAULT_CONFIG: Omit<
   lockFile: ".strandweave/runtime.lock",
   socketLogFile: ".strandweave/logs/websocket.log",
   serverLogFile: ".strandweave/logs/server.log",
-  costsPerMTok: {
-    input: 3.0, // $3 per million input tokens
-    inputCache: 3.75, // $3.75 per million tokens when creating cache
-    cacheRead: 0.3, // $0.30 per million tokens from cache
-    output: 15.0, // $15 per million output tokens
-  },
-  modelCosts: {
-    sonnet: {
-      input: 3.0,
-      inputCache: 3.75,
-      cacheRead: 0.3,
-      output: 15.0,
-    },
-    haiku: {
-      input: 1.0,
-      inputCache: 1.25,
-      cacheRead: 0.1,
-      output: 5.0,
-    },
-    opus: {
-      input: 5.0,
-      inputCache: 6.25,
-      cacheRead: 0.5,
-      output: 25.0,
-    },
-  },
   logParsingInterval: 1000, // Check for new log entries every second
   autostart: true, // Default to current behavior
   dataHashTimeLimit: 5000, // 5 seconds for directory hashing
@@ -1228,37 +1166,6 @@ export function loadCodonSequence(configPath: string): CodonConfig[] {
     }
     throw error;
   }
-}
-
-/**
- * Calculate the cost in dollars for a given token usage.
- *
- * Uses the configured costs per million tokens for each token type.
- * This matches Claude's pricing model with separate rates for:
- * - Standard input tokens
- * - Cache creation tokens
- * - Cache read tokens
- * - Output tokens
- *
- * @param usage - Token counts by type
- * @param costs - Cost configuration per million tokens
- * @returns Total cost in dollars
- */
-export function calculateCost(
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationTokens: number;
-    cacheReadTokens: number;
-  },
-  costs: StrandweaveConfig["costsPerMTok"],
-): number {
-  const inputCost = (usage.inputTokens / 1_000_000) * costs.input;
-  const cacheCreationCost = (usage.cacheCreationTokens / 1_000_000) * costs.inputCache;
-  const cacheReadCost = (usage.cacheReadTokens / 1_000_000) * costs.cacheRead;
-  const outputCost = (usage.outputTokens / 1_000_000) * costs.output;
-
-  return inputCost + cacheCreationCost + cacheReadCost + outputCost;
 }
 
 // -------------
