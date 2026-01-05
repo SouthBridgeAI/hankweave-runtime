@@ -253,6 +253,55 @@ export interface TokenUsage {
 }
 
 // -------------
+// Shim Self-Test Types
+// -------------
+
+/**
+ * Individual check result from a shim's self-test.
+ * Each check verifies a specific aspect of the environment setup.
+ */
+export interface ShimSelfTestCheck {
+  /** Name of the check (e.g., "gemini_cli_found", "api_key") */
+  name: string;
+  /** Whether this check passed */
+  passed: boolean;
+  /** Human-readable message describing the check result */
+  message: string;
+}
+
+/**
+ * Complete self-test result from a shim.
+ * Shims use --self-test flag to verify their environment is properly configured.
+ */
+export interface ShimSelfTestResult {
+  /** Information about the shim itself */
+  shim: {
+    /** Name of the shim (e.g., "gemini-cli-shim") */
+    name: string;
+    /** Version of the shim */
+    version: string;
+  };
+  /** Information about the underlying agent/CLI */
+  agent: {
+    /** Name of the agent (e.g., "gemini-cli") */
+    name: string;
+    /** Version of the agent (or "unknown" if not found) */
+    version: string;
+    /** Whether the agent was found in the system */
+    found: boolean;
+  };
+  /** Array of individual check results */
+  checks: ShimSelfTestCheck[];
+  /** Overall test result */
+  overall: {
+    /** Whether all checks passed */
+    passed: boolean;
+    /** Overall status message */
+    message: string;
+  };
+}
+
+// -------------
 // Synthetic Message Types
 // -------------
 

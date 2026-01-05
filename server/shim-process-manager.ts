@@ -5,7 +5,7 @@ import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import { type Codon, isContextExceeded } from "./types/types.js";
+import { type Codon, isContextExceeded, type ShimSelfTestResult } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
 
 /**
@@ -373,5 +373,76 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
       });
       this.logStream = undefined;
     }
+  }
+
+  /**
+   * Run the shim's self-test to verify environment setup.
+   * Executes the shim with --self-test flag and returns the results.
+   *
+   * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.mjs"])
+   * @returns Promise resolving to self-test results
+   * @throws Error if self-test execution fails or returns invalid JSON
+   */
+  async runSelfTest(command: string[]): Promise<ShimSelfTestResult> {
+    this.logger.log("Running shim self-test...");
+
+    const [bin, ...binArgs] = command;
+    const args = [...binArgs, "--self-test"];
+
+    const fullCommand = `${bin} ${args.join(" ")}`;
+    this.logger.log(`Executing self-test: ${fullCommand}`);
+
+    return new Promise((resolve, reject) => {
+      const childProcess = spawn(bin, args, {
+        cwd: this.executionPath,
+        stdio: ["ignore", "pipe", "pipe"], // No stdin, capture stdout/stderr
+        env: { ...process.env }, // Use current environment (includes API keys)
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      childProcess.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      childProcess.stderr?.on("data", (data) => {
+        stderr += data.toString();
+        this.logger.log(`Self-test stderr: ${data.toString()}`, "debug");
+      });
+
+      const timeout = setTimeout(() => {
+        childProcess.kill("SIGTERM");
+        reject(new Error("Self-test timed out after 30 seconds"));
+      }, 30000);
+
+      childProcess.on("close", (code) => {
+        clearTimeout(timeout);
+
+        if (code !== 0) {
+          this.logger.log(`Self-test failed with exit code ${code}`, "error");
+          if (stderr) {
+            this.logger.log(`Stderr: ${stderr}`, "error");
+          }
+        }
+
+        try {
+          const result = JSON.parse(stdout) as ShimSelfTestResult;
+          this.logger.log(
+            `Self-test completed: ${result.overall.passed ? "PASSED" : "FAILED"}`,
+            result.overall.passed ? "info" : "error",
+          );
+          resolve(result);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : "Unknown error parsing JSON";
+          reject(new Error(`Failed to parse self-test output: ${errorMsg}\nOutput: ${stdout}`));
+        }
+      });
+
+      childProcess.on("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
   }
 }

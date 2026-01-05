@@ -43,7 +43,12 @@ async function runSessionToCompletion(
 
   // Spawn process - pass the same logPath so parser and manager use the same file
   const command = ["bun", "run", geminiShimPath];
-  const actualLogPath = await manager.spawn(command, codon, previousSessionId, sessionLogPath);
+  const actualLogPath = await manager.spawn(
+    command,
+    codon,
+    previousSessionId,
+    sessionLogPath
+  );
   console.log(`    ✓ Spawned gemini shim, log: ${actualLogPath}`);
 
   console.log(`  Waiting for completion...`);
@@ -162,14 +167,15 @@ describe("Gemini Shim Integration Test", () => {
       continuationMode: "fresh",
     });
 
-    const { logPath: actualLogPath, allMessages } = await runSessionToCompletion(
-      tempDir,
-      executionPath,
-      logger,
-      geminiShimPath,
-      codon,
-      null
-    );
+    const { logPath: actualLogPath, allMessages } =
+      await runSessionToCompletion(
+        tempDir,
+        executionPath,
+        logger,
+        geminiShimPath,
+        codon,
+        null
+      );
 
     console.log("\n  Verifying log file exists and has content...");
 
@@ -312,4 +318,73 @@ describe("Gemini Shim Integration Test", () => {
 
     console.log("\n✅ Test passed: Gemini shim with continuation mode\n");
   }, 180000); // 3 minute timeout for the whole test
+
+  test("shim self-test via ShimProcessManager", async () => {
+    console.log("\n📝 Test: Shim self-test via ShimProcessManager");
+
+    // Create log path for logger
+    const logPath = path.join(tempDir, "self-test-log.jsonl");
+
+    // Create log parser (required by ShimProcessManager constructor)
+    const logParser = new ClaudeLogParser({
+      logPath,
+      codonId: "self-test-codon",
+      parsingInterval: 100,
+    });
+
+    // Create manager
+    const manager = new ShimProcessManager(executionPath, logger, logParser);
+
+    console.log("\n  Running self-test...");
+
+    // Run self-test
+    const command = ["bun", "run", geminiShimPath];
+    const result = await manager.runSelfTest(command);
+
+    console.log(`    ✓ Self-test completed`);
+    console.log(
+      `      Overall: ${result.overall.passed ? "PASSED" : "FAILED"}`
+    );
+    console.log(`      Message: ${result.overall.message}`);
+
+    // Verify result structure
+    console.log("\n  Verifying result structure...");
+    expect(result).toBeDefined();
+    expect(result.shim).toBeDefined();
+    expect(result.shim.name).toBe("gemini-cli-shim");
+    expect(typeof result.shim.version).toBe("string");
+    console.log(`    ✓ Shim: ${result.shim.name} v${result.shim.version}`);
+
+    expect(result.agent).toBeDefined();
+    expect(result.agent.name).toBe("gemini-cli");
+    expect(typeof result.agent.found).toBe("boolean");
+    console.log(
+      `    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`
+    );
+
+    expect(result.checks).toBeDefined();
+    expect(Array.isArray(result.checks)).toBe(true);
+    expect(result.checks.length).toBeGreaterThan(0);
+    console.log(`    ✓ Checks: ${result.checks.length} checks performed`);
+
+    // Verify each check has required fields
+    for (const check of result.checks) {
+      expect(check.name).toBeDefined();
+      expect(typeof check.passed).toBe("boolean");
+      expect(check.message).toBeDefined();
+      console.log(
+        `      - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`
+      );
+    }
+
+    expect(result.overall).toBeDefined();
+    expect(typeof result.overall.passed).toBe("boolean");
+    expect(result.overall.message).toBeDefined();
+    console.log(`    ✓ Overall result is well-formed`);
+
+    // Clean up
+    logParser.stop();
+
+    console.log("\n✅ Test passed: Shim self-test via ShimProcessManager\n");
+  }, 30000); // 30 second timeout
 });

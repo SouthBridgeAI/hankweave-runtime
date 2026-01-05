@@ -13,7 +13,7 @@ import type {
   SystemMessage,
   UserMessage,
 } from "./types/claude-session-schema.js";
-import type { Codon } from "./types/types.js";
+import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
 /**
@@ -244,6 +244,57 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    */
   getPid(): number | undefined {
     return this.processManager?.getPid();
+  }
+
+  /**
+   * Run self-test on the underlying process manager to verify environment setup.
+   *
+   * Supports both:
+   * - ShimProcessManager (for Google/Gemini models)
+   * - ClaudeAgentSDKManager (for Anthropic models)
+   *
+   * @returns Promise resolving to self-test results
+   * @throws Error if self-test fails
+   */
+  async runSelfTest(): Promise<ShimSelfTestResult> {
+    this.config.logger.log(
+      `CodonRunner: Running self-test for codon ${this.config.codonId}`,
+      "info",
+    );
+
+    let result: ShimSelfTestResult;
+
+    if (this.processManager instanceof ShimProcessManager) {
+      // Shim-based model (e.g., Gemini)
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
+      const command = ["bun", shimPath];
+
+      this.config.logger.log(`Testing shim at: ${shimPath}`, "info");
+      result = await this.processManager.runSelfTest(command);
+    } else if (this.processManager instanceof ClaudeAgentSDKManager) {
+      // Claude Agent SDK (Anthropic models)
+      this.config.logger.log("Testing Claude Agent SDK environment", "info");
+      result = await this.processManager.runSelfTest();
+    } else {
+      throw new Error("Self-test not supported for this process manager type");
+    }
+
+    // Log results
+    this.config.logger.log(
+      `Self-test ${result.overall.passed ? "PASSED" : "FAILED"}: ${result.overall.message}`,
+      result.overall.passed ? "info" : "error",
+    );
+
+    for (const check of result.checks) {
+      this.config.logger.log(
+        `  - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`,
+        check.passed ? "info" : "error",
+      );
+    }
+
+    return result;
   }
 
   /**
