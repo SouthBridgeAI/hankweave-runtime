@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
@@ -96,6 +97,97 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   static canRun(model: ModelInfo): boolean {
     const supportedProviders = ["anthropic", "google"];
     return supportedProviders.includes(model.providerId.toLowerCase());
+  }
+
+  /**
+   * Run self-test for a model without creating a full CodonRunner instance.
+   * Useful for validation and testing where you only have model info.
+   *
+   * @param modelInfo - The model to test
+   * @param executionPath - Temporary execution path for the test
+   * @param logger - Logger instance for recording test progress
+   * @param anthropicBaseUrl - Optional custom Anthropic API base URL
+   * @returns Promise resolving to self-test results
+   */
+  static async runSelfTestForModel(
+    modelInfo: ModelInfo,
+    executionPath: string,
+    logger: Logger,
+    anthropicBaseUrl?: string,
+  ): Promise<ShimSelfTestResult> {
+    const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
+
+    // Create temporary log parser (required by managers)
+    const tempLogParserPath = path.join(os.tmpdir(), `self-test-parser-${Date.now()}.jsonl`);
+    const tempLogParser = new ClaudeLogParser({
+      logPath: tempLogParserPath,
+      codonId: "self-test" as CodonId,
+      parsingInterval: 100,
+    });
+
+    try {
+      let result: ShimSelfTestResult;
+
+      if (isAnthropicModel) {
+        // Use Claude Agent SDK Manager for Anthropic models
+        logger.log(
+          `Testing Claude Agent SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+          "info",
+        );
+
+        const manager = new ClaudeAgentSDKManager(
+          executionPath,
+          logger,
+          tempLogParser,
+          anthropicBaseUrl,
+        );
+
+        result = await manager.runSelfTest();
+      } else {
+        // Use Shim Process Manager for non-Anthropic models
+        logger.log(
+          `Testing shim for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+          "info",
+        );
+
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
+
+        const manager = new ShimProcessManager(
+          executionPath,
+          logger,
+          tempLogParser,
+          anthropicBaseUrl,
+        );
+
+        result = await manager.runSelfTest(["bun", shimPath]);
+      }
+
+      // Log results
+      logger.log(
+        `Self-test ${result.overall.passed ? "PASSED" : "FAILED"}: ${result.overall.message}`,
+        result.overall.passed ? "info" : "error",
+      );
+
+      for (const check of result.checks) {
+        logger.log(
+          `  - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`,
+          check.passed ? "info" : "error",
+        );
+      }
+
+      return result;
+    } finally {
+      // Clean up temporary log parser
+      tempLogParser.stop();
+
+      // Clean up temporary log file if it exists
+      const fs = await import("node:fs");
+      if (fs.existsSync(tempLogParserPath)) {
+        fs.unlinkSync(tempLogParserPath);
+      }
+    }
   }
 
   /**
@@ -244,57 +336,6 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    */
   getPid(): number | undefined {
     return this.processManager?.getPid();
-  }
-
-  /**
-   * Run self-test on the underlying process manager to verify environment setup.
-   *
-   * Supports both:
-   * - ShimProcessManager (for Google/Gemini models)
-   * - ClaudeAgentSDKManager (for Anthropic models)
-   *
-   * @returns Promise resolving to self-test results
-   * @throws Error if self-test fails
-   */
-  async runSelfTest(): Promise<ShimSelfTestResult> {
-    this.config.logger.log(
-      `CodonRunner: Running self-test for codon ${this.config.codonId}`,
-      "info",
-    );
-
-    let result: ShimSelfTestResult;
-
-    if (this.processManager instanceof ShimProcessManager) {
-      // Shim-based model (e.g., Gemini)
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = path.dirname(__filename);
-      const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
-      const command = ["bun", shimPath];
-
-      this.config.logger.log(`Testing shim at: ${shimPath}`, "info");
-      result = await this.processManager.runSelfTest(command);
-    } else if (this.processManager instanceof ClaudeAgentSDKManager) {
-      // Claude Agent SDK (Anthropic models)
-      this.config.logger.log("Testing Claude Agent SDK environment", "info");
-      result = await this.processManager.runSelfTest();
-    } else {
-      throw new Error("Self-test not supported for this process manager type");
-    }
-
-    // Log results
-    this.config.logger.log(
-      `Self-test ${result.overall.passed ? "PASSED" : "FAILED"}: ${result.overall.message}`,
-      result.overall.passed ? "info" : "error",
-    );
-
-    for (const check of result.checks) {
-      this.config.logger.log(
-        `  - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`,
-        check.passed ? "info" : "error",
-      );
-    }
-
-    return result;
   }
 
   /**

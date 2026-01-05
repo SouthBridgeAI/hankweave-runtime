@@ -7,8 +7,8 @@ import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { CodonId } from "./types/branded-types.js";
-import type { ModelName } from "./types/types.js";
-import { deepMerge } from "./utils.js";
+import type { ModelName, ShimSelfTestResult } from "./types/types.js";
+import { deepMerge, type Logger } from "./utils.js";
 
 // -------------
 // Constants
@@ -1189,6 +1189,12 @@ export interface ValidationResult {
       variables: Record<string, string>;
     }>;
   };
+  shimSelfTests?: Array<{
+    modelId: string;
+    provider: string;
+    passed: boolean;
+    result: ShimSelfTestResult;
+  }>;
 }
 
 /**
@@ -1200,12 +1206,14 @@ export interface ValidationResult {
  *
  * @param configPath - Path to configuration file
  * @param executionPath - Execution directory for relative path resolution
+ * @param logger - Logger instance for writing self-test logs
  * @returns Validation result with statistics and warnings
  * @throws Error with detailed messages if validation fails
  */
 export async function validateStrand(
   configPath: string,
   executionPath: string,
+  logger: Logger,
 ): Promise<ValidationResult> {
   const codons = loadCodonSequence(configPath);
 
@@ -1292,7 +1300,9 @@ export async function validateStrand(
           const previousCodon = config.codons[codonIndex - 1];
           if (codon.model.modelId !== previousCodon.model.modelId) {
             throw new Error(
-              `${loopLabel} > Codon ${codonIndex + 1} (${codon.id}): Cannot use continuationMode "continue-previous" when model differs from previous codon in loop. ` +
+              `${loopLabel} > Codon ${codonIndex + 1} (${
+                codon.id
+              }): Cannot use continuationMode "continue-previous" when model differs from previous codon in loop. ` +
                 `Different models cannot share the same session ID. Change to "fresh" to start a new conversation with a different model.`,
             );
           }
@@ -1531,6 +1541,88 @@ export async function validateStrand(
   // Global warnings
   if (result.codonCount === 0) {
     throw new Error("Configuration must contain at least one codon");
+  }
+
+  // Collect unique models and run self-tests for shims
+  // Only run self-tests if explicitly requested (e.g., in --validate mode)
+
+  const uniqueModels = new Map<string, ModelInfo>();
+
+  function collectModelsRecursive(config: CodonConfig): void {
+    if ("codons" in config) {
+      // Loop: collect from all nested codons
+      for (const codon of config.codons) {
+        collectModelsRecursive(codon);
+      }
+    } else {
+      // Codon: add model to map (using modelId as key for uniqueness)
+      uniqueModels.set(config.model.modelId, config.model);
+    }
+  }
+
+  // Collect all unique models
+  for (const config of codons) {
+    collectModelsRecursive(config);
+  }
+
+  // Run self-tests for each unique model
+  if (uniqueModels.size > 0) {
+    result.shimSelfTests = [];
+
+    for (const [modelId, modelInfo] of uniqueModels) {
+      logger.log(
+        `Running self-test for model: ${modelInfo.name} (${modelInfo.providerId}/${modelId})`,
+      );
+
+      // Create temporary execution path for self-test
+      const tempExecutionPath = path.join(os.tmpdir(), `strandweave-self-test-exec-${Date.now()}`);
+      if (!fs.existsSync(tempExecutionPath)) {
+        fs.mkdirSync(tempExecutionPath, { recursive: true });
+      }
+
+      try {
+        // Use CodonRunner's static method to run self-test
+        const { CodonRunner } = await import("./codon-runner.js");
+        const selfTestResult = await CodonRunner.runSelfTestForModel(
+          modelInfo,
+          tempExecutionPath,
+          logger,
+          undefined, // anthropicBaseUrl - could be passed from config if needed
+        );
+
+        // Record result
+        result.shimSelfTests.push({
+          modelId,
+          provider: modelInfo.providerId,
+          passed: selfTestResult.overall.passed,
+          result: selfTestResult,
+        });
+
+        // Add warning if self-test failed
+        if (!selfTestResult.overall.passed) {
+          result.warnings.push(
+            `Self-test failed for ${modelInfo.name} (${modelInfo.providerId}/${modelId}): ${selfTestResult.overall.message}`,
+          );
+        }
+
+        logger.log(
+          `Self-test ${selfTestResult.overall.passed ? "PASSED" : "FAILED"} for ${modelInfo.name}`,
+        );
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        logger.log(`Self-test error for ${modelInfo.name}: ${errorMessage}`, "error");
+
+        result.warnings.push(
+          `Self-test error for ${modelInfo.name} (${modelInfo.providerId}/${modelId}): ${errorMessage}`,
+        );
+      } finally {
+        // Clean up temporary execution path
+        if (fs.existsSync(tempExecutionPath)) {
+          fs.rmSync(tempExecutionPath, { recursive: true, force: true });
+        }
+      }
+    }
   }
 
   return result;

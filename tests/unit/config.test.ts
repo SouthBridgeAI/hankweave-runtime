@@ -379,6 +379,7 @@ describe("validateStrand", () => {
   const tempDir = path.resolve("tests", "test-area", "temp-validation-test");
   const configPath = path.join(tempDir, "validate-config.json");
   const projectPath = path.join(tempDir, "project");
+  let testLogger: Logger;
 
   // Set up before each test
   beforeEach(() => {
@@ -388,6 +389,7 @@ describe("validateStrand", () => {
 
     // Initialize LLM Provider Registry for model validation
     const mockLogger = new Logger("/dev/null");
+    testLogger = mockLogger;
     LlmProviderRegistry.getInstance({
       logger: mockLogger,
       performHealthCheckOnInit: false,
@@ -413,7 +415,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.codonCount).toBe(1);
     expect(result.promptFileCount).toBe(1);
@@ -459,7 +461,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.codonCount).toBe(2);
     expect(result.promptFileCount).toBe(2);
@@ -490,7 +492,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      "Duplicate codon ID",
+    );
   });
 
   test("warns about duplicate codon names", async () => {
@@ -514,7 +518,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain('Duplicate codon name "Duplicate Name"');
@@ -534,7 +538,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is empty");
@@ -555,7 +559,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is large");
@@ -585,7 +589,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(0);
@@ -617,7 +621,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(1);
@@ -648,7 +652,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Invalid target path");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      "Invalid target path",
+    );
   });
 
   test("warns about potentially dangerous commands", async () => {
@@ -673,7 +679,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Potentially dangerous command detected");
@@ -694,7 +700,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("but there's no previous codon");
@@ -722,7 +728,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("doesn't track any files");
@@ -761,7 +767,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Continues from previous loop");
@@ -792,7 +798,7 @@ describe("validateStrand", () => {
 
     writeStrandConfig(configPath, config);
     // Union schema reports "Invalid input" at top level, nested errors contain "Command cannot be empty"
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       "Failed to load codon config",
     );
   });
@@ -806,7 +812,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, invalidConfig);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow();
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow();
   });
 
   test("counts codons inside loops correctly", async () => {
@@ -855,7 +861,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     // Should count: 1 standalone + 2 in loop + 1 final = 4 total codons
     expect(result.codonCount).toBe(4);
@@ -893,7 +899,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      "Duplicate codon ID",
+    );
   });
 
   test("throws when codon ID conflicts with loop ID", async () => {
@@ -928,7 +936,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow("Duplicate");
   });
 
   test("validates codons inside loops with proper context in error messages", async () => {
@@ -996,7 +1004,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     // Should not throw, but should have warnings
     expect(result.warnings.length).toBeGreaterThan(0);
@@ -1027,7 +1035,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
   });
@@ -1063,7 +1071,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
   });
@@ -1099,7 +1107,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1135,7 +1143,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*contextExceeded.*context.*exhausted/i,
     );
   });
@@ -1171,7 +1179,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1201,7 +1209,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(1);
   });
@@ -1227,7 +1235,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1253,7 +1261,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*session ID/i,
     );
   });
@@ -1290,7 +1298,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*session ID/i,
     );
   });
@@ -1334,7 +1342,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*session ID/i,
     );
   });
@@ -1371,7 +1379,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*previous codon in loop.*session ID/i,
     );
   });
@@ -1408,10 +1416,157 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
+
+  test("runs self-tests for all unique models", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "anthropic-codon",
+        name: "Anthropic Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "gemini-codon",
+        name: "Gemini Codon",
+        model: "gemini-2.5-flash",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "anthropic-codon-2",
+        name: "Another Anthropic Codon",
+        model: "sonnet", // Different Anthropic model
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+
+    // Should have run self-tests
+    expect(result.shimSelfTests).toBeDefined();
+    expect(Array.isArray(result.shimSelfTests)).toBe(true);
+
+    // Type guard to ensure shimSelfTests exists
+    if (!result.shimSelfTests) {
+      throw new Error("shimSelfTests should be defined");
+    }
+
+    expect(result.shimSelfTests.length).toBeGreaterThan(0);
+
+    // Should have self-tests for unique models
+    const modelIds = result.shimSelfTests.map((test) => test.modelId);
+    expect(modelIds.length).toBeGreaterThan(0);
+
+    // Each self-test should have required fields
+    for (const test of result.shimSelfTests) {
+      expect(test.modelId).toBeDefined();
+      expect(test.provider).toBeDefined();
+      expect(typeof test.passed).toBe("boolean");
+      expect(test.result).toBeDefined();
+      expect(test.result.shim).toBeDefined();
+      expect(test.result.agent).toBeDefined();
+      expect(Array.isArray(test.result.checks)).toBe(true);
+      expect(test.result.overall).toBeDefined();
+      expect(typeof test.result.overall.passed).toBe("boolean");
+    }
+  }, 10_000); // 10 second timeout for self-tests
+
+  test("collects unique models from loops", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "opus",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "gemini-2.5-flash",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+      {
+        id: "regular-codon",
+        name: "Regular Codon",
+        model: "opus", // Same as loop-codon-1, should not duplicate
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+
+    // Should have run self-tests
+    expect(result.shimSelfTests).toBeDefined();
+    expect(Array.isArray(result.shimSelfTests)).toBe(true);
+
+    // Type guard to ensure shimSelfTests exists
+    if (!result.shimSelfTests) {
+      throw new Error("shimSelfTests should be defined");
+    }
+
+    // Should have unique models only (opus should appear once, gemini once)
+    const modelIds = result.shimSelfTests.map((test) => test.modelId);
+    const uniqueModelIds = new Set(modelIds);
+    expect(modelIds.length).toBe(uniqueModelIds.size);
+  }, 10_000); // 10 second timeout for self-tests
+
+  test("adds warnings when self-tests fail", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "test-codon",
+        name: "Test Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+
+    // Check shimSelfTests structure
+    expect(result.shimSelfTests).toBeDefined();
+
+    // Type guard to ensure shimSelfTests exists
+    if (!result.shimSelfTests) {
+      throw new Error("shimSelfTests should be defined");
+    }
+
+    // If any self-test failed, there should be a warning
+    const failedTests = result.shimSelfTests.filter((test) => !test.passed);
+    if (failedTests.length > 0) {
+      expect(result.warnings.length).toBeGreaterThan(0);
+      expect(result.warnings.some((w) => w.includes("Self-test failed"))).toBe(true);
+    }
+  }, 10_000); // 10 second timeout for self-tests
 });
 
 describe("loadStrandFile", () => {
