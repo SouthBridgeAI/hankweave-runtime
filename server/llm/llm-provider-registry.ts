@@ -278,6 +278,26 @@ export class LlmProviderRegistry {
     }
   }
 
+  // === Blocklist Helpers ===
+
+  /**
+   * Check if a model is blocked by the blocklist.
+   * Checks both model-level and provider-level blocking (case-insensitive).
+   *
+   * @param modelInfo - The model information to check
+   * @returns true if the model or its provider is blocked
+   */
+  private isModelBlocked(modelInfo: ModelInfo): boolean {
+    const isModelBlocked = this.blockList.models?.some(
+      (blocked) => blocked.toLowerCase() === modelInfo.modelId.toLowerCase(),
+    );
+    const isProviderBlocked = this.blockList.providers?.some(
+      (blocked) => blocked.toLowerCase() === modelInfo.providerId.toLowerCase(),
+    );
+
+    return isModelBlocked || isProviderBlocked || false;
+  }
+
   // === Model Resolution Helpers ===
 
   /**
@@ -612,16 +632,18 @@ export class LlmProviderRegistry {
     // Normalize model name for case-insensitive lookup
     const normalizedName = modelName.toLowerCase();
 
-    // Check if model is blocked (case-insensitive)
-    if (this.blockList.models?.some((blocked) => blocked.toLowerCase() === normalizedName)) {
-      this.logger?.log(`Model blocked: ${modelName}`, "error");
-      return { success: false, reason: "model-blocked" };
-    }
-
+    // First, look up the model to get its ModelInfo (which has the short modelId)
     const modelInfo = this.models.get(normalizedName);
     if (!modelInfo) {
       this.logger?.log(`Model not found: ${modelName}`, "debug");
       return { success: false, reason: "model-not-found" };
+    }
+
+    // Check if model or provider is blocked (case-insensitive)
+    // This ensures blocking works whether user provides "claude-x" or "anthropic/claude-x"
+    if (this.isModelBlocked(modelInfo)) {
+      this.logger?.log(`Model blocked: ${modelName}`, "error");
+      return { success: false, reason: "model-blocked" };
     }
 
     // Normalize provider ID for case-insensitive lookup
@@ -673,14 +695,16 @@ export class LlmProviderRegistry {
     // Normalize model name for case-insensitive lookup
     const normalizedName = modelName.toLowerCase();
 
-    // Check if model is blocked (case-insensitive)
-    if (this.blockList.models?.some((blocked) => blocked.toLowerCase() === normalizedName)) {
-      return { success: false, reason: "model-blocked" };
-    }
-
+    // First, look up the model to get its ModelInfo (which has the short modelId)
     const info = this.models.get(normalizedName);
     if (!info) {
       return { success: false, reason: "model-not-found" };
+    }
+
+    // Check if model or provider is blocked (case-insensitive)
+    // This ensures blocking works whether user provides "claude-x" or "anthropic/claude-x"
+    if (this.isModelBlocked(info)) {
+      return { success: false, reason: "model-blocked" };
     }
 
     return { success: true, info };

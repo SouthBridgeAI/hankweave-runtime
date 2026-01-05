@@ -606,6 +606,240 @@ describe("LlmProviderRegistry", () => {
       });
     });
 
+    describe("blocklist handling for getModelInfo", () => {
+      beforeEach(() => {
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            providers: ["groq"],
+            models: ["claude-3-5-sonnet-20241022", "gpt-4o-2024-05-13"],
+          },
+        });
+      });
+
+      it("should block models in blocklist", () => {
+        const result = registry.getModelInfo("claude-3-5-sonnet-20241022");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should block models in blocklist (case-insensitive)", () => {
+        const result = registry.getModelInfo("CLAUDE-3-5-SONNET-20241022");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should block models with full model ID", () => {
+        const result = registry.getModelInfo("anthropic/claude-3-5-sonnet-20241022");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should allow non-blocked models", () => {
+        const result = registry.getModelInfo("claude-sonnet-4-5");
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.info.modelId).toBe("claude-sonnet-4-5");
+        }
+      });
+
+      it("should return model-not-found for unknown models", () => {
+        const result = registry.getModelInfo("unknown-model");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-not-found");
+        }
+      });
+
+      it("should block all models from a blocked provider", () => {
+        // Groq is in the blocklist
+        const result = registry.getModelInfo("llama3-8b-8192");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should block provider models even with full model ID", () => {
+        const result = registry.getModelInfo("groq/llama3-8b-8192");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should handle case-insensitive provider blocking", () => {
+        // Create registry with uppercase provider in blocklist
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            providers: ["ANTHROPIC"],
+          },
+        });
+
+        // Use a model that's unique to anthropic
+        const result = registry.getModelInfo("claude-3-5-sonnet-20241022");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+    });
+
+    describe("blocklist handling for getProviderForModel", () => {
+      beforeEach(() => {
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            providers: ["groq"],
+            models: ["claude-3-5-sonnet-20241022", "gpt-4o-2024-05-13"],
+          },
+        });
+      });
+
+      it("should block models in blocklist", () => {
+        const result = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+
+        // Should log the error
+        const errorLogs = logs.filter((l) => l.message.includes("Model blocked"));
+        expect(errorLogs.length).toBeGreaterThan(0);
+      });
+
+      it("should block models in blocklist (case-insensitive)", () => {
+        const result = registry.getProviderForModel("CLAUDE-3-5-SONNET-20241022");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should block models with full model ID", () => {
+        const result = registry.getProviderForModel("anthropic/claude-3-5-sonnet-20241022");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should block OpenAI models in blocklist", () => {
+        const result = registry.getProviderForModel("gpt-4o-2024-05-13");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should allow non-blocked models", () => {
+        const result = registry.getModelInfo("claude-sonnet-4-5");
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.info.modelId).toBe("claude-sonnet-4-5");
+        }
+      });
+
+      it("should return model-not-found for unknown models", () => {
+        const result = registry.getProviderForModel("unknown-model");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-not-found");
+        }
+      });
+
+      it("should prioritize model-blocked over provider-unavailable", () => {
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            models: ["claude-3-5-sonnet-20241022"],
+          },
+        });
+
+        const result = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+
+        // Should return model-blocked before checking provider availability
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should block all models from a blocked provider", () => {
+        // Groq is in the blocklist
+        const result = registry.getProviderForModel("llama3-8b-8192");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should block provider models even with full model ID", () => {
+        const result = registry.getProviderForModel("groq/llama3-8b-8192");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should handle case-insensitive provider blocking", () => {
+        // Create registry with uppercase provider in blocklist
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            providers: ["OPENAI"],
+          },
+        });
+
+        // Use a model that's unique to openai
+        const result = registry.getProviderForModel("gpt-4o-2024-05-13");
+
+        expect(result.success).toBe(false);
+        if (result.success === false) {
+          expect(result.reason).toBe("model-blocked");
+        }
+      });
+
+      it("should check provider blocklist before looking up provider instance", () => {
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            providers: ["anthropic"],
+          },
+        });
+
+        // Use a model that's unique to anthropic
+        const blockedResult = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+        expect(blockedResult.success).toBe(false);
+        if (blockedResult.success === false) {
+          expect(blockedResult.reason).toBe("model-blocked");
+        }
+      });
+    });
+
     describe("edge cases", () => {
       it("should handle empty model name gracefully", () => {
         const result = registry.resolveModel({
