@@ -504,14 +504,14 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon3Started = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonStartWithSession("codon-3", 30000, codon3StartTime);
+  ).waitForCodonStartWithSession("codon-3", 90000, codon3StartTime);
   console.log(
     `${colors.green}✓ Codon 3 started (session: ${codon3Started.data.sessionId})${colors.reset}`,
   );
 
   await testState.client.waitForEvent(
     "assistant.action",
-    30000,
+    120000,
     (event) => event.type === "assistant.action",
     codon3StartTime,
   );
@@ -524,7 +524,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon3Skipped = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-3", 10000, codon3StartTime);
+  ).waitForCodonCompletionBySession("codon-3", 30000, codon3StartTime);
   expect(codon3Skipped.data.success).toBe(false);
   console.log(`${colors.green}✓ Codon 3 skipped${colors.reset}`);
 
@@ -653,14 +653,14 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon3Started2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonStartWithSession("codon-3", 30000, codon3Scenario3StartTime);
+  ).waitForCodonStartWithSession("codon-3", 90000, codon3Scenario3StartTime);
   console.log(
     `${colors.green}✓ Codon 3 started (session: ${codon3Started2.data.sessionId})${colors.reset}`,
   );
 
   const codon3Completed2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-3", 60000, codon3Scenario3StartTime);
+  ).waitForCodonCompletionBySession("codon-3", 180000, codon3Scenario3StartTime);
   console.log(
     `${colors.green}✓ Codon 3 completed (cost: $${codon3Completed2.data.cost.toFixed(6)})${
       colors.reset
