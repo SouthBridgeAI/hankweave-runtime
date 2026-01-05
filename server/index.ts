@@ -266,6 +266,7 @@ Examples:
       const validationResult = await validateStrand(
         absoluteConfigPath,
         executionSetup.executionPath, // Changed from readOnlySourceData
+        validationLogger,
       );
 
       // Print summary
@@ -320,6 +321,7 @@ Examples:
     const { codons, warnings } = await validateStrand(
       absoluteConfigPath,
       executionSetup.executionPath, // Changed from readOnlySourceData
+      validationLogger,
     );
 
     // Log any non-fatal warnings

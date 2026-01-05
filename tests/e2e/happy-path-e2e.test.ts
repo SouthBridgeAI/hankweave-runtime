@@ -187,8 +187,7 @@ async function setupAndRunCodons(): Promise<void> {
   // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
 
-  // Give server time to start
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  await new Promise((resolve) => setTimeout(resolve, 10_000));
 
   // Connect WebSocket client
   testState.client = new TestWSClient();
@@ -196,7 +195,7 @@ async function setupAndRunCodons(): Promise<void> {
 
   // Wait for initial events
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
-  const readyEvent = await testState.client.waitForEvent("server.ready");
+  const readyEvent = await testState.client.waitForEvent("server.ready", 10_000);
   if (readyEvent.type === "server.ready") {
     // Capture execution paths from server
     testState.executionPath = readyEvent.data.executionPath;
