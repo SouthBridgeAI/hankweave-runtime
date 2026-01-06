@@ -40,6 +40,9 @@ jobs:
       - name: Run package tests
         run: bun test:package
 
+      - name: Install Gemini CLI
+        run: npm install -g @google/gemini-cli
+
       - name: Run e2e happy path tests
         env:
           STRANDWEAVE_TEST_USE_NPX: 1
