@@ -39,3 +39,11 @@ jobs:
 
       - name: Run package tests
         run: bun test:package
+
+      - name: Run e2e happy path tests
+        env:
+          STRANDWEAVE_TEST_USE_NPX: 1
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+        run: bun test tests/e2e/happy-path-e2e.test.ts
