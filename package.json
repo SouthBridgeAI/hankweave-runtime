@@ -1,11 +1,29 @@
 {
   "name": "strandweave",
-  "module": "index.ts",
+  "version": "0.1.0",
+  "description": "Orchestration runtime for antibrittle agentic workflows",
+  "author": "Southbridge",
+  "license": "MIT",
+  "keywords": [
+    "strandweave"
+  ],
   "type": "module",
   "bin": {
-    "strandweave": "./server/index.ts"
+    "strandweave": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
   },
   "scripts": {
+    "build": "bun scripts/build.ts",
+    "test:package": "bun scripts/test-local-package.ts",
+    "prepublishOnly": "bun run build",
     "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
     "tc": "bun typecheck",
     "lint": "biome check .",
@@ -28,6 +46,7 @@
     "cleanup:force": "bun server/index.ts --cleanup --config=strand.json -y"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.0.6",
     "@types/bun": "latest",
     "@types/lodash.merge": "^4.6.9"
   },
@@ -40,7 +59,6 @@
     "@ai-sdk/groq": "^2.0.11",
     "@ai-sdk/openai": "^2.0.18",
     "@anthropic-ai/claude-agent-sdk": "^0.1.70",
-    "@biomejs/biome": "2.0.6",
     "ai": "^5.0.15",
     "eta": "^3.5.0",
     "fast-glob": "^3.3.3",

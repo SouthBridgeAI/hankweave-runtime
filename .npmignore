@@ -1,0 +1,48 @@
+# Source files (we ship the built dist/ instead)
+server/
+scripts/
+
+# Tests
+tests/
+*.test.ts
+*.test.js
+
+# Development files
+.vscode/
+.idea/
+*.log
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Documentation and development
+documentation/
+external-docs/
+intermediates/
+CLAUDE.md
+spec.md
+
+# Test artifacts
+test-install*/
+*.tgz
+
+# Config files
+tsconfig.json
+biome.json
+bun.lockb
+
+# Keep these
+!dist/
+!README.md
+!LICENSE
+!package.json
