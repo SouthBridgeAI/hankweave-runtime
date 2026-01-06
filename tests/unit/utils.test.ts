@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
 import type { FileNode } from "../../server/types/types";
-import { buildFileTree, copyFiles, escapeShellArg, Logger } from "../../server/utils";
+import { buildFileTree, copyFiles, escapeShellArg, Logger, serve } from "../../server/utils";
+import { getFreePort } from "../utils/test-helpers.js";
 
 describe("escapeShellArg", () => {
   test("escapes single quotes correctly", () => {
@@ -310,5 +311,409 @@ describe("copyFiles", () => {
 
     expect(await fs.promises.readFile(path.join(destDir, "include.txt"), "utf-8")).toBe("included");
     expect(await fs.promises.readFile(path.join(destDir, "ignore.txt"), "utf-8")).toBe("ignored");
+  });
+});
+
+describe("serve", () => {
+  test("creates HTTP server that responds to requests", async () => {
+    const testPort = await getFreePort();
+
+    const server = serve({
+      port: testPort,
+      fetch: async (request: Request) => {
+        if (request.url.includes("/test")) {
+          return new Response("Test OK", { status: 200 });
+        }
+        return new Response("Not Found", { status: 404 });
+      },
+    });
+
+    // Give server time to start
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      // Make request to server
+      const response = await fetch(`http://localhost:${testPort}/test`);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("Test OK");
+
+      // Test 404 response
+      const notFoundResponse = await fetch(`http://localhost:${testPort}/other`);
+      expect(notFoundResponse.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("creates HTTP server with idle timeout", async () => {
+    const testPort = await getFreePort();
+
+    const server = serve({
+      port: testPort,
+      idleTimeout: 5,
+      fetch: async () => {
+        return new Response("OK", { status: 200 });
+      },
+    });
+
+    // Give server time to start
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      const response = await fetch(`http://localhost:${testPort}/`);
+      expect(response.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("server.stop() shuts down the server", async () => {
+    const testPort = await getFreePort();
+
+    const server = serve({
+      port: testPort,
+      fetch: async () => new Response("OK"),
+    });
+
+    // Give server time to start
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Verify server is running
+    const response = await fetch(`http://localhost:${testPort}/`);
+    expect(response.status).toBe(200);
+
+    // Stop the server
+    server.stop();
+
+    // Give server time to stop
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Verify server is no longer accepting connections
+    try {
+      await fetch(`http://localhost:${testPort}/`);
+      expect(true).toBe(false); // Should not reach here
+    } catch (error) {
+      // Expected error when connecting to stopped server
+      expect(error).toBeDefined();
+    }
+  });
+
+  test("creates WebSocket server", async () => {
+    const testPort = await getFreePort();
+    const connections: Set<unknown> = new Set();
+
+    const server = serve({
+      port: testPort,
+      websocket: {
+        open: (ws) => {
+          connections.add(ws);
+        },
+        message: (ws, message) => {
+          // Echo the message back
+          if (typeof message === "string") {
+            ws.send(`echo: ${message}`);
+          }
+        },
+        close: (ws) => {
+          connections.delete(ws);
+        },
+      },
+    });
+
+    // Give server time to start
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      // Create WebSocket client
+      const ws = new WebSocket(`ws://localhost:${testPort}`);
+
+      // Wait for connection
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = (error) => reject(error);
+        setTimeout(() => reject(new Error("Connection timeout")), 5000);
+      });
+
+      expect(connections.size).toBe(1);
+
+      // Send message and receive echo
+      const echoPromise = new Promise<string>((resolve) => {
+        ws.onmessage = (event) => {
+          resolve(event.data);
+        };
+      });
+
+      ws.send("hello");
+      const echo = await echoPromise;
+      expect(echo).toBe("echo: hello");
+
+      // Close connection
+      ws.close();
+
+      // Wait for close to be processed
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(connections.size).toBe(0);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("handles multiple HTTP requests concurrently", async () => {
+    const testPort = await getFreePort();
+    let requestCount = 0;
+
+    const server = serve({
+      port: testPort,
+      fetch: async () => {
+        requestCount++;
+        // Simulate some async work
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return new Response(`Request ${requestCount}`, { status: 200 });
+      },
+    });
+
+    // Give server time to start
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      // Make multiple concurrent requests
+      const requests = Array.from({ length: 5 }, (_, i) =>
+        fetch(`http://localhost:${testPort}/test${i}`),
+      );
+
+      const responses = await Promise.all(requests);
+
+      expect(responses.length).toBe(5);
+      responses.forEach((response) => {
+        expect(response.status).toBe(200);
+      });
+
+      expect(requestCount).toBe(5);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("WebSocket upgrade hook initializes connection data", async () => {
+    const testPort = await getFreePort();
+    interface TestData {
+      id: string;
+      authenticated: boolean;
+    }
+    let capturedData: TestData | null = null;
+
+    const server = serve<TestData>({
+      port: testPort,
+      websocket: {
+        upgrade: (_req) => ({
+          id: "test-123",
+          authenticated: false,
+        }),
+        open: (ws) => {
+          capturedData = ws.data;
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      const ws = new WebSocket(`ws://localhost:${testPort}`);
+
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = (error) => reject(error);
+        setTimeout(() => reject(new Error("Connection timeout")), 5000);
+      });
+
+      // Give open handler time to execute
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(capturedData).not.toBeNull();
+      // biome-ignore lint/style/noNonNullAssertion: checked not null above
+      expect(capturedData!.id).toBe("test-123");
+      // biome-ignore lint/style/noNonNullAssertion: checked not null above
+      expect(capturedData!.authenticated).toBe(false);
+
+      ws.close();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("WebSocket data can be updated and read back", async () => {
+    const testPort = await getFreePort();
+    interface TestData {
+      id: string;
+      count: number;
+      active: boolean;
+    }
+
+    const server = serve<TestData>({
+      port: testPort,
+      websocket: {
+        upgrade: (_req) => ({
+          id: "conn-1",
+          count: 0,
+          active: false,
+        }),
+        message: (ws, message) => {
+          if (message === "activate") {
+            // Update data by replacing entire object
+            ws.data = {
+              ...ws.data,
+              active: true,
+              count: ws.data.count + 1,
+            };
+            ws.send(JSON.stringify(ws.data));
+          } else if (message === "increment") {
+            // Update data again
+            ws.data = {
+              ...ws.data,
+              count: ws.data.count + 1,
+            };
+            ws.send(JSON.stringify(ws.data));
+          }
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      const ws = new WebSocket(`ws://localhost:${testPort}`);
+
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = (error) => reject(error);
+        setTimeout(() => reject(new Error("Connection timeout")), 5000);
+      });
+
+      // Test activate
+      const activateResponse = new Promise<TestData>((resolve) => {
+        ws.onmessage = (event) => {
+          resolve(JSON.parse(event.data));
+        };
+      });
+      ws.send("activate");
+      const activateData = await activateResponse;
+      expect(activateData.active).toBe(true);
+      expect(activateData.count).toBe(1);
+      expect(activateData.id).toBe("conn-1");
+
+      // Test increment
+      const incrementResponse = new Promise<TestData>((resolve) => {
+        ws.onmessage = (event) => {
+          resolve(JSON.parse(event.data));
+        };
+      });
+      ws.send("increment");
+      const incrementData = await incrementResponse;
+      expect(incrementData.active).toBe(true);
+      expect(incrementData.count).toBe(2);
+      expect(incrementData.id).toBe("conn-1");
+
+      ws.close();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("WebSocket data updates persist across handler calls", async () => {
+    const testPort = await getFreePort();
+    interface ClientData {
+      id: string;
+      handshakeComplete: boolean;
+      messageCount: number;
+    }
+
+    const server = serve<ClientData>({
+      port: testPort,
+      websocket: {
+        upgrade: (_req) => ({
+          id: "client-xyz",
+          handshakeComplete: false,
+          messageCount: 0,
+        }),
+        message: (ws, message) => {
+          if (message === "handshake") {
+            // Simulate handshake - update data
+            ws.data = {
+              ...ws.data,
+              handshakeComplete: true,
+            };
+            ws.send("handshake_ok");
+          } else if (message === "ping") {
+            // Only respond if handshake is complete
+            if (ws.data.handshakeComplete) {
+              ws.data = {
+                ...ws.data,
+                messageCount: ws.data.messageCount + 1,
+              };
+              ws.send(`pong:${ws.data.messageCount}`);
+            } else {
+              ws.send("error:not_authenticated");
+            }
+          }
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      const ws = new WebSocket(`ws://localhost:${testPort}`);
+
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = (error) => reject(error);
+        setTimeout(() => reject(new Error("Connection timeout")), 5000);
+      });
+
+      // Test ping before handshake - should fail
+      const pingBeforeHandshake = new Promise<string>((resolve) => {
+        ws.onmessage = (event) => {
+          resolve(event.data);
+        };
+      });
+      ws.send("ping");
+      const errorResponse = await pingBeforeHandshake;
+      expect(errorResponse).toBe("error:not_authenticated");
+
+      // Perform handshake
+      const handshakeResponse = new Promise<string>((resolve) => {
+        ws.onmessage = (event) => {
+          resolve(event.data);
+        };
+      });
+      ws.send("handshake");
+      const handshakeResult = await handshakeResponse;
+      expect(handshakeResult).toBe("handshake_ok");
+
+      // Test ping after handshake - should succeed
+      const ping1Response = new Promise<string>((resolve) => {
+        ws.onmessage = (event) => {
+          resolve(event.data);
+        };
+      });
+      ws.send("ping");
+      const pong1 = await ping1Response;
+      expect(pong1).toBe("pong:1");
+
+      // Test another ping - count should increment
+      const ping2Response = new Promise<string>((resolve) => {
+        ws.onmessage = (event) => {
+          resolve(event.data);
+        };
+      });
+      ws.send("ping");
+      const pong2 = await ping2Response;
+      expect(pong2).toBe("pong:2");
+
+      ws.close();
+    } finally {
+      server.stop();
+    }
   });
 });

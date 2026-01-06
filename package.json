@@ -60,12 +60,14 @@
     "@ai-sdk/openai": "^2.0.18",
     "@anthropic-ai/claude-agent-sdk": "^0.1.70",
     "ai": "^5.0.15",
+    "crossws": "^0.4.1",
     "eta": "^3.5.0",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",
     "lodash.merge": "^4.6.2",
     "minimatch": "^10.0.1",
     "simple-git": "^3.28.0",
+    "srvx": "^0.10.0",
     "zod": "^3.25.74"
   }
 }

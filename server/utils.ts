@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Message, Peer } from "crossws";
+import { serve as crosswsServe } from "crossws/server";
 import glob from "fast-glob";
 import merge from "lodash.merge";
 import { fileResolver } from "./file-resolver.js";
@@ -11,7 +13,7 @@ import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
 // -------------
 
 export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
 // -------------
@@ -411,4 +413,194 @@ export async function copyFiles(
  */
 export function deepMerge<T extends Record<string, unknown>>(...sources: Array<T | undefined>): T {
   return merge({}, ...sources) as T;
+}
+
+// -------------
+// Server Utilities
+// -------------
+
+/**
+ * Abstraction over server instances providing a common interface.
+ * This allows the codebase to be runtime-agnostic.
+ */
+export interface StrandweaveServer {
+  /** Stop the server and clean up resources */
+  stop(): void;
+}
+
+/**
+ * Runtime-agnostic WebSocket interface.
+ * Provides a common interface that works across Bun, Node.js, and other runtimes.
+ */
+export interface StrandweaveWebSocket<T = unknown> {
+  /** Custom data attached to this WebSocket connection */
+  data: T;
+  /** Send a message to the client */
+  send(message: string | Buffer): void;
+  /** Close the WebSocket connection */
+  close(code?: number, reason?: string): void;
+}
+
+/**
+ * Configuration options for creating an HTTP or WebSocket server.
+ * Provides a runtime-agnostic interface for both HTTP and WebSocket servers.
+ *
+ * The generic type T represents the WebSocket connection data type.
+ */
+export interface ServeOptions<T = unknown> {
+  /** Port number to listen on */
+  port: number;
+  /** Idle timeout in seconds (optional, only for HTTP servers) */
+  idleTimeout?: number;
+  /** HTTP request handler (required for HTTP servers) */
+  // biome-ignore lint/suspicious/noExplicitAny: server parameter is runtime-specific
+  fetch?: (request: Request, server?: any) => Response | Promise<Response> | undefined;
+  /** WebSocket handlers (required for WebSocket servers) */
+  websocket?: {
+    /**
+     * Called before upgrading to WebSocket.
+     * Return context data to attach to the connection.
+     */
+    upgrade?: (request: Request) => T | Promise<T>;
+    /** Called when a WebSocket connection is opened */
+    open?: (ws: StrandweaveWebSocket<T>) => void;
+    /** Called when a message is received on the WebSocket */
+    message?: (ws: StrandweaveWebSocket<T>, message: string | Buffer) => void;
+    /** Called when a WebSocket connection is closed */
+    close?: (ws: StrandweaveWebSocket<T>) => void;
+  };
+}
+
+/**
+ * Adapter that wraps a crossws Peer to provide the Strand weave WebSocket interface.
+ * Maps Peer.context to .data and adapts method signatures.
+ */
+class PeerAdapter<T> implements StrandweaveWebSocket<T> {
+  constructor(private peer: Peer) {
+    // Initialize context if it doesn't exist
+    if (!this.peer.context) {
+      // biome-ignore lint/suspicious/noExplicitAny: crossws Peer type doesn't expose context setter
+      (this.peer as any).context = {};
+    }
+  }
+
+  get data(): T {
+    return this.peer.context as T;
+  }
+
+  set data(value: T) {
+    // Cannot replace context object (readonly), so update its properties
+    const context = this.peer.context as Record<string, unknown>;
+    // Clear existing properties
+    for (const key in context) {
+      delete context[key];
+    }
+    // Copy new properties
+    Object.assign(context, value);
+  }
+
+  send(message: string | Buffer): void {
+    console.log(`[PeerAdapter] Sending message of length ${message.length} to peer`);
+    this.peer.send(message);
+    console.log(`[PeerAdapter] Message sent successfully`);
+  }
+
+  close(code?: number, reason?: string): void {
+    this.peer.close(code, reason);
+  }
+}
+
+/**
+ * Create an HTTP or WebSocket server using crossws.
+ *
+ * This provides a runtime-agnostic interface that works with Bun, Node.js, Deno,
+ * and other runtimes via the crossws library.
+ *
+ * @param options - Server configuration options
+ * @returns Server instance with stop() method
+ *
+ * @example
+ * // HTTP server
+ * const server = serve({
+ *   port: 3000,
+ *   fetch: async (req) => new Response("Hello"),
+ * });
+ *
+ * @example
+ * // WebSocket server
+ * const server = serve({
+ *   port: 8080,
+ *   websocket: {
+ *     open: (ws) => console.log("connected"),
+ *     message: (ws, msg) => console.log(msg),
+ *   },
+ *   fetch: (req, server) => server.upgrade(req),
+ * });
+ */
+export function serve<T = unknown>(options: ServeOptions<T>): StrandweaveServer {
+  // Convert our options to crossws format
+  // biome-ignore lint/suspicious/noExplicitAny: crossws options type is complex and runtime-specific
+  const crosswsOptions: any = {
+    port: options.port,
+    fetch: options.fetch,
+  };
+
+  // If WebSocket handlers are provided, wrap them with adapters
+  if (options.websocket) {
+    const { upgrade, open, message, close } = options.websocket;
+
+    // Map to maintain consistent adapter instances per peer
+    const peerAdapters = new WeakMap<Peer, PeerAdapter<T>>();
+
+    const getAdapter = (peer: Peer): PeerAdapter<T> => {
+      let adapter = peerAdapters.get(peer);
+      if (!adapter) {
+        adapter = new PeerAdapter<T>(peer);
+        peerAdapters.set(peer, adapter);
+      }
+      return adapter;
+    };
+
+    crosswsOptions.websocket = {
+      upgrade: upgrade
+        ? async (req: Request) => {
+            const context = await upgrade(req);
+            return { context };
+          }
+        : undefined,
+
+      open: open
+        ? (peer: Peer) => {
+            open(getAdapter(peer));
+          }
+        : undefined,
+
+      message: message
+        ? (peer: Peer, msg: Message) => {
+            // Convert Message to string or Buffer
+            const data = msg.rawData;
+            const messageData =
+              typeof data === "string" || Buffer.isBuffer(data) ? data : msg.text();
+            message(getAdapter(peer), messageData);
+          }
+        : undefined,
+
+      close: close
+        ? (peer: Peer) => {
+            close(getAdapter(peer));
+          }
+        : undefined,
+    };
+  }
+
+  const server = crosswsServe(crosswsOptions);
+
+  return {
+    stop: () => {
+      // crossws servers have a close() method
+      if (server && typeof server.close === "function") {
+        server.close();
+      }
+    },
+  };
 }

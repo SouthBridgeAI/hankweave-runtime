@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { Server, ServerWebSocket } from "bun";
 import { minimatch } from "minimatch";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { CodonRunner } from "./codon-runner.js";
@@ -11,7 +10,7 @@ import { EventJournal } from "./event-journal.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
-import { BunProxyRunner } from "./llm-proxy.js";
+import { ProxyRunner } from "./llm-proxy.js";
 // Import event types from new schema file
 import type {
   AssistantActionEvent,
@@ -80,6 +79,9 @@ import {
   escapeShellArg,
   generateId,
   Logger,
+  type StrandweaveServer,
+  type StrandweaveWebSocket,
+  serve,
   toError,
 } from "./utils.js";
 
@@ -101,13 +103,13 @@ import {
  * - Event streaming to clients
  */
 export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
-  private server: Server<ClientData> | null = null;
-  private clients: Map<string, ServerWebSocket<ClientData>> = new Map();
+  private server: StrandweaveServer | null = null;
+  private clients: Map<string, StrandweaveWebSocket<ClientData>> = new Map();
   public readonly config: StrandweaveConfig;
   private logger: Logger;
 
   // Proxy server
-  private proxyRunner: BunProxyRunner | null = null;
+  private proxyRunner: ProxyRunner | null = null;
 
   // State management
   private stateManager: StateManager;
@@ -376,7 +378,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       const proxyPort = this.config.port + 1;
       this.logger.log(`Starting proxy server on port ${proxyPort}`);
 
-      this.proxyRunner = new BunProxyRunner(
+      this.proxyRunner = new ProxyRunner(
         "passthrough",
         proxyPort,
         this.config.anthropicBaseUrl || "https://api.anthropic.com",
@@ -554,30 +556,23 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       }
     }
 
-    // Start Bun WebSocket server
-    this.server = Bun.serve<ClientData>({
+    // Start WebSocket server
+    this.server = serve<ClientData>({
       port: this.config.port,
       websocket: {
+        upgrade: () => {
+          // Initialize connection data before WebSocket opens
+          const now = new Date();
+          return {
+            id: generateId(),
+            connectionTime: now,
+            lastActivity: now,
+            handshakeComplete: false,
+          };
+        },
         open: (ws) => this.handleConnection(ws),
         message: (ws, message) => this.handleMessage(ws, message),
         close: (ws) => this.handleClose(ws),
-      },
-      fetch(req, server) {
-        // Upgrade to WebSocket
-        const now = new Date();
-        if (
-          server.upgrade(req, {
-            data: {
-              id: generateId(),
-              connectionTime: now,
-              lastActivity: now,
-              handshakeComplete: false,
-            },
-          })
-        ) {
-          return;
-        }
-        return new Response("WebSocket server only", { status: 400 });
       },
     });
 
@@ -618,8 +613,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // WebSocket Connection Management
   // -------------
 
-  private handleConnection(ws: ServerWebSocket<ClientData>): void {
-    // Data is already initialized in the fetch handler during upgrade
+  private handleConnection(ws: StrandweaveWebSocket<ClientData>): void {
+    // Data is already initialized in the upgrade hook
     const clientId = ws.data.id;
     this.logger.log(`Client ${clientId} connected`);
 
@@ -631,7 +626,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   }
 
   private async handleHandshake(
-    ws: ServerWebSocket<ClientData>,
+    ws: StrandweaveWebSocket<ClientData>,
     request: HandshakeRequest,
   ): Promise<void> {
     const { mode, sendPreviousEvents = false } = request.data;
@@ -701,8 +696,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     // server.ready is a connection state event - send to client only, don't journal
     this.emit("event", serverReadyEvent, ws);
 
+    this.logger.log(`[handleHandshake] config.autostart = ${this.config.autostart}`);
     if (this.config.autostart) {
-      this.autoStartNextCodon();
+      this.logger.log("[handleHandshake] Calling autoStartNextCodon()");
+      this.autoStartNextCodon().catch((err) => {
+        this.logger.log(`[handleHandshake] autoStartNextCodon error: ${err}`, "error");
+      });
     } else {
       const serverIdleEvent = {
         id: EventId(generateId()),
@@ -720,7 +719,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   }
 
   private async handleMessage(
-    ws: ServerWebSocket<ClientData>,
+    ws: StrandweaveWebSocket<ClientData>,
     message: string | Buffer,
   ): Promise<void> {
     try {
@@ -796,7 +795,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
   }
 
-  private handleClose(ws: ServerWebSocket<ClientData>): void {
+  private handleClose(ws: StrandweaveWebSocket<ClientData>): void {
     const clientId = ws.data.id;
     this.logger.log(`Client ${clientId} disconnected`);
 
@@ -813,7 +812,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async handleCommand(
     command: ClientCommand,
-    sender: ServerWebSocket<ClientData>,
+    sender: StrandweaveWebSocket<ClientData>,
   ): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
 
@@ -969,7 +968,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // Ping Commands (for testing)
   // -------------
 
-  private handlePing(commandId: string, sender?: ServerWebSocket<ClientData>): void {
+  private handlePing(commandId: string, sender?: StrandweaveWebSocket<ClientData>): void {
     this.logger.log(`Handling ping command: ${commandId}`);
 
     // Send pong response only to the sender
@@ -991,7 +990,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
   }
 
-  private handlePingBroadcast(commandId: string, sender?: ServerWebSocket<ClientData>): void {
+  private handlePingBroadcast(commandId: string, sender?: StrandweaveWebSocket<ClientData>): void {
     this.logger.log(`Handling ping.broadcast command: ${commandId}`);
 
     const senderClientId = sender?.data.id || "unknown";
@@ -1023,7 +1022,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
   private async handleHistorySync(
     command: import("./schemas/event-schemas.js").HistorySyncCommand,
-    sender?: ServerWebSocket<ClientData>,
+    sender?: StrandweaveWebSocket<ClientData>,
   ): Promise<void> {
     if (!sender?.data.handshakeComplete) {
       this.logger.log("History sync command received but sender not ready", "error");
@@ -1067,7 +1066,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // -------------
 
   private sendHistoryBatch(
-    sender: ServerWebSocket<ClientData>,
+    sender: StrandweaveWebSocket<ClientData>,
     events: ServerEvent[],
     hasMore: boolean,
   ): void {
@@ -1108,7 +1107,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   emit<K extends keyof ServerInternalEvents>(
     event: K,
     data: ServerInternalEvents[K][0],
-    target?: ServerWebSocket<ClientData>,
+    target?: StrandweaveWebSocket<ClientData>,
   ): boolean {
     if (event !== "event") {
       // Should relax this restriction eventually
@@ -1149,11 +1148,17 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         });
 
       // Broadcast to all connected clients that have completed handshake
+      console.log(`[emit] Broadcasting ${serverEvent.type} to ${this.clients.size} client(s)`);
       if (this.clients.size > 0) {
         for (const [_, client] of this.clients) {
+          console.log(
+            `[emit] Client ${client.data.id}: handshakeComplete=${client.data.handshakeComplete}`,
+          );
           if (!client.data.handshakeComplete) continue;
           try {
+            console.log(`[emit] Sending ${serverEvent.type} to client ${client.data.id}`);
             client.send(JSON.stringify(serverEvent));
+            console.log(`[emit] Successfully sent ${serverEvent.type} to client ${client.data.id}`);
           } catch (error) {
             this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
           }
@@ -2301,7 +2306,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               // Fall back to accumulated cost if registry lookup fails
               const accumulatedCost = this.currentCodon?.codonCost || 0;
               this.logger.log(
-                `Cannot calculate final cost for model: ${modelId}, using accumulated cost: $${accumulatedCost.toFixed(4)}`,
+                `Cannot calculate final cost for model: ${modelId}, using accumulated cost: $${accumulatedCost.toFixed(
+                  4,
+                )}`,
                 "debug",
               );
               finalCost = accumulatedCost;
@@ -2310,7 +2317,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             // Fall back to accumulated cost if no model ID
             const accumulatedCost = this.currentCodon?.codonCost || 0;
             this.logger.log(
-              `Cannot calculate final cost: no model ID, using accumulated cost: $${accumulatedCost.toFixed(4)}`,
+              `Cannot calculate final cost: no model ID, using accumulated cost: $${accumulatedCost.toFixed(
+                4,
+              )}`,
               "debug",
             );
             finalCost = accumulatedCost;
