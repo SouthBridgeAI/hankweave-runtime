@@ -588,14 +588,23 @@ export function startServer(config: TestServerConfig): ChildProcess {
   const serverLogPath = path.join(config.testRunDir, "server.log");
   const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
 
-  // Use absolute path to server to ensure it's found regardless of where test is run from
-  const serverPath = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    "../../server/index.ts",
-  );
+  // Build command and arguments based on environment
+  let command: string;
+  let args: string[];
 
-  // Build command arguments
-  const args = [serverPath, `--config=${config.configFile}`, `--port=${config.port}`];
+  if (process.env.STRANDWEAVE_TEST_USE_NPX) {
+    // Use npx strandweave when testing the installed package
+    command = "npx";
+    args = ["strandweave", `--config=${config.configFile}`, `--port=${config.port}`];
+  } else {
+    // Use bun with local server path for normal development
+    const serverPath = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      "../../server/index.ts",
+    );
+    command = "bun";
+    args = [serverPath, `--config=${config.configFile}`, `--port=${config.port}`];
+  }
 
   // Run without proxy if specified
   if (config.withoutProxy) {
@@ -617,7 +626,7 @@ export function startServer(config: TestServerConfig): ChildProcess {
     args.push("--start-new");
   }
 
-  const serverProcess = spawn("bun", args, {
+  const serverProcess = spawn(command, args, {
     cwd: config.cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
