@@ -596,6 +596,14 @@ export function startServer(config: TestServerConfig): ChildProcess {
     // Use npx strandweave when testing the installed package
     command = "npx";
     args = ["strandweave", `--config=${config.configFile}`, `--port=${config.port}`];
+  } else if (process.env.STRANDWEAVE_TEST_USE_BUNX) {
+    // Use bunx strandweave when testing the installed package with bun
+    command = "bunx";
+    args = ["strandweave", `--config=${config.configFile}`, `--port=${config.port}`];
+  } else if (process.env.STRANDWEAVE_TEST_USE_PNPM_DLX) {
+    // Use pnpm dlx strandweave when testing the installed package with pnpm
+    command = "pnpm";
+    args = ["dlx", "strandweave", `--config=${config.configFile}`, `--port=${config.port}`];
   } else {
     // Use bun with local server path for normal development
     const serverPath = path.resolve(
