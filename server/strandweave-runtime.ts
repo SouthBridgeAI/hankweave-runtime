@@ -2511,8 +2511,24 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   }
 
   private async handleCodonComplete(exitCode: number, isContextExceeded: boolean): Promise<void> {
+    this.logger.log(
+      `[handleCodonComplete] ======= ENTERED handleCodonComplete - exitCode=${exitCode}, isContextExceeded=${isContextExceeded} =======`,
+      "info",
+    );
+    this.logger.log(
+      `[handleCodonComplete] currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${!!this.currentCodonRunner}`,
+      "info",
+    );
+    this.logger.log(`[handleCodonComplete] Call stack:\n${new Error().stack}`, "debug");
+
     // Get the current codon from the in-memory state first
-    if (!this.currentCodon) return;
+    if (!this.currentCodon) {
+      this.logger.log(
+        `[handleCodonComplete] No currentCodon, returning early`,
+        "info",
+      );
+      return;
+    }
 
     const codonId = this.currentCodon.codonId;
     const wasSkipped = this.isSkippingCodon;
@@ -2810,7 +2826,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Clean up - now happens after state is persisted
+    this.logger.log(
+      `[handleCodonComplete] About to call cleanupCurrentCodon - codonId=${codonId}, exitCode=${exitCode}, isContextExceeded=${isContextExceeded}, finalStatus=${finalStatus}`,
+      "info",
+    );
+    this.logger.log(`[handleCodonComplete] Stack trace:\n${new Error().stack}`, "debug");
     this.cleanupCurrentCodon();
+    this.logger.log(`[handleCodonComplete] cleanupCurrentCodon completed`, "info");
 
     // Handle next steps
     if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
@@ -4507,12 +4529,25 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // -------------
 
   private cleanupCurrentCodon(): void {
+    this.logger.log(
+      `[cleanupCurrentCodon] Called - currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${!!this.currentCodonRunner}`,
+      "info",
+    );
+    this.logger.log(`[cleanupCurrentCodon] Stack trace:\n${new Error().stack}`, "debug");
+
     // Clean up runner (handles both logParser and processManager)
     if (this.currentCodonRunner) {
+      this.logger.log(
+        `[cleanupCurrentCodon] Calling cleanup() on currentCodonRunner`,
+        "info",
+      );
       this.currentCodonRunner
         .cleanup()
         .catch((err) => this.logger.log(`Error cleaning up codon runner: ${err}`, "error"));
       this.currentCodonRunner = undefined;
+      this.logger.log(`[cleanupCurrentCodon] CodonRunner cleaned up and set to undefined`, "info");
+    } else {
+      this.logger.log(`[cleanupCurrentCodon] No currentCodonRunner to clean up`, "info");
     }
 
     this.watchedPatterns = [];

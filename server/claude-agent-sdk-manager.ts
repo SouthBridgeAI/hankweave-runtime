@@ -6,6 +6,7 @@ import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
+import { toError } from "./utils.js";
 
 /**
  * Manages Claude Agent SDK lifecycle, mimicking the ClaudeProcessManager API.
@@ -74,12 +75,22 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     this.logger.log(`Generated synthetic PID: ${this.syntheticPid} for SDK session`);
 
     // Start the query in the background
-    this.runQuery(promptContent, options, codon.id).catch((error) => {
+    this.logger.log(`[SPAWN-DEBUG] About to call runQuery`, "debug");
+    this.logger.log(`[SPAWN-DEBUG] Options: ${JSON.stringify(options, null, 2)}`, "debug");
+
+    const queryPromise = this.runQuery(promptContent, options, codon.id);
+    this.logger.log(`[SPAWN-DEBUG] runQuery called, promise returned`, "debug");
+
+    queryPromise.catch((error) => {
       this.logger.log(`Query error: ${error.message}`, "error");
       this.cleanup();
       this.emit("error", error);
     });
 
+    this.logger.log(
+      `[SPAWN-DEBUG] Returning from spawn(), actualLogPath: ${actualLogPath}`,
+      "debug",
+    );
     return actualLogPath;
   }
 
@@ -244,15 +255,41 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * Run the query and process messages.
    */
   private async runQuery(promptContent: string, options: Options, codonId: string): Promise<void> {
-    try {
-      const queryGenerator = query({ prompt: promptContent, options });
+    this.logger.log(
+      `[SDK-runQuery] ======= ENTERED runQuery function for codon ${codonId} =======`,
+      "info",
+    );
+    this.logger.log(`[SDK-runQuery] Starting query for codon ${codonId}`, "debug");
+    this.logger.log(
+      `[SDK-runQuery] Options: model=${options.model}, cwd=${options.cwd}, continue=${options.continue || false}, resume=${options.resume || "none"}`,
+      "debug",
+    );
+    this.logger.log(`[SDK-runQuery] Prompt length: ${promptContent.length} chars`, "debug");
 
+    try {
+      this.logger.log(`[SDK-runQuery] Creating query generator`, "debug");
+      this.logger.log(`[SDK-runQuery] About to call query() from SDK...`, "info");
+      const queryGenerator = query({ prompt: promptContent, options });
+      this.logger.log(`[SDK-runQuery] query() returned, generator created`, "info");
+      this.logger.log(`[SDK-runQuery] Query generator created, entering message loop`, "debug");
+
+      let messageCount = 0;
       for await (const message of queryGenerator) {
-        if (this.killed) break;
+        messageCount++;
+        this.logger.log(
+          `[SDK-runQuery] Received message ${messageCount}: type=${message.type}`,
+          "debug",
+        );
+
+        if (this.killed) {
+          this.logger.log(`[SDK-runQuery] Killed flag set, breaking loop`, "debug");
+          break;
+        }
 
         // Store session ID from first message
         if (!this.sessionId) {
           this.sessionId = message.session_id;
+          this.logger.log(`[SDK-runQuery] Session ID: ${this.sessionId}`, "debug");
         }
 
         // Convert SDK message to JSONL format and write to log
@@ -267,11 +304,18 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         }
       }
 
+      this.logger.log(
+        `[SDK-runQuery] Message loop completed, received ${messageCount} message(s)`,
+        "info",
+      );
+
       // Parse final log entries
+      this.logger.log(`[SDK-runQuery] Parsing final log entries`, "debug");
       this.logParser.parseNow();
 
       // Check for context exceeded
       const allMessages = this.logParser.getAllMessages();
+      this.logger.log(`[SDK-runQuery] Got ${allMessages.length} messages from log parser`, "debug");
       const contextExceeded = allMessages.some((msg) => {
         if (msg.type === "result" && msg.subtype === "error") {
           return msg.result?.includes("context") || false;
@@ -279,9 +323,17 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         return false;
       });
 
+      this.logger.log(
+        `[SDK-runQuery] Query complete, contextExceeded=${contextExceeded}, calling cleanup and emitting exit`,
+        "info",
+      );
       this.cleanup();
+      this.logger.log(`[SDK-runQuery] About to emit exit event`, "info");
       this.emit("exit", 0, contextExceeded);
+      this.logger.log(`[SDK-runQuery] Exit event emitted`, "info");
     } catch (error) {
+      this.logger.log(`[SDK-runQuery] CAUGHT ERROR: ${toError(error).message}`, "error");
+      this.logger.log(`[SDK-runQuery] Error stack: ${toError(error).stack}`, "error");
       const errorDetails = this.extractErrorDetails(error as Error, codonId);
       this.logger.log(errorDetails, "error");
       this.cleanup();
@@ -429,6 +481,9 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * Clean up resources.
    */
   private cleanup(): void {
+    this.logger.log(`[CLEANUP-DEBUG] cleanup() called`, "info");
+    this.logger.log(`[CLEANUP-DEBUG] Stack trace:\n${new Error().stack}`, "debug");
+
     if (this.logStream && !this.logStream.destroyed) {
       this.logStream.end();
       this.logStream = undefined;

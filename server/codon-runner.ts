@@ -356,6 +356,15 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     }
 
     this.config.logger.log(
+      `[CodonRunner.cleanup] ======= ENTERED cleanup for codon ${this.config.codonId} =======`,
+      "info",
+    );
+    this.config.logger.log(
+      `[CodonRunner.cleanup] hasProcessManager=${!!this.processManager}, hasLogParser=${!!this.logParser}`,
+      "info",
+    );
+
+    this.config.logger.log(
       `CodonRunner: Cleaning up resources for codon ${this.config.codonId}`,
       "info",
     );
