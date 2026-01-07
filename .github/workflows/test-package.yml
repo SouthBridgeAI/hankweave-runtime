@@ -7,7 +7,7 @@ on:
 
 jobs:
   test-package-installation:
-    name: Test Package Installation on ${{ matrix.os }}
+    name: install strandweave on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
 
@@ -73,25 +73,6 @@ jobs:
             echo "No execution directory found"
           fi
 
-      # Diagnostic: Show directory structure before upload
-      - name: Show test directory structure
-        if: always()
-        shell: bash
-        run: |
-          echo "=== tests/test-results structure ==="
-          if [ -d "tests/test-results" ]; then
-            find tests/test-results -type f -o -type d | head -100 || true
-          else
-            echo "Directory does not exist"
-          fi
-          echo ""
-          echo "=== tests/test-area structure ==="
-          if [ -d "tests/test-area" ]; then
-            find tests/test-area -type f -o -type d | head -100 || true
-          else
-            echo "Directory does not exist"
-          fi
-
       - name: Upload test results and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,7 +84,7 @@ jobs:
           retention-days: 7
 
   test-e2e:
-    name: Test ${{ matrix.test-type }} on ${{ matrix.os }} with npx
+    name: Test ${{ matrix.test-type }} on ${{ matrix.os }} with ${{ matrix.package-manager }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
 
@@ -112,6 +93,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         test-type: [happy-path, init-command]
+        package-manager: [npx, bunx, pnpm-dlx]
 
     steps:
       - name: Checkout code
@@ -139,31 +121,16 @@ jobs:
       - name: Install Gemini CLI
         run: npm install -g @google/gemini-cli
 
-      # Run e2e tests with npx based on test-type
-      - name: Run ${{ matrix.test-type }} e2e tests with npx
+      # Run e2e tests based on test-type and package-manager
+      - name: Run ${{ matrix.test-type }} e2e tests with ${{ matrix.package-manager }}
         env:
-          STRANDWEAVE_TEST_USE_NPX: 1
+          STRANDWEAVE_TEST_USE_NPX: ${{ matrix.package-manager == 'npx' && '1' || '' }}
+          STRANDWEAVE_TEST_USE_BUNX: ${{ matrix.package-manager == 'bunx' && '1' || '' }}
+          STRANDWEAVE_TEST_USE_PNPM_DLX: ${{ matrix.package-manager == 'pnpm-dlx' && '1' || '' }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
         run: bun test tests/e2e/${{ matrix.test-type }}-e2e.test.ts
-
-      # Future: Add support for bunx and pnpm-dlx by adding to matrix.package-manager
-      # - name: Run e2e tests with bunx
-      #   env:
-      #     STRANDWEAVE_TEST_USE_BUNX: 1
-      #     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      #     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      #     STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
-      #   run: bun test tests/e2e/happy-path-e2e.test.ts
-
-      # - name: Run e2e tests with pnpm dlx
-      #   env:
-      #     STRANDWEAVE_TEST_USE_PNPM_DLX: 1
-      #     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      #     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      #     STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
-      #   run: bun test tests/e2e/happy-path-e2e.test.ts
 
       # Copy logs from execution directories if test failed
       - name: Preserve execution logs
@@ -196,30 +163,11 @@ jobs:
             echo "No execution directory found"
           fi
 
-      # Diagnostic: Show directory structure before upload
-      - name: Show test directory structure
-        if: always()
-        shell: bash
-        run: |
-          echo "=== tests/test-results structure ==="
-          if [ -d "tests/test-results" ]; then
-            find tests/test-results -type f -o -type d | head -100 || true
-          else
-            echo "Directory does not exist"
-          fi
-          echo ""
-          echo "=== tests/test-area structure ==="
-          if [ -d "tests/test-area" ]; then
-            find tests/test-area -type f -o -type d | head -100 || true
-          else
-            echo "Directory does not exist"
-          fi
-
       - name: Upload test results and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.test-type }}-${{ matrix.os }}
+          name: test-results-${{ matrix.test-type }}-${{ matrix.package-manager }}-${{ matrix.os }}
           path: |
             tests/test-results/
             tests/test-area/
