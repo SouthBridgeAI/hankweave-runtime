@@ -71,6 +71,25 @@ jobs:
       #     STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
       #   run: bun test tests/e2e/happy-path-e2e.test.ts
 
+      # Diagnostic: Show directory structure before upload
+      - name: Show test directory structure
+        if: always()
+        shell: bash
+        run: |
+          echo "=== tests/test-results structure ==="
+          if [ -d "tests/test-results" ]; then
+            find tests/test-results -type f -o -type d | head -100 || true
+          else
+            echo "Directory does not exist"
+          fi
+          echo ""
+          echo "=== tests/test-area structure ==="
+          if [ -d "tests/test-area" ]; then
+            find tests/test-area -type f -o -type d | head -100 || true
+          else
+            echo "Directory does not exist"
+          fi
+
       - name: Upload test results and logs
         if: always()
         uses: actions/upload-artifact@v4
