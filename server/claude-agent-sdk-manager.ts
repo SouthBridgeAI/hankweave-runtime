@@ -76,7 +76,6 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
     // Start the query in the background
     this.logger.log(`[SPAWN-DEBUG] About to call runQuery`, "debug");
-    this.logger.log(`[SPAWN-DEBUG] Options: ${JSON.stringify(options, null, 2)}`, "debug");
 
     const queryPromise = this.runQuery(promptContent, options, codon.id);
     this.logger.log(`[SPAWN-DEBUG] runQuery called, promise returned`, "debug");
@@ -261,7 +260,9 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     );
     this.logger.log(`[SDK-runQuery] Starting query for codon ${codonId}`, "debug");
     this.logger.log(
-      `[SDK-runQuery] Options: model=${options.model}, cwd=${options.cwd}, continue=${options.continue || false}, resume=${options.resume || "none"}`,
+      `[SDK-runQuery] Options: model=${options.model}, cwd=${
+        options.cwd
+      }, continue=${options.continue || false}, resume=${options.resume || "none"}`,
       "debug",
     );
     this.logger.log(`[SDK-runQuery] Prompt length: ${promptContent.length} chars`, "debug");

@@ -151,7 +151,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         timestamp: Date;
       }
     | undefined;
-  private currentCodonRunner: CodonRunner | undefined;
+  // Map of codonId -> CodonRunner - single source of truth for all runners
+  private codonRunners = new Map<string, CodonRunner>();
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingCodon = false;
@@ -1834,8 +1835,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       const logFileName = `${codonId.replace(/#/g, "-")}-claude.log`;
       const logPath = path.join(runFolder, logFileName);
 
-      // Create runner for this codon
-      this.currentCodonRunner = new CodonRunner({
+      // Create runner for this codon and store in map (single source of truth)
+      const runner = new CodonRunner({
         codon,
         codonId,
         executionPath: this.config.executionPath,
@@ -1844,6 +1845,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         anthropicBaseUrl: this.proxyRunner?.proxyUrl,
         logPath, // Pass the run-specific log path
       });
+      this.codonRunners.set(codonId, runner);
 
       // Subscribe to runner events
       this.logger.log(`[runCodon] Setting up event handlers for codon ${codonId}`, "debug");
@@ -1854,9 +1856,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         `[runCodon] Starting runner execution for codon ${codonId}, previousSessionId: ${previousSessionId || "none"}`,
         "debug",
       );
-      await this.currentCodonRunner.run(
-        previousSessionId ? SessionId(previousSessionId) : undefined,
-      );
+
+      await runner.run(previousSessionId ? SessionId(previousSessionId) : undefined);
       this.logger.log(`[runCodon] Runner.run() completed for codon ${codonId}`, "debug");
 
       // Validate process started
@@ -1865,7 +1866,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         throw new Error("No active run while starting Claude process");
       }
 
-      const pid = this.currentCodonRunner.getPid();
+      const pid = runner.getPid();
       this.logger.log(`[runCodon] Got PID ${pid} for codon ${codonId}`, "debug");
       if (!pid) {
         throw new Error("Failed to get process PID");
@@ -1903,17 +1904,21 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         "error",
       );
       this.logger.log(`[runCodon] Error stack: ${toError(error).stack}`, "error");
+      const runnerForCleanup = this.codonRunners.get(codonId);
       this.logger.log(
-        `[runCodon] State at error - currentRunId: ${this.currentRunId}, hasRunner: ${!!this.currentCodonRunner}`,
+        `[runCodon] State at error - currentRunId: ${this.currentRunId}, hasRunner: ${!!runnerForCleanup}`,
         "error",
       );
 
       // Clean up runner if initialization fails
-      if (this.currentCodonRunner) {
-        this.logger.log(`[runCodon] Calling cleanup on currentCodonRunner due to error`, "error");
-        await this.currentCodonRunner.cleanup();
-        this.currentCodonRunner = undefined;
-        this.logger.log(`[runCodon] CodonRunner cleanup complete, set to undefined`, "error");
+      if (runnerForCleanup) {
+        this.logger.log(
+          `[runCodon] Calling cleanup on runner for codon ${codonId} due to error`,
+          "error",
+        );
+        await runnerForCleanup.cleanup();
+        this.codonRunners.delete(codonId);
+        this.logger.log(`[runCodon] CodonRunner cleanup complete, removed from map`, "error");
       }
 
       // Transition to failed (fire-and-forget) if we have a run
@@ -1951,12 +1956,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
    * Set up event handlers for the current codon runner
    */
   private setupCodonRunnerEventHandlers(codonId: CodonId): void {
-    if (!this.currentCodonRunner) {
-      throw new Error("Cannot setup handlers: no current codon runner");
+    const runner = this.codonRunners.get(codonId);
+    if (!runner) {
+      throw new Error(`Cannot setup handlers: no runner found for codon ${codonId}`);
     }
 
     // Process lifecycle events
-    this.currentCodonRunner.on("exit", (code: number, isContextExceeded: boolean) => {
+    runner.on("exit", (code: number, isContextExceeded: boolean) => {
       if (isContextExceeded) {
         this.logger.log(
           `[STRANDWEAVE-SERVER] Context exceeded error detected for codon ${codonId}`,
@@ -1966,24 +1972,24 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.handleCodonComplete(code, isContextExceeded);
     });
 
-    this.currentCodonRunner.on("error", (error: Error) => {
+    runner.on("error", (error: Error) => {
       this.handleError(error, `Process for codon ${codonId}`, ErrorSeverity.FATAL);
     });
 
     // Log parser events (forwarded through runner)
-    this.currentCodonRunner.on("systemMessage", (msg: SystemMessage) => {
+    runner.on("systemMessage", (msg: SystemMessage) => {
       this.handleSystemMessage(msg, codonId);
     });
 
-    this.currentCodonRunner.on("assistantMessage", (msg: AssistantMessage) => {
+    runner.on("assistantMessage", (msg: AssistantMessage) => {
       this.handleAssistantMessage(msg, codonId);
     });
 
-    this.currentCodonRunner.on("userMessage", (msg: UserMessage) => {
+    runner.on("userMessage", (msg: UserMessage) => {
       this.handleUserMessage(msg, codonId);
     });
 
-    this.currentCodonRunner.on("resultMessage", (msg: ResultMessage) => {
+    runner.on("resultMessage", (msg: ResultMessage) => {
       this.handleResultMessage(msg, codonId);
     });
   }
@@ -2116,8 +2122,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       } as ErrorEvent);
 
       // Runner will handle the cleanup
-      if (this.currentCodonRunner) {
-        this.currentCodonRunner.kill();
+      if (this.currentCodon) {
+        const runner = this.codonRunners.get(this.currentCodon.codonId);
+        if (runner) {
+          runner.kill();
+        }
       }
 
       return; // Stop processing
@@ -2238,8 +2247,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           } as ErrorEvent);
 
           // Runner will handle the cleanup
-          if (this.currentCodonRunner) {
-            this.currentCodonRunner.kill();
+          if (this.currentCodon) {
+            const runner = this.codonRunners.get(this.currentCodon.codonId);
+            if (runner) {
+              runner.kill();
+            }
           }
 
           return; // Stop processing further messages
@@ -2515,18 +2527,18 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       `[handleCodonComplete] ======= ENTERED handleCodonComplete - exitCode=${exitCode}, isContextExceeded=${isContextExceeded} =======`,
       "info",
     );
+    const hasRunner = this.currentCodon
+      ? !!this.codonRunners.get(this.currentCodon.codonId)
+      : false;
     this.logger.log(
-      `[handleCodonComplete] currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${!!this.currentCodonRunner}`,
+      `[handleCodonComplete] currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${hasRunner}`,
       "info",
     );
     this.logger.log(`[handleCodonComplete] Call stack:\n${new Error().stack}`, "debug");
 
     // Get the current codon from the in-memory state first
     if (!this.currentCodon) {
-      this.logger.log(
-        `[handleCodonComplete] No currentCodon, returning early`,
-        "info",
-      );
+      this.logger.log(`[handleCodonComplete] No currentCodon, returning early`, "info");
       return;
     }
 
@@ -2826,13 +2838,42 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Clean up - now happens after state is persisted
+    // RACE CONDITION FIX: Look up the runner by codonId from the map
+    // This ensures we clean up the correct runner even if autoStartNextCodon already started a new codon
     this.logger.log(
-      `[handleCodonComplete] About to call cleanupCurrentCodon - codonId=${codonId}, exitCode=${exitCode}, isContextExceeded=${isContextExceeded}, finalStatus=${finalStatus}`,
+      `[handleCodonComplete] About to cleanup codon ${codonId} - exitCode=${exitCode}, isContextExceeded=${isContextExceeded}, finalStatus=${finalStatus}`,
       "info",
     );
     this.logger.log(`[handleCodonComplete] Stack trace:\n${new Error().stack}`, "debug");
-    this.cleanupCurrentCodon();
-    this.logger.log(`[handleCodonComplete] cleanupCurrentCodon completed`, "info");
+
+    const runnerToCleanup = this.codonRunners.get(codonId);
+    if (runnerToCleanup) {
+      this.logger.log(
+        `[handleCodonComplete] Found runner for codon ${codonId}, cleaning up`,
+        "info",
+      );
+      await runnerToCleanup
+        .cleanup()
+        .catch((err) =>
+          this.logger.log(`Error cleaning up runner for ${codonId}: ${err}`, "error"),
+        );
+      this.codonRunners.delete(codonId);
+    } else {
+      this.logger.log(`[handleCodonComplete] No runner found in map for codon ${codonId}`, "info");
+    }
+
+    // Only clear current codon state if this is still the current codon
+    if (this.currentCodon?.codonId === codonId) {
+      this.logger.log(`[handleCodonComplete] Clearing current codon state for ${codonId}`, "info");
+      this.cleanupCurrentCodon();
+    } else {
+      this.logger.log(
+        `[handleCodonComplete] Not clearing current codon state (current is ${this.currentCodon?.codonId || "none"}, completed is ${codonId})`,
+        "info",
+      );
+    }
+
+    this.logger.log(`[handleCodonComplete] Cleanup completed for codon ${codonId}`, "info");
 
     // Handle next steps
     if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
@@ -3130,8 +3171,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.logger.log(`Skipping codon ${this.currentCodon.codonId}`);
     this.isSkippingCodon = true;
 
-    if (this.currentCodonRunner) {
-      await this.currentCodonRunner.kill("SIGTERM");
+    const runner = this.codonRunners.get(this.currentCodon.codonId);
+    if (runner) {
+      await runner.kill("SIGTERM");
     }
   }
 
@@ -3317,8 +3359,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     }
 
     // Kill the process (if exists)
-    if (this.currentCodonRunner) {
-      await this.currentCodonRunner.kill("SIGTERM");
+    if (this.currentCodon) {
+      const runner = this.codonRunners.get(this.currentCodon.codonId);
+      if (runner) {
+        await runner.kill("SIGTERM");
+      }
     }
 
     // Clean up codon state
@@ -4529,25 +4574,43 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   // -------------
 
   private cleanupCurrentCodon(): void {
+    const hasRunner = this.currentCodon
+      ? !!this.codonRunners.get(this.currentCodon.codonId)
+      : false;
     this.logger.log(
-      `[cleanupCurrentCodon] Called - currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${!!this.currentCodonRunner}`,
+      `[cleanupCurrentCodon] Called - currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${hasRunner}`,
       "info",
     );
     this.logger.log(`[cleanupCurrentCodon] Stack trace:\n${new Error().stack}`, "debug");
 
     // Clean up runner (handles both logParser and processManager)
-    if (this.currentCodonRunner) {
-      this.logger.log(
-        `[cleanupCurrentCodon] Calling cleanup() on currentCodonRunner`,
-        "info",
-      );
-      this.currentCodonRunner
-        .cleanup()
-        .catch((err) => this.logger.log(`Error cleaning up codon runner: ${err}`, "error"));
-      this.currentCodonRunner = undefined;
-      this.logger.log(`[cleanupCurrentCodon] CodonRunner cleaned up and set to undefined`, "info");
-    } else {
-      this.logger.log(`[cleanupCurrentCodon] No currentCodonRunner to clean up`, "info");
+    // Remove from runner map first (before clearing currentCodon)
+    if (this.currentCodon?.codonId) {
+      const runner = this.codonRunners.get(this.currentCodon.codonId);
+      if (runner) {
+        this.logger.log(
+          `[cleanupCurrentCodon] Calling cleanup() on runner for codon ${this.currentCodon.codonId}`,
+          "info",
+        );
+        runner
+          .cleanup()
+          .catch((err) =>
+            this.logger.log(
+              `Error cleaning up runner for codon ${this.currentCodon?.codonId}: ${err}`,
+              "error",
+            ),
+          );
+        this.codonRunners.delete(this.currentCodon.codonId);
+        this.logger.log(
+          `[cleanupCurrentCodon] Runner for codon ${this.currentCodon.codonId} cleaned up and removed from map`,
+          "info",
+        );
+      } else {
+        this.logger.log(
+          `[cleanupCurrentCodon] No runner found in map for codon ${this.currentCodon.codonId}`,
+          "info",
+        );
+      }
     }
 
     this.watchedPatterns = [];
@@ -4844,9 +4907,12 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.logger.log(`Shutting down server: ${reason}`);
 
     // Kill any running process immediately before setting shutdown flag
-    if (this.currentCodonRunner && this.currentCodon) {
-      this.logger.log("Killing current codon runner for shutdown");
-      await this.currentCodonRunner.kill("SIGTERM");
+    if (this.currentCodon) {
+      const runner = this.codonRunners.get(this.currentCodon.codonId);
+      if (runner) {
+        this.logger.log("Killing current codon runner for shutdown");
+        await runner.kill("SIGTERM");
+      }
     }
 
     this.isShuttingDown = true;
