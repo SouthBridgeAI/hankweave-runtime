@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "bin": {
-    "strandweave": "./dist/index.js"
+    "strandweave": "dist/index.js"
   },
   "main": "./dist/index.js",
   "files": [

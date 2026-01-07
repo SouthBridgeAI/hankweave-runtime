@@ -95,5 +95,5 @@ describe("Package Installation Tests", () => {
     } finally {
       await stopVerdaccioRegistry(registry);
     }
-  });
+  }, 30000); // 30 second timeout for build + publish operations
 });
