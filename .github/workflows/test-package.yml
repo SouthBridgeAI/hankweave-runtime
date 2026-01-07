@@ -41,6 +41,32 @@ jobs:
       - name: Run package installation tests
         run: bun test tests/e2e/package-installation.e2e.test.ts
 
+      # Run happy-path e2e tests with different package managers
+      # These automatically start Verdaccio, build, publish, and test
+      - name: Run e2e tests with npx
+        env:
+          STRANDWEAVE_TEST_USE_NPX: 1
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+        run: bun test tests/e2e/happy-path-e2e.test.ts
+
+      # - name: Run e2e tests with bunx
+      #   env:
+      #     STRANDWEAVE_TEST_USE_BUNX: 1
+      #     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      #     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      #     STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+      #   run: bun test tests/e2e/happy-path-e2e.test.ts
+
+      # - name: Run e2e tests with pnpm dlx
+      #   env:
+      #     STRANDWEAVE_TEST_USE_PNPM_DLX: 1
+      #     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      #     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      #     STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+      #   run: bun test tests/e2e/happy-path-e2e.test.ts
+
       - name: Upload test results and logs
         if: always()
         uses: actions/upload-artifact@v4
