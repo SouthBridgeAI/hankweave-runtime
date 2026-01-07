@@ -6,8 +6,8 @@ on:
       - strandweave-npx
 
 jobs:
-  test-package:
-    name: Test on ${{ matrix.os }}
+  test-package-installation:
+    name: Test Package Installation on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
 
@@ -42,29 +42,113 @@ jobs:
       - name: Run package installation tests
         run: bun test tests/e2e/package-installation.e2e.test.ts
 
+      # Copy logs from execution directories if test failed
+      - name: Preserve execution logs
+        if: always()
+        shell: bash
+        run: |
+          echo "=== Checking for execution directories ==="
+          EXEC_DIR="${HOME}/.strandweave-executions"
+          if [ -d "$EXEC_DIR" ]; then
+            echo "Found execution directory: $EXEC_DIR"
+            find "$EXEC_DIR" -maxdepth 1 -type d | head -20
+
+            # Find the most recent test run directory
+            TEST_RUN_DIR=$(ls -td tests/test-results/run-* 2>/dev/null | head -1 || true)
+            if [ -n "$TEST_RUN_DIR" ]; then
+              echo "Copying logs to: $TEST_RUN_DIR"
+
+              # Find the most recent execution
+              LATEST_EXEC=$(ls -td "$EXEC_DIR"/*/ 2>/dev/null | head -1 || true)
+              if [ -n "$LATEST_EXEC" ]; then
+                echo "Latest execution: $LATEST_EXEC"
+
+                # Copy logs, state, and runs if they exist
+                [ -d "$LATEST_EXEC/.strandweave/logs" ] && cp -r "$LATEST_EXEC/.strandweave/logs" "$TEST_RUN_DIR/" && echo "  ✓ Copied logs directory"
+                [ -f "$LATEST_EXEC/.strandweave/state.json" ] && cp "$LATEST_EXEC/.strandweave/state.json" "$TEST_RUN_DIR/" && echo "  ✓ Copied state.json"
+                [ -d "$LATEST_EXEC/.strandweave/runs" ] && cp -r "$LATEST_EXEC/.strandweave/runs" "$TEST_RUN_DIR/" && echo "  ✓ Copied runs directory"
+              fi
+            fi
+          else
+            echo "No execution directory found"
+          fi
+
+      # Diagnostic: Show directory structure before upload
+      - name: Show test directory structure
+        if: always()
+        shell: bash
+        run: |
+          echo "=== tests/test-results structure ==="
+          if [ -d "tests/test-results" ]; then
+            find tests/test-results -type f -o -type d | head -100 || true
+          else
+            echo "Directory does not exist"
+          fi
+          echo ""
+          echo "=== tests/test-area structure ==="
+          if [ -d "tests/test-area" ]; then
+            find tests/test-area -type f -o -type d | head -100 || true
+          else
+            echo "Directory does not exist"
+          fi
+
+      - name: Upload test results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-package-installation-${{ matrix.os }}
+          path: |
+            tests/test-results/
+            tests/test-area/
+          retention-days: 7
+
+  test-e2e:
+    name: Test ${{ matrix.test-type }} on ${{ matrix.os }} with npx
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        test-type: [happy-path, init-command]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: bun install
+
       # Install Gemini CLI for e2e tests
       - name: Install Gemini CLI
         run: npm install -g @google/gemini-cli
 
-      # Run happy-path e2e tests with different package managers
-      # These automatically start Verdaccio, build, publish, and test
-      - name: Run e2e tests with npx
+      # Run e2e tests with npx based on test-type
+      - name: Run ${{ matrix.test-type }} e2e tests with npx
         env:
           STRANDWEAVE_TEST_USE_NPX: 1
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
-        run: bun test tests/e2e/happy-path-e2e.test.ts
+        run: bun test tests/e2e/${{ matrix.test-type }}-e2e.test.ts
 
-      # Run init command e2e tests with npx
-      - name: Run init command e2e tests with npx
-        env:
-          STRANDWEAVE_TEST_USE_NPX: 1
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
-        run: bun test tests/e2e/init-command-e2e.test.ts
-
+      # Future: Add support for bunx and pnpm-dlx by adding to matrix.package-manager
       # - name: Run e2e tests with bunx
       #   env:
       #     STRANDWEAVE_TEST_USE_BUNX: 1
@@ -135,7 +219,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results-${{ matrix.test-type }}-${{ matrix.os }}
           path: |
             tests/test-results/
             tests/test-area/
