@@ -123,6 +123,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       logPath: tempLogParserPath,
       codonId: "self-test" as CodonId,
       parsingInterval: 100,
+      logger,
     });
 
     try {
@@ -198,6 +199,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       logPath: this.logPath,
       codonId: this.config.codonId,
       parsingInterval: this.config.logParsingInterval ?? 100,
+      logger: this.config.logger,
 
       // Forward log parser events to our listeners
       onSystemMessage: (msg) => this.emit("systemMessage", msg),

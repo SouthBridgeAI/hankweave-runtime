@@ -6,6 +6,7 @@ import {
   type SystemMessage,
   type UserMessage,
 } from "./types/claude-session-schema.js";
+import type { Logger } from "./utils.js";
 
 /**
  * Configuration options for Claude log parser.
@@ -25,6 +26,8 @@ export interface ClaudeLogParserOptions {
   onResultMessage?: (msg: ResultMessage) => void;
   /** How often to check for new log entries (milliseconds) */
   parsingInterval: number;
+  /** Optional logger for diagnostic output */
+  logger?: Logger;
 }
 
 /**
@@ -48,6 +51,11 @@ export class ClaudeLogParser {
   start(): void {
     const { parsingInterval } = this.options;
 
+    this.options.logger?.log(
+      `[LOG-PARSER] Starting log parser for ${this.options.logPath} (interval: ${parsingInterval}ms)`,
+      "debug",
+    );
+
     // Set up periodic parsing
     this.logTimer = setInterval(() => this.parseLogFile(), parsingInterval);
 
@@ -57,6 +65,10 @@ export class ClaudeLogParser {
 
   stop(): void {
     if (this.logTimer) {
+      this.options.logger?.log(
+        `[LOG-PARSER] Stopping log parser for ${this.options.logPath}`,
+        "debug",
+      );
       clearInterval(this.logTimer);
       this.logTimer = undefined;
     }
@@ -98,11 +110,19 @@ export class ClaudeLogParser {
     const messages: Array<SystemMessage | AssistantMessage | UserMessage | ResultMessage> = [];
 
     if (!fs.existsSync(logPath)) {
+      if (this.isFirstParse) {
+        this.options.logger?.log(`[LOG-PARSER] Log file does not exist yet: ${logPath}`, "debug");
+      }
       return messages;
     }
 
     try {
       const content = fs.readFileSync(logPath, "utf-8");
+
+      this.options.logger?.log(
+        `[LOG-PARSER] Parsing log file (mode: ${fullParse ? "full" : "incremental"}, firstParse: ${this.isFirstParse}, fileSize: ${content.length}, lastPos: ${this.lastPosition})`,
+        "debug",
+      );
 
       if (fullParse) {
         // Full parse mode: parse entire file without buffer management
@@ -139,7 +159,21 @@ export class ClaudeLogParser {
         this.lastPosition = content.length - this.buffer.length;
         this.isFirstParse = false; // Mark that we've done our first parse
       }
+
+      if (messages.length > 0) {
+        const messageTypes = messages
+          .map((m) => {
+            const subtype = "subtype" in m ? m.subtype : "n/a";
+            return `${m.type}:${subtype}`;
+          })
+          .join(", ");
+        this.options.logger?.log(
+          `[LOG-PARSER] Parsed ${messages.length} message(s): [${messageTypes}]`,
+          "debug",
+        );
+      }
     } catch (error) {
+      this.options.logger?.log(`[LOG-PARSER] Error parsing log: ${error}`, "error");
       console.error(`Error parsing log: ${error}`);
     }
 
@@ -170,11 +204,25 @@ export class ClaudeLogParser {
 
       const message = result.data;
 
+      // Log important message types
+      if (message.type === "system" && message.subtype === "init") {
+        this.options.logger?.log(
+          `[LOG-PARSER] Found system init message for codon ${this.options.codonId}, session: ${message.session_id}`,
+          "info",
+        );
+      }
+
       // Only emit callbacks if noEmit is false
       if (!noEmit) {
         switch (message.type) {
           case "system":
             if (this.options.onSystemMessage) {
+              if (message.subtype === "init") {
+                this.options.logger?.log(
+                  `[LOG-PARSER] Emitting system init callback for codon ${this.options.codonId}`,
+                  "debug",
+                );
+              }
               this.options.onSystemMessage(message);
             }
             break;
