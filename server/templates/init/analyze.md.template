@@ -4,21 +4,6 @@ Please analyze the files in the `data` directory localted in the current working
 
 Your analysis should include:
 
-1. **Workflow System Overview**: Examine the strandweave configuration and workflow structure. What workflows are defined? How are codons organized and connected?
-
-2. **Technical Architecture Review**: Analyze the technical implementation based on the stack (Node.js, TypeScript, bun runtime, Claude API integration). Are there any architecture decisions or patterns worth noting?
-
-3. **Feature Assessment**: Review the current features (multi-step AI workflows, codon configuration, file tracking) and evaluate their implementation completeness.
-
-4. **TODO & Ideas Evaluation**: Assess the items in the development notes:
-   - Which TODOs are most critical to address first?
-   - Which ideas (parallel codon execution, multi-provider support, web designer) would provide the most value?
-   - Are there any missing considerations?
-
-5. **Recommendations**: Provide specific, actionable recommendations for:
-   - Improving the workflow system
-   - Addressing the known TODOs
-   - Prioritizing the proposed ideas
-   - Any additional improvements specific to AI workflow orchestration
+1. Very brief overview of the file in that directory
 
 Please create your analysis in a file called `analysis.md` in the execution directory.
