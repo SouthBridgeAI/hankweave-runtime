@@ -60,6 +60,12 @@ function spawnInitCommand(options: {
     };
   }
 
+  // On Windows, package manager commands (npx, bunx, pnpm) are .cmd files
+  // and need to be spawned with shell=true
+  const needsShell =
+    process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
+  spawnOptions.shell = needsShell;
+
   return spawn(command, args, spawnOptions);
 }
 
