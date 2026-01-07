@@ -200,4 +200,4 @@ verdaccio-storage/
 verdaccio.pid
 .npmrc.backup
 .npmrc.verdaccio
-htpasswd
+
