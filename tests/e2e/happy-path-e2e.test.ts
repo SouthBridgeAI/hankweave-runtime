@@ -226,11 +226,12 @@ async function setupAndRunCodons(): Promise<void> {
   // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
 
-  await new Promise((resolve) => setTimeout(resolve, 10_000));
-
-  // Connect WebSocket client
+  // Connect WebSocket client with retry logic (handles slow npx startup on Windows)
   testState.client = new TestWSClient();
-  await testState.client.connect(serverConfig.port);
+  await testState.client.connectWithRetry(serverConfig.port, {
+    maxRetries: 30, // 30 retries * 2s = 60s max wait
+    retryDelay: 2000, // 2 seconds between retries
+  });
 
   // Wait for initial events
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);

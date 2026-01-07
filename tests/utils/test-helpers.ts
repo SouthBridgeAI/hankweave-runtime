@@ -181,6 +181,51 @@ export class TestWSClient {
   private clientId: string | null = null;
   private grantedMode: ClientMode | null = null;
 
+  /**
+   * Connect to WebSocket with retry logic.
+   * Useful when server startup time is unpredictable (e.g., npx on Windows).
+   */
+  async connectWithRetry(
+    port: number,
+    options: {
+      performHandshake?: boolean;
+      mode?: ClientMode;
+      maxRetries?: number;
+      retryDelay?: number;
+      timeout?: number;
+    } = {},
+  ): Promise<void> {
+    const {
+      performHandshake = true,
+      mode = ClientMode.READANDWRITE,
+      maxRetries = 30,
+      retryDelay = 2000,
+      timeout = 10000,
+    } = options;
+
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`${colors.gray}Connection attempt ${attempt}/${maxRetries}...${colors.reset}`);
+        await this.connect(port, { performHandshake, mode, timeout });
+        return; // Success!
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < maxRetries) {
+          console.log(
+            `${colors.yellow}Connection failed, retrying in ${retryDelay}ms...${colors.reset}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        }
+      }
+    }
+
+    throw new Error(
+      `Failed to connect after ${maxRetries} attempts. Last error: ${lastError?.message}`,
+    );
+  }
+
   async connect(
     port: number,
     options: {
