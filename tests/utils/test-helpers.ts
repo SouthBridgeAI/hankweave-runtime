@@ -759,10 +759,16 @@ export function startServer(config: TestServerConfig): ChildProcess {
     ...(config.env || {}),
   } as Record<string, string>;
 
+  // On Windows, package manager commands (npx, bunx, pnpm) are .cmd files
+  // and need to be spawned with shell=true
+  const needsShell =
+    process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
+
   const serverProcess = spawn(command, args, {
     cwd: config.cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env,
+    shell: needsShell,
   });
 
   serverProcess.stdout?.on("data", (data) => {
