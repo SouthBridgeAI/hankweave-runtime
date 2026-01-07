@@ -1954,12 +1954,29 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
   }
 
   private handleSystemMessage(msg: SystemMessage, codonId: string): void {
+    // Debug logging for system messages
+    if (msg.subtype === "init") {
+      this.logger.log(
+        `[handleSystemMessage] Received init message for codon ${codonId}, session: ${msg.session_id}`,
+        "debug",
+      );
+      this.logger.log(
+        `[handleSystemMessage] Condition check - subtype=init: true, has_session: ${!!msg.session_id}, has_currentCodon: ${!!this.currentCodon}, currentCodon_status: ${this.currentCodon?.status || "N/A"}`,
+        "debug",
+      );
+    }
+
     if (
       msg.subtype === "init" &&
       msg.session_id &&
       this.currentCodon &&
       this.currentCodon.status === "initializing"
     ) {
+      this.logger.log(
+        `[handleSystemMessage] All conditions met, transitioning codon ${codonId} to running`,
+        "info",
+      );
+
       // Transition to running (fire-and-forget)
       if (this.currentRunId) {
         this.stateManager.transition({
@@ -2005,6 +2022,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           message: `Claude started codon ${codonId} with session ID: ${msg.session_id}`,
         },
       } as InfoEvent);
+    } else if (msg.subtype === "init") {
+      this.logger.log(
+        `[handleSystemMessage] Init message for codon ${codonId} did NOT meet all conditions - skipping transition`,
+        "info",
+      );
     }
   }
 
