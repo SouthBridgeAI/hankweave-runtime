@@ -196,9 +196,8 @@ async function setupVerdaccio(): Promise<void> {
 
   console.log(`${colors.green}✓ Published to ${registry.registryURL}${colors.reset}`);
 
-  // 6. Set env var for spawned processes
-  process.env.npm_config_registry = registry.registryURL;
-
+  // 6. Store verdaccio setup (but DON'T set global env var)
+  // We'll pass the registry URL directly to the server spawn command
   verdaccioSetup = {
     registry,
     npmrcPath,
@@ -222,7 +221,6 @@ async function cleanupVerdaccio(): Promise<void> {
   await removeNpmrc(verdaccioSetup.npmrcPath);
   await stopVerdaccioRegistry(verdaccioSetup.registry);
 
-  delete process.env.npm_config_registry;
   verdaccioSetup = null;
 
   console.log(`${colors.green}✓ Verdaccio cleanup complete${colors.reset}`);
@@ -325,6 +323,13 @@ async function setupAndRunCodons(): Promise<void> {
     console.log(
       `${colors.yellow}Using command: ${commandOverride.command} ${commandOverride.args.join(" ")}${colors.reset}`,
     );
+  }
+
+  // If using Verdaccio, set registry URL in env (only for initial npx/bunx command, NOT server's child processes)
+  if (verdaccioSetup && commandOverride) {
+    serverConfig.env = {
+      npm_config_registry: verdaccioSetup.registry.registryURL,
+    };
   }
 
   // Start server with execution isolation

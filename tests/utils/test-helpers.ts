@@ -80,6 +80,12 @@ export async function startVerdaccioRegistry(packageName: string): Promise<Verda
         url: "https://registry.npmjs.org/",
         maxage: "1d",
         cache: true,
+        // SSL workaround needed: Even though we only pass npm_config_registry to the npx command,
+        // bun install in rig setup may still discover the registry URL through .npmrc files or
+        // global npm configs, causing it to go through Verdaccio's proxy.
+        // Bun + Verdaccio have SSL certificate validation issues when proxying to npmjs.
+        strict_ssl: false,
+        timeout: "60s",
       },
     },
     packages: {
@@ -694,6 +700,7 @@ export interface TestServerConfig {
     command: string; // e.g., "npx", "bunx", "pnpm"
     args: string[]; // e.g., ["strandweave"], ["dlx", "strandweave"]
   };
+  env?: Record<string, string>; // Optional custom environment variables (merged with process.env)
 }
 
 export function startServer(config: TestServerConfig): ChildProcess {
@@ -746,18 +753,16 @@ export function startServer(config: TestServerConfig): ChildProcess {
 
   console.log(`${colors.gray}Command: ${command} ${args.join(" ")}${colors.reset}`);
 
+  // Merge custom environment variables with process.env
+  const env: Record<string, string> = {
+    ...process.env,
+    ...(config.env || {}),
+  } as Record<string, string>;
+
   const serverProcess = spawn(command, args, {
     cwd: config.cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      // Pass registry URL if available (for npx/bunx/pnpm to use)
-      ...(process.env.npm_config_registry
-        ? {
-            npm_config_registry: process.env.npm_config_registry,
-          }
-        : {}),
-    },
+    env,
   });
 
   serverProcess.stdout?.on("data", (data) => {
