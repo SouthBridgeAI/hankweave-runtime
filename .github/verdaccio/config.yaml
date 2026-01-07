@@ -1,0 +1,40 @@
+# Verdaccio configuration for CI testing
+# This runs a local npm registry for testing package installation before publishing
+
+storage: ./verdaccio-storage
+
+auth:
+  htpasswd:
+    file: ./htpasswd
+    # Allow unlimited users for CI testing
+    max_users: -1
+
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+    timeout: 60s
+
+packages:
+  # Scoped packages
+  '@*/*':
+    access: $all
+    publish: $all
+    unpublish: $all
+    proxy: npmjs
+
+  # All other packages
+  '**':
+    access: $all
+    publish: $all
+    unpublish: $all
+    proxy: npmjs
+
+server:
+  keepAliveTimeout: 60
+
+middlewares:
+  audit:
+    enabled: false
+
+# Minimal logging for CI
+logs: { type: stdout, format: pretty, level: warn }

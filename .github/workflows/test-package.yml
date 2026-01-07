@@ -37,12 +37,53 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Run package tests
-        run: bun test:package
+      # Install and start Verdaccio local registry
+      - name: Install Verdaccio
+        run: npm install -g verdaccio
 
+      - name: Start Verdaccio (Linux/Mac)
+        if: runner.os != 'Windows'
+        run: |
+          verdaccio --config .github/verdaccio/config.yaml &
+          echo $! > verdaccio.pid
+          sleep 5
+
+      - name: Start Verdaccio (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process -NoNewWindow verdaccio -ArgumentList "--config", ".github/verdaccio/config.yaml"
+          Start-Sleep -Seconds 5
+
+      - name: Verify Verdaccio is running
+        run: curl -f http://localhost:4873/ || exit 1
+
+      # Configure all package managers to use Verdaccio via .npmrc
+      - name: Configure Verdaccio registry
+        run: echo "registry=http://localhost:4873/" > .npmrc
+
+      # Build and publish to Verdaccio
+      - name: Build package
+        run: bun run build
+
+      - name: Publish to Verdaccio
+        run: npm publish
+
+      # Test package runners (all use Verdaccio via .npmrc)
+      - name: Test with npx
+        run: npx strandweave@0.1.0 --help
+
+      - name: Test with bunx
+        run: bunx strandweave@0.1.0 --help
+
+      - name: Test with pnpm dlx
+        run: pnpm dlx strandweave@0.1.0 --help
+
+      # Install Gemini CLI from Verdaccio registry
       - name: Install Gemini CLI
         run: npm install -g @google/gemini-cli
 
+      # Run e2e tests using package from Verdaccio
       - name: Run e2e happy path tests (npx)
         env:
           STRANDWEAVE_TEST_USE_NPX: 1
@@ -66,6 +107,14 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
         run: bun test tests/e2e/happy-path-e2e.test.ts
+
+      # Cleanup Verdaccio
+      - name: Stop Verdaccio (Linux/Mac)
+        if: runner.os != 'Windows' && always()
+        run: |
+          if [ -f verdaccio.pid ]; then
+            kill $(cat verdaccio.pid) || true
+          fi
 
       - name: Upload test results and logs
         if: always()

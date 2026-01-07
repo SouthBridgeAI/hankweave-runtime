@@ -23,6 +23,7 @@
   "scripts": {
     "build": "bun scripts/build.ts",
     "test:package": "bun scripts/test-local-package.ts",
+    "test:package:verdaccio": "bun scripts/test-with-verdaccio.ts",
     "prepublishOnly": "bun run build",
     "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
     "tc": "bun typecheck",

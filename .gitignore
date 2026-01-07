@@ -194,3 +194,10 @@ dist
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Verdaccio local registry testing
+verdaccio-storage/
+verdaccio.pid
+.npmrc.backup
+.npmrc.verdaccio
+htpasswd
