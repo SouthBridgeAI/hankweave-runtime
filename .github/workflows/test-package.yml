@@ -71,6 +71,37 @@ jobs:
       #     STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
       #   run: bun test tests/e2e/happy-path-e2e.test.ts
 
+      # Copy logs from execution directories if test failed
+      - name: Preserve execution logs
+        if: always()
+        shell: bash
+        run: |
+          echo "=== Checking for execution directories ==="
+          EXEC_DIR="${HOME}/.strandweave-executions"
+          if [ -d "$EXEC_DIR" ]; then
+            echo "Found execution directory: $EXEC_DIR"
+            find "$EXEC_DIR" -maxdepth 1 -type d | head -20
+
+            # Find the most recent test run directory
+            TEST_RUN_DIR=$(ls -td tests/test-results/run-* 2>/dev/null | head -1)
+            if [ -n "$TEST_RUN_DIR" ]; then
+              echo "Copying logs to: $TEST_RUN_DIR"
+
+              # Find the most recent execution
+              LATEST_EXEC=$(ls -td "$EXEC_DIR"/*/ 2>/dev/null | head -1)
+              if [ -n "$LATEST_EXEC" ]; then
+                echo "Latest execution: $LATEST_EXEC"
+
+                # Copy logs, state, and runs if they exist
+                [ -d "$LATEST_EXEC/.strandweave/logs" ] && cp -r "$LATEST_EXEC/.strandweave/logs" "$TEST_RUN_DIR/" && echo "  ✓ Copied logs directory"
+                [ -f "$LATEST_EXEC/.strandweave/state.json" ] && cp "$LATEST_EXEC/.strandweave/state.json" "$TEST_RUN_DIR/" && echo "  ✓ Copied state.json"
+                [ -d "$LATEST_EXEC/.strandweave/runs" ] && cp -r "$LATEST_EXEC/.strandweave/runs" "$TEST_RUN_DIR/" && echo "  ✓ Copied runs directory"
+              fi
+            fi
+          else
+            echo "No execution directory found"
+          fi
+
       # Diagnostic: Show directory structure before upload
       - name: Show test directory structure
         if: always()
