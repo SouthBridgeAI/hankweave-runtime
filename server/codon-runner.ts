@@ -360,6 +360,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       "info",
     );
 
+    // Log stack trace to understand why cleanup was called
+    const stack = new Error().stack;
+    this.config.logger.log(
+      `[CLEANUP-STACK] Cleanup called from:\n${stack?.split("\n").slice(1, 6).join("\n")}`,
+      "debug",
+    );
+
     // Stop log parser
     if (this.logParser) {
       this.logParser.stop();

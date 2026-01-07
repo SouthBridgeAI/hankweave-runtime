@@ -1846,24 +1846,36 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       });
 
       // Subscribe to runner events
+      this.logger.log(`[runCodon] Setting up event handlers for codon ${codonId}`, "debug");
       this.setupCodonRunnerEventHandlers(codonId);
 
       // Start execution
+      this.logger.log(
+        `[runCodon] Starting runner execution for codon ${codonId}, previousSessionId: ${previousSessionId || "none"}`,
+        "debug",
+      );
       await this.currentCodonRunner.run(
         previousSessionId ? SessionId(previousSessionId) : undefined,
       );
+      this.logger.log(`[runCodon] Runner.run() completed for codon ${codonId}`, "debug");
 
       // Validate process started
+      this.logger.log(`[runCodon] Validating process started for codon ${codonId}`, "debug");
       if (!this.currentRunId) {
         throw new Error("No active run while starting Claude process");
       }
 
       const pid = this.currentCodonRunner.getPid();
+      this.logger.log(`[runCodon] Got PID ${pid} for codon ${codonId}`, "debug");
       if (!pid) {
         throw new Error("Failed to get process PID");
       }
 
       // Transition to initializing (fire-and-forget)
+      this.logger.log(
+        `[runCodon] Transitioning codon ${codonId} to initializing (PID: ${pid})`,
+        "debug",
+      );
       this.stateManager.transition({
         type: "CodonTransitioned",
         data: {
@@ -1880,15 +1892,36 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           },
         },
       });
+      this.logger.log(
+        `[runCodon] Successfully completed runCodon for ${codonId}, status should be initializing`,
+        "debug",
+      );
     } catch (error) {
+      // LOG: Caught error during codon initialization
+      this.logger.log(
+        `[runCodon] CAUGHT ERROR during codon ${codonId} initialization: ${toError(error).message}`,
+        "error",
+      );
+      this.logger.log(`[runCodon] Error stack: ${toError(error).stack}`, "error");
+      this.logger.log(
+        `[runCodon] State at error - currentRunId: ${this.currentRunId}, hasRunner: ${!!this.currentCodonRunner}`,
+        "error",
+      );
+
       // Clean up runner if initialization fails
       if (this.currentCodonRunner) {
+        this.logger.log(`[runCodon] Calling cleanup on currentCodonRunner due to error`, "error");
         await this.currentCodonRunner.cleanup();
         this.currentCodonRunner = undefined;
+        this.logger.log(`[runCodon] CodonRunner cleanup complete, set to undefined`, "error");
       }
 
       // Transition to failed (fire-and-forget) if we have a run
       if (this.currentRunId) {
+        this.logger.log(
+          `[runCodon] Transitioning codon ${codonId} to failed due to error`,
+          "error",
+        );
         this.stateManager.transition({
           type: "CodonTransitioned",
           data: {
@@ -1907,7 +1940,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
           },
         });
       }
+      this.logger.log(`[runCodon] Calling cleanupCurrentCodon()`, "error");
       this.cleanupCurrentCodon();
+      this.logger.log(`[runCodon] Re-throwing error`, "error");
       throw error;
     }
   }
