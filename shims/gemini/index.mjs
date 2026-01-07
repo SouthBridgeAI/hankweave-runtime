@@ -134,14 +134,17 @@ var GeminiCLI = class {
    */
   static async isInstalled() {
     return new Promise((resolve2) => {
-      const proc = spawn("which", ["gemini"]);
+      // On Windows, use 'where' instead of 'which'
+      const isWindows = process.platform === "win32";
+      const whichCommand = isWindows ? "where" : "which";
+      const proc = spawn(whichCommand, ["gemini"], { shell: isWindows });
       let path = "";
       proc.stdout?.on("data", (data) => {
         path += data.toString();
       });
       proc.on("close", (code) => {
         if (code === 0 && path.trim()) {
-          const versionProc = spawn("gemini", ["--version"]);
+          const versionProc = spawn("gemini", ["--version"], { shell: isWindows });
           let version = "";
           versionProc.stdout?.on("data", (data) => {
             version += data.toString();
@@ -177,12 +180,15 @@ var GeminiCLI = class {
     if (this.verbose) {
       console.error("[gemini-cli-shim] Spawning gemini:", args.join(" "));
     }
+    // On Windows, gemini is a .cmd file and needs shell=true
+    const isWindows = process.platform === "win32";
     this.process = spawn("gemini", args, {
       cwd: this.options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env
-      }
+      },
+      shell: isWindows
     });
     const fullPrompt = this.options.appendSystemPrompt ? `${prompt}
 
