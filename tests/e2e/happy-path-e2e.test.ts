@@ -185,6 +185,7 @@ async function setupVerdaccio(): Promise<void> {
   const publishProc = spawn("npm", ["publish", `--registry=${registry.registryURL}`], {
     cwd: projectRoot,
     stdio: "inherit", // Show publish output
+    shell: true, // Required for Windows compatibility (npm.cmd)
   });
 
   await new Promise<void>((resolve, reject) => {
