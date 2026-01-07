@@ -41,6 +41,10 @@ jobs:
       - name: Run package installation tests
         run: bun test tests/e2e/package-installation.e2e.test.ts
 
+      # Install Gemini CLI for e2e tests
+      - name: Install Gemini CLI
+        run: npm install -g @google/gemini-cli
+
       # Run happy-path e2e tests with different package managers
       # These automatically start Verdaccio, build, publish, and test
       - name: Run e2e tests with npx
