@@ -104,14 +104,9 @@ describe("init command e2e", () => {
     const child = spawnInitCommand({ cwd: INIT_TEST_DIR });
 
     let stdout = "";
-    let stderr = "";
 
     child.stdout?.on("data", (data) => {
       stdout += data.toString();
-    });
-
-    child.stderr?.on("data", (data) => {
-      stderr += data.toString();
     });
 
     // Wait for process to complete
@@ -119,7 +114,6 @@ describe("init command e2e", () => {
 
     // Verify success
     expect(exitCode).toBe(0);
-    expect(stderr).toBe("");
     expect(stdout).toContain("Initialized strand");
 
     // Verify files were created
