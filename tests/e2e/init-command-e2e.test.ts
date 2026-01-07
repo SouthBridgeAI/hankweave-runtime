@@ -4,11 +4,12 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { launchStrandweave } from "../utils/strandweave-server-test-helpers.js";
 import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
 
 // Test configuration
-const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_AREA = path.join(TEST_ROOT, "tests/test-area");
 const TEST_TIMESTAMP = generateTestTimestamp();
 const INIT_TEST_DIR = path.join(TEST_AREA, `init-test-${TEST_TIMESTAMP}`);

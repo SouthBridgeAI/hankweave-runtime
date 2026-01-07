@@ -19,6 +19,7 @@ import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import { CodonId, RunId } from "../../server/types/branded-types.js";
 import type { Run, StrandweaveState } from "../../server/types/state-types.js";
@@ -48,7 +49,7 @@ import {
 // TEST CONFIGURATION
 // -------------
 
-const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const EXECUTION_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-comprehensive");
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const SNAPSHOT_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-comprehensive-snapshots");
@@ -355,7 +356,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   // Start server
   console.log(`\n${colors.blue}Starting server with execution isolation...${colors.reset}`);
   const serverPath = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
+    path.dirname(fileURLToPath(import.meta.url)),
     "../../server/index.ts",
   );
 

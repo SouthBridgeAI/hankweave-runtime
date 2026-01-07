@@ -5,6 +5,7 @@ import type http from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ClientCommand } from "../../server/command-schemas.js";
 import type { StrandweaveState } from "../../server/types/state-types.js";
 import type {
@@ -68,7 +69,7 @@ export async function startVerdaccioRegistry(packageName: string): Promise<Verda
 
   // Start Verdaccio
   const server = (await runServer({
-    self_path: path.dirname(new URL(import.meta.url).pathname),
+    self_path: path.dirname(fileURLToPath(import.meta.url)),
     storage: storageDir,
     web: { title: "Test Registry" },
     max_body_size: "128mb",
@@ -716,7 +717,7 @@ export function startServer(config: TestServerConfig): ChildProcess {
   } else {
     // Default: bun with local server path
     const serverPath = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname),
+      path.dirname(fileURLToPath(import.meta.url)),
       "../../server/index.ts",
     );
     command = "bun";

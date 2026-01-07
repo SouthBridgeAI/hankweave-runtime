@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { StrandweaveRuntime } from "../../server/strandweave-runtime.js";
 import {
   type ErrorEvent,
@@ -17,7 +18,7 @@ import {
 
 // Test configuration similar to e2e tests
 const TEST_ROOT = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "../.."
 );
 const EXECUTION_DIR = path.join(

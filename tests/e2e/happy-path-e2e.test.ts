@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type CleanupIntegrationResult,
   executeTestCleanup,
@@ -65,7 +66,7 @@ import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
 // Test configuration
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 // Use __dirname to ensure we're always relative to this test file
-const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const CODONS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons.config.json");
