@@ -3,11 +3,13 @@
 
 storage: ./verdaccio-storage
 
+# Disable authentication for CI testing
 auth:
   htpasswd:
     file: ./htpasswd
-    # Allow unlimited users for CI testing
     max_users: -1
+    # Allow anonymous publishing for CI
+    algorithm: bcrypt
 
 uplinks:
   npmjs:
@@ -17,16 +19,16 @@ uplinks:
 packages:
   # Scoped packages
   '@*/*':
-    access: $all
-    publish: $all
-    unpublish: $all
+    access: $anonymous
+    publish: $anonymous
+    unpublish: $anonymous
     proxy: npmjs
 
   # All other packages
   '**':
-    access: $all
-    publish: $all
-    unpublish: $all
+    access: $anonymous
+    publish: $anonymous
+    unpublish: $anonymous
     proxy: npmjs
 
 server:

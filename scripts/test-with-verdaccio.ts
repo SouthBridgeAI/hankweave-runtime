@@ -117,11 +117,13 @@ async function main() {
 
     // Publish
     log("\n📤 Publishing to local registry...", colors.blue);
+    log("   (Anonymous publishing enabled - no auth required)", colors.gray);
     const publishResult = await execCommand("npm", ["publish"]);
     if (!publishResult.success) {
       log("❌ Publish failed", colors.red);
       log("   (This is normal if the package version already exists)", colors.yellow);
-      log("   Try bumping the version in package.json", colors.yellow);
+      log("   Try bumping the version in package.json or run:", colors.yellow);
+      log("   npm unpublish --force strandweave@0.1.0", colors.gray);
     } else {
       log("✅ Published to Verdaccio", colors.green);
     }
