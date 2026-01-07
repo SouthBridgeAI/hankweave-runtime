@@ -49,7 +49,7 @@ import type {
   ToolUseContent,
   UserMessage,
 } from "./types/claude-session-schema.js";
-import { APITimeoutError, ErrorSeverity } from "./types/error-types.js";
+import { APITimeoutError, CommandError, ErrorSeverity } from "./types/error-types.js";
 import {
   type CodonExecution,
   type CodonStatus,
@@ -1437,7 +1437,23 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
             this.logger.log(`Ran command in ${resolvedWorkingDir}: ${item.command.run}`);
           }
         } catch (error) {
-          const errorMessage = toError(error).message;
+          const errorObj = toError(error);
+          const errorMessage = errorObj.message;
+
+          // Extract exit code if available (from command failures)
+          const isCommandError = error instanceof CommandError;
+          const exitCode = isCommandError ? error.exitCode : -1;
+          const stdout = isCommandError ? error.stdout : "";
+          const stderr = isCommandError ? error.stderr : "";
+
+          // Diagnostic logging
+          this.logger.log(`[DEBUG] Rig setup error details - Exit code: ${exitCode}`, "error");
+          if (stdout) {
+            this.logger.log(`[DEBUG] Rig setup error stdout: ${stdout}`, "info");
+          }
+          if (stderr) {
+            this.logger.log(`[DEBUG] Rig setup error stderr: ${stderr}`, "error");
+          }
 
           // Check if this operation allows failure
           if (item.allowFailure) {
@@ -1490,6 +1506,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
                 from: "preparing",
                 to: "failed",
                 metadata: {
+                  exitCode, // Include exit code in metadata
                   failedDuring: "preparing",
                   failureReason: this.codonFailureReason,
                 },
@@ -4480,21 +4497,64 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       workingDir = this.config.executionPath;
     }
 
+    // Diagnostic logging: log working directory and its contents
+    this.logger.log(`[DEBUG] Running command: ${cmd.command.run}`, "info");
+    this.logger.log(`[DEBUG] Working directory: ${workingDir}`, "info");
+    try {
+      const dirContents = await fs.promises.readdir(workingDir);
+      this.logger.log(`[DEBUG] Directory contents: ${dirContents.join(", ")}`, "info");
+    } catch (e) {
+      this.logger.log(`[DEBUG] Could not read directory contents: ${toError(e).message}`, "error");
+    }
+
     return new Promise((resolve, reject) => {
       const proc = spawn(cmd.command.run, {
         shell: true,
         cwd: workingDir,
       });
 
+      // Capture stdout and stderr for diagnostic purposes
+      let stdout = "";
+      let stderr = "";
+
+      proc.stdout?.on("data", (data) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        this.logger.log(`[DEBUG] Command stdout: ${chunk.trim()}`, "info");
+      });
+
+      proc.stderr?.on("data", (data) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        this.logger.log(`[DEBUG] Command stderr: ${chunk.trim()}`, "error");
+      });
+
       proc.on("exit", (code) => {
         if (code === 0) {
+          this.logger.log(`[DEBUG] Command completed successfully`, "info");
           resolve();
         } else {
-          reject(new Error(`Command failed with exit code ${code}`));
+          // Handle null exit code (killed by signal)
+          const exitCode = code ?? -1;
+          this.logger.log(`[DEBUG] Command failed with exit code ${exitCode}`, "error");
+          this.logger.log(`[DEBUG] Full stdout: ${stdout}`, "info");
+          this.logger.log(`[DEBUG] Full stderr: ${stderr}`, "error");
+
+          // Create CommandError with exit code and output
+          const error = new CommandError(
+            `Command failed with exit code ${exitCode}`,
+            exitCode,
+            stdout,
+            stderr,
+          );
+          reject(error);
         }
       });
 
-      proc.on("error", reject);
+      proc.on("error", (err) => {
+        this.logger.log(`[DEBUG] Command error: ${err.message}`, "error");
+        reject(err);
+      });
     });
   }
 
