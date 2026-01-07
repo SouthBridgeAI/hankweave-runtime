@@ -7,6 +7,13 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchStrandweave } from "../utils/strandweave-server-test-helpers.js";
 import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
+import {
+  cleanupVerdaccio,
+  getCommandOverride,
+  needsVerdaccio,
+  setupVerdaccio,
+  type VerdaccioSetup,
+} from "../utils/verdaccio.js";
 
 // Test configuration
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -14,19 +21,73 @@ const TEST_AREA = path.join(TEST_ROOT, "tests/test-area");
 const TEST_TIMESTAMP = generateTestTimestamp();
 const INIT_TEST_DIR = path.join(TEST_AREA, `init-test-${TEST_TIMESTAMP}`);
 
+// Verdaccio setup state (for package manager testing)
+let verdaccioSetup: VerdaccioSetup | null = null;
+
+/**
+ * Spawns the init command using either package manager (npx/bunx/pnpm dlx) or direct bun execution.
+ * Automatically configures registry URL if using Verdaccio.
+ */
+function spawnInitCommand(options: {
+  cwd: string;
+  stdio?: Parameters<typeof spawn>[2]["stdio"];
+}): ReturnType<typeof spawn> {
+  const commandOverride = getCommandOverride();
+  let command: string;
+  let args: string[];
+
+  if (commandOverride) {
+    // Using package manager (npx/bunx/pnpm dlx)
+    command = commandOverride.command;
+    args = [...commandOverride.args, "--init"];
+  } else {
+    // Default: direct bun execution
+    const serverEntry = path.join(TEST_ROOT, "server/index.ts");
+    command = "bun";
+    args = [serverEntry, "--init"];
+  }
+
+  const spawnOptions: Parameters<typeof spawn>[2] = {
+    cwd: options.cwd,
+    stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
+  };
+
+  // Add registry URL if using Verdaccio
+  if (verdaccioSetup && commandOverride) {
+    spawnOptions.env = {
+      ...process.env,
+      npm_config_registry: verdaccioSetup.registry.registryURL,
+    };
+  }
+
+  return spawn(command, args, spawnOptions);
+}
+
 describe("init command e2e", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
+    // Setup Verdaccio if testing with package managers
+    if (needsVerdaccio()) {
+      const projectRoot = path.resolve(TEST_ROOT);
+      verdaccioSetup = await setupVerdaccio(projectRoot);
+    }
+
     // Create test area directory
     if (!fs.existsSync(TEST_AREA)) {
       fs.mkdirSync(TEST_AREA, { recursive: true });
     }
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     // Clean up test directory
     // if (fs.existsSync(INIT_TEST_DIR)) {
     //   fs.rmSync(INIT_TEST_DIR, { recursive: true, force: true });
     // }
+
+    // Cleanup Verdaccio if it was started
+    if (verdaccioSetup) {
+      await cleanupVerdaccio(verdaccioSetup);
+      verdaccioSetup = null;
+    }
   });
 
   test("init command creates all required files", async () => {
@@ -34,11 +95,7 @@ describe("init command e2e", () => {
     fs.mkdirSync(INIT_TEST_DIR, { recursive: true });
 
     // Run init command
-    const serverEntry = path.join(TEST_ROOT, "server/index.ts");
-    const child = spawn("bun", [serverEntry, "--init"], {
-      cwd: INIT_TEST_DIR,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnInitCommand({ cwd: INIT_TEST_DIR });
 
     let stdout = "";
     let stderr = "";
@@ -93,11 +150,7 @@ describe("init command e2e", () => {
     fs.writeFileSync(path.join(nonEmptyDir, "existing.txt"), "content");
 
     // Run init command
-    const serverEntry = path.join(TEST_ROOT, "server/index.ts");
-    const child = spawn("bun", [serverEntry, "--init"], {
-      cwd: nonEmptyDir,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnInitCommand({ cwd: nonEmptyDir });
 
     let stderr = "";
     child.stderr?.on("data", (data) => {

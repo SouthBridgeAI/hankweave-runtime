@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { afterAll, describe, expect, it } from "bun:test";
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,6 +85,14 @@ import type {
 } from "../../server/types/types.js";
 // Import connectStrandweaveClient for sync client
 import { connectStrandweaveClient } from "../utils/strandweave-server-test-helpers.js";
+// Import Verdaccio helpers
+import {
+  cleanupVerdaccio,
+  getCommandOverride,
+  needsVerdaccio,
+  setupVerdaccio,
+  type VerdaccioSetup,
+} from "../utils/verdaccio.js";
 
 // Server configuration - Updated for execution isolation
 const serverConfig: TestServerConfig = {
@@ -105,127 +113,9 @@ const strandweaveResultsDir = path.join(serverConfig.cwd, "strandweave-results/"
 // -------------
 
 const projectRoot = path.resolve(TEST_ROOT);
-const packageJsonPath = path.join(projectRoot, "package.json");
 
 // Module-level Verdaccio state
-interface VerdaccioSetup {
-  registry: import("../utils/test-helpers.js").VerdaccioRegistry;
-  npmrcPath: string;
-  packageName: string;
-  packageVersion: string;
-}
-
 let verdaccioSetup: VerdaccioSetup | null = null;
-
-// IMPORTANT: Only setup Verdaccio if testing with package managers
-const needsVerdaccio = Boolean(
-  process.env.STRANDWEAVE_TEST_USE_NPX ||
-    process.env.STRANDWEAVE_TEST_USE_BUNX ||
-    process.env.STRANDWEAVE_TEST_USE_PNPM_DLX,
-);
-
-// Determine command override based on env vars
-function getCommandOverride(): TestServerConfig["commandOverride"] {
-  if (process.env.STRANDWEAVE_TEST_USE_NPX) {
-    return { command: "npx", args: ["strandweave"] };
-  }
-  if (process.env.STRANDWEAVE_TEST_USE_BUNX) {
-    return { command: "bunx", args: ["strandweave"] };
-  }
-  if (process.env.STRANDWEAVE_TEST_USE_PNPM_DLX) {
-    return { command: "pnpm", args: ["dlx", "strandweave"] };
-  }
-  return undefined;
-}
-
-// Setup Verdaccio before tests start (ONLY if needsVerdaccio is true)
-async function setupVerdaccio(): Promise<void> {
-  if (!needsVerdaccio) {
-    console.log(`${colors.gray}Skipping Verdaccio setup (not needed)${colors.reset}`);
-    return;
-  }
-
-  console.log(`\n${colors.blue}=== Setting up Verdaccio for package testing ===${colors.reset}\n`);
-
-  // 1. Read package.json
-  const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, "utf-8")) as {
-    name: string;
-    version: string;
-  };
-
-  console.log(`📦 Package: ${packageJson.name}@${packageJson.version}`);
-
-  // 2. Build package
-  console.log("\n🏗️  Building package...");
-  const buildProc = spawn("bun", ["run", "build"], {
-    cwd: projectRoot,
-    stdio: "inherit", // Show build output
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    buildProc.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Build failed with code ${code}`));
-    });
-  });
-
-  console.log(`${colors.green}✓ Build complete${colors.reset}`);
-
-  // 3. Start Verdaccio
-  const { startVerdaccioRegistry, createNpmrcForVerdaccio } = await import(
-    "../utils/test-helpers.js"
-  );
-  const registry = await startVerdaccioRegistry(packageJson.name);
-
-  // 4. Create .npmrc
-  const npmrcPath = await createNpmrcForVerdaccio(projectRoot, registry.port);
-
-  // 5. Publish to registry
-  console.log(`\n📤 Publishing ${packageJson.name}@${packageJson.version}...`);
-  const publishProc = spawn("npm", ["publish", `--registry=${registry.registryURL}`], {
-    cwd: projectRoot,
-    stdio: "inherit", // Show publish output
-    shell: true, // Required for Windows compatibility (npm.cmd)
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    publishProc.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Publish failed with code ${code}`));
-    });
-  });
-
-  console.log(`${colors.green}✓ Published to ${registry.registryURL}${colors.reset}`);
-
-  // 6. Store verdaccio setup (but DON'T set global env var)
-  // We'll pass the registry URL directly to the server spawn command
-  verdaccioSetup = {
-    registry,
-    npmrcPath,
-    packageName: packageJson.name,
-    packageVersion: packageJson.version,
-  };
-
-  console.log(`${colors.green}\n=== Verdaccio setup complete ===\n${colors.reset}`);
-}
-
-// Cleanup Verdaccio after all tests (ONLY if it was started)
-async function cleanupVerdaccio(): Promise<void> {
-  if (!verdaccioSetup) {
-    return;
-  }
-
-  console.log(`\n${colors.blue}Cleaning up Verdaccio...${colors.reset}`);
-
-  const { removeNpmrc, stopVerdaccioRegistry } = await import("../utils/test-helpers.js");
-
-  await removeNpmrc(verdaccioSetup.npmrcPath);
-  await stopVerdaccioRegistry(verdaccioSetup.registry);
-
-  verdaccioSetup = null;
-
-  console.log(`${colors.green}✓ Verdaccio cleanup complete${colors.reset}`);
-}
 
 // -------------
 // Test State - Shared across all tests
@@ -296,8 +186,8 @@ async function setupAndRunCodons(): Promise<void> {
   testState.testStartTime = Date.now();
 
   // CONDITIONALLY setup Verdaccio if needed
-  if (needsVerdaccio) {
-    await setupVerdaccio();
+  if (needsVerdaccio()) {
+    verdaccioSetup = await setupVerdaccio(projectRoot);
   }
 
   // Ensure test results directory exists
@@ -1081,8 +971,9 @@ describe("Strandweave E2E Test", () => {
     }
 
     // CONDITIONALLY cleanup Verdaccio if it was started
-    if (needsVerdaccio) {
-      await cleanupVerdaccio();
+    if (verdaccioSetup) {
+      await cleanupVerdaccio(verdaccioSetup);
+      verdaccioSetup = null;
     }
   });
 });
