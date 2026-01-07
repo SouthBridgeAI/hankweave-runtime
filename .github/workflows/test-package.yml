@@ -84,12 +84,12 @@ jobs:
             find "$EXEC_DIR" -maxdepth 1 -type d | head -20
 
             # Find the most recent test run directory
-            TEST_RUN_DIR=$(ls -td tests/test-results/run-* 2>/dev/null | head -1)
+            TEST_RUN_DIR=$(ls -td tests/test-results/run-* 2>/dev/null | head -1 || true)
             if [ -n "$TEST_RUN_DIR" ]; then
               echo "Copying logs to: $TEST_RUN_DIR"
 
               # Find the most recent execution
-              LATEST_EXEC=$(ls -td "$EXEC_DIR"/*/ 2>/dev/null | head -1)
+              LATEST_EXEC=$(ls -td "$EXEC_DIR"/*/ 2>/dev/null | head -1 || true)
               if [ -n "$LATEST_EXEC" ]; then
                 echo "Latest execution: $LATEST_EXEC"
 
