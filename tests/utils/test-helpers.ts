@@ -1,6 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import type http from "node:http";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { ClientCommand } from "../../server/command-schemas.js";
 import type { StrandweaveState } from "../../server/types/state-types.js";
@@ -41,6 +44,115 @@ export const colors = {
   blue: "\x1b[34m",
   gray: "\x1b[90m",
 };
+
+// -------------
+// Verdaccio Registry Management
+// -------------
+
+export interface VerdaccioRegistry {
+  server: http.Server;
+  registryURL: string;
+  storageDir: string;
+  port: number;
+}
+
+/**
+ * Start a local Verdaccio registry for testing package installation.
+ * Does NOT build or publish - caller is responsible for that.
+ */
+export async function startVerdaccioRegistry(packageName: string): Promise<VerdaccioRegistry> {
+  const { runServer } = await import("verdaccio");
+
+  // Create temp storage
+  const storageDir = await mkdtemp(path.join(tmpdir(), "strandweave-verdaccio-"));
+
+  // Start Verdaccio
+  const server = (await runServer({
+    self_path: path.dirname(new URL(import.meta.url).pathname),
+    storage: storageDir,
+    web: { title: "Test Registry" },
+    max_body_size: "128mb",
+    max_users: -1,
+    log: { level: "fatal" },
+    uplinks: {
+      npmjs: {
+        url: "https://registry.npmjs.org/",
+        maxage: "1d",
+        cache: true,
+      },
+    },
+    packages: {
+      [packageName]: {
+        access: "$all",
+        publish: "$all",
+      },
+      "**": {
+        access: "$all",
+        publish: "noone",
+        proxy: "npmjs",
+      },
+    },
+  })) as http.Server;
+
+  // Wait for server to be ready
+  await new Promise<void>((resolve, reject) => {
+    server.listen(0, () => resolve());
+    server.on("error", reject);
+  });
+
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Failed to get Verdaccio server address");
+  }
+
+  const registryURL = `http://localhost:${address.port}`;
+
+  console.log(`${colors.green}✓ Verdaccio registry started at ${registryURL}${colors.reset}`);
+
+  return {
+    server,
+    registryURL,
+    storageDir,
+    port: address.port,
+  };
+}
+
+/**
+ * Stop a Verdaccio registry and clean up temp storage.
+ */
+export async function stopVerdaccioRegistry(registry: VerdaccioRegistry): Promise<void> {
+  // Close server
+  await new Promise<void>((resolve) => {
+    registry.server.close(() => resolve());
+    registry.server.closeAllConnections();
+  });
+
+  // Clean up storage
+  await rm(registry.storageDir, { recursive: true, force: true });
+
+  console.log(`${colors.gray}✓ Verdaccio registry stopped${colors.reset}`);
+}
+
+/**
+ * Create .npmrc file with auth token for Verdaccio.
+ * Returns path to created .npmrc file.
+ */
+export async function createNpmrcForVerdaccio(projectRoot: string, port: number): Promise<string> {
+  const npmrcPath = path.join(projectRoot, ".npmrc");
+  const npmrcContent = `//localhost:${port}/:_authToken=dummy`;
+  await writeFile(npmrcPath, npmrcContent);
+
+  console.log(`${colors.gray}✓ Created .npmrc${colors.reset}`);
+
+  return npmrcPath;
+}
+
+/**
+ * Remove .npmrc file.
+ */
+export async function removeNpmrc(npmrcPath: string): Promise<void> {
+  await rm(npmrcPath, { force: true });
+}
 
 // -------------
 // Test WebSocket Client
@@ -576,6 +688,11 @@ export interface TestServerConfig {
   useExecutionFlag?: boolean; // Whether to use --execution flag
   startNew?: boolean; // Force new execution
   withoutProxy?: boolean; // Run server without proxy
+  commandOverride?: {
+    // Override the default command (bun server/index.ts)
+    command: string; // e.g., "npx", "bunx", "pnpm"
+    args: string[]; // e.g., ["strandweave"], ["dlx", "strandweave"]
+  };
 }
 
 export function startServer(config: TestServerConfig): ChildProcess {
@@ -588,57 +705,57 @@ export function startServer(config: TestServerConfig): ChildProcess {
   const serverLogPath = path.join(config.testRunDir, "server.log");
   const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
 
-  // Build command and arguments based on environment
+  // Use provided command or default to bun with local server
   let command: string;
-  let args: string[];
+  let baseArgs: string[];
 
-  if (process.env.STRANDWEAVE_TEST_USE_NPX) {
-    // Use npx strandweave when testing the installed package
-    command = "npx";
-    args = ["strandweave", `--config=${config.configFile}`, `--port=${config.port}`];
-  } else if (process.env.STRANDWEAVE_TEST_USE_BUNX) {
-    // Use bunx strandweave when testing the installed package with bun
-    command = "bunx";
-    args = ["strandweave", `--config=${config.configFile}`, `--port=${config.port}`];
-  } else if (process.env.STRANDWEAVE_TEST_USE_PNPM_DLX) {
-    // Use pnpm dlx strandweave when testing the installed package with pnpm
-    command = "pnpm";
-    args = ["dlx", "strandweave", `--config=${config.configFile}`, `--port=${config.port}`];
+  if (config.commandOverride) {
+    // Custom command provided
+    command = config.commandOverride.command;
+    baseArgs = [...config.commandOverride.args];
   } else {
-    // Use bun with local server path for normal development
+    // Default: bun with local server path
     const serverPath = path.resolve(
       path.dirname(new URL(import.meta.url).pathname),
       "../../server/index.ts",
     );
     command = "bun";
-    args = [serverPath, `--config=${config.configFile}`, `--port=${config.port}`];
+    baseArgs = [serverPath];
   }
 
-  // Run without proxy if specified
+  // Build args: baseArgs + config flags
+  const args = [...baseArgs, `--config=${config.configFile}`, `--port=${config.port}`];
+
+  // Add optional flags
   if (config.withoutProxy) {
-    args.push(`--without-proxy`);
+    args.push("--without-proxy");
   }
 
-  // Add --data flag if using execution isolation
   if (config.useDataFlag && config.dataSourceDir) {
     args.push(`--data=${config.dataSourceDir}`);
   }
 
-  // Add --execution flag if using explicit execution directory
   if (config.useExecutionFlag && config.executionDir) {
     args.push(`--execution=${config.executionDir}`);
   }
 
-  // Add --start-new flag if forcing new execution
   if (config.startNew) {
     args.push("--start-new");
   }
+
+  console.log(`${colors.gray}Command: ${command} ${args.join(" ")}${colors.reset}`);
 
   const serverProcess = spawn(command, args, {
     cwd: config.cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
+      // Pass registry URL if available (for npx/bunx/pnpm to use)
+      ...(process.env.npm_config_registry
+        ? {
+            npm_config_registry: process.env.npm_config_registry,
+          }
+        : {}),
     },
   });
 
