@@ -416,6 +416,149 @@ export function deepMerge<T extends Record<string, unknown>>(...sources: Array<T
 }
 
 // -------------
+// File System Reliability Utilities
+// -------------
+
+/**
+ * Rename file with retry logic for Windows file locking issues.
+ *
+ * On Windows, EPERM/EBUSY errors can occur transiently due to:
+ * - Antivirus scanning (Windows Defender in CI environments)
+ * - File handles not fully released after previous operations
+ * - Windows filesystem timing differences vs Unix
+ *
+ * This implements exponential backoff retry to handle these transient locks.
+ *
+ * @param source - Source file path
+ * @param target - Target file path
+ * @param options - Retry configuration options
+ * @param options.maxRetries - Maximum number of retry attempts (default: 5)
+ * @param options.initialDelay - Initial delay in milliseconds (default: 10ms)
+ * @param options.logger - Optional logger for debugging retry attempts
+ * @returns Promise that resolves when rename succeeds
+ * @throws Error if rename fails after all retries or encounters non-retryable error
+ *
+ * @example
+ * ```ts
+ * // Basic usage
+ * await renameWithRetry('temp.json', 'state.json');
+ *
+ * // With custom retry settings and logging
+ * await renameWithRetry('temp.json', 'state.json', {
+ *   maxRetries: 10,
+ *   initialDelay: 20,
+ *   logger: myLogger
+ * });
+ * ```
+ */
+export async function renameWithRetry(
+  source: string,
+  target: string,
+  options: {
+    maxRetries?: number;
+    initialDelay?: number;
+    logger?: Logger;
+  } = {},
+): Promise<void> {
+  const { maxRetries = 5, initialDelay = 10, logger } = options;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await fs.promises.rename(source, target);
+      return; // Success!
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      lastError = err;
+
+      // Only retry on file locking errors
+      if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "EACCES") {
+        if (attempt < maxRetries - 1) {
+          const delay = initialDelay * 2 ** attempt;
+          logger?.log(
+            `File locked, retrying rename in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+            "debug",
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+
+      // Non-retryable error or max retries exceeded
+      throw error;
+    }
+  }
+
+  // Should never reach here, but TypeScript doesn't know that
+  throw lastError || new Error("Rename failed after retries");
+}
+
+/**
+ * Synchronous version of renameWithRetry for use in synchronous contexts.
+ *
+ * Same behavior as renameWithRetry but uses synchronous fs operations.
+ * Useful for scenarios where async/await cannot be used.
+ *
+ * @param source - Source file path
+ * @param target - Target file path
+ * @param options - Retry configuration options
+ * @param options.maxRetries - Maximum number of retry attempts (default: 5)
+ * @param options.initialDelay - Initial delay in milliseconds (default: 10ms)
+ * @param options.logger - Optional logger for debugging retry attempts
+ * @throws Error if rename fails after all retries or encounters non-retryable error
+ *
+ * @example
+ * ```ts
+ * renameWithRetrySync('temp.json', 'state.json');
+ * ```
+ */
+export function renameWithRetrySync(
+  source: string,
+  target: string,
+  options: {
+    maxRetries?: number;
+    initialDelay?: number;
+    logger?: Logger;
+  } = {},
+): void {
+  const { maxRetries = 5, initialDelay = 10, logger } = options;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      fs.renameSync(source, target);
+      return; // Success!
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      lastError = err;
+
+      // Only retry on file locking errors
+      if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "EACCES") {
+        if (attempt < maxRetries - 1) {
+          const delay = initialDelay * 2 ** attempt;
+          logger?.log(
+            `File locked, retrying rename in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+            "debug",
+          );
+          // Synchronous sleep using busy-wait (not ideal but necessary for sync context)
+          const start = Date.now();
+          while (Date.now() - start < delay) {
+            // Busy wait
+          }
+          continue;
+        }
+      }
+
+      // Non-retryable error or max retries exceeded
+      throw error;
+    }
+  }
+
+  // Should never reach here, but TypeScript doesn't know that
+  throw lastError || new Error("Rename failed after retries");
+}
+
+// -------------
 // Server Utilities
 // -------------
 

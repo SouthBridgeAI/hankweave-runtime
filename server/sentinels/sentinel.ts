@@ -15,7 +15,7 @@ import type {
   SentinelOutputPaths,
   StructuredOutputContext,
 } from "../types/sentinel-types.js";
-import { generateId, type Logger } from "../utils.js";
+import { generateId, type Logger, renameWithRetrySync } from "../utils.js";
 import "../../tests/types/global-test-types.js";
 import { HistoryManager } from "./history-manager.js";
 import { type TemplateContext, TemplateRenderer } from "./prompt-templating-engine.js";
@@ -1571,7 +1571,8 @@ export class Sentinel {
     const tempPath = `${filePath}.tmp`;
     try {
       fs.writeFileSync(tempPath, content, "utf-8");
-      fs.renameSync(tempPath, filePath);
+      // Use retry logic for Windows file locking issues
+      renameWithRetrySync(tempPath, filePath, { logger: this.logger });
     } catch (error) {
       // Clean up temp file if rename failed
       if (fs.existsSync(tempPath)) {

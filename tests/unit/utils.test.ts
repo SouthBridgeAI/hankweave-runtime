@@ -3,7 +3,14 @@ import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
 import type { FileNode } from "../../server/types/types";
-import { buildFileTree, copyFiles, escapeShellArg, Logger, serve } from "../../server/utils";
+import {
+  buildFileTree,
+  copyFiles,
+  escapeShellArg,
+  Logger,
+  renameWithRetry,
+  serve,
+} from "../../server/utils";
 import { getFreePort } from "../utils/test-helpers.js";
 
 describe("escapeShellArg", () => {
@@ -714,6 +721,284 @@ describe("serve", () => {
       ws.close();
     } finally {
       server.stop();
+    }
+  });
+});
+
+describe("renameWithRetry", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    const timestamp = Date.now();
+    tempDir = path.resolve("tests", "test-area", `temp-test-rename-${timestamp}`);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("successfully renames file on first attempt", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+
+    await fs.promises.writeFile(sourcePath, "test content");
+
+    await renameWithRetry(sourcePath, targetPath);
+
+    expect(fs.existsSync(targetPath)).toBe(true);
+    expect(fs.existsSync(sourcePath)).toBe(false);
+    expect(await fs.promises.readFile(targetPath, "utf-8")).toBe("test content");
+  });
+
+  test("overwrites existing target file", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+
+    await fs.promises.writeFile(sourcePath, "new content");
+    await fs.promises.writeFile(targetPath, "old content");
+
+    await renameWithRetry(sourcePath, targetPath);
+
+    expect(fs.existsSync(targetPath)).toBe(true);
+    expect(fs.existsSync(sourcePath)).toBe(false);
+    expect(await fs.promises.readFile(targetPath, "utf-8")).toBe("new content");
+  });
+
+  test("retries on EPERM error and eventually succeeds", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+    const mockLogger = new MockLogger("");
+
+    await fs.promises.writeFile(sourcePath, "content");
+
+    // Mock fs.promises.rename to fail twice with EPERM, then succeed
+    let attemptCount = 0;
+    const originalRename = fs.promises.rename;
+    // biome-ignore lint/suspicious/noExplicitAny: mocking for test
+    (fs.promises as any).rename = async (src: string, dest: string) => {
+      attemptCount++;
+      if (attemptCount <= 2) {
+        const error: NodeJS.ErrnoException = new Error("EPERM: operation not permitted");
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalRename.call(fs.promises, src, dest);
+    };
+
+    try {
+      await renameWithRetry(sourcePath, targetPath, {
+        maxRetries: 5,
+        initialDelay: 1, // Use minimal delay for tests
+        logger: mockLogger,
+      });
+
+      expect(fs.existsSync(targetPath)).toBe(true);
+      expect(fs.existsSync(sourcePath)).toBe(false);
+      expect(attemptCount).toBe(3); // Failed twice, succeeded on third attempt
+
+      // Check that retry was logged
+      const retryLogs = mockLogger.logs.filter((log) => log.message.includes("File locked"));
+      expect(retryLogs.length).toBeGreaterThan(0);
+    } finally {
+      // Restore original rename
+      fs.promises.rename = originalRename;
+    }
+  });
+
+  test("retries on EBUSY error", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+
+    await fs.promises.writeFile(sourcePath, "content");
+
+    let attemptCount = 0;
+    const originalRename = fs.promises.rename;
+    // biome-ignore lint/suspicious/noExplicitAny: mocking for test
+    (fs.promises as any).rename = async (src: string, dest: string) => {
+      attemptCount++;
+      if (attemptCount === 1) {
+        const error: NodeJS.ErrnoException = new Error("EBUSY: resource busy or locked");
+        error.code = "EBUSY";
+        throw error;
+      }
+      return originalRename.call(fs.promises, src, dest);
+    };
+
+    try {
+      await renameWithRetry(sourcePath, targetPath, {
+        maxRetries: 3,
+        initialDelay: 1,
+      });
+
+      expect(fs.existsSync(targetPath)).toBe(true);
+      expect(attemptCount).toBe(2);
+    } finally {
+      fs.promises.rename = originalRename;
+    }
+  });
+
+  test("retries on EACCES error", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+
+    await fs.promises.writeFile(sourcePath, "content");
+
+    let attemptCount = 0;
+    const originalRename = fs.promises.rename;
+    // biome-ignore lint/suspicious/noExplicitAny: mocking for test
+    (fs.promises as any).rename = async (src: string, dest: string) => {
+      attemptCount++;
+      if (attemptCount === 1) {
+        const error: NodeJS.ErrnoException = new Error("EACCES: permission denied");
+        error.code = "EACCES";
+        throw error;
+      }
+      return originalRename.call(fs.promises, src, dest);
+    };
+
+    try {
+      await renameWithRetry(sourcePath, targetPath, {
+        maxRetries: 3,
+        initialDelay: 1,
+      });
+
+      expect(fs.existsSync(targetPath)).toBe(true);
+      expect(attemptCount).toBe(2);
+    } finally {
+      fs.promises.rename = originalRename;
+    }
+  });
+
+  test("does not retry on non-retryable errors", async () => {
+    const sourcePath = path.join(tempDir, "nonexistent.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+
+    // ENOENT (file not found) should not trigger retry
+    try {
+      await renameWithRetry(sourcePath, targetPath, {
+        maxRetries: 5,
+        initialDelay: 1,
+      });
+      expect(true).toBe(false); // Should not reach here
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      expect(err.code).toBe("ENOENT");
+    }
+  });
+
+  test("throws error after max retries exceeded", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+    const mockLogger = new MockLogger("");
+
+    await fs.promises.writeFile(sourcePath, "content");
+
+    let attemptCount = 0;
+    const originalRename = fs.promises.rename;
+    // biome-ignore lint/suspicious/noExplicitAny: mocking for test
+    (fs.promises as any).rename = async () => {
+      attemptCount++;
+      const error: NodeJS.ErrnoException = new Error("EPERM: operation not permitted");
+      error.code = "EPERM";
+      throw error;
+    };
+
+    try {
+      await renameWithRetry(sourcePath, targetPath, {
+        maxRetries: 3,
+        initialDelay: 1,
+        logger: mockLogger,
+      });
+      expect(true).toBe(false); // Should not reach here
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      expect(err.code).toBe("EPERM");
+      expect(attemptCount).toBe(3); // Should try exactly maxRetries times
+
+      // Verify retry attempts were logged
+      const retryLogs = mockLogger.logs.filter((log) => log.message.includes("File locked"));
+      expect(retryLogs.length).toBe(2); // maxRetries - 1 (no log on final attempt)
+    } finally {
+      fs.promises.rename = originalRename;
+    }
+  });
+
+  test("uses exponential backoff for retries", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+    const mockLogger = new MockLogger("");
+
+    await fs.promises.writeFile(sourcePath, "content");
+
+    const delays: number[] = [];
+    let attemptCount = 0;
+    const originalRename = fs.promises.rename;
+    // biome-ignore lint/suspicious/noExplicitAny: mocking for test
+    (fs.promises as any).rename = async (src: string, dest: string) => {
+      attemptCount++;
+      if (attemptCount <= 3) {
+        const error: NodeJS.ErrnoException = new Error("EPERM: operation not permitted");
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalRename.call(fs.promises, src, dest);
+    };
+
+    // Capture delays from log messages
+    const originalLog = mockLogger.log.bind(mockLogger);
+    mockLogger.log = (message: string, level = "info" as "info" | "error" | "debug") => {
+      originalLog(message, level);
+      const match = message.match(/retrying rename in (\d+)ms/);
+      if (match) {
+        delays.push(Number.parseInt(match[1]));
+      }
+    };
+
+    try {
+      await renameWithRetry(sourcePath, targetPath, {
+        maxRetries: 5,
+        initialDelay: 10,
+        logger: mockLogger,
+      });
+
+      // Verify exponential backoff: 10ms, 20ms, 40ms
+      expect(delays).toEqual([10, 20, 40]);
+    } finally {
+      fs.promises.rename = originalRename;
+    }
+  });
+
+  test("works without logger", async () => {
+    const sourcePath = path.join(tempDir, "source.txt");
+    const targetPath = path.join(tempDir, "target.txt");
+
+    await fs.promises.writeFile(sourcePath, "content");
+
+    let attemptCount = 0;
+    const originalRename = fs.promises.rename;
+    // biome-ignore lint/suspicious/noExplicitAny: mocking for test
+    (fs.promises as any).rename = async (src: string, dest: string) => {
+      attemptCount++;
+      if (attemptCount === 1) {
+        const error: NodeJS.ErrnoException = new Error("EPERM: operation not permitted");
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalRename.call(fs.promises, src, dest);
+    };
+
+    try {
+      // Should not throw even without logger
+      await renameWithRetry(sourcePath, targetPath, {
+        maxRetries: 3,
+        initialDelay: 1,
+      });
+
+      expect(fs.existsSync(targetPath)).toBe(true);
+      expect(attemptCount).toBe(2);
+    } finally {
+      fs.promises.rename = originalRename;
     }
   });
 });

@@ -10,7 +10,7 @@ import { type CodonId, CodonId as CodonIdConstructor, type RunId } from "./types
 import type * as ST from "./types/state-types.js";
 import { CodonTransitions, getCodonCost, isTerminalCodonStatus } from "./types/state-types.js";
 import type { CodonConfig } from "./types/types.js";
-import type { Logger } from "./utils.js";
+import { type Logger, renameWithRetry } from "./utils.js";
 
 // Error types for state management
 export class InvalidTransitionError extends Error {
@@ -1290,9 +1290,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
       // Write to temp file first
       const tempPath = `${this.statePath}.tmp`;
       await fs.promises.writeFile(tempPath, JSON.stringify(this.state, null, 2), "utf-8");
-
-      // Atomic rename
-      await fs.promises.rename(tempPath, this.statePath);
+      await renameWithRetry(tempPath, this.statePath, { logger: this.logger });
     } catch (error) {
       throw new PersistenceError("save", error as Error);
     }
