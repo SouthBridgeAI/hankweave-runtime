@@ -126,6 +126,10 @@ jobs:
         shell: bash
         run: |
           TEST_DIR=$(mktemp -d)
+          # Convert to Windows path on Windows runners
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            TEST_DIR=$(cygpath -w "$TEST_DIR")
+          fi
           echo "test_dir=${TEST_DIR}" >> $GITHUB_OUTPUT
           echo "Created test directory: ${TEST_DIR}"
 
