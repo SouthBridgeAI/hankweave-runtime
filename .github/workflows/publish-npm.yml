@@ -43,10 +43,10 @@ jobs:
         run: bun run lint
 
       - name: Run unit tests
-        run: bun run test:unit
+        run: bun test tests/unit
 
       - name: Run integration tests
-        run: bun run test:integration
+        run: bun test tests/integration
 
       - name: Build package
         run: bun run build
