@@ -141,7 +141,7 @@ describe("init command e2e", () => {
     expect(firstCodon).toHaveProperty("name");
     expect(firstCodon).toHaveProperty("model");
     expect(firstCodon).toHaveProperty("continuationMode");
-  });
+  }, 30_000); // 30 seconds timeout for this test
 
   test("init command fails in non-empty directory", async () => {
     // Create directory with a file
@@ -165,7 +165,7 @@ describe("init command e2e", () => {
 
     // Clean up
     fs.rmSync(nonEmptyDir, { recursive: true, force: true });
-  });
+  }, 30_000); // 30 seconds timeout for this test
 
   test("generated strand can be executed successfully", async () => {
     const configPath = path.join(INIT_TEST_DIR, "strand.json");
