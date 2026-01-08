@@ -78,6 +78,37 @@ jobs:
           PKG_VERSION=$(node -p 'require("./package.json").version')
           echo "✓ Published: ${PKG_NAME}@${PKG_VERSION}"
 
+      - name: Run smoke tests
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry-run)
+        run: |
+          PKG_NAME=$(node -p 'require("./package.json").name')
+          PKG_VERSION=$(node -p 'require("./package.json").version')
+          echo "=== Running smoke tests for ${PKG_NAME}@${PKG_VERSION} ==="
+          echo ""
+
+          # Create a temporary test directory
+          TEST_DIR=$(mktemp -d)
+          echo "Created test directory: ${TEST_DIR}"
+          cd "${TEST_DIR}"
+
+          # Test 1: Initialize
+          echo ""
+          echo "Test 1: Running --init..."
+          npx --yes ${PKG_NAME}@latest --init
+          echo "✓ Init completed"
+
+          # Test 2: Basic command with data
+          echo ""
+          echo "Test 2: Running --basic --data=./data..."
+          npx ${PKG_NAME}@latest --basic --data=./data
+          echo "✓ Basic command completed"
+
+          # Clean up
+          cd -
+          rm -rf "${TEST_DIR}"
+          echo ""
+          echo "✓ All smoke tests passed!"
+
       - name: Create summary
         if: always()
         run: |
