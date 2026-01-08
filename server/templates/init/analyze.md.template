@@ -1,9 +1,0 @@
-# Project Analysis
-
-Please analyze the files in the `data` directory localted in the current working directory (do not go to other directories) and create a comprehensive analysis report.
-
-Your analysis should include:
-
-1. Very brief overview of the file in that directory
-
-Please create your analysis in a file called `analysis.md` in the execution directory.
