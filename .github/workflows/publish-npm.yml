@@ -145,13 +145,13 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          cat > ~/.bunfig.toml << 'EOF'
-[install]
-registry = "https://registry.npmjs.org/"
-
-[install.scopes]
-EOF
-          echo "\"@southbridgeai\" = { token = \"${NPM_TOKEN}\" }" >> ~/.bunfig.toml
+          {
+            echo "[install]"
+            echo "registry = \"https://registry.npmjs.org/\""
+            echo ""
+            echo "[install.scopes]"
+            echo "\"@southbridgeai\" = { token = \"${NPM_TOKEN}\" }"
+          } > ~/.bunfig.toml
           echo "✓ Created bunfig.toml with authentication"
           echo "Debug: bunfig.toml location: ~/.bunfig.toml"
           echo "Debug: bunfig.toml exists: $([ -f ~/.bunfig.toml ] && echo 'yes' || echo 'no')"
