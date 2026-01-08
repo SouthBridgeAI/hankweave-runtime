@@ -810,6 +810,21 @@ export function startServer(config: TestServerConfig): ChildProcess {
   const needsShell =
     process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
 
+  // Log spawn attempt with details
+  console.log(`${colors.gray}Spawning process with:${colors.reset}`);
+  console.log(`${colors.gray}  cwd: ${config.cwd}${colors.reset}`);
+  console.log(`${colors.gray}  shell: ${needsShell}${colors.reset}`);
+  console.log(`${colors.gray}  config file: ${config.configFile}${colors.reset}`);
+
+  // Write initial metadata to log
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Starting server process\n`);
+  serverLogStream.write(
+    `[${new Date().toISOString()}] [INIT] Command: ${command} ${args.join(" ")}\n`,
+  );
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Working directory: ${config.cwd}\n`);
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Shell: ${needsShell}\n`);
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Platform: ${process.platform}\n`);
+
   const serverProcess = spawn(command, args, {
     cwd: config.cwd,
     stdio: ["ignore", "pipe", "pipe"],
@@ -817,29 +832,46 @@ export function startServer(config: TestServerConfig): ChildProcess {
     shell: needsShell,
   });
 
+  // Log PID immediately after spawn
+  console.log(
+    `${colors.gray}Process spawned with PID: ${serverProcess.pid || "N/A"}${colors.reset}`,
+  );
+  serverLogStream.write(
+    `[${new Date().toISOString()}] [INIT] Process PID: ${serverProcess.pid || "N/A"}\n`,
+  );
+
   serverProcess.stdout?.on("data", (data) => {
     const message = data.toString();
-    // Only log to file by default, let tests decide if they want console output
+    // Log to both console and file for debugging
+    console.log(`${colors.gray}[SERVER STDOUT] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDOUT] ${message}`);
   });
 
   serverProcess.stderr?.on("data", (data) => {
     const message = data.toString();
-    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
+    console.error(`${colors.red}[SERVER STDERR] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
   });
 
   serverProcess.on("error", (error) => {
     const message = `Failed to start server: ${error.message}`;
-    console.error(`${colors.red}${message}${colors.reset}`);
+    console.error(`${colors.red}[SERVER ERROR EVENT] ${message}${colors.reset}`);
+    console.error(`${colors.red}Error stack: ${error.stack}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [ERROR] ${message}\n`);
+    serverLogStream.write(`[${new Date().toISOString()}] [ERROR] Stack: ${error.stack}\n`);
     serverLogStream.end();
   });
 
+  serverProcess.on("spawn", () => {
+    const spawnMessage = "Process spawn event received";
+    console.log(`${colors.green}[SERVER SPAWN] ${spawnMessage}${colors.reset}`);
+    serverLogStream.write(`[${new Date().toISOString()}] [SPAWN] ${spawnMessage}\n`);
+  });
+
   serverProcess.on("exit", (code, signal) => {
-    serverLogStream.write(
-      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
-    );
+    const exitMessage = `Process exited with code ${code} and signal ${signal}`;
+    console.log(`${colors.yellow}[SERVER EXIT] ${exitMessage}${colors.reset}`);
+    serverLogStream.write(`[${new Date().toISOString()}] [EXIT] ${exitMessage}\n`);
     serverLogStream.end();
 
     // Remove from active processes list

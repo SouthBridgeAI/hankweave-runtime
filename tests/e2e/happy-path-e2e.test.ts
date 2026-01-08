@@ -101,11 +101,16 @@ const serverConfig: TestServerConfig = {
   port: 0, // Will be set dynamically
   testMode: "e2e-happy-path",
   dataSourceDir: DATA_SOURCE_FILE, // New: specify data source file
-  cwd: TEST_RUN_DIR, // Server starts from isolated test directory
+  // Use project root as cwd so npx can find .npmrc and registry config
+  // The server itself will use --data and --execution flags to isolate its work
+  cwd: TEST_ROOT,
   useDataFlag: true, // New: use --data flag
   startNew: true, // Force new execution for tests
 };
 
+// The strandweave-results will be created by the server in its execution directory
+// Since we're using --data and --start-new, it will be in a temp execution directory
+// For now, we'll check in the cwd where npx runs, but this might need adjustment
 const strandweaveResultsDir = path.join(serverConfig.cwd, "strandweave-results/");
 
 // -------------
