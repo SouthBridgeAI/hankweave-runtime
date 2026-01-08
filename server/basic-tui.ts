@@ -9,7 +9,7 @@ import type {
   SkipCodonCommand,
 } from "./types/types.js";
 import { ClientMode } from "./types/types.js";
-import { generateId } from "./utils.js";
+import { generateId, WebSocket } from "./utils.js";
 
 // ANSI color codes for terminal formatting
 const COLORS = {

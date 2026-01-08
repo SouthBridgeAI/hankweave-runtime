@@ -16,6 +16,7 @@ import type {
   ServerEvent,
 } from "../../server/types/types.js";
 import { ClientMode } from "../../server/types/types.js";
+import { WebSocket } from "../../server/utils.js";
 
 /**
  * Finds an available TCP port provided by the OS.

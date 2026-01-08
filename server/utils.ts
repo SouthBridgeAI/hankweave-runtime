@@ -2,11 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Message, Peer } from "crossws";
 import { serve as crosswsServe } from "crossws/server";
+// Import cross-platform WebSocket client from crossws
+// This works in Node.js (18+), Bun, Deno, and browsers
+import WebSocket from "crossws/websocket";
 import glob from "fast-glob";
 import merge from "lodash.merge";
 import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
+
+// Re-export WebSocket for use throughout the codebase
+// This hides the crossws dependency as an implementation detail
+export { WebSocket };
 
 // -------------
 // ID Generation

@@ -10,6 +10,7 @@ import {
   Logger,
   renameWithRetry,
   serve,
+  WebSocket,
 } from "../../server/utils";
 import { getFreePort } from "../utils/test-helpers.js";
 

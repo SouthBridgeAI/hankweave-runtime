@@ -18,6 +18,7 @@ import {
   type HandshakeResponse,
   type ServerEvent,
 } from "../../server/types/types.js";
+import { WebSocket } from "../../server/utils.js";
 import { generateTestTimestamp, setupTestDirectory } from "./test-helpers.js";
 
 // -------------
