@@ -62,7 +62,9 @@ jobs:
           npm publish --dry-run
           echo ""
           echo "✓ Dry-run completed successfully!"
-          echo "Package would be published as: $(node -p \"require('./package.json').name\")@$(node -p \"require('./package.json').version\")"
+          PKG_NAME=$(node -p 'require("./package.json").name')
+          PKG_VERSION=$(node -p 'require("./package.json").version')
+          echo "Package would be published as: ${PKG_NAME}@${PKG_VERSION}"
 
       - name: Publish to npm
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry-run)
@@ -72,15 +74,19 @@ jobs:
           echo "=== Publishing package to npm ==="
           npm publish
           echo ""
-          echo "✓ Published: $(node -p \"require('./package.json').name\")@$(node -p \"require('./package.json').version\")"
+          PKG_NAME=$(node -p 'require("./package.json").name')
+          PKG_VERSION=$(node -p 'require("./package.json").version')
+          echo "✓ Published: ${PKG_NAME}@${PKG_VERSION}"
 
       - name: Create summary
         if: always()
         run: |
+          PKG_NAME=$(node -p 'require("./package.json").name')
+          PKG_VERSION=$(node -p 'require("./package.json").version')
           echo "## Publish Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Package:** $(node -p \"require('./package.json').name\")" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** $(node -p \"require('./package.json').version\")" >> $GITHUB_STEP_SUMMARY
+          echo "**Package:** ${PKG_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${PKG_VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Dry-run:** ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}" >> $GITHUB_STEP_SUMMARY
           if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.dry-run }}" != "true" ]; then
@@ -88,6 +94,6 @@ jobs:
             echo "### Installation" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-            echo "npx $(node -p \"require('./package.json').name\")@$(node -p \"require('./package.json').version\") --init" >> $GITHUB_STEP_SUMMARY
+            echo "npx ${PKG_NAME}@${PKG_VERSION} --init" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
