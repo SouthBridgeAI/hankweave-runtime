@@ -178,6 +178,9 @@ jobs:
         if: matrix.package-manager == 'bunx'
         shell: bash
         working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bunx ${{ env.PKG_SPEC }} --init
 
       - name: Test npx basic command
@@ -194,6 +197,8 @@ jobs:
         shell: bash
         working-directory: ${{ steps.test-dir.outputs.test_dir }}
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
         run: bunx ${{ env.PKG_SPEC }} --basic --data=./data
