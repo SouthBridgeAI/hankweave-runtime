@@ -119,11 +119,6 @@ export class ClaudeLogParser {
     try {
       const content = fs.readFileSync(logPath, "utf-8");
 
-      this.options.logger?.log(
-        `[LOG-PARSER] Parsing log file (mode: ${fullParse ? "full" : "incremental"}, firstParse: ${this.isFirstParse}, fileSize: ${content.length}, lastPos: ${this.lastPosition})`,
-        "debug",
-      );
-
       if (fullParse) {
         // Full parse mode: parse entire file without buffer management
         const lines = content.split("\n");
@@ -217,12 +212,6 @@ export class ClaudeLogParser {
         switch (message.type) {
           case "system":
             if (this.options.onSystemMessage) {
-              if (message.subtype === "init") {
-                this.options.logger?.log(
-                  `[LOG-PARSER] Emitting system init callback for codon ${this.options.codonId}`,
-                  "debug",
-                );
-              }
               this.options.onSystemMessage(message);
             }
             break;

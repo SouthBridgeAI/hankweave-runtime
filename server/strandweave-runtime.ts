@@ -1149,17 +1149,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         });
 
       // Broadcast to all connected clients that have completed handshake
-      console.log(`[emit] Broadcasting ${serverEvent.type} to ${this.clients.size} client(s)`);
       if (this.clients.size > 0) {
         for (const [_, client] of this.clients) {
-          console.log(
-            `[emit] Client ${client.data.id}: handshakeComplete=${client.data.handshakeComplete}`,
-          );
           if (!client.data.handshakeComplete) continue;
           try {
-            console.log(`[emit] Sending ${serverEvent.type} to client ${client.data.id}`);
             client.send(JSON.stringify(serverEvent));
-            console.log(`[emit] Successfully sent ${serverEvent.type} to client ${client.data.id}`);
           } catch (error) {
             this.logger.log(`Failed to send event to client ${client.data.id}: ${error}`, "error");
           }

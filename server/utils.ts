@@ -650,9 +650,7 @@ class PeerAdapter<T> implements StrandweaveWebSocket<T> {
   }
 
   send(message: string | Buffer): void {
-    console.log(`[PeerAdapter] Sending message of length ${message.length} to peer`);
     this.peer.send(message);
-    console.log(`[PeerAdapter] Message sent successfully`);
   }
 
   close(code?: number, reason?: string): void {
