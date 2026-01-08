@@ -80,6 +80,8 @@ jobs:
 
       - name: Run smoke tests
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry-run)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           PKG_NAME=$(node -p 'require("./package.json").name')
           PKG_VERSION=$(node -p 'require("./package.json").version')
