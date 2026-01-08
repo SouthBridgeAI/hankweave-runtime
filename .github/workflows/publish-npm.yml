@@ -82,6 +82,8 @@ jobs:
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry-run)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
         run: |
           PKG_NAME=$(node -p 'require("./package.json").name')
           PKG_VERSION=$(node -p 'require("./package.json").version')

@@ -71,6 +71,10 @@ export class BasicTUI {
   private waitingForCheckpoints = false;
 
   constructor(private server: StrandweaveRuntime) {
+    // Print version at the very start
+    const version = this.server.config?.version || "unknown";
+    console.log(`${COLORS.bold}${COLORS.cyan}Strandweave v${version}${COLORS.reset}\n`);
+
     this.connectToServer();
     this.setupKeyboardInput();
   }
