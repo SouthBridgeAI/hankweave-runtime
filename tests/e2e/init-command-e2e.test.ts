@@ -66,6 +66,17 @@ function spawnInitCommand(options: {
     process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
   spawnOptions.shell = needsShell;
 
+  // Log the command being executed for debugging
+  console.log("\n=== Spawning Init Command ===");
+  console.log("Command:", command);
+  console.log("Args:", args);
+  console.log("CWD:", options.cwd);
+  if (verdaccioSetup) {
+    console.log("Registry:", verdaccioSetup.registry.registryURL);
+  }
+  console.log("Shell:", spawnOptions.shell);
+  console.log("===========================\n");
+
   return spawn(command, args, spawnOptions);
 }
 
@@ -104,13 +115,27 @@ describe("init command e2e", () => {
     const child = spawnInitCommand({ cwd: INIT_TEST_DIR });
 
     let stdout = "";
+    let stderr = "";
 
     child.stdout?.on("data", (data) => {
       stdout += data.toString();
     });
 
+    child.stderr?.on("data", (data) => {
+      stderr += data.toString();
+    });
+
     // Wait for process to complete
     const [exitCode] = await once(child, "exit");
+
+    // Log output for debugging
+    console.log("\n=== Init Command Output ===");
+    console.log("Exit Code:", exitCode);
+    console.log("\n--- STDOUT ---");
+    console.log(stdout || "(empty)");
+    console.log("\n--- STDERR ---");
+    console.log(stderr || "(empty)");
+    console.log("=== End Output ===\n");
 
     // Verify success
     expect(exitCode).toBe(0);
