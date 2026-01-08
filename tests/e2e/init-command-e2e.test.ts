@@ -25,7 +25,7 @@ const INIT_TEST_DIR = path.join(TEST_AREA, `init-test-${TEST_TIMESTAMP}`);
 let verdaccioSetup: VerdaccioSetup | null = null;
 
 /**
- * Spawns the init command using either package manager (npx/bunx/pnpm dlx) or direct bun execution.
+ * Spawns the init command using either package manager (npx/bunx/pnpm dlx/deno) or direct bun execution.
  * Automatically configures registry URL if using Verdaccio.
  */
 function spawnInitCommand(options: {
@@ -37,7 +37,7 @@ function spawnInitCommand(options: {
   let args: string[];
 
   if (commandOverride) {
-    // Using package manager (npx/bunx/pnpm dlx)
+    // Using package manager (npx/bunx/pnpm dlx/deno)
     command = commandOverride.command;
     args = [...commandOverride.args, "--init"];
   } else {
@@ -61,7 +61,7 @@ function spawnInitCommand(options: {
   }
 
   // On Windows, package manager commands (npx, bunx, pnpm) are .cmd files
-  // and need to be spawned with shell=true
+  // and need to be spawned with shell=true. Deno is a native executable and doesn't need shell.
   const needsShell =
     process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
   spawnOptions.shell = needsShell;

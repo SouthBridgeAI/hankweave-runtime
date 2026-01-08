@@ -35,13 +35,14 @@ export function needsVerdaccio(): boolean {
   return Boolean(
     process.env.STRANDWEAVE_TEST_USE_NPX ||
       process.env.STRANDWEAVE_TEST_USE_BUNX ||
-      process.env.STRANDWEAVE_TEST_USE_PNPM_DLX,
+      process.env.STRANDWEAVE_TEST_USE_PNPM_DLX ||
+      process.env.STRANDWEAVE_TEST_USE_DENO,
   );
 }
 
 /**
  * Determines command override based on environment variables.
- * Returns command configuration for npx/bunx/pnpm dlx, or undefined for direct bun execution.
+ * Returns command configuration for npx/bunx/pnpm dlx/deno, or undefined for direct bun execution.
  */
 export function getCommandOverride(): TestServerConfig["commandOverride"] {
   if (process.env.STRANDWEAVE_TEST_USE_NPX) {
@@ -52,6 +53,9 @@ export function getCommandOverride(): TestServerConfig["commandOverride"] {
   }
   if (process.env.STRANDWEAVE_TEST_USE_PNPM_DLX) {
     return { command: "pnpm", args: ["dlx", "strandweave"] };
+  }
+  if (process.env.STRANDWEAVE_TEST_USE_DENO) {
+    return { command: "deno", args: ["run", "-A", "npm:strandweave"] };
   }
   return undefined;
 }
