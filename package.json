@@ -1,5 +1,5 @@
 {
-  "name": "strandweave",
+  "name": "@southbridgeai/strandweave",
   "version": "0.1.0",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": "Southbridge",
@@ -8,6 +8,9 @@
     "strandweave"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "restricted"
+  },
   "bin": {
     "strandweave": "dist/index.js"
   },
