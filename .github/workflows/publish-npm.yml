@@ -136,8 +136,10 @@ jobs:
       - name: Configure npm authentication
         shell: bash
         run: |
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > "${HOME}/.npmrc"
           echo "✓ Created .npmrc with authentication in home directory"
+          echo "Debug: HOME=${HOME}"
+          echo "Debug: .npmrc path: ${HOME}/.npmrc"
 
       - name: Configure bun authentication
         if: matrix.package-manager == 'bunx'
@@ -151,22 +153,31 @@ jobs:
             echo ""
             echo "[install.scopes]"
             echo "\"@southbridgeai\" = { token = \"${NPM_TOKEN}\" }"
-          } > ~/.bunfig.toml
+          } > "${HOME}/.bunfig.toml"
           echo "✓ Created bunfig.toml with authentication"
-          echo "Debug: bunfig.toml location: ~/.bunfig.toml"
-          echo "Debug: bunfig.toml exists: $([ -f ~/.bunfig.toml ] && echo 'yes' || echo 'no')"
-          echo "Debug: bunfig.toml size: $(wc -c < ~/.bunfig.toml) bytes"
+          echo "Debug: bunfig.toml location: ${HOME}/.bunfig.toml"
+          echo "Debug: bunfig.toml exists: $([ -f "${HOME}/.bunfig.toml" ] && echo 'yes' || echo 'no')"
+          echo "Debug: bunfig.toml size: $(wc -c < "${HOME}/.bunfig.toml") bytes"
 
       - name: Debug authentication setup
         if: matrix.package-manager == 'bunx'
         shell: bash
         run: |
           echo "=== Debugging authentication setup ==="
-          echo "npmrc exists: $([ -f ~/.npmrc ] && echo 'yes' || echo 'no')"
-          echo "bunfig.toml exists: $([ -f ~/.bunfig.toml ] && echo 'yes' || echo 'no')"
+          echo "HOME: ${HOME}"
+          echo "USER: ${USER}"
+          echo "npmrc exists at ${HOME}/.npmrc: $([ -f "${HOME}/.npmrc" ] && echo 'yes' || echo 'no')"
+          echo "bunfig.toml exists at ${HOME}/.bunfig.toml: $([ -f "${HOME}/.bunfig.toml" ] && echo 'yes' || echo 'no')"
+          echo ""
+          echo "Checking alternate locations:"
+          echo "npmrc in working dir: $([ -f .npmrc ] && echo 'yes' || echo 'no')"
+          echo "bunfig.toml in working dir: $([ -f bunfig.toml ] && echo 'yes' || echo 'no')"
           echo ""
           echo "bunfig.toml contents (sanitized):"
-          sed 's/token = ".*"/token = "***"/' ~/.bunfig.toml
+          sed 's/token = ".*"/token = "***"/' "${HOME}/.bunfig.toml"
+          echo ""
+          echo "Testing bun config:"
+          bun --version || echo "bun not in PATH"
 
       - name: Test npx init command
         if: matrix.package-manager == 'npx'
