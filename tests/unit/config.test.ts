@@ -380,9 +380,15 @@ describe("validateStrand", () => {
   const configPath = path.join(tempDir, "validate-config.json");
   const projectPath = path.join(tempDir, "project");
   let testLogger: Logger;
+  let originalEnv: Record<string, string | undefined>;
 
   // Set up before each test
   beforeEach(() => {
+    // Capture and set environment variables for self-tests
+    originalEnv = captureEnv();
+    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+    process.env.GOOGLE_API_KEY = "test-google-key";
+
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
     fs.mkdirSync(projectPath, { recursive: true });
@@ -399,6 +405,8 @@ describe("validateStrand", () => {
   afterEach(() => {
     cleanup(tempDir);
     LlmProviderRegistry.resetInstance();
+    // Restore original environment
+    restoreEnv(originalEnv);
   });
 
   test("validates basic configuration successfully", async () => {
