@@ -142,15 +142,31 @@ jobs:
       - name: Configure bun authentication
         if: matrix.package-manager == 'bunx'
         shell: bash
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          cat > ~/.bunfig.toml << EOF
-          [install]
-          registry = "https://registry.npmjs.org/"
+          cat > ~/.bunfig.toml << 'EOF'
+[install]
+registry = "https://registry.npmjs.org/"
 
-          [install.scopes]
-          "@southbridgeai" = { token = "${{ secrets.NPM_TOKEN }}" }
-          EOF
+[install.scopes]
+EOF
+          echo "\"@southbridgeai\" = { token = \"${NPM_TOKEN}\" }" >> ~/.bunfig.toml
           echo "✓ Created bunfig.toml with authentication"
+          echo "Debug: bunfig.toml location: ~/.bunfig.toml"
+          echo "Debug: bunfig.toml exists: $([ -f ~/.bunfig.toml ] && echo 'yes' || echo 'no')"
+          echo "Debug: bunfig.toml size: $(wc -c < ~/.bunfig.toml) bytes"
+
+      - name: Debug authentication setup
+        if: matrix.package-manager == 'bunx'
+        shell: bash
+        run: |
+          echo "=== Debugging authentication setup ==="
+          echo "npmrc exists: $([ -f ~/.npmrc ] && echo 'yes' || echo 'no')"
+          echo "bunfig.toml exists: $([ -f ~/.bunfig.toml ] && echo 'yes' || echo 'no')"
+          echo ""
+          echo "bunfig.toml contents (sanitized):"
+          sed 's/token = ".*"/token = "***"/' ~/.bunfig.toml
 
       - name: Test npx init command
         if: matrix.package-manager == 'npx'
