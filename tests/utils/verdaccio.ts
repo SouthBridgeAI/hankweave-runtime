@@ -45,24 +45,28 @@ export function needsVerdaccio(): boolean {
  * Returns command configuration for npx/bunx/pnpm dlx/deno, or undefined for direct bun execution.
  */
 export function getCommandOverride(): TestServerConfig["commandOverride"] {
-  // Read package name from package.json to ensure we use the correct scoped name
+  // Read package name from package.json
   const packageJsonPath = path.join(import.meta.dir, "../../package.json");
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
     name: string;
   };
   const packageName = packageJson.name;
 
+  // Use @latest to force package manager to check registry and bypass cache
+  const packageWithLatest = `${packageName}@latest`;
+
   if (process.env.STRANDWEAVE_TEST_USE_NPX) {
-    return { command: "npx", args: [packageName] };
+    // --yes skips prompts, @latest forces fresh download from registry
+    return { command: "npx", args: ["--yes", packageWithLatest] };
   }
   if (process.env.STRANDWEAVE_TEST_USE_BUNX) {
-    return { command: "bunx", args: [packageName] };
+    return { command: "bunx", args: [packageWithLatest] };
   }
   if (process.env.STRANDWEAVE_TEST_USE_PNPM_DLX) {
-    return { command: "pnpm", args: ["dlx", packageName] };
+    return { command: "pnpm", args: ["dlx", packageWithLatest] };
   }
   if (process.env.STRANDWEAVE_TEST_USE_DENO) {
-    return { command: "deno", args: ["run", "-A", `npm:${packageName}`] };
+    return { command: "deno", args: ["run", "-A", `npm:${packageWithLatest}`] };
   }
   return undefined;
 }
