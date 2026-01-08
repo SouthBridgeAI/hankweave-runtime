@@ -45,17 +45,24 @@ export function needsVerdaccio(): boolean {
  * Returns command configuration for npx/bunx/pnpm dlx/deno, or undefined for direct bun execution.
  */
 export function getCommandOverride(): TestServerConfig["commandOverride"] {
+  // Read package name from package.json to ensure we use the correct scoped name
+  const packageJsonPath = path.join(import.meta.dir, "../../package.json");
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
+    name: string;
+  };
+  const packageName = packageJson.name;
+
   if (process.env.STRANDWEAVE_TEST_USE_NPX) {
-    return { command: "npx", args: ["strandweave"] };
+    return { command: "npx", args: [packageName] };
   }
   if (process.env.STRANDWEAVE_TEST_USE_BUNX) {
-    return { command: "bunx", args: ["strandweave"] };
+    return { command: "bunx", args: [packageName] };
   }
   if (process.env.STRANDWEAVE_TEST_USE_PNPM_DLX) {
-    return { command: "pnpm", args: ["dlx", "strandweave"] };
+    return { command: "pnpm", args: ["dlx", packageName] };
   }
   if (process.env.STRANDWEAVE_TEST_USE_DENO) {
-    return { command: "deno", args: ["run", "-A", "npm:strandweave"] };
+    return { command: "deno", args: ["run", "-A", `npm:${packageName}`] };
   }
   return undefined;
 }
