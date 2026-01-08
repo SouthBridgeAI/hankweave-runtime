@@ -42,49 +42,8 @@ jobs:
       - name: Run package installation tests
         run: bun test tests/e2e/package-installation.e2e.test.ts
 
-      # Copy logs from execution directories if test failed
-      - name: Preserve execution logs
-        if: always()
-        shell: bash
-        run: |
-          echo "=== Checking for execution directories ==="
-          EXEC_DIR="${HOME}/.strandweave-executions"
-          if [ -d "$EXEC_DIR" ]; then
-            echo "Found execution directory: $EXEC_DIR"
-            find "$EXEC_DIR" -maxdepth 1 -type d | head -20
-
-            # Find the most recent test run directory
-            TEST_RUN_DIR=$(ls -td tests/test-results/run-* 2>/dev/null | head -1 || true)
-            if [ -n "$TEST_RUN_DIR" ]; then
-              echo "Copying logs to: $TEST_RUN_DIR"
-
-              # Find the most recent execution
-              LATEST_EXEC=$(ls -td "$EXEC_DIR"/*/ 2>/dev/null | head -1 || true)
-              if [ -n "$LATEST_EXEC" ]; then
-                echo "Latest execution: $LATEST_EXEC"
-
-                # Copy logs, state, and runs if they exist
-                [ -d "$LATEST_EXEC/.strandweave/logs" ] && cp -r "$LATEST_EXEC/.strandweave/logs" "$TEST_RUN_DIR/" && echo "  ✓ Copied logs directory"
-                [ -f "$LATEST_EXEC/.strandweave/state.json" ] && cp "$LATEST_EXEC/.strandweave/state.json" "$TEST_RUN_DIR/" && echo "  ✓ Copied state.json"
-                [ -d "$LATEST_EXEC/.strandweave/runs" ] && cp -r "$LATEST_EXEC/.strandweave/runs" "$TEST_RUN_DIR/" && echo "  ✓ Copied runs directory"
-              fi
-            fi
-          else
-            echo "No execution directory found"
-          fi
-
-      - name: Upload test results and logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-package-installation-${{ matrix.os }}
-          path: |
-            tests/test-results/
-            tests/test-area/
-          retention-days: 7
-
   test-e2e:
-    name: Test ${{ matrix.test-type }} on ${{ matrix.os }} with ${{ matrix.package-manager }}
+    name: Test ${{ matrix.test-type }} on ${{ matrix.os }} (npx)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
 
@@ -93,8 +52,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         test-type: [happy-path, init-command]
-        # disable pnpm-dlx for now - can't seem to get it working with private registry
-        package-manager: [npx, bunx]
 
     steps:
       - name: Checkout code
@@ -122,12 +79,10 @@ jobs:
       - name: Install Gemini CLI
         run: npm install -g @google/gemini-cli
 
-      # Run e2e tests based on test-type and package-manager
-      - name: Run ${{ matrix.test-type }} e2e tests with ${{ matrix.package-manager }}
+      # Run e2e tests with npx only
+      - name: Run ${{ matrix.test-type }} e2e tests with npx
         env:
-          STRANDWEAVE_TEST_USE_NPX: ${{ matrix.package-manager == 'npx' && '1' || '' }}
-          STRANDWEAVE_TEST_USE_BUNX: ${{ matrix.package-manager == 'bunx' && '1' || '' }}
-          STRANDWEAVE_TEST_USE_PNPM_DLX: ${{ matrix.package-manager == 'pnpm-dlx' && '1' || '' }}
+          STRANDWEAVE_TEST_USE_NPX: '1'
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
@@ -168,7 +123,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.test-type }}-${{ matrix.package-manager }}-${{ matrix.os }}
+          name: test-results-${{ matrix.test-type }}-npx-${{ matrix.os }}
           path: |
             tests/test-results/
             tests/test-area/

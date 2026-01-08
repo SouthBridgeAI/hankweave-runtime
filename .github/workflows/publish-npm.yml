@@ -86,42 +86,7 @@ jobs:
           PKG_VERSION=$(node -p 'require("./package.json").version')
           echo "✓ Published: ${PKG_NAME}@${PKG_VERSION}"
 
-      - name: Run smoke tests
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry-run)
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
-        run: |
-          PKG_NAME=$(node -p 'require("./package.json").name')
-          PKG_VERSION=$(node -p 'require("./package.json").version')
-          echo "=== Running smoke tests for ${PKG_NAME}@${PKG_VERSION} ==="
-          echo ""
-
-          # Create a temporary test directory
-          TEST_DIR=$(mktemp -d)
-          echo "Created test directory: ${TEST_DIR}"
-          cd "${TEST_DIR}"
-
-          # Test 1: Initialize
-          echo ""
-          echo "Test 1: Running --init..."
-          npx --yes ${PKG_NAME}@latest --init
-          echo "✓ Init completed"
-
-          # Test 2: Basic command with data
-          echo ""
-          echo "Test 2: Running --basic --data=./data..."
-          npx ${PKG_NAME}@latest --basic --data=./data
-          echo "✓ Basic command completed"
-
-          # Clean up
-          cd -
-          rm -rf "${TEST_DIR}"
-          echo ""
-          echo "✓ All smoke tests passed!"
-
-      - name: Create summary
+      - name: Create publish summary
         if: always()
         run: |
           PKG_NAME=$(node -p 'require("./package.json").name')
@@ -140,3 +105,92 @@ jobs:
             echo "npx ${PKG_NAME}@${PKG_VERSION} --init" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
+
+  smoke-tests:
+    name: Smoke test on ${{ matrix.os }} with ${{ matrix.package-manager }}
+    runs-on: ${{ matrix.os }}
+    needs: publish
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry-run)
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        package-manager: [npx, bunx]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Bun
+        # if: matrix.package-manager == 'bunx'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Get package info
+        id: pkg-info
+        run: |
+          PKG_NAME=$(node -p 'require("./package.json").name')
+          PKG_VERSION=$(node -p 'require("./package.json").version')
+          echo "name=${PKG_NAME}" >> $GITHUB_OUTPUT
+          echo "version=${PKG_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Run smoke tests with ${{ matrix.package-manager }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+        shell: bash
+        run: |
+          PKG_NAME="${{ steps.pkg-info.outputs.name }}"
+          PKG_VERSION="${{ steps.pkg-info.outputs.version }}"
+          PACKAGE_MANAGER="${{ matrix.package-manager }}"
+
+          echo "=== Running smoke tests for ${PKG_NAME}@${PKG_VERSION} with ${PACKAGE_MANAGER} ==="
+          echo ""
+
+          # Create a temporary test directory
+          TEST_DIR=$(mktemp -d)
+          echo "Created test directory: ${TEST_DIR}"
+          cd "${TEST_DIR}"
+
+          # Test 1: Initialize
+          echo ""
+          echo "Test 1: Running --init with ${PACKAGE_MANAGER}..."
+          if [ "${PACKAGE_MANAGER}" = "npx" ]; then
+            npx --yes ${PKG_NAME}@latest --init
+          elif [ "${PACKAGE_MANAGER}" = "bunx" ]; then
+            bunx --bun ${PKG_NAME}@latest --init
+          fi
+          echo "✓ Init completed"
+
+          # Test 2: Basic command with data
+          echo ""
+          echo "Test 2: Running --basic --data=./data with ${PACKAGE_MANAGER}..."
+          if [ "${PACKAGE_MANAGER}" = "npx" ]; then
+            npx ${PKG_NAME}@latest --basic --data=./data
+          elif [ "${PACKAGE_MANAGER}" = "bunx" ]; then
+            bunx --bun ${PKG_NAME}@latest --basic --data=./data
+          fi
+          echo "✓ Basic command completed"
+
+          # Clean up
+          cd -
+          rm -rf "${TEST_DIR}"
+          echo ""
+          echo "✓ All smoke tests passed for ${PACKAGE_MANAGER} on ${{ matrix.os }}!"
+
+      - name: Create smoke test summary
+        if: always()
+        run: |
+          echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**OS:** ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Package Manager:** ${{ matrix.package-manager }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
