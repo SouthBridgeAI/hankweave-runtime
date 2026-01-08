@@ -131,10 +131,22 @@ jobs:
 
       - name: Configure npm authentication
         shell: bash
-        working-directory: ${{ steps.test-dir.outputs.test_dir }}
         run: |
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-          echo "✓ Created .npmrc with authentication"
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+          echo "✓ Created .npmrc with authentication in home directory"
+
+      - name: Configure bun authentication
+        if: matrix.package-manager == 'bunx'
+        shell: bash
+        run: |
+          cat > ~/.bunfig.toml << EOF
+          [install]
+          registry = "https://registry.npmjs.org/"
+
+          [install.scopes]
+          "@southbridgeai" = { token = "${{ secrets.NPM_TOKEN }}" }
+          EOF
+          echo "✓ Created bunfig.toml with authentication"
 
       - name: Test npx init command
         if: matrix.package-manager == 'npx'
