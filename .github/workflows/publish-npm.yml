@@ -93,30 +93,15 @@ jobs:
           echo ""
           echo "✓ Published: ${{ steps.pkg-info.outputs.name }}@${{ steps.pkg-info.outputs.version }}"
 
-      - name: Create publish summary
-        if: always()
-        run: |
-          echo "## Publish Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Package:** ${{ steps.pkg-info.outputs.name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.pkg-info.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Dry-run:** ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.dry-run }}" != "true" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Installation" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-            echo "npx ${{ steps.pkg-info.outputs.name }}@${{ steps.pkg-info.outputs.version }} --init" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          fi
-
   smoke-tests:
     name: Smoke test on ${{ matrix.os }} with ${{ matrix.package-manager }}
     runs-on: ${{ matrix.os }}
     needs: publish
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry-run)
     timeout-minutes: 15
+
+    env:
+      PKG_SPEC: ${{ needs.publish.outputs.pkg_name }}@${{ needs.publish.outputs.pkg_version }}
 
     strategy:
       fail-fast: false
@@ -125,12 +110,6 @@ jobs:
         package-manager: [npx, bunx]
 
     steps:
-      - name: Wait for npm propagation
-        run: |
-          echo "Waiting 30 seconds for npm CDN to propagate the package..."
-          sleep 30
-          echo "✓ Wait complete, proceeding with smoke tests"
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -142,60 +121,47 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Configure npm authentication
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
-
-      - name: Run smoke tests with ${{ matrix.package-manager }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+      - name: Create test directory
+        id: test-dir
         shell: bash
         run: |
-          PKG_NAME="${{ needs.publish.outputs.pkg_name }}"
-          PKG_VERSION="${{ needs.publish.outputs.pkg_version }}"
-          PACKAGE_MANAGER="${{ matrix.package-manager }}"
-
-          echo "=== Running smoke tests for ${PKG_NAME}@${PKG_VERSION} with ${PACKAGE_MANAGER} ==="
-          echo ""
-
-          # Create a temporary test directory
           TEST_DIR=$(mktemp -d)
+          echo "test_dir=${TEST_DIR}" >> $GITHUB_OUTPUT
           echo "Created test directory: ${TEST_DIR}"
-          cd "${TEST_DIR}"
 
-          # Test 1: Initialize
-          echo ""
-          echo "Test 1: Running --init with ${PACKAGE_MANAGER}..."
-          if [ "${PACKAGE_MANAGER}" = "npx" ]; then
-            npx --yes ${PKG_NAME}@${PKG_VERSION} --init
-          elif [ "${PACKAGE_MANAGER}" = "bunx" ]; then
-            bunx ${PKG_NAME}@${PKG_VERSION} --init
-          fi
-          echo "✓ Init completed"
-
-          # Test 2: Basic command with data
-          echo ""
-          echo "Test 2: Running --basic --data=./data with ${PACKAGE_MANAGER}..."
-          if [ "${PACKAGE_MANAGER}" = "npx" ]; then
-            npx ${PKG_NAME}@${PKG_VERSION} --basic --data=./data
-          elif [ "${PACKAGE_MANAGER}" = "bunx" ]; then
-            bunx ${PKG_NAME}@${PKG_VERSION} --basic --data=./data
-          fi
-          echo "✓ Basic command completed"
-
-          # Clean up
-          cd -
-          rm -rf "${TEST_DIR}"
-          echo ""
-          echo "✓ All smoke tests passed for ${PACKAGE_MANAGER} on ${{ matrix.os }}!"
-
-      - name: Create smoke test summary
-        if: always()
+      - name: Configure npm authentication
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
         run: |
-          echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**OS:** ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Package Manager:** ${{ matrix.package-manager }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          echo "✓ Created .npmrc with authentication"
+
+      - name: Test npx init command
+        if: matrix.package-manager == 'npx'
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        run: npx --yes ${{ env.PKG_SPEC }} --init
+
+      - name: Test bunx init command
+        if: matrix.package-manager == 'bunx'
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        run: bunx ${{ env.PKG_SPEC }} --init
+
+      - name: Test npx basic command
+        if: matrix.package-manager == 'npx'
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+        run: npx ${{ env.PKG_SPEC }} --basic --data=./data
+
+      - name: Test bunx basic command
+        if: matrix.package-manager == 'bunx'
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+        run: bunx ${{ env.PKG_SPEC }} --basic --data=./data
