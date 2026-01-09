@@ -1,6 +1,11 @@
 #!/usr/bin/env bun
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
+import {
+  ClaudeExecutableNotFoundError,
+  validateClaudeExecutable,
+} from "./claude-agent-sdk-manager.js";
+import { ensureClaudeSdkAvailable } from "./claude-runtime-extractor.js";
 import { CleanupCommand } from "./cleanup-command.js";
 import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
@@ -184,6 +189,30 @@ Examples:
       process.exit(0);
     } catch (error) {
       console.error(`\n❌ Init failed: ${(error as Error).message}\n`);
+      process.exit(1);
+    }
+  }
+
+  // Validate Claude CLI is available (unless we're in cleanup or validate mode)
+  if (!cleanupMode && !validateMode) {
+    try {
+      // First, try to extract bundled SDK files (for compiled executables)
+      // This returns the path to extracted cli.js if we're compiled, or null if running from source
+      const extractedCliPath = await ensureClaudeSdkAvailable();
+
+      // Validate that Claude executable is available (either extracted or installed)
+      const claudePath = validateClaudeExecutable(extractedCliPath);
+      console.log(`✅ Claude CLI: ${claudePath}`);
+    } catch (error) {
+      if (error instanceof ClaudeExecutableNotFoundError) {
+        console.error(`\n❌ ${error.message}\n`);
+        process.exit(1);
+      }
+      // Log any other errors during SDK setup
+      console.error(`\n❌ Claude SDK setup failed: ${(error as Error).message}`);
+      if ((error as Error).stack) {
+        console.error(`Stack trace:\n${(error as Error).stack}`);
+      }
       process.exit(1);
     }
   }

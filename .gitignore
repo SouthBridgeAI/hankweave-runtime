@@ -12,6 +12,9 @@ server/config-validation/event-schemas.generated.ts
 # Langton (ignore top-level workflows directory but not .github/workflows)
 /workflows
 
+# Executable builds
+releases/
+
 # Logs
 
 tests/test-area
