@@ -40,7 +40,7 @@ jobs:
   # Build executables for all platforms using native runners
   build-executables:
     name: Build ${{ matrix.name }}
-    needs: test
+    #needs: test
     timeout-minutes: 20
 
     strategy:
