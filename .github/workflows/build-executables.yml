@@ -40,6 +40,10 @@ jobs:
       - name: Build executable
         run: bun scripts/build-executable.ts ${{ matrix.target }}
 
+      - name: Smoke test - Run --help
+        run: |
+          ${{ matrix.target == 'windows-x64' && 'releases\strandweave.exe --help' || './releases/strandweave --help' }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
