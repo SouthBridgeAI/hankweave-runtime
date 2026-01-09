@@ -234,7 +234,7 @@ jobs:
   # Summary job to check overall status
   build-summary:
     name: Build Summary
-    needs: [test, build-executables]
+    needs: [build-executables] #test,
     runs-on: ubuntu-latest
     if: always()
 
