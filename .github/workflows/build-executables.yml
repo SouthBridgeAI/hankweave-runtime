@@ -1,0 +1,216 @@
+name: Build Executables
+
+on:
+  push:
+    branches:
+      - strandweave-npx-and-executable
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-latest
+            can_test: true
+          - target: linux-arm64
+            os: ubuntu-latest
+            can_test: false
+          - target: darwin-x64
+            os: macos-latest
+            can_test: false
+          - target: darwin-arm64
+            os: macos-latest
+            can_test: true
+          - target: windows-x64
+            os: windows-latest
+            can_test: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build executable
+        run: bun scripts/build-executable.ts ${{ matrix.target }}
+
+      - name: Smoke test - Run --help
+        if: matrix.can_test
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            releases/strandweave.exe --help
+          else
+            ./releases/strandweave --help
+          fi
+
+      - name: Smoke test - Create test directory
+        if: matrix.can_test
+        id: test-dir
+        shell: bash
+        run: |
+          TEST_DIR=$(mktemp -d)
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            TEST_DIR=$(cygpath -w "$TEST_DIR")
+          fi
+          echo "test_dir=${TEST_DIR}" >> $GITHUB_OUTPUT
+          echo "Created test directory: ${TEST_DIR}"
+
+      - name: Smoke test - Run --init
+        if: matrix.can_test
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            "${{ github.workspace }}/releases/strandweave.exe" --init
+          else
+            "${{ github.workspace }}/releases/strandweave" --init
+          fi
+
+      - name: Smoke test - Run basic command
+        if: matrix.can_test
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            "${{ github.workspace }}/releases/strandweave.exe" --basic --data=./data
+          else
+            "${{ github.workspace }}/releases/strandweave" --basic --data=./data
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: strandweave-${{ matrix.target }}
+          path: releases/strandweave${{ matrix.target == 'windows-x64' && '.exe' || '' }}
+          if-no-files-found: error
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from package.json
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+
+          # Rename artifacts to include target in filename
+          mv artifacts/strandweave-linux-x64/strandweave release-assets/strandweave-linux-x64
+          mv artifacts/strandweave-linux-arm64/strandweave release-assets/strandweave-linux-arm64
+          mv artifacts/strandweave-darwin-x64/strandweave release-assets/strandweave-darwin-x64
+          mv artifacts/strandweave-darwin-arm64/strandweave release-assets/strandweave-darwin-arm64
+          mv artifacts/strandweave-windows-x64/strandweave.exe release-assets/strandweave-windows-x64.exe
+
+          # Make them executable
+          chmod +x release-assets/strandweave-*
+
+          # List files
+          ls -lh release-assets/
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          # Strandweave Standalone Executables
+
+          Standalone executables for all major platforms. No Node.js or Bun installation required.
+
+          ## Downloads
+
+          Choose the binary for your platform:
+
+          ### macOS
+          - **Apple Silicon (M1/M2/M3)**: `strandweave-darwin-arm64`
+          - **Intel**: `strandweave-darwin-x64`
+
+          **Important for macOS users**: After downloading, you need to remove the quarantine attribute:
+          ```bash
+          xattr -d com.apple.quarantine strandweave-darwin-arm64  # or strandweave-darwin-x64
+          chmod +x strandweave-darwin-arm64
+          ./strandweave-darwin-arm64 --help
+          ```
+
+          ### Linux
+          - **x64**: `strandweave-linux-x64`
+          - **ARM64**: `strandweave-linux-arm64`
+
+          ```bash
+          chmod +x strandweave-linux-x64  # or strandweave-linux-arm64
+          ./strandweave-linux-x64 --help
+          ```
+
+          ### Windows
+          - **x64**: `strandweave-windows-x64.exe`
+
+          ```powershell
+          .\strandweave-windows-x64.exe --help
+          ```
+
+          ## Usage
+
+          After downloading and setting up the binary:
+
+          ```bash
+          # Initialize a new project
+          ./strandweave --init
+
+          # Run the server
+          ./strandweave
+
+          # See all options
+          ./strandweave --help
+          ```
+
+          ## What's Changed
+
+          See commit history for details: https://github.com/${{ github.repository }}/commits/${{ github.sha }}
+          EOF
+
+          echo "Release notes generated"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-${{ github.run_number }}
+          name: Strandweave v${{ steps.version.outputs.version }} (Build ${{ github.run_number }})
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            release-assets/strandweave-linux-x64
+            release-assets/strandweave-linux-arm64
+            release-assets/strandweave-darwin-x64
+            release-assets/strandweave-darwin-arm64
+            release-assets/strandweave-windows-x64.exe

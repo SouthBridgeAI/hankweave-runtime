@@ -1,4 +1,6 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
@@ -7,6 +9,110 @@ import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js"
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
 import { toError } from "./utils.js";
+
+/**
+ * Error thrown when Claude executable cannot be found.
+ * This allows callers to handle this specific case.
+ */
+export class ClaudeExecutableNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClaudeExecutableNotFoundError";
+  }
+}
+
+/**
+ * Detect an installed Claude executable.
+ * Checks common installation locations and falls back to `which claude`.
+ *
+ * @returns Path to Claude executable, or null if not found
+ */
+export function detectClaudeExecutable(): string | null {
+  const possiblePaths = [
+    // Installed via curl installer (cline)
+    path.join(os.homedir(), ".cline/cli/bin/claude"),
+    // Installed via claude installer
+    path.join(os.homedir(), ".claude/local/claude"),
+    // Homebrew installation (macOS)
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+  ];
+
+  // Check known paths
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  // Try `which claude` as fallback
+  try {
+    const whichResult = execSync("which claude", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    if (whichResult && fs.existsSync(whichResult)) {
+      return whichResult;
+    }
+  } catch {
+    // which claude failed, that's okay
+  }
+
+  return null;
+}
+
+/**
+ * Validate that Claude executable is available.
+ * Sets CLAUDE_PATH_TO_CLAUDE_EXECUTABLE if needed.
+ *
+ * Priority order:
+ * 1. Extracted SDK path (for compiled executables)
+ * 2. Existing CLAUDE_PATH_TO_CLAUDE_EXECUTABLE env var
+ * 3. Auto-detected installed Claude CLI
+ *
+ * @param extractedCliPath - Path to extracted cli.js (from runtime extractor, if compiled)
+ * @returns Path to the validated Claude executable
+ * @throws ClaudeExecutableNotFoundError if no valid executable is found
+ */
+export function validateClaudeExecutable(extractedCliPath?: string | null): string {
+  // Priority 1: Use extracted SDK path (for compiled executables)
+  if (extractedCliPath && fs.existsSync(extractedCliPath)) {
+    process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE = extractedCliPath;
+    return extractedCliPath;
+  }
+
+  // Priority 2: Check if already set via environment variable
+  if (process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE) {
+    if (fs.existsSync(process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE)) {
+      return process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
+    }
+    // If set but doesn't exist, warn and try to detect
+    console.warn(
+      `⚠️  CLAUDE_PATH_TO_CLAUDE_EXECUTABLE is set to '${process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE}' but file does not exist. Attempting auto-detection...`,
+    );
+  }
+
+  // Priority 3: Try to auto-detect installed Claude CLI
+  const detectedPath = detectClaudeExecutable();
+  if (detectedPath) {
+    // Set it so the SDK will use it
+    process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE = detectedPath;
+    return detectedPath;
+  }
+
+  // Not found - throw helpful error
+  throw new ClaudeExecutableNotFoundError(
+    `Claude CLI executable not found. Please install it with one of these methods:
+
+  1. curl -fsSL https://claude.ai/install.sh | bash
+  2. brew install --cask claude-code
+  3. npm install -g @anthropic-ai/claude-code
+
+Then either:
+  - Ensure 'claude' is in your PATH, or
+  - Set CLAUDE_PATH_TO_CLAUDE_EXECUTABLE=/path/to/claude`,
+  );
+}
 
 /**
  * Manages Claude Agent SDK lifecycle, mimicking the ClaudeProcessManager API.
