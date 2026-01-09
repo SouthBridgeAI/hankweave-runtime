@@ -3,7 +3,7 @@ name: Build Executables
 on:
   push:
     branches:
-      - strandweave-npx-and-executable
+      - strandweave-npx
 
 jobs:
   build:
