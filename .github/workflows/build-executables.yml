@@ -45,6 +45,12 @@ jobs:
       - name: Build executable
         run: bun scripts/build-executable.ts ${{ matrix.target }}
 
+      - name: Code sign macOS binary (ad-hoc)
+        if: startsWith(matrix.target, 'darwin-')
+        run: |
+          codesign --force --sign - releases/strandweave
+          echo "✓ Ad-hoc signed macOS binary"
+
       - name: Smoke test - Run --help
         if: matrix.can_test
         shell: bash
