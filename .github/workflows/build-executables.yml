@@ -47,8 +47,50 @@ jobs:
 
       - name: Smoke test - Run --help
         if: matrix.can_test
+        shell: bash
         run: |
-          ${{ matrix.target == 'windows-x64' && 'releases\strandweave.exe --help' || './releases/strandweave --help' }}
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            releases/strandweave.exe --help
+          else
+            ./releases/strandweave --help
+          fi
+
+      - name: Smoke test - Create test directory
+        if: matrix.can_test
+        id: test-dir
+        shell: bash
+        run: |
+          TEST_DIR=$(mktemp -d)
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            TEST_DIR=$(cygpath -w "$TEST_DIR")
+          fi
+          echo "test_dir=${TEST_DIR}" >> $GITHUB_OUTPUT
+          echo "Created test directory: ${TEST_DIR}"
+
+      - name: Smoke test - Run --init
+        if: matrix.can_test
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            "${{ github.workspace }}/releases/strandweave.exe" --init
+          else
+            "${{ github.workspace }}/releases/strandweave" --init
+          fi
+
+      - name: Smoke test - Run basic command
+        if: matrix.can_test
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            "${{ github.workspace }}/releases/strandweave.exe" --basic --data=./data
+          else
+            "${{ github.workspace }}/releases/strandweave" --basic --data=./data
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
