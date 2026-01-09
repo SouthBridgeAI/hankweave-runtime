@@ -19,7 +19,7 @@
  *   bun scripts/build-executable.ts darwin-arm64 my-binary   # Build for macOS ARM64 with custom name
  */
 
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -138,27 +138,43 @@ async function main() {
   // Build target flag
   const bunTarget = getBunTarget(target);
 
-  // Build embed flags - paths must match exactly what the extractor expects
-  // The extractor uses "node_modules/@anthropic-ai/claude-agent-sdk/..." paths
-  const embedFlags = filesToEmbed.map((f) => `--embed "${f}"`).join(" ");
-
-  // Build the command
+  // Build the arguments array for spawn
   // IMPORTANT: Entry point MUST come BEFORE --compile to avoid embedded .js files being treated as entry points
-  let buildCmd = `bun build "${ENTRY_POINT}" --compile`;
-  if (bunTarget) {
-    buildCmd += ` --target=${bunTarget}`;
-  }
-  buildCmd += ` ${embedFlags} --outfile "${outputFile}"`;
+  const buildArgs = ["build", ENTRY_POINT, "--compile"];
 
-  console.log(`\n🛠️  Build command:\n   ${buildCmd}\n`);
+  if (bunTarget) {
+    buildArgs.push(`--target=${bunTarget}`);
+  }
+
+  // Add embed flags
+  for (const file of filesToEmbed) {
+    buildArgs.push("--embed", file);
+  }
+
+  buildArgs.push("--outfile", outputFile);
+
+  console.log(`\n🛠️  Build command:\n   bun ${buildArgs.join(" ")}\n`);
   console.log("⏳ Building (this may take a moment)...\n");
 
   try {
-    // Run the build
-    execSync(buildCmd, {
+    // Run the build using spawn
+    const buildProc = spawn("bun", buildArgs, {
       cwd: process.cwd(),
       stdio: "inherit",
-      shell: "/bin/sh", // Use shell to handle quotes properly
+      shell: true, // Required for Windows compatibility
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      buildProc.on("exit", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Build process exited with code ${code}`));
+        }
+      });
+      buildProc.on("error", (error) => {
+        reject(error);
+      });
     });
 
     // Verify output exists
