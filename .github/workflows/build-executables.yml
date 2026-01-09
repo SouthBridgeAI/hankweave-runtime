@@ -1,81 +1,29 @@
-name: Build and Test Executables
+name: Build Executables
 
 on:
   push:
     branches:
       - strandweave-npx-and-executable
-  pull_request:
-    branches:
-      - strandweave-npx-and-executable
-  workflow_dispatch:
 
 jobs:
-  # Test job runs first to validate code
-  # test:
-  #   name: Run Tests
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 15
-
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup Bun
-  #       uses: oven-sh/setup-bun@v2
-  #       with:
-  #         bun-version: latest
-
-  #     - name: Install dependencies
-  #       run: bun install
-
-  #     - name: Run linter
-  #       run: bun run lint
-
-  #     - name: Run type check
-  #       run: bun run tc
-
-  #     - name: Run unit tests
-  #       run: bun test tests/unit
-
-  # Build executables for all platforms using native runners
-  build-executables:
-    name: Build ${{ matrix.name }}
-    #needs: test
-    timeout-minutes: 20
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux builds (both architectures on ubuntu)
-          - os: ubuntu-latest
-            target: linux-x64
-            name: strandweave-linux-x64
-            test-command: ./releases/strandweave-linux-x64 --help
-
-          - os: ubuntu-latest
-            target: linux-arm64
-            name: strandweave-linux-arm64
-            test-command: echo "Cross-compiled ARM64, skipping native test"
-
-          # macOS builds (native runners for both architectures)
-          - os: macos-13  # Intel Mac
-            target: darwin-x64
-            name: strandweave-darwin-x64
-            test-command: ./releases/strandweave-darwin-x64 --help
-
-          - os: macos-latest  # Apple Silicon (ARM64)
-            target: darwin-arm64
-            name: strandweave-darwin-arm64
-            test-command: ./releases/strandweave-darwin-arm64 --help
-
-          # Windows build
-          - os: windows-latest
-            target: windows-x64
-            name: strandweave-windows-x64
-            test-command: .\releases\strandweave-windows-x64.exe --help
-
-    runs-on: ${{ matrix.os }}
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: linux-arm64
+            os: ubuntu-latest
+          - target: darwin-x64
+            os: macos-latest
+          - target: darwin-arm64
+            os: macos-latest
+          - target: windows-x64
+            os: windows-latest
 
     steps:
       - name: Checkout code
@@ -90,163 +38,11 @@ jobs:
         run: bun install
 
       - name: Build executable
-        run: bun scripts/build-executable.ts ${{ matrix.target }} ${{ matrix.name }}
+        run: bun scripts/build-executable.ts ${{ matrix.target }}
 
-      - name: Verify executable exists
-        shell: bash
-        run: |
-          if [ ! -f "releases/${{ matrix.name }}" ] && [ ! -f "releases/${{ matrix.name }}.exe" ]; then
-            echo "❌ Executable not found: releases/${{ matrix.name }}"
-            exit 1
-          fi
-          echo "✅ Executable built successfully"
-
-      - name: Basic smoke test
-        shell: bash
-        run: |
-          echo "Running smoke test: ${{ matrix.test-command }}"
-          ${{ matrix.test-command }} || echo "Note: Cross-compiled binaries may not run on build host"
-
-      - name: Upload executable artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: releases/${{ matrix.name }}*
-          retention-days: 30
+          name: strandweave-${{ matrix.target }}
+          path: releases/strandweave${{ matrix.target == 'windows-x64' && '.exe' || '' }}
           if-no-files-found: error
-
-  # Create GitHub Release with all executables
-  create-release:
-    name: Create GitHub Release
-    needs: build-executables
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/strandweave-npx-and-executable'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Get version from package.json
-        id: package-version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}"
-
-      - name: Download all executable artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts/
-
-      - name: List downloaded artifacts
-        run: |
-          echo "Downloaded artifacts:"
-          ls -R release-artifacts/
-
-      - name: Create release tag
-        id: create-tag
-        run: |
-          TAG="v${{ steps.package-version.outputs.version }}-executable-$(date +%Y%m%d-%H%M%S)"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Creating tag: ${TAG}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "Executable build for v${{ steps.package-version.outputs.version }}"
-          git push origin "${TAG}"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.create-tag.outputs.tag }}
-          name: "Strandweave Executables v${{ steps.package-version.outputs.version }}"
-          draft: false
-          prerelease: true
-          generate_release_notes: true
-          files: |
-            release-artifacts/strandweave-linux-x64/strandweave-linux-x64
-            release-artifacts/strandweave-linux-arm64/strandweave-linux-arm64
-            release-artifacts/strandweave-darwin-x64/strandweave-darwin-x64
-            release-artifacts/strandweave-darwin-arm64/strandweave-darwin-arm64
-            release-artifacts/strandweave-windows-x64/strandweave-windows-x64.exe
-          body: |
-            # Strandweave Standalone Executables
-
-            Standalone executables for Strandweave v${{ steps.package-version.outputs.version }}.
-
-            ## Download Instructions
-
-            Download the appropriate executable for your platform:
-
-            - **Linux (x64)**: \`strandweave-linux-x64\`
-            - **Linux (ARM64)**: \`strandweave-linux-arm64\`
-            - **macOS (Apple Silicon)**: \`strandweave-darwin-arm64\`
-            - **macOS (Intel)**: \`strandweave-darwin-x64\`
-            - **Windows (x64)**: \`strandweave-windows-x64.exe\`
-
-            ## Installation
-
-            ### Linux/macOS
-            \`\`\`bash
-            # Download (replace URL with actual release URL)
-            curl -L -o strandweave <URL>
-
-            # Make executable
-            chmod +x strandweave
-
-            # Move to PATH (optional)
-            sudo mv strandweave /usr/local/bin/
-            \`\`\`
-
-            ### Windows
-            Download \`strandweave-windows-x64.exe\` and run it from PowerShell or CMD.
-
-            ## Requirements
-
-            - **Bun runtime must be installed** (the Claude SDK requires it)
-            - Claude CLI must be installed OR will auto-detect from common locations
-
-            Install Bun:
-            \`\`\`bash
-            curl -fsSL https://bun.sh/install | bash
-            \`\`\`
-
-            ## Usage
-
-            \`\`\`bash
-            # Initialize a new project
-            strandweave --init
-
-            # Run with a strand configuration
-            strandweave --config=strand.json --data=/path/to/project
-
-            # Show help
-            strandweave --help
-            \`\`\`
-
-            ## Notes
-
-            - These executables include the Strandweave runtime but require Bun to be installed
-            - This is a pre-release build from the integration branch
-            - For production use, install via npm: \`npx @southbridgeai/strandweave\`
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Summary job to check overall status
-  build-summary:
-    name: Build Summary
-    needs: [build-executables] #test,
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: Check build status
-        run: |
-          if [ "${{ needs.test.result }}" != "success" ]; then
-            echo "❌ Tests failed"
-            exit 1
-          fi
-          if [ "${{ needs.build-executables.result }}" != "success" ]; then
-            echo "❌ Executable builds failed"
-            exit 1
-          fi
-          echo "✅ All builds successful"
