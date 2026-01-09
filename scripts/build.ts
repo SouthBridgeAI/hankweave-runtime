@@ -46,6 +46,9 @@ async function build() {
       "@ai-sdk/google",
       "@ai-sdk/groq",
       "@ai-sdk/openai",
+      // crossws and srvx will bring their platform-specific implementations
+      "crossws",
+      "srvx",
     ],
   });
 

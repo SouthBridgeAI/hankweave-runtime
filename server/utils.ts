@@ -212,6 +212,55 @@ export function escapeShellArg(arg: string): string {
 }
 
 // -------------
+// Runtime Detection
+// -------------
+
+/**
+ * Supported JavaScript runtimes.
+ */
+export type Runtime = "bun" | "node" | "deno";
+
+/**
+ * Detect the current JavaScript runtime.
+ * Uses global object inspection following the crossws pattern.
+ *
+ * @returns The detected runtime ('bun', 'deno', or 'node')
+ */
+export function detectRuntime(): Runtime {
+  if ("Bun" in globalThis) return "bun";
+  if ("Deno" in globalThis) return "deno";
+  return "node";
+}
+
+/**
+ * Get the appropriate command array to run a script in the current runtime.
+ * This ensures shims and other scripts are executed with the correct runtime.
+ *
+ * @param scriptPath - Path to the script to execute
+ * @returns Command array suitable for spawn/exec (e.g., ['bun', scriptPath])
+ *
+ * @example
+ * ```ts
+ * // In Bun: ['bun', '/path/to/shim.mjs']
+ * // In Node: ['node', '/path/to/shim.mjs']
+ * // In Deno: ['deno', 'run', '--allow-all', '/path/to/shim.mjs']
+ * const cmd = getRuntimeCommand('/path/to/shim.mjs');
+ * spawn(cmd[0], cmd.slice(1), options);
+ * ```
+ */
+export function getRuntimeCommand(scriptPath: string): string[] {
+  const runtime = detectRuntime();
+  switch (runtime) {
+    case "bun":
+      return ["bun", scriptPath];
+    case "deno":
+      return ["deno", "run", "--allow-all", scriptPath];
+    case "node":
+      return ["node", scriptPath];
+  }
+}
+
+// -------------
 // Error Utilities
 // -------------
 

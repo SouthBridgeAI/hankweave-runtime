@@ -15,7 +15,7 @@ import type {
   UserMessage,
 } from "./types/claude-session-schema.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
-import type { Logger } from "./utils.js";
+import { getRuntimeCommand, type Logger } from "./utils.js";
 
 /**
  * Events emitted by CodonRunner during execution
@@ -162,7 +162,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           anthropicBaseUrl,
         );
 
-        result = await manager.runSelfTest(["bun", shimPath]);
+        result = await manager.runSelfTest(getRuntimeCommand(shimPath));
       }
 
       // Log results
@@ -294,7 +294,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
 
       await this.processManager.spawn(
-        ["bun", shimPath], // Hardcoded gemini shim command
+        getRuntimeCommand(shimPath),
         this.config.codon,
         previousSessionId || null,
         this.logPath,
