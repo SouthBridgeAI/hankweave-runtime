@@ -16,14 +16,19 @@ jobs:
         include:
           - target: linux-x64
             os: ubuntu-latest
+            can_test: true
           - target: linux-arm64
             os: ubuntu-latest
+            can_test: false
           - target: darwin-x64
             os: macos-latest
+            can_test: false
           - target: darwin-arm64
             os: macos-latest
+            can_test: true
           - target: windows-x64
             os: windows-latest
+            can_test: true
 
     steps:
       - name: Checkout code
@@ -41,6 +46,7 @@ jobs:
         run: bun scripts/build-executable.ts ${{ matrix.target }}
 
       - name: Smoke test - Run --help
+        if: matrix.can_test
         run: |
           ${{ matrix.target == 'windows-x64' && 'releases\strandweave.exe --help' || './releases/strandweave --help' }}
 
