@@ -4,6 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
+import {
+  extractClaudeSdkFiles,
+  getExtractedCliPath,
+  isCompiledExecutable,
+  needsExtraction,
+} from "./claude-runtime-extractor.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
@@ -62,59 +68,6 @@ export function detectClaudeExecutable(): string | null {
 }
 
 /**
- * Validate that Claude executable is available.
- * Sets CLAUDE_PATH_TO_CLAUDE_EXECUTABLE if needed.
- *
- * Priority order:
- * 1. Extracted SDK path (for compiled executables)
- * 2. Existing CLAUDE_PATH_TO_CLAUDE_EXECUTABLE env var
- * 3. Auto-detected installed Claude CLI
- *
- * @param extractedCliPath - Path to extracted cli.js (from runtime extractor, if compiled)
- * @returns Path to the validated Claude executable
- * @throws ClaudeExecutableNotFoundError if no valid executable is found
- */
-export function validateClaudeExecutable(extractedCliPath?: string | null): string {
-  // Priority 1: Use extracted SDK path (for compiled executables)
-  if (extractedCliPath && fs.existsSync(extractedCliPath)) {
-    process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE = extractedCliPath;
-    return extractedCliPath;
-  }
-
-  // Priority 2: Check if already set via environment variable
-  if (process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE) {
-    if (fs.existsSync(process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE)) {
-      return process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
-    }
-    // If set but doesn't exist, warn and try to detect
-    console.warn(
-      `⚠️  CLAUDE_PATH_TO_CLAUDE_EXECUTABLE is set to '${process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE}' but file does not exist. Attempting auto-detection...`,
-    );
-  }
-
-  // Priority 3: Try to auto-detect installed Claude CLI
-  const detectedPath = detectClaudeExecutable();
-  if (detectedPath) {
-    // Set it so the SDK will use it
-    process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE = detectedPath;
-    return detectedPath;
-  }
-
-  // Not found - throw helpful error
-  throw new ClaudeExecutableNotFoundError(
-    `Claude CLI executable not found. Please install it with one of these methods:
-
-  1. curl -fsSL https://claude.ai/install.sh | bash
-  2. brew install --cask claude-code
-  3. npm install -g @anthropic-ai/claude-code
-
-Then either:
-  - Ensure 'claude' is in your PATH, or
-  - Set CLAUDE_PATH_TO_CLAUDE_EXECUTABLE=/path/to/claude`,
-  );
-}
-
-/**
  * Manages Claude Agent SDK lifecycle, mimicking the ClaudeProcessManager API.
  * Handles log stream creation and converts SDK messages to JSONL format.
  */
@@ -133,6 +86,59 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private model?: ModelInfo,
   ) {
     super();
+  }
+
+  /**
+   * Ensure Claude SDK files are available, extracting if necessary.
+   *
+   * This static method should be called at application startup before creating
+   * any ClaudeAgentSDKManager instances. It handles:
+   * - Detecting if running from compiled executable or source
+   * - Extracting embedded SDK files for compiled mode
+   * - Verifying extracted files exist
+   * - Setting CLAUDE_PATH_TO_CLAUDE_EXECUTABLE environment variable
+   *
+   * @returns Path to cli.js if compiled (and sets env var), or null if running from source
+   * @throws Error if extraction fails or extracted file doesn't exist
+   */
+  static async ensureSdkAvailable(): Promise<string | null> {
+    try {
+      const isCompiled = isCompiledExecutable();
+
+      // If we're not compiled, return null to use normal detection
+      if (!isCompiled) {
+        console.log("📦 Running from source, using node_modules SDK");
+        return null;
+      }
+
+      // Check if we already have extracted files
+      let cliPath: string;
+      if (!needsExtraction()) {
+        cliPath = getExtractedCliPath();
+        console.log(`📦 Using cached Claude SDK: ${cliPath}`);
+      } else {
+        // Need to extract
+        cliPath = await extractClaudeSdkFiles();
+      }
+
+      // Verify the extracted file actually exists
+      if (!fs.existsSync(cliPath)) {
+        throw new Error(
+          `Extracted Claude CLI not found at: ${cliPath}\nThis indicates a problem with the compilation or extraction process.`,
+        );
+      }
+
+      // Set environment variable so SDK knows where to find the CLI
+      process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE = cliPath;
+
+      return cliPath;
+    } catch (error) {
+      console.error(`❌ Claude SDK extraction failed: ${(error as Error).message}`);
+      if ((error as Error).stack) {
+        console.error(`   Stack: ${(error as Error).stack}`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -682,7 +688,38 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       });
     }
 
-    // Check 2: Verify authentication (API key or OAuth token)
+    // Check 2: Verify Claude CLI executable is available
+    const customCliPath = process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
+    if (customCliPath) {
+      // User explicitly set a path - verify it exists
+      const cliExists = fs.existsSync(customCliPath);
+      checks.push({
+        name: "claude_cli_executable",
+        passed: cliExists,
+        message: cliExists
+          ? `Claude CLI found at: ${customCliPath}`
+          : `Claude CLI not found at specified path: ${customCliPath}`,
+      });
+    } else {
+      // Try to detect Claude CLI in standard locations
+      const detectedPath = detectClaudeExecutable();
+      if (detectedPath) {
+        checks.push({
+          name: "claude_cli_executable",
+          passed: true,
+          message: `Claude CLI detected at: ${detectedPath}`,
+        });
+      } else {
+        // No CLI found, but SDK will handle it internally
+        checks.push({
+          name: "claude_cli_executable",
+          passed: true,
+          message: "Claude CLI not detected, SDK will use internal CLI resolution",
+        });
+      }
+    }
+
+    // Check 3: Verify authentication (API key or OAuth token)
     const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
     const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
     const hasAuth = hasApiKey || hasOAuthToken;
@@ -701,7 +738,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         : "No authentication found (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)",
     });
 
-    // Check 3: Verify custom base URL if set
+    // Check 4: Verify custom base URL if set
     if (this.anthropicBaseUrl) {
       checks.push({
         name: "custom_base_url",

@@ -370,38 +370,16 @@ export async function extractClaudeSdkFiles(): Promise<string> {
 /**
  * Ensure Claude SDK files are available, extracting if necessary.
  *
- * This is the main entry point that should be called at startup.
- * It checks if we're running compiled, if extraction is needed,
- * and performs extraction if necessary.
+ * @deprecated Use ClaudeAgentSDKManager.ensureSdkAvailable() instead.
+ * This function is kept for backward compatibility.
  *
- * @returns Path to cli.js (either extracted or from node_modules)
+ * @returns Path to cli.js if compiled (and sets env var), or null if running from source
+ * @throws Error if extraction fails or extracted file doesn't exist
  */
 export async function ensureClaudeSdkAvailable(): Promise<string | null> {
-  try {
-    const isCompiled = isCompiledExecutable();
-
-    // If we're not compiled, return null to use normal detection
-    if (!isCompiled) {
-      console.log("📦 Running from source, using node_modules SDK");
-      return null;
-    }
-
-    // Check if we already have extracted files
-    if (!needsExtraction()) {
-      const cliPath = getExtractedCliPath();
-      console.log(`📦 Using cached Claude SDK: ${cliPath}`);
-      return cliPath;
-    }
-
-    // Need to extract
-    return await extractClaudeSdkFiles();
-  } catch (error) {
-    console.error(`❌ Claude SDK extraction failed: ${(error as Error).message}`);
-    if ((error as Error).stack) {
-      console.error(`   Stack: ${(error as Error).stack}`);
-    }
-    throw error;
-  }
+  // Import to avoid circular dependency
+  const { ClaudeAgentSDKManager } = await import("./claude-agent-sdk-manager.js");
+  return ClaudeAgentSDKManager.ensureSdkAvailable();
 }
 
 /**

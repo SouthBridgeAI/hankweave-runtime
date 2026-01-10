@@ -357,6 +357,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     // Verify expected checks exist
     const checkNames = result.checks.map((c) => c.name);
     expect(checkNames).toContain("sdk_installed");
+    expect(checkNames).toContain("claude_cli_executable");
     expect(checkNames).toContain("authentication");
     console.log(`    ✓ Expected checks are present`);
 
