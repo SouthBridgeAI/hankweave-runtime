@@ -124,6 +124,9 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install gemini-cli globally
+        run: npm install -g @google/gemini-cli
+
       - name: Create test directory
         id: test-dir
         shell: bash
