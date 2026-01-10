@@ -143,7 +143,8 @@ describe("init command e2e", () => {
 
     // Verify files were created
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "strand.json"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze.md"))).toBe(true);
+    expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-sonnet.md"))).toBe(true);
+    expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, ".gitignore"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample1.txt"))).toBe(true);
@@ -158,7 +159,7 @@ describe("init command e2e", () => {
     expect(strandConfig).toHaveProperty("recommendations");
     expect(strandConfig).toHaveProperty("strand");
     expect(Array.isArray(strandConfig.strand)).toBe(true);
-    expect(strandConfig.strand.length).toBeGreaterThan(0);
+    expect(strandConfig.strand.length).toBe(2);
 
     // Verify first codon has required fields
     const firstCodon = strandConfig.strand[0];
@@ -166,6 +167,13 @@ describe("init command e2e", () => {
     expect(firstCodon).toHaveProperty("name");
     expect(firstCodon).toHaveProperty("model");
     expect(firstCodon).toHaveProperty("continuationMode");
+
+    // Verify second codon has required fields
+    const secondCodon = strandConfig.strand[1];
+    expect(secondCodon).toHaveProperty("id");
+    expect(secondCodon).toHaveProperty("name");
+    expect(secondCodon).toHaveProperty("model");
+    expect(secondCodon).toHaveProperty("continuationMode");
   }, 30_000); // 30 seconds timeout for this test
 
   test("init command fails in non-empty directory", async () => {
@@ -215,16 +223,22 @@ describe("init command e2e", () => {
       // Wait for the run to complete
       await server.waitForRunToComplete(300000);
 
-      // Verify that the analysis file was created in strandweave-results
+      // Verify that the analysis files were created in strandweave-results
       const resultsDir = path.join(INIT_TEST_DIR, "strandweave-results");
       expect(fs.existsSync(resultsDir)).toBe(true);
 
-      const analysisFile = path.join(resultsDir, "analysis.md");
-      expect(fs.existsSync(analysisFile)).toBe(true);
+      const analysisSonnetFile = path.join(resultsDir, "analysis-sonnet.md");
+      expect(fs.existsSync(analysisSonnetFile)).toBe(true);
 
-      // Verify analysis file has content
-      const analysisContent = fs.readFileSync(analysisFile, "utf-8");
-      expect(analysisContent.length).toBeGreaterThan(0);
+      const analysisGeminiFile = path.join(resultsDir, "analysis-gemini.md");
+      expect(fs.existsSync(analysisGeminiFile)).toBe(true);
+
+      // Verify analysis files have content
+      const analysisSonnetContent = fs.readFileSync(analysisSonnetFile, "utf-8");
+      expect(analysisSonnetContent.length).toBeGreaterThan(0);
+
+      const analysisGeminiContent = fs.readFileSync(analysisGeminiFile, "utf-8");
+      expect(analysisGeminiContent.length).toBeGreaterThan(0);
     } finally {
       // Clean up server
       await server.stop(10000);

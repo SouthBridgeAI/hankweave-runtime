@@ -17,30 +17,53 @@ const templates: Record<string, string> = {
   },
   "strand": [
     {
-      "id": "analyze",
-      "name": "Analyze Project",
+      "id": "analyze-sonnet",
+      "name": "Analyze Project (Sonnet)",
       "model": "sonnet",
       "continuationMode": "fresh",
-      "promptFile": "./prompts/analyze.md",
-      "trackedFiles": ["analysis.md"],
+      "promptFile": "./prompts/analyze-sonnet.md",
+      "trackedFiles": ["analysis-sonnet.md"],
       "outputFiles": [
         {
-          "copy": ["analysis.md"]
+          "copy": ["analysis-sonnet.md"]
+        }
+      ]
+    },
+    {
+      "id": "analyze-gemini",
+      "name": "Analyze Project (Gemini)",
+      "model": "gemini-2.5-flash",
+      "continuationMode": "fresh",
+      "promptFile": "./prompts/analyze-gemini.md",
+      "trackedFiles": ["analysis-gemini.md"],
+      "outputFiles": [
+        {
+          "copy": ["analysis-gemini.md"]
         }
       ]
     }
   ]
 }`,
 
-  "prompts/analyze.md": `# Project Analysis
+  "prompts/analyze-sonnet.md": `# Project Analysis (Sonnet)
 
-Please analyze the files in the \`data\` directory localted in the current working directory (do not go to other directories) and create a comprehensive analysis report.
+Please analyze the files in the \`data\` directory located in the current working directory (do not go to other directories) and create a comprehensive analysis report.
 
 Your analysis should include:
 
-1. Very brief overview of the file in that directory
+1. Very brief overview of the files in that directory
 
-Please create your analysis in a file called \`analysis.md\` in the execution directory.`,
+Please create your analysis in a file called \`analysis-sonnet.md\` in the execution directory.`,
+
+  "prompts/analyze-gemini.md": `# Project Analysis (Gemini)
+
+Please analyze the files in the \`data\` directory located in the current working directory (do not go to other directories) and create a comprehensive analysis report.
+
+Your analysis should include:
+
+1. Very brief overview of the files in that directory
+
+Please create your analysis in a file called \`analysis-gemini.md\` in the execution directory.`,
 
   ".gitignore": `# Strandweave execution directories
 .strandweave/
@@ -158,7 +181,8 @@ export async function initProject(targetDir: string): Promise<void> {
   console.log(`\n✅ Initialized strand in ${targetDir}\n`);
   console.log("Created files:");
   console.log("  - strand.json");
-  console.log("  - prompts/analyze.md");
+  console.log("  - prompts/analyze-sonnet.md");
+  console.log("  - prompts/analyze-gemini.md");
   console.log("  - data/sample1.txt");
   console.log("  - data/sample2.txt");
   console.log("  - data/notes.txt");
