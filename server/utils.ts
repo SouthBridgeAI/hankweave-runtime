@@ -242,10 +242,23 @@ export function detectRuntime(): Runtime {
  * @returns true if running from a compiled executable, false otherwise
  */
 export function isCompiledExecutable(): boolean {
+  console.log("\n🔍 isCompiledExecutable() detection:");
+
   // Allow override for testing (avoids Bun's module mock persistence bug)
   // https://github.com/oven-sh/bun/issues/7823
   if (process.env.STRANDWEAVE_TEST_IS_COMPILED !== undefined) {
-    return process.env.STRANDWEAVE_TEST_IS_COMPILED === "true";
+    const result = process.env.STRANDWEAVE_TEST_IS_COMPILED === "true";
+    console.log(`  ✓ Using test override: ${result}`);
+    return result;
+  }
+
+  // We only support Bun compiled executables
+  const isBun = typeof Bun !== "undefined";
+  console.log(`  Runtime: ${isBun ? "Bun" : "Other (Node.js/Deno)"}`);
+
+  if (!isBun) {
+    console.log("  ✗ Not running in Bun, cannot be compiled executable");
+    return false;
   }
 
   // Simple check: if we're running from Bun's virtual filesystem, we're compiled
