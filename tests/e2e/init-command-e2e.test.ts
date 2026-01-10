@@ -183,7 +183,7 @@ describe("init command e2e", () => {
 
     // Verify files were created
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "strand.json"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-sonnet.md"))).toBe(true);
+    expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-haiku.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, ".gitignore"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
@@ -288,15 +288,15 @@ describe("init command e2e", () => {
       const resultsDir = path.join(INIT_TEST_DIR, "strandweave-results");
       expect(fs.existsSync(resultsDir)).toBe(true);
 
-      const analysisSonnetFile = path.join(resultsDir, "analysis-sonnet.md");
-      expect(fs.existsSync(analysisSonnetFile)).toBe(true);
+      const analysisHaikuFile = path.join(resultsDir, "analysis-haiku.md");
+      expect(fs.existsSync(analysisHaikuFile)).toBe(true);
 
       const analysisGeminiFile = path.join(resultsDir, "analysis-gemini.md");
       expect(fs.existsSync(analysisGeminiFile)).toBe(true);
 
       // Verify analysis files have content
-      const analysisSonnetContent = fs.readFileSync(analysisSonnetFile, "utf-8");
-      expect(analysisSonnetContent.length).toBeGreaterThan(0);
+      const analysisHaikuContent = fs.readFileSync(analysisHaikuFile, "utf-8");
+      expect(analysisHaikuContent.length).toBeGreaterThan(0);
 
       const analysisGeminiContent = fs.readFileSync(analysisGeminiFile, "utf-8");
       expect(analysisGeminiContent.length).toBeGreaterThan(0);
