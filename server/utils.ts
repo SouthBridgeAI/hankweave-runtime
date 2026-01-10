@@ -263,11 +263,11 @@ export function isCompiledExecutable(): boolean {
 
   // Simple check: if we're running from Bun's virtual filesystem, we're compiled
   // On Unix: /$bunfs/root/...
-  // On Windows: X:/~BUN/root/... (drive letter varies)
+  // On Windows: X:\~BUN\ or X:/~BUN/ (drive letter varies, slashes can be either direction)
   const path = import.meta.path;
   const isCompiled =
     path.startsWith("/$bunfs/") || // Unix
-    /^[A-Z]:\/~BUN\/root/i.test(path); // Windows
+    /^[A-Z]:[/\\]~BUN[/\\]/i.test(path); // Windows (both forward and backslashes)
   return isCompiled;
 }
 
