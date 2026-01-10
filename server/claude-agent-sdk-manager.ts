@@ -7,14 +7,13 @@ import type { ClaudeLogParser } from "./claude-log-parser.js";
 import {
   extractClaudeSdkFiles,
   getExtractedCliPath,
-  isCompiledExecutable,
   needsExtraction,
 } from "./claude-runtime-extractor.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
-import { toError } from "./utils.js";
+import { isCompiledExecutable, toError } from "./utils.js";
 
 /**
  * Error thrown when Claude executable cannot be found.

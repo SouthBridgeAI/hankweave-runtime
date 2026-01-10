@@ -233,6 +233,32 @@ export function detectRuntime(): Runtime {
 }
 
 /**
+ * Detects if we're running from a compiled Bun executable.
+ *
+ * When compiled, Bun puts files in a virtual filesystem at:
+ * - On Unix: /$bunfs/root/...
+ * - On Windows: X:/~BUN/root/... (drive letter varies)
+ *
+ * @returns true if running from a compiled executable, false otherwise
+ */
+export function isCompiledExecutable(): boolean {
+  // Allow override for testing (avoids Bun's module mock persistence bug)
+  // https://github.com/oven-sh/bun/issues/7823
+  if (process.env.STRANDWEAVE_TEST_IS_COMPILED !== undefined) {
+    return process.env.STRANDWEAVE_TEST_IS_COMPILED === "true";
+  }
+
+  // Simple check: if we're running from Bun's virtual filesystem, we're compiled
+  // On Unix: /$bunfs/root/...
+  // On Windows: X:/~BUN/root/... (drive letter varies)
+  const path = import.meta.path;
+  const isCompiled =
+    path.startsWith("/$bunfs/") || // Unix
+    /^[A-Z]:\/~BUN\/root/i.test(path); // Windows
+  return isCompiled;
+}
+
+/**
  * Get the appropriate command array to run a script in the current runtime.
  * This ensures shims and other scripts are executed with the correct runtime.
  *
@@ -652,8 +678,7 @@ export interface ServeOptions<T = unknown> {
   /** Idle timeout in seconds (optional, only for HTTP servers) */
   idleTimeout?: number;
   /** HTTP request handler (required for HTTP servers) */
-  // biome-ignore lint/suspicious/noExplicitAny: server parameter is runtime-specific
-  fetch?: (request: Request, server?: any) => Response | Promise<Response> | undefined;
+  fetch?: (request: Request, server?: unknown) => Response | Promise<Response> | undefined;
   /** WebSocket handlers (required for WebSocket servers) */
   websocket?: {
     /**

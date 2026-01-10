@@ -63,62 +63,6 @@ export function getExtractedCliPath(): string {
 }
 
 /**
- * Check if we're running as a compiled Bun executable.
- * When compiled with Bun, process.argv[1] points to Bun's virtual filesystem.
- *
- * On Unix: /$bunfs/root/...
- * On Windows: X:/~BUN/root/... (drive letter varies)
- */
-export function isCompiledExecutable(): boolean {
-  // Strategy: Check multiple indicators to determine if we're compiled
-  //
-  // Priority order (most reliable first):
-  // 1. If process.argv[1] matches Bun VFS pattern -> definitely compiled
-  // 2. If SDK can't be found in node_modules -> compiled
-  // 3. Otherwise -> not compiled (running from source)
-
-  const mainPath = process.argv[1] || "";
-
-  try {
-    // FIRST: Check if running in Bun's virtual filesystem
-    // This is the most reliable indicator for compiled executables
-    // On Unix: /$bunfs/root/...
-    // On Windows: X:/~BUN/root/... (e.g., B:/~BUN/root/strandweave-windows-x64.exe)
-    if (
-      mainPath.includes("$bunfs") ||
-      mainPath.includes("bunfs") ||
-      mainPath.match(/^[A-Z]:\/~BUN\/root/i) // Windows: X:/~BUN/root
-    ) {
-      return true; // Running from Bun's virtual filesystem = definitely compiled
-    }
-
-    // SECOND: Check if SDK exists in standard node_modules locations
-    const possibleSdkPaths = [
-      path.join(process.cwd(), "node_modules/@anthropic-ai/claude-agent-sdk/cli.js"),
-      path.join(path.dirname(mainPath), "node_modules/@anthropic-ai/claude-agent-sdk/cli.js"),
-    ];
-
-    for (const sdkPath of possibleSdkPaths) {
-      if (fs.existsSync(sdkPath)) {
-        return false; // SDK exists on disk, not compiled
-      }
-    }
-
-    // THIRD: Try to resolve the SDK from node_modules
-    try {
-      require.resolve("@anthropic-ai/claude-agent-sdk");
-      return false;
-    } catch {
-      // Can't resolve SDK, likely compiled
-      return true;
-    }
-  } catch {
-    // Error during detection, assume we might be compiled
-    return true;
-  }
-}
-
-/**
  * Check if embedded files are available (async check).
  * This actually tries to access an embedded file to verify.
  */

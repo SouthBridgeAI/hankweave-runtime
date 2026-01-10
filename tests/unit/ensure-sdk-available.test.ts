@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ClaudeAgentSDKManager } from "../../server/claude-agent-sdk-manager.js";
+import * as extractorModule from "../../server/claude-runtime-extractor.js";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
 
 describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
@@ -18,7 +19,10 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
   });
 
   afterEach(() => {
-    // Restore original environment
+    // Restore mocks
+    mock.restore();
+
+    // Restore original environment (this clears STRANDWEAVE_TEST_IS_COMPILED)
     restoreEnv(originalEnv);
 
     // Clean up temp directory
@@ -38,9 +42,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
 
   describe("Source Mode (not compiled)", () => {
     test("should return null when running from source", async () => {
-      // Mock isCompiledExecutable to return false
+      // Set env var to indicate not compiled (source mode)
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "false";
+
+      // Mock extractor functions (shouldn't be called in source mode)
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => false,
+        ...extractorModule,
         needsExtraction: () => false,
         getExtractedCliPath: () => "/fake/path",
         extractClaudeSdkFiles: async () => "/fake/path",
@@ -53,8 +60,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       // Ensure env var is not set before test
       delete process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
 
+      // Set env var to indicate not compiled (source mode)
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "false";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => false,
+        ...extractorModule,
         needsExtraction: () => false,
         getExtractedCliPath: () => "/fake/path",
         extractClaudeSdkFiles: async () => "/fake/path",
@@ -71,8 +82,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       const cliPath = path.join(tempDir, "cached", "cli.js");
       createDummyCliFile(cliPath);
 
+      // Set env var to indicate compiled mode
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => true,
+        ...extractorModule,
         needsExtraction: () => false,
         getExtractedCliPath: () => cliPath,
         extractClaudeSdkFiles: async () => {
@@ -89,8 +104,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       const cliPath = path.join(tempDir, "cached", "cli.js");
       createDummyCliFile(cliPath);
 
+      // Set env var to indicate compiled mode
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => true,
+        ...extractorModule,
         needsExtraction: () => false,
         getExtractedCliPath: () => cliPath,
         extractClaudeSdkFiles: async () => {
@@ -109,8 +128,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       const cliPath = path.join(tempDir, "extracted", "cli.js");
       let extractCalled = false;
 
+      // Set env var to indicate compiled mode
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => true,
+        ...extractorModule,
         needsExtraction: () => true,
         getExtractedCliPath: () => {
           throw new Error("Should not call getExtractedCliPath when extraction needed");
@@ -132,8 +155,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
     test("should set env var after extraction", async () => {
       const cliPath = path.join(tempDir, "extracted", "cli.js");
 
+      // Set env var to indicate compiled mode
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => true,
+        ...extractorModule,
         needsExtraction: () => true,
         getExtractedCliPath: () => {
           throw new Error("Should not call getExtractedCliPath");
@@ -154,8 +181,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
     test("should throw when extracted file doesn't exist", async () => {
       const nonExistentPath = path.join(tempDir, "does-not-exist", "cli.js");
 
+      // Set env var to indicate compiled mode
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => true,
+        ...extractorModule,
         needsExtraction: () => false,
         getExtractedCliPath: () => nonExistentPath,
         extractClaudeSdkFiles: async () => {
@@ -169,8 +200,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
     });
 
     test("should throw when extraction fails", async () => {
+      // Set env var to indicate compiled mode
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => true,
+        ...extractorModule,
         needsExtraction: () => true,
         getExtractedCliPath: () => {
           throw new Error("Should not call");
@@ -188,8 +223,12 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
     test("should throw when file is created but then deleted before verification", async () => {
       const cliPath = path.join(tempDir, "deleted", "cli.js");
 
+      // Set env var to indicate compiled mode
+      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+
+      // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
-        isCompiledExecutable: () => true,
+        ...extractorModule,
         needsExtraction: () => true,
         getExtractedCliPath: () => {
           throw new Error("Should not call");
