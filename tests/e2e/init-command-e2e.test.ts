@@ -5,6 +5,13 @@ import { once } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  type BinarySetup,
+  cleanupBinary,
+  getBinaryCommandOverride,
+  needsBinary,
+  setupBinary,
+} from "../utils/binary.js";
 import { launchStrandweave } from "../utils/strandweave-server-test-helpers.js";
 import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
 import {
@@ -17,27 +24,41 @@ import {
 
 // Test configuration
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const TEST_AREA = path.join(TEST_ROOT, "tests/test-area");
 const TEST_TIMESTAMP = generateTestTimestamp();
-const INIT_TEST_DIR = path.join(TEST_AREA, `init-test-${TEST_TIMESTAMP}`);
 
 // Verdaccio setup state (for package manager testing)
 let verdaccioSetup: VerdaccioSetup | null = null;
 
+// Binary setup state (for compiled binary testing)
+let binarySetup: BinarySetup | null = null;
+
+// Test area and init directory - determined at runtime based on test mode
+let TEST_AREA: string;
+let INIT_TEST_DIR: string;
+
 /**
- * Spawns the init command using either package manager (npx/bunx/pnpm dlx/deno) or direct bun execution.
+ * Spawns the init command using either binary, package manager (npx/bunx/pnpm dlx/deno), or direct bun execution.
  * Automatically configures registry URL if using Verdaccio.
  */
 function spawnInitCommand(options: {
   cwd: string;
   stdio?: Parameters<typeof spawn>[2]["stdio"];
 }): ReturnType<typeof spawn> {
-  const commandOverride = getCommandOverride();
   let command: string;
   let args: string[];
 
-  if (commandOverride) {
+  // Priority order: binary > package manager > default bun
+  if (binarySetup) {
+    // Using compiled binary
+    const binaryCommandOverride = getBinaryCommandOverride(binarySetup.binaryPath);
+    command = binaryCommandOverride.command;
+    args = [...binaryCommandOverride.args, "--init"];
+  } else if (needsVerdaccio()) {
     // Using package manager (npx/bunx/pnpm dlx/deno)
+    const commandOverride = getCommandOverride();
+    if (!commandOverride) {
+      throw new Error("Verdaccio mode enabled but no command override configured");
+    }
     command = commandOverride.command;
     args = [...commandOverride.args, "--init"];
   } else {
@@ -52,8 +73,8 @@ function spawnInitCommand(options: {
     stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
   };
 
-  // Add registry URL if using Verdaccio
-  if (verdaccioSetup && commandOverride) {
+  // Add registry URL if using Verdaccio (not needed for binary mode)
+  if (verdaccioSetup && !binarySetup && needsVerdaccio()) {
     spawnOptions.env = {
       ...process.env,
       npm_config_registry: verdaccioSetup.registry.registryURL,
@@ -61,17 +82,20 @@ function spawnInitCommand(options: {
   }
 
   // On Windows, package manager commands (npx, bunx, pnpm) are .cmd files
-  // and need to be spawned with shell=true. Deno is a native executable and doesn't need shell.
+  // and need to be spawned with shell=true. Binary and Deno are native executables and don't need shell.
   const needsShell =
-    process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
+    !binarySetup &&
+    process.platform === "win32" &&
+    ["npx", "bunx", "pnpm", "npm"].includes(command);
   spawnOptions.shell = needsShell;
 
   // Log the command being executed for debugging
   console.log("\n=== Spawning Init Command ===");
+  console.log("Mode:", binarySetup ? "Binary" : verdaccioSetup ? "Verdaccio" : "Default");
   console.log("Command:", command);
   console.log("Args:", args);
   console.log("CWD:", options.cwd);
-  if (verdaccioSetup) {
+  if (verdaccioSetup && !binarySetup) {
     console.log("Registry:", verdaccioSetup.registry.registryURL);
   }
   console.log("Shell:", spawnOptions.shell);
@@ -82,9 +106,19 @@ function spawnInitCommand(options: {
 
 describe("init command e2e", () => {
   beforeAll(async () => {
+    const projectRoot = path.resolve(TEST_ROOT);
+
+    // Setup binary if testing with compiled binary
+    if (needsBinary()) {
+      binarySetup = await setupBinary(projectRoot);
+    }
+
+    // Use project-local test area for all tests
+    TEST_AREA = path.join(TEST_ROOT, "tests/test-area");
+    INIT_TEST_DIR = path.join(TEST_AREA, `init-test-${TEST_TIMESTAMP}`);
+
     // Setup Verdaccio if testing with package managers
     if (needsVerdaccio()) {
-      const projectRoot = path.resolve(TEST_ROOT);
       verdaccioSetup = await setupVerdaccio(projectRoot);
     }
 
@@ -99,6 +133,12 @@ describe("init command e2e", () => {
     // if (fs.existsSync(INIT_TEST_DIR)) {
     //   fs.rmSync(INIT_TEST_DIR, { recursive: true, force: true });
     // }
+
+    // Cleanup binary if it was built
+    if (binarySetup) {
+      await cleanupBinary(binarySetup);
+      binarySetup = null;
+    }
 
     // Cleanup Verdaccio if it was started
     if (verdaccioSetup) {
@@ -207,9 +247,8 @@ describe("init command e2e", () => {
     // Get a free port for the server
     const port = await getFreePort();
 
-    // Launch server using the data directory created by init
-    // Use INIT_TEST_DIR as both cwd (for output files) and execution directory
-    const server = await launchStrandweave({
+    // Determine command to use - priority: binary > verdaccio > default
+    const serverOptions: Parameters<typeof launchStrandweave>[0] = {
       configPath,
       dataDir,
       port,
@@ -217,7 +256,29 @@ describe("init command e2e", () => {
       executionDir: INIT_TEST_DIR,
       reuseTestDirectory: true, // Don't clean the directory - it has our init files
       logPrefix: "[Init E2E]",
-    });
+    };
+
+    if (binarySetup) {
+      // Use binary command override
+      serverOptions.commandOverride = getBinaryCommandOverride(binarySetup.binaryPath);
+    } else if (needsVerdaccio()) {
+      // Use package manager command override
+      const commandOverride = getCommandOverride();
+      if (commandOverride) {
+        serverOptions.commandOverride = commandOverride;
+      }
+      // Add registry URL to env for verdaccio
+      if (verdaccioSetup) {
+        serverOptions.env = {
+          ...serverOptions.env,
+          npm_config_registry: verdaccioSetup.registry.registryURL,
+        };
+      }
+    }
+
+    // Launch server using the data directory created by init
+    // Use INIT_TEST_DIR as both cwd (for output files) and execution directory
+    const server = await launchStrandweave(serverOptions);
 
     try {
       // Wait for the run to complete

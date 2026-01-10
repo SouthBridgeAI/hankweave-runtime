@@ -75,6 +75,18 @@ async function build() {
   // Make executable
   await Bun.$`chmod +x ${outfile}`;
 
+  // Copy shims directory to dist
+  console.log("📋 Copying shims directory...");
+  const shimsSource = join(import.meta.dir, "..", "shims");
+  const shimsTarget = join(distDir, "shims");
+
+  if (existsSync(shimsSource)) {
+    await Bun.$`cp -r ${shimsSource} ${shimsTarget}`;
+    console.log(`✅ Copied shims to ${shimsTarget}`);
+  } else {
+    console.warn("⚠️  Warning: shims directory not found at", shimsSource);
+  }
+
   console.log("\n✅ Build complete!");
   console.log(`📁 Output: ${outfile}`);
 

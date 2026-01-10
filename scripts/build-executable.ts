@@ -113,12 +113,15 @@ async function main() {
 
   // Build the list of files to embed (use relative paths - they work better with embedding)
   const filesToEmbed = [
+    // Claude Agent SDK files
     path.join(SDK_PATH, "cli.js"),
     path.join(SDK_PATH, "resvg.wasm"),
     path.join(SDK_PATH, "tree-sitter.wasm"),
     path.join(SDK_PATH, "tree-sitter-bash.wasm"),
     path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, ripgrepPlatform === "x64-win32" ? "rg.exe" : "rg"),
     path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, "ripgrep.node"),
+    // Shim files (use .js extension for embedding compatibility)
+    path.join("shims", "gemini", "index.js"),
   ];
 
   // Verify all files exist

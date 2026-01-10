@@ -67,13 +67,16 @@ import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 // Use __dirname to ensure we're always relative to this test file
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
-const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
-const CODONS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons.config.json");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = generateTestTimestamp();
-const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
+
+// These paths are determined at runtime based on test mode (binary vs normal)
+let DATA_SOURCE_FILE: string;
+let TEST_RESULTS_DIR: string;
+let CODONS_CONFIG: string;
+let TEST_RUN_DIR: string;
+let TEST_CWD: string; // Working directory for tests
 
 // Import types and utilities from the server
 import { type HistoryBatchEvent, isJournaledEvent } from "../../server/schemas/event-schemas.js";
@@ -83,6 +86,15 @@ import type {
   ErrorEvent,
   ServerEvent,
 } from "../../server/types/types.js";
+// Import Binary helpers
+import {
+  type BinarySetup,
+  cleanupBinary,
+  copyTestFixtures,
+  getBinaryCommandOverride,
+  needsBinary,
+  setupBinary,
+} from "../utils/binary.js";
 // Import connectStrandweaveClient for sync client
 import { connectStrandweaveClient } from "../utils/strandweave-server-test-helpers.js";
 // Import Verdaccio helpers
@@ -95,23 +107,12 @@ import {
 } from "../utils/verdaccio.js";
 
 // Server configuration - Updated for execution isolation
-const serverConfig: TestServerConfig = {
-  testRunDir: TEST_RUN_DIR,
-  configFile: CODONS_CONFIG,
-  port: 0, // Will be set dynamically
-  testMode: "e2e-happy-path",
-  dataSourceDir: DATA_SOURCE_FILE, // New: specify data source file
-  // Use project root as cwd so npx can find .npmrc and registry config
-  // The server itself will use --data and --execution flags to isolate its work
-  cwd: TEST_ROOT,
-  useDataFlag: true, // New: use --data flag
-  startNew: true, // Force new execution for tests
-};
+// Will be initialized in setupAndRunCodons() after paths are determined
+let serverConfig: TestServerConfig;
 
 // The strandweave-results will be created by the server in its execution directory
 // Since we're using --data and --start-new, it will be in a temp execution directory
-// For now, we'll check in the cwd where npx runs, but this might need adjustment
-const strandweaveResultsDir = path.join(serverConfig.cwd, "strandweave-results/");
+let strandweaveResultsDir: string;
 
 // -------------
 // Verdaccio Setup (conditional based on env vars)
@@ -121,6 +122,9 @@ const projectRoot = path.resolve(TEST_ROOT);
 
 // Module-level Verdaccio state
 let verdaccioSetup: VerdaccioSetup | null = null;
+
+// Module-level Binary state
+let binarySetup: BinarySetup | null = null;
 
 // -------------
 // Test State - Shared across all tests
@@ -190,6 +194,43 @@ const testState: TestState = {
 async function setupAndRunCodons(): Promise<void> {
   testState.testStartTime = Date.now();
 
+  // CONDITIONALLY setup binary if needed
+  if (needsBinary()) {
+    binarySetup = await setupBinary(projectRoot);
+    // Use isolated temp directory for binary tests (ensures no access to project codebase)
+    TEST_CWD = binarySetup.testIsolationDir;
+    console.log(`${colors.yellow}Using isolated test directory: ${TEST_CWD}${colors.reset}`);
+
+    // Copy test fixtures to isolated directory
+    copyTestFixtures(
+      ["tests/config/poem_guides.txt", "tests/config/test-codons.config.json"],
+      projectRoot,
+      TEST_CWD,
+    );
+  } else {
+    // Use project root for non-binary tests
+    TEST_CWD = TEST_ROOT;
+  }
+
+  // Set paths based on test working directory
+  DATA_SOURCE_FILE = path.join(TEST_CWD, "tests/config/poem_guides.txt");
+  TEST_RESULTS_DIR = path.join(TEST_CWD, "tests/test-results");
+  CODONS_CONFIG = path.join(TEST_CWD, "tests/config/test-codons.config.json");
+  TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
+  strandweaveResultsDir = path.join(TEST_CWD, "strandweave-results/");
+
+  // Initialize server config with determined paths
+  serverConfig = {
+    testRunDir: TEST_RUN_DIR,
+    configFile: CODONS_CONFIG,
+    port: 0, // Will be set dynamically
+    testMode: "e2e-happy-path",
+    dataSourceDir: DATA_SOURCE_FILE,
+    cwd: TEST_CWD,
+    useDataFlag: true,
+    startNew: true,
+  };
+
   // CONDITIONALLY setup Verdaccio if needed
   if (needsVerdaccio()) {
     verdaccioSetup = await setupVerdaccio(projectRoot);
@@ -212,17 +253,24 @@ async function setupAndRunCodons(): Promise<void> {
   serverConfig.port = await getFreePort();
   console.log(`${colors.blue}Using dynamic port: ${serverConfig.port}${colors.reset}`);
 
-  // Get command override if testing with package managers
-  const commandOverride = getCommandOverride();
-  if (commandOverride) {
-    serverConfig.commandOverride = commandOverride;
-    console.log(
-      `${colors.yellow}Using command: ${commandOverride.command} ${commandOverride.args.join(" ")}${colors.reset}`,
-    );
+  // Get command override - priority: binary > package manager
+  if (binarySetup) {
+    const binaryCommandOverride = getBinaryCommandOverride(binarySetup.binaryPath);
+    serverConfig.commandOverride = binaryCommandOverride;
+    console.log(`${colors.yellow}Using binary: ${binaryCommandOverride.command}${colors.reset}`);
+  } else if (needsVerdaccio()) {
+    const commandOverride = getCommandOverride();
+    if (commandOverride) {
+      serverConfig.commandOverride = commandOverride;
+      console.log(
+        `${colors.yellow}Using command: ${commandOverride.command} ${commandOverride.args.join(" ")}${colors.reset}`,
+      );
+    }
   }
 
   // If using Verdaccio, set registry URL in env (only for initial npx/bunx command, NOT server's child processes)
-  if (verdaccioSetup && commandOverride) {
+  // Not needed for binary mode
+  if (verdaccioSetup && !binarySetup && needsVerdaccio()) {
     serverConfig.env = {
       npm_config_registry: verdaccioSetup.registry.registryURL,
     };
@@ -974,6 +1022,12 @@ describe("Strandweave E2E Test", () => {
       }
 
       console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
+    }
+
+    // CONDITIONALLY cleanup binary if it was built
+    if (binarySetup) {
+      await cleanupBinary(binarySetup);
+      binarySetup = null;
     }
 
     // CONDITIONALLY cleanup Verdaccio if it was started
