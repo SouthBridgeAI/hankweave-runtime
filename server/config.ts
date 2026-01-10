@@ -1203,6 +1203,7 @@ export interface ValidationResult {
   };
   shimSelfTests?: Array<{
     modelId: string;
+    modelName: string;
     provider: string;
     passed: boolean;
     result: ShimSelfTestResult;
@@ -1605,6 +1606,7 @@ export async function validateStrand(
         // Record result
         result.shimSelfTests.push({
           modelId,
+          modelName: modelInfo.name,
           provider: modelInfo.providerId,
           passed: selfTestResult.overall.passed,
           result: selfTestResult,
@@ -1625,6 +1627,23 @@ export async function validateStrand(
 
         logger.log(`Self-test error for ${modelInfo.name}: ${errorMessage}`, "error");
 
+        // Record as a failed test so it will be caught by the failure check
+        result.shimSelfTests.push({
+          modelId,
+          modelName: modelInfo.name,
+          provider: modelInfo.providerId,
+          passed: false,
+          result: {
+            shim: { name: "unknown", version: "unknown" },
+            agent: { name: "unknown", version: "unknown", found: false },
+            checks: [],
+            overall: {
+              passed: false,
+              message: errorMessage,
+            },
+          },
+        });
+
         result.warnings.push(
           `Self-test error for ${modelInfo.name} (${modelInfo.providerId}/${modelId}): ${errorMessage}`,
         );
@@ -1634,6 +1653,20 @@ export async function validateStrand(
           fs.rmSync(tempExecutionPath, { recursive: true, force: true });
         }
       }
+    }
+  }
+
+  // Check if any self-tests failed and throw error if so
+  if (result.shimSelfTests && result.shimSelfTests.length > 0) {
+    const failedTests = result.shimSelfTests.filter((test) => !test.passed);
+    if (failedTests.length > 0) {
+      const errorMessages = failedTests.map(
+        (test) =>
+          `  - ${test.modelName} (${test.provider}/${test.modelId}): ${test.result.overall.message}`,
+      );
+      throw new Error(
+        `Self-test failed for ${failedTests.length} model(s):\n${errorMessages.join("\n")}\n\nPlease ensure all required API keys and dependencies are configured correctly.`,
+      );
     }
   }
 
