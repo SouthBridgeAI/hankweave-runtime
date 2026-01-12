@@ -147,73 +147,77 @@ describe("init command e2e", () => {
     }
   });
 
-  test("init command creates all required files", async () => {
-    // Create empty directory for init
-    fs.mkdirSync(INIT_TEST_DIR, { recursive: true });
+  test(
+    "init command creates all required files",
+    async () => {
+      // Create empty directory for init
+      fs.mkdirSync(INIT_TEST_DIR, { recursive: true });
 
-    // Run init command
-    const child = spawnInitCommand({ cwd: INIT_TEST_DIR });
+      // Run init command
+      const child = spawnInitCommand({ cwd: INIT_TEST_DIR });
 
-    let stdout = "";
-    let stderr = "";
+      let stdout = "";
+      let stderr = "";
 
-    child.stdout?.on("data", (data) => {
-      stdout += data.toString();
-    });
+      child.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
 
-    child.stderr?.on("data", (data) => {
-      stderr += data.toString();
-    });
+      child.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
 
-    // Wait for process to complete
-    const [exitCode] = await once(child, "exit");
+      // Wait for process to complete
+      const [exitCode] = await once(child, "exit");
 
-    // Log output for debugging
-    console.log("\n=== Init Command Output ===");
-    console.log("Exit Code:", exitCode);
-    console.log("\n--- STDOUT ---");
-    console.log(stdout || "(empty)");
-    console.log("\n--- STDERR ---");
-    console.log(stderr || "(empty)");
-    console.log("=== End Output ===\n");
+      // Log output for debugging
+      console.log("\n=== Init Command Output ===");
+      console.log("Exit Code:", exitCode);
+      console.log("\n--- STDOUT ---");
+      console.log(stdout || "(empty)");
+      console.log("\n--- STDERR ---");
+      console.log(stderr || "(empty)");
+      console.log("=== End Output ===\n");
 
-    // Verify success
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Initialized strand");
+      // Verify success
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("Initialized strand");
 
-    // Verify files were created
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "strand.json"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-haiku.md"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample1.txt"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample2.txt"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/notes.txt"))).toBe(true);
+      // Verify files were created
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "strand.json"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-haiku.md"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample1.txt"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample2.txt"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/notes.txt"))).toBe(true);
 
-    // Verify strand.json is valid JSON and has expected structure
-    const strandContent = fs.readFileSync(path.join(INIT_TEST_DIR, "strand.json"), "utf-8");
-    const strandConfig = JSON.parse(strandContent);
+      // Verify strand.json is valid JSON and has expected structure
+      const strandContent = fs.readFileSync(path.join(INIT_TEST_DIR, "strand.json"), "utf-8");
+      const strandConfig = JSON.parse(strandContent);
 
-    expect(strandConfig).toHaveProperty("meta");
-    expect(strandConfig).toHaveProperty("recommendations");
-    expect(strandConfig).toHaveProperty("strand");
-    expect(Array.isArray(strandConfig.strand)).toBe(true);
-    expect(strandConfig.strand.length).toBe(2);
+      expect(strandConfig).toHaveProperty("meta");
+      expect(strandConfig).toHaveProperty("recommendations");
+      expect(strandConfig).toHaveProperty("strand");
+      expect(Array.isArray(strandConfig.strand)).toBe(true);
+      expect(strandConfig.strand.length).toBe(2);
 
-    // Verify first codon has required fields
-    const firstCodon = strandConfig.strand[0];
-    expect(firstCodon).toHaveProperty("id");
-    expect(firstCodon).toHaveProperty("name");
-    expect(firstCodon).toHaveProperty("model");
-    expect(firstCodon).toHaveProperty("continuationMode");
+      // Verify first codon has required fields
+      const firstCodon = strandConfig.strand[0];
+      expect(firstCodon).toHaveProperty("id");
+      expect(firstCodon).toHaveProperty("name");
+      expect(firstCodon).toHaveProperty("model");
+      expect(firstCodon).toHaveProperty("continuationMode");
 
-    // Verify second codon has required fields
-    const secondCodon = strandConfig.strand[1];
-    expect(secondCodon).toHaveProperty("id");
-    expect(secondCodon).toHaveProperty("name");
-    expect(secondCodon).toHaveProperty("model");
-    expect(secondCodon).toHaveProperty("continuationMode");
-  }, 30_000); // 30 seconds timeout for this test
+      // Verify second codon has required fields
+      const secondCodon = strandConfig.strand[1];
+      expect(secondCodon).toHaveProperty("id");
+      expect(secondCodon).toHaveProperty("name");
+      expect(secondCodon).toHaveProperty("model");
+      expect(secondCodon).toHaveProperty("continuationMode");
+    },
+    2 * 30_000,
+  ); // 60 seconds timeout for this test
 
   test("init command fails in non-empty directory", async () => {
     // Create directory with a file

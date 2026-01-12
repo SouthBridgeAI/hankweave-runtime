@@ -115,28 +115,7 @@ function computeFileHash(content: Buffer | string): string {
 }
 
 /**
- * Get the Bun virtual filesystem prefix for the current platform.
- * - Unix: /$bunfs/root
- * - Windows: X:/~BUN/root (where X is the drive letter from process.argv[1])
- */
-function getBunVfsPrefix(): string {
-  const mainPath = process.argv[1] || "";
-
-  // Windows: extract drive letter from path like "B:/~BUN/root/..."
-  const windowsMatch = mainPath.match(/^([A-Z]):\/~BUN\/root/i);
-  if (windowsMatch) {
-    return `${windowsMatch[1]}:/~BUN/root`;
-  }
-
-  // Unix: standard prefix
-  return "/$bunfs/root";
-}
-
-/**
- * Read an embedded file.
- *
- * First tries to find the file in Bun.embeddedFiles (the recommended way),
- * then falls back to Bun.file() with various path formats.
+ * Read an embedded file from Bun.embeddedFiles.
  *
  * Throws if the file doesn't exist or can't be read.
  */
@@ -144,7 +123,7 @@ async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
   // Normalize to forward slashes
   const normalizedPath = embeddedPath.replace(/\\/g, "/");
 
-  // FIRST: Try to find in Bun.embeddedFiles (most reliable method)
+  // Try to find in Bun.embeddedFiles
   const embeddedFiles = (
     globalThis as {
       Bun?: { embeddedFiles?: Iterable<Blob & { name: string }> };
@@ -162,39 +141,8 @@ async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
     }
   }
 
-  // SECOND: Try Bun.file() with various path formats
-  const vfsPrefix = getBunVfsPrefix();
-
-  const pathsToTry = [
-    `${vfsPrefix}/${normalizedPath}`, // Platform-specific Bun virtual filesystem
-    normalizedPath, // Relative path
-    `/$bunfs/root/${normalizedPath}`, // Unix-style (fallback)
-    embeddedPath, // Original path
-  ];
-
-  const errors: string[] = [];
-
-  for (const tryPath of pathsToTry) {
-    try {
-      const file = Bun.file(tryPath);
-      const exists = await file.exists();
-      if (exists) {
-        const buffer = await file.arrayBuffer();
-        if (buffer.byteLength > 0) {
-          return buffer;
-        }
-        errors.push(`${tryPath}: file exists but is empty`);
-      } else {
-        errors.push(`${tryPath}: does not exist`);
-      }
-    } catch (error) {
-      errors.push(`${tryPath}: ${(error as Error).message}`);
-    }
-  }
-
-  throw new Error(
-    `Embedded file not found: ${embeddedPath}\nTried paths:\n  ${errors.join("\n  ")}`,
-  );
+  // File not found in embedded files
+  throw new Error(`Embedded file not found: ${embeddedPath}`);
 }
 
 /**

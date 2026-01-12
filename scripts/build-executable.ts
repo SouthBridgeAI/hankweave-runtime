@@ -160,6 +160,9 @@ async function main() {
     buildArgs.push(`--target=${bunTarget}`);
   }
 
+  // Disable content hashing for embedded files to preserve original names
+  buildArgs.push("--asset-naming", "[name].[ext]");
+
   // Add embed flags
   for (const file of filesToEmbed) {
     buildArgs.push("--embed", file);
