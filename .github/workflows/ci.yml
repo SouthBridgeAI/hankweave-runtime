@@ -14,6 +14,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+
 jobs:
   lint-and-typecheck:
     name: Lint and Type Check
@@ -94,10 +99,6 @@ jobs:
         run: npm install -g @google/gemini-cli
 
       - name: Run integration tests
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
         run: bun test tests/integration
 
   # init-e2e-normal:
@@ -165,10 +166,6 @@ jobs:
   #     - name: Run basic validation
   #       shell: bash
   #       working-directory: ${{ steps.test-dir.outputs.test_dir }}
-  #       env:
-  #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-  #         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-  #         STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
   #       run: |
   #         if [[ "$RUNNER_OS" == "Windows" ]]; then
   #           bun "${{ github.workspace }}/server/index.ts" --validate --config=strand.json --data=./data
@@ -211,9 +208,6 @@ jobs:
 
   #     - name: Test package with Verdaccio
   #       env:
-  #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-  #         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-  #         STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
   #         TEST_INIT_ONLY: "true"
   #       run: bun scripts/test-with-verdaccio.ts
 
@@ -291,10 +285,6 @@ jobs:
   #     - name: Run basic validation
   #       shell: bash
   #       working-directory: ${{ steps.test-dir.outputs.test_dir }}
-  #       env:
-  #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-  #         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-  #         STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
   #       run: |
   #         if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
   #           "${{ github.workspace }}/releases/strandweave.exe" --validate --config=strand.json --data=./data
