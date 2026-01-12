@@ -29,18 +29,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
-          node-version: '20'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
+          install-gemini: 'false'
 
       - name: Run linting
         run: bun run lint
@@ -57,21 +49,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Install gemini-cli globally
-        run: npm install -g @google/gemini-cli
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       - name: Run unit tests
         run: bun test tests/unit
@@ -88,24 +67,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Install gemini-cli globally
-        run: npm install -g @google/gemini-cli
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       - name: Run init E2E test (normal mode)
-        run: bun scripts/e2e/init.ts normal
+        run: bun run test:e2e:init
 
   init-e2e-npx:
     name: Init E2E - NPX Mode
@@ -116,27 +82,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Install gemini-cli globally
-        run: npm install -g @google/gemini-cli
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       - name: Build package
         run: bun run build
 
       - name: Run init E2E test (npx mode)
-        run: bun scripts/e2e/init.ts npx
+        run: bun run test:e2e:init:npx
 
   init-e2e-binary:
     name: Init E2E - Binary Mode
@@ -147,143 +100,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Install gemini-cli globally
-        run: npm install -g @google/gemini-cli
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       - name: Build binary
         run: bun scripts/build-executable.ts linux-x64
 
       - name: Run init E2E test (binary mode)
-        run: bun scripts/e2e/init.ts binary
-
-  # init-e2e-npx:
-  #   name: Init E2E - NPX Mode (Verdaccio)
-  #   runs-on: ${{ matrix.os }}
-  #   timeout-minutes: 15
-
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       os: [ubuntu-latest, macos-latest, windows-latest]
-
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: '20'
-
-  #     - name: Setup Bun
-  #       uses: oven-sh/setup-bun@v2
-  #       with:
-  #         bun-version: latest
-
-  #     - name: Install dependencies
-  #       run: bun install
-
-  #     - name: Install gemini-cli globally
-  #       run: npm install -g @google/gemini-cli
-
-  #     - name: Build package
-  #       run: bun run build
-
-  #     - name: Test package with Verdaccio
-  #       env:
-  #         TEST_INIT_ONLY: "true"
-  #       run: bun scripts/test-with-verdaccio.ts
-
-  # init-e2e-executable:
-  #   name: Init E2E - Executable Mode
-  #   runs-on: ${{ matrix.os }}
-  #   timeout-minutes: 20
-
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       include:
-  #         - os: ubuntu-latest
-  #           target: linux-x64
-  #         - os: macos-latest
-  #           target: darwin-arm64
-  #         - os: windows-latest
-  #           target: windows-x64
-
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: '20'
-
-  #     - name: Setup Bun
-  #       uses: oven-sh/setup-bun@v2
-  #       with:
-  #         bun-version: latest
-
-  #     - name: Install dependencies
-  #       run: bun install
-
-  #     - name: Install gemini-cli globally
-  #       run: npm install -g @google/gemini-cli
-
-  #     - name: Build executable
-  #       run: bun scripts/build-executable.ts ${{ matrix.target }}
-
-  #     - name: Create test directory
-  #       id: test-dir
-  #       shell: bash
-  #       run: |
-  #         TEST_DIR=$(mktemp -d)
-  #         if [[ "$RUNNER_OS" == "Windows" ]]; then
-  #           TEST_DIR=$(cygpath -w "$TEST_DIR")
-  #         fi
-  #         echo "test_dir=${TEST_DIR}" >> $GITHUB_OUTPUT
-  #         echo "Created test directory: ${TEST_DIR}"
-
-  #     - name: Run init command (executable)
-  #       shell: bash
-  #       working-directory: ${{ steps.test-dir.outputs.test_dir }}
-  #       run: |
-  #         if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-  #           "${{ github.workspace }}/releases/strandweave.exe" --init
-  #         else
-  #           "${{ github.workspace }}/releases/strandweave" --init
-  #         fi
-
-  #     - name: Verify generated files
-  #       shell: bash
-  #       working-directory: ${{ steps.test-dir.outputs.test_dir }}
-  #       run: |
-  #         echo "Checking generated files..."
-  #         test -f strand.json && echo "✓ strand.json exists" || (echo "✗ strand.json missing" && exit 1)
-  #         test -f README.md && echo "✓ README.md exists" || (echo "✗ README.md missing" && exit 1)
-  #         test -f .gitignore && echo "✓ .gitignore exists" || (echo "✗ .gitignore missing" && exit 1)
-  #         test -d prompts && echo "✓ prompts/ directory exists" || (echo "✗ prompts/ missing" && exit 1)
-  #         test -d data && echo "✓ data/ directory exists" || (echo "✗ data/ missing" && exit 1)
-
-  #     - name: Run basic validation
-  #       shell: bash
-  #       working-directory: ${{ steps.test-dir.outputs.test_dir }}
-  #       run: |
-  #         if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-  #           "${{ github.workspace }}/releases/strandweave.exe" --validate --config=strand.json --data=./data
-  #         else
-  #           "${{ github.workspace }}/releases/strandweave" --validate --config=strand.json --data=./data
-  #         fi
+        run: bun run test:e2e:init:binary
