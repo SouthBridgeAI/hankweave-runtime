@@ -266,8 +266,14 @@ describe("Provider Fallback Scenarios", () => {
       expect(selectedModel).toBe("gpt-4o-mini");
 
       // Calculate cost difference
-      const claudeCost = registry.calculateCost("claude-3-5-sonnet-20241022", 1000, 500);
-      const gptCost = registry.calculateCost("gpt-4o-mini", 1000, 500);
+      const claudeCost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
+      const gptCost = registry.calculateCost("gpt-4o-mini", {
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
 
       console.log(
         `Fallback from Claude (${
@@ -438,17 +444,18 @@ describe("Provider Fallback Scenarios", () => {
       // Test cost calculation for different providers
       const testTokens = { input: 10000, output: 2000 };
 
-      const claudeCost = registry.calculateCost(
-        "claude-3-5-sonnet-20241022",
-        testTokens.input,
-        testTokens.output,
-      );
-      const gptCost = registry.calculateCost("gpt-4o-mini", testTokens.input, testTokens.output);
-      const geminiCost = registry.calculateCost(
-        "gemini-1.5-flash",
-        testTokens.input,
-        testTokens.output,
-      );
+      const claudeCost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+        inputTokens: testTokens.input,
+        outputTokens: testTokens.output,
+      });
+      const gptCost = registry.calculateCost("gpt-4o-mini", {
+        inputTokens: testTokens.input,
+        outputTokens: testTokens.output,
+      });
+      const geminiCost = registry.calculateCost("gemini-1.5-flash", {
+        inputTokens: testTokens.input,
+        outputTokens: testTokens.output,
+      });
 
       const costs = [
         {
@@ -494,7 +501,10 @@ describe("Provider Fallback Scenarios", () => {
 
       registry.setProviderAvailable("test", true);
 
-      const cost = registry.calculateCost("free-model", 1000, 500);
+      const cost = registry.calculateCost("free-model", {
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
       expect(cost).toBe(0);
 
       const formatted = registry.formatCost(0);
@@ -617,7 +627,10 @@ describe("Provider Fallback Scenarios", () => {
         registry.isModelAvailable("gpt-4o-mini"); // Should be false (unavailable)
         registry.isModelAvailable("gemini-1.5-flash"); // Should be true
         registry.getAvailableModels();
-        registry.calculateCost("gemini-1.5-flash", 1000, 500);
+        registry.calculateCost("gemini-1.5-flash", {
+          inputTokens: 1000,
+          outputTokens: 500,
+        });
       }
 
       const duration = performance.now() - start;

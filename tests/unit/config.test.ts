@@ -1,17 +1,17 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  calculateCost,
-  DEFAULT_CONFIG,
   loadCodonSequence,
   loadRuntimeConfig,
   loadStrandFile,
   loadStrandweaveRuntimeEnvVars,
   validateStrand,
 } from "../../server/config";
+import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
 import { CodonId } from "../../server/types/branded-types";
-import type { CodonConfig, ModelName } from "../../server/types/types";
+import type { ModelName } from "../../server/types/types";
+import { Logger } from "../../server/utils";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers";
 
 // -------------
@@ -51,103 +51,327 @@ const writeStrandConfig = (filePath: string, codons: unknown[]) => {
 // Tests
 // -------------
 
-describe("calculateCost", () => {
-  const costs = DEFAULT_CONFIG.costsPerMTok;
+// -------------
+// Model Validation Tests
+// -------------
 
-  test("calculates zero cost for zero tokens", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    expect(result).toBe(0);
+describe("Model Validation", () => {
+  beforeAll(() => {
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
-  test("calculates cost for only input tokens", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1000,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    expect(result).toBe(costs.input / 1000);
-  });
+  describe("in codonSchema (transforms to ModelInfo)", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-codon-model-test");
+    const configPath = path.join(tempDir, "test-config.json");
 
-  test("calculates cost for only output tokens", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 0,
-        outputTokens: 1000,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    expect(result).toBe(costs.output / 1000);
-  });
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
 
-  test("calculates cost for mixed token types", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1000,
-        outputTokens: 2000,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    const expected = (costs.input + 2 * costs.output) / 1000;
-    expect(result).toBe(expected);
-  });
+    afterEach(() => {
+      cleanup(tempDir);
+    });
 
-  test("handles very large token counts without overflow", () => {
-    const largeTokens = Number.MAX_SAFE_INTEGER / 1000;
-    expect(() =>
-      calculateCost(
+    test("accepts valid Claude model shortcuts (sonnet, opus, haiku)", () => {
+      const models = ["sonnet", "opus", "haiku"];
+
+      for (const model of models) {
+        const config = [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ];
+
+        writeStrandConfig(configPath, config);
+        const result = loadCodonSequence(configPath);
+
+        expect(result).toHaveLength(1);
+        const codon = result[0];
+        if (codon.type !== "loop") {
+          expect(codon.model).toBeDefined();
+          expect(codon.model.modelId).toContain(model);
+        }
+      }
+    });
+
+    test("accepts valid Gemini models", () => {
+      const models = ["gemini-2.5-flash"];
+
+      for (const model of models) {
+        const config = [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ];
+
+        writeStrandConfig(configPath, config);
+        const result = loadCodonSequence(configPath);
+
+        expect(result).toHaveLength(1);
+        const codon = result[0];
+        if (codon.type !== "loop") {
+          expect(codon.model).toBeDefined();
+          expect(typeof codon.model.modelId).toBe("string");
+        }
+      }
+    });
+
+    test("throws error for invalid model", () => {
+      const config = [
         {
-          inputTokens: largeTokens,
-          outputTokens: largeTokens,
-          cacheCreationTokens: largeTokens,
-          cacheReadTokens: largeTokens,
+          id: "test-codon",
+          name: "Test Codon",
+          model: "invalid-model-xyz",
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
         },
-        costs,
-      ),
-    ).not.toThrow();
+      ];
+
+      writeStrandConfig(configPath, config);
+      expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
+    });
+
+    test("throws error for empty model string", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "",
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ];
+
+      writeStrandConfig(configPath, config);
+      expect(() => loadCodonSequence(configPath)).toThrow();
+    });
+
+    test("validates model in loop codons", () => {
+      const config = [
+        {
+          type: "loop",
+          id: "test-loop",
+          name: "Test Loop",
+          terminateOn: {
+            type: "iterationLimit" as const,
+            limit: 2,
+          },
+          codons: [
+            {
+              id: "loop-codon",
+              name: "Loop Codon",
+              model: "invalid-loop-model",
+              continuationMode: "fresh" as const,
+              promptText: "Test prompt",
+            },
+          ],
+        },
+      ];
+
+      writeStrandConfig(configPath, config);
+      expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
+    });
   });
 
-  test("maintains precision to 6 decimal places", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1234,
-        outputTokens: 5678,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    const expected = (1234 * costs.input + 5678 * costs.output) / 1_000_000;
-    expect(result).toBeCloseTo(expected, 6);
+  describe("in strandRecommendationsSchema (keeps as string)", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-recommendations-model-test");
+    const strandPath = path.join(tempDir, "test-strand.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("accepts valid model in recommendations", () => {
+      const models = ["sonnet", "opus", "haiku"];
+
+      for (const model of models) {
+        const strandContent = {
+          recommendations: {
+            model,
+          },
+          strand: [
+            {
+              id: "test-codon",
+              name: "Test Codon",
+              model: "sonnet" as ModelName,
+              continuationMode: "fresh" as const,
+              promptText: "Test prompt",
+            },
+          ],
+        };
+
+        createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+        const result = loadStrandFile(strandPath);
+
+        // Model should stay as string in recommendations
+        expect(result.recommendations?.model).toBe(model);
+        expect(typeof result.recommendations?.model).toBe("string");
+      }
+    });
+
+    test("throws error for invalid model in recommendations", () => {
+      const strandContent = {
+        recommendations: {
+          model: "gpt-4-turbo",
+        },
+        strand: [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model: "sonnet" as ModelName,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ],
+      };
+
+      createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+      expect(() => loadStrandFile(strandPath)).toThrow("Invalid");
+    });
+
+    test("allows undefined model in recommendations", () => {
+      const strandContent = {
+        recommendations: {
+          dataHashTimeLimit: 5000,
+          // No model field
+        },
+        strand: [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model: "sonnet" as ModelName,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ],
+      };
+
+      createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+      const result = loadStrandFile(strandPath);
+
+      expect(result.recommendations?.model).toBeUndefined();
+    });
   });
 
-  test("calculates cache tokens correctly", () => {
-    const result = calculateCost(
-      {
-        inputTokens: 1000,
-        outputTokens: 1000,
-        cacheCreationTokens: 500,
-        cacheReadTokens: 0,
-      },
-      costs,
-    );
-    const expected = (costs.input + costs.output + 0.5 * costs.inputCache) / 1000;
-    expect(result).toBe(expected);
+  describe("in runtimeConfigSchema (keeps as string)", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-runtime-model-test");
+    const runtimeConfigPath = path.join(tempDir, "strandweave.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("accepts valid model in runtime config", () => {
+      const models = ["sonnet", "opus", "haiku", "gemini-2.5-flash"];
+
+      for (const model of models) {
+        const runtimeContent = {
+          model,
+          port: 8080,
+        };
+
+        createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+        const result = loadRuntimeConfig(runtimeConfigPath);
+
+        // Model should stay as string in runtime config
+        expect(result.model).toBe(model);
+        expect(typeof result.model).toBe("string");
+      }
+    });
+
+    test("throws error for invalid model in runtime config", () => {
+      const runtimeContent = {
+        model: "this is not a model", // Invalid - not in registry
+        port: 8080,
+      };
+
+      createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+      expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow("Invalid");
+    });
+
+    test("allows undefined model in runtime config", () => {
+      const runtimeContent = {
+        port: 8080,
+        // No model field
+      };
+
+      createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+      const result = loadRuntimeConfig(runtimeConfigPath);
+
+      expect(result.model).toBeUndefined();
+    });
+
+    test("throws error for empty model string in runtime config", () => {
+      const runtimeContent = {
+        model: "",
+        port: 8080,
+      };
+
+      createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
+      expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow();
+    });
+  });
+
+  describe("model validation error messages", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-model-error-test");
+    const configPath = path.join(tempDir, "test-config.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("provides helpful error message for invalid model", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "nonexistent-model",
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ];
+
+      writeStrandConfig(configPath, config);
+
+      try {
+        loadCodonSequence(configPath);
+        throw new Error("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        const message = (error as Error).message;
+        expect(message).toContain("Invalid model");
+        expect(message).toContain("nonexistent-model");
+      }
+    });
   });
 });
 
@@ -155,16 +379,26 @@ describe("validateStrand", () => {
   const tempDir = path.resolve("tests", "test-area", "temp-validation-test");
   const configPath = path.join(tempDir, "validate-config.json");
   const projectPath = path.join(tempDir, "project");
+  let testLogger: Logger;
 
   // Set up before each test
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
     fs.mkdirSync(projectPath, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    testLogger = mockLogger;
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("validates basic configuration successfully", async () => {
@@ -181,7 +415,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.codonCount).toBe(1);
     expect(result.promptFileCount).toBe(1);
@@ -209,7 +443,7 @@ describe("validateStrand", () => {
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "sonnet",
+        model: "opus", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt2.md",
         appendSystemPromptFile: "./system.md",
@@ -227,7 +461,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.codonCount).toBe(2);
     expect(result.promptFileCount).toBe(2);
@@ -258,7 +492,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      "Duplicate codon ID",
+    );
   });
 
   test("warns about duplicate codon names", async () => {
@@ -282,7 +518,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain('Duplicate codon name "Duplicate Name"');
@@ -302,7 +538,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is empty");
@@ -323,7 +559,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is large");
@@ -353,7 +589,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(0);
@@ -385,7 +621,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(1);
@@ -416,7 +652,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Invalid target path");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      "Invalid target path",
+    );
   });
 
   test("warns about potentially dangerous commands", async () => {
@@ -441,7 +679,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Potentially dangerous command detected");
@@ -462,7 +700,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("but there's no previous codon");
@@ -483,14 +721,14 @@ describe("validateStrand", () => {
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "sonnet",
+        model: "opus", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("doesn't track any files");
@@ -522,14 +760,14 @@ describe("validateStrand", () => {
       {
         id: "codon-after-loop",
         name: "Codon After Loop",
-        model: "sonnet",
+        model: "opus", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Continues from previous loop");
@@ -559,8 +797,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
-      "Command cannot be empty",
+    // Union schema reports "Invalid input" at top level, nested errors contain "Command cannot be empty"
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      "Failed to load codon config",
     );
   });
 
@@ -573,7 +812,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, invalidConfig);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow();
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow();
   });
 
   test("counts codons inside loops correctly", async () => {
@@ -606,7 +845,7 @@ describe("validateStrand", () => {
           {
             id: "loop-codon-2",
             name: "Loop Codon 2",
-            model: "sonnet",
+            model: "opus", // Same model for continue-previous
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -615,14 +854,14 @@ describe("validateStrand", () => {
       {
         id: "final-codon",
         name: "Final Codon",
-        model: "sonnet",
+        model: "opus", // Match last codon in loop
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     // Should count: 1 standalone + 2 in loop + 1 final = 4 total codons
     expect(result.codonCount).toBe(4);
@@ -660,7 +899,9 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate codon ID");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      "Duplicate codon ID",
+    );
   });
 
   test("throws when codon ID conflicts with loop ID", async () => {
@@ -695,7 +936,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow("Duplicate");
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow("Duplicate");
   });
 
   test("validates codons inside loops with proper context in error messages", async () => {
@@ -763,7 +1004,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
 
     // Should not throw, but should have warnings
     expect(result.warnings.length).toBeGreaterThan(0);
@@ -794,7 +1035,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
   });
@@ -830,7 +1071,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
   });
@@ -857,7 +1098,7 @@ describe("validateStrand", () => {
           {
             id: "codon-2",
             name: "Codon 2",
-            model: "sonnet",
+            model: "opus", // Same model for continue-previous
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -866,7 +1107,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -902,7 +1143,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath)).rejects.toThrow(
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*contextExceeded.*context.*exhausted/i,
     );
   });
@@ -938,7 +1179,7 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -968,10 +1209,364 @@ describe("validateStrand", () => {
     ];
 
     writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath);
+    const result = await validateStrand(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(1);
   });
+
+  test("allows two codons with different models and fresh continuationMode", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "codon-1",
+        name: "First Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "codon-2",
+        name: "Second Codon",
+        model: "sonnet", // Different model
+        continuationMode: "fresh", // Fresh mode is OK
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+    // Should not throw
+    expect(result.codonCount).toBe(2);
+  });
+
+  test("throws when codon with continue-previous has different model from previous codon", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "codon-1",
+        name: "First Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "codon-2",
+        name: "Second Codon",
+        model: "sonnet", // Different model
+        continuationMode: "continue-previous", // This should fail
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      /continue-previous.*model differs.*session ID/i,
+    );
+  });
+
+  test("throws when codon after loop has different model with continue-previous", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon",
+            name: "Loop Codon",
+            model: "opus", // Loop uses opus
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+      {
+        id: "after-loop",
+        name: "After Loop",
+        model: "sonnet", // Different model
+        continuationMode: "continue-previous", // This should fail
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      /continue-previous.*model differs.*session ID/i,
+    );
+  });
+
+  test("throws when codon after loop with multiple codons has different model", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "haiku",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "opus", // Last codon in loop uses opus
+            continuationMode: "continue-previous",
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+      {
+        id: "after-loop",
+        name: "After Loop",
+        model: "sonnet", // Different from last codon in loop
+        continuationMode: "continue-previous", // This should fail
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      /continue-previous.*model differs.*session ID/i,
+    );
+  });
+
+  test("throws when codons inside loop have different models with continue-previous", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "haiku",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "opus", // Different model
+            continuationMode: "continue-previous", // This should fail
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+      /continue-previous.*model differs.*previous codon in loop.*session ID/i,
+    );
+  });
+
+  test("allows codons inside loop with different models when using fresh", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "haiku",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "opus", // Different model
+            continuationMode: "fresh", // Fresh mode is OK
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+    // Should not throw
+    expect(result.codonCount).toBe(2);
+  });
+
+  test("runs self-tests for all unique models", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "anthropic-codon",
+        name: "Anthropic Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "gemini-codon",
+        name: "Gemini Codon",
+        model: "gemini-2.5-flash",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+      {
+        id: "anthropic-codon-2",
+        name: "Another Anthropic Codon",
+        model: "sonnet", // Different Anthropic model
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+
+    // Should have run self-tests
+    expect(result.shimSelfTests).toBeDefined();
+    expect(Array.isArray(result.shimSelfTests)).toBe(true);
+
+    // Type guard to ensure shimSelfTests exists
+    if (!result.shimSelfTests) {
+      throw new Error("shimSelfTests should be defined");
+    }
+
+    expect(result.shimSelfTests.length).toBeGreaterThan(0);
+
+    // Should have self-tests for unique models
+    const modelIds = result.shimSelfTests.map((test) => test.modelId);
+    expect(modelIds.length).toBeGreaterThan(0);
+
+    // Each self-test should have required fields
+    for (const test of result.shimSelfTests) {
+      expect(test.modelId).toBeDefined();
+      expect(test.provider).toBeDefined();
+      expect(typeof test.passed).toBe("boolean");
+      expect(test.result).toBeDefined();
+      expect(test.result.shim).toBeDefined();
+      expect(test.result.agent).toBeDefined();
+      expect(Array.isArray(test.result.checks)).toBe(true);
+      expect(test.result.overall).toBeDefined();
+      expect(typeof test.result.overall.passed).toBe("boolean");
+    }
+  }, 10_000); // 10 second timeout for self-tests
+
+  test("collects unique models from loops", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "loop-codon-1",
+            name: "Loop Codon 1",
+            model: "opus",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+          {
+            id: "loop-codon-2",
+            name: "Loop Codon 2",
+            model: "gemini-2.5-flash",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+          },
+        ],
+      },
+      {
+        id: "regular-codon",
+        name: "Regular Codon",
+        model: "opus", // Same as loop-codon-1, should not duplicate
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+
+    // Should have run self-tests
+    expect(result.shimSelfTests).toBeDefined();
+    expect(Array.isArray(result.shimSelfTests)).toBe(true);
+
+    // Type guard to ensure shimSelfTests exists
+    if (!result.shimSelfTests) {
+      throw new Error("shimSelfTests should be defined");
+    }
+
+    // Should have unique models only (opus should appear once, gemini once)
+    const modelIds = result.shimSelfTests.map((test) => test.modelId);
+    const uniqueModelIds = new Set(modelIds);
+    expect(modelIds.length).toBe(uniqueModelIds.size);
+  }, 10_000); // 10 second timeout for self-tests
+
+  test("adds warnings when self-tests fail", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "test-codon",
+        name: "Test Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+      },
+    ];
+
+    writeStrandConfig(configPath, config);
+    const result = await validateStrand(configPath, projectPath, testLogger);
+
+    // Check shimSelfTests structure
+    expect(result.shimSelfTests).toBeDefined();
+
+    // Type guard to ensure shimSelfTests exists
+    if (!result.shimSelfTests) {
+      throw new Error("shimSelfTests should be defined");
+    }
+
+    // If any self-test failed, there should be a warning
+    const failedTests = result.shimSelfTests.filter((test) => !test.passed);
+    if (failedTests.length > 0) {
+      expect(result.warnings.length).toBeGreaterThan(0);
+      expect(result.warnings.some((w) => w.includes("Self-test failed"))).toBe(true);
+    }
+  }, 10_000); // 10 second timeout for self-tests
 });
 
 describe("loadStrandFile", () => {
@@ -981,10 +1576,18 @@ describe("loadStrandFile", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("loads valid strand file with all fields", () => {
@@ -1020,7 +1623,10 @@ describe("loadStrandFile", () => {
     const result = loadStrandFile(strandPath);
 
     expect(result.meta).toEqual(strandContent.meta);
-    expect(result.recommendations).toEqual(strandContent.recommendations);
+    // Check recommendations fields (model stays as string)
+    expect(result.recommendations?.model).toBe("sonnet");
+    expect(result.recommendations?.dataHashTimeLimit).toBe(10000);
+    expect(result.recommendations?.sentinel).toEqual(strandContent.recommendations.sentinel);
     expect(result.strand).toHaveLength(1);
     expect(result.strand[0].id).toBe("test-codon");
   });
@@ -1190,10 +1796,18 @@ describe("loadRuntimeConfig", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("returns empty object when file doesn't exist", () => {
@@ -1616,16 +2230,25 @@ describe("loadCodonSequence", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
+
+    // Initialize LLM Provider Registry for model validation
+    const mockLogger = new Logger("/dev/null");
+    LlmProviderRegistry.getInstance({
+      logger: mockLogger,
+      performHealthCheckOnInit: false,
+    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
+    LlmProviderRegistry.resetInstance();
   });
 
   test("loads valid configuration", () => {
-    const validConfig: CodonConfig[] = [
+    // Input data (before Zod parsing) - don't type as CodonConfig since that's the output type
+    const validConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1637,7 +2260,17 @@ describe("loadCodonSequence", () => {
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject(validConfig[0]);
+    expect(result[0].type).toBe("codon");
+
+    // Model is transformed to ModelInfo, so check other fields
+    const codon = result[0] as import("../../server/types/types.js").Codon;
+    expect(codon.id).toBe("test-codon");
+    expect(codon.name).toBe("Test Codon");
+    expect(codon.promptText).toBe("Test prompt");
+    expect(codon.continuationMode).toBe("fresh");
+    // Check that model was transformed and validated
+    expect(codon.model).toBeDefined();
+    expect(codon.model.modelId).toContain("opus");
   });
 
   test("throws on missing required fields", () => {
@@ -1654,11 +2287,11 @@ describe("loadCodonSequence", () => {
   });
 
   test("throws on invalid model names", () => {
-    const invalidConfig: CodonConfig[] = [
+    const invalidConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
-        model: "invalid-model-name" as ModelName, // Intentionally invalid for testing
+        model: "invalid-model-name", // Intentionally invalid for testing
         continuationMode: "fresh",
         promptText: "Test prompt",
       },
@@ -1683,9 +2316,9 @@ describe("loadCodonSequence", () => {
 
     // Both provided - loadCodonSequence doesn't actually validate this case, it just uses promptFile if both are provided
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
-    const bothConfig: CodonConfig[] = [
+    const bothConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1708,9 +2341,9 @@ describe("loadCodonSequence", () => {
   test("validates appendSystemPromptFile XOR appendSystemPromptText", () => {
     // Both provided
     createTestFile(path.join(tempDir, "system.md"), "System prompt");
-    const bothConfig: CodonConfig[] = [
+    const bothConfig = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1726,9 +2359,9 @@ describe("loadCodonSequence", () => {
 
   test("resolves relative paths correctly", () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
-    const config: CodonConfig[] = [
+    const config = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1749,9 +2382,9 @@ describe("loadCodonSequence", () => {
     createTestFile(path.join(tempDir, "prompt1.md"), "Prompt 1");
     createTestFile(path.join(tempDir, "prompt2.md"), "Prompt 2");
 
-    const config: CodonConfig[] = [
+    const config = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1792,9 +2425,9 @@ describe("loadCodonSequence", () => {
   });
 
   test("throws on non-existent prompt files", () => {
-    const config: CodonConfig[] = [
+    const config = [
       {
-        id: CodonId("test-codon"),
+        id: "test-codon",
         name: "Test Codon",
         model: "opus",
         continuationMode: "fresh",
@@ -1814,9 +2447,9 @@ describe("loadCodonSequence", () => {
     if (process.platform !== "win32") {
       fs.chmodSync(promptPath, 0o000);
 
-      const config: CodonConfig[] = [
+      const config = [
         {
-          id: CodonId("test-codon"),
+          id: "test-codon",
           name: "Test Codon",
           model: "opus",
           continuationMode: "fresh",

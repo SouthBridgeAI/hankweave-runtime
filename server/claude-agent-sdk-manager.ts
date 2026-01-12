@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
+import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import type { Codon } from "./types/types.js";
+import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
 /**
@@ -22,7 +23,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
-    private model?: import("./types/types.js").ModelName,
+    private model?: ModelInfo,
   ) {
     super();
   }
@@ -87,10 +88,10 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    */
   private buildSDKOptions(codon: Codon, previousSessionId: string | null): Options {
     // Use model override if provided, otherwise use codon model
-    const model = this.model || codon.model;
+    const modelInfo = this.model || codon.model;
 
     const options: Options = {
-      model: this.mapModelName(model),
+      model: modelInfo.modelId,
       cwd: this.executionPath,
       permissionMode: "bypassPermissions",
       abortController: this.abortController,
@@ -175,23 +176,12 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
     // Log model usage
     if (this.model) {
-      this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
+      this.logger.log(
+        `Using model override: ${modelInfo.modelId} (codon config specified: ${codon.model.modelId})`,
+      );
     }
 
     return options;
-  }
-
-  /**
-   * Map our model names to SDK model names.
-   */
-  private mapModelName(model: string): string {
-    // Map short names to full model names
-    const modelMap: Record<string, string> = {
-      sonnet: "claude-sonnet-4-5-20250929",
-      opus: "claude-opus-4-5-20251101",
-    };
-
-    return modelMap[model] || model;
   }
 
   /**
@@ -483,5 +473,106 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       });
       this.logStream = undefined;
     }
+  }
+
+  /**
+   * Run self-test to verify Claude Agent SDK environment setup.
+   * Checks for API authentication (API key or OAuth token) and SDK availability.
+   *
+   * @returns Promise resolving to self-test results
+   */
+  async runSelfTest(): Promise<ShimSelfTestResult> {
+    this.logger.log("Running Claude Agent SDK self-test...");
+
+    const checks: ShimSelfTestResult["checks"] = [];
+
+    // Check 1: Verify SDK is installed (by trying to import it)
+    let sdkFound = false;
+    let sdkVersion = "unknown";
+    try {
+      // SDK is already imported, so if we got this far, it's available
+      sdkFound = true;
+      // Try to get version from package.json
+      try {
+        const sdkPackageJsonPath = path.join(
+          path.dirname(require.resolve("@anthropic-ai/claude-agent-sdk")),
+          "../package.json",
+        );
+        const sdkPackageJson = JSON.parse(fs.readFileSync(sdkPackageJsonPath, "utf-8"));
+        sdkVersion = sdkPackageJson.version || "unknown";
+      } catch {
+        // If we can't read the version, that's ok
+        sdkVersion = "installed";
+      }
+
+      checks.push({
+        name: "sdk_installed",
+        passed: true,
+        message: `Claude Agent SDK found (version ${sdkVersion})`,
+      });
+    } catch (error) {
+      checks.push({
+        name: "sdk_installed",
+        passed: false,
+        message:
+          "Claude Agent SDK not found or failed to load: " +
+          (error instanceof Error ? error.message : "Unknown error"),
+      });
+    }
+
+    // Check 2: Verify authentication (API key or OAuth token)
+    const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+    const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    const hasAuth = hasApiKey || hasOAuthToken;
+
+    const authMethod = hasOAuthToken
+      ? "CLAUDE_CODE_OAUTH_TOKEN"
+      : hasApiKey
+        ? "ANTHROPIC_API_KEY"
+        : "none";
+
+    checks.push({
+      name: "authentication",
+      passed: hasAuth,
+      message: hasAuth
+        ? `Authentication configured via ${authMethod}`
+        : "No authentication found (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)",
+    });
+
+    // Check 3: Verify custom base URL if set
+    if (this.anthropicBaseUrl) {
+      checks.push({
+        name: "custom_base_url",
+        passed: true,
+        message: `Using custom Anthropic base URL: ${this.anthropicBaseUrl}`,
+      });
+    }
+
+    // Overall result
+    const allPassed = checks.every((check) => check.passed);
+
+    const result: ShimSelfTestResult = {
+      shim: {
+        name: "claude-agent-sdk-manager",
+        version: sdkVersion,
+      },
+      agent: {
+        name: "claude-agent-sdk",
+        version: sdkVersion,
+        found: sdkFound,
+      },
+      checks,
+      overall: {
+        passed: allPassed,
+        message: allPassed ? "All checks passed" : "Some checks failed",
+      },
+    };
+
+    this.logger.log(
+      `Self-test completed: ${result.overall.passed ? "PASSED" : "FAILED"}`,
+      result.overall.passed ? "info" : "error",
+    );
+
+    return result;
   }
 }

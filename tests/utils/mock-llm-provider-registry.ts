@@ -134,13 +134,22 @@ export class MockLlmProviderRegistry {
     return { success: true, info: model };
   }
 
-  calculateCost(modelName: string, inputTokens: number, outputTokens: number): number | null {
+  calculateCost(
+    modelName: string,
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheCreationTokens?: number;
+    },
+  ): number | null {
     const model = this.mockModels.get(modelName);
     if (!model) return null;
 
+    // Mock currently doesn't have cache token costs, so we ignore them
     return (
-      (inputTokens / 1_000_000) * model.costPerMillionInput +
-      (outputTokens / 1_000_000) * model.costPerMillionOutput
+      (usage.inputTokens / 1_000_000) * model.costPerMillionInput +
+      (usage.outputTokens / 1_000_000) * model.costPerMillionOutput
     );
   }
 

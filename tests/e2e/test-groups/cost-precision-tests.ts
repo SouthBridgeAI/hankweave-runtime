@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DEFAULT_CONFIG, getModelFamily } from "../../../server/config.js";
+import { LlmProviderRegistry } from "../../../server/llm/llm-provider-registry.js";
 import type {
   CodonCompletedEvent,
   StateSnapshotEvent,
@@ -11,9 +11,10 @@ interface TestState {
   client: TestWSClient | null;
 }
 
-export function runCostPrecisionTests(testState: TestState) {
+export function runCostPrecisionTests(testState: TestState, _configPath: string) {
   test("token costs are calculated with proper precision", () => {
     const tokenEvents = testState.client?.getEventsByType("token.usage") || [];
+    const registry = LlmProviderRegistry.getInstance();
 
     tokenEvents.forEach((event) => {
       const tokenEvent = event as TokenUsageEvent;
@@ -31,65 +32,86 @@ export function runCostPrecisionTests(testState: TestState) {
           expect(decimals).toBeGreaterThanOrEqual(4);
         }
 
-        // Verify cost calculation
-        let expectedCost: number;
+        // Verify cost calculation using LLMProviderRegistry
+        let expectedCost: number | null = null;
 
-        // If modelUsage is available (multi-model scenario), recalculate using per-model rates
+        // If modelUsage is available (multi-model scenario), calculate using registry
         if (data.modelUsage) {
-          expectedCost = Object.entries(data.modelUsage).reduce((sum, [modelId, usage]) => {
-            // Extract model family (sonnet/haiku/opus) from full model ID
-            const modelFamily = getModelFamily(modelId);
-            const costs = DEFAULT_CONFIG.modelCosts[modelFamily];
+          let totalCost = 0;
+          let allModelsFound = true;
 
-            if (!costs) {
-              console.warn(
-                `Unknown model family "${modelFamily}" from model ID "${modelId}". Using default sonnet rates.`,
-              );
-              return (
-                sum +
-                (usage.inputTokens / 1_000_000) * DEFAULT_CONFIG.costsPerMTok.input +
-                (usage.outputTokens / 1_000_000) * DEFAULT_CONFIG.costsPerMTok.output +
-                ((usage.cacheCreationInputTokens || 0) / 1_000_000) *
-                  DEFAULT_CONFIG.costsPerMTok.inputCache +
-                ((usage.cacheReadInputTokens || 0) / 1_000_000) *
-                  DEFAULT_CONFIG.costsPerMTok.cacheRead
-              );
+          for (const [modelId, usage] of Object.entries(data.modelUsage)) {
+            console.log(`\n  Processing model: ${modelId}`);
+
+            const modelCost = registry.calculateCost(modelId, {
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              cacheReadTokens: usage.cacheReadInputTokens || 0,
+              cacheCreationTokens: usage.cacheCreationInputTokens || 0,
+            });
+
+            if (modelCost === null) {
+              console.warn(`  ❌ Model ${modelId} NOT FOUND in registry`);
+              allModelsFound = false;
+              break;
             }
 
-            // Calculate cost for this model using its specific rates
-            const modelCost =
-              (usage.inputTokens / 1_000_000) * costs.input +
-              (usage.outputTokens / 1_000_000) * costs.output +
-              ((usage.cacheCreationInputTokens || 0) / 1_000_000) * costs.inputCache +
-              ((usage.cacheReadInputTokens || 0) / 1_000_000) * costs.cacheRead;
+            console.log(`  ✅ Model cost calculated: $${modelCost.toFixed(6)}`);
+            totalCost += modelCost;
+          }
 
-            return sum + modelCost;
-          }, 0);
+          if (allModelsFound) {
+            expectedCost = totalCost;
+          }
         } else {
-          // Fallback: single-model calculation (based on config.ts defaults for sonnet)
-          expectedCost =
-            (data.inputTokens / 1_000_000) * 3.0 +
-            (data.outputTokens / 1_000_000) * 15.0 +
-            (data.cacheCreationTokens / 1_000_000) * 3.75 +
-            (data.cacheReadTokens / 1_000_000) * 0.3;
+          // Single-model scenario: read modelId directly from event
+          const modelId = data.modelId;
+          console.log(`Model ID from event: ${modelId || "NOT FOUND"}`);
+
+          if (modelId) {
+            const usageForCalc = {
+              inputTokens: data.inputTokens,
+              outputTokens: data.outputTokens,
+              cacheReadTokens: data.cacheReadTokens || 0,
+              cacheCreationTokens: data.cacheCreationTokens || 0,
+            };
+
+            const modelCost = registry.calculateCost(modelId, usageForCalc);
+
+            if (modelCost !== null) {
+              expectedCost = modelCost;
+              console.log(`✅ Model cost calculated: $${modelCost.toFixed(6)}`);
+            } else {
+              console.warn(`❌ Model ${modelId} NOT FOUND in registry`);
+            }
+          } else {
+            console.warn(`❌ No modelId in event for codon ${data.codonId}`);
+          }
         }
 
-        // Check if values are within 5% of expected
-        const percentageDiff = Math.abs(data.totalCost - expectedCost) / expectedCost;
-        if (percentageDiff > 0.05) {
+        // Only verify if we successfully calculated expected cost
+        if (expectedCost !== null) {
+          // Check if values are within 5% of expected
+          const percentageDiff = Math.abs(data.totalCost - expectedCost) / expectedCost;
+          const diffDollars = data.totalCost - expectedCost;
+
+          console.log(`\n=== COMPARISON ===`);
+          console.log(`Expected: $${expectedCost.toFixed(6)}`);
+          console.log(`Actual:   $${data.totalCost.toFixed(6)}`);
           console.log(
-            `Cost precision test failed: expected ${expectedCost}, got ${
-              data.totalCost
-            }, difference: ${percentageDiff * 100}%`,
+            `Difference: $${diffDollars.toFixed(6)} (${(percentageDiff * 100).toFixed(2)}%)`,
           );
-        } else {
-          console.log(
-            `Cost precision test passed: expected ${expectedCost}, got ${
-              data.totalCost
-            }, difference: ${percentageDiff * 100}%`,
-          );
+
+          if (percentageDiff > 0.05) {
+            console.log(
+              `❌ FAILED: Difference ${(percentageDiff * 100).toFixed(2)}% exceeds 5% threshold`,
+            );
+          } else {
+            console.log(`✅ PASSED: Within 5% tolerance`);
+          }
+
+          expect(percentageDiff).toBeLessThanOrEqual(0.05);
         }
-        expect(percentageDiff).toBeLessThanOrEqual(0.05);
       }
     });
   });

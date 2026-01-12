@@ -6,8 +6,10 @@ import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { initProject } from "./init-command.js";
+import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
 import type { StrandweaveConfig } from "./types/types.js";
+import { Logger } from "./utils.js";
 
 // -------------
 // Helper Functions
@@ -246,6 +248,16 @@ Examples:
     strandPath: absoluteConfigPath,
   });
 
+  // Initialize LLM Provider Registry singleton before ANY config parsing/validation
+  // This must happen before validateStrand() since Zod transforms use it for model validation
+  const validationLogger = new Logger(
+    path.join(executionSetup.executionPath, "model-validation.log"),
+  );
+  LlmProviderRegistry.getInstance({
+    logger: validationLogger,
+    performHealthCheckOnInit: false,
+  });
+
   try {
     // Validation mode
     if (validateMode) {
@@ -254,6 +266,7 @@ Examples:
       const validationResult = await validateStrand(
         absoluteConfigPath,
         executionSetup.executionPath, // Changed from readOnlySourceData
+        validationLogger,
       );
 
       // Print summary
@@ -308,6 +321,7 @@ Examples:
     const { codons, warnings } = await validateStrand(
       absoluteConfigPath,
       executionSetup.executionPath, // Changed from readOnlySourceData
+      validationLogger,
     );
 
     // Log any non-fatal warnings

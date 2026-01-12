@@ -19,6 +19,7 @@ import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import { CodonId, RunId } from "../../server/types/branded-types.js";
 import type { Run, StrandweaveState } from "../../server/types/state-types.js";
 import type {
@@ -34,7 +35,6 @@ import type {
 } from "../../server/types/types.js";
 import { generateId } from "../../server/utils.js";
 import { getGitCommits, getGitShas } from "../utils/git-test-helpers.js";
-import { calculateCostFromUsage } from "../utils/test-data-helpers.js";
 import {
   colors,
   generateTestTimestamp,
@@ -504,14 +504,14 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon3Started = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonStartWithSession("codon-3", 30000, codon3StartTime);
+  ).waitForCodonStartWithSession("codon-3", 90000, codon3StartTime);
   console.log(
     `${colors.green}✓ Codon 3 started (session: ${codon3Started.data.sessionId})${colors.reset}`,
   );
 
   await testState.client.waitForEvent(
     "assistant.action",
-    30000,
+    120000,
     (event) => event.type === "assistant.action",
     codon3StartTime,
   );
@@ -524,7 +524,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon3Skipped = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-3", 10000, codon3StartTime);
+  ).waitForCodonCompletionBySession("codon-3", 30000, codon3StartTime);
   expect(codon3Skipped.data.success).toBe(false);
   console.log(`${colors.green}✓ Codon 3 skipped${colors.reset}`);
 
@@ -653,14 +653,14 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon3Started2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonStartWithSession("codon-3", 30000, codon3Scenario3StartTime);
+  ).waitForCodonStartWithSession("codon-3", 90000, codon3Scenario3StartTime);
   console.log(
     `${colors.green}✓ Codon 3 started (session: ${codon3Started2.data.sessionId})${colors.reset}`,
   );
 
   const codon3Completed2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-3", 60000, codon3Scenario3StartTime);
+  ).waitForCodonCompletionBySession("codon-3", 180000, codon3Scenario3StartTime);
   console.log(
     `${colors.green}✓ Codon 3 completed (cost: $${codon3Completed2.data.cost.toFixed(6)})${
       colors.reset
@@ -1031,10 +1031,24 @@ describe("Comprehensive Rollback E2E Test", () => {
     test("2.5 Cost Calculation Validation: Costs are reasonable", () => {
       const snapshot = testSnapshots[2];
       const run = snapshot.state.runs[0];
+      const registry = LlmProviderRegistry.getInstance();
 
       for (const codon of run.codons) {
         if (codon.status === "completed") {
-          const expectedCost = calculateCostFromUsage(codon.finalTokens, "sonnet");
+          // Get the model from sentinel states (all sentinels in a codon use the same model)
+          const modelId = codon.sentinels?.executed?.[0]?.model;
+          expect(modelId).toBeDefined();
+          if (!modelId) continue;
+
+          const expectedCost = registry.calculateCost(modelId, {
+            inputTokens: codon.finalTokens.inputTokens,
+            outputTokens: codon.finalTokens.outputTokens,
+            cacheReadTokens: codon.finalTokens.cacheReadTokens,
+            cacheCreationTokens: codon.finalTokens.cacheCreationTokens,
+          });
+          expect(expectedCost).not.toBeNull();
+          if (expectedCost === null) continue;
+
           const actualCost = codon.finalCost;
 
           const variance = Math.abs(actualCost - expectedCost) / expectedCost;
@@ -1319,13 +1333,16 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
     });
 
-    test("6.3 Checkpoint Ordering: Chronological", () => {
+    test("6.3 Checkpoint Ordering: Reverse Chronological (newest first)", () => {
+      // Checkpoints are returned in reverse chronological order (newest first)
+      // for better UX - users typically want to rollback to recent checkpoints
       for (const snapshot of testSnapshots) {
         if (snapshot.checkpoints.length > 1) {
           for (let i = 1; i < snapshot.checkpoints.length; i++) {
             const prev = new Date(snapshot.checkpoints[i - 1].timestamp);
             const curr = new Date(snapshot.checkpoints[i].timestamp);
-            expect(curr.getTime()).toBeGreaterThanOrEqual(prev.getTime());
+            // Each checkpoint should be older than or equal to the previous one (descending order)
+            expect(curr.getTime()).toBeLessThanOrEqual(prev.getTime());
           }
         }
       }

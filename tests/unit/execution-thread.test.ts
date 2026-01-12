@@ -4,36 +4,37 @@ import { analyzeExecutionThread, findContinuationSessionId } from "../../server/
 import type { CodonId, RunId, SessionId, StrandweaveState } from "../../server/types/state-types";
 import type { CodonConfig } from "../../server/types/types";
 import type { Logger } from "../../server/utils";
+import { createTestCodon } from "../utils/test-codon-factory.js";
 
 // Test data and utilities
 const testCodonConfigs: CodonConfig[] = [
-  {
-    id: "codon-1" as CodonId,
+  createTestCodon({
+    id: "codon-1",
     name: "Codon 1: TestCodon1",
     promptFile: ["./codon1Prompt1.md", "./codon1Prompt2.md"],
     model: "sonnet",
     continuationMode: "fresh",
     description: "Write three pick one",
     trackedFiles: ["notes/**/*", "*.md"],
-  },
-  {
-    id: "codon-2" as CodonId,
+  }),
+  createTestCodon({
+    id: "codon-2",
     name: "Codon 2: Schema Generation",
     promptText: "Can you put your second favorite poem...",
     model: "sonnet",
     continuationMode: "continue-previous",
     description: "Write one more",
     trackedFiles: ["notes/**/*"],
-  },
-  {
-    id: "codon-3" as CodonId,
+  }),
+  createTestCodon({
+    id: "codon-3",
     name: "Codon 3: More Validation",
     promptText: "Can you convert the poems...",
     model: "sonnet",
     continuationMode: "fresh",
     description: "Convert poems to code",
     trackedFiles: ["typescript_code/src/**/*.ts"],
-  },
+  }),
 ];
 
 // Mock logger that captures log messages
