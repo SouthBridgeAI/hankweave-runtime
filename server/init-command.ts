@@ -65,19 +65,6 @@ Your analysis should include:
 
 Please create your analysis in a file called \`analysis-gemini.md\` in the execution directory.`,
 
-  ".gitignore": `# Strandweave execution directories
-.strandweave/
-
-# Output files
-strandweave-results/
-
-# Environment
-.env
-.env.local
-
-# Node
-node_modules/`,
-
   "README.md": `# Strand
 
 This strand was initialized with \`strandweave init\`.
@@ -186,6 +173,5 @@ export async function initProject(targetDir: string): Promise<void> {
   console.log("  - data/sample1.txt");
   console.log("  - data/sample2.txt");
   console.log("  - data/notes.txt");
-  console.log("  - .gitignore");
   console.log("  - README.md");
 }

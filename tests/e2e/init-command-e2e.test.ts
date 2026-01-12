@@ -185,7 +185,6 @@ describe("init command e2e", () => {
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "strand.json"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-haiku.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, ".gitignore"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample1.txt"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample2.txt"))).toBe(true);
