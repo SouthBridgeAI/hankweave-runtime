@@ -26,13 +26,6 @@
   },
   "scripts": {
     "build": "bun scripts/build.ts",
-    "build:exe": "bun scripts/build-executable.ts",
-    "build:exe:linux": "bun scripts/build-executable.ts linux-x64 strandweave-linux-x64",
-    "build:exe:linux-arm": "bun scripts/build-executable.ts linux-arm64 strandweave-linux-arm64",
-    "build:exe:mac": "bun scripts/build-executable.ts darwin-arm64 strandweave-darwin-arm64",
-    "build:exe:mac-intel": "bun scripts/build-executable.ts darwin-x64 strandweave-darwin-x64",
-    "build:exe:windows": "bun scripts/build-executable.ts windows-x64 strandweave-windows-x64",
-    "build:exe:all": "bun build:exe:linux && bun build:exe:linux-arm && bun build:exe:mac && bun build:exe:mac-intel && bun build:exe:windows",
     "prepublishOnly": "bun run build",
     "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
     "tc": "bun typecheck",
