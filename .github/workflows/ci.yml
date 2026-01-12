@@ -104,8 +104,70 @@ jobs:
       - name: Install gemini-cli globally
         run: npm install -g @google/gemini-cli
 
-      - name: Run init E2E test
-        run: bun scripts/e2e/test-init-normal.ts
+      - name: Run init E2E test (normal mode)
+        run: bun scripts/e2e/init.ts normal
+
+  init-e2e-npx:
+    name: Init E2E - NPX Mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install gemini-cli globally
+        run: npm install -g @google/gemini-cli
+
+      - name: Build package
+        run: bun run build
+
+      - name: Run init E2E test (npx mode)
+        run: bun scripts/e2e/init.ts npx
+
+  init-e2e-binary:
+    name: Init E2E - Binary Mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install gemini-cli globally
+        run: npm install -g @google/gemini-cli
+
+      - name: Build binary
+        run: bun scripts/build-executable.ts linux-x64
+
+      - name: Run init E2E test (binary mode)
+        run: bun scripts/e2e/init.ts binary
 
   # init-e2e-npx:
   #   name: Init E2E - NPX Mode (Verdaccio)
