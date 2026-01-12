@@ -10,7 +10,7 @@ import { initProject } from "./init-command.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
 import type { StrandweaveConfig } from "./types/types.js";
-import { Logger } from "./utils.js";
+import { getMetadata, Logger } from "./utils.js";
 
 // -------------
 // Helper Functions
@@ -64,6 +64,9 @@ function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
 // -------------
 
 async function main() {
+  // Print version banner
+  console.log(`\nStrandweave v${getMetadata().version}\n`);
+
   // Strict argument validation
   const rawArgs = process.argv.slice(2);
   const validPatterns = [
@@ -385,6 +388,7 @@ Examples:
   }
 }
 
+// Run main if this is the main module
 if (import.meta.main) {
   main();
 }

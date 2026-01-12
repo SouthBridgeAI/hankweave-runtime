@@ -99,6 +99,17 @@ async function main() {
 
   console.log("🔨 Building Strandweave standalone executable\n");
 
+  // Read version from package.json for build-time constants
+  const packageJson = JSON.parse(fs.readFileSync("package.json", "utf-8"));
+  const buildVersion = packageJson.version;
+  const buildDate = new Date().toISOString();
+  const buildTarget = target || "current-platform";
+
+  console.log(`📝 Build metadata:`);
+  console.log(`   Version: ${buildVersion}`);
+  console.log(`   Target: ${buildTarget}`);
+  console.log(`   Date: ${buildDate}\n`);
+
   // Verify SDK exists
   if (!fs.existsSync(SDK_PATH)) {
     console.error(`❌ Claude Agent SDK not found at ${SDK_PATH}`);
@@ -154,6 +165,12 @@ async function main() {
     buildArgs.push("--embed", file);
   }
 
+  // Add build-time constants via --define
+  // Note: Values must be valid JavaScript expressions (e.g., strings need quotes)
+  buildArgs.push("--define", `BUILD_VERSION=${JSON.stringify(buildVersion)}`);
+  buildArgs.push("--define", `BUILD_DATE=${JSON.stringify(buildDate)}`);
+  buildArgs.push("--define", `BUILD_TARGET=${JSON.stringify(buildTarget)}`);
+
   buildArgs.push("--outfile", outputFile);
 
   console.log(`\n🛠️  Build command:\n   bun ${buildArgs.join(" ")}\n`);
@@ -161,10 +178,11 @@ async function main() {
 
   try {
     // Run the build using spawn
+    // Note: shell:false to avoid quote escaping issues with --define
     const buildProc = spawn("bun", buildArgs, {
       cwd: process.cwd(),
       stdio: "inherit",
-      shell: true, // Required for Windows compatibility
+      shell: false,
     });
 
     await new Promise<void>((resolve, reject) => {

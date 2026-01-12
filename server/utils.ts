@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Message, Peer } from "crossws";
 import { serve as crosswsServe } from "crossws/server";
 // Import cross-platform WebSocket client from crossws
@@ -7,6 +8,7 @@ import { serve as crosswsServe } from "crossws/server";
 import WebSocket from "crossws/websocket";
 import glob from "fast-glob";
 import merge from "lodash.merge";
+import { z } from "zod";
 import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
@@ -242,22 +244,16 @@ export function detectRuntime(): Runtime {
  * @returns true if running from a compiled executable, false otherwise
  */
 export function isCompiledExecutable(): boolean {
-  console.log("\n🔍 isCompiledExecutable() detection:");
-
   // Allow override for testing (avoids Bun's module mock persistence bug)
   // https://github.com/oven-sh/bun/issues/7823
   if (process.env.STRANDWEAVE_TEST_IS_COMPILED !== undefined) {
-    const result = process.env.STRANDWEAVE_TEST_IS_COMPILED === "true";
-    console.log(`  ✓ Using test override: ${result}`);
-    return result;
+    return process.env.STRANDWEAVE_TEST_IS_COMPILED === "true";
   }
 
   // We only support Bun compiled executables
   const isBun = typeof Bun !== "undefined";
-  console.log(`  Runtime: ${isBun ? "Bun" : "Other (Node.js/Deno)"}`);
 
   if (!isBun) {
-    console.log("  ✗ Not running in Bun, cannot be compiled executable");
     return false;
   }
 
@@ -269,6 +265,137 @@ export function isCompiledExecutable(): boolean {
     path.startsWith("/$bunfs/") || // Unix
     /^[A-Z]:[/\\]~BUN[/\\]/i.test(path); // Windows (both forward and backslashes)
   return isCompiled;
+}
+
+// -------------
+// Metadata Management
+// -------------
+
+/**
+ * Schema for application metadata.
+ * This is embedded in compiled executables and used to track version info.
+ */
+export const metadataSchema = z.object({
+  version: z.string().min(1, "Version cannot be empty"),
+  buildDate: z.string().optional(),
+  buildTarget: z.string().optional(),
+});
+
+export type Metadata = z.infer<typeof metadataSchema>;
+
+/**
+ * Metadata class for managing application metadata.
+ * Supports serialization/deserialization and validation via Zod.
+ */
+export class AppMetadata {
+  private constructor(private data: Metadata) {}
+
+  /**
+   * Create metadata from object (validates with Zod schema)
+   */
+  static create(data: unknown): AppMetadata {
+    const validated = metadataSchema.parse(data);
+    return new AppMetadata(validated);
+  }
+
+  /**
+   * Deserialize metadata from JSON string
+   */
+  static deserialize(json: string): AppMetadata {
+    const data = JSON.parse(json);
+    return AppMetadata.create(data);
+  }
+
+  /**
+   * Serialize metadata to JSON string
+   */
+  serialize(): string {
+    return JSON.stringify(this.data, null, 2);
+  }
+
+  /**
+   * Get the version string
+   */
+  get version(): string {
+    return this.data.version;
+  }
+
+  /**
+   * Get the build date (if available)
+   */
+  get buildDate(): string | undefined {
+    return this.data.buildDate;
+  }
+
+  /**
+   * Get the build target (if available)
+   */
+  get buildTarget(): string | undefined {
+    return this.data.buildTarget;
+  }
+
+  /**
+   * Get raw metadata object
+   */
+  toObject(): Metadata {
+    return { ...this.data };
+  }
+}
+
+// Cached metadata to avoid repeated file reads/imports
+let cachedMetadata: AppMetadata | null = null;
+const FALLBACK_VERSION = "1.0.0";
+
+/**
+ * Get application metadata (version, build info, etc.).
+ * Works in both development (reads from filesystem) and compiled executable
+ * (uses build-time constants) contexts.
+ *
+ * In compiled mode: Uses BUILD_VERSION, BUILD_DATE, BUILD_TARGET constants
+ * In dev mode: Reads from package.json
+ *
+ * @returns AppMetadata instance, or metadata with fallback version
+ */
+export function getMetadata(): AppMetadata {
+  if (cachedMetadata) return cachedMetadata;
+
+  try {
+    // For compiled executables, use build-time constants
+    // These are injected via Bun's --define flag and replaced at compile-time
+    if (isCompiledExecutable()) {
+      try {
+        // Build-time constants are compile-time replacements
+        // They will be replaced with their actual values during compilation
+        const buildMetadata = {
+          version: BUILD_VERSION,
+          buildDate: BUILD_DATE,
+          buildTarget: BUILD_TARGET,
+        };
+        cachedMetadata = AppMetadata.create(buildMetadata);
+        return cachedMetadata as AppMetadata;
+      } catch {
+        // Fallback if constants are somehow not defined
+        cachedMetadata = AppMetadata.create({ version: FALLBACK_VERSION });
+        return cachedMetadata as AppMetadata;
+      }
+    }
+
+    // Fallback: Read from package.json (dev mode)
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const packageJsonPath = path.resolve(__dirname, "../package.json");
+    if (fs.existsSync(packageJsonPath)) {
+      const content = fs.readFileSync(packageJsonPath, "utf-8");
+      const pkg = JSON.parse(content);
+      cachedMetadata = AppMetadata.create({ version: pkg.version || FALLBACK_VERSION });
+    } else {
+      // Ultimate fallback
+      cachedMetadata = AppMetadata.create({ version: FALLBACK_VERSION });
+    }
+  } catch {
+    cachedMetadata = AppMetadata.create({ version: FALLBACK_VERSION });
+  }
+
+  return cachedMetadata as AppMetadata;
 }
 
 /**

@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getMetadata } from "./utils.js";
 
 /**
  * Get the Bun virtual filesystem prefix for the current platform.
@@ -107,7 +108,7 @@ async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
 }
 
 // Version for directory naming (matches package version)
-const SHIM_VERSION = "0.1.21";
+const SHIM_VERSION = getMetadata().version;
 
 // Path prefix for embedded shim files (must match paths used during build)
 const EMBEDDED_SHIM_PATH = "shims";

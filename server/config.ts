@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { validateModel } from "./config-validation/model-validator.js";
 import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
@@ -9,18 +8,10 @@ import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { CodonId } from "./types/branded-types.js";
 import type { ModelName, ShimSelfTestResult } from "./types/types.js";
-import { deepMerge, type Logger } from "./utils.js";
+import { deepMerge, getMetadata, type Logger } from "./utils.js";
 
-// Get version from package.json
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const packageJsonPath = path.resolve(__dirname, "../package.json");
-let PACKAGE_VERSION = "1.0.0"; // Fallback version
-try {
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-  PACKAGE_VERSION = packageJson.version || "1.0.0";
-} catch {
-  // If package.json cannot be read, use fallback
-}
+// Get version from package metadata
+const PACKAGE_VERSION = getMetadata().version;
 
 // -------------
 // Constants

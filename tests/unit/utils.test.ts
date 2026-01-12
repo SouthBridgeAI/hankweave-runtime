@@ -4,9 +4,11 @@ import { rmSync } from "node:fs";
 import * as path from "node:path";
 import type { FileNode } from "../../server/types/types";
 import {
+  AppMetadata,
   buildFileTree,
   copyFiles,
   escapeShellArg,
+  getMetadata,
   Logger,
   renameWithRetry,
   serve,
@@ -1001,5 +1003,129 @@ describe("renameWithRetry", () => {
     } finally {
       fs.promises.rename = originalRename;
     }
+  });
+});
+
+describe("AppMetadata", () => {
+  test("creates metadata from valid object", () => {
+    const metadata = AppMetadata.create({
+      version: "1.0.0",
+      buildDate: "2024-01-01T00:00:00.000Z",
+      buildTarget: "darwin-arm64",
+    });
+
+    expect(metadata.version).toBe("1.0.0");
+    expect(metadata.buildDate).toBe("2024-01-01T00:00:00.000Z");
+    expect(metadata.buildTarget).toBe("darwin-arm64");
+  });
+
+  test("creates metadata with minimal fields", () => {
+    const metadata = AppMetadata.create({
+      version: "2.0.0",
+    });
+
+    expect(metadata.version).toBe("2.0.0");
+    expect(metadata.buildDate).toBeUndefined();
+    expect(metadata.buildTarget).toBeUndefined();
+  });
+
+  test("rejects empty version", () => {
+    expect(() => {
+      AppMetadata.create({
+        version: "",
+      });
+    }).toThrow();
+  });
+
+  test("rejects missing version", () => {
+    expect(() => {
+      AppMetadata.create({
+        buildDate: "2024-01-01T00:00:00.000Z",
+      });
+    }).toThrow();
+  });
+
+  test("serializes to JSON", () => {
+    const metadata = AppMetadata.create({
+      version: "1.2.3",
+      buildDate: "2024-01-01T00:00:00.000Z",
+    });
+
+    const json = metadata.serialize();
+    const parsed = JSON.parse(json);
+
+    expect(parsed.version).toBe("1.2.3");
+    expect(parsed.buildDate).toBe("2024-01-01T00:00:00.000Z");
+  });
+
+  test("deserializes from JSON string", () => {
+    const json = JSON.stringify({
+      version: "3.0.0",
+      buildDate: "2024-06-01T00:00:00.000Z",
+      buildTarget: "linux-x64",
+    });
+
+    const metadata = AppMetadata.deserialize(json);
+
+    expect(metadata.version).toBe("3.0.0");
+    expect(metadata.buildDate).toBe("2024-06-01T00:00:00.000Z");
+    expect(metadata.buildTarget).toBe("linux-x64");
+  });
+
+  test("toObject returns metadata object", () => {
+    const metadata = AppMetadata.create({
+      version: "1.0.0",
+      buildDate: "2024-01-01T00:00:00.000Z",
+    });
+
+    const obj = metadata.toObject();
+
+    expect(obj.version).toBe("1.0.0");
+    expect(obj.buildDate).toBe("2024-01-01T00:00:00.000Z");
+    expect(obj.buildTarget).toBeUndefined();
+  });
+
+  test("deserialize handles invalid JSON", () => {
+    expect(() => {
+      AppMetadata.deserialize("not valid json");
+    }).toThrow();
+  });
+
+  test("create validates schema", () => {
+    // Valid extra fields should be ignored (schema is not strict)
+    const metadata = AppMetadata.create({
+      version: "1.0.0",
+      extraField: "should be ignored",
+    });
+
+    expect(metadata.version).toBe("1.0.0");
+  });
+});
+
+describe("getMetadata", () => {
+  test("returns metadata with version", () => {
+    const metadata = getMetadata();
+
+    expect(metadata).toBeDefined();
+    expect(metadata.version).toBeDefined();
+    expect(typeof metadata.version).toBe("string");
+    expect(metadata.version.length).toBeGreaterThan(0);
+  });
+
+  test("returns consistent metadata on multiple calls", () => {
+    const metadata1 = getMetadata();
+    const metadata2 = getMetadata();
+
+    expect(metadata1.version).toBe(metadata2.version);
+    expect(metadata1.buildDate).toBe(metadata2.buildDate);
+    expect(metadata1.buildTarget).toBe(metadata2.buildTarget);
+  });
+
+  test("version follows semver-like format", () => {
+    const metadata = getMetadata();
+    const version = metadata.version;
+
+    // Should be either semver format (x.y.z) or fallback "1.0.0"
+    expect(version).toMatch(/^\d+\.\d+\.\d+/);
   });
 });
