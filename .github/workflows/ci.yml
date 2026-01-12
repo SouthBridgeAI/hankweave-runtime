@@ -48,33 +48,8 @@ jobs:
       - name: Run type check
         run: bun run tc
 
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run unit tests
-        run: bun test tests/unit
-
-  integration-tests:
-    name: Integration Tests
+  tests:
+    name: Unit & Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -97,6 +72,9 @@ jobs:
 
       - name: Install gemini-cli globally
         run: npm install -g @google/gemini-cli
+
+      - name: Run unit tests
+        run: bun test tests/unit
 
       - name: Run integration tests
         run: bun test tests/integration
