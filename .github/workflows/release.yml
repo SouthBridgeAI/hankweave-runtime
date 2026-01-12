@@ -85,7 +85,6 @@ jobs:
   build-executables:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    needs: publish-npm
     timeout-minutes: 20
 
     strategy:
@@ -94,14 +93,19 @@ jobs:
         include:
           - target: linux-x64
             os: ubuntu-latest
+            can_test: true
           - target: linux-arm64
             os: ubuntu-latest
+            can_test: false
           - target: darwin-x64
             os: macos-latest
+            can_test: false
           - target: darwin-arm64
             os: macos-latest
+            can_test: true
           - target: windows-x64
             os: windows-latest
+            can_test: true
 
     steps:
       - name: Checkout code
@@ -112,6 +116,50 @@ jobs:
 
       - name: Build executable
         run: bun scripts/build-executable.ts ${{ matrix.target }}
+
+      - name: Smoke test - Run --help
+        if: matrix.can_test
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            releases/strandweave.exe --help
+          else
+            ./releases/strandweave --help
+          fi
+
+      - name: Smoke test - Create test directory
+        if: matrix.can_test
+        id: test-dir
+        shell: bash
+        run: |
+          TEST_DIR=$(mktemp -d)
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            TEST_DIR=$(cygpath -w "$TEST_DIR")
+          fi
+          echo "test_dir=${TEST_DIR}" >> $GITHUB_OUTPUT
+          echo "Created test directory: ${TEST_DIR}"
+
+      - name: Smoke test - Run --init
+        if: matrix.can_test
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            "${{ github.workspace }}/releases/strandweave.exe" --init
+          else
+            "${{ github.workspace }}/releases/strandweave" --init
+          fi
+
+      - name: Smoke test - Run basic command
+        if: matrix.can_test
+        shell: bash
+        working-directory: ${{ steps.test-dir.outputs.test_dir }}
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            "${{ github.workspace }}/releases/strandweave.exe" --basic --data=./data
+          else
+            "${{ github.workspace }}/releases/strandweave" --basic --data=./data
+          fi
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
