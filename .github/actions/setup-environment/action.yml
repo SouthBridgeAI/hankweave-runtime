@@ -6,6 +6,10 @@ inputs:
     description: 'Install gemini-cli globally'
     required: false
     default: 'true'
+  registry-url:
+    description: 'Optional registry URL for npm publishing'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -14,6 +18,7 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        registry-url: ${{ inputs.registry-url || '' }}
 
     - name: Setup Bun
       uses: oven-sh/setup-bun@v2
