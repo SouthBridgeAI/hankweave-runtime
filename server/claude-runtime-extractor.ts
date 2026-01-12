@@ -122,6 +122,9 @@ function computeFileHash(content: Buffer | string): string {
 async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
   // Normalize to forward slashes
   const normalizedPath = embeddedPath.replace(/\\/g, "/");
+  const basename = path.basename(normalizedPath);
+  // Also check for basename with trailing dot (Bun adds this for extensionless files)
+  const basenameWithDot = `${basename}.`;
 
   // Try to find in Bun.embeddedFiles
   const embeddedFiles = (
@@ -131,8 +134,18 @@ async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
   ).Bun?.embeddedFiles;
   if (embeddedFiles) {
     for (const file of embeddedFiles) {
-      // The file.name contains the path used during --embed
-      if (file.name === normalizedPath || file.name === embeddedPath) {
+      // The file.name might be the full path or just the basename
+      // Bun sometimes strips paths when embedding
+      // Bun also adds a trailing dot for extensionless files with --asset-naming [name].[ext]
+      const fileBasename = path.basename(file.name);
+      if (
+        file.name === normalizedPath ||
+        file.name === embeddedPath ||
+        file.name === basename ||
+        file.name === basenameWithDot ||
+        fileBasename === basename ||
+        fileBasename === basenameWithDot
+      ) {
         const buffer = await file.arrayBuffer();
         if (buffer.byteLength > 0) {
           return buffer;
@@ -193,28 +206,29 @@ export async function extractClaudeSdkFiles(): Promise<string> {
   // Files to extract (paths must match what was embedded during build)
   // Note: WASM files are optional - they're for syntax highlighting and SVG rendering
   // The core Claude Code CLI functionality works without them
+  // Note: cli.js is embedded as cli.bundle to avoid Bun's special .js handling
   const filesToExtract = [
-    { name: "cli.js", required: true },
-    { name: "resvg.wasm", required: false }, // SVG rendering
-    { name: "tree-sitter.wasm", required: false }, // Syntax parsing
-    { name: "tree-sitter-bash.wasm", required: false }, // Bash syntax
+    { embeddedName: "cli.bundle", outputName: "cli.js", required: true },
+    { embeddedName: "resvg.wasm", outputName: "resvg.wasm", required: false }, // SVG rendering
+    { embeddedName: "tree-sitter.wasm", outputName: "tree-sitter.wasm", required: false }, // Syntax parsing
+    { embeddedName: "tree-sitter-bash.wasm", outputName: "tree-sitter-bash.wasm", required: false }, // Bash syntax
   ];
 
   // Extract main files
   for (const file of filesToExtract) {
     // Path matches what was embedded: node_modules/@anthropic-ai/claude-agent-sdk/<file>
-    const embeddedPath = `${EMBEDDED_SDK_PATH}/${file.name}`;
-    const destPath = path.join(extractDir, file.name);
+    const embeddedPath = `${EMBEDDED_SDK_PATH}/${file.embeddedName}`;
+    const destPath = path.join(extractDir, file.outputName);
 
     try {
       const content = await readEmbeddedFile(embeddedPath);
       await Bun.write(destPath, content);
-      console.log(`  ✓ Extracted ${file.name} (${computeFileHash(Buffer.from(content))})`);
+      console.log(`  ✓ Extracted ${file.outputName} (${computeFileHash(Buffer.from(content))})`);
     } catch (error) {
       if (file.required) {
-        throw new Error(`Failed to extract ${file.name}: ${(error as Error).message}`);
+        throw new Error(`Failed to extract ${file.outputName}: ${(error as Error).message}`);
       }
-      console.warn(`  ⚠ Could not extract ${file.name}: ${(error as Error).message}`);
+      console.warn(`  ⚠ Could not extract ${file.outputName}: ${(error as Error).message}`);
     }
   }
 
@@ -230,25 +244,34 @@ export async function extractClaudeSdkFiles(): Promise<string> {
     const rgNodeName = "ripgrep.node";
 
     // Extract rg binary
+    // Note: We pass the full path but readEmbeddedFile will also check by basename
     const rgEmbeddedPath = `${EMBEDDED_SDK_PATH}/vendor/ripgrep/${platformKey}/${rgBinaryName}`;
     const rgDestPath = path.join(ripgrepDestDir, rgBinaryName);
-    const rgContent = await readEmbeddedFile(rgEmbeddedPath);
-    await Bun.write(rgDestPath, rgContent);
+    try {
+      const rgContent = await readEmbeddedFile(rgEmbeddedPath);
+      await Bun.write(rgDestPath, rgContent);
 
-    // Make rg executable on Unix systems
-    if (platformKey !== "x64-win32") {
-      fs.chmodSync(rgDestPath, 0o755);
+      // Make rg executable on Unix systems
+      if (platformKey !== "x64-win32") {
+        fs.chmodSync(rgDestPath, 0o755);
+      }
+      console.log(`  ✓ Extracted vendor/ripgrep/${platformKey}/${rgBinaryName}`);
+    } catch (error) {
+      console.warn(`  ⚠ Could not extract ${rgBinaryName}: ${(error as Error).message}`);
     }
-    console.log(`  ✓ Extracted vendor/ripgrep/${platformKey}/${rgBinaryName}`);
 
     // Extract ripgrep.node
     const nodeEmbeddedPath = `${EMBEDDED_SDK_PATH}/vendor/ripgrep/${platformKey}/${rgNodeName}`;
     const nodeDestPath = path.join(ripgrepDestDir, rgNodeName);
-    const nodeContent = await readEmbeddedFile(nodeEmbeddedPath);
-    await Bun.write(nodeDestPath, nodeContent);
-    console.log(`  ✓ Extracted vendor/ripgrep/${platformKey}/${rgNodeName}`);
+    try {
+      const nodeContent = await readEmbeddedFile(nodeEmbeddedPath);
+      await Bun.write(nodeDestPath, nodeContent);
+      console.log(`  ✓ Extracted vendor/ripgrep/${platformKey}/${rgNodeName}`);
+    } catch (error) {
+      console.warn(`  ⚠ Could not extract ${rgNodeName}: ${(error as Error).message}`);
+    }
   } catch (error) {
-    console.warn(`  ⚠ Could not extract ripgrep binaries: ${(error as Error).message}`);
+    console.warn(`  ⚠ Could not setup ripgrep directory: ${(error as Error).message}`);
     console.warn("    (ripgrep functionality may be unavailable)");
   }
 

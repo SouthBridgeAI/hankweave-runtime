@@ -53,6 +53,9 @@ function getBunVfsPrefix(): string {
 async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
   // Normalize to forward slashes
   const normalizedPath = embeddedPath.replace(/\\/g, "/");
+  const basename = path.basename(normalizedPath);
+  // Also check for basename with trailing dot (Bun adds this for extensionless files)
+  const basenameWithDot = `${basename}.`;
 
   // FIRST: Try to find in Bun.embeddedFiles (most reliable method)
   const embeddedFiles = (
@@ -62,8 +65,18 @@ async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
   ).Bun?.embeddedFiles;
   if (embeddedFiles) {
     for (const file of embeddedFiles) {
-      // The file.name contains the path used during --embed
-      if (file.name === normalizedPath || file.name === embeddedPath) {
+      // The file.name might be the full path or just the basename
+      // Bun sometimes strips paths when embedding
+      // Bun also adds a trailing dot for extensionless files with --asset-naming [name].[ext]
+      const fileBasename = path.basename(file.name);
+      if (
+        file.name === normalizedPath ||
+        file.name === embeddedPath ||
+        file.name === basename ||
+        file.name === basenameWithDot ||
+        fileBasename === basename ||
+        fileBasename === basenameWithDot
+      ) {
         const buffer = await file.arrayBuffer();
         if (buffer.byteLength > 0) {
           return buffer;

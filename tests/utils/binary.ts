@@ -101,6 +101,14 @@ export async function setupBinary(projectRoot: string): Promise<BinarySetup> {
   console.log(`📦 Binary name: ${binaryName}`);
   console.log(`📦 Output path: ${binaryPath}`);
 
+  // Clean up ~/.strandweave directory to ensure fresh state for each test run
+  const strandweaveDir = path.join(os.homedir(), ".strandweave");
+  if (fs.existsSync(strandweaveDir)) {
+    console.log(`\n🧹 Removing ~/.strandweave directory...`);
+    fs.rmSync(strandweaveDir, { recursive: true, force: true });
+    console.log(`${colors.green}✓ Cleaned up ~/.strandweave${colors.reset}`);
+  }
+
   // Remove old test binary if it exists
   if (fs.existsSync(binaryPath)) {
     console.log(`\n🧹 Removing old test binary...`);
