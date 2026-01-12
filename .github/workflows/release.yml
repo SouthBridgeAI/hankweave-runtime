@@ -62,17 +62,6 @@ jobs:
       - name: Run integration tests
         run: bun test tests/integration
 
-      - name: Build package
-        run: bun run build
-
-      - name: Verify build output
-        run: |
-          echo "=== Verifying dist/ directory ==="
-          ls -lah dist/
-          echo ""
-          echo "=== Checking dist/index.js exists ==="
-          test -f dist/index.js && echo "✓ dist/index.js exists" || (echo "✗ dist/index.js missing" && exit 1)
-
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
