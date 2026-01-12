@@ -275,12 +275,18 @@ export function isCompiledExecutable(): boolean {
  * Get the appropriate command array to run a script in the current runtime.
  * This ensures shims and other scripts are executed with the correct runtime.
  *
+ * For compiled executables, we check if 'bun' is available on PATH and use it
+ * if present (for better performance), otherwise fall back to 'node'.
+ * This ensures standalone executables work on systems without Bun installed.
+ *
  * @param scriptPath - Path to the script to execute
  * @returns Command array suitable for spawn/exec (e.g., ['bun', scriptPath])
  *
  * @example
  * ```ts
- * // In Bun: ['bun', '/path/to/shim.mjs']
+ * // In Bun (source): ['bun', '/path/to/shim.mjs']
+ * // In compiled executable with bun on PATH: ['bun', '/path/to/shim.mjs']
+ * // In compiled executable without bun: ['node', '/path/to/shim.mjs']
  * // In Node: ['node', '/path/to/shim.mjs']
  * // In Deno: ['deno', 'run', '--allow-all', '/path/to/shim.mjs']
  * const cmd = getRuntimeCommand('/path/to/shim.mjs');
@@ -288,6 +294,29 @@ export function isCompiledExecutable(): boolean {
  * ```
  */
 export function getRuntimeCommand(scriptPath: string): string[] {
+  // If we're in a compiled executable, prefer bun if available, otherwise use node
+  // Rationale:
+  // 1. Can't assume 'bun' is on PATH in standalone distributions
+  // 2. Shims have #!/usr/bin/env node and are Node-compatible
+  // 3. Using bun when available provides better performance
+  if (isCompiledExecutable()) {
+    // Check if 'bun' is available on PATH using which/where
+    try {
+      const checkCommand = process.platform === "win32" ? "where" : "which";
+      const result = Bun.spawnSync([checkCommand, "bun"], {
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      if (result.exitCode === 0) {
+        return ["bun", scriptPath];
+      }
+    } catch {
+      // Command check failed, fall through to node
+    }
+    return ["node", scriptPath];
+  }
+
+  // When running from source, use the current runtime
   const runtime = detectRuntime();
   switch (runtime) {
     case "bun":
