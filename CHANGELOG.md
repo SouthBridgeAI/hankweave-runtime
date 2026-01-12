@@ -8,13 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- 
+- Verdaccio integration for local npm registry testing
+- E2E test suite for package installation and executables
+- Test utilities for binary file comparison and executable validation
+- CI/CD workflows for automated building, testing, and publishing
+- Support for testing executables on Linux x64/ARM64, macOS Intel/Apple Silicon, Windows x64
 
 ### Changed
-- 
+- Improved test infrastructure with StrandweaveServerTestInstance class
+- Updated CI/CD workflows with comprehensive platform matrix testing
+- Enhanced error handling and logging throughout runtime extraction
 
 ### Fixed
-- 
+- Test helper utilities for cross-platform compatibility
 
 ## [0.1.32] - 2026-01-12
 
