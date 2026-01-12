@@ -208,11 +208,10 @@ async function pushToOrigin(version: string): Promise<void> {
 	// Wait for user input
 	await Bun.$`sh -c "read"`.quiet();
 
-	// Push commits and tags
-	await Bun.$`git push`;
-	await Bun.$`git push --tags`;
+	// Push only the tag (not the commits)
+	await Bun.$`git push origin ${`v${version}`}`;
 
-	console.log("✓ Pushed to origin");
+	console.log(`✓ Pushed tag v${version} to origin`);
 }
 
 /**
