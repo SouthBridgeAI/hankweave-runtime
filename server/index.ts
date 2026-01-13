@@ -5,6 +5,7 @@ import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
+import { parseCliArgs } from "./cli-parser.js";
 import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
@@ -17,7 +18,6 @@ import {
   resolveRemoteStrand,
 } from "./remote-strand.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
-import type { StrandweaveConfig } from "./types/types.js";
 import { getMetadata, Logger } from "./utils.js";
 
 // -------------
@@ -50,80 +50,6 @@ function generateTempFilePath(prefix: string): string {
   );
 }
 
-/**
- * Get value for a flag, supporting both --flag=value (deprecated) and --flag value syntax.
- * Returns undefined if flag is not present.
- */
-function getFlagValue(args: string[], flagName: string): string | undefined {
-  // Check for deprecated --flag=value syntax
-  const equalsIndex = args.findIndex((arg) => arg.startsWith(`${flagName}=`));
-  if (equalsIndex !== -1) {
-    console.warn(
-      `⚠️  Deprecation warning: '${args[equalsIndex]}' uses deprecated syntax. Use '${flagName} <value>' instead.`,
-    );
-    return args[equalsIndex].split("=")[1];
-  }
-
-  // Check for --flag value syntax
-  const flagIndex = args.indexOf(flagName);
-  if (flagIndex !== -1 && flagIndex + 1 < args.length) {
-    const nextArg = args[flagIndex + 1];
-    // Make sure next arg is not another flag
-    if (!nextArg.startsWith("-")) {
-      return nextArg;
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Parse CLI arguments into a structured config object for resolveSettings()
- */
-function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
-  const cliArgs: Partial<StrandweaveConfig> = {};
-
-  // Parse port
-  const portArg = getFlagValue(args, "--port");
-  if (portArg) {
-    cliArgs.port = parseInt(portArg, 10);
-  }
-
-  // Parse model
-  const modelArg = getFlagValue(args, "--model");
-  if (modelArg) {
-    cliArgs.model = modelArg as "sonnet" | "opus";
-  }
-
-  // Parse anthropicBaseUrl
-  const baseUrlArg = getFlagValue(args, "--anthropic-base-url");
-  if (baseUrlArg) {
-    cliArgs.anthropicBaseUrl = baseUrlArg;
-  }
-
-  // Parse autostart (inverse of --no-autostart)
-  if (args.includes("--no-autostart")) {
-    cliArgs.autostart = false;
-  }
-
-  // Parse proxy flags (proxy is OFF by default)
-  if (args.includes("--proxy")) {
-    cliArgs.withoutProxy = false; // Enable proxy
-  }
-  // Keep --without-proxy for backward compatibility (now redundant since proxy is off by default)
-  if (args.includes("--without-proxy")) {
-    cliArgs.withoutProxy = true;
-  }
-
-  // Parse idleTimeout
-  const idleTimeoutArg = getFlagValue(args, "--idle-timeout");
-  if (idleTimeoutArg) {
-    cliArgs.idleTimeout = parseInt(idleTimeoutArg, 10);
-  }
-
-  return cliArgs;
-}
-
 // -------------
 // Main Entry Point
 // -------------
@@ -132,124 +58,47 @@ async function main() {
   // Print version banner
   console.log(`\nStrandweave v${getMetadata().version}\n`);
 
-  // Strict argument validation
-  const rawArgs = process.argv.slice(2);
+  const args = process.argv.slice(2);
 
-  // Flags that take no value
-  const booleanFlags = new Set([
-    "--headless",
-    "--validate",
-    "-v",
-    "--cleanup",
-    "-y",
-    "--no-autostart",
-    "--start-new",
-    "--copy",
-    "--proxy",
-    "--without-proxy",
-    "--init",
-    "--help",
-    "-h",
-    "--force",
-  ]);
-
-  // Flags that take a value (support both --flag=value and --flag value)
-  const valueFlags = new Set([
-    "--config",
-    "--data",
-    "--execution",
-    "--anthropic-base-url",
-    "--port",
-    "--model",
-    "--idle-timeout",
-    "--input",
-  ]);
-
-  // Validate arguments
-  let i = 0;
-  const positionalArgs: string[] = [];
-  while (i < rawArgs.length) {
-    const arg = rawArgs[i];
-
-    if (arg.startsWith("-")) {
-      // Check for --flag=value syntax
-      const equalsIndex = arg.indexOf("=");
-      const flagName = equalsIndex > 0 ? arg.substring(0, equalsIndex) : arg;
-
-      if (booleanFlags.has(flagName)) {
-        if (equalsIndex > 0) {
-          console.error(`❌ Error: Flag '${flagName}' does not take a value.`);
-          process.exit(1);
-        }
-        i++;
-      } else if (valueFlags.has(flagName)) {
-        if (equalsIndex > 0) {
-          // --flag=value syntax (deprecated but supported)
-          i++;
-        } else {
-          // --flag value syntax
-          if (i + 1 >= rawArgs.length || rawArgs[i + 1].startsWith("-")) {
-            console.error(`❌ Error: Flag '${flagName}' requires a value.`);
-            process.exit(1);
-          }
-          i += 2; // Skip flag and value
-        }
-      } else {
-        console.error(
-          `❌ Error: Unknown argument '${arg}'. Run with --help for available options.`,
-        );
-        process.exit(1);
-      }
-    } else {
-      // Positional argument
-      positionalArgs.push(arg);
-      i++;
-    }
-  }
-
-  // Validate positional args count
-  if (positionalArgs.length > 2) {
-    console.error(
-      `❌ Error: Too many positional arguments. Expected at most 2 (strand-path, data-path), got ${positionalArgs.length}.`,
-    );
+  // Parse ALL CLI arguments in one place (with validation)
+  let cliArgs: ReturnType<typeof parseCliArgs>;
+  try {
+    cliArgs = parseCliArgs(args);
+  } catch (error) {
+    console.error(`❌ Error: ${(error as Error).message}`);
     process.exit(1);
   }
 
-  const args = process.argv.slice(2);
+  // Extract values with defaults
+  const configPath = cliArgs.strandPath || cliArgs.configPath || "strand.json";
+  const dataSourcePath = cliArgs.dataPath || cliArgs.dataFlag;
+  const executionPath = cliArgs.executionPath;
+  const inlineInput = cliArgs.inputText;
 
-  // Parse config path: positional[0] or --config flag, default to "strand.json"
-  const configPath = positionalArgs[0] || getFlagValue(args, "--config") || "strand.json";
+  const useSymlink = !cliArgs.copy;
+  const headlessMode = cliArgs.headless || false;
+  const validateMode = cliArgs.validate || false;
+  const cleanupMode = cliArgs.cleanup || false;
+  const skipConfirmation = cliArgs.skipConfirmation || false;
+  const startNew = cliArgs.startNew || false;
+  const forceMode = cliArgs.force || false;
+  const initMode = cliArgs.init || false;
 
-  // Parse data path: positional[1] or --data flag
-  const dataSourcePath = positionalArgs[1] || getFlagValue(args, "--data");
-
-  // Parse execution path
-  const executionPath = getFlagValue(args, "--execution");
-
-  const useSymlink = !args.includes("--copy");
-
-  // TUI is now the default! Use --headless to disable
-  const headlessMode = args.includes("--headless");
-
-  const validateMode = args.includes("--validate") || args.includes("-v");
-  const cleanupMode = args.includes("--cleanup");
-  const skipConfirmation = args.includes("-y");
-  const startNew = args.includes("--start-new");
-  const forceMode = args.includes("--force");
-  const initMode = args.includes("--init");
-  // Note: Config-related args (port, model, anthropicBaseUrl, autostart, withoutProxy)
-  // are now parsed by parseCliArgs() and handled by resolveSettings()
-
-  if (args.includes("--help") || args.includes("-h")) {
+  if (cliArgs.help) {
     console.log(`
 Strandweave Runtime - Codon Orchestration
 
-Usage: strandweave [strand-path] [data-path] [options]
+Usage: strandweave [data-path] [options]
+       strandweave [strand-path] [data-path] [options]
 
 Arguments:
+  data-path                 Path to data file/directory, or "-" for stdin (default: cwd)
+                            When only one argument provided:
+                            - If ends with .json: treated as strand-path
+                            - Otherwise: treated as data-path
   strand-path               Path to strand config, or remote Git URL (default: strand.json)
                             Remote URLs: https://github.com/user/repo#branch
-  data-path                 Path to data file/directory, or "-" for stdin (default: cwd)
+                            Requires both arguments to specify custom strand path
 
 Options:
   --init                    Initialize a new strand in current directory
@@ -345,9 +194,6 @@ Examples:
 
   // Resolve data source path
   const originalCwd = process.cwd(); // Save original CWD
-
-  // Parse --input flag for inline text
-  const inlineInput = getFlagValue(args, "--input");
 
   // Determine resolved data path based on input mode
   let resolvedDataPath: string;
@@ -460,9 +306,6 @@ Examples:
 
   // Load and validate configuration
   // Config path already resolved above before execution setup
-
-  // Parse CLI arguments into structured config
-  const cliArgs = parseCliArgs(args);
 
   // Resolve settings from all 5 config layers
   // (default config, runtime config, strand recommendations, env vars, CLI args)

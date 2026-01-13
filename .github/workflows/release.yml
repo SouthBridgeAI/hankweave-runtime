@@ -145,9 +145,9 @@ jobs:
         working-directory: ${{ steps.test-dir.outputs.test_dir }}
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            "${{ github.workspace }}/releases/strandweave.exe" --data ./data
+            "${{ github.workspace }}/releases/strandweave.exe" ./data
           else
-            "${{ github.workspace }}/releases/strandweave" --data ./data
+            "${{ github.workspace }}/releases/strandweave" ./data
           fi
 
       - name: Upload executable artifact
