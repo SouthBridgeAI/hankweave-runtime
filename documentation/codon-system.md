@@ -241,9 +241,9 @@ Each transition is triggered by specific events:
 
 #### Non-Terminal States (The Journey)
 
-- **`preparing`**: The server is executing the `rigSetup` operations for the codon, such as copying template files or running `npm install`. The Claude process has not yet been started.
-- **`starting`**: The rig is ready. The server is now spawning the Claude CLI subprocess and feeding it the prompt via stdin. A checkpoint may be created at this stage if rig setup was performed.
-- **`initializing`**: The Claude process is running, and the server is listening to its log output, waiting for the initial "init" message that contains the crucial `sessionId`.
+- **`preparing`**: The server is executing the `rigSetup` operations for the codon, such as copying template files or running `npm install`. The Claude session has not yet been started.
+- **`starting`**: The rig is ready. The server is now starting the Claude session (via the Agent SDK or CLI subprocess) and feeding it the prompt. A checkpoint may be created at this stage if rig setup was performed.
+- **`initializing`**: The Claude session is running, and the server is listening to its log output, waiting for the initial "init" message that contains the crucial `sessionId`.
 - **`running`**: The server has received the `sessionId` and Claude is now actively working on the prompt. This is the state where most of the "thinking", tool use, and message generation occurs. Costs and file changes are actively tracked.
 - **`completing-sentinels`**: The main Claude agent has finished its work and exited cleanly, but the server is waiting for parallel Sentinel agents to finish processing their event queues and finalize their outputs before marking the codon as complete. This ensures all observational and analytical work is captured.
 
@@ -314,7 +314,7 @@ This is the default mode. It starts a brand new conversation with Claude, with n
 
 #### `continue-previous` Mode
 
-This is the key to building multi-turn, context-aware workflows. The server will find the `sessionId` from the most recent successful execution of the preceding codon and pass it to the Claude CLI. This makes Claude "remember" the entire conversation up to that point, allowing it to build upon previous work.
+This is the key to building multi-turn, context-aware workflows. The server will find the `sessionId` from the most recent successful execution of the preceding codon and pass it to Claude. This makes Claude "remember" the entire conversation up to that point, allowing it to build upon previous work.
 
 **Requirements for continuation:**
 

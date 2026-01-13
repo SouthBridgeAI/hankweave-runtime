@@ -24,17 +24,22 @@ const uuidSchema = z
 // Tool names - accept any string for forward compatibility
 export const toolNameSchema = z.string();
 
-// Claude model identifier - accepting the full model name from logs
+// Model identifier - accepting Claude models and other providers (e.g., Gemini, OpenAI)
 // Also accepts <synthetic> for timeout messages
-const modelSchema = z
-  .string()
-  .regex(/^(claude-.*|<synthetic>)$/, "Must be a Claude model identifier or <synthetic>");
+const modelSchema = z.string().min(1, "Model identifier cannot be empty");
 
 // Permission mode for Claude Code
 const permissionModeSchema = z.enum(["bypassPermissions", "requestPermissions"]);
 
-// API key source - accepts known values and "none" for cases where API key is configured differently
-const apiKeySourceSchema = z.enum(["ANTHROPIC_API_KEY", "env", "none"]);
+// API key source - accepts known API key sources for different providers
+const apiKeySourceSchema = z.enum([
+  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENAI_API_KEY",
+  "env",
+  "none",
+]);
 
 /**
  * System Message Schema

@@ -22,20 +22,25 @@ export function runLogOrderingTests(testDir: string) {
       if (!fs.existsSync(logPath)) return;
 
       const entries = parseJSONL(fs.readFileSync(logPath, "utf-8"));
+      // Ignore hook_response system messages that precede init
+      const filteredEntries = entries.filter(
+        (e) => !(e.type === "system" && e.subtype === "hook_response"),
+      );
+      if (filteredEntries.length === 0) return;
 
       // System init should be first
-      expect(entries[0]?.type).toBe("system");
-      expect(entries[0]?.subtype).toBe("init");
+      expect(filteredEntries[0]?.type).toBe("system");
+      expect(filteredEntries[0]?.subtype).toBe("init");
 
       // Result should be last (if codon completed)
-      const resultIndex = entries.findIndex((e) => e.type === "result");
+      const resultIndex = filteredEntries.findIndex((e) => e.type === "result");
       if (resultIndex !== -1) {
-        expect(resultIndex).toBe(entries.length - 1);
+        expect(resultIndex).toBe(filteredEntries.length - 1);
       }
 
       // No user messages should appear before first assistant message
-      const firstAssistant = entries.findIndex((e) => e.type === "assistant");
-      const firstUser = entries.findIndex((e) => e.type === "user");
+      const firstAssistant = filteredEntries.findIndex((e) => e.type === "assistant");
+      const firstUser = filteredEntries.findIndex((e) => e.type === "user");
       if (firstUser !== -1 && firstAssistant !== -1) {
         expect(firstAssistant).toBeLessThan(firstUser);
       }

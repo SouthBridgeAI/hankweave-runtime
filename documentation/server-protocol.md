@@ -826,7 +826,7 @@ When errors occur, the server sends structured error events:
 
 **Error Codes:**
 - `CONFIG_INVALID`: Codon configuration error
-- `CLAUDE_NOT_FOUND`: Claude CLI not available
+- `CLAUDE_NOT_FOUND`: Claude Code not available (SDK or CLI)
 - `API_ERROR`: Claude API error (rate limit, auth, etc.)
 - `CODON_TIMEOUT`: Codon took too long
 - `STATE_CORRUPTED`: State file corruption detected

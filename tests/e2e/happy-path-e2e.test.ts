@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type CleanupIntegrationResult,
   executeTestCleanup,
@@ -65,14 +66,17 @@ import { runToolUsageTests } from "./test-groups/tool-usage-tests.js";
 // Test configuration
 const _TEST_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 // Use __dirname to ensure we're always relative to this test file
-const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
-const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
-const CODONS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons.config.json");
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = generateTestTimestamp();
-const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
+
+// These paths are determined at runtime based on test mode (binary vs normal)
+let DATA_SOURCE_FILE: string;
+let TEST_RESULTS_DIR: string;
+let CODONS_CONFIG: string;
+let TEST_RUN_DIR: string;
+let TEST_CWD: string; // Working directory for tests
 
 // Import types and utilities from the server
 import { type HistoryBatchEvent, isJournaledEvent } from "../../server/schemas/event-schemas.js";
@@ -82,22 +86,45 @@ import type {
   ErrorEvent,
   ServerEvent,
 } from "../../server/types/types.js";
+// Import Binary helpers
+import {
+  type BinarySetup,
+  cleanupBinary,
+  copyTestFixtures,
+  getBinaryCommandOverride,
+  needsBinary,
+  setupBinary,
+} from "../utils/binary.js";
 // Import connectStrandweaveClient for sync client
 import { connectStrandweaveClient } from "../utils/strandweave-server-test-helpers.js";
+// Import Verdaccio helpers
+import {
+  cleanupVerdaccio,
+  getCommandOverride,
+  needsVerdaccio,
+  setupVerdaccio,
+  type VerdaccioSetup,
+} from "../utils/verdaccio.js";
 
 // Server configuration - Updated for execution isolation
-const serverConfig: TestServerConfig = {
-  testRunDir: TEST_RUN_DIR,
-  configFile: CODONS_CONFIG,
-  port: 0, // Will be set dynamically
-  testMode: "e2e-happy-path",
-  dataSourceDir: DATA_SOURCE_FILE, // New: specify data source file
-  cwd: TEST_RUN_DIR, // Server starts from isolated test directory
-  useDataFlag: true, // New: use --data flag
-  startNew: true, // Force new execution for tests
-};
+// Will be initialized in setupAndRunCodons() after paths are determined
+let serverConfig: TestServerConfig;
 
-const strandweaveResultsDir = path.join(serverConfig.cwd, "strandweave-results/");
+// The strandweave-results will be created by the server in its execution directory
+// Since we're using --data and --start-new, it will be in a temp execution directory
+let strandweaveResultsDir: string;
+
+// -------------
+// Verdaccio Setup (conditional based on env vars)
+// -------------
+
+const projectRoot = path.resolve(TEST_ROOT);
+
+// Module-level Verdaccio state
+let verdaccioSetup: VerdaccioSetup | null = null;
+
+// Module-level Binary state
+let binarySetup: BinarySetup | null = null;
 
 // -------------
 // Test State - Shared across all tests
@@ -167,6 +194,48 @@ const testState: TestState = {
 async function setupAndRunCodons(): Promise<void> {
   testState.testStartTime = Date.now();
 
+  // CONDITIONALLY setup binary if needed
+  if (needsBinary()) {
+    binarySetup = await setupBinary(projectRoot);
+    // Use isolated temp directory for binary tests (ensures no access to project codebase)
+    TEST_CWD = binarySetup.testIsolationDir;
+    console.log(`${colors.yellow}Using isolated test directory: ${TEST_CWD}${colors.reset}`);
+
+    // Copy test fixtures to isolated directory
+    copyTestFixtures(
+      ["tests/config/poem_guides.txt", "tests/config/test-codons.config.json"],
+      projectRoot,
+      TEST_CWD,
+    );
+  } else {
+    // Use project root for non-binary tests
+    TEST_CWD = TEST_ROOT;
+  }
+
+  // Set paths based on test working directory
+  DATA_SOURCE_FILE = path.join(TEST_CWD, "tests/config/poem_guides.txt");
+  TEST_RESULTS_DIR = path.join(TEST_CWD, "tests/test-results");
+  CODONS_CONFIG = path.join(TEST_CWD, "tests/config/test-codons.config.json");
+  TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
+  strandweaveResultsDir = path.join(TEST_CWD, "strandweave-results/");
+
+  // Initialize server config with determined paths
+  serverConfig = {
+    testRunDir: TEST_RUN_DIR,
+    configFile: CODONS_CONFIG,
+    port: 0, // Will be set dynamically
+    testMode: "e2e-happy-path",
+    dataSourceDir: DATA_SOURCE_FILE,
+    cwd: TEST_CWD,
+    useDataFlag: true,
+    startNew: true,
+  };
+
+  // CONDITIONALLY setup Verdaccio if needed
+  if (needsVerdaccio()) {
+    verdaccioSetup = await setupVerdaccio(projectRoot);
+  }
+
   // Ensure test results directory exists
   if (!fs.existsSync(TEST_RESULTS_DIR)) {
     fs.mkdirSync(TEST_RESULTS_DIR, { recursive: true });
@@ -184,19 +253,42 @@ async function setupAndRunCodons(): Promise<void> {
   serverConfig.port = await getFreePort();
   console.log(`${colors.blue}Using dynamic port: ${serverConfig.port}${colors.reset}`);
 
+  // Get command override - priority: binary > package manager
+  if (binarySetup) {
+    const binaryCommandOverride = getBinaryCommandOverride(binarySetup.binaryPath);
+    serverConfig.commandOverride = binaryCommandOverride;
+    console.log(`${colors.yellow}Using binary: ${binaryCommandOverride.command}${colors.reset}`);
+  } else if (needsVerdaccio()) {
+    const commandOverride = getCommandOverride();
+    if (commandOverride) {
+      serverConfig.commandOverride = commandOverride;
+      console.log(
+        `${colors.yellow}Using command: ${commandOverride.command} ${commandOverride.args.join(" ")}${colors.reset}`,
+      );
+    }
+  }
+
+  // If using Verdaccio, set registry URL in env (only for initial npx/bunx command, NOT server's child processes)
+  // Not needed for binary mode
+  if (verdaccioSetup && !binarySetup && needsVerdaccio()) {
+    serverConfig.env = {
+      npm_config_registry: verdaccioSetup.registry.registryURL,
+    };
+  }
+
   // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
 
-  // Give server time to start
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-
-  // Connect WebSocket client
+  // Connect WebSocket client with retry logic (handles slow npx startup on Windows)
   testState.client = new TestWSClient();
-  await testState.client.connect(serverConfig.port);
+  await testState.client.connectWithRetry(serverConfig.port, {
+    maxRetries: 30, // 30 retries * 2s = 60s max wait
+    retryDelay: 2000, // 2 seconds between retries
+  });
 
   // Wait for initial events
   console.log(`${colors.blue}Waiting for server initialization...${colors.reset}`);
-  const readyEvent = await testState.client.waitForEvent("server.ready");
+  const readyEvent = await testState.client.waitForEvent("server.ready", 10_000);
   if (readyEvent.type === "server.ready") {
     // Capture execution paths from server
     testState.executionPath = readyEvent.data.executionPath;
@@ -217,7 +309,7 @@ async function setupAndRunCodons(): Promise<void> {
   testState.codon1Started = codon1StartEvent;
   console.log(`${colors.green}✓ Codon 1 started${colors.reset}`);
 
-  testState.codon1Completed = await testState.client.waitForCodonCompletion("codon-1", 60000);
+  testState.codon1Completed = await testState.client.waitForCodonCompletion("codon-1", 120000);
   console.log(`${colors.green}✓ Codon 1 completed${colors.reset}`);
 
   // Start read-only sync client in background after Codon 1 completes
@@ -345,7 +437,7 @@ async function setupAndRunCodons(): Promise<void> {
     console.log(`${colors.red}✗ Codon 2 did not start${colors.reset}`);
   }
 
-  testState.codon2Completed = await testState.client.waitForCodonCompletion("codon-2", 60000);
+  testState.codon2Completed = await testState.client.waitForCodonCompletion("codon-2", 120000);
   console.log(`${colors.green}✓ Codon 2 completed${colors.reset}`);
 
   // Codon 3
@@ -373,7 +465,7 @@ async function setupAndRunCodons(): Promise<void> {
     console.log(`${colors.red}✗ Codon 3 did not start${colors.reset}`);
   }
 
-  testState.codon3Completed = await testState.client.waitForCodonCompletion("codon-3", 60000);
+  testState.codon3Completed = await testState.client.waitForCodonCompletion("codon-3", 120000);
   console.log(`${colors.green}✓ Codon 3 completed${colors.reset}`);
 
   // Wait for sync client background collection to complete
@@ -845,7 +937,7 @@ describe("Strandweave E2E Test", () => {
   });
 
   describe("Cost Precision", () => {
-    runCostPrecisionTests(testState);
+    runCostPrecisionTests(testState, CODONS_CONFIG);
   });
 
   describe("File System Edge Cases", () => {
@@ -930,6 +1022,18 @@ describe("Strandweave E2E Test", () => {
       }
 
       console.log(`${colors.green}✓ Cleanup verification complete${colors.reset}`);
+    }
+
+    // CONDITIONALLY cleanup binary if it was built
+    if (binarySetup) {
+      await cleanupBinary(binarySetup);
+      binarySetup = null;
+    }
+
+    // CONDITIONALLY cleanup Verdaccio if it was started
+    if (verdaccioSetup) {
+      await cleanupVerdaccio(verdaccioSetup);
+      verdaccioSetup = null;
     }
   });
 });

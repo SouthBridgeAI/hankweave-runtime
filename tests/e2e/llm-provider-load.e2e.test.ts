@@ -30,7 +30,10 @@ describe("Provider Registry Performance", () => {
       for (let i = 0; i < 1000; i++) {
         lookups.push(
           registry.getModelInfo("claude-3-haiku-20240307"),
-          registry.calculateCost("claude-3-haiku-20240307", 1000, 500),
+          registry.calculateCost("claude-3-haiku-20240307", {
+            inputTokens: 1000,
+            outputTokens: 500,
+          }),
           registry.isModelAvailable("gpt-4o"),
         );
       }
@@ -88,7 +91,10 @@ describe("Provider Registry Performance", () => {
 
       for (let i = 0; i < 1000; i++) {
         for (const model of models) {
-          registry.calculateCost(model, i * 100, i * 50);
+          registry.calculateCost(model, {
+            inputTokens: i * 100,
+            outputTokens: i * 50,
+          });
         }
       }
 
@@ -162,7 +168,10 @@ describe("Provider Registry Performance", () => {
         const models = registry.getAvailableModels();
         for (const model of models) {
           registry.getModelInfo(model);
-          registry.calculateCost(model, Math.random() * 10000, Math.random() * 5000);
+          registry.calculateCost(model, {
+            inputTokens: Math.random() * 10000,
+            outputTokens: Math.random() * 5000,
+          });
         }
 
         // Force garbage collection if available
@@ -270,7 +279,7 @@ describe("Provider Registry Performance", () => {
           for (let i = 0; i < 10; i++) {
             const inputTokens = Math.floor(Math.random() * 5000) + 100;
             const outputTokens = Math.floor(Math.random() * 1000) + 50;
-            registry.calculateCost(model, inputTokens, outputTokens);
+            registry.calculateCost(model, { inputTokens, outputTokens });
             totalCalculations++;
           }
         }
@@ -303,7 +312,7 @@ describe("Provider Registry Performance", () => {
 
             registry.isModelAvailable(model);
             registry.getProviderForModel(model);
-            registry.calculateCost(model, 1000, 500);
+            registry.calculateCost(model, { inputTokens: 1000, outputTokens: 500 });
 
             // Simulate small delay between operations
             await new Promise((resolve) => setTimeout(resolve, 1));
@@ -390,7 +399,7 @@ describe("Provider Registry Performance", () => {
       // Test lookups on large dataset
       for (let i = 0; i < 100; i++) {
         registry.getModelInfo(`model-${i % 50}`);
-        registry.calculateCost(`model-${i % 50}`, 1000, 500);
+        registry.calculateCost(`model-${i % 50}`, { inputTokens: 1000, outputTokens: 500 });
       }
 
       const end = performance.now();
@@ -433,7 +442,10 @@ describe("Provider Registry Performance", () => {
           const randomInputTokens = Math.floor(Math.random() * 2000) + 100;
           const randomOutputTokens = Math.floor(Math.random() * 500) + 50;
 
-          registry.calculateCost(config.model, randomInputTokens, randomOutputTokens);
+          registry.calculateCost(config.model, {
+            inputTokens: randomInputTokens,
+            outputTokens: randomOutputTokens,
+          });
 
           // Occasionally check model availability (health status changes)
           if (event % 50 === 0) {
@@ -472,7 +484,10 @@ describe("Provider Registry Performance", () => {
         for (let i = 0; i < burstSize; i++) {
           operations.push(
             registry.getAvailableModels(),
-            registry.calculateCost("claude-3-5-sonnet-20241022", 1000, 500),
+            registry.calculateCost("claude-3-5-sonnet-20241022", {
+              inputTokens: 1000,
+              outputTokens: 500,
+            }),
             registry.isModelAvailable("gpt-4o-mini"),
           );
         }
@@ -510,7 +525,7 @@ describe("Provider Registry Performance", () => {
       for (let i = 0; i < 1000; i++) {
         registry.getModelInfo(`fake-model-${i}`);
         registry.isModelAvailable(`fake-model-${i}`);
-        registry.calculateCost(`fake-model-${i}`, 1000, 500);
+        registry.calculateCost(`fake-model-${i}`, { inputTokens: 1000, outputTokens: 500 });
       }
 
       const end = performance.now();

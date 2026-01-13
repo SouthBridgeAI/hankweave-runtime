@@ -476,7 +476,7 @@ describe("Loop E2E Test", () => {
       // run will fail because of the existing dir new-notes
       // let's clean up and restart
       const offendingDir = path.join(executionPath, "new-notes");
-      fs.rmdirSync(offendingDir, { recursive: true });
+      fs.rmSync(offendingDir, { recursive: true });
 
       // Small delay before reconnecting
       await new Promise((resolve) => setTimeout(resolve, 1000));

@@ -1,0 +1,35 @@
+name: 'Setup Environment'
+description: 'Sets up Node.js, Bun, and project dependencies'
+
+inputs:
+  install-gemini:
+    description: 'Install gemini-cli globally'
+    required: false
+    default: 'true'
+  registry-url:
+    description: 'Optional registry URL for npm publishing'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: ${{ inputs.registry-url || '' }}
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+
+    - name: Install dependencies
+      shell: bash
+      run: bun install
+
+    - name: Install gemini-cli globally
+      if: inputs.install-gemini == 'true'
+      shell: bash
+      run: npm install -g @google/gemini-cli

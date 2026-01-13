@@ -18,7 +18,21 @@ Getting the Strandweave Runner up and running involves a few prerequisites and a
     git --version
     ```
 
-3.  **Claude CLI**: The server orchestrates the official Claude CLI. You must have it installed and configured with a valid Anthropic API key.
+3.  **Claude Code Authentication**: The server uses the Claude Agent SDK to orchestrate Claude Code sessions. You need to authenticate with your Anthropic account. There are several authentication methods:
+
+    **Option A: OAuth Token (Recommended)**
+    ```bash
+    # Install Claude CLI to get a token
+    npm install -g @anthropic-ai/claude-cli
+
+    # Generate OAuth token
+    claude setup-token
+
+    # Set the token as an environment variable
+    export CLAUDE_CODE_OAUTH_TOKEN=your-token-here
+    ```
+
+    **Option B: API Key**
     ```bash
     # Install Claude CLI
     npm install -g @anthropic-ai/claude-cli
@@ -26,6 +40,10 @@ Getting the Strandweave Runner up and running involves a few prerequisites and a
     # Configure with your API key
     claude auth
     ```
+
+    **Note**: The server now primarily uses the Agent SDK (`@anthropic-ai/claude-agent-sdk`) for running Claude sessions in-process, which provides better performance and integration. The SDK bundles its own version of Claude Code internally, so you don't need to have the CLI installed separately (though it's useful for authentication setup).
+
+    **Advanced**: You can override the bundled Claude Code executable by setting the `CLAUDE_PATH_TO_CLAUDE_EXECUTABLE` environment variable to point to a custom Claude Code binary. If not specified, the SDK will use its own bundled version.
 
 **System Requirements:**
 - **OS**: macOS, Linux, or Windows (with WSL)
@@ -357,6 +375,7 @@ These are the built-in defaults used when no other configuration is provided:
   withoutProxy: false,
   logParsingInterval: 1000,
   dataHashTimeLimit: 60000,
+  idleTimeout: 20,
 
   // Sentinel configuration
   sentinel: {
@@ -388,6 +407,7 @@ Create a `strandweave.json` file in your execution directory for project-wide se
   "model": "sonnet",
   "autostart": false,
   "logParsingInterval": 2000,
+  "idleTimeout": 30,
   "sentinel": {
     "enablePersistence": false,
     "healthCheckGracePeriodMs": 3000
@@ -403,6 +423,7 @@ Create a `strandweave.json` file in your execution directory for project-wide se
 - `anthropicBaseUrl` (string) - Custom Anthropic API endpoint
 - `logParsingInterval` (number) - How often to check for new log entries (ms)
 - `dataHashTimeLimit` (number) - Max time for data hashing (ms)
+- `idleTimeout` (number) - Idle timeout for WebSocket and proxy servers in seconds (0-255). Maximum time a connection can be idle before the server closes it.
 - `sentinel` (object) - Sentinel configuration:
   - `enablePersistence` (boolean) - Enable sentinel state persistence
   - `healthCheckGracePeriodMs` (number) - Grace period for health checks
@@ -468,6 +489,7 @@ export STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL=https://custom.api.com
 # Timing settings
 export STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL=2000
 export STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT=30000
+export STRANDWEAVE_RUNTIME_IDLE_TIMEOUT=30
 
 # Sentinel settings (nested)
 export STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE=false
@@ -499,6 +521,9 @@ bun run server --without-proxy
 
 # Custom API endpoint
 bun run server --anthropic-base-url=https://custom.api.com
+
+# Set idle timeout to 30 seconds
+bun run server --idle-timeout=30
 ```
 
 **Available CLI Flags**:
@@ -507,6 +532,7 @@ bun run server --anthropic-base-url=https://custom.api.com
 - `--no-autostart` - Don't auto-start codons
 - `--without-proxy` - Disable LLM proxy
 - `--anthropic-base-url=<url>` - Custom API endpoint
+- `--idle-timeout=<seconds>` - Idle timeout in seconds (0-255)
 
 See [Command-Line Options](#command-line-options) for complete list.
 
@@ -655,7 +681,7 @@ When a codon fails:
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| "Claude CLI not found" | CLI not installed or not in PATH | Install with `npm install -g @anthropic-ai/claude-cli` |
+| "Claude Code not found" | Authentication not configured | Run `claude auth` to configure OAuth or API key |
 | "API timeout" | Network issues or rate limiting | Check connection, wait for rate limit reset |
 | "Permission denied" | File permissions or locked files | Check file ownership, close other programs |
 | "Git not available" | Git not installed | Install Git (checkpointing will be disabled) |

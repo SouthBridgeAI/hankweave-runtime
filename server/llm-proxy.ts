@@ -1,5 +1,5 @@
 import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
-import type { Logger } from "./utils.js";
+import { type Logger, type StrandweaveServer, serve } from "./utils.js";
 
 /**
  * Represents an incoming request to the LLM proxy
@@ -130,6 +130,12 @@ class HttpTransport implements LLMTransport {
       const urlParts = new URL(this.baseUrl);
       forwardHeaders.host = urlParts.host;
 
+      // Remove Content-Length header - let fetch calculate it automatically
+      // This is important because middleware can modify req.body, making the
+      // original Content-Length header incorrect
+      delete forwardHeaders["content-length"];
+      delete forwardHeaders["Content-Length"];
+
       const response = await fetch(targetUrl, {
         method: req.method,
         headers: forwardHeaders,
@@ -159,8 +165,16 @@ class HttpTransport implements LLMTransport {
         body: responseBody,
       };
     } catch (error) {
+      const errorDetails =
+        error instanceof Error
+          ? {
+              message: error.message,
+              cause: error.cause,
+              stack: error.stack?.split("\n").slice(0, 3).join("\n"),
+            }
+          : error;
       this.logger.log(
-        `[PROXY-HTTP-TRANSPORT] Failed to fetch from ${targetUrl}: ${error}`,
+        `[PROXY-HTTP-TRANSPORT] Failed to fetch from ${targetUrl}: ${JSON.stringify(errorDetails, null, 2)}`,
         "error",
       );
       throw error;
@@ -442,26 +456,28 @@ export function createPassthroughProxy({
 // -------------=
 
 /**
- * Bun server runner for the LLM proxy
+ * Server runner for the LLM proxy
  *
  * Handles server lifecycle management and HTTP request routing for the proxy.
  * Currently supports only "passthrough" proxy mode.
  */
-export class BunProxyRunner {
-  private server?: Bun.Server;
+export class ProxyRunner {
+  private server?: StrandweaveServer;
 
   /**
-   * Create a new Bun proxy runner
+   * Create a new proxy runner
    * @param proxy - Proxy type, currently only "passthrough" is supported
    * @param port - Port number to listen on
    * @param proxyToUrl - Target URL to proxy requests to
    * @param logger - Logger instance for debugging and monitoring
+   * @param idleTimeout - Idle timeout in seconds (0-255, 0 for no timeout)
    */
   constructor(
     private proxy: "passthrough",
     private port: number,
     private proxyToUrl: string,
     private logger: Logger,
+    private idleTimeout: number = 0,
   ) {}
 
   /**
@@ -487,8 +503,9 @@ export class BunProxyRunner {
       logger: this.logger,
     });
 
-    this.server = Bun.serve({
+    this.server = serve({
       port: this.port,
+      idleTimeout: this.idleTimeout,
       async fetch(request: Request): Promise<Response> {
         const url = new URL(request.url);
         const pathname = url.pathname + url.search;
@@ -507,7 +524,7 @@ export class BunProxyRunner {
 
     const proxyUrl = `http://localhost:${this.port}`;
 
-    console.log(`BunProxyRunner: LLM Proxy server started on port ${this.port}`);
+    console.log(`ProxyRunner: LLM Proxy server started on port ${this.port}`);
     console.log(`   Health check: ${proxyUrl}/health`);
 
     return proxyUrl;
@@ -519,7 +536,7 @@ export class BunProxyRunner {
   stop(): void {
     if (this.server) {
       this.server.stop();
-      console.log("BunProxyRunner: Proxy server stopped");
+      console.log("ProxyRunner: Proxy server stopped");
     }
   }
 }

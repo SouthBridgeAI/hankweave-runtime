@@ -5,6 +5,7 @@ import { InvalidTransitionError, PersistenceError, StateManager } from "../../se
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
 import type * as ST from "../../server/types/state-types";
 import { Logger } from "../../server/utils";
+import { createTestCodon, createTestConfig } from "../utils/test-codon-factory.js";
 
 // Test directory setup
 const TEST_DIR = path.join(import.meta.dir, "test-state-manager");
@@ -787,21 +788,21 @@ describe("StateManager", () => {
   describe("expandNextIterationForCodon", () => {
     test("passes contextExceeded flag to planner", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("test-loop"),
+        createTestConfig({
+          type: "loop",
+          id: "test-loop",
           name: "Test Loop",
           codons: [
             {
-              id: CodonId("work"),
+              id: "work",
               name: "Work",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "Do work",
             },
           ],
-          terminateOn: { type: "contextExceeded" as const },
-        },
+          terminateOn: { type: "contextExceeded" },
+        }),
       ];
 
       // Create state manager with codon configs
@@ -846,21 +847,21 @@ describe("StateManager", () => {
 
     test("persists updated plan after expansion", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("test-loop"),
+        createTestConfig({
+          type: "loop",
+          id: "test-loop",
           name: "Test Loop",
           codons: [
             {
-              id: CodonId("codon"),
+              id: "codon",
               name: "Codon",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "Test",
             },
           ],
-          terminateOn: { type: "iterationLimit" as const, limit: 3 },
-        },
+          terminateOn: { type: "iterationLimit", limit: 3 },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -899,21 +900,21 @@ describe("StateManager", () => {
 
     test("validates plan after expansion", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("loop"),
+        createTestConfig({
+          type: "loop",
+          id: "loop",
           name: "Loop",
           codons: [
             {
-              id: CodonId("p"),
+              id: "p",
               name: "P",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "P",
             },
           ],
-          terminateOn: { type: "iterationLimit" as const, limit: 3 },
-        },
+          terminateOn: { type: "iterationLimit", limit: 3 },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -956,21 +957,21 @@ describe("StateManager", () => {
 
     test("default contextExceeded=false continues loop", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("loop"),
+        createTestConfig({
+          type: "loop",
+          id: "loop",
           name: "Loop",
           codons: [
             {
-              id: CodonId("p"),
+              id: "p",
               name: "P",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "P",
             },
           ],
-          terminateOn: { type: "contextExceeded" as const },
-        },
+          terminateOn: { type: "contextExceeded" },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -1002,21 +1003,21 @@ describe("StateManager", () => {
   describe("isContextExceededAcceptable", () => {
     test("returns true for codon in loop with contextExceeded termination", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("context-loop"),
+        createTestConfig({
+          type: "loop",
+          id: "context-loop",
           name: "Context Loop",
           codons: [
             {
-              id: CodonId("work"),
+              id: "work",
               name: "Work",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "Do work",
             },
           ],
-          terminateOn: { type: "contextExceeded" as const },
-        },
+          terminateOn: { type: "contextExceeded" },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -1042,21 +1043,21 @@ describe("StateManager", () => {
 
     test("returns false for codon in loop with iterationLimit termination", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("limited-loop"),
+        createTestConfig({
+          type: "loop",
+          id: "limited-loop",
           name: "Limited Loop",
           codons: [
             {
-              id: CodonId("work"),
+              id: "work",
               name: "Work",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "Do work",
             },
           ],
-          terminateOn: { type: "iterationLimit" as const, limit: 3 },
-        },
+          terminateOn: { type: "iterationLimit", limit: 3 },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -1082,13 +1083,13 @@ describe("StateManager", () => {
 
     test("returns false for regular codon (not in loop)", async () => {
       const codonConfigs = [
-        {
-          id: CodonId("regular"),
+        createTestCodon({
+          id: "regular",
           name: "Regular Codon",
-          model: "sonnet" as const,
-          continuationMode: "fresh" as const,
+          model: "sonnet",
+          continuationMode: "fresh",
           promptText: "Do work",
-        },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -1132,28 +1133,28 @@ describe("StateManager", () => {
 
     test("works correctly for different codons in same loop", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("multi-codon-loop"),
+        createTestConfig({
+          type: "loop",
+          id: "multi-codon-loop",
           name: "Multi Codon Loop",
           codons: [
             {
-              id: CodonId("codon1"),
+              id: "codon1",
               name: "Codon 1",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "P1",
             },
             {
-              id: CodonId("codon2"),
+              id: "codon2",
               name: "Codon 2",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "P2",
             },
           ],
-          terminateOn: { type: "contextExceeded" as const },
-        },
+          terminateOn: { type: "contextExceeded" },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -1179,36 +1180,36 @@ describe("StateManager", () => {
 
     test("works correctly for multiple loops with different termination types", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("context-loop"),
+        createTestConfig({
+          type: "loop",
+          id: "context-loop",
           name: "Context Loop",
           codons: [
             {
-              id: CodonId("work1"),
+              id: "work1",
               name: "Work 1",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "W1",
             },
           ],
-          terminateOn: { type: "contextExceeded" as const },
-        },
-        {
-          type: "loop" as const,
-          id: CodonId("limited-loop"),
+          terminateOn: { type: "contextExceeded" },
+        }),
+        createTestConfig({
+          type: "loop",
+          id: "limited-loop",
           name: "Limited Loop",
           codons: [
             {
-              id: CodonId("work2"),
+              id: "work2",
               name: "Work 2",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "W2",
             },
           ],
-          terminateOn: { type: "iterationLimit" as const, limit: 2 },
-        },
+          terminateOn: { type: "iterationLimit", limit: 2 },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
@@ -1236,21 +1237,21 @@ describe("StateManager", () => {
 
     test("works correctly after loop expansion", async () => {
       const codonConfigs = [
-        {
-          type: "loop" as const,
-          id: CodonId("loop"),
+        createTestConfig({
+          type: "loop",
+          id: "loop",
           name: "Loop",
           codons: [
             {
-              id: CodonId("p"),
+              id: "p",
               name: "P",
-              model: "sonnet" as const,
-              continuationMode: "fresh" as const,
+              model: "sonnet",
+              continuationMode: "fresh",
               promptText: "P",
             },
           ],
-          terminateOn: { type: "contextExceeded" as const },
-        },
+          terminateOn: { type: "contextExceeded" },
+        }),
       ];
 
       const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);

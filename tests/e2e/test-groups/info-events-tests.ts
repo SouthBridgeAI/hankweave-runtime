@@ -18,7 +18,7 @@ export function runInfoEventsTests(testState: TestState) {
 
   test("info events for all 3 Claude session starts", () => {
     const sessionStartEvents = infoEvents.filter(
-      (e) => (e as InfoEvent).data?.message?.includes("Claude started with session ID") || false,
+      (e) => (e as InfoEvent).data?.message?.includes("Claude started codon") || false,
     );
     expect(sessionStartEvents.length).toBe(3);
   });

@@ -2,27 +2,20 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
-import { calculateCost } from "../../server/config.js";
+import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { AssistantMessage, ResultMessage } from "../../server/types/claude-session-schema.js";
 import { logMessageSchema } from "../../server/types/claude-session-schema.js";
 import type { TokenUsage } from "../../server/types/types.js";
 
 // Local helper for testing log parsing - replaces the removed loadCodonStateFromLog
-function parseLogForTesting(
-  logPath: string,
-  costsPerMTok: {
-    input: number;
-    output: number;
-    inputCache: number;
-    cacheRead: number;
-  },
-): {
+function parseLogForTesting(logPath: string): {
   sessionId: string | null;
   success: boolean;
   cost: number;
   tokens: TokenUsage;
 } {
   let sessionId: string | null = null;
+  let modelId: string | null = null;
   let success = false;
   const tokens: TokenUsage & { _totalCost?: number } = {
     inputTokens: 0,
@@ -51,6 +44,7 @@ function parseLogForTesting(
 
         if (entry.type === "system" && entry.subtype === "init") {
           sessionId = entry.session_id;
+          modelId = entry.model;
         }
 
         if (entry.type === "result") {
@@ -88,12 +82,23 @@ function parseLogForTesting(
       }
     }
 
-    // Use the total cost from result message if available, otherwise calculate
+    // Use the total cost from result message if available, otherwise calculate using LLM registry
     const tokensWithCost = tokens as TokenUsage & { _totalCost?: number };
-    const cost =
-      tokensWithCost._totalCost !== undefined
-        ? tokensWithCost._totalCost
-        : calculateCost(tokens, costsPerMTok);
+    let cost = 0;
+
+    if (tokensWithCost._totalCost !== undefined) {
+      cost = tokensWithCost._totalCost;
+    } else if (modelId) {
+      // Use LLM registry to calculate cost based on model
+      const registry = LlmProviderRegistry.getInstance();
+      const calculatedCost = registry.calculateCost(modelId, {
+        inputTokens: tokens.inputTokens,
+        outputTokens: tokens.outputTokens,
+        cacheReadTokens: tokens.cacheReadTokens,
+        cacheCreationTokens: tokens.cacheCreationTokens,
+      });
+      cost = calculatedCost ?? 0;
+    }
 
     // Clean up temporary property
     if (tokensWithCost._totalCost !== undefined) {
@@ -292,12 +297,7 @@ describe("Claude Log Parser", () => {
 
       fs.writeFileSync(logPath, logContent);
 
-      const state = parseLogForTesting(logPath, {
-        input: 15,
-        output: 75,
-        inputCache: 18.75,
-        cacheRead: 1.5,
-      });
+      const state = parseLogForTesting(logPath);
 
       expect(state.sessionId).toBe("374bf5fd-dc81-4fe4-bb06-a92b30c79227");
       expect(state.success).toBe(false); // Codon failed due to timeout
@@ -569,6 +569,86 @@ describe("Claude Log Parser", () => {
 
       const messages = parser.getAllMessages();
       expect(messages).toHaveLength(0);
+    });
+  });
+
+  describe("SDK log format compatibility", () => {
+    test("should parse real SDK-generated log file", () => {
+      // Use the real SDK log file from comparison tests
+      const sdkLogPath = path.join(__dirname, "../test-data/claude-logs/agent-sdk/sdk-log.jsonl");
+
+      const parser = new ClaudeLogParser({
+        logPath: sdkLogPath,
+        codonId: "sdk-test",
+        parsingInterval: 50,
+      });
+
+      const messages = parser.getAllMessages();
+
+      // The SDK log contains 16 messages total
+      expect(messages.length).toBe(16);
+
+      // Count message types
+      const messageCounts = {
+        system: 0,
+        assistant: 0,
+        user: 0,
+        result: 0,
+      };
+
+      for (const msg of messages) {
+        messageCounts[msg.type]++;
+      }
+
+      // Verify expected breakdown:
+      // 1 system.init
+      // 8 assistant messages (1 text + 7 tool_use)
+      // 6 user messages (tool_result responses)
+      // 1 result message
+      expect(messageCounts.system).toBe(1);
+      expect(messageCounts.assistant).toBe(8);
+      expect(messageCounts.user).toBe(6);
+      expect(messageCounts.result).toBe(1);
+
+      // Verify system.init message parsed correctly
+      const initMessage = messages[0];
+      expect(initMessage.type).toBe("system");
+      if (initMessage.type === "system") {
+        expect(initMessage.subtype).toBe("init");
+        expect(initMessage.session_id).toBeTruthy();
+        expect(initMessage.model).toBe("claude-sonnet-4-5-20250929");
+        expect(initMessage.tools.length).toBeGreaterThan(0);
+        expect(initMessage.cwd).toBeTruthy();
+      }
+
+      // Verify assistant messages parsed correctly
+      const firstAssistantMessage = messages.find((m) => m.type === "assistant");
+      expect(firstAssistantMessage).toBeDefined();
+      if (firstAssistantMessage && firstAssistantMessage.type === "assistant") {
+        expect(firstAssistantMessage.message.id).toBeTruthy();
+        expect(firstAssistantMessage.message.role).toBe("assistant");
+        expect(firstAssistantMessage.message.model).toBe("claude-sonnet-4-5-20250929");
+        expect(firstAssistantMessage.message.content).toBeDefined();
+      }
+
+      // Verify user messages parsed correctly
+      const firstUserMessage = messages.find((m) => m.type === "user");
+      expect(firstUserMessage).toBeDefined();
+      if (firstUserMessage && firstUserMessage.type === "user") {
+        expect(firstUserMessage.message.role).toBe("user");
+        expect(firstUserMessage.message.content).toBeDefined();
+      }
+
+      // Verify result message parsed correctly
+      const resultMessage = messages[messages.length - 1];
+      expect(resultMessage.type).toBe("result");
+      if (resultMessage.type === "result") {
+        expect(resultMessage.subtype).toBe("success");
+        expect(resultMessage.is_error).toBe(false);
+        expect(resultMessage.total_cost_usd).toBeGreaterThan(0);
+        expect(resultMessage.num_turns).toBeGreaterThan(0);
+        expect(resultMessage.duration_ms).toBeGreaterThan(0);
+      }
     });
   });
 });

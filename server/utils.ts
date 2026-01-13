@@ -1,17 +1,28 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Message, Peer } from "crossws";
+import { serve as crosswsServe } from "crossws/server";
+// Import cross-platform WebSocket client from crossws
+// This works in Node.js (18+), Bun, Deno, and browsers
+import WebSocket from "crossws/websocket";
 import glob from "fast-glob";
 import merge from "lodash.merge";
+import { z } from "zod";
 import { fileResolver } from "./file-resolver.js";
 import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
+
+// Re-export WebSocket for use throughout the codebase
+// This hides the crossws dependency as an implementation detail
+export { WebSocket };
 
 // -------------
 // ID Generation
 // -------------
 
 export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
 // -------------
@@ -200,6 +211,248 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
 export function escapeShellArg(arg: string): string {
   // Replace all single quotes with '\''
   return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+// -------------
+// Runtime Detection
+// -------------
+
+/**
+ * Supported JavaScript runtimes.
+ */
+export type Runtime = "bun" | "node" | "deno";
+
+/**
+ * Detect the current JavaScript runtime.
+ * Uses global object inspection following the crossws pattern.
+ *
+ * @returns The detected runtime ('bun', 'deno', or 'node')
+ */
+export function detectRuntime(): Runtime {
+  if ("Bun" in globalThis) return "bun";
+  if ("Deno" in globalThis) return "deno";
+  return "node";
+}
+
+/**
+ * Detects if we're running from a compiled Bun executable.
+ *
+ * When compiled, Bun puts files in a virtual filesystem at:
+ * - On Unix: /$bunfs/root/...
+ * - On Windows: X:/~BUN/root/... (drive letter varies)
+ *
+ * @returns true if running from a compiled executable, false otherwise
+ */
+export function isCompiledExecutable(): boolean {
+  // Allow override for testing (avoids Bun's module mock persistence bug)
+  // https://github.com/oven-sh/bun/issues/7823
+  if (process.env.STRANDWEAVE_TEST_IS_COMPILED !== undefined) {
+    return process.env.STRANDWEAVE_TEST_IS_COMPILED === "true";
+  }
+
+  // We only support Bun compiled executables
+  const isBun = typeof Bun !== "undefined";
+
+  if (!isBun) {
+    return false;
+  }
+
+  // Simple check: if we're running from Bun's virtual filesystem, we're compiled
+  // On Unix: /$bunfs/root/...
+  // On Windows: X:\~BUN\ or X:/~BUN/ (drive letter varies, slashes can be either direction)
+  const path = import.meta.path;
+  const isCompiled =
+    path.startsWith("/$bunfs/") || // Unix
+    /^[A-Z]:[/\\]~BUN[/\\]/i.test(path); // Windows (both forward and backslashes)
+  return isCompiled;
+}
+
+// -------------
+// Metadata Management
+// -------------
+
+/**
+ * Schema for application metadata.
+ * This is embedded in compiled executables and used to track version info.
+ */
+export const metadataSchema = z.object({
+  version: z.string().min(1, "Version cannot be empty"),
+  buildDate: z.string().optional(),
+  buildTarget: z.string().optional(),
+});
+
+export type Metadata = z.infer<typeof metadataSchema>;
+
+/**
+ * Metadata class for managing application metadata.
+ * Supports serialization/deserialization and validation via Zod.
+ */
+export class AppMetadata {
+  private constructor(private data: Metadata) {}
+
+  /**
+   * Create metadata from object (validates with Zod schema)
+   */
+  static create(data: unknown): AppMetadata {
+    const validated = metadataSchema.parse(data);
+    return new AppMetadata(validated);
+  }
+
+  /**
+   * Deserialize metadata from JSON string
+   */
+  static deserialize(json: string): AppMetadata {
+    const data = JSON.parse(json);
+    return AppMetadata.create(data);
+  }
+
+  /**
+   * Serialize metadata to JSON string
+   */
+  serialize(): string {
+    return JSON.stringify(this.data, null, 2);
+  }
+
+  /**
+   * Get the version string
+   */
+  get version(): string {
+    return this.data.version;
+  }
+
+  /**
+   * Get the build date (if available)
+   */
+  get buildDate(): string | undefined {
+    return this.data.buildDate;
+  }
+
+  /**
+   * Get the build target (if available)
+   */
+  get buildTarget(): string | undefined {
+    return this.data.buildTarget;
+  }
+
+  /**
+   * Get raw metadata object
+   */
+  toObject(): Metadata {
+    return { ...this.data };
+  }
+}
+
+// Cached metadata to avoid repeated file reads/imports
+let cachedMetadata: AppMetadata | null = null;
+const FALLBACK_VERSION = "1.0.0";
+
+/**
+ * Get application metadata (version, build info, etc.).
+ * Works in both development (reads from filesystem) and compiled executable
+ * (uses build-time constants) contexts.
+ *
+ * In compiled mode: Uses BUILD_VERSION, BUILD_DATE, BUILD_TARGET constants
+ * In dev mode: Reads from package.json
+ *
+ * @returns AppMetadata instance, or metadata with fallback version
+ */
+export function getMetadata(): AppMetadata {
+  if (cachedMetadata) return cachedMetadata;
+
+  try {
+    // For compiled executables, use build-time constants
+    // These are injected via Bun's --define flag and replaced at compile-time
+    if (isCompiledExecutable()) {
+      try {
+        // Build-time constants are compile-time replacements
+        // They will be replaced with their actual values during compilation
+        const buildMetadata = {
+          version: BUILD_VERSION,
+          buildDate: BUILD_DATE,
+          buildTarget: BUILD_TARGET,
+        };
+        cachedMetadata = AppMetadata.create(buildMetadata);
+        return cachedMetadata as AppMetadata;
+      } catch {
+        // Fallback if constants are somehow not defined
+        cachedMetadata = AppMetadata.create({ version: FALLBACK_VERSION });
+        return cachedMetadata as AppMetadata;
+      }
+    }
+
+    // Fallback: Read from package.json (dev mode)
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const packageJsonPath = path.resolve(__dirname, "../package.json");
+    if (fs.existsSync(packageJsonPath)) {
+      const content = fs.readFileSync(packageJsonPath, "utf-8");
+      const pkg = JSON.parse(content);
+      cachedMetadata = AppMetadata.create({ version: pkg.version || FALLBACK_VERSION });
+    } else {
+      // Ultimate fallback
+      cachedMetadata = AppMetadata.create({ version: FALLBACK_VERSION });
+    }
+  } catch {
+    cachedMetadata = AppMetadata.create({ version: FALLBACK_VERSION });
+  }
+
+  return cachedMetadata as AppMetadata;
+}
+
+/**
+ * Get the appropriate command array to run a script in the current runtime.
+ * This ensures shims and other scripts are executed with the correct runtime.
+ *
+ * For compiled executables, we check if 'bun' is available on PATH and use it
+ * if present (for better performance), otherwise fall back to 'node'.
+ * This ensures standalone executables work on systems without Bun installed.
+ *
+ * @param scriptPath - Path to the script to execute
+ * @returns Command array suitable for spawn/exec (e.g., ['bun', scriptPath])
+ *
+ * @example
+ * ```ts
+ * // In Bun (source): ['bun', '/path/to/shim.mjs']
+ * // In compiled executable with bun on PATH: ['bun', '/path/to/shim.mjs']
+ * // In compiled executable without bun: ['node', '/path/to/shim.mjs']
+ * // In Node: ['node', '/path/to/shim.mjs']
+ * // In Deno: ['deno', 'run', '--allow-all', '/path/to/shim.mjs']
+ * const cmd = getRuntimeCommand('/path/to/shim.mjs');
+ * spawn(cmd[0], cmd.slice(1), options);
+ * ```
+ */
+export function getRuntimeCommand(scriptPath: string): string[] {
+  // If we're in a compiled executable, prefer bun if available, otherwise use node
+  // Rationale:
+  // 1. Can't assume 'bun' is on PATH in standalone distributions
+  // 2. Shims have #!/usr/bin/env node and are Node-compatible
+  // 3. Using bun when available provides better performance
+  if (isCompiledExecutable()) {
+    // Check if 'bun' is available on PATH using which/where
+    try {
+      const checkCommand = process.platform === "win32" ? "where" : "which";
+      const result = Bun.spawnSync([checkCommand, "bun"], {
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      if (result.exitCode === 0) {
+        return ["bun", scriptPath];
+      }
+    } catch {
+      // Command check failed, fall through to node
+    }
+    return ["node", scriptPath];
+  }
+
+  // When running from source, use the current runtime
+  const runtime = detectRuntime();
+  switch (runtime) {
+    case "bun":
+      return ["bun", scriptPath];
+    case "deno":
+      return ["deno", "run", "--allow-all", scriptPath];
+    case "node":
+      return ["node", scriptPath];
+  }
 }
 
 // -------------
@@ -411,4 +664,334 @@ export async function copyFiles(
  */
 export function deepMerge<T extends Record<string, unknown>>(...sources: Array<T | undefined>): T {
   return merge({}, ...sources) as T;
+}
+
+// -------------
+// File System Reliability Utilities
+// -------------
+
+/**
+ * Rename file with retry logic for Windows file locking issues.
+ *
+ * On Windows, EPERM/EBUSY errors can occur transiently due to:
+ * - Antivirus scanning (Windows Defender in CI environments)
+ * - File handles not fully released after previous operations
+ * - Windows filesystem timing differences vs Unix
+ *
+ * This implements exponential backoff retry to handle these transient locks.
+ *
+ * @param source - Source file path
+ * @param target - Target file path
+ * @param options - Retry configuration options
+ * @param options.maxRetries - Maximum number of retry attempts (default: 5)
+ * @param options.initialDelay - Initial delay in milliseconds (default: 10ms)
+ * @param options.logger - Optional logger for debugging retry attempts
+ * @returns Promise that resolves when rename succeeds
+ * @throws Error if rename fails after all retries or encounters non-retryable error
+ *
+ * @example
+ * ```ts
+ * // Basic usage
+ * await renameWithRetry('temp.json', 'state.json');
+ *
+ * // With custom retry settings and logging
+ * await renameWithRetry('temp.json', 'state.json', {
+ *   maxRetries: 10,
+ *   initialDelay: 20,
+ *   logger: myLogger
+ * });
+ * ```
+ */
+export async function renameWithRetry(
+  source: string,
+  target: string,
+  options: {
+    maxRetries?: number;
+    initialDelay?: number;
+    logger?: Logger;
+  } = {},
+): Promise<void> {
+  const { maxRetries = 5, initialDelay = 10, logger } = options;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await fs.promises.rename(source, target);
+      return; // Success!
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      lastError = err;
+
+      // Only retry on file locking errors
+      if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "EACCES") {
+        if (attempt < maxRetries - 1) {
+          const delay = initialDelay * 2 ** attempt;
+          logger?.log(
+            `File locked, retrying rename in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+            "debug",
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+
+      // Non-retryable error or max retries exceeded
+      throw error;
+    }
+  }
+
+  // Should never reach here, but TypeScript doesn't know that
+  throw lastError || new Error("Rename failed after retries");
+}
+
+/**
+ * Synchronous version of renameWithRetry for use in synchronous contexts.
+ *
+ * Same behavior as renameWithRetry but uses synchronous fs operations.
+ * Useful for scenarios where async/await cannot be used.
+ *
+ * @param source - Source file path
+ * @param target - Target file path
+ * @param options - Retry configuration options
+ * @param options.maxRetries - Maximum number of retry attempts (default: 5)
+ * @param options.initialDelay - Initial delay in milliseconds (default: 10ms)
+ * @param options.logger - Optional logger for debugging retry attempts
+ * @throws Error if rename fails after all retries or encounters non-retryable error
+ *
+ * @example
+ * ```ts
+ * renameWithRetrySync('temp.json', 'state.json');
+ * ```
+ */
+export function renameWithRetrySync(
+  source: string,
+  target: string,
+  options: {
+    maxRetries?: number;
+    initialDelay?: number;
+    logger?: Logger;
+  } = {},
+): void {
+  const { maxRetries = 5, initialDelay = 10, logger } = options;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      fs.renameSync(source, target);
+      return; // Success!
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      lastError = err;
+
+      // Only retry on file locking errors
+      if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "EACCES") {
+        if (attempt < maxRetries - 1) {
+          const delay = initialDelay * 2 ** attempt;
+          logger?.log(
+            `File locked, retrying rename in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+            "debug",
+          );
+          // Synchronous sleep using busy-wait (not ideal but necessary for sync context)
+          const start = Date.now();
+          while (Date.now() - start < delay) {
+            // Busy wait
+          }
+          continue;
+        }
+      }
+
+      // Non-retryable error or max retries exceeded
+      throw error;
+    }
+  }
+
+  // Should never reach here, but TypeScript doesn't know that
+  throw lastError || new Error("Rename failed after retries");
+}
+
+// -------------
+// Server Utilities
+// -------------
+
+/**
+ * Abstraction over server instances providing a common interface.
+ * This allows the codebase to be runtime-agnostic.
+ */
+export interface StrandweaveServer {
+  /** Stop the server and clean up resources */
+  stop(): void;
+}
+
+/**
+ * Runtime-agnostic WebSocket interface.
+ * Provides a common interface that works across Bun, Node.js, and other runtimes.
+ */
+export interface StrandweaveWebSocket<T = unknown> {
+  /** Custom data attached to this WebSocket connection */
+  data: T;
+  /** Send a message to the client */
+  send(message: string | Buffer): void;
+  /** Close the WebSocket connection */
+  close(code?: number, reason?: string): void;
+}
+
+/**
+ * Configuration options for creating an HTTP or WebSocket server.
+ * Provides a runtime-agnostic interface for both HTTP and WebSocket servers.
+ *
+ * The generic type T represents the WebSocket connection data type.
+ */
+export interface ServeOptions<T = unknown> {
+  /** Port number to listen on */
+  port: number;
+  /** Idle timeout in seconds (optional, only for HTTP servers) */
+  idleTimeout?: number;
+  /** HTTP request handler (required for HTTP servers) */
+  fetch?: (request: Request, server?: unknown) => Response | Promise<Response> | undefined;
+  /** WebSocket handlers (required for WebSocket servers) */
+  websocket?: {
+    /**
+     * Called before upgrading to WebSocket.
+     * Return context data to attach to the connection.
+     */
+    upgrade?: (request: Request) => T | Promise<T>;
+    /** Called when a WebSocket connection is opened */
+    open?: (ws: StrandweaveWebSocket<T>) => void;
+    /** Called when a message is received on the WebSocket */
+    message?: (ws: StrandweaveWebSocket<T>, message: string | Buffer) => void;
+    /** Called when a WebSocket connection is closed */
+    close?: (ws: StrandweaveWebSocket<T>) => void;
+  };
+}
+
+/**
+ * Adapter that wraps a crossws Peer to provide the Strand weave WebSocket interface.
+ * Maps Peer.context to .data and adapts method signatures.
+ */
+class PeerAdapter<T> implements StrandweaveWebSocket<T> {
+  constructor(private peer: Peer) {
+    // Initialize context if it doesn't exist
+    if (!this.peer.context) {
+      // biome-ignore lint/suspicious/noExplicitAny: crossws Peer type doesn't expose context setter
+      (this.peer as any).context = {};
+    }
+  }
+
+  get data(): T {
+    return this.peer.context as T;
+  }
+
+  set data(value: T) {
+    // Cannot replace context object (readonly), so update its properties
+    const context = this.peer.context as Record<string, unknown>;
+    // Clear existing properties
+    for (const key in context) {
+      delete context[key];
+    }
+    // Copy new properties
+    Object.assign(context, value);
+  }
+
+  send(message: string | Buffer): void {
+    this.peer.send(message);
+  }
+
+  close(code?: number, reason?: string): void {
+    this.peer.close(code, reason);
+  }
+}
+
+/**
+ * Create an HTTP or WebSocket server using crossws.
+ *
+ * This provides a runtime-agnostic interface that works with Bun, Node.js, Deno,
+ * and other runtimes via the crossws library.
+ *
+ * @param options - Server configuration options
+ * @returns Server instance with stop() method
+ *
+ * @example
+ * // HTTP server
+ * const server = serve({
+ *   port: 3000,
+ *   fetch: async (req) => new Response("Hello"),
+ * });
+ *
+ * @example
+ * // WebSocket server
+ * const server = serve({
+ *   port: 8080,
+ *   websocket: {
+ *     open: (ws) => console.log("connected"),
+ *     message: (ws, msg) => console.log(msg),
+ *   },
+ *   fetch: (req, server) => server.upgrade(req),
+ * });
+ */
+export function serve<T = unknown>(options: ServeOptions<T>): StrandweaveServer {
+  // Convert our options to crossws format
+  // biome-ignore lint/suspicious/noExplicitAny: crossws options type is complex and runtime-specific
+  const crosswsOptions: any = {
+    port: options.port,
+    fetch: options.fetch,
+  };
+
+  // If WebSocket handlers are provided, wrap them with adapters
+  if (options.websocket) {
+    const { upgrade, open, message, close } = options.websocket;
+
+    // Map to maintain consistent adapter instances per peer
+    const peerAdapters = new WeakMap<Peer, PeerAdapter<T>>();
+
+    const getAdapter = (peer: Peer): PeerAdapter<T> => {
+      let adapter = peerAdapters.get(peer);
+      if (!adapter) {
+        adapter = new PeerAdapter<T>(peer);
+        peerAdapters.set(peer, adapter);
+      }
+      return adapter;
+    };
+
+    crosswsOptions.websocket = {
+      upgrade: upgrade
+        ? async (req: Request) => {
+            const context = await upgrade(req);
+            return { context };
+          }
+        : undefined,
+
+      open: open
+        ? (peer: Peer) => {
+            open(getAdapter(peer));
+          }
+        : undefined,
+
+      message: message
+        ? (peer: Peer, msg: Message) => {
+            // Convert Message to string or Buffer
+            const data = msg.rawData;
+            const messageData =
+              typeof data === "string" || Buffer.isBuffer(data) ? data : msg.text();
+            message(getAdapter(peer), messageData);
+          }
+        : undefined,
+
+      close: close
+        ? (peer: Peer) => {
+            close(getAdapter(peer));
+          }
+        : undefined,
+    };
+  }
+
+  const server = crosswsServe(crosswsOptions);
+
+  return {
+    stop: () => {
+      // crossws servers have a close() method
+      if (server && typeof server.close === "function") {
+        server.close();
+      }
+    },
+  };
 }

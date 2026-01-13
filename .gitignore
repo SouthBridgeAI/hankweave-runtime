@@ -1,10 +1,19 @@
 # Based on https://raw.githubusercontent.com/github/gitignore/main/Node.gitignore
 
+# GitHub Actions workflows (explicitly allow)
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.github/workflows/*.yaml
+
 # Generated files
 server/config-validation/event-schemas.generated.ts
 
-# Langton
-workflows
+# Langton (ignore top-level workflows directory but not .github/workflows)
+/workflows
+
+# Executable builds
+releases/
 
 # Logs
 
@@ -188,3 +197,10 @@ dist
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Verdaccio local registry testing
+verdaccio-storage/
+verdaccio.pid
+.npmrc.backup
+.npmrc.verdaccio
+

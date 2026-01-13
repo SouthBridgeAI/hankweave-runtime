@@ -3,15 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
+import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import { type Codon, isContextExceeded } from "./types/types.js";
+import { type Codon, isContextExceeded, type ShimSelfTestResult } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
 
 /**
- * Manages Claude subprocess lifecycle, including spawning, monitoring, and cleanup.
+ * Manages shim subprocess lifecycle, including spawning, monitoring, and cleanup.
  * Handles log stream creation and process argument building.
+ * Works with any shim that supports the standardized argument interface.
  */
-export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
+export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
   private process: ChildProcess | undefined;
   private logStream: fs.WriteStream | undefined;
   private killed = false;
@@ -21,20 +23,26 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
-    private model?: import("./types/types.js").ModelName,
+    private model?: ModelInfo,
   ) {
     super();
   }
 
   /**
-   * Spawn a Claude process for the given codon configuration.
+   * Spawn a shim process for the given codon configuration.
    * Sets up logging, environment, and process monitoring.
    *
+   * @param command - Command to execute (e.g., ["claude"] or ["bun", "run", "shims/gemini/dist/index.mjs"])
    * @param codon - Codon configuration (not Loop - loops must be expanded first)
    * @param previousSessionId - Session ID to continue from (if any)
    * @param logPath - Custom log file path (optional, defaults to .strandweave/logs/)
    */
-  async spawn(codon: Codon, previousSessionId: string | null, logPath?: string): Promise<string> {
+  async spawn(
+    command: string[],
+    codon: Codon,
+    previousSessionId: string | null,
+    logPath?: string,
+  ): Promise<string> {
     if (this.process) {
       throw new Error("Process already running");
     }
@@ -52,8 +60,8 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     // Create log stream
     this.logStream = fs.createWriteStream(actualLogPath);
 
-    // Build Claude arguments
-    const args = this.buildClaudeArgs(codon, previousSessionId);
+    // Build shim arguments
+    const args = this.buildShimArgs(codon, previousSessionId);
 
     // Set up environment
     const env = { ...process.env }; // Start with server's environment
@@ -84,9 +92,14 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       Object.assign(env, codon.env);
     }
 
+    // Combine shim command with shim flags
+    // Example: ["bun", "run", "shim.ts"] + ["--model", "gemini...", "-p", "..."]
+    const [bin, ...binArgs] = command;
+    const finalArgs = [...binArgs, ...args];
+
     // Log the exact command being run
-    const fullCommand = `claude ${args.join(" ")}`;
-    this.logger.log(`Executing Claude command: ${fullCommand}`);
+    const fullCommand = `${bin} ${finalArgs.join(" ")}`;
+    this.logger.log(`Executing Agent: ${fullCommand}`);
     this.logger.log(`Working directory: ${this.executionPath}`);
 
     // Additional debugging
@@ -100,7 +113,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     );
 
     // Spawn process
-    this.process = spawn("claude", args, {
+    this.process = spawn(bin, finalArgs, {
       cwd: this.executionPath,
       stdio: ["pipe", "pipe", "pipe"],
       env,
@@ -128,44 +141,38 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     // Feed prompt to stdin
     await this.feedPrompt(codon);
 
-    this.logger.log(`Claude process started for codon ${codon.id} (PID: ${this.process.pid})`);
+    this.logger.log(`Shim process started for codon ${codon.id} (PID: ${this.process.pid})`);
 
     return actualLogPath;
   }
 
   /**
-   * Build command line arguments for Claude CLI.
+   * Build command line arguments for shim.
+   * Only includes arguments supported by all shims.
    */
-  private buildClaudeArgs(codon: Codon, previousSessionId: string | null): string[] {
+  private buildShimArgs(codon: Codon, previousSessionId: string | null): string[] {
     // Use model override if provided, otherwise use codon model
-    const model = this.model || codon.model;
+    const modelInfo = this.model || codon.model;
+    const modelId = modelInfo.modelId;
 
-    const args = [
-      "--verbose",
-      "--dangerously-skip-permissions",
-      "--model",
-      model,
-      "--permission-mode",
-      "bypassPermissions",
-      "-p",
-      "--output-format",
-      "stream-json",
-    ];
+    const args = ["--model", modelId, "-p"];
 
     // Log model usage
     if (this.model) {
-      this.logger.log(`Using model override: ${model} (codon config specified: ${codon.model})`);
+      this.logger.log(
+        `Using model override: ${modelInfo.modelId} (codon config specified: ${codon.model.modelId})`,
+      );
     }
 
     if (codon.continuationMode === "continue-previous" && previousSessionId) {
-      args.push("-c", "--resume", previousSessionId);
+      args.push("--resume", previousSessionId);
     }
 
     // Handle system prompt if provided
     const systemPrompt = this.buildSystemPrompt(codon);
     if (systemPrompt) {
       args.push("--append-system-prompt", escapeShellArg(systemPrompt));
-      this.logger.log(`Added system prompt to Claude (${systemPrompt.length} chars)`);
+      this.logger.log(`Added system prompt to shim (${systemPrompt.length} chars)`);
       this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
 
@@ -204,7 +211,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   }
 
   /**
-   * Feed prompt content to Claude's stdin.
+   * Feed prompt content to shim's stdin.
    */
   private async feedPrompt(codon: Codon): Promise<void> {
     if (!this.process?.stdin) {
@@ -234,7 +241,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     this.process.stdin.write(processedContent);
     this.process.stdin.end();
 
-    this.logger.log(`Fed prompt to Claude (${processedContent.length} chars)`);
+    this.logger.log(`Fed prompt to shim (${processedContent.length} chars)`);
     this.logger.log(`Prompt content:\n${processedContent}`);
   }
 
@@ -245,7 +252,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     if (!this.process) return;
 
     this.process.on("exit", (code, signal) => {
-      this.logger.log(`Claude process exited with code: ${code}, signal: ${signal}`);
+      this.logger.log(`Shim process exited with code: ${code}, signal: ${signal}`);
 
       // Parse final log entries to ensure we have all messages
       this.logParser.parseNow();
@@ -263,7 +270,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
     });
 
     this.process.on("error", (error) => {
-      this.logger.log(`Claude process error: ${error.message}`, "error");
+      this.logger.log(`Shim process error: ${error.message}`, "error");
       this.cleanup();
       this.emit("error", error);
     });
@@ -274,7 +281,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     this.process.stderr?.on("data", (data) => {
       const errorMessage = data.toString().trim();
-      this.logger.log(`Claude stderr: ${errorMessage}`, "error");
+      this.logger.log(`Shim stderr: ${errorMessage}`, "error");
 
       // Write to log file as JSON entry (matching server behavior)
       if (this.logStream && !this.logStream.destroyed) {
@@ -290,13 +297,13 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
   }
 
   /**
-   * Kill the Claude process.
+   * Kill the shim process.
    */
   async kill(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
     if (!this.process || this.killed) return;
 
     this.killed = true;
-    this.logger.log(`Killing Claude process with ${signal}`);
+    this.logger.log(`Killing shim process with ${signal}`);
 
     // Force an immediate parse of the log file to capture any final messages
     // This ensures we don't lose token counts or other important data when killing
@@ -319,7 +326,7 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       setTimeout(() => {
         clearInterval(checkInterval);
         if (this.process && !this.process.killed) {
-          this.logger.log("Force killing Claude process with SIGKILL");
+          this.logger.log("Force killing shim process with SIGKILL");
           this.process.kill("SIGKILL");
         }
         resolve();
@@ -366,5 +373,76 @@ export class ClaudeProcessManager extends TypedEventEmitter<ProcessEvents> {
       });
       this.logStream = undefined;
     }
+  }
+
+  /**
+   * Run the shim's self-test to verify environment setup.
+   * Executes the shim with --self-test flag and returns the results.
+   *
+   * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.mjs"])
+   * @returns Promise resolving to self-test results
+   * @throws Error if self-test execution fails or returns invalid JSON
+   */
+  async runSelfTest(command: string[]): Promise<ShimSelfTestResult> {
+    this.logger.log("Running shim self-test...");
+
+    const [bin, ...binArgs] = command;
+    const args = [...binArgs, "--self-test"];
+
+    const fullCommand = `${bin} ${args.join(" ")}`;
+    this.logger.log(`Executing self-test: ${fullCommand}`);
+
+    return new Promise((resolve, reject) => {
+      const childProcess = spawn(bin, args, {
+        cwd: this.executionPath,
+        stdio: ["ignore", "pipe", "pipe"], // No stdin, capture stdout/stderr
+        env: { ...process.env }, // Use current environment (includes API keys)
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      childProcess.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      childProcess.stderr?.on("data", (data) => {
+        stderr += data.toString();
+        this.logger.log(`Self-test stderr: ${data.toString()}`, "debug");
+      });
+
+      const timeout = setTimeout(() => {
+        childProcess.kill("SIGTERM");
+        reject(new Error("Self-test timed out after 30 seconds"));
+      }, 30000);
+
+      childProcess.on("close", (code) => {
+        clearTimeout(timeout);
+
+        if (code !== 0) {
+          this.logger.log(`Self-test failed with exit code ${code}`, "error");
+          if (stderr) {
+            this.logger.log(`Stderr: ${stderr}`, "error");
+          }
+        }
+
+        try {
+          const result = JSON.parse(stdout) as ShimSelfTestResult;
+          this.logger.log(
+            `Self-test completed: ${result.overall.passed ? "PASSED" : "FAILED"}`,
+            result.overall.passed ? "info" : "error",
+          );
+          resolve(result);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : "Unknown error parsing JSON";
+          reject(new Error(`Failed to parse self-test output: ${errorMsg}\nOutput: ${stdout}`));
+        }
+      });
+
+      childProcess.on("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
   }
 }

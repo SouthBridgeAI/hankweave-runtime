@@ -33,7 +33,7 @@ export const modelInfoSchema = z.object({
   attachment: z.boolean(), // Supports file attachments
   reasoning: z.boolean(), // Supports reasoning / chain-of-thought
   tool_call: z.boolean(), // Supports tool calling (also implies structured output support)
-  temperature: z.boolean(), // Supports temperature control
+  temperature: z.boolean().optional(), // Supports temperature control
 
   // Pricing and limits
   cost: modelCostSchema,
@@ -67,7 +67,7 @@ export const modelsDevApiResponseSchema = z.record(
         attachment: z.boolean(),
         reasoning: z.boolean(),
         tool_call: z.boolean(),
-        temperature: z.boolean(),
+        temperature: z.boolean().optional(),
         knowledge: z.string().optional(),
         release_date: z.string(),
         last_updated: z.string(),

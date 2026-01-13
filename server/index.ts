@@ -1,13 +1,16 @@
 #!/usr/bin/env bun
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
+import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
 import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { initProject } from "./init-command.js";
+import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
 import type { StrandweaveConfig } from "./types/types.js";
+import { getMetadata, Logger } from "./utils.js";
 
 // -------------
 // Helper Functions
@@ -47,6 +50,12 @@ function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
     cliArgs.withoutProxy = true;
   }
 
+  // Parse idleTimeout
+  const idleTimeoutArg = args.find((arg) => arg.startsWith("--idle-timeout="))?.split("=")[1];
+  if (idleTimeoutArg) {
+    cliArgs.idleTimeout = parseInt(idleTimeoutArg, 10);
+  }
+
   return cliArgs;
 }
 
@@ -55,6 +64,9 @@ function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
 // -------------
 
 async function main() {
+  // Print version banner
+  console.log(`\nStrandweave v${getMetadata().version}\n`);
+
   // Strict argument validation
   const rawArgs = process.argv.slice(2);
   const validPatterns = [
@@ -74,6 +86,7 @@ async function main() {
     /^--port=\d+$/,
     /^--model=(sonnet|opus)$/,
     /^--without-proxy$/,
+    /^--idle-timeout=\d+$/,
     /^--init$/,
     /^--help$/,
     /^-h$/,
@@ -121,6 +134,7 @@ Options:
   --model=<sonnet|opus>     Override model for all codons (ignores per-codon settings)
   --anthropic-base-url=<url> Custom Anthropic API base URL
   --without-proxy           Disable the proxy server
+  --idle-timeout=<seconds>  Idle timeout for WebSocket and proxy servers in seconds (0-255, default: 20)
   --help, -h                Show this help message
 
 Execution Isolation:
@@ -174,6 +188,18 @@ Examples:
       process.exit(0);
     } catch (error) {
       console.error(`\n❌ Init failed: ${(error as Error).message}\n`);
+      process.exit(1);
+    }
+  }
+
+  // Ensure Claude SDK is available (unless we're in cleanup or validate mode)
+  // this is a basic check for when we are running using en executable
+  // more thorough checks happen during selftests
+  if (!cleanupMode && !validateMode) {
+    try {
+      await ClaudeAgentSDKManager.ensureSdkAvailable();
+    } catch (error) {
+      console.error(`\n❌ ${(error as Error).message}\n`);
       process.exit(1);
     }
   }
@@ -238,6 +264,16 @@ Examples:
     strandPath: absoluteConfigPath,
   });
 
+  // Initialize LLM Provider Registry singleton before ANY config parsing/validation
+  // This must happen before validateStrand() since Zod transforms use it for model validation
+  const validationLogger = new Logger(
+    path.join(executionSetup.executionPath, "model-validation.log"),
+  );
+  LlmProviderRegistry.getInstance({
+    logger: validationLogger,
+    performHealthCheckOnInit: false,
+  });
+
   try {
     // Validation mode
     if (validateMode) {
@@ -246,6 +282,7 @@ Examples:
       const validationResult = await validateStrand(
         absoluteConfigPath,
         executionSetup.executionPath, // Changed from readOnlySourceData
+        validationLogger,
       );
 
       // Print summary
@@ -300,6 +337,7 @@ Examples:
     const { codons, warnings } = await validateStrand(
       absoluteConfigPath,
       executionSetup.executionPath, // Changed from readOnlySourceData
+      validationLogger,
     );
 
     // Log any non-fatal warnings
@@ -350,6 +388,7 @@ Examples:
   }
 }
 
+// Run main if this is the main module
 if (import.meta.main) {
   main();
 }
