@@ -1,7 +1,7 @@
 import path from "node:path";
 import { StateManager } from "../../server/state-manager";
 import { CodonId } from "../../server/types/branded-types";
-import type { CodonStatus, StrandweaveState } from "../../server/types/state-types";
+import type { CodonStatus, HankweaveState } from "../../server/types/state-types";
 import type { CodonConfig } from "../../server/types/types";
 import { Logger } from "../../server/utils";
 
@@ -27,7 +27,7 @@ export function waitForCodonStatus(
   });
 }
 
-export function createMockState(overrides?: Partial<StrandweaveState>): StrandweaveState {
+export function createMockState(overrides?: Partial<HankweaveState>): HankweaveState {
   return {
     runs: [],
     currentRunId: null,
@@ -41,10 +41,10 @@ export function createTestStateManager(
   codonConfigs?: CodonConfig[],
 ): StateManager {
   const logger = new Logger(path.join(testDir, "test.log"));
-  return new StateManager(path.join(testDir, ".strandweave"), logger, codonConfigs);
+  return new StateManager(path.join(testDir, ".hankweave"), logger, codonConfigs);
 }
 
-export function getCompletedCodonsFromState(state: StrandweaveState): Array<{
+export function getCompletedCodonsFromState(state: HankweaveState): Array<{
   codonId: string;
   cost: number;
   sessionId: string;

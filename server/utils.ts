@@ -246,8 +246,8 @@ export function detectRuntime(): Runtime {
 export function isCompiledExecutable(): boolean {
   // Allow override for testing (avoids Bun's module mock persistence bug)
   // https://github.com/oven-sh/bun/issues/7823
-  if (process.env.STRANDWEAVE_TEST_IS_COMPILED !== undefined) {
-    return process.env.STRANDWEAVE_TEST_IS_COMPILED === "true";
+  if (process.env.HANKWEAVE_TEST_IS_COMPILED !== undefined) {
+    return process.env.HANKWEAVE_TEST_IS_COMPILED === "true";
   }
 
   // We only support Bun compiled executables
@@ -817,7 +817,7 @@ export function renameWithRetrySync(
  * Abstraction over server instances providing a common interface.
  * This allows the codebase to be runtime-agnostic.
  */
-export interface StrandweaveServer {
+export interface HankweaveServer {
   /** Stop the server and clean up resources */
   stop(): void;
 }
@@ -826,7 +826,7 @@ export interface StrandweaveServer {
  * Runtime-agnostic WebSocket interface.
  * Provides a common interface that works across Bun, Node.js, and other runtimes.
  */
-export interface StrandweaveWebSocket<T = unknown> {
+export interface HankweaveWebSocket<T = unknown> {
   /** Custom data attached to this WebSocket connection */
   data: T;
   /** Send a message to the client */
@@ -856,19 +856,19 @@ export interface ServeOptions<T = unknown> {
      */
     upgrade?: (request: Request) => T | Promise<T>;
     /** Called when a WebSocket connection is opened */
-    open?: (ws: StrandweaveWebSocket<T>) => void;
+    open?: (ws: HankweaveWebSocket<T>) => void;
     /** Called when a message is received on the WebSocket */
-    message?: (ws: StrandweaveWebSocket<T>, message: string | Buffer) => void;
+    message?: (ws: HankweaveWebSocket<T>, message: string | Buffer) => void;
     /** Called when a WebSocket connection is closed */
-    close?: (ws: StrandweaveWebSocket<T>) => void;
+    close?: (ws: HankweaveWebSocket<T>) => void;
   };
 }
 
 /**
- * Adapter that wraps a crossws Peer to provide the Strand weave WebSocket interface.
+ * Adapter that wraps a crossws Peer to provide the Hank weave WebSocket interface.
  * Maps Peer.context to .data and adapts method signatures.
  */
-class PeerAdapter<T> implements StrandweaveWebSocket<T> {
+class PeerAdapter<T> implements HankweaveWebSocket<T> {
   constructor(private peer: Peer) {
     // Initialize context if it doesn't exist
     if (!this.peer.context) {
@@ -928,7 +928,7 @@ class PeerAdapter<T> implements StrandweaveWebSocket<T> {
  *   fetch: (req, server) => server.upgrade(req),
  * });
  */
-export function serve<T = unknown>(options: ServeOptions<T>): StrandweaveServer {
+export function serve<T = unknown>(options: ServeOptions<T>): HankweaveServer {
   // Convert our options to crossws format
   // biome-ignore lint/suspicious/noExplicitAny: crossws options type is complex and runtime-specific
   const crosswsOptions: any = {

@@ -6,8 +6,8 @@ import type { SentinelConfig } from "../../server/config-validation/sentinel.sch
 import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type {
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
 import type { SentinelOutputPaths } from "../../server/types/sentinel-types.js";
 
@@ -29,8 +29,8 @@ describe("Sentinel Output Files - Unit Tests", () => {
   const createMockLlmCall = (responseText = "Mock response") => {
     return async (
       _id: string,
-      _options: StrandweaveGenerateTextOptions,
-    ): Promise<StrandweaveGenerateTextResult> => {
+      _options: HankweaveGenerateTextOptions,
+    ): Promise<HankweaveGenerateTextResult> => {
       return {
         text: responseText,
         finishReason: "stop",
@@ -50,7 +50,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
   });
 
   describe("Path Convention", () => {
-    test("filename-only resolves to .strandweave/sentinels/outputs/{id}/", () => {
+    test("filename-only resolves to .hankweave/sentinels/outputs/{id}/", () => {
       const config = createBaseConfig();
       const outputPaths: SentinelOutputPaths = {
         logFile: "output.md",
@@ -73,7 +73,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const expectedPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -154,7 +154,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const autoDir = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -189,7 +189,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const autoDir = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -222,7 +222,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const autoDir = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -262,7 +262,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const autoDir = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -306,7 +306,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -348,7 +348,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -390,7 +390,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -432,7 +432,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -452,7 +452,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       let callCount = 0;
       const mockLlm = createMockLlmCall();
-      const wrappedMock = async (id: string, options: StrandweaveGenerateTextOptions) => {
+      const wrappedMock = async (id: string, options: HankweaveGenerateTextOptions) => {
         callCount++;
         return {
           ...(await mockLlm(id, options)),
@@ -489,7 +489,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -510,7 +510,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       let callCount = 0;
       const mockLlm = createMockLlmCall();
-      const wrappedMock = async (id: string, options: StrandweaveGenerateTextOptions) => {
+      const wrappedMock = async (id: string, options: HankweaveGenerateTextOptions) => {
         callCount++;
         return {
           ...(await mockLlm(id, options)),
@@ -547,7 +547,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const currentPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -593,7 +593,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
       // Should only create logFile
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -604,7 +604,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
       // No lastValueFile should exist
       const currentPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -645,7 +645,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -667,7 +667,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const logPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -715,7 +715,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
 
       const currentPath = path.join(
         executionPath,
-        ".strandweave",
+        ".hankweave",
         "sentinels",
         "outputs",
         "test-sentinel",
@@ -807,7 +807,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
       await sentinel.completeAllWork();
 
       // No files should be created
-      expect(fs.existsSync(path.join(executionPath, ".strandweave"))).toBe(false);
+      expect(fs.existsSync(path.join(executionPath, ".hankweave"))).toBe(false);
     });
   });
 });

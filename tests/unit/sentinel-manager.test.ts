@@ -7,8 +7,8 @@ import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry
 import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import type { CodonId } from "../../server/types/branded-types.js";
 import type {
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
 import { Logger } from "../../server/utils.js";
 import { createMockLlm } from "../utils/mock-llm.js";
@@ -77,8 +77,8 @@ describe("SentinelManager - Large Tasks", () => {
       // Wrap mock to match expected signature (sentinelId, options)
       const wrappedMock = async (
         _sentinelId: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         return mockLlm.generateText(options);
       };
 
@@ -119,8 +119,8 @@ describe("SentinelManager - Large Tasks", () => {
       // Wrap mock to match expected signature
       const wrappedMock = async (
         _sentinelId: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         return mockLlm.generateText(options);
       };
 
@@ -156,8 +156,8 @@ describe("SentinelManager - Large Tasks", () => {
       // Wrap mock to match expected signature
       const wrappedMock = async (
         _sentinelId: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         return mockLlm.generateText(options);
       };
 
@@ -199,8 +199,8 @@ describe("SentinelManager - Large Tasks", () => {
       // Wrap mock to match expected signature
       const wrappedMock = async (
         _sentinelId: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         return mockLlm.generateText(options);
       };
 
@@ -357,8 +357,8 @@ describe("SentinelManager - Large Tasks", () => {
       // Wrap mock to match expected signature
       const wrappedMock = async (
         _sentinelId: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         return mockLlm.generateText(options);
       };
 

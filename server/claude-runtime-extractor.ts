@@ -48,10 +48,10 @@ function getPlatformKey(): string {
 
 /**
  * Get the extraction directory path.
- * Uses ~/.strandweave/claude-sdk/<version>/ by default.
+ * Uses ~/.hankweave/claude-sdk/<version>/ by default.
  */
 export function getExtractionDir(): string {
-  const cacheDir = process.env.STRANDWEAVE_CACHE_DIR || path.join(os.homedir(), ".strandweave");
+  const cacheDir = process.env.HANKWEAVE_CACHE_DIR || path.join(os.homedir(), ".hankweave");
   return path.join(cacheDir, "claude-sdk", SDK_VERSION);
 }
 

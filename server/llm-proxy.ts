@@ -1,5 +1,5 @@
 import { type ClaudeApiRequest, claudeApiRequestSchema } from "./types/claude-session-schema";
-import { type Logger, type StrandweaveServer, serve } from "./utils.js";
+import { type HankweaveServer, type Logger, serve } from "./utils.js";
 
 /**
  * Represents an incoming request to the LLM proxy
@@ -462,7 +462,7 @@ export function createPassthroughProxy({
  * Currently supports only "passthrough" proxy mode.
  */
 export class ProxyRunner {
-  private server?: StrandweaveServer;
+  private server?: HankweaveServer;
 
   /**
    * Create a new proxy runner
@@ -512,7 +512,7 @@ export class ProxyRunner {
 
         // Health check endpoint
         if (pathname === "/health" || pathname === "/") {
-          return new Response("Strandweave Proxy OK", {
+          return new Response("Hankweave Proxy OK", {
             status: 200,
             headers: { "Content-Type": "text/plain" },
           });

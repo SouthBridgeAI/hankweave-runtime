@@ -5,7 +5,7 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runLogFilesTests(testDir: string) {
   // Find the run folder - there should be exactly one
-  const runsDir = path.join(testDir, ".strandweave/runs");
+  const runsDir = path.join(testDir, ".hankweave/runs");
   let runFolder = "";
 
   if (fs.existsSync(runsDir)) {
@@ -17,7 +17,7 @@ export function runLogFilesTests(testDir: string) {
 
   for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
     describe(`${codonId} logs`, () => {
-      // Logs are now in .strandweave/runs/{runId}/codon-{codonId}-claude.log
+      // Logs are now in .hankweave/runs/{runId}/codon-{codonId}-claude.log
       const logPath = path.join(runFolder, `${codonId}-claude.log`);
 
       test(`log file exists`, () => {

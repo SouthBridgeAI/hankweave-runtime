@@ -5,8 +5,8 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type {
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { WebSocketLogReader } from "../../server/websocket-log-reader.js";
@@ -26,8 +26,8 @@ class MockLlmCall {
 
   public fn = async (
     sentinelId: string,
-    options: StrandweaveGenerateTextOptions,
-  ): Promise<StrandweaveGenerateTextResult> => {
+    options: HankweaveGenerateTextOptions,
+  ): Promise<HankweaveGenerateTextResult> => {
     // Get the queue for this sentinel
     const eventQueue = this.pendingEventsQueueBySentinel.get(sentinelId) || [];
 

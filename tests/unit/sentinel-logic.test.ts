@@ -7,8 +7,8 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type {
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
 import { createMockLlm } from "../utils/mock-llm.js";
 
@@ -32,12 +32,12 @@ describe("Sentinel LLM Interaction Logic", () => {
   });
 
   describe("Non-conversational sentinel LLM calls", () => {
-    it("should construct the correct StrandweaveGenerateTextOptions for a non-conversational sentinel", async () => {
-      const capturedOptions: StrandweaveGenerateTextOptions[] = [];
+    it("should construct the correct HankweaveGenerateTextOptions for a non-conversational sentinel", async () => {
+      const capturedOptions: HankweaveGenerateTextOptions[] = [];
       const mockLlmCall = async (
         _id: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         capturedOptions.push(options);
         return await mockLlmProvider.generateText(options);
       };
@@ -81,11 +81,11 @@ describe("Sentinel LLM Interaction Logic", () => {
     });
 
     it("should handle templates correctly in non-conversational mode", async () => {
-      const capturedOptions: StrandweaveGenerateTextOptions[] = [];
+      const capturedOptions: HankweaveGenerateTextOptions[] = [];
       const mockLlmCall = async (
         _id: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         capturedOptions.push(options);
         return await mockLlmProvider.generateText(options);
       };
@@ -136,11 +136,11 @@ describe("Sentinel LLM Interaction Logic", () => {
     });
 
     it("should respect LLM parameters from config", async () => {
-      const capturedOptions: StrandweaveGenerateTextOptions[] = [];
+      const capturedOptions: HankweaveGenerateTextOptions[] = [];
       const mockLlmCall = async (
         _id: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         capturedOptions.push(options);
         return await mockLlmProvider.generateText(options);
       };
@@ -189,11 +189,11 @@ describe("Sentinel LLM Interaction Logic", () => {
 
   describe("Conversational sentinel LLM calls", () => {
     it("should construct correct options for a conversational sentinel, including history", async () => {
-      const capturedOptions: StrandweaveGenerateTextOptions[] = [];
+      const capturedOptions: HankweaveGenerateTextOptions[] = [];
       const mockLlmCall = async (
         _id: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         capturedOptions.push(options);
         return await mockLlmProvider.generateText(options);
       };
@@ -253,8 +253,8 @@ describe("Sentinel LLM Interaction Logic", () => {
     it("should add the LLM response to history ONLY on successful call", async () => {
       const mockLlmCall = async (
         _id: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         return await mockLlmProvider.generateText(options);
       };
 
@@ -304,7 +304,7 @@ describe("Sentinel LLM Interaction Logic", () => {
 
     it("should handle LLM errors correctly based on continueOnError setting", async () => {
       let callCount = 0;
-      const mockLlmCall = async (_id: string, _options: StrandweaveGenerateTextOptions) => {
+      const mockLlmCall = async (_id: string, _options: HankweaveGenerateTextOptions) => {
         callCount++;
         throw new Error("LLM API Error");
       };
@@ -345,7 +345,7 @@ describe("Sentinel LLM Interaction Logic", () => {
     });
 
     it("should throw LLM errors when continueOnError is false", async () => {
-      const mockLlmCall = async (_id: string, _options: StrandweaveGenerateTextOptions) => {
+      const mockLlmCall = async (_id: string, _options: HankweaveGenerateTextOptions) => {
         throw new Error("LLM API Error");
       };
 
@@ -394,11 +394,11 @@ describe("Sentinel LLM Interaction Logic", () => {
 
   describe("Event processing", () => {
     it("should pass the correct event data to templates", async () => {
-      const capturedOptions: StrandweaveGenerateTextOptions[] = [];
+      const capturedOptions: HankweaveGenerateTextOptions[] = [];
       const mockLlmCall = async (
         _id: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         capturedOptions.push(options);
         return await mockLlmProvider.generateText(options);
       };
@@ -477,11 +477,11 @@ Total: <%= it.events.length %> events
     });
 
     it("should handle multiple events with debounce strategy", async () => {
-      const capturedOptions: StrandweaveGenerateTextOptions[] = [];
+      const capturedOptions: HankweaveGenerateTextOptions[] = [];
       const mockLlmCall = async (
         _id: string,
-        options: StrandweaveGenerateTextOptions,
-      ): Promise<StrandweaveGenerateTextResult> => {
+        options: HankweaveGenerateTextOptions,
+      ): Promise<HankweaveGenerateTextResult> => {
         capturedOptions.push(options);
         return await mockLlmProvider.generateText(options);
       };
@@ -543,7 +543,7 @@ Total: <%= it.events.length %> events
 
   describe("Configuration validation", () => {
     it("should validate conversational sentinels have system prompts", async () => {
-      const mockLlmCall = async (): Promise<StrandweaveGenerateTextResult> => {
+      const mockLlmCall = async (): Promise<HankweaveGenerateTextResult> => {
         return {
           text: "response",
           finishReason: "stop",
@@ -578,7 +578,7 @@ Total: <%= it.events.length %> events
     });
 
     it("should accept valid conversational configuration", async () => {
-      const mockLlmCall = async (): Promise<StrandweaveGenerateTextResult> => {
+      const mockLlmCall = async (): Promise<HankweaveGenerateTextResult> => {
         return {
           text: "response",
           finishReason: "stop",

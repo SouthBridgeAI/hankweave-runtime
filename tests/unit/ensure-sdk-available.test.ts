@@ -22,7 +22,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
     // Restore mocks
     mock.restore();
 
-    // Restore original environment (this clears STRANDWEAVE_TEST_IS_COMPILED)
+    // Restore original environment (this clears HANKWEAVE_TEST_IS_COMPILED)
     restoreEnv(originalEnv);
 
     // Clean up temp directory
@@ -43,7 +43,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
   describe("Source Mode (not compiled)", () => {
     test("should return null when running from source", async () => {
       // Set env var to indicate not compiled (source mode)
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "false";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "false";
 
       // Mock extractor functions (shouldn't be called in source mode)
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -61,7 +61,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       delete process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
 
       // Set env var to indicate not compiled (source mode)
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "false";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "false";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -83,7 +83,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       createDummyCliFile(cliPath);
 
       // Set env var to indicate compiled mode
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -105,7 +105,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       createDummyCliFile(cliPath);
 
       // Set env var to indicate compiled mode
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -129,7 +129,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       let extractCalled = false;
 
       // Set env var to indicate compiled mode
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -156,7 +156,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       const cliPath = path.join(tempDir, "extracted", "cli.js");
 
       // Set env var to indicate compiled mode
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -182,7 +182,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       const nonExistentPath = path.join(tempDir, "does-not-exist", "cli.js");
 
       // Set env var to indicate compiled mode
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -201,7 +201,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
 
     test("should throw when extraction fails", async () => {
       // Set env var to indicate compiled mode
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({
@@ -224,7 +224,7 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       const cliPath = path.join(tempDir, "deleted", "cli.js");
 
       // Set env var to indicate compiled mode
-      process.env.STRANDWEAVE_TEST_IS_COMPILED = "true";
+      process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
 
       // Mock extractor functions
       mock.module("../../server/claude-runtime-extractor.js", () => ({

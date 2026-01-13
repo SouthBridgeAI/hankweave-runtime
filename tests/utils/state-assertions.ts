@@ -1,7 +1,7 @@
 import { expect } from "bun:test";
-import type { StrandweaveState } from "../../server/types/state-types";
+import type { HankweaveState } from "../../server/types/state-types";
 
-export function assertCodonCompleted(state: StrandweaveState, codonId: string): void {
+export function assertCodonCompleted(state: HankweaveState, codonId: string): void {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
   expect(currentRun).toBeDefined();
 
@@ -11,7 +11,7 @@ export function assertCodonCompleted(state: StrandweaveState, codonId: string): 
 }
 
 export function assertRunStatus(
-  state: StrandweaveState,
+  state: HankweaveState,
   status: "running" | "completed" | "failed" | "crashed",
 ): void {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
@@ -20,7 +20,7 @@ export function assertRunStatus(
 }
 
 export function assertCodonCount(
-  state: StrandweaveState,
+  state: HankweaveState,
   expectedCount: number,
   status?: "completed" | "failed" | "skipped",
 ): void {
@@ -35,7 +35,7 @@ export function assertCodonCount(
   }
 }
 
-export function assertCodonCost(state: StrandweaveState, codonId: string, minCost: number): void {
+export function assertCodonCost(state: HankweaveState, codonId: string, minCost: number): void {
   const currentRun = state.runs.find((r) => r.runId === state.currentRunId);
   expect(currentRun).toBeDefined();
 
@@ -54,6 +54,6 @@ export function assertCodonCost(state: StrandweaveState, codonId: string, minCos
   expect(cost).toBeGreaterThanOrEqual(minCost);
 }
 
-export function assertStateHasRuns(state: StrandweaveState, expectedCount: number): void {
+export function assertStateHasRuns(state: HankweaveState, expectedCount: number): void {
   expect(state.runs).toHaveLength(expectedCount);
 }

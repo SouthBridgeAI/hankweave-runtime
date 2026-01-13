@@ -6,7 +6,7 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 export function runSessionContinuityTests(testDir: string) {
   test("Codon 2 log shows continuation from Codon 1 session", () => {
     // Find the run folder
-    const runsDir = path.join(testDir, ".strandweave/runs");
+    const runsDir = path.join(testDir, ".hankweave/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);

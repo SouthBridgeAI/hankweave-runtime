@@ -20,8 +20,8 @@ releases/
 tests/test-area
 tests/test-results
 
-strandweave-results
-.strandweave
+hankweave-results
+.hankweave
 
 logs
 _.log

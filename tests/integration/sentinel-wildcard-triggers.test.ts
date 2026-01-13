@@ -7,7 +7,7 @@ import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
-import type { StrandweaveModelMessage } from "../../server/types/input-ai-types.js";
+import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
 import { Logger } from "../../server/utils.js";
 import { createTypedMockLlmAdapter } from "../utils/mock-llm.js";
 
@@ -44,7 +44,7 @@ const createMockEvent = (type: ServerEvent["type"], id?: string): ServerEvent =>
 // Enhanced mock logger with event tracking
 class TestLogger extends Logger {
   public logs: Array<{ message: string; level: string }> = [];
-  public llmCalls: Array<{ id: string; eventsOrMessages: ServerEvent[] | StrandweaveModelMessage[] }> = [];
+  public llmCalls: Array<{ id: string; eventsOrMessages: ServerEvent[] | HankweaveModelMessage[] }> = [];
   private trackedEvents: ServerEvent[] = [];
 
   constructor() {

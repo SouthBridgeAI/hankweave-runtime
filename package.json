@@ -1,18 +1,18 @@
 {
-  "name": "@southbridgeai/strandweave",
+  "name": "@southbridgeai/hankweave",
   "version": "0.1.32",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": "Southbridge",
   "license": "MIT",
   "keywords": [
-    "strandweave"
+    "hankweave"
   ],
   "type": "module",
   "publishConfig": {
     "access": "restricted"
   },
   "bin": {
-    "strandweave": "dist/index.js"
+    "hankweave": "dist/index.js"
   },
   "main": "./dist/index.js",
   "files": [
@@ -52,8 +52,8 @@
     "pre-test": "bun run test:e2e:check && bun run pre-test:cleanup",
     "pre-test:cleanup": "rm -rf tests/test-area && mkdir -p tests/test-area && rm -rf tests/test-results && mkdir -p tests/test-results && echo '✅ Test area and results cleaned'",
     "cleanup": "echo 'Error: --cleanup requires --config' && exit 1",
-    "cleanup:example": "bun server/index.ts --cleanup --config=strand.json",
-    "cleanup:force": "bun server/index.ts --cleanup --config=strand.json -y"
+    "cleanup:example": "bun server/index.ts --cleanup --config=hank.json",
+    "cleanup:force": "bun server/index.ts --cleanup --config=hank.json -y"
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.6",

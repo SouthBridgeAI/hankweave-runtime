@@ -4,7 +4,7 @@
   "runs": [
     {
       "runId": "1753110463686-yayna",
-      "runFolder": "/Users/hrishioa/Dropbox/Projects/Southbridge/tadpole/tests/test-area/rollback-improved/.strandweave/runs/1753110463686-yayna",
+      "runFolder": "/Users/hrishioa/Dropbox/Projects/Southbridge/tadpole/tests/test-area/rollback-improved/.hankweave/runs/1753110463686-yayna",
       "status": "running",
       "startTime": "2025-07-21T16:54:23.686Z",
       "gitBranch": "run-1753110463686-yayna",
@@ -25,7 +25,7 @@
           "endTime": "2025-07-21T16:54:47.277Z",
           "claudeSessionId": "d84e70fc-2fa6-449e-8c3d-e77902943932",
           "claudePid": 63933,
-          "claudeLogPath": ".strandweave/runs/1753110463686-yayna/codon-codon-2-claude.log",
+          "claudeLogPath": ".hankweave/runs/1753110463686-yayna/codon-codon-2-claude.log",
           "finalCost": 0.0859851,
           "tokenUsage": {
             "inputTokens": 18,
@@ -41,7 +41,7 @@
           "startTime": "2025-07-21T16:54:47.300Z",
           "claudeSessionId": "29934902-d639-4e2b-932c-47e60802f94e",
           "claudePid": 63935,
-          "claudeLogPath": ".strandweave/runs/1753110463686-yayna/codon-codon-3-claude.log",
+          "claudeLogPath": ".hankweave/runs/1753110463686-yayna/codon-codon-3-claude.log",
           "codonCost": 0,
           "codonTokens": {
             "inputTokens": 0,
@@ -56,7 +56,7 @@
     },
     {
       "runId": "1753110411854-28u0x",
-      "runFolder": "/Users/hrishioa/Dropbox/Projects/Southbridge/tadpole/tests/test-area/rollback-improved/.strandweave/runs/1753110411854-28u0x",
+      "runFolder": "/Users/hrishioa/Dropbox/Projects/Southbridge/tadpole/tests/test-area/rollback-improved/.hankweave/runs/1753110411854-28u0x",
       "status": "completed",
       "startTime": "2025-07-21T16:53:31.854Z",
       "endTime": "2025-07-21T16:54:20.329Z",
@@ -72,7 +72,7 @@
           "endTime": "2025-07-21T16:53:53.822Z",
           "claudeSessionId": "94d42746-84b7-4277-8f7d-242843374cbf",
           "claudePid": 63898,
-          "claudeLogPath": ".strandweave/runs/1753110411854-28u0x/codon-codon-1-claude.log",
+          "claudeLogPath": ".hankweave/runs/1753110411854-28u0x/codon-codon-1-claude.log",
           "finalCost": 0.12757815,
           "tokenUsage": {
             "inputTokens": 60,
@@ -90,7 +90,7 @@
           "endTime": "2025-07-21T16:54:09.188Z",
           "claudeSessionId": "9c8c74ba-794e-4224-bce6-82f44dfbcf94",
           "claudePid": 63902,
-          "claudeLogPath": ".strandweave/runs/1753110411854-28u0x/codon-codon-2-claude.log",
+          "claudeLogPath": ".hankweave/runs/1753110411854-28u0x/codon-codon-2-claude.log",
           "finalCost": 0.0859851,
           "tokenUsage": {
             "inputTokens": 18,
@@ -108,7 +108,7 @@
           "endTime": "2025-07-21T16:54:20.329Z",
           "claudeSessionId": "649300e4-9242-422a-b03d-990796cc94b3",
           "claudePid": 63904,
-          "claudeLogPath": ".strandweave/runs/1753110411854-28u0x/codon-codon-3-claude.log",
+          "claudeLogPath": ".hankweave/runs/1753110411854-28u0x/codon-codon-3-claude.log",
           "finalCost": 0,
           "tokenUsage": {
             "inputTokens": 0,

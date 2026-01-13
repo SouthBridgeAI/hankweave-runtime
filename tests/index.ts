@@ -1,5 +1,5 @@
 /**
- * Strandweave Server Test Suite
+ * Hankweave Server Test Suite
  *
  * Directory Structure:
  * - config/   - Test configuration files (codons, models, etc.)

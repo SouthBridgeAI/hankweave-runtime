@@ -10,14 +10,14 @@ import type {
   ServerReadyEvent,
 } from "../../server/schemas/event-schemas.js";
 import { CodonId } from "../../server/types/branded-types.js";
-import { launchStrandweave } from "../utils/strandweave-server-test-helpers.js";
+import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 import { getFreePort } from "../utils/test-helpers.js";
 
 describe("Loop E2E Test", () => {
   it("should execute codons in correct order with loop expansion", async () => {
     const configPath = "tests/config/test-codons-with-loop.config.json";
     const port = await getFreePort();
-    const strandweave = await launchStrandweave({
+    const hankweave = await launchHankweave({
       configPath,
       port,
       logPrefix: "[loop-test]",
@@ -25,7 +25,7 @@ describe("Loop E2E Test", () => {
 
     try {
       // Wait for server ready and capture execution path
-      const readyEvent = (await strandweave.waitForEvent("server.ready")) as ServerReadyEvent;
+      const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
       const executionPath = readyEvent.data.executionPath;
 
       // Expected codons:
@@ -51,7 +51,7 @@ describe("Loop E2E Test", () => {
 
       // Wait for all codons to complete (with longer timeout per codon)
       for (const expectedCodonId of expectedCodons) {
-        const startEvent = (await strandweave.waitForCodonStart(
+        const startEvent = (await hankweave.waitForCodonStart(
           expectedCodonId,
           lastTimestamp,
           300_000, // 5 minute timeout for codon start
@@ -60,7 +60,7 @@ describe("Loop E2E Test", () => {
         expect(startEvent.data.codonId).toBe(expectedCodonId);
         codonEvents.push(startEvent);
 
-        const completedEvent = (await strandweave.waitForCodonCompletion(
+        const completedEvent = (await hankweave.waitForCodonCompletion(
           expectedCodonId,
           startEvent.timestamp,
           300_000, // 5 minute timeout for codon completion
@@ -163,7 +163,7 @@ describe("Loop E2E Test", () => {
       }
 
       // Wait for the run to complete naturally (RunCompleted state transition)
-      await strandweave.waitForRunToComplete(10_000);
+      await hankweave.waitForRunToComplete(10_000);
 
       // Verify sentinel lifecycle events in loop codons
       // Sentinels should be loaded once per loop codon iteration with iteration-specific IDs
@@ -179,7 +179,7 @@ describe("Loop E2E Test", () => {
       // await new Promise((resolve) => setTimeout(resolve, 5000));
 
       // Get all events
-      const events = strandweave.getEvents();
+      const events = hankweave.getEvents();
 
       // Verify sentinel.loaded events
       const loadedEvents = events.filter(
@@ -237,7 +237,7 @@ describe("Loop E2E Test", () => {
       }
 
       // Verify loopContext is set correctly for loop codons and not set for non-loop codons
-      const finalState = strandweave.getState();
+      const finalState = hankweave.getState();
       const currentRun = finalState.runs[0];
       expect(currentRun).toBeDefined();
 
@@ -287,9 +287,9 @@ describe("Loop E2E Test", () => {
       expect(codon3State?.loopContext).toBeUndefined();
 
       // Verify log files exist for each loop iteration and are not overwritten
-      // Logs are stored in .strandweave/runs/{runId}/ directory
+      // Logs are stored in .hankweave/runs/{runId}/ directory
       const runId = currentRun.runId;
-      const runFolder = path.join(executionPath, ".strandweave", "runs", runId);
+      const runFolder = path.join(executionPath, ".hankweave", "runs", runId);
       expect(fs.existsSync(runFolder)).toBe(true);
 
       // Check that each codon has its own log file
@@ -336,11 +336,11 @@ describe("Loop E2E Test", () => {
       }
 
       // Server will shutdown automatically, wait for connection close
-      await strandweave.waitForConnectionClose(5000);
+      await hankweave.waitForConnectionClose(5000);
     } finally {
       // Only stop if server is still running
-      if (strandweave.process.exitCode === null && strandweave.process.signalCode === null) {
-        await strandweave.stop();
+      if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {
+        await hankweave.stop();
       }
     }
   }, 600_000); // 10 minute timeout
@@ -348,7 +348,7 @@ describe("Loop E2E Test", () => {
   it("should complete loop successfully with rig setup failures when allowFailure is true", async () => {
     const configPath = "tests/config/test-codons-with-loop-rig-setup.config.json";
     const port = await getFreePort();
-    const strandweave = await launchStrandweave({
+    const hankweave = await launchHankweave({
       configPath,
       port,
       logPrefix: "[loop-rig-test]",
@@ -356,7 +356,7 @@ describe("Loop E2E Test", () => {
 
     try {
       // Wait for server ready
-      const readyEvent = (await strandweave.waitForEvent("server.ready")) as ServerReadyEvent;
+      const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
       const executionPath = readyEvent.data.executionPath;
 
       // Expected codons:
@@ -378,7 +378,7 @@ describe("Loop E2E Test", () => {
 
       // Wait for all codons to complete
       for (const expectedCodonId of expectedCodons) {
-        const startEvent = (await strandweave.waitForCodonStart(
+        const startEvent = (await hankweave.waitForCodonStart(
           expectedCodonId,
           lastTimestamp,
           300_000, // 5 minute timeout
@@ -387,7 +387,7 @@ describe("Loop E2E Test", () => {
         expect(startEvent.data.codonId).toBe(expectedCodonId);
         codonEvents.push(startEvent);
 
-        const completedEvent = (await strandweave.waitForCodonCompletion(
+        const completedEvent = (await hankweave.waitForCodonCompletion(
           expectedCodonId,
           startEvent.timestamp,
           300_000, // 5 minute timeout
@@ -414,7 +414,7 @@ describe("Loop E2E Test", () => {
       expect(logLines.length).toBe(2);
 
       // Should have error events for the failed command operations (allowFailure=true)
-      const rigSetupErrors = strandweave
+      const rigSetupErrors = hankweave
         .getEvents()
         .filter((e) => e.type === "error")
         .filter((e) => e.data.message?.includes("allowFailure=true"));
@@ -437,14 +437,14 @@ describe("Loop E2E Test", () => {
       expect(summaryContent.length).toBeGreaterThan(0);
 
       // Wait for the run to complete
-      await strandweave.waitForRunToComplete(10_000);
+      await hankweave.waitForRunToComplete(10_000);
 
       // Server will shutdown automatically
-      await strandweave.waitForConnectionClose(5000);
+      await hankweave.waitForConnectionClose(5000);
     } finally {
       // Only stop if server is still running
-      if (strandweave.process.exitCode === null && strandweave.process.signalCode === null) {
-        await strandweave.stop();
+      if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {
+        await hankweave.stop();
       }
     }
   }, 600_000); // 10 minute timeout
@@ -452,7 +452,7 @@ describe("Loop E2E Test", () => {
   it("should handle rollback from interrupted codon inside loop iteration", async () => {
     const configPath = "tests/config/test-codons-with-loop-error.config.json";
     const port = await getFreePort();
-    let strandweave = await launchStrandweave({
+    let hankweave = await launchHankweave({
       configPath,
       port,
       logPrefix: "[loop-rollback-test]",
@@ -460,18 +460,18 @@ describe("Loop E2E Test", () => {
 
     try {
       // Wait for server ready
-      const readyEvent = (await strandweave.waitForEvent("server.ready")) as ServerReadyEvent;
+      const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
       const executionPath = readyEvent.data.executionPath;
 
-      await strandweave.waitForCodonStart("setup-codon");
-      const setupCompleted = (await strandweave.waitForCodonCompletion(
+      await hankweave.waitForCodonStart("setup-codon");
+      const setupCompleted = (await hankweave.waitForCodonCompletion(
         "setup-codon",
       )) as CodonCompletedEvent;
       expect(setupCompleted.data.success).toBe(true);
 
-      await strandweave.waitForCodonStart("write-iteration#0");
+      await hankweave.waitForCodonStart("write-iteration#0");
 
-      await strandweave.waitForRunToFail();
+      await hankweave.waitForRunToFail();
 
       // run will fail because of the existing dir new-notes
       // let's clean up and restart
@@ -481,10 +481,10 @@ describe("Loop E2E Test", () => {
       // Small delay before reconnecting
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      expect(strandweave.hasLockFile()).toBeFalse();
+      expect(hankweave.hasLockFile()).toBeFalse();
 
       // relaunch the server and request previous events to capture rollback
-      strandweave = await launchStrandweave({
+      hankweave = await launchHankweave({
         configPath,
         port,
         logPrefix: "[loop-rollback-test]",
@@ -493,7 +493,7 @@ describe("Loop E2E Test", () => {
         sendPreviousEvents: true,
       });
 
-      await strandweave.waitForRunToComplete();
+      await hankweave.waitForRunToComplete();
 
       // make sure we have all the artifacts from all the codons
       // 2 iterations + review files
@@ -512,8 +512,8 @@ describe("Loop E2E Test", () => {
       expect(finalContent.trim()).toBe("Final codon reached");
     } finally {
       // Only stop if server is still running
-      if (strandweave.process.exitCode === null && strandweave.process.signalCode === null) {
-        await strandweave.stop();
+      if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {
+        await hankweave.stop();
       }
     }
   }, 600_000); // 10 minute timeout

@@ -31,14 +31,14 @@ import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js
  *    - Shims are at shims/gemini/index.mjs (project root)
  *    - Need to go up one level: ../shims/gemini/index.mjs
  *
- * 2. Bundled NPX package (npx @southbridgeai/strandweave):
+ * 2. Bundled NPX package (npx @southbridgeai/hankweave):
  *    - Current file is in dist/index.js (bundled)
  *    - Shims are at dist/shims/gemini/index.mjs
  *    - Need to use same directory: ./shims/gemini/index.mjs
  *
- * 3. Compiled executable (strandweave binary):
+ * 3. Compiled executable (hankweave binary):
  *    - Shims are embedded in the executable
- *    - Extract to ~/.strandweave/shims/<version>/
+ *    - Extract to ~/.hankweave/shims/<version>/
  *    - Return path to extracted shim
  *
  * @param currentFilePath - Path to current file (from import.meta.url)

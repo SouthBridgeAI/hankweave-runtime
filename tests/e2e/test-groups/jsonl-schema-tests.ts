@@ -6,7 +6,7 @@ import { colors } from "../../utils/test-helpers.js";
 export function runJSONLSchemaTests(testDir: string) {
   for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
     test(`${codonId} JSONL has valid schema`, () => {
-      const logPath = path.join(testDir, `.strandweave/logs/log-${codonId}.jsonl`);
+      const logPath = path.join(testDir, `.hankweave/logs/log-${codonId}.jsonl`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const lines = logContent.split("\n").filter((l) => l.trim());

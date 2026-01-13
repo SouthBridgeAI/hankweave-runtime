@@ -1,12 +1,12 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
 import type {
-  StrandweaveGenerateObjectOptions,
-  StrandweaveGenerateObjectResult,
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
-  StrandweaveStreamTextOptions,
-  StrandweaveStreamTextResult,
+  HankweaveGenerateObjectOptions,
+  HankweaveGenerateObjectResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
+  HankweaveStreamTextOptions,
+  HankweaveStreamTextResult,
 } from "../../server/types/llm-call-types";
 
 // --- Helper Functions for Realistic Simulation ---
@@ -64,14 +64,14 @@ export type MockLlmConfig = {
   forceError?: Error;
   errorProvider?: (
     options:
-      | StrandweaveGenerateTextOptions
-      | StrandweaveStreamTextOptions
-      | StrandweaveGenerateObjectOptions,
+      | HankweaveGenerateTextOptions
+      | HankweaveStreamTextOptions
+      | HankweaveGenerateObjectOptions,
   ) => Error | undefined;
   // Custom implementations for testing
   generateObject?: <T>(
-    options: StrandweaveGenerateObjectOptions,
-  ) => Promise<StrandweaveGenerateObjectResult<T>>;
+    options: HankweaveGenerateObjectOptions,
+  ) => Promise<HankweaveGenerateObjectResult<T>>;
   // Add parameter overrides for testing
   respectMaxOutputTokens?: boolean; // Default: true
 };
@@ -89,8 +89,8 @@ export function createMockLlm(config: MockLlmConfig = {}) {
    * Mock implementation of `generateText`.
    */
   async function mockGenerateText(
-    options: StrandweaveGenerateTextOptions,
-  ): Promise<StrandweaveGenerateTextResult> {
+    options: HankweaveGenerateTextOptions,
+  ): Promise<HankweaveGenerateTextResult> {
     // Handle forced errors for testing
     if (config.forceError) {
       throw config.forceError;
@@ -134,7 +134,7 @@ export function createMockLlm(config: MockLlmConfig = {}) {
   /**
    * Mock implementation of `streamText`.
    */
-  function mockStreamText(options: StrandweaveStreamTextOptions): StrandweaveStreamTextResult {
+  function mockStreamText(options: HankweaveStreamTextOptions): HankweaveStreamTextResult {
     // Handle forced errors for testing
     if (config.forceError) {
       throw config.forceError;
@@ -218,8 +218,8 @@ export function createMockLlm(config: MockLlmConfig = {}) {
    * Mock implementation of `generateObject`.
    */
   async function mockGenerateObject<T>(
-    options: StrandweaveGenerateObjectOptions,
-  ): Promise<StrandweaveGenerateObjectResult<T>> {
+    options: HankweaveGenerateObjectOptions,
+  ): Promise<HankweaveGenerateObjectResult<T>> {
     // Handle forced errors for testing
     if (config.forceError) {
       throw config.forceError;
@@ -271,10 +271,10 @@ export function createMockLlm(config: MockLlmConfig = {}) {
  */
 export function createTypedMockLlmAdapter(
   customResponse?: string | (() => Promise<string>) | (() => Promise<never>),
-): (id: string, options: StrandweaveGenerateTextOptions) => Promise<StrandweaveGenerateTextResult> {
+): (id: string, options: HankweaveGenerateTextOptions) => Promise<HankweaveGenerateTextResult> {
   const mockLlm = createMockLlm();
 
-  return async (_id: string, options: StrandweaveGenerateTextOptions) => {
+  return async (_id: string, options: HankweaveGenerateTextOptions) => {
     // If a custom response function is provided, use it for the text
     if (customResponse) {
       if (typeof customResponse === "string") {

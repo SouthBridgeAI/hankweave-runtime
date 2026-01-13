@@ -1,7 +1,7 @@
 /**
  * Sentinel Integration Test Group
  *
- * Tests that sentinels integrate correctly with the main Strandweave workflow:
+ * Tests that sentinels integrate correctly with the main Hankweave workflow:
  * - Sentinels load without blocking codon execution
  * - Events are emitted correctly
  * - State is persisted
@@ -18,7 +18,7 @@ import type {
   SentinelUnloadedEvent,
   ServerEvent,
 } from "../../../server/schemas/event-schemas.js";
-import type { StrandweaveState } from "../../../server/types/state-types.js";
+import type { HankweaveState } from "../../../server/types/state-types.js";
 
 // TestState interface for this test group
 interface TestState {
@@ -95,13 +95,13 @@ export function runSentinelIntegrationTests(testState: TestState): void {
         return;
       }
 
-      const statePath = path.join(testState.executionPath, ".strandweave/state.json");
+      const statePath = path.join(testState.executionPath, ".hankweave/state.json");
       if (!fs.existsSync(statePath)) {
         console.log("⚠️ No state.json found");
         return;
       }
 
-      const state: StrandweaveState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
+      const state: HankweaveState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
 
       let foundSentinels = false;
       for (const run of state.runs) {
@@ -159,7 +159,7 @@ export function runSentinelIntegrationTests(testState: TestState): void {
 
       const narratorOutputDir = path.join(
         testState.executionPath,
-        ".strandweave/sentinels/outputs/test-sentinel",
+        ".hankweave/sentinels/outputs/test-sentinel",
       );
 
       if (!fs.existsSync(narratorOutputDir)) {
@@ -201,7 +201,7 @@ export function runSentinelIntegrationTests(testState: TestState): void {
 
       const costAnalystOutputDir = path.join(
         testState.executionPath,
-        ".strandweave/sentinels/outputs/cost-analyst",
+        ".hankweave/sentinels/outputs/cost-analyst",
       );
 
       if (!fs.existsSync(costAnalystOutputDir)) {
@@ -250,7 +250,7 @@ export function runSentinelIntegrationTests(testState: TestState): void {
 
       const qaBotOutputDir = path.join(
         testState.executionPath,
-        ".strandweave/sentinels/outputs/qa-bot",
+        ".hankweave/sentinels/outputs/qa-bot",
       );
 
       if (!fs.existsSync(qaBotOutputDir)) {
@@ -293,12 +293,12 @@ export function runSentinelIntegrationTests(testState: TestState): void {
         return;
       }
 
-      const statePath = path.join(testState.executionPath, ".strandweave/state.json");
+      const statePath = path.join(testState.executionPath, ".hankweave/state.json");
       if (!fs.existsSync(statePath)) {
         return;
       }
 
-      const state: StrandweaveState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
+      const state: HankweaveState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
 
       let foundSentinelCosts = false;
 

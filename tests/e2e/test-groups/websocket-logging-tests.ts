@@ -27,7 +27,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     if (!testState.executionPath) {
       throw new Error("Execution path not available");
     }
-    return path.join(testState.executionPath, ".strandweave/logs/websocket.log");
+    return path.join(testState.executionPath, ".hankweave/logs/websocket.log");
   };
 
   it("should create websocket.log file", () => {
@@ -309,7 +309,7 @@ export function runWebSocketLoggingTests(testState: TestState): void {
     if (!testState.executionPath) {
       throw new Error("Execution path not available");
     }
-    const exportPath = path.join(testState.executionPath, ".strandweave/logs/codon-1-export.jsonl");
+    const exportPath = path.join(testState.executionPath, ".hankweave/logs/codon-1-export.jsonl");
 
     reader.exportToFile(codon1Messages, exportPath);
 

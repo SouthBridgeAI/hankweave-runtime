@@ -9,12 +9,12 @@ async function cleanupTestArea() {
     // Get all items in test-area
     const items = await fs.promises.readdir(testAreaPath);
 
-    // Remove all temp directories and .strandweave directory
+    // Remove all temp directories and .hankweave directory
     for (const item of items) {
       const itemPath = path.join(testAreaPath, item);
       const stats = await fs.promises.stat(itemPath);
 
-      if (stats.isDirectory() && (item.startsWith("temp-test-") || item === ".strandweave")) {
+      if (stats.isDirectory() && (item.startsWith("temp-test-") || item === ".hankweave")) {
         console.log(`Cleaning up: ${item}`);
         await fs.promises.rm(itemPath, { recursive: true, force: true });
       }

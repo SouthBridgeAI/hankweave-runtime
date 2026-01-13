@@ -55,7 +55,7 @@ describe("Codon-Level Sentinel Overrides", () => {
         triggers: true, // From codon override
       };
 
-      // Perform merge (same logic as StrandweaveServer)
+      // Perform merge (same logic as HankweaveServer)
       const merged = {
         ...sentinelConfig.reportToWebsocket,
         ...codonOverride,
@@ -119,7 +119,7 @@ describe("Codon-Level Sentinel Overrides", () => {
         lastValueFile: "custom-current.md",
       };
 
-      // These would be stored in a Map<string, OutputPaths> in StrandweaveServer
+      // These would be stored in a Map<string, OutputPaths> in HankweaveServer
       const outputPathsMap = new Map<string, typeof codonOutputPaths>();
       outputPathsMap.set("sentinel-1", codonOutputPaths);
 
@@ -184,7 +184,7 @@ describe("Codon-Level Sentinel Overrides", () => {
       const loaded = result.configs[0];
       expect(loaded.failCodonIfNotLoaded).toBe(true);
       expect(loaded.outputPaths).toEqual({ logFile: "custom.md" });
-      expect(loaded.config.reportToWebsocket?.outputs).toBe(true); // Not merged yet - that happens in StrandweaveServer
+      expect(loaded.config.reportToWebsocket?.outputs).toBe(true); // Not merged yet - that happens in HankweaveServer
     });
   });
 });

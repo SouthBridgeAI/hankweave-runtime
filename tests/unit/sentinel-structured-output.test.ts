@@ -7,17 +7,17 @@ import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { SentinelFatalError } from "../../server/sentinels/sentinel-fatal-error.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type {
-  StrandweaveGenerateObjectOptions,
-  StrandweaveGenerateObjectResult,
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateObjectOptions,
+  HankweaveGenerateObjectResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
 
 // Mock LLM functions
 const mockLlmCall = async (
   _id: string,
-  _options: StrandweaveGenerateTextOptions,
-): Promise<StrandweaveGenerateTextResult> => {
+  _options: HankweaveGenerateTextOptions,
+): Promise<HankweaveGenerateTextResult> => {
   return {
     text: "mock response",
     finishReason: "stop",
@@ -27,8 +27,8 @@ const mockLlmCall = async (
 
 const mockLlmObjectCall = async (
   _id: string,
-  _options: StrandweaveGenerateObjectOptions,
-): Promise<StrandweaveGenerateObjectResult<unknown>> => {
+  _options: HankweaveGenerateObjectOptions,
+): Promise<HankweaveGenerateObjectResult<unknown>> => {
   return {
     object: { name: "test" },
     finishReason: "stop",

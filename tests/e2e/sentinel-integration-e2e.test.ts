@@ -2,7 +2,7 @@
 /**
  * Comprehensive Sentinel Integration E2E Test
  *
- * Tests the full sentinel system integration with StrandweaveServer:
+ * Tests the full sentinel system integration with HankweaveServer:
  * - Sentinel lifecycle events
  * - State persistence and SentinelState tracking
  * - Output file generation
@@ -29,7 +29,7 @@ import type {
   ServerEvent,
   StateTransitionEvent,
 } from "../../server/schemas/event-schemas.js";
-import type { StrandweaveState } from "../../server/types/state-types.js";
+import type { HankweaveState } from "../../server/types/state-types.js";
 import {
   ClientMode,
   colors,
@@ -152,7 +152,7 @@ describe("Sentinel Integration: With Sentinels", () => {
     ];
 
     const codonConfigPath = path.join(configDir, "codons.json");
-    fs.writeFileSync(codonConfigPath, JSON.stringify({ strand: codonsConfig }, null, 2));
+    fs.writeFileSync(codonConfigPath, JSON.stringify({ hank: codonsConfig }, null, 2));
 
     // Ensure test run directory exists
     if (!fs.existsSync(TEST_RUN_DIR)) {
@@ -355,11 +355,11 @@ describe("Sentinel Integration: With Sentinels", () => {
         throw new Error("No execution path");
       }
 
-      const statePath = path.join(executionPath, ".strandweave/state.json");
+      const statePath = path.join(executionPath, ".hankweave/state.json");
       expect(fs.existsSync(statePath)).toBe(true);
 
       const stateContent = fs.readFileSync(statePath, "utf-8");
-      const state: StrandweaveState = JSON.parse(stateContent);
+      const state: HankweaveState = JSON.parse(stateContent);
 
       expect(state.runs.length).toBeGreaterThan(0);
       const codon = state.runs[0].codons.find((p) => p.codonId === "sentinel-test-codon");
@@ -417,8 +417,8 @@ describe("Sentinel Integration: With Sentinels", () => {
         throw new Error("No execution path");
       }
 
-      const statePath = path.join(executionPath, ".strandweave/state.json");
-      const state: StrandweaveState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      const statePath = path.join(executionPath, ".hankweave/state.json");
+      const state: HankweaveState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
 
       const codon = state.runs[0].codons.find((p) => p.codonId === "sentinel-test-codon");
       expect(codon).toBeDefined();
@@ -446,7 +446,7 @@ describe("Sentinel Integration: With Sentinels", () => {
         throw new Error("No execution path");
       }
 
-      const outputsDir = path.join(executionPath, ".strandweave/sentinels/outputs");
+      const outputsDir = path.join(executionPath, ".hankweave/sentinels/outputs");
       expect(fs.existsSync(outputsDir)).toBe(true);
 
       // Should have directories for each sentinel
@@ -465,7 +465,7 @@ describe("Sentinel Integration: With Sentinels", () => {
 
       const textNarratorDir = path.join(
         executionPath,
-        ".strandweave/sentinels/outputs/text-narrator",
+        ".hankweave/sentinels/outputs/text-narrator",
       );
       const files = fs.readdirSync(textNarratorDir);
 
@@ -486,7 +486,7 @@ describe("Sentinel Integration: With Sentinels", () => {
 
       const entityTrackerDir = path.join(
         executionPath,
-        ".strandweave/sentinels/outputs/entity-tracker",
+        ".hankweave/sentinels/outputs/entity-tracker",
       );
       const files = fs.readdirSync(entityTrackerDir);
 
@@ -504,7 +504,7 @@ describe("Sentinel Integration: With Sentinels", () => {
         throw new Error("No execution path");
       }
 
-      const sentinelsDir = path.join(executionPath, ".strandweave/sentinels");
+      const sentinelsDir = path.join(executionPath, ".hankweave/sentinels");
 
       if (fs.existsSync(sentinelsDir)) {
         const historyFiles = fs.readdirSync(sentinelsDir).filter((f) => f.endsWith(".json"));
@@ -599,7 +599,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     ];
 
     const codonConfigPath = path.join(configDir, "codons.json");
-    fs.writeFileSync(codonConfigPath, JSON.stringify({ strand: codonsConfig }, null, 2));
+    fs.writeFileSync(codonConfigPath, JSON.stringify({ hank: codonsConfig }, null, 2));
 
     // Ensure test run directory exists
     if (!fs.existsSync(TEST_RUN_DIR)) {
@@ -691,8 +691,8 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     it("should not have sentinels field in state.json when no sentinels", () => {
       if (!executionPath) throw new Error("No execution path");
 
-      const statePath = path.join(executionPath, ".strandweave/state.json");
-      const state: StrandweaveState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      const statePath = path.join(executionPath, ".hankweave/state.json");
+      const state: HankweaveState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
 
       const codon = state.runs[0].codons.find((p) => p.codonId === "zero-sen-codon");
       expect(codon).toBeDefined();

@@ -11,7 +11,7 @@ permissions:
 env:
   CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-  STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
+  HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY: ${{ secrets.HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY }}
 
 jobs:
   publish-npm:
@@ -111,9 +111,9 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            releases/strandweave.exe --help
+            releases/hankweave.exe --help
           else
-            ./releases/strandweave --help
+            ./releases/hankweave --help
           fi
 
       - name: Smoke test - Create test directory
@@ -134,9 +134,9 @@ jobs:
         working-directory: ${{ steps.test-dir.outputs.test_dir }}
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            "${{ github.workspace }}/releases/strandweave.exe" --init
+            "${{ github.workspace }}/releases/hankweave.exe" --init
           else
-            "${{ github.workspace }}/releases/strandweave" --init
+            "${{ github.workspace }}/releases/hankweave" --init
           fi
 
       - name: Smoke test - Run headless command
@@ -145,16 +145,16 @@ jobs:
         working-directory: ${{ steps.test-dir.outputs.test_dir }}
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            "${{ github.workspace }}/releases/strandweave.exe" --headless --data ./data
+            "${{ github.workspace }}/releases/hankweave.exe" --headless --data ./data
           else
-            "${{ github.workspace }}/releases/strandweave" --headless --data ./data
+            "${{ github.workspace }}/releases/hankweave" --headless --data ./data
           fi
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: strandweave-${{ matrix.target }}
-          path: releases/strandweave${{ matrix.target == 'windows-x64' && '.exe' || '' }}
+          name: hankweave-${{ matrix.target }}
+          path: releases/hankweave${{ matrix.target == 'windows-x64' && '.exe' || '' }}
           if-no-files-found: error
 
   create-release:
@@ -184,14 +184,14 @@ jobs:
           mkdir -p release-assets
 
           # Rename artifacts to include target in filename
-          mv artifacts/strandweave-linux-x64/strandweave release-assets/strandweave-linux-x64
-          mv artifacts/strandweave-linux-arm64/strandweave release-assets/strandweave-linux-arm64
-          mv artifacts/strandweave-darwin-x64/strandweave release-assets/strandweave-darwin-x64
-          mv artifacts/strandweave-darwin-arm64/strandweave release-assets/strandweave-darwin-arm64
-          mv artifacts/strandweave-windows-x64/strandweave.exe release-assets/strandweave-windows-x64.exe
+          mv artifacts/hankweave-linux-x64/hankweave release-assets/hankweave-linux-x64
+          mv artifacts/hankweave-linux-arm64/hankweave release-assets/hankweave-linux-arm64
+          mv artifacts/hankweave-darwin-x64/hankweave release-assets/hankweave-darwin-x64
+          mv artifacts/hankweave-darwin-arm64/hankweave release-assets/hankweave-darwin-arm64
+          mv artifacts/hankweave-windows-x64/hankweave.exe release-assets/hankweave-windows-x64.exe
 
           # Make them executable
-          chmod +x release-assets/strandweave-*
+          chmod +x release-assets/hankweave-*
 
           # List files
           ls -lh release-assets/
@@ -217,7 +217,7 @@ jobs:
 
           # Save to file
           cat > release-notes.md << 'EOF'
-          # Strandweave Release
+          # Hankweave Release
 
           This release includes:
           - npm package: `${{ needs.publish-npm.outputs.pkg_name }}@${{ steps.version.outputs.version }}`
@@ -244,30 +244,30 @@ jobs:
           ## Platform-Specific Instructions
 
           ### macOS
-          - **Apple Silicon (M1/M2/M3)**: `strandweave-darwin-arm64`
-          - **Intel**: `strandweave-darwin-x64`
+          - **Apple Silicon (M1/M2/M3)**: `hankweave-darwin-arm64`
+          - **Intel**: `hankweave-darwin-x64`
 
           After downloading:
           ```bash
-          xattr -d com.apple.quarantine strandweave-darwin-arm64
-          chmod +x strandweave-darwin-arm64
-          ./strandweave-darwin-arm64 --help
+          xattr -d com.apple.quarantine hankweave-darwin-arm64
+          chmod +x hankweave-darwin-arm64
+          ./hankweave-darwin-arm64 --help
           ```
 
           ### Linux
-          - **x64**: `strandweave-linux-x64`
-          - **ARM64**: `strandweave-linux-arm64`
+          - **x64**: `hankweave-linux-x64`
+          - **ARM64**: `hankweave-linux-arm64`
 
           ```bash
-          chmod +x strandweave-linux-x64
-          ./strandweave-linux-x64 --help
+          chmod +x hankweave-linux-x64
+          ./hankweave-linux-x64 --help
           ```
 
           ### Windows
-          - **x64**: `strandweave-windows-x64.exe`
+          - **x64**: `hankweave-windows-x64.exe`
 
           ```powershell
-          .\strandweave-windows-x64.exe --help
+          .\hankweave-windows-x64.exe --help
           ```
           EOF
 
@@ -275,13 +275,13 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          name: Strandweave v${{ steps.version.outputs.version }}
+          name: Hankweave v${{ steps.version.outputs.version }}
           body_path: release-notes.md
           draft: false
           prerelease: false
           files: |
-            release-assets/strandweave-linux-x64
-            release-assets/strandweave-linux-arm64
-            release-assets/strandweave-darwin-x64
-            release-assets/strandweave-darwin-arm64
-            release-assets/strandweave-windows-x64.exe
+            release-assets/hankweave-linux-x64
+            release-assets/hankweave-linux-arm64
+            release-assets/hankweave-darwin-x64
+            release-assets/hankweave-darwin-arm64
+            release-assets/hankweave-windows-x64.exe

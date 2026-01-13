@@ -5,11 +5,11 @@
 import {
   type CodonExecution,
   type CodonId,
+  type HankweaveState,
   isTerminalCodonStatus,
   type Run,
   type RunId,
   type SessionId,
-  type StrandweaveState,
 } from "./types/state-types.js";
 import type { Logger } from "./utils.js";
 
@@ -109,14 +109,14 @@ export class ExecutionThread {
 /**
  * Analyze execution history to build a unified thread with all metadata.
  *
- * @param state - The complete Strandweave state (including executionPlan)
+ * @param state - The complete Hankweave state (including executionPlan)
  * @param checkpointData - Map of SHA to git checkpoint data (optional)
  * @param targetRunId - Specific run to analyze (defaults to latest)
  * @param logger - Optional logger for debugging
  * @returns Complete execution thread with all metadata preserved
  */
 export async function analyzeExecutionThread(
-  state: StrandweaveState,
+  state: HankweaveState,
   checkpointData?: Map<string, { message: string; timestamp: string; branch: string }>,
   targetRunId?: RunId,
   logger?: Logger,
@@ -417,7 +417,7 @@ export function getNextCodonId(thread: ExecutionThread): CodonId | null {
 export function findContinuationSessionId(
   thread: ExecutionThread,
   codonId: CodonId,
-  state: StrandweaveState,
+  state: HankweaveState,
 ): SessionId | null {
   const executionPlan = state.executionPlan || [];
   const entry = executionPlan.find((e) => e.codonId === codonId);

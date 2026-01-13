@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ExecutionPlanner } from "../../server/execution-planner";
 import { analyzeExecutionThread, findContinuationSessionId } from "../../server/execution-thread";
-import type { CodonId, RunId, SessionId, StrandweaveState } from "../../server/types/state-types";
+import type { CodonId, HankweaveState, RunId, SessionId } from "../../server/types/state-types";
 import type { CodonConfig } from "../../server/types/types";
 import type { Logger } from "../../server/utils";
 import { createTestCodon } from "../utils/test-codon-factory.js";
@@ -66,7 +66,7 @@ function createCheckpointData(
 }
 
 // Load the real test state
-function _loadTestState(): StrandweaveState {
+function _loadTestState(): HankweaveState {
   // This file likely needs renaming or content update in real scenario, but assuming content structure matches
   // For now I will mock it or assume the file exists and has compatible structure but with old names replaced
   // Since I can't easily modify the test data file here without knowing its exact content and path,
@@ -88,7 +88,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Basic Thread Building", () => {
     test("should handle empty state", async () => {
-      const emptyState: StrandweaveState = {
+      const emptyState: HankweaveState = {
         runs: [],
         currentRunId: null,
         executionPlan: new ExecutionPlanner(testCodonConfigs).buildInitialPlan(),
@@ -112,7 +112,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should handle single run with single codon", async () => {
-      const singleRunState: StrandweaveState = {
+      const singleRunState: HankweaveState = {
         runs: [
           {
             runId: "test-run-1" as RunId,
@@ -177,7 +177,7 @@ describe("Execution Thread Analysis", () => {
   describe("Real Test State Analysis", () => {
     test("should correctly analyze the provided test state", async () => {
       // Constructing a state that mimics the "real" state structure
-      const testState: StrandweaveState = {
+      const testState: HankweaveState = {
         runs: [
           {
             runId: "1753110463686-yayna" as RunId,
@@ -318,7 +318,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Next Codon Detection", () => {
     test("should return first codon for fresh run with no codons", async () => {
-      const freshState: StrandweaveState = {
+      const freshState: HankweaveState = {
         runs: [
           {
             runId: "fresh-run" as RunId,
@@ -340,7 +340,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should return next codon after completed codon", async () => {
-      const completedCodon1State: StrandweaveState = {
+      const completedCodon1State: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -384,7 +384,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Session ID Finding", () => {
     test("should find session ID for continue-previous codon", async () => {
-      const testState: StrandweaveState = {
+      const testState: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -428,7 +428,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should return null for fresh codon", async () => {
-      const testState: StrandweaveState = {
+      const testState: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -454,7 +454,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Checkpoint Validation", () => {
     test("should only include validated checkpoints", async () => {
-      const testState: StrandweaveState = {
+      const testState: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -503,7 +503,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should include no checkpoints when none validated", async () => {
-      const testState: StrandweaveState = {
+      const testState: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -552,7 +552,7 @@ describe("Execution Thread Analysis", () => {
     test("should handle rig-setup continuation correctly", async () => {
       // This tests the critical case where we rollback to a rig-setup checkpoint
       // and need to re-run the same codon
-      const state: StrandweaveState = {
+      const state: HankweaveState = {
         runs: [
           {
             runId: "continuation-run" as RunId,
@@ -639,7 +639,7 @@ describe("Execution Thread Analysis", () => {
 
     test("should handle multiple continuation runs correctly", async () => {
       // Test a chain of continuations: original -> continuation1 -> continuation2
-      const state: StrandweaveState = {
+      const state: HankweaveState = {
         runs: [
           {
             runId: "continuation-2" as RunId,
@@ -774,7 +774,7 @@ describe("Execution Thread Analysis", () => {
 
     test("should handle skipped codon with session for continuation", async () => {
       // Test that a skipped codon with assistant messages can be used for continuation
-      const state: StrandweaveState = {
+      const state: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -821,7 +821,7 @@ describe("Execution Thread Analysis", () => {
 
     test("should not use skipped codon without messages for continuation", async () => {
       // Test that a skipped codon without assistant messages cannot be used for continuation
-      const state: StrandweaveState = {
+      const state: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -867,7 +867,7 @@ describe("Execution Thread Analysis", () => {
 
     test("should handle continuation from beginning (null afterCodon)", async () => {
       // Test continuation from the very beginning of a run
-      const state: StrandweaveState = {
+      const state: HankweaveState = {
         runs: [
           {
             runId: "continuation-run" as RunId,
@@ -935,7 +935,7 @@ describe("Execution Thread Analysis", () => {
 
   describe("Edge Cases", () => {
     test("should handle failed codon in continuation chain", async () => {
-      const state: StrandweaveState = {
+      const state: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,
@@ -1006,7 +1006,7 @@ describe("Execution Thread Analysis", () => {
     });
 
     test("should handle running codon detection", async () => {
-      const state: StrandweaveState = {
+      const state: HankweaveState = {
         runs: [
           {
             runId: "test-run" as RunId,

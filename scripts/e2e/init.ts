@@ -54,13 +54,13 @@ const testEnv = { ...process.env };
 
 switch (mode) {
 	case "npx":
-		testEnv.STRANDWEAVE_TEST_USE_NPX = "1";
+		testEnv.HANKWEAVE_TEST_USE_NPX = "1";
 		break;
 	case "bunx":
-		testEnv.STRANDWEAVE_TEST_USE_BUNX = "1";
+		testEnv.HANKWEAVE_TEST_USE_BUNX = "1";
 		break;
 	case "binary":
-		testEnv.STRANDWEAVE_TEST_USE_BINARY = "1";
+		testEnv.HANKWEAVE_TEST_USE_BINARY = "1";
 		break;
 	case "normal":
 	default:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build script for strandweave npm package
+ * Build script for hankweave npm package
  *
  * This script:
  * 1. Bundles server/index.ts and all dependencies
@@ -16,7 +16,7 @@ const distDir = join(import.meta.dir, "..", "dist");
 const outfile = join(distDir, "index.js");
 
 async function build() {
-  console.log("🏗️  Building strandweave for npm distribution...\n");
+  console.log("🏗️  Building hankweave for npm distribution...\n");
 
   // Clean dist directory
   if (existsSync(distDir)) {

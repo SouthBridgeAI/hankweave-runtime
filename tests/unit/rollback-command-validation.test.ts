@@ -8,7 +8,7 @@ import { Logger } from "../../server/utils";
 
 // Test directory setup
 const TEST_DIR = path.join(import.meta.dir, "test-rollback-validation");
-const TEST_STRANDWEAVE_DIR = path.join(TEST_DIR, ".strandweave");
+const TEST_HANKWEAVE_DIR = path.join(TEST_DIR, ".hankweave");
 
 // Mock logger
 class MockLogger extends Logger {
@@ -29,13 +29,13 @@ describe("Rollback Command Validation", () => {
 
   beforeEach(async () => {
     // Create test directory
-    await fs.promises.mkdir(TEST_STRANDWEAVE_DIR, { recursive: true });
+    await fs.promises.mkdir(TEST_HANKWEAVE_DIR, { recursive: true });
 
     // Create mock logger
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger);
+    stateManager = new StateManager(TEST_HANKWEAVE_DIR, mockLogger);
     await stateManager.initialize();
   });
 

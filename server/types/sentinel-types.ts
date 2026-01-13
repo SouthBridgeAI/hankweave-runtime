@@ -52,9 +52,9 @@ export type { StructuredOutputContext } from "../types/llm-call-types.js";
 export interface SentinelOutputPaths {
   /**
    * Path to append-only log file. Path convention:
-   * - Filename only (e.g., "output.md") → .strandweave/sentinel-outputs/{id}/
+   * - Filename only (e.g., "output.md") → .hankweave/sentinel-outputs/{id}/
    * - Path with slash (e.g., "data/output.md") → execution-dir relative
-   * Auto-generated if omitted: .strandweave/sentinel-outputs/{id}/{id}-{codon}-{timestamp}.md
+   * Auto-generated if omitted: .hankweave/sentinel-outputs/{id}/{id}-{codon}-{timestamp}.md
    */
   logFile?: string;
 

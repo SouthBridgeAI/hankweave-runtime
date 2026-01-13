@@ -8,8 +8,8 @@ import { SentinelFatalError } from "../../server/sentinels/sentinel-fatal-error.
 import { CodonId } from "../../server/types/branded-types.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
-import type { StrandweaveModelMessage } from "../../server/types/input-ai-types.js";
-import type { StrandweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
+import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
+import type { HankweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
 import { Logger } from "../../server/utils.js";
 import { createTypedMockLlmAdapter } from "../utils/mock-llm.js";
 
@@ -18,7 +18,7 @@ class TestLogger extends Logger {
   public logs: Array<{ message: string; level: string }> = [];
   public llmCalls: Array<{
     id: string;
-    eventsOrMessages: ServerEvent[] | StrandweaveModelMessage[];
+    eventsOrMessages: ServerEvent[] | HankweaveModelMessage[];
   }> = [];
 
   constructor() {
@@ -470,7 +470,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
 
       // Three sentinels: one succeeds, one has template error, one has resource error
-      const mixedLlmCall = (id: string, options: StrandweaveGenerateTextOptions) => {
+      const mixedLlmCall = (id: string, options: HankweaveGenerateTextOptions) => {
         switch (id) {
           case "success-sentinel":
             return createTypedMockLlmAdapter("Success!")(id, options);

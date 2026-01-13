@@ -18,7 +18,7 @@ describe("resolveSettings - Integration Tests", () => {
     // Capture and clear environment
     originalEnv = captureEnv();
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith("STRANDWEAVE_RUNTIME_")) {
+      if (key.startsWith("HANKWEAVE_RUNTIME_")) {
         delete process.env[key];
       }
     }
@@ -50,7 +50,7 @@ describe("resolveSettings - Integration Tests", () => {
   });
 
   test("merges runtime config file (layer 2)", () => {
-    const runtimeConfigPath = path.join(TEST_DIR, "strandweave.json");
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(
       runtimeConfigPath,
       JSON.stringify({
@@ -67,10 +67,10 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.autostart).toBe(false);
   });
 
-  test("merges strand file recommendations (layer 3)", () => {
-    const strandPath = path.join(TEST_DIR, "strand.json");
+  test("merges hank file recommendations (layer 3)", () => {
+    const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
-      strandPath,
+      hankPath,
       JSON.stringify({
         recommendations: {
           model: "sonnet",
@@ -79,7 +79,7 @@ describe("resolveSettings - Integration Tests", () => {
             enablePersistence: false,
           },
         },
-        strand: [
+        hank: [
           {
             id: "test-codon",
             name: "Test",
@@ -91,7 +91,7 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    const result = resolveSettings({ strandPath });
+    const result = resolveSettings({ hankPath });
 
     expect(result.model).toBe("sonnet");
     expect(result.dataHashTimeLimit).toBe(15000);
@@ -99,9 +99,9 @@ describe("resolveSettings - Integration Tests", () => {
   });
 
   test("merges environment variables (layer 4)", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "9000";
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
-    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "true";
+    process.env.HANKWEAVE_RUNTIME_PORT = "9000";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "true";
 
     const result = resolveSettings();
 
@@ -125,8 +125,8 @@ describe("resolveSettings - Integration Tests", () => {
   });
 
   test("CLI args override environment variables", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "8000";
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "sonnet";
+    process.env.HANKWEAVE_RUNTIME_PORT = "8000";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "sonnet";
 
     const result = resolveSettings({
       cliArgs: {
@@ -139,16 +139,16 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.model).toBe("sonnet"); // From env
   });
 
-  test("environment variables override strand recommendations", () => {
-    const strandPath = path.join(TEST_DIR, "strand.json");
+  test("environment variables override hank recommendations", () => {
+    const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
-      strandPath,
+      hankPath,
       JSON.stringify({
         recommendations: {
           model: "sonnet",
           dataHashTimeLimit: 10000,
         },
-        strand: [
+        hank: [
           {
             id: "test",
             name: "Test",
@@ -160,16 +160,16 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
 
-    const result = resolveSettings({ strandPath });
+    const result = resolveSettings({ hankPath });
 
     expect(result.model).toBe("opus"); // Env wins
-    expect(result.dataHashTimeLimit).toBe(10000); // From strand
+    expect(result.dataHashTimeLimit).toBe(10000); // From hank
   });
 
-  test("strand recommendations override runtime config", () => {
-    const runtimeConfigPath = path.join(TEST_DIR, "strandweave.json");
+  test("hank recommendations override runtime config", () => {
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(
       runtimeConfigPath,
       JSON.stringify({
@@ -178,14 +178,14 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    const strandPath = path.join(TEST_DIR, "strand.json");
+    const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
-      strandPath,
+      hankPath,
       JSON.stringify({
         recommendations: {
           model: "opus", // Override runtime config
         },
-        strand: [
+        hank: [
           {
             id: "test",
             name: "Test",
@@ -197,14 +197,14 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    const result = resolveSettings({ runtimeConfigPath, strandPath });
+    const result = resolveSettings({ runtimeConfigPath, hankPath });
 
-    expect(result.model).toBe("opus"); // Strand wins
+    expect(result.model).toBe("opus"); // Hank wins
     expect(result.port).toBe(8080); // From runtime config
   });
 
   test("runtime config overrides defaults", () => {
-    const runtimeConfigPath = path.join(TEST_DIR, "strandweave.json");
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(
       runtimeConfigPath,
       JSON.stringify({
@@ -222,7 +222,7 @@ describe("resolveSettings - Integration Tests", () => {
 
   test("all 5 layers work together with correct precedence", () => {
     // Layer 2: Runtime config
-    const runtimeConfigPath = path.join(TEST_DIR, "strandweave.json");
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(
       runtimeConfigPath,
       JSON.stringify({
@@ -233,16 +233,16 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    // Layer 3: Strand recommendations
-    const strandPath = path.join(TEST_DIR, "strand.json");
+    // Layer 3: Hank recommendations
+    const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
-      strandPath,
+      hankPath,
       JSON.stringify({
         recommendations: {
           model: "opus", // Override runtime config
           dataHashTimeLimit: 15000,
         },
-        strand: [
+        hank: [
           {
             id: "test",
             name: "Test",
@@ -255,32 +255,32 @@ describe("resolveSettings - Integration Tests", () => {
     );
 
     // Layer 4: Environment variables
-    process.env.STRANDWEAVE_RUNTIME_PORT = "9000"; // Override runtime config
-    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "true";
+    process.env.HANKWEAVE_RUNTIME_PORT = "9000"; // Override runtime config
+    process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "true";
 
     // Layer 5: CLI arguments
     const result = resolveSettings({
       runtimeConfigPath,
-      strandPath,
+      hankPath,
       cliArgs: {
         port: 9999, // Override everything
         anthropicBaseUrl: "https://custom.api.com",
       },
     });
 
-    // Verify precedence (CLI > Env > Strand > Runtime > Default)
+    // Verify precedence (CLI > Env > Hank > Runtime > Default)
     expect(result.port).toBe(9999); // CLI (layer 5) wins
-    expect(result.model).toBe("opus"); // Strand (layer 3) wins over runtime
+    expect(result.model).toBe("opus"); // Hank (layer 3) wins over runtime
     expect(result.autostart).toBe(false); // Runtime (layer 2)
     expect(result.withoutProxy).toBe(true); // Env (layer 4)
     expect(result.anthropicBaseUrl).toBe("https://custom.api.com"); // CLI (layer 5)
-    expect(result.dataHashTimeLimit).toBe(15000); // Strand (layer 3)
+    expect(result.dataHashTimeLimit).toBe(15000); // Hank (layer 3)
     expect(result.logParsingInterval).toBe(2000); // Runtime (layer 2)
   });
 
   test("handles nested sentinel config merge across layers", () => {
     // Layer 2: Runtime config
-    const runtimeConfigPath = path.join(TEST_DIR, "strandweave.json");
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(
       runtimeConfigPath,
       JSON.stringify({
@@ -291,10 +291,10 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    // Layer 3: Strand recommendations
-    const strandPath = path.join(TEST_DIR, "strand.json");
+    // Layer 3: Hank recommendations
+    const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
-      strandPath,
+      hankPath,
       JSON.stringify({
         recommendations: {
           sentinel: {
@@ -302,7 +302,7 @@ describe("resolveSettings - Integration Tests", () => {
             waitForAllHealthChecks: true, // Add new field
           },
         },
-        strand: [
+        hank: [
           {
             id: "test",
             name: "Test",
@@ -315,14 +315,14 @@ describe("resolveSettings - Integration Tests", () => {
     );
 
     // Layer 4: Environment
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
 
-    const result = resolveSettings({ runtimeConfigPath, strandPath });
+    const result = resolveSettings({ runtimeConfigPath, hankPath });
 
     // Should deep merge sentinel config
-    expect(result.sentinel?.enablePersistence).toBe(false); // Strand wins
+    expect(result.sentinel?.enablePersistence).toBe(false); // Hank wins
     expect(result.sentinel?.healthCheckGracePeriodMs).toBe(3000); // Env wins
-    expect(result.sentinel?.waitForAllHealthChecks).toBe(true); // From strand
+    expect(result.sentinel?.waitForAllHealthChecks).toBe(true); // From hank
   });
 
   test("handles missing runtime config gracefully", () => {
@@ -334,22 +334,22 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.port).toBe(7777);
   });
 
-  test("handles missing strand file gracefully", () => {
+  test("handles missing hank file gracefully", () => {
     const result = resolveSettings({
-      strandPath: path.join(TEST_DIR, "nonexistent.json"),
+      hankPath: path.join(TEST_DIR, "nonexistent.json"),
     });
 
     // Should still work with defaults
     expect(result.port).toBe(7777);
   });
 
-  test("handles strand file without recommendations", () => {
-    const strandPath = path.join(TEST_DIR, "strand.json");
+  test("handles hank file without recommendations", () => {
+    const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
-      strandPath,
+      hankPath,
       JSON.stringify({
         // No recommendations field
-        strand: [
+        hank: [
           {
             id: "test",
             name: "Test",
@@ -361,14 +361,14 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    const result = resolveSettings({ strandPath });
+    const result = resolveSettings({ hankPath });
 
     // Should still work with defaults
     expect(result.port).toBe(7777);
   });
 
   test("handles empty runtime config file", () => {
-    const runtimeConfigPath = path.join(TEST_DIR, "strandweave.json");
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(runtimeConfigPath, JSON.stringify({}));
 
     const result = resolveSettings({ runtimeConfigPath });
@@ -377,13 +377,13 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.port).toBe(7777);
   });
 
-  test("handles empty recommendations in strand file", () => {
-    const strandPath = path.join(TEST_DIR, "strand.json");
+  test("handles empty recommendations in hank file", () => {
+    const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
-      strandPath,
+      hankPath,
       JSON.stringify({
         recommendations: {}, // Empty
-        strand: [
+        hank: [
           {
             id: "test",
             name: "Test",
@@ -395,14 +395,14 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    const result = resolveSettings({ strandPath });
+    const result = resolveSettings({ hankPath });
 
     // Should use defaults
     expect(result.port).toBe(7777);
   });
 
   test("merges complex nested configurations correctly", () => {
-    const runtimeConfigPath = path.join(TEST_DIR, "strandweave.json");
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(
       runtimeConfigPath,
       JSON.stringify({
@@ -413,8 +413,8 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
 
     const result = resolveSettings({
       runtimeConfigPath,

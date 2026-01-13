@@ -1,0 +1,7 @@
+# Bun configuration for Hankweave
+
+[test]
+# Set environment variables for tests
+# BUN_TEST tells isNonInteractive() in execution-setup.ts to skip confirmation prompts
+[test.env]
+BUN_TEST = "true"

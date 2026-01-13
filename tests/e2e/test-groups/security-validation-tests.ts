@@ -22,8 +22,8 @@ export function runSecurityValidationTests(_testState: TestState, testDir: strin
     ];
 
     const allLogs = [
-      path.join(testDir, ".strandweave/logs/server.log"),
-      path.join(testDir, ".strandweave/logs/websocket.log"),
+      path.join(testDir, ".hankweave/logs/server.log"),
+      path.join(testDir, ".hankweave/logs/websocket.log"),
     ];
 
     allLogs.forEach((logPath) => {

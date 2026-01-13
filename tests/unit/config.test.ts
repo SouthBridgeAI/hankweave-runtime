@@ -3,10 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   loadCodonSequence,
+  loadHankFile,
+  loadHankweaveRuntimeEnvVars,
   loadRuntimeConfig,
-  loadStrandFile,
-  loadStrandweaveRuntimeEnvVars,
-  validateStrand,
+  validateHank,
 } from "../../server/config";
 import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
 import { CodonId } from "../../server/types/branded-types";
@@ -39,12 +39,12 @@ const cleanup = (dir: string) => {
 };
 
 /**
- * Helper to write a strand config file in the correct object format.
+ * Helper to write a hank config file in the correct object format.
  * Uses unknown type to allow test data with plain strings instead of branded types.
  */
-const writeStrandConfig = (filePath: string, codons: unknown[]) => {
-  const strandFile = { strand: codons };
-  fs.writeFileSync(filePath, JSON.stringify(strandFile, null, 2));
+const writeHankConfig = (filePath: string, codons: unknown[]) => {
+  const hankFile = { hank: codons };
+  fs.writeFileSync(filePath, JSON.stringify(hankFile, null, 2));
 };
 
 // -------------
@@ -92,7 +92,7 @@ describe("Model Validation", () => {
           },
         ];
 
-        writeStrandConfig(configPath, config);
+        writeHankConfig(configPath, config);
         const result = loadCodonSequence(configPath);
 
         expect(result).toHaveLength(1);
@@ -118,7 +118,7 @@ describe("Model Validation", () => {
           },
         ];
 
-        writeStrandConfig(configPath, config);
+        writeHankConfig(configPath, config);
         const result = loadCodonSequence(configPath);
 
         expect(result).toHaveLength(1);
@@ -141,7 +141,7 @@ describe("Model Validation", () => {
         },
       ];
 
-      writeStrandConfig(configPath, config);
+      writeHankConfig(configPath, config);
       expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
     });
 
@@ -156,7 +156,7 @@ describe("Model Validation", () => {
         },
       ];
 
-      writeStrandConfig(configPath, config);
+      writeHankConfig(configPath, config);
       expect(() => loadCodonSequence(configPath)).toThrow();
     });
 
@@ -182,14 +182,14 @@ describe("Model Validation", () => {
         },
       ];
 
-      writeStrandConfig(configPath, config);
+      writeHankConfig(configPath, config);
       expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
     });
   });
 
-  describe("in strandRecommendationsSchema (keeps as string)", () => {
+  describe("in hankRecommendationsSchema (keeps as string)", () => {
     const tempDir = path.resolve("tests", "test-area", "temp-recommendations-model-test");
-    const strandPath = path.join(tempDir, "test-strand.json");
+    const hankPath = path.join(tempDir, "test-hank.json");
 
     beforeEach(() => {
       cleanup(tempDir);
@@ -204,11 +204,11 @@ describe("Model Validation", () => {
       const models = ["sonnet", "opus", "haiku"];
 
       for (const model of models) {
-        const strandContent = {
+        const hankContent = {
           recommendations: {
             model,
           },
-          strand: [
+          hank: [
             {
               id: "test-codon",
               name: "Test Codon",
@@ -219,8 +219,8 @@ describe("Model Validation", () => {
           ],
         };
 
-        createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
-        const result = loadStrandFile(strandPath);
+        createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
+        const result = loadHankFile(hankPath);
 
         // Model should stay as string in recommendations
         expect(result.recommendations?.model).toBe(model);
@@ -229,11 +229,11 @@ describe("Model Validation", () => {
     });
 
     test("throws error for invalid model in recommendations", () => {
-      const strandContent = {
+      const hankContent = {
         recommendations: {
           model: "gpt-4-turbo",
         },
-        strand: [
+        hank: [
           {
             id: "test-codon",
             name: "Test Codon",
@@ -244,17 +244,17 @@ describe("Model Validation", () => {
         ],
       };
 
-      createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
-      expect(() => loadStrandFile(strandPath)).toThrow("Invalid");
+      createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
+      expect(() => loadHankFile(hankPath)).toThrow("Invalid");
     });
 
     test("allows undefined model in recommendations", () => {
-      const strandContent = {
+      const hankContent = {
         recommendations: {
           dataHashTimeLimit: 5000,
           // No model field
         },
-        strand: [
+        hank: [
           {
             id: "test-codon",
             name: "Test Codon",
@@ -265,8 +265,8 @@ describe("Model Validation", () => {
         ],
       };
 
-      createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
-      const result = loadStrandFile(strandPath);
+      createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
+      const result = loadHankFile(hankPath);
 
       expect(result.recommendations?.model).toBeUndefined();
     });
@@ -274,7 +274,7 @@ describe("Model Validation", () => {
 
   describe("in runtimeConfigSchema (keeps as string)", () => {
     const tempDir = path.resolve("tests", "test-area", "temp-runtime-model-test");
-    const runtimeConfigPath = path.join(tempDir, "strandweave.json");
+    const runtimeConfigPath = path.join(tempDir, "hankweave.json");
 
     beforeEach(() => {
       cleanup(tempDir);
@@ -360,7 +360,7 @@ describe("Model Validation", () => {
         },
       ];
 
-      writeStrandConfig(configPath, config);
+      writeHankConfig(configPath, config);
 
       try {
         loadCodonSequence(configPath);
@@ -375,7 +375,7 @@ describe("Model Validation", () => {
   });
 });
 
-describe("validateStrand", () => {
+describe("validateHank", () => {
   const tempDir = path.resolve("tests", "test-area", "temp-validation-test");
   const configPath = path.join(tempDir, "validate-config.json");
   const projectPath = path.join(tempDir, "project");
@@ -422,8 +422,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.codonCount).toBe(1);
     expect(result.promptFileCount).toBe(1);
@@ -468,8 +468,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.codonCount).toBe(2);
     expect(result.promptFileCount).toBe(2);
@@ -499,8 +499,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       "Duplicate codon ID",
     );
   });
@@ -525,8 +525,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain('Duplicate codon name "Duplicate Name"');
@@ -545,8 +545,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is empty");
@@ -566,8 +566,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is large");
@@ -596,8 +596,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(0);
@@ -628,8 +628,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(1);
@@ -659,8 +659,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       "Invalid target path",
     );
   });
@@ -686,8 +686,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Potentially dangerous command detected");
@@ -707,8 +707,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("but there's no previous codon");
@@ -735,8 +735,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("doesn't checkpoint any files");
@@ -774,8 +774,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Continues from previous loop");
@@ -804,9 +804,9 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     // Union schema reports "Invalid input" at top level, nested errors contain "Command cannot be empty"
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       "Failed to load codon config",
     );
   });
@@ -819,8 +819,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow();
+    writeHankConfig(configPath, invalidConfig);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow();
   });
 
   test("counts codons inside loops correctly", async () => {
@@ -868,8 +868,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     // Should count: 1 standalone + 2 in loop + 1 final = 4 total codons
     expect(result.codonCount).toBe(4);
@@ -906,8 +906,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       "Duplicate codon ID",
     );
   });
@@ -943,8 +943,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow("Duplicate");
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow("Duplicate");
   });
 
   test("validates codons inside loops with proper context in error messages", async () => {
@@ -971,7 +971,7 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     expect(() => loadCodonSequence(configPath)).toThrow(
       /Loop.*my-loop.*promptFile.*does not exist/,
     );
@@ -1011,8 +1011,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     // Should not throw, but should have warnings
     expect(result.warnings.length).toBeGreaterThan(0);
@@ -1042,8 +1042,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
   });
@@ -1078,8 +1078,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       /contextExceeded.*fresh.*infinite/i,
     );
   });
@@ -1114,8 +1114,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1150,8 +1150,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*contextExceeded.*context.*exhausted/i,
     );
   });
@@ -1186,8 +1186,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1216,8 +1216,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(1);
   });
@@ -1242,8 +1242,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1268,8 +1268,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*session ID/i,
     );
   });
@@ -1305,8 +1305,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*session ID/i,
     );
   });
@@ -1349,8 +1349,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*session ID/i,
     );
   });
@@ -1386,8 +1386,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    await expect(validateStrand(configPath, projectPath, testLogger)).rejects.toThrow(
+    writeHankConfig(configPath, config);
+    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
       /continue-previous.*model differs.*previous codon in loop.*session ID/i,
     );
   });
@@ -1423,8 +1423,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1456,8 +1456,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     // Should have run self-tests
     expect(result.shimSelfTests).toBeDefined();
@@ -1526,8 +1526,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     // Should have run self-tests
     expect(result.shimSelfTests).toBeDefined();
@@ -1557,8 +1557,8 @@ describe("validateStrand", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
-    const result = await validateStrand(configPath, projectPath, testLogger);
+    writeHankConfig(configPath, config);
+    const result = await validateHank(configPath, projectPath, testLogger);
 
     // Check shimSelfTests structure
     expect(result.shimSelfTests).toBeDefined();
@@ -1577,9 +1577,9 @@ describe("validateStrand", () => {
   }, 10_000); // 10 second timeout for self-tests
 });
 
-describe("loadStrandFile", () => {
-  const tempDir = path.resolve("tests", "test-area", "temp-test-strand");
-  const strandPath = path.join(tempDir, "test-strand.json");
+describe("loadHankFile", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-test-hank");
+  const hankPath = path.join(tempDir, "test-hank.json");
 
   beforeEach(() => {
     cleanup(tempDir);
@@ -1598,12 +1598,12 @@ describe("loadStrandFile", () => {
     LlmProviderRegistry.resetInstance();
   });
 
-  test("loads valid strand file with all fields", () => {
-    const strandContent = {
+  test("loads valid hank file with all fields", () => {
+    const hankContent = {
       meta: {
-        name: "Test Strand",
+        name: "Test Hank",
         version: "1.0.0",
-        description: "A test strand",
+        description: "A test hank",
         author: "Test Author",
       },
       recommendations: {
@@ -1615,7 +1615,7 @@ describe("loadStrandFile", () => {
           waitForAllHealthChecks: true,
         },
       },
-      strand: [
+      hank: [
         {
           id: "test-codon",
           name: "Test Codon",
@@ -1626,22 +1626,22 @@ describe("loadStrandFile", () => {
       ],
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    const result = loadStrandFile(strandPath);
+    const result = loadHankFile(hankPath);
 
-    expect(result.meta).toEqual(strandContent.meta);
+    expect(result.meta).toEqual(hankContent.meta);
     // Check recommendations fields (model stays as string)
     expect(result.recommendations?.model).toBe("sonnet");
     expect(result.recommendations?.dataHashTimeLimit).toBe(10000);
-    expect(result.recommendations?.sentinel).toEqual(strandContent.recommendations.sentinel);
-    expect(result.strand).toHaveLength(1);
-    expect(result.strand[0].id).toBe("test-codon");
+    expect(result.recommendations?.sentinel).toEqual(hankContent.recommendations.sentinel);
+    expect(result.hank).toHaveLength(1);
+    expect(result.hank[0].id).toBe("test-codon");
   });
 
-  test("loads strand file with only strand array (minimal)", () => {
-    const strandContent = {
-      strand: [
+  test("loads hank file with only hank array (minimal)", () => {
+    const hankContent = {
+      hank: [
         {
           id: "test-codon",
           name: "Test Codon",
@@ -1652,44 +1652,44 @@ describe("loadStrandFile", () => {
       ],
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    const result = loadStrandFile(strandPath);
+    const result = loadHankFile(hankPath);
 
     expect(result.meta).toBeUndefined();
     expect(result.recommendations).toBeUndefined();
-    expect(result.strand).toHaveLength(1);
+    expect(result.hank).toHaveLength(1);
   });
 
   test("throws error for missing file", () => {
-    expect(() => loadStrandFile("/nonexistent/strand.json")).toThrow("Strand file not found");
+    expect(() => loadHankFile("/nonexistent/hank.json")).toThrow("Hank file not found");
   });
 
   test("throws error for invalid JSON", () => {
-    createTestFile(strandPath, "{ invalid json }");
-    expect(() => loadStrandFile(strandPath)).toThrow();
+    createTestFile(hankPath, "{ invalid json }");
+    expect(() => loadHankFile(hankPath)).toThrow();
   });
 
-  test("throws error for missing strand array", () => {
-    const strandContent = {
+  test("throws error for missing hank array", () => {
+    const hankContent = {
       meta: {
-        name: "Test Strand",
+        name: "Test Hank",
         version: "1.0.0",
       },
-      // Missing strand array
+      // Missing hank array
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
-    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
+    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
   });
 
   test("throws error for empty meta name", () => {
-    const strandContent = {
+    const hankContent = {
       meta: {
         name: "",
         version: "1.0.0",
       },
-      strand: [
+      hank: [
         {
           id: "test-codon",
           name: "Test Codon",
@@ -1700,16 +1700,16 @@ describe("loadStrandFile", () => {
       ],
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
-    expect(() => loadStrandFile(strandPath)).toThrow();
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
+    expect(() => loadHankFile(hankPath)).toThrow();
   });
 
   test("validates recommendations model enum", () => {
-    const strandContent = {
+    const hankContent = {
       recommendations: {
         model: "invalid-model", // Invalid model
       },
-      strand: [
+      hank: [
         {
           id: "test-codon",
           name: "Test Codon",
@@ -1720,19 +1720,19 @@ describe("loadStrandFile", () => {
       ],
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
-    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
+    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
   });
 
   test("throws error on typos in recommendations", () => {
     // With .strict() mode enabled, typos in recommendations are caught
     // and users get immediate feedback instead of silent failures.
-    const strandContent = {
+    const hankContent = {
       recommendations: {
         modle: "opus", // Typo! Should be "model"
         dataHashTimeLimit: 10000, // Valid field
       },
-      strand: [
+      hank: [
         {
           id: "test-codon",
           name: "Test Codon",
@@ -1743,19 +1743,19 @@ describe("loadStrandFile", () => {
       ],
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
     // Should throw with helpful error message about unrecognized keys
-    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
   });
 
   test("throws error on multiple typos in recommendations", () => {
-    const strandContent = {
+    const hankContent = {
       recommendations: {
         modle: "opus", // Typo! Should be "model"
         dataHashTimeLimittt: 10000, // Typo! Should be "dataHashTimeLimit"
       },
-      strand: [
+      hank: [
         {
           id: "test-codon",
           name: "Test Codon",
@@ -1766,13 +1766,13 @@ describe("loadStrandFile", () => {
       ],
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
   });
 
   test("throws error on typos in recommendations.sentinel", () => {
-    const strandContent = {
+    const hankContent = {
       recommendations: {
         model: "opus",
         sentinel: {
@@ -1780,7 +1780,7 @@ describe("loadStrandFile", () => {
           healthCheckGracePeriodMsss: 5000, // Typo! Should be "healthCheckGracePeriodMs"
         },
       },
-      strand: [
+      hank: [
         {
           id: "test-codon",
           name: "Test Codon",
@@ -1791,15 +1791,15 @@ describe("loadStrandFile", () => {
       ],
     };
 
-    createTestFile(strandPath, JSON.stringify(strandContent, null, 2));
+    createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    expect(() => loadStrandFile(strandPath)).toThrow("Invalid strand file");
+    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
   });
 });
 
 describe("loadRuntimeConfig", () => {
   const tempDir = path.resolve("tests", "test-area", "temp-test-runtime");
-  const runtimeConfigPath = path.join(tempDir, "strandweave.json");
+  const runtimeConfigPath = path.join(tempDir, "hankweave.json");
 
   beforeEach(() => {
     cleanup(tempDir);
@@ -2008,15 +2008,15 @@ describe("loadRuntimeConfig", () => {
   });
 });
 
-describe("loadStrandweaveRuntimeEnvVars", () => {
+describe("loadHankweaveRuntimeEnvVars", () => {
   let originalEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
     // Capture current env state
     originalEnv = captureEnv();
-    // Clear any STRANDWEAVE_RUNTIME_ vars before each test
+    // Clear any HANKWEAVE_RUNTIME_ vars before each test
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith("STRANDWEAVE_RUNTIME_")) {
+      if (key.startsWith("HANKWEAVE_RUNTIME_")) {
         delete process.env[key];
       }
     }
@@ -2027,60 +2027,60 @@ describe("loadStrandweaveRuntimeEnvVars", () => {
     restoreEnv(originalEnv);
   });
 
-  test("returns empty object when no STRANDWEAVE_RUNTIME_ env vars are set", () => {
-    const result = loadStrandweaveRuntimeEnvVars();
+  test("returns empty object when no HANKWEAVE_RUNTIME_ env vars are set", () => {
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result).toEqual({});
   });
 
   test("parses single top-level port env var", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
+    process.env.HANKWEAVE_RUNTIME_PORT = "8080";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.port).toBe(8080);
   });
 
   test("parses single top-level model env var", () => {
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.model).toBe("opus");
   });
 
   test("parses boolean autostart env var (true)", () => {
-    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
+    process.env.HANKWEAVE_RUNTIME_AUTOSTART = "true";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.autostart).toBe(true);
   });
 
   test("parses boolean autostart env var (false)", () => {
-    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "false";
+    process.env.HANKWEAVE_RUNTIME_AUTOSTART = "false";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.autostart).toBe(false);
   });
 
   test("parses boolean using numeric 1", () => {
-    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "1";
+    process.env.HANKWEAVE_RUNTIME_AUTOSTART = "1";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.autostart).toBe(true);
   });
 
   test("parses boolean using numeric 0", () => {
-    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "0";
+    process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "0";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.withoutProxy).toBe(false);
   });
 
   test("parses multiple top-level env vars", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "9000";
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "sonnet";
-    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
-    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "false";
+    process.env.HANKWEAVE_RUNTIME_PORT = "9000";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "sonnet";
+    process.env.HANKWEAVE_RUNTIME_AUTOSTART = "true";
+    process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "false";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.port).toBe(9000);
     expect(result.model).toBe("sonnet");
     expect(result.autostart).toBe(true);
@@ -2088,27 +2088,27 @@ describe("loadStrandweaveRuntimeEnvVars", () => {
   });
 
   test("parses URL env var", () => {
-    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
+    process.env.HANKWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.anthropicBaseUrl).toBe("https://api.example.com");
   });
 
   test("parses string paths", () => {
-    process.env.STRANDWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
-    process.env.STRANDWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
+    process.env.HANKWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
+    process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.outputDirectory).toBe("/tmp/output");
     expect(result.executionBaseDir).toBe("/tmp/executions");
   });
 
   test("parses nested sentinel env vars", () => {
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.sentinel).toEqual({
       enablePersistence: true,
       healthCheckGracePeriodMs: 5000,
@@ -2117,12 +2117,12 @@ describe("loadStrandweaveRuntimeEnvVars", () => {
   });
 
   test("parses mix of top-level and nested env vars", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
+    process.env.HANKWEAVE_RUNTIME_PORT = "8080";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.port).toBe(8080);
     expect(result.model).toBe("opus");
     expect(result.sentinel).toEqual({
@@ -2132,86 +2132,86 @@ describe("loadStrandweaveRuntimeEnvVars", () => {
   });
 
   test("converts snake_case to camelCase", () => {
-    process.env.STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
-    process.env.STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
+    process.env.HANKWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
+    process.env.HANKWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result.logParsingInterval).toBe(2000);
     expect(result.dataHashTimeLimit).toBe(10000);
   });
 
-  test("ignores non-STRANDWEAVE_RUNTIME_ prefixed env vars", () => {
+  test("ignores non-HANKWEAVE_RUNTIME_ prefixed env vars", () => {
     process.env.PORT = "3000";
     process.env.NODE_ENV = "test";
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY = "sk-ant-sentinel";
+    process.env.HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY = "sk-ant-sentinel";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result).toEqual({});
   });
 
-  test("ignores empty STRANDWEAVE_RUNTIME_ env vars", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "";
+  test("ignores empty HANKWEAVE_RUNTIME_ env vars", () => {
+    process.env.HANKWEAVE_RUNTIME_PORT = "";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
     expect(result).toEqual({});
   });
 
   test("throws error for invalid number value", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "not-a-number";
+    process.env.HANKWEAVE_RUNTIME_PORT = "not-a-number";
 
-    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+    expect(() => loadHankweaveRuntimeEnvVars()).toThrow(
       'Invalid number value for port: "not-a-number"',
     );
   });
 
   test("throws error for invalid model enum", () => {
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "gpt-4";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "gpt-4";
 
-    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+    expect(() => loadHankweaveRuntimeEnvVars()).toThrow(
       "Invalid environment variable configuration",
     );
   });
 
   test("throws error for invalid URL format", () => {
-    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "not-a-url";
+    process.env.HANKWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "not-a-url";
 
-    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+    expect(() => loadHankweaveRuntimeEnvVars()).toThrow(
       "Invalid environment variable configuration",
     );
   });
 
   test("throws error for negative port", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "-100";
+    process.env.HANKWEAVE_RUNTIME_PORT = "-100";
 
-    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+    expect(() => loadHankweaveRuntimeEnvVars()).toThrow(
       "Invalid environment variable configuration",
     );
   });
 
   test("throws error for negative sentinel grace period", () => {
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "-500";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "-500";
 
-    expect(() => loadStrandweaveRuntimeEnvVars()).toThrow(
+    expect(() => loadHankweaveRuntimeEnvVars()).toThrow(
       "Invalid environment variable configuration",
     );
   });
 
   test("handles all supported fields", () => {
-    process.env.STRANDWEAVE_RUNTIME_PORT = "8080";
-    process.env.STRANDWEAVE_RUNTIME_AUTOSTART = "true";
-    process.env.STRANDWEAVE_RUNTIME_WITHOUT_PROXY = "false";
-    process.env.STRANDWEAVE_RUNTIME_MODEL = "opus";
-    process.env.STRANDWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
-    process.env.STRANDWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
-    process.env.STRANDWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
-    process.env.STRANDWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
-    process.env.STRANDWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
-    process.env.STRANDWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
+    process.env.HANKWEAVE_RUNTIME_PORT = "8080";
+    process.env.HANKWEAVE_RUNTIME_AUTOSTART = "true";
+    process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "false";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
+    process.env.HANKWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
+    process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
+    process.env.HANKWEAVE_RUNTIME_LOG_PARSING_INTERVAL = "2000";
+    process.env.HANKWEAVE_RUNTIME_DATA_HASH_TIME_LIMIT = "10000";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_WAIT_FOR_ALL_HEALTH_CHECKS = "false";
 
-    const result = loadStrandweaveRuntimeEnvVars();
+    const result = loadHankweaveRuntimeEnvVars();
 
     expect(result.port).toBe(8080);
     expect(result.autostart).toBe(true);
@@ -2264,7 +2264,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, validConfig);
+    writeHankConfig(configPath, validConfig);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -2290,7 +2290,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2305,7 +2305,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2319,7 +2319,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, neitherConfig);
+    writeHankConfig(configPath, neitherConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
 
     // Both provided - loadCodonSequence doesn't actually validate this case, it just uses promptFile if both are provided
@@ -2335,7 +2335,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, bothConfig);
+    writeHankConfig(configPath, bothConfig);
     // This actually doesn't throw - it just uses promptFile
     const result = loadCodonSequence(configPath);
     const codon = result[0];
@@ -2361,7 +2361,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, bothConfig);
+    writeHankConfig(configPath, bothConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2377,7 +2377,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     const codon = result[0];
@@ -2400,7 +2400,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     const codon = result[0];
@@ -2428,7 +2428,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidRigConfig);
+    writeHankConfig(configPath, invalidRigConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2443,7 +2443,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2465,7 +2465,7 @@ describe("loadCodonSequence", () => {
         },
       ];
 
-      writeStrandConfig(configPath, config);
+      writeHankConfig(configPath, config);
       expect(() => loadCodonSequence(configPath)).toThrow();
 
       // Restore permissions for cleanup
@@ -2502,7 +2502,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -2548,7 +2548,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -2599,7 +2599,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(3);
@@ -2634,7 +2634,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -2678,7 +2678,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);
@@ -2701,7 +2701,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2719,7 +2719,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow("at least one codon");
   });
 
@@ -2744,7 +2744,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2770,7 +2770,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow("at least 1");
   });
 
@@ -2807,7 +2807,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2833,7 +2833,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2859,7 +2859,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, invalidConfig);
+    writeHankConfig(configPath, invalidConfig);
     expect(() => loadCodonSequence(configPath)).toThrow();
   });
 
@@ -2898,7 +2898,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     // Should load successfully
@@ -2933,7 +2933,7 @@ describe("loadCodonSequence", () => {
       },
     ];
 
-    writeStrandConfig(configPath, config);
+    writeHankConfig(configPath, config);
     const result = loadCodonSequence(configPath);
 
     expect(result).toHaveLength(1);

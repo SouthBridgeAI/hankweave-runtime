@@ -1,5 +1,5 @@
 // -------------
-// Strandweave State Management Types
+// Hankweave State Management Types
 // -------------
 
 import type { CodonId, RunId, SessionId } from "./branded-types.js";
@@ -59,7 +59,7 @@ export type CodonStatus =
 interface BaseCodon {
   /**
    * Which codon configuration this execution is for.
-   * References the codon in strand.json.
+   * References the codon in hank.json.
    *
    * Used by: UI to show codon name, state queries for codon history
    */
@@ -151,7 +151,7 @@ export interface InitializingCodon extends BaseCodon {
 
   /**
    * Path to Claude's JSONL log file.
-   * Relative to .strandweave directory.
+   * Relative to .hankweave directory.
    * Example: "runs/1234-abc/codon-research-claude.log"
    *
    * Used by: Log parser, debugging, cleanup
@@ -527,7 +527,7 @@ export interface Run {
 
   /**
    * Absolute path where run files are stored.
-   * Example: "/project/.strandweave/runs/1234-abc"
+   * Example: "/project/.hankweave/runs/1234-abc"
    *
    * Used by: Log file storage, cleanup operations
    * Edge case: Folder might not exist if run failed early
@@ -639,15 +639,15 @@ export type StartingConditions =
 // -------------
 
 /**
- * Root state object for Strandweave.
- * Stored in .strandweave/state.json.
+ * Root state object for Hankweave.
+ * Stored in .hankweave/state.json.
  *
  * Design decisions:
  * - Single file instead of per-run for simplicity
  * - No version field per user request
  * - No denormalized costs - computed when needed
  */
-export interface StrandweaveState {
+export interface HankweaveState {
   /**
    * All runs, newest first.
    * Append-only - runs are never removed from history.
@@ -1008,7 +1008,7 @@ export type StateTransitionType = StateTransition["type"];
 // -------------
 
 /**
- * Central state management for Strandweave.
+ * Central state management for Hankweave.
  * All state modifications go through this interface.
  *
  * Implementation notes:
@@ -1038,7 +1038,7 @@ export interface StateManager {
    *
    * Usage: const { runs, currentRunId } = stateManager.getState();
    */
-  getState(): Readonly<StrandweaveState>;
+  getState(): Readonly<HankweaveState>;
 
   // ===== State Modifications =====
 

@@ -1,4 +1,4 @@
-This is the **Master Migration Specification** for converting the **Tadpole** codebase to **Strandweave Runtime**.
+This is the **Master Migration Specification** for converting the **Tadpole** codebase to **Hankweave Runtime**.
 
 This document is designed for an AI agent or developer to follow step-by-step. It prioritizes safety and cohesion over speed.
 
@@ -17,14 +17,14 @@ Use this as the absolute source of truth.
 
 | Concept | Old Name | New Name | Context / Usage |
 | :--- | :--- | :--- | :--- |
-| **Project Name** | Tadpole | **Strandweave** | The runtime, the CLI tool, the branding. |
-| **Input Program** | Tadprogram / Phase Config | **Strand** | The combination of the sequence JSON and prompt files. |
+| **Project Name** | Tadpole | **Hankweave** | The runtime, the CLI tool, the branding. |
+| **Input Program** | Tadprogram / Phase Config | **Hank** | The combination of the sequence JSON and prompt files. |
 | **Execution Unit** | Phase | **Codon** | The atomic step in a workflow. |
 | **Setup** | Workspace / workspaceSetup | **Rig** / **rigSetup** | Preparing the environment (files/commands) before AI runs. |
 | **Observer** | Chronicler | **Sentinel** | Parallel agents watching the event stream. |
 | **Config File** | `phases.json` | `codon-sequence.json` | The default configuration file name. |
-| **State Dir** | `.tadpole` | `.strandweave` | The hidden folder tracking state. |
-| **Executions** | `.tadpole-executions` | `.strandweave-executions` | Where runs actually happen. |
+| **State Dir** | `.tadpole` | `.hankweave` | The hidden folder tracking state. |
+| **Executions** | `.tadpole-executions` | `.hankweave-executions` | Where runs actually happen. |
 | **Events** | `phase.*`, `chronicler.*` | `codon.*`, `sentinel.*` | Wire protocol event types. |
 
 ---
@@ -35,7 +35,7 @@ Use this as the absolute source of truth.
 *Goal: Rename files and directories to match new domains. This will temporarily break imports.*
 
 1.  **Main Server File**:
-    *   Rename `server/tadpole-server.ts` $\rightarrow$ `server/strandweave-runtime.ts`.
+    *   Rename `server/tadpole-server.ts` $\rightarrow$ `server/hankweave-runtime.ts`.
 2.  **Chroniclers $\rightarrow$ Sentinels**:
     *   Rename directory `server/chroniclers/` $\rightarrow$ `server/sentinels/`.
     *   Inside that directory, rename:
@@ -82,7 +82,7 @@ Use this as the absolute source of truth.
     *   `SkippedPhase` $\rightarrow$ `SkippedCodon`
 *   In `Run` interface: `phases: PhaseExecution[]` $\rightarrow$ `codons: CodonExecution[]`.
 *   In `TadpoleState` interface:
-    *   Rename interface to `StrandweaveState`.
+    *   Rename interface to `HankweaveState`.
     *   Rename `executionPlan` type to use `ExecutionCodonEntry` (see step 3).
 
 **Target: `server/schemas/event-schemas.ts`**
@@ -104,10 +104,10 @@ Use this as the absolute source of truth.
 
 **Target: `server/config.ts`**
 *   Rename `loadPhaseConfig` $\rightarrow$ `loadCodonSequence`.
-*   Rename `validatePhaseConfig` $\rightarrow$ `validateStrand`.
+*   Rename `validatePhaseConfig` $\rightarrow$ `validateHank`.
 *   Update `DEFAULT_CONFIG` paths:
-    *   `.tadpole/logs/` $\rightarrow$ `.strandweave/logs/`
-    *   `.tadpole/server.lock` $\rightarrow$ `.strandweave/runtime.lock`
+    *   `.tadpole/logs/` $\rightarrow$ `.hankweave/logs/`
+    *   `.tadpole/server.lock` $\rightarrow$ `.hankweave/runtime.lock`
 *   Update validation error messages: "Phase" $\rightarrow$ "Codon", "Loop must contain phases" $\rightarrow$ "Loop must contain codons".
 
 **Target: `server/execution-planner.ts`**
@@ -116,7 +116,7 @@ Use this as the absolute source of truth.
 *   Logic: `generateIterationPhaseId` $\rightarrow$ `generateIterationCodonId`.
 
 **Target: `server/state-manager.ts`**
-*   Rename class `TadpoleState` references to `StrandweaveState`.
+*   Rename class `TadpoleState` references to `HankweaveState`.
 *   Rename methods:
     *   `getCurrentlyRunningPhase` $\rightarrow$ `getCurrentlyRunningCodon`.
     *   `getPhaseById` $\rightarrow$ `getCodonById`.
@@ -124,12 +124,12 @@ Use this as the absolute source of truth.
 *   Logic: Update the `processQueue` loop to handle the new Event types (e.g., `CodonStarted` instead of `PhaseStarted`).
 
 **Target: `server/checkpoint-git.ts`**
-*   **Git Config**: Change user.name from "Tadpole Runner" to "Strandweave Runtime".
-*   **Paths**: `.tadpole/checkpoints` $\rightarrow$ `.strandweave/checkpoints`.
+*   **Git Config**: Change user.name from "Tadpole Runner" to "Hankweave Runtime".
+*   **Paths**: `.tadpole/checkpoints` $\rightarrow$ `.hankweave/checkpoints`.
 
-**Target: `server/strandweave-runtime.ts` (formerly tadpole-server)**
-*   **Class Name**: `TadpoleServer` $\rightarrow$ `StrandweaveRuntime`.
-*   **Lock File**: `.tadpole/server.lock` $\rightarrow$ `.strandweave/runtime.lock`.
+**Target: `server/hankweave-runtime.ts` (formerly tadpole-server)**
+*   **Class Name**: `TadpoleServer` $\rightarrow$ `HankweaveRuntime`.
+*   **Lock File**: `.tadpole/server.lock` $\rightarrow$ `.hankweave/runtime.lock`.
 *   **Methods**:
     *   `startPhase` $\rightarrow$ `startCodon`.
     *   `autoStartNextPhase` $\rightarrow$ `autoStartNextCodon`.
@@ -141,7 +141,7 @@ Use this as the absolute source of truth.
 
 **Target: `server/sentinels/sentinel-manager.ts` (formerly chronicler-manager)**
 *   Rename class `ChroniclerManager` $\rightarrow$ `SentinelManager`.
-*   Directory path: `.tadpole/chroniclers` $\rightarrow$ `.strandweave/sentinels`.
+*   Directory path: `.tadpole/chroniclers` $\rightarrow$ `.hankweave/sentinels`.
 *   Logic: Ensure it listens to `codon.*` events, not `phase.*`.
 
 ---
@@ -151,27 +151,27 @@ Use this as the absolute source of truth.
 
 **Target: Global Search**
 *   Search for: `TADPOLE_`
-    *   Replace with: `STRANDWEAVE_` (e.g., `STRANDWEAVE_API_KEY`).
+    *   Replace with: `HANKWEAVE_` (e.g., `HANKWEAVE_API_KEY`).
     *   Special attention: `server/index.ts` (CLI args processing) and `server/config.ts` (env var loading).
 *   Search for: `.tadpole`
-    *   Replace with: `.strandweave` (check `.gitignore` resolution logic in `server/file-resolver.ts`).
+    *   Replace with: `.hankweave` (check `.gitignore` resolution logic in `server/file-resolver.ts`).
 *   Search for: `tadpole-results`
-    *   Replace with: `strandweave-results` (Output directory default).
+    *   Replace with: `hankweave-results` (Output directory default).
 *   Search for: `phases.json`
     *   Replace with: `codon-sequence.json` (Default config file name).
 
 **Target: `server/index.ts`**
-*   CLI Help Text: Update "Tadpole Server" to "Strandweave Runtime".
+*   CLI Help Text: Update "Tadpole Server" to "Hankweave Runtime".
 *   Flags:
     *   `--phases` (if it exists) $\rightarrow$ `--sequence`.
-    *   Logs: "Starting Tadpole Server..." $\rightarrow$ "Starting Strandweave Runtime...".
+    *   Logs: "Starting Tadpole Server..." $\rightarrow$ "Starting Hankweave Runtime...".
 
 ---
 
 #### Step 5: The TUI (`server/basic-tui.ts`)
 *Goal: Ensure the UI doesn't break.*
 
-*   **Visuals**: Update console logs "Tadpole Server" $\rightarrow$ "Strandweave".
+*   **Visuals**: Update console logs "Tadpole Server" $\rightarrow$ "Hankweave".
 *   **Event Handling**:
     *   `case "phase.started"` $\rightarrow$ `case "codon.started"`.
     *   `case "phase.completed"` $\rightarrow$ `case "codon.completed"`.
@@ -185,19 +185,19 @@ Use this as the absolute source of truth.
 #### Step 6: Clean Up
 
 *   **package.json**:
-    *   Change `"name"` to `"strandweave"`.
-    *   Change `"bin"` entry if present: `"strandweave": "./server/index.ts"`.
+    *   Change `"name"` to `"hankweave"`.
+    *   Change `"bin"` entry if present: `"hankweave": "./server/index.ts"`.
 *   **Execution Setup**:
-    *   In `server/execution-setup.ts`, ensure the execution root is `~/.strandweave-executions`.
+    *   In `server/execution-setup.ts`, ensure the execution root is `~/.hankweave-executions`.
 *   **Data Hasher**:
     *   Ensure hash calculation doesn't rely on string "tadpole" (it shouldn't, but check comments).
 
 ### Verification Checklist for the Agent
 
 1.  [ ] Does `server/index.ts` load `codon-sequence.json` by default?
-2.  [ ] Are all `TADPOLE_` environment variables renamed to `STRANDWEAVE_`?
+2.  [ ] Are all `TADPOLE_` environment variables renamed to `HANKWEAVE_`?
 3.  [ ] Does `server/basic-tui.ts` correctly display `Codon Started`?
-4.  [ ] Is the hidden state directory `.strandweave`?
+4.  [ ] Is the hidden state directory `.hankweave`?
 5.  [ ] Does the git checkpoint commit message say `checkpoint(rig-setup)` instead of `workspace-setup`?
 6.  [ ] Are all `Chronicler` references in `server/sentinels/*` gone?
 7.  [ ] Does `bun tc` pass without errors?
@@ -211,18 +211,18 @@ These are specific internal names in files that don't always show up in a genera
 
 *   **`server/types/input-ai-types.ts`**:
     *   This entire file prefixes everything with `Tadpole`.
-    *   `TadpoleModelMessage` $\rightarrow$ `StrandweaveModelMessage`.
-    *   `TadpoleSystemModelMessage`, `TadpoleUserModelMessage`, etc. $\rightarrow$ `StrandweaveSystem...`.
-    *   `assertTadpoleIsSubsetOfSdk` $\rightarrow$ `assertStrandweaveIsSubsetOfSdk`.
+    *   `TadpoleModelMessage` $\rightarrow$ `HankweaveModelMessage`.
+    *   `TadpoleSystemModelMessage`, `TadpoleUserModelMessage`, etc. $\rightarrow$ `HankweaveSystem...`.
+    *   `assertTadpoleIsSubsetOfSdk` $\rightarrow$ `assertHankweaveIsSubsetOfSdk`.
 
 *   **`server/types/error-types.ts`**:
-    *   `TadpoleError` (Base class) $\rightarrow$ `StrandweaveError`.
+    *   `TadpoleError` (Base class) $\rightarrow$ `HankweaveError`.
     *   `PhaseError` $\rightarrow$ `CodonError`.
     *   `APITimeoutError`: Check `phaseId` property inside constructor. Rename to `codonId`.
 
 *   **`server/types/llm-call-types.ts`**:
-    *   `TadpoleLlmCallParams` $\rightarrow$ `StrandweaveLlmCallParams`.
-    *   `TadpoleGenerateTextOptions`, etc. $\rightarrow$ `StrandweaveGenerateTextOptions`.
+    *   `TadpoleLlmCallParams` $\rightarrow$ `HankweaveLlmCallParams`.
+    *   `TadpoleGenerateTextOptions`, etc. $\rightarrow$ `HankweaveGenerateTextOptions`.
 
 *   **`server/utils.ts`**:
     *   `isTadpoleError` / `toTadpoleError` (if they exist, or if you see generic error handling referring to the old class name).
@@ -250,9 +250,9 @@ These are runtime string constructions that need to be updated to match the new 
 ### 3. The "Homage" & Git Identity
 
 In **`server/checkpoint-git.ts`**:
-*   **Git User**: `user.name = Tadpole Runner` $\rightarrow$ `Strandweave Runtime`.
+*   **Git User**: `user.name = Tadpole Runner` $\rightarrow$ `Hankweave Runtime`.
 *   **Git Email**: `froggie@southbridge.ai` is a Tadpole reference (Frog/Tadpole).
-    *   Rename to: `weaver@southbridge.ai` (Matches "Strandweave").
+    *   Rename to: `weaver@southbridge.ai` (Matches "Hankweave").
 *   **Initial Commit Message**: "Initial checkpoint setup" (Safe, but check if it mentions Tadpole).
 
 ### 4. CLI & Validation Logic
@@ -260,7 +260,7 @@ In **`server/checkpoint-git.ts`**:
 In **`server/index.ts`**:
 *   **Arg Validation Regex**:
     *   The `validPatterns` array might contain regexes specific to old flags if any existed (e.g. `--phase=...`).
-    *   Help text block: This is a large template string. Read through it carefully. "Tadpole runs in an isolated execution directory..." $\rightarrow$ "Strandweave runs...".
+    *   Help text block: This is a large template string. Read through it carefully. "Tadpole runs in an isolated execution directory..." $\rightarrow$ "Hankweave runs...".
 
 In **`server/config.ts`**:
 *   **Zod Error Map Messages**:
@@ -272,17 +272,17 @@ In **`server/config.ts`**:
 *   **`server/execution-setup.ts`**:
     *   Look for `execution-meta.json`. The file name is fine, but check the *content* written into it.
     *   Does it contain a `version` field that might be confused?
-    *   The path `.tadpole/execution-meta.json` changes to `.strandweave/execution-meta.json`.
+    *   The path `.tadpole/execution-meta.json` changes to `.hankweave/execution-meta.json`.
 
 *   **`server/data-hasher.ts`**:
     *   The function `findExecutionDirs` searches `os.homedir(), ".tadpole-executions"`.
-    *   Must search `.strandweave-executions`.
+    *   Must search `.hankweave-executions`.
 
 ### 6. Package.json & Scripts
 
 *   **`package.json`**:
-    *   Name: `"tapole"` (Note the typo in your provided file "tapole" -> "tadpole"). Change to `"strandweave"`.
-    *   Scripts often refer to paths: `bun server/index.ts`. If you rename the file to `server/strandweave-runtime.ts` (or similar entry point), update the scripts!
+    *   Name: `"tapole"` (Note the typo in your provided file "tapole" -> "tadpole"). Change to `"hankweave"`.
+    *   Scripts often refer to paths: `bun server/index.ts`. If you rename the file to `server/hankweave-runtime.ts` (or similar entry point), update the scripts!
     *   **IMPORTANT**: The file `server/index.ts` is the entry point. You might NOT want to rename `index.ts` itself, but you *should* check imports inside it.
 
 ### 7. Agent Instructions (Refined)

@@ -89,7 +89,7 @@ export function runEventJournalTests(testState: TestState): void {
     if (!testState.executionPath) {
       throw new Error("Execution path not available");
     }
-    return path.join(testState.executionPath, ".strandweave/events/events.jsonl");
+    return path.join(testState.executionPath, ".hankweave/events/events.jsonl");
   };
 
   it("should create event journal file", () => {

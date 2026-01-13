@@ -8,10 +8,10 @@ import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { HistoryManager } from "../../server/sentinels/history-manager.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
-import type { StrandweaveModelMessage } from "../../server/types/input-ai-types.js";
+import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
 import type {
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
 import { Logger } from "../../server/utils.js";
 import { createMockLlm } from "../utils/mock-llm.js";
@@ -68,8 +68,8 @@ class TestLogger extends Logger {
 const mockLlmProvider = createMockLlm();
 
 // Helper function to create an LLM adapter for sentinels
-function createLlmAdapter(callTracker?: Array<{ id: string; options: StrandweaveGenerateTextOptions }>) {
-  return async (id: string, options: StrandweaveGenerateTextOptions): Promise<StrandweaveGenerateTextResult> => {
+function createLlmAdapter(callTracker?: Array<{ id: string; options: HankweaveGenerateTextOptions }>) {
+  return async (id: string, options: HankweaveGenerateTextOptions): Promise<HankweaveGenerateTextResult> => {
     // Track the call if a tracker is provided
     if (callTracker) {
       callTracker.push({ id, options });
@@ -184,7 +184,7 @@ describe("Conversational Sentinel Integration Tests", () => {
       const config = loadSentinelConfig("conversational-narrator.json");
 
       // Track LLM calls
-      const llmCalls: Array<{ id: string; options: StrandweaveGenerateTextOptions }> = [];
+      const llmCalls: Array<{ id: string; options: HankweaveGenerateTextOptions }> = [];
       const mockLlm = createLlmAdapter(llmCalls);
 
       // Create first sentinel instance

@@ -17,8 +17,8 @@ export function runMultiFilePromptTests(testState: TestState, codonsConfig: stri
   test("multi-file prompts are concatenated correctly", () => {
     // Codon 3 uses array of prompt files
     const configContent = fs.readFileSync(codonsConfig, "utf-8");
-    const strandFile = JSON.parse(configContent);
-    const codons = strandFile.strand || [];
+    const hankFile = JSON.parse(configContent);
+    const codons = hankFile.hank || [];
     const codon3Config = codons.find((p: { id: string }) => p.id === "codon-3");
 
     if (Array.isArray(codon3Config?.promptFile)) {

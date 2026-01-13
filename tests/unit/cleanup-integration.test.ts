@@ -10,7 +10,7 @@ import {
 
 describe("Cleanup Integration Utility", () => {
   const testRoot = path.join(process.cwd(), "tests/unit/test-cleanup-integration");
-  const executionRoot = path.join(testRoot, ".strandweave-executions");
+  const executionRoot = path.join(testRoot, ".hankweave-executions");
   const dataSourcePath = path.join(testRoot, "test-data");
   const testExecutionDir = path.join(executionRoot, "test-execution-123");
 
@@ -43,9 +43,9 @@ describe("Cleanup Integration Utility", () => {
     });
 
     test("returns true when execution directory exists", async () => {
-      // Create .strandweave directory in execution
-      const strandweaveDir = path.join(testExecutionDir, ".strandweave");
-      await fs.promises.mkdir(strandweaveDir, { recursive: true });
+      // Create .hankweave directory in execution
+      const hankweaveDir = path.join(testExecutionDir, ".hankweave");
+      await fs.promises.mkdir(hankweaveDir, { recursive: true });
 
       expect(isCleanupNeeded(testExecutionDir)).toBe(true);
     });
@@ -58,8 +58,8 @@ describe("Cleanup Integration Utility", () => {
     });
 
     test("checks both execution and test directories", async () => {
-      const strandweaveDir = path.join(testExecutionDir, ".strandweave");
-      await fs.promises.mkdir(strandweaveDir, { recursive: true });
+      const hankweaveDir = path.join(testExecutionDir, ".hankweave");
+      await fs.promises.mkdir(hankweaveDir, { recursive: true });
 
       const testDir = path.join(testRoot, "some-test-dir");
       await fs.promises.mkdir(testDir, { recursive: true });
@@ -82,8 +82,8 @@ describe("Cleanup Integration Utility", () => {
 
     test("cleans up execution directory by path", async () => {
       // Create execution directory with metadata
-      const strandweaveDir = path.join(testExecutionDir, ".strandweave");
-      await fs.promises.mkdir(strandweaveDir, { recursive: true });
+      const hankweaveDir = path.join(testExecutionDir, ".hankweave");
+      await fs.promises.mkdir(hankweaveDir, { recursive: true });
 
       const meta = {
         version: "1.0.0",
@@ -95,7 +95,7 @@ describe("Cleanup Integration Utility", () => {
         lastUsed: new Date().toISOString(),
       };
       await fs.promises.writeFile(
-        path.join(strandweaveDir, "execution-meta.json"),
+        path.join(hankweaveDir, "execution-meta.json"),
         JSON.stringify(meta, null, 2),
       );
 
