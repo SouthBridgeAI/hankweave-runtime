@@ -9,7 +9,7 @@ import type {
   StrandweaveUserModelMessage,
 } from "../types/input-ai-types.js";
 import { strandweaveModelMessageSchema } from "../types/input-ai-types.js";
-import type { Logger } from "../utils.js";
+import { type Logger, renameWithRetry } from "../utils.js";
 
 // Simple token counter - approximate 4 chars per token
 // Intent: Provide a rough estimate for pruning without external dependencies
@@ -393,8 +393,8 @@ export class HistoryManager {
       // Write to temp file first (atomic write pattern)
       await fs.writeFile(tempPath, JSON.stringify(this.history, null, 2), "utf-8");
 
-      // Atomic rename
-      await fs.rename(tempPath, this.historyFilePath);
+      // Atomic rename with retry for Windows file locking issues
+      await renameWithRetry(tempPath, this.historyFilePath, { logger: this.logger });
 
       this.logger?.log(
         `[HistoryManager:${this.sentinelId}] Saved ${this.history.length} messages to file`,

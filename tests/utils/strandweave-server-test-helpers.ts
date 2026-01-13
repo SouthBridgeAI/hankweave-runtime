@@ -18,6 +18,7 @@ import {
   type HandshakeResponse,
   type ServerEvent,
 } from "../../server/types/types.js";
+import { WebSocket } from "../../server/utils.js";
 import { generateTestTimestamp, setupTestDirectory } from "./test-helpers.js";
 
 // -------------
@@ -174,6 +175,11 @@ export interface LaunchServerOptions {
   executionDir?: string;
   /** Custom data directory path (default: tests/config/poem_guides.txt) */
   dataDir?: string;
+  /** Command override for binary/package manager testing (e.g., binary path, npx, bunx, pnpm dlx) */
+  commandOverride?: {
+    command: string;
+    args: string[];
+  };
 }
 
 /**
@@ -439,11 +445,12 @@ export async function launchStrandweave(
     });
   }
 
-  // Always use DEFAULT_CWD (project root) to find server entry,
-  // but use cwd for spawn working directory (which affects where output files go)
-  const serverEntry = path.resolve(DEFAULT_CWD, "server/index.ts");
-  const spawnArgs = [
-    serverEntry,
+  // Determine command and args - priority: binary > commandOverride > default bun
+  let command: string;
+  let spawnArgs: string[];
+  let needsShell = false;
+
+  const serverArgs = [
     "--basic",
     `--config=${configPath}`,
     `--data=${dataSourcePath}`,
@@ -451,10 +458,24 @@ export async function launchStrandweave(
     `--port=${port}`,
   ];
 
-  const child = spawn("bun", spawnArgs, {
+  if (options.commandOverride) {
+    // Use command override (binary, npx, bunx, pnpm dlx, etc.)
+    command = options.commandOverride.command;
+    spawnArgs = [...options.commandOverride.args, ...serverArgs];
+    // On Windows, package managers need shell=true (but not binaries)
+    needsShell = process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
+  } else {
+    // Default: Use bun with source files
+    const serverEntry = path.resolve(DEFAULT_CWD, "server/index.ts");
+    command = "bun";
+    spawnArgs = [serverEntry, ...serverArgs];
+  }
+
+  const child = spawn(command, spawnArgs, {
     cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
+    shell: needsShell,
   });
 
   child.stdout?.on("data", (data) => {

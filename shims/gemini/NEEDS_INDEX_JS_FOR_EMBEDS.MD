@@ -1,0 +1,1 @@
+For some reason `.mjs` does not get embedded

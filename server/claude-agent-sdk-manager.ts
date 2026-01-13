@@ -1,11 +1,70 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
+import {
+  extractClaudeSdkFiles,
+  getExtractedCliPath,
+  needsExtraction,
+} from "./claude-runtime-extractor.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
+import { isCompiledExecutable, toError } from "./utils.js";
+
+/**
+ * Error thrown when Claude executable cannot be found.
+ * This allows callers to handle this specific case.
+ */
+export class ClaudeExecutableNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClaudeExecutableNotFoundError";
+  }
+}
+
+/**
+ * Detect an installed Claude executable.
+ * Checks common installation locations and falls back to `which claude`.
+ *
+ * @returns Path to Claude executable, or null if not found
+ */
+export function detectClaudeExecutable(): string | null {
+  const possiblePaths = [
+    // Installed via curl installer (cline)
+    path.join(os.homedir(), ".cline/cli/bin/claude"),
+    // Installed via claude installer
+    path.join(os.homedir(), ".claude/local/claude"),
+    // Homebrew installation (macOS)
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+  ];
+
+  // Check known paths
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  // Try `which claude` as fallback
+  try {
+    const whichResult = execSync("which claude", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    if (whichResult && fs.existsSync(whichResult)) {
+      return whichResult;
+    }
+  } catch {
+    // which claude failed, that's okay
+  }
+
+  return null;
+}
 
 /**
  * Manages Claude Agent SDK lifecycle, mimicking the ClaudeProcessManager API.
@@ -26,6 +85,59 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private model?: ModelInfo,
   ) {
     super();
+  }
+
+  /**
+   * Ensure Claude SDK files are available, extracting if necessary.
+   *
+   * This static method should be called at application startup before creating
+   * any ClaudeAgentSDKManager instances. It handles:
+   * - Detecting if running from compiled executable or source
+   * - Extracting embedded SDK files for compiled mode
+   * - Verifying extracted files exist
+   * - Setting CLAUDE_PATH_TO_CLAUDE_EXECUTABLE environment variable
+   *
+   * @returns Path to cli.js if compiled (and sets env var), or null if running from source
+   * @throws Error if extraction fails or extracted file doesn't exist
+   */
+  static async ensureSdkAvailable(): Promise<string | null> {
+    try {
+      const isCompiled = isCompiledExecutable();
+
+      // If we're not compiled, return null to use normal detection
+      if (!isCompiled) {
+        console.log("📦 Running from source, using node_modules SDK");
+        return null;
+      }
+
+      // Check if we already have extracted files
+      let cliPath: string;
+      if (!needsExtraction()) {
+        cliPath = getExtractedCliPath();
+        console.log(`📦 Using cached Claude SDK: ${cliPath}`);
+      } else {
+        // Need to extract
+        cliPath = await extractClaudeSdkFiles();
+      }
+
+      // Verify the extracted file actually exists
+      if (!fs.existsSync(cliPath)) {
+        throw new Error(
+          `Extracted Claude CLI not found at: ${cliPath}\nThis indicates a problem with the compilation or extraction process.`,
+        );
+      }
+
+      // Set environment variable so SDK knows where to find the CLI
+      process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE = cliPath;
+
+      return cliPath;
+    } catch (error) {
+      console.error(`❌ Claude SDK extraction failed: ${(error as Error).message}`);
+      if ((error as Error).stack) {
+        console.error(`   Stack: ${(error as Error).stack}`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -74,12 +186,21 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     this.logger.log(`Generated synthetic PID: ${this.syntheticPid} for SDK session`);
 
     // Start the query in the background
-    this.runQuery(promptContent, options, codon.id).catch((error) => {
+    this.logger.log(`[SPAWN-DEBUG] About to call runQuery`, "debug");
+
+    const queryPromise = this.runQuery(promptContent, options, codon.id);
+    this.logger.log(`[SPAWN-DEBUG] runQuery called, promise returned`, "debug");
+
+    queryPromise.catch((error) => {
       this.logger.log(`Query error: ${error.message}`, "error");
       this.cleanup();
       this.emit("error", error);
     });
 
+    this.logger.log(
+      `[SPAWN-DEBUG] Returning from spawn(), actualLogPath: ${actualLogPath}`,
+      "debug",
+    );
     return actualLogPath;
   }
 
@@ -244,15 +365,43 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * Run the query and process messages.
    */
   private async runQuery(promptContent: string, options: Options, codonId: string): Promise<void> {
-    try {
-      const queryGenerator = query({ prompt: promptContent, options });
+    this.logger.log(
+      `[SDK-runQuery] ======= ENTERED runQuery function for codon ${codonId} =======`,
+      "info",
+    );
+    this.logger.log(`[SDK-runQuery] Starting query for codon ${codonId}`, "debug");
+    this.logger.log(
+      `[SDK-runQuery] Options: model=${options.model}, cwd=${
+        options.cwd
+      }, continue=${options.continue || false}, resume=${options.resume || "none"}`,
+      "debug",
+    );
+    this.logger.log(`[SDK-runQuery] Prompt length: ${promptContent.length} chars`, "debug");
 
+    try {
+      this.logger.log(`[SDK-runQuery] Creating query generator`, "debug");
+      this.logger.log(`[SDK-runQuery] About to call query() from SDK...`, "info");
+      const queryGenerator = query({ prompt: promptContent, options });
+      this.logger.log(`[SDK-runQuery] query() returned, generator created`, "info");
+      this.logger.log(`[SDK-runQuery] Query generator created, entering message loop`, "debug");
+
+      let messageCount = 0;
       for await (const message of queryGenerator) {
-        if (this.killed) break;
+        messageCount++;
+        this.logger.log(
+          `[SDK-runQuery] Received message ${messageCount}: type=${message.type}`,
+          "debug",
+        );
+
+        if (this.killed) {
+          this.logger.log(`[SDK-runQuery] Killed flag set, breaking loop`, "debug");
+          break;
+        }
 
         // Store session ID from first message
         if (!this.sessionId) {
           this.sessionId = message.session_id;
+          this.logger.log(`[SDK-runQuery] Session ID: ${this.sessionId}`, "debug");
         }
 
         // Convert SDK message to JSONL format and write to log
@@ -267,11 +416,18 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         }
       }
 
+      this.logger.log(
+        `[SDK-runQuery] Message loop completed, received ${messageCount} message(s)`,
+        "info",
+      );
+
       // Parse final log entries
+      this.logger.log(`[SDK-runQuery] Parsing final log entries`, "debug");
       this.logParser.parseNow();
 
       // Check for context exceeded
       const allMessages = this.logParser.getAllMessages();
+      this.logger.log(`[SDK-runQuery] Got ${allMessages.length} messages from log parser`, "debug");
       const contextExceeded = allMessages.some((msg) => {
         if (msg.type === "result" && msg.subtype === "error") {
           return msg.result?.includes("context") || false;
@@ -279,9 +435,17 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         return false;
       });
 
+      this.logger.log(
+        `[SDK-runQuery] Query complete, contextExceeded=${contextExceeded}, calling cleanup and emitting exit`,
+        "info",
+      );
       this.cleanup();
+      this.logger.log(`[SDK-runQuery] About to emit exit event`, "info");
       this.emit("exit", 0, contextExceeded);
+      this.logger.log(`[SDK-runQuery] Exit event emitted`, "info");
     } catch (error) {
+      this.logger.log(`[SDK-runQuery] CAUGHT ERROR: ${toError(error).message}`, "error");
+      this.logger.log(`[SDK-runQuery] Error stack: ${toError(error).stack}`, "error");
       const errorDetails = this.extractErrorDetails(error as Error, codonId);
       this.logger.log(errorDetails, "error");
       this.cleanup();
@@ -429,6 +593,9 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * Clean up resources.
    */
   private cleanup(): void {
+    this.logger.log(`[CLEANUP-DEBUG] cleanup() called`, "info");
+    this.logger.log(`[CLEANUP-DEBUG] Stack trace:\n${new Error().stack}`, "debug");
+
     if (this.logStream && !this.logStream.destroyed) {
       this.logStream.end();
       this.logStream = undefined;
@@ -520,7 +687,38 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       });
     }
 
-    // Check 2: Verify authentication (API key or OAuth token)
+    // Check 2: Verify Claude CLI executable is available
+    const customCliPath = process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
+    if (customCliPath) {
+      // User explicitly set a path - verify it exists
+      const cliExists = fs.existsSync(customCliPath);
+      checks.push({
+        name: "claude_cli_executable",
+        passed: cliExists,
+        message: cliExists
+          ? `Claude CLI found at: ${customCliPath}`
+          : `Claude CLI not found at specified path: ${customCliPath}`,
+      });
+    } else {
+      // Try to detect Claude CLI in standard locations
+      const detectedPath = detectClaudeExecutable();
+      if (detectedPath) {
+        checks.push({
+          name: "claude_cli_executable",
+          passed: true,
+          message: `Claude CLI detected at: ${detectedPath}`,
+        });
+      } else {
+        // No CLI found, but SDK will handle it internally
+        checks.push({
+          name: "claude_cli_executable",
+          passed: true,
+          message: "Claude CLI not detected, SDK will use internal CLI resolution",
+        });
+      }
+    }
+
+    // Check 3: Verify authentication (API key or OAuth token)
     const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
     const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
     const hasAuth = hasApiKey || hasOAuthToken;
@@ -539,7 +737,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         : "No authentication found (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)",
     });
 
-    // Check 3: Verify custom base URL if set
+    // Check 4: Verify custom base URL if set
     if (this.anthropicBaseUrl) {
       checks.push({
         name: "custom_base_url",

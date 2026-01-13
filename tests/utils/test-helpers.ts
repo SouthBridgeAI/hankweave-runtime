@@ -1,7 +1,11 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import type http from "node:http";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ClientCommand } from "../../server/command-schemas.js";
 import type { StrandweaveState } from "../../server/types/state-types.js";
 import type {
@@ -12,6 +16,7 @@ import type {
   ServerEvent,
 } from "../../server/types/types.js";
 import { ClientMode } from "../../server/types/types.js";
+import { WebSocket } from "../../server/utils.js";
 
 /**
  * Finds an available TCP port provided by the OS.
@@ -43,6 +48,121 @@ export const colors = {
 };
 
 // -------------
+// Verdaccio Registry Management
+// -------------
+
+export interface VerdaccioRegistry {
+  server: http.Server;
+  registryURL: string;
+  storageDir: string;
+  port: number;
+}
+
+/**
+ * Start a local Verdaccio registry for testing package installation.
+ * Does NOT build or publish - caller is responsible for that.
+ */
+export async function startVerdaccioRegistry(packageName: string): Promise<VerdaccioRegistry> {
+  const { runServer } = await import("verdaccio");
+
+  // Create temp storage
+  const storageDir = await mkdtemp(path.join(tmpdir(), "strandweave-verdaccio-"));
+
+  // Start Verdaccio
+  const server = (await runServer({
+    self_path: path.dirname(fileURLToPath(import.meta.url)),
+    storage: storageDir,
+    web: { title: "Test Registry" },
+    max_body_size: "128mb",
+    max_users: -1,
+    log: { level: "fatal" },
+    uplinks: {
+      npmjs: {
+        url: "https://registry.npmjs.org/",
+        maxage: "1d",
+        cache: true,
+        // SSL workaround needed: Even though we only pass npm_config_registry to the npx command,
+        // bun install in rig setup may still discover the registry URL through .npmrc files or
+        // global npm configs, causing it to go through Verdaccio's proxy.
+        // Bun + Verdaccio have SSL certificate validation issues when proxying to npmjs.
+        strict_ssl: false,
+        timeout: "60s",
+      },
+    },
+    packages: {
+      [packageName]: {
+        access: "$all",
+        publish: "$all",
+      },
+      "**": {
+        access: "$all",
+        publish: "noone",
+        proxy: "npmjs",
+      },
+    },
+  })) as http.Server;
+
+  // Wait for server to be ready
+  await new Promise<void>((resolve, reject) => {
+    server.listen(0, () => resolve());
+    server.on("error", reject);
+  });
+
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Failed to get Verdaccio server address");
+  }
+
+  const registryURL = `http://localhost:${address.port}`;
+
+  console.log(`${colors.green}✓ Verdaccio registry started at ${registryURL}${colors.reset}`);
+
+  return {
+    server,
+    registryURL,
+    storageDir,
+    port: address.port,
+  };
+}
+
+/**
+ * Stop a Verdaccio registry and clean up temp storage.
+ */
+export async function stopVerdaccioRegistry(registry: VerdaccioRegistry): Promise<void> {
+  // Close server
+  await new Promise<void>((resolve) => {
+    registry.server.close(() => resolve());
+    registry.server.closeAllConnections();
+  });
+
+  // Clean up storage
+  await rm(registry.storageDir, { recursive: true, force: true });
+
+  console.log(`${colors.gray}✓ Verdaccio registry stopped${colors.reset}`);
+}
+
+/**
+ * Create .npmrc file with auth token for Verdaccio.
+ * Returns path to created .npmrc file.
+ */
+export async function createNpmrcForVerdaccio(projectRoot: string, port: number): Promise<string> {
+  const npmrcPath = path.join(projectRoot, ".npmrc");
+  const npmrcContent = `//localhost:${port}/:_authToken=dummy`;
+  await writeFile(npmrcPath, npmrcContent);
+
+  console.log(`${colors.gray}✓ Created .npmrc${colors.reset}`);
+
+  return npmrcPath;
+}
+
+/**
+ * Remove .npmrc file.
+ */
+export async function removeNpmrc(npmrcPath: string): Promise<void> {
+  await rm(npmrcPath, { force: true });
+}
+
+// -------------
 // Test WebSocket Client
 // -------------
 
@@ -61,6 +181,51 @@ export class TestWSClient {
   private handshakeComplete = false;
   private clientId: string | null = null;
   private grantedMode: ClientMode | null = null;
+
+  /**
+   * Connect to WebSocket with retry logic.
+   * Useful when server startup time is unpredictable (e.g., npx on Windows).
+   */
+  async connectWithRetry(
+    port: number,
+    options: {
+      performHandshake?: boolean;
+      mode?: ClientMode;
+      maxRetries?: number;
+      retryDelay?: number;
+      timeout?: number;
+    } = {},
+  ): Promise<void> {
+    const {
+      performHandshake = true,
+      mode = ClientMode.READANDWRITE,
+      maxRetries = 30,
+      retryDelay = 2000,
+      timeout = 10000,
+    } = options;
+
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`${colors.gray}Connection attempt ${attempt}/${maxRetries}...${colors.reset}`);
+        await this.connect(port, { performHandshake, mode, timeout });
+        return; // Success!
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < maxRetries) {
+          console.log(
+            `${colors.yellow}Connection failed, retrying in ${retryDelay}ms...${colors.reset}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        }
+      }
+    }
+
+    throw new Error(
+      `Failed to connect after ${maxRetries} attempts. Last error: ${lastError?.message}`,
+    );
+  }
 
   async connect(
     port: number,
@@ -576,6 +741,12 @@ export interface TestServerConfig {
   useExecutionFlag?: boolean; // Whether to use --execution flag
   startNew?: boolean; // Force new execution
   withoutProxy?: boolean; // Run server without proxy
+  commandOverride?: {
+    // Override the default command (bun server/index.ts)
+    command: string; // e.g., "npx", "bunx", "pnpm"
+    args: string[]; // e.g., ["strandweave"], ["dlx", "strandweave"]
+  };
+  env?: Record<string, string>; // Optional custom environment variables (merged with process.env)
 }
 
 export function startServer(config: TestServerConfig): ChildProcess {
@@ -588,66 +759,119 @@ export function startServer(config: TestServerConfig): ChildProcess {
   const serverLogPath = path.join(config.testRunDir, "server.log");
   const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
 
-  // Use absolute path to server to ensure it's found regardless of where test is run from
-  const serverPath = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    "../../server/index.ts",
-  );
+  // Use provided command or default to bun with local server
+  let command: string;
+  let baseArgs: string[];
 
-  // Build command arguments
-  const args = [serverPath, `--config=${config.configFile}`, `--port=${config.port}`];
-
-  // Run without proxy if specified
-  if (config.withoutProxy) {
-    args.push(`--without-proxy`);
+  if (config.commandOverride) {
+    // Custom command provided
+    command = config.commandOverride.command;
+    baseArgs = [...config.commandOverride.args];
+  } else {
+    // Default: bun with local server path
+    const serverPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../server/index.ts",
+    );
+    command = "bun";
+    baseArgs = [serverPath];
   }
 
-  // Add --data flag if using execution isolation
+  // Build args: baseArgs + config flags
+  const args = [...baseArgs, `--config=${config.configFile}`, `--port=${config.port}`];
+
+  // Add optional flags
+  if (config.withoutProxy) {
+    args.push("--without-proxy");
+  }
+
   if (config.useDataFlag && config.dataSourceDir) {
     args.push(`--data=${config.dataSourceDir}`);
   }
 
-  // Add --execution flag if using explicit execution directory
   if (config.useExecutionFlag && config.executionDir) {
     args.push(`--execution=${config.executionDir}`);
   }
 
-  // Add --start-new flag if forcing new execution
   if (config.startNew) {
     args.push("--start-new");
   }
 
-  const serverProcess = spawn("bun", args, {
+  console.log(`${colors.gray}Command: ${command} ${args.join(" ")}${colors.reset}`);
+
+  // Merge custom environment variables with process.env
+  const env: Record<string, string> = {
+    ...process.env,
+    ...(config.env || {}),
+  } as Record<string, string>;
+
+  // On Windows, package manager commands (npx, bunx, pnpm) are .cmd files
+  // and need to be spawned with shell=true
+  const needsShell =
+    process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
+
+  // Log spawn attempt with details
+  console.log(`${colors.gray}Spawning process with:${colors.reset}`);
+  console.log(`${colors.gray}  cwd: ${config.cwd}${colors.reset}`);
+  console.log(`${colors.gray}  shell: ${needsShell}${colors.reset}`);
+  console.log(`${colors.gray}  config file: ${config.configFile}${colors.reset}`);
+
+  // Write initial metadata to log
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Starting server process\n`);
+  serverLogStream.write(
+    `[${new Date().toISOString()}] [INIT] Command: ${command} ${args.join(" ")}\n`,
+  );
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Working directory: ${config.cwd}\n`);
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Shell: ${needsShell}\n`);
+  serverLogStream.write(`[${new Date().toISOString()}] [INIT] Platform: ${process.platform}\n`);
+
+  const serverProcess = spawn(command, args, {
     cwd: config.cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-    },
+    env,
+    shell: needsShell,
   });
+
+  // Log PID immediately after spawn
+  console.log(
+    `${colors.gray}Process spawned with PID: ${serverProcess.pid || "N/A"}${colors.reset}`,
+  );
+  serverLogStream.write(
+    `[${new Date().toISOString()}] [INIT] Process PID: ${serverProcess.pid || "N/A"}\n`,
+  );
 
   serverProcess.stdout?.on("data", (data) => {
     const message = data.toString();
-    // Only log to file by default, let tests decide if they want console output
+    // Log to both console and file for debugging
+    console.log(`${colors.gray}[SERVER STDOUT] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDOUT] ${message}`);
   });
 
   serverProcess.stderr?.on("data", (data) => {
     const message = data.toString();
-    console.error(`${colors.red}[SERVER ERROR] ${message.trim()}${colors.reset}`);
+    console.error(`${colors.red}[SERVER STDERR] ${message.trim()}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [STDERR] ${message}`);
   });
 
   serverProcess.on("error", (error) => {
     const message = `Failed to start server: ${error.message}`;
-    console.error(`${colors.red}${message}${colors.reset}`);
+    console.error(`${colors.red}[SERVER ERROR EVENT] ${message}${colors.reset}`);
+    console.error(`${colors.red}Error stack: ${error.stack}${colors.reset}`);
     serverLogStream.write(`[${new Date().toISOString()}] [ERROR] ${message}\n`);
+    serverLogStream.write(`[${new Date().toISOString()}] [ERROR] Stack: ${error.stack}\n`);
     serverLogStream.end();
   });
 
+  serverProcess.on("spawn", () => {
+    const spawnMessage = "Process spawn event received";
+    console.log(`${colors.green}[SERVER SPAWN] ${spawnMessage}${colors.reset}`);
+    serverLogStream.write(`[${new Date().toISOString()}] [SPAWN] ${spawnMessage}\n`);
+  });
+
   serverProcess.on("exit", (code, signal) => {
-    serverLogStream.write(
-      `[${new Date().toISOString()}] [EXIT] Process exited with code ${code} and signal ${signal}\n`,
-    );
+    const exitMessage = `Process exited with code ${code} and signal ${signal}`;
+    console.log(`${colors.yellow}[SERVER EXIT] ${exitMessage}${colors.reset}`);
+    serverLogStream.write(`[${new Date().toISOString()}] [EXIT] ${exitMessage}\n`);
     serverLogStream.end();
 
     // Remove from active processes list

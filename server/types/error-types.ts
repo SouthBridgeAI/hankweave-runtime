@@ -71,3 +71,15 @@ export class ContextExceededError extends StrandweaveError {
     this.name = "ContextExceededError";
   }
 }
+
+export class CommandError extends Error {
+  constructor(
+    message: string,
+    public readonly exitCode: number,
+    public readonly stdout: string,
+    public readonly stderr: string,
+  ) {
+    super(message);
+    this.name = "CommandError";
+  }
+}

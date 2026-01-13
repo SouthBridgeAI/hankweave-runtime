@@ -6,6 +6,11 @@ import { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { ShimProcessManager } from "./shim-process-manager.js";
+import {
+  extractShimFiles,
+  getExtractedShimPath,
+  needsShimExtraction,
+} from "./shim-runtime-extractor.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { CodonId, SessionId } from "./types/branded-types.js";
 import type {
@@ -15,7 +20,57 @@ import type {
   UserMessage,
 } from "./types/claude-session-schema.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
-import type { Logger } from "./utils.js";
+import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js";
+
+/**
+ * Helper function to resolve shim path correctly for all execution contexts.
+ *
+ * Execution contexts:
+ * 1. Source (development):
+ *    - Current file is in server/codon-runner.ts
+ *    - Shims are at shims/gemini/index.mjs (project root)
+ *    - Need to go up one level: ../shims/gemini/index.mjs
+ *
+ * 2. Bundled NPX package (npx @southbridgeai/strandweave):
+ *    - Current file is in dist/index.js (bundled)
+ *    - Shims are at dist/shims/gemini/index.mjs
+ *    - Need to use same directory: ./shims/gemini/index.mjs
+ *
+ * 3. Compiled executable (strandweave binary):
+ *    - Shims are embedded in the executable
+ *    - Extract to ~/.strandweave/shims/<version>/
+ *    - Return path to extracted shim
+ *
+ * @param currentFilePath - Path to current file (from import.meta.url)
+ * @returns Absolute path to the shim
+ * @throws Error if shims are not available
+ */
+async function resolveShimPath(currentFilePath: string): Promise<string> {
+  // Check if running from compiled executable
+  if (isCompiledExecutable()) {
+    // Extract shims if needed
+    if (needsShimExtraction("gemini")) {
+      await extractShimFiles();
+    }
+
+    // Return path to extracted gemini shim
+    return getExtractedShimPath("gemini");
+  }
+
+  const currentDir = path.dirname(currentFilePath);
+
+  // Check if we're running from dist (bundled NPX) or server (source)
+  // When bundled, currentDir will contain '/dist'
+  // When source, currentDir will contain '/server'
+  const isRunningFromDist = currentDir.includes("/dist") || currentDir.includes("\\dist");
+
+  if (isRunningFromDist) {
+    // Running from dist/index.js -> shims are at dist/shims/
+    return path.resolve(currentDir, "shims/gemini/index.mjs");
+  }
+  // Running from server/codon-runner.ts -> shims are at ../shims/
+  return path.resolve(currentDir, "../shims/gemini/index.mjs");
+}
 
 /**
  * Events emitted by CodonRunner during execution
@@ -123,6 +178,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       logPath: tempLogParserPath,
       codonId: "self-test" as CodonId,
       parsingInterval: 100,
+      logger,
     });
 
     try {
@@ -151,8 +207,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         );
 
         const __filename = fileURLToPath(import.meta.url);
-        const __dirname = path.dirname(__filename);
-        const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
+        const shimPath = await resolveShimPath(__filename);
 
         const manager = new ShimProcessManager(
           executionPath,
@@ -161,7 +216,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           anthropicBaseUrl,
         );
 
-        result = await manager.runSelfTest(["bun", shimPath]);
+        result = await manager.runSelfTest(getRuntimeCommand(shimPath));
       }
 
       // Log results
@@ -198,6 +253,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       logPath: this.logPath,
       codonId: this.config.codonId,
       parsingInterval: this.config.logParsingInterval ?? 100,
+      logger: this.config.logger,
 
       // Forward log parser events to our listeners
       onSystemMessage: (msg) => this.emit("systemMessage", msg),
@@ -288,11 +344,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     } else {
       // ShimProcessManager needs command array
       const __filename = fileURLToPath(import.meta.url);
-      const __dirname = path.dirname(__filename);
-      const shimPath = path.resolve(__dirname, "../shims/gemini/index.mjs");
+      const shimPath = await resolveShimPath(__filename);
 
       await this.processManager.spawn(
-        ["bun", shimPath], // Hardcoded gemini shim command
+        getRuntimeCommand(shimPath),
         this.config.codon,
         previousSessionId || null,
         this.logPath,
@@ -354,8 +409,25 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     }
 
     this.config.logger.log(
+      `[CodonRunner.cleanup] ======= ENTERED cleanup for codon ${this.config.codonId} =======`,
+      "info",
+    );
+    this.config.logger.log(
+      `[CodonRunner.cleanup] hasProcessManager=${!!this
+        .processManager}, hasLogParser=${!!this.logParser}`,
+      "info",
+    );
+
+    this.config.logger.log(
       `CodonRunner: Cleaning up resources for codon ${this.config.codonId}`,
       "info",
+    );
+
+    // Log stack trace to understand why cleanup was called
+    const stack = new Error().stack;
+    this.config.logger.log(
+      `[CLEANUP-STACK] Cleanup called from:\n${stack?.split("\n").slice(1, 6).join("\n")}`,
+      "debug",
     );
 
     // Stop log parser

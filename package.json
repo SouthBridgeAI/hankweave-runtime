@@ -1,16 +1,40 @@
 {
-  "name": "strandweave",
-  "module": "index.ts",
+  "name": "@southbridgeai/strandweave",
+  "version": "0.1.32",
+  "description": "Orchestration runtime for antibrittle agentic workflows",
+  "author": "Southbridge",
+  "license": "MIT",
+  "keywords": [
+    "strandweave"
+  ],
   "type": "module",
+  "publishConfig": {
+    "access": "restricted"
+  },
   "bin": {
-    "strandweave": "./server/index.ts"
+    "strandweave": "dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "shims",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
   },
   "scripts": {
+    "build": "bun scripts/build.ts",
+    "prepublishOnly": "bun run build",
     "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
     "tc": "bun typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
+    "release:patch": "bun scripts/release.ts patch",
+    "release:minor": "bun scripts/release.ts minor",
+    "release:major": "bun scripts/release.ts major",
     "fetch-models": "bun scripts/fetch-models-dev.ts",
     "server": "bun server/index.ts",
     "server:basic": "bun server/index.ts --basic",
@@ -19,6 +43,10 @@
     "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",
     "test:integration": "bun tests/integration",
     "test:e2e:check": "bun tests/utils/check-test-ready.ts",
+    "test:e2e:init": "bun scripts/e2e/init.ts normal",
+    "test:e2e:init:npx": "bun scripts/e2e/init.ts npx",
+    "test:e2e:init:bunx": "bun scripts/e2e/init.ts bunx",
+    "test:e2e:init:binary": "bun scripts/e2e/init.ts binary",
     "test:e2e:sanity": "bun tests/utils/sanity-check.ts",
     "test:e2e:cleanup": "./tests/utils/cleanup-test.sh",
     "pre-test": "bun run test:e2e:check && bun run pre-test:cleanup",
@@ -28,8 +56,10 @@
     "cleanup:force": "bun server/index.ts --cleanup --config=strand.json -y"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.0.6",
     "@types/bun": "latest",
-    "@types/lodash.merge": "^4.6.9"
+    "@types/lodash.merge": "^4.6.9",
+    "verdaccio": "^6.2.4"
   },
   "peerDependencies": {
     "typescript": "^5.9.2"
@@ -40,14 +70,15 @@
     "@ai-sdk/groq": "^2.0.11",
     "@ai-sdk/openai": "^2.0.18",
     "@anthropic-ai/claude-agent-sdk": "^0.1.70",
-    "@biomejs/biome": "2.0.6",
     "ai": "^5.0.15",
+    "crossws": "^0.4.1",
     "eta": "^3.5.0",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",
     "lodash.merge": "^4.6.2",
     "minimatch": "^10.0.1",
     "simple-git": "^3.28.0",
+    "srvx": "^0.10.0",
     "zod": "^3.25.74"
   }
 }

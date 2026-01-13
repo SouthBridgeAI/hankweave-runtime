@@ -18,6 +18,7 @@ This is not just a wrapper for Claude; it is a stateful runtime environment that
 6. [Advanced Features: Sentinels & Loops](#advanced-features)
 7. [Debugging & Internals](#debugging--internals)
 8. [Use Cases & Failure Modes](#use-cases--failure-modes)
+9. [Release](#release)
 
 ---
 
@@ -313,3 +314,22 @@ Inside that folder:
     *   *Fix*: Use the `f` key to Force Stop, then `r` to Rollback and edit the prompt to guide the agent differently.
 3.  **Rig Setup Failures**: If `npm install` fails in the execution dir.
     *   *Fix*: Ensure your `rigSetup` commands are valid for the environment Strandweave is running in.
+
+---
+
+## Release
+
+Strandweave uses an automated release process that handles versioning, changelog management, git tagging, and publishing.
+
+### Prerequisites
+
+- Clean git working directory (no uncommitted changes)
+- Update `CHANGELOG.md` with changes under the `## [Unreleased]` section
+
+### Release Commands
+
+```bash
+bun run release:patch  # 0.1.26 -> 0.1.27
+bun run release:minor  # 0.1.26 -> 0.2.0
+bun run release:major  # 0.1.26 -> 1.0.0
+```

@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   CodonCompletedEvent,
   InfoEvent,
@@ -38,7 +39,7 @@ import {
   TestWSClient,
 } from "../utils/test-helpers.js";
 
-const TEST_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const TEST_TIMESTAMP = generateTestTimestamp();
 

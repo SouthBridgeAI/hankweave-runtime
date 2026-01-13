@@ -156,10 +156,10 @@ proxy.addMiddleware(new TokenLimitMiddleware(4000));
 
 ### Server Integration
 
-The `BunProxyRunner` class provides a complete HTTP server implementation:
+The `ProxyRunner` class provides a complete HTTP server implementation:
 
 ```typescript
-const runner = new BunProxyRunner(
+const runner = new ProxyRunner(
   "passthrough",           // Proxy type
   3001,                   // Port
   "https://api.anthropic.com", // Target URL

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
+import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
 import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
@@ -9,7 +10,7 @@ import { initProject } from "./init-command.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
 import type { StrandweaveConfig } from "./types/types.js";
-import { Logger } from "./utils.js";
+import { getMetadata, Logger } from "./utils.js";
 
 // -------------
 // Helper Functions
@@ -63,6 +64,9 @@ function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
 // -------------
 
 async function main() {
+  // Print version banner
+  console.log(`\nStrandweave v${getMetadata().version}\n`);
+
   // Strict argument validation
   const rawArgs = process.argv.slice(2);
   const validPatterns = [
@@ -184,6 +188,18 @@ Examples:
       process.exit(0);
     } catch (error) {
       console.error(`\n❌ Init failed: ${(error as Error).message}\n`);
+      process.exit(1);
+    }
+  }
+
+  // Ensure Claude SDK is available (unless we're in cleanup or validate mode)
+  // this is a basic check for when we are running using en executable
+  // more thorough checks happen during selftests
+  if (!cleanupMode && !validateMode) {
+    try {
+      await ClaudeAgentSDKManager.ensureSdkAvailable();
+    } catch (error) {
+      console.error(`\n❌ ${(error as Error).message}\n`);
       process.exit(1);
     }
   }
@@ -372,6 +388,7 @@ Examples:
   }
 }
 
+// Run main if this is the main module
 if (import.meta.main) {
   main();
 }

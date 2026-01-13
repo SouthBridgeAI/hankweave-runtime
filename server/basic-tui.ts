@@ -9,7 +9,7 @@ import type {
   SkipCodonCommand,
 } from "./types/types.js";
 import { ClientMode } from "./types/types.js";
-import { generateId } from "./utils.js";
+import { generateId, WebSocket } from "./utils.js";
 
 // ANSI color codes for terminal formatting
 const COLORS = {
@@ -71,6 +71,10 @@ export class BasicTUI {
   private waitingForCheckpoints = false;
 
   constructor(private server: StrandweaveRuntime) {
+    // Print version at the very start
+    const version = this.server.config?.version || "unknown";
+    console.log(`${COLORS.bold}${COLORS.cyan}Strandweave v${version}${COLORS.reset}\n`);
+
     this.connectToServer();
     this.setupKeyboardInput();
   }
