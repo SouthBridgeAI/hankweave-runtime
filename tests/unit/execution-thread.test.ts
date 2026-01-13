@@ -15,7 +15,7 @@ const testCodonConfigs: CodonConfig[] = [
     model: "sonnet",
     continuationMode: "fresh",
     description: "Write three pick one",
-    trackedFiles: ["notes/**/*", "*.md"],
+    checkpointedFiles: ["notes/**/*", "*.md"],
   }),
   createTestCodon({
     id: "codon-2",
@@ -24,7 +24,7 @@ const testCodonConfigs: CodonConfig[] = [
     model: "sonnet",
     continuationMode: "continue-previous",
     description: "Write one more",
-    trackedFiles: ["notes/**/*"],
+    checkpointedFiles: ["notes/**/*"],
   }),
   createTestCodon({
     id: "codon-3",
@@ -33,7 +33,7 @@ const testCodonConfigs: CodonConfig[] = [
     model: "sonnet",
     continuationMode: "fresh",
     description: "Convert poems to code",
-    trackedFiles: ["typescript_code/src/**/*.ts"],
+    checkpointedFiles: ["typescript_code/src/**/*.ts"],
   }),
 ];
 

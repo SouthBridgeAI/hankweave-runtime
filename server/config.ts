@@ -71,7 +71,7 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
         const validFields =
           codonData?.type === "loop"
             ? "type, id, name, description, terminateOn, codons"
-            : "type, id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, rigSetup, description, trackedFiles, env, outputFiles, sentinels";
+            : "type, id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, rigSetup, description, checkpointedFiles, env, outputFiles, sentinels";
         errorMsg = `  - ${itemType} "${codonName}" (${codonId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: ${validFields}.`;
       } else {
         errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
@@ -292,11 +292,11 @@ const codonObjectSchema = z.object({
     .string()
     .optional()
     .describe("Optional description shown to users about what this codon does"),
-  trackedFiles: z
+  checkpointedFiles: z
     .array(z.string())
     .optional()
     .describe(
-      "Glob patterns for files to track during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved using gitignore rules for consistency.",
+      "Glob patterns for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved using gitignore rules for consistency.",
     ),
   env: z
     .record(z.string())
@@ -669,7 +669,7 @@ export const DEFAULT_CONFIG: Omit<
   autostart: true, // Default to current behavior
   dataHashTimeLimit: 5000, // 5 seconds for directory hashing
   toolResultTruncateLength: 2500, // Default truncation length for tool results
-  withoutProxy: false, // Enable proxy by default
+  withoutProxy: true, // Proxy disabled by default (enable with --proxy)
   handshakeHistoryLimit: 50, // Maximum recent events to include in handshake response
   idleTimeout: 0, // 0 seconds idle timeout (ie no timeout) for WebSocket and proxy servers (0-255)
   sentinel: {
@@ -1467,7 +1467,7 @@ export async function validateStrand(
     }
 
     // Count codons with file tracking
-    if (codon.trackedFiles && codon.trackedFiles.length > 0) {
+    if (codon.checkpointedFiles && codon.checkpointedFiles.length > 0) {
       result.trackingCodonCount++;
       result.checkpointCodonCount++;
     }
@@ -1519,8 +1519,8 @@ export async function validateStrand(
         }
 
         // Warn if the codon doesn't produce output that might be needed
-        if (!codonToCheck.trackedFiles || codonToCheck.trackedFiles.length === 0) {
-          result.warnings.push(`${codonLabel}: ${warningContext} doesn't track any files`);
+        if (!codonToCheck.checkpointedFiles || codonToCheck.checkpointedFiles.length === 0) {
+          result.warnings.push(`${codonLabel}: ${warningContext} doesn't checkpoint any files`);
         }
       }
     }

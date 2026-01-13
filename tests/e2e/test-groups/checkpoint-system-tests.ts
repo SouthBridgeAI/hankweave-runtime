@@ -105,7 +105,7 @@ export async function runCheckpointSystemTests(testDir: string) {
         encoding: "utf-8",
       });
 
-      const trackedFiles = gitFiles.trim()
+      const checkpointedFiles = gitFiles.trim()
         ? gitFiles
             .trim()
             .split("\n")
@@ -113,7 +113,7 @@ export async function runCheckpointSystemTests(testDir: string) {
         : [];
 
       // All tracked files should match our checkpoint patterns
-      for (const file of trackedFiles) {
+      for (const file of checkpointedFiles) {
         const matchesPattern =
           file.startsWith("notes/") ||
           file.endsWith(".md") ||
@@ -126,13 +126,13 @@ export async function runCheckpointSystemTests(testDir: string) {
       // Verify specific files that should be tracked based on what Claude created
       // Note: Some files might not exist if Claude didn't create them
       if (fs.existsSync(path.join(testDir, "notes/favorite_poem.txt"))) {
-        expect(trackedFiles).toContain("notes/favorite_poem.txt");
+        expect(checkpointedFiles).toContain("notes/favorite_poem.txt");
       }
-      expect(trackedFiles).toContain("notes/second_favorite_poem.txt");
-      expect(trackedFiles).toContain("typescript_code/src/poem1.ts");
+      expect(checkpointedFiles).toContain("notes/second_favorite_poem.txt");
+      expect(checkpointedFiles).toContain("typescript_code/src/poem1.ts");
       // poem2.ts might not always be created by Claude
       if (fs.existsSync(path.join(testDir, "typescript_code/src/poem2.ts"))) {
-        expect(trackedFiles).toContain("typescript_code/src/poem2.ts");
+        expect(checkpointedFiles).toContain("typescript_code/src/poem2.ts");
       }
     } catch (error) {
       console.error(`Git ls-files failed: ${error}`);

@@ -145,6 +145,16 @@ export const codonStartedEventDataSchema = z.object({
   sessionId: z.string(),
   previousSessionId: z.string().optional(),
   startTime: z.string().datetime(),
+  // Prompt frontmatter metadata (from prompt file YAML frontmatter)
+  promptMetadata: z
+    .object({
+      name: z.string().optional(),
+      description: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      version: z.string().optional(),
+      author: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const codonCompletedEventDataSchema = z.object({

@@ -18,7 +18,7 @@
       "./noTodosPrompt.md"
     ],
     "description": "Initial setup",
-    "trackedFiles": [
+    "checkpointedFiles": [
       "notes/**/*"
     ]
   },
@@ -42,7 +42,7 @@
           "./noTodosPrompt.md"
         ],
         "description": "Write iteration marker",
-        "trackedFiles": [
+        "checkpointedFiles": [
           "notes/**/*"
         ]
       },
@@ -56,7 +56,7 @@
           "./noTodosPrompt.md"
         ],
         "description": "Review the iteration work",
-        "trackedFiles": [
+        "checkpointedFiles": [
           "notes/**/*"
         ],
         "rigSetup": [
@@ -81,7 +81,7 @@
       "./noTodosPrompt.md"
     ],
     "description": "Final codon after loop",
-    "trackedFiles": [
+    "checkpointedFiles": [
       "notes/**/*"
     ]
   }

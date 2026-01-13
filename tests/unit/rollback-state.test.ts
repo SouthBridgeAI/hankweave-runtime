@@ -27,7 +27,7 @@ describe("Rollback State Management", () => {
       promptText: "Test prompt 1",
       model: "sonnet",
       continuationMode: "fresh",
-      trackedFiles: ["*.txt"],
+      checkpointedFiles: ["*.txt"],
     }),
     createTestCodon({
       id: "codon-2",
@@ -35,7 +35,7 @@ describe("Rollback State Management", () => {
       promptText: "Test prompt 2",
       model: "sonnet",
       continuationMode: "continue-previous",
-      trackedFiles: ["*.md"],
+      checkpointedFiles: ["*.md"],
     }),
     createTestCodon({
       id: "codon-3",
@@ -43,7 +43,7 @@ describe("Rollback State Management", () => {
       promptText: "Test prompt 3",
       model: "opus",
       continuationMode: "fresh",
-      trackedFiles: ["src/**/*.ts"],
+      checkpointedFiles: ["src/**/*.ts"],
     }),
   ];
 

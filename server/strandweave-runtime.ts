@@ -199,6 +199,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     this.logger = new Logger(path.join(this.config.executionPath, this.config.serverLogFile));
     this.serverStartTime = new Date();
 
+    // Make lockFile path absolute (relative to execution path)
+    this.config.lockFile = path.join(this.config.executionPath, this.config.lockFile);
+
     // Initialize state manager with execution path
     const strandweaveDir = path.join(this.config.executionPath, ".strandweave");
     this.stateManager = new StateManager(strandweaveDir, this.logger, this.config.codons);
@@ -233,6 +236,10 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         // Look up codon config in execution plan
         const entry = this.stateManager.getCodonById(data.codonId);
         if (entry) {
+          // Get frontmatter from the runner if available
+          const runner = this.codonRunners.get(data.codonId);
+          const promptMetadata = runner?.getPromptFrontmatter();
+
           this.emit("event", {
             id: EventId(generateId()),
             timestamp: new Date().toISOString(),
@@ -244,6 +251,7 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
               sessionId: codon.claudeSessionId,
               previousSessionId: "previousSessionId" in codon ? codon.previousSessionId : undefined,
               startTime: codon.startTime,
+              promptMetadata,
             },
           } as CodonStartedEvent);
         }
@@ -1613,13 +1621,13 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       // Accumulate patterns from all codons up to and including current
       for (let i = 0; i <= currentCodonIndex; i++) {
         const codonConfig = this.config.codons[i];
-        // Only codons have trackedFiles (not loops)
+        // Only codons have checkpointedFiles (not loops)
         if (
           codonConfig.type !== "loop" &&
-          codonConfig.trackedFiles &&
-          codonConfig.trackedFiles.length > 0
+          codonConfig.checkpointedFiles &&
+          codonConfig.checkpointedFiles.length > 0
         ) {
-          await this.addCheckpointPatterns(codonConfig.trackedFiles);
+          await this.addCheckpointPatterns(codonConfig.checkpointedFiles);
         }
       }
 
@@ -1731,8 +1739,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     };
 
     // Store watch patterns for tool-based tracking
-    if (codon.trackedFiles && codon.trackedFiles.length > 0) {
-      this.watchedPatterns = codon.trackedFiles;
+    if (codon.checkpointedFiles && codon.checkpointedFiles.length > 0) {
+      this.watchedPatterns = codon.checkpointedFiles;
       this.logger.log(`Watching patterns: ${this.watchedPatterns.join(", ")}`);
     }
 
@@ -1740,11 +1748,11 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
     // This ensures we have the actual session ID before notifying clients
 
     // Send initial file states if any exist
-    if (codon.trackedFiles && codon.trackedFiles.length > 0) {
+    if (codon.checkpointedFiles && codon.checkpointedFiles.length > 0) {
       // Use the unified file resolver to get files respecting gitignore
       const resolvedFiles = await fileResolver.resolveFiles(
         this.config.executionPath,
-        codon.trackedFiles,
+        codon.checkpointedFiles,
       );
 
       // Get file contents for each resolved file
@@ -4234,9 +4242,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
       for (let i = 0; i <= maxIndex; i++) {
         const codonConfig = this.config.codons[i];
-        // Only codons have trackedFiles (not loops)
-        if (codonConfig.type !== "loop" && codonConfig.trackedFiles?.length) {
-          await this.addCheckpointPatterns(codonConfig.trackedFiles);
+        // Only codons have checkpointedFiles (not loops)
+        if (codonConfig.type !== "loop" && codonConfig.checkpointedFiles?.length) {
+          await this.addCheckpointPatterns(codonConfig.checkpointedFiles);
         }
       }
     }

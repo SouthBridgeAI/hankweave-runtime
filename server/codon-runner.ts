@@ -394,6 +394,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
+   * Get the prompt frontmatter (if any was parsed from the prompt file)
+   */
+  getPromptFrontmatter(): import("./prompt-frontmatter.js").PromptFrontmatter | undefined {
+    return this.processManager?.promptFrontmatter;
+  }
+
+  /**
    * Clean up all resources owned by this runner
    *
    * This should be called when the codon execution is complete

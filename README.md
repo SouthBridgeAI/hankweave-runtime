@@ -53,15 +53,15 @@ To achieve reliability and clean rollbacks, Strandweave uses **Execution Isolati
 ```mermaid
 graph TD
     UserProject[📂 User Data / Project] -->|Read-Only Symlink| ExecutionDir[📂 ~/.strandweave-executions/...]
-    
+
     subgraph Execution Environment
         ExecutionDir -->|1. Rig Setup| PreparedRig[Project Staging Area]
         PreparedRig -->|2. Agent Modifies| ModifiedFiles[Modified Artifacts]
         ModifiedFiles -->|3. Checkpointing| ShadowGit[Shadow Git Repo]
     end
-    
+
     ModifiedFiles -->|4. Explicit Copy| ResultsDir[📂 User/strandweave-results/]
-    
+
     style Execution Environment fill:#f9f,stroke:#333,stroke-width:2px
     style UserProject fill:#eee,stroke:#333
     style ResultsDir fill:#bfb,stroke:#333
@@ -191,7 +191,7 @@ Create a file named `strand.json`. This defines your workflow using the object f
       "model": "sonnet",
       "continuationMode": "fresh",
       "promptText": "Read the source files in <%DATA_DIR%> and write a summary to analysis.md",
-      "trackedFiles": ["analysis.md"],
+      "checkpointedFiles": ["analysis.md"],
       "outputFiles": [
         {
           "copy": ["analysis.md"]
@@ -204,7 +204,7 @@ Create a file named `strand.json`. This defines your workflow using the object f
       "model": "sonnet",
       "continuationMode": "continue-previous",
       "promptText": "Based on your analysis, refactor the code structure.",
-      "trackedFiles": ["src/**/*.ts"]
+      "checkpointedFiles": ["src/**/*.ts"]
     }
   ]
 }
@@ -226,12 +226,12 @@ bun /path/to/strandweave/server/index.ts --validate --config=./strand.json --dat
 If valid, run the server with the **TUI (Terminal UI)**. We also recommend `--start-new` to ensure you aren't resuming an old stale session.
 
 ```bash
-bun /path/to/strandweave/server/index.ts --basic --start-new --config=./strand.json --data=./my-target-project/
+bun /path/to/strandweave/server/index.ts --start-new --config ./strand.json --data ./my-target-project/
 ```
 
 ### 4. Interactive Controls
 
-Once running in Basic Mode (`--basic`), you are in the **TUI**.
+By default, Strandweave runs in **TUI (Terminal User Interface)** mode. Use `--headless` to disable the TUI for CI/CD or scripted usage.
 
 | Key | Action | Description |
 | :--- | :--- | :--- |

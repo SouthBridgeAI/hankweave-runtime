@@ -1,15 +1,23 @@
 #!/usr/bin/env bun
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
+import { parseCliArgs } from "./cli-parser.js";
 import { resolveSettings, validateStrand } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { initProject } from "./init-command.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
+import {
+  displayStrandSummary,
+  getStrandSummary,
+  isRemoteStrandUrl,
+  resolveRemoteStrand,
+} from "./remote-strand.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
-import type { StrandweaveConfig } from "./types/types.js";
 import { getMetadata, Logger } from "./utils.js";
 
 // -------------
@@ -17,46 +25,29 @@ import { getMetadata, Logger } from "./utils.js";
 // -------------
 
 /**
- * Parse CLI arguments into a structured config object for resolveSettings()
+ * Read content from stdin.
+ * Throws if stdin is a TTY (no piped input).
  */
-function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
-  const cliArgs: Partial<StrandweaveConfig> = {};
-
-  // Parse port
-  const portArg = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
-  if (portArg) {
-    cliArgs.port = parseInt(portArg, 10);
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) {
+    throw new Error('No input provided on stdin. Use: echo "text" | strandweave strand.json -');
   }
 
-  // Parse model
-  const modelArg = args.find((arg) => arg.startsWith("--model="))?.split("=")[1];
-  if (modelArg) {
-    cliArgs.model = modelArg as "sonnet" | "opus";
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer);
   }
+  return Buffer.concat(chunks).toString("utf-8");
+}
 
-  // Parse anthropicBaseUrl
-  const baseUrlArg = args.find((arg) => arg.startsWith("--anthropic-base-url="))?.split("=")[1];
-  if (baseUrlArg) {
-    cliArgs.anthropicBaseUrl = baseUrlArg;
-  }
-
-  // Parse autostart (inverse of --no-autostart)
-  if (args.includes("--no-autostart")) {
-    cliArgs.autostart = false;
-  }
-
-  // Parse withoutProxy
-  if (args.includes("--without-proxy")) {
-    cliArgs.withoutProxy = true;
-  }
-
-  // Parse idleTimeout
-  const idleTimeoutArg = args.find((arg) => arg.startsWith("--idle-timeout="))?.split("=")[1];
-  if (idleTimeoutArg) {
-    cliArgs.idleTimeout = parseInt(idleTimeoutArg, 10);
-  }
-
-  return cliArgs;
+/**
+ * Generate a unique temporary file path.
+ */
+function generateTempFilePath(prefix: string): string {
+  return path.join(
+    os.tmpdir(),
+    `strandweave-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
+  );
 }
 
 // -------------
@@ -67,75 +58,74 @@ async function main() {
   // Print version banner
   console.log(`\nStrandweave v${getMetadata().version}\n`);
 
-  // Strict argument validation
-  const rawArgs = process.argv.slice(2);
-  const validPatterns = [
-    /^--basic$/,
-    /^-b$/,
-    /^--validate$/,
-    /^-v$/,
-    /^--cleanup$/,
-    /^-y$/,
-    /^--no-autostart$/,
-    /^--start-new$/,
-    /^--config=.+$/,
-    /^--data=.+$/,
-    /^--execution=.+$/,
-    /^--copy$/,
-    /^--anthropic-base-url=.+$/,
-    /^--port=\d+$/,
-    /^--model=(sonnet|opus)$/,
-    /^--without-proxy$/,
-    /^--idle-timeout=\d+$/,
-    /^--init$/,
-    /^--help$/,
-    /^-h$/,
-  ];
-  for (const arg of rawArgs) {
-    if (!validPatterns.some((pattern) => pattern.test(arg))) {
-      console.error(`❌ Error: Unknown argument '${arg}'. Run with --help for available options.`);
-      process.exit(1);
-    }
-  }
   const args = process.argv.slice(2);
-  const configPath =
-    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "strand.json";
-  const dataSourcePath = args.find((arg) => arg.startsWith("--data="))?.split("=")[1];
-  const executionPath = args.find((arg) => arg.startsWith("--execution="))?.split("=")[1];
-  const useSymlink = !args.includes("--copy");
-  const basicMode = args.includes("--basic") || args.includes("-b");
-  const validateMode = args.includes("--validate") || args.includes("-v");
-  const cleanupMode = args.includes("--cleanup");
-  const skipConfirmation = args.includes("-y");
-  const startNew = args.includes("--start-new");
-  const initMode = args.includes("--init");
-  // Note: Config-related args (port, model, anthropicBaseUrl, autostart, withoutProxy)
-  // are now parsed by parseCliArgs() and handled by resolveSettings()
 
-  if (args.includes("--help") || args.includes("-h")) {
+  // Parse ALL CLI arguments in one place (with validation)
+  let cliArgs: ReturnType<typeof parseCliArgs>;
+  try {
+    cliArgs = parseCliArgs(args);
+  } catch (error) {
+    console.error(`❌ Error: ${(error as Error).message}`);
+    process.exit(1);
+  }
+
+  // Extract values with defaults
+  const configPath = cliArgs.strandPath || cliArgs.configPath || "strand.json";
+  const dataSourcePath = cliArgs.dataPath || cliArgs.dataFlag;
+  const executionPath = cliArgs.executionPath;
+  const inlineInput = cliArgs.inputText;
+
+  const useSymlink = !cliArgs.copy;
+  const headlessMode = cliArgs.headless || false;
+  const validateMode = cliArgs.validate || false;
+  const cleanupMode = cliArgs.cleanup || false;
+  const skipConfirmation = cliArgs.skipConfirmation || false;
+  const startNew = cliArgs.startNew || false;
+  const forceMode = cliArgs.force || false;
+  const initMode = cliArgs.init || false;
+
+  if (cliArgs.help) {
     console.log(`
 Strandweave Runtime - Codon Orchestration
 
-Usage: bun server/index.ts [options]
+Usage: strandweave [data-path] [options]
+       strandweave [strand-path] [data-path] [options]
+
+Arguments:
+  data-path                 Path to data file/directory, or "-" for stdin (default: cwd)
+                            When only one argument provided:
+                            - If ends with .json: treated as strand-path
+                            - Otherwise: treated as data-path
+  strand-path               Path to strand config, or remote Git URL (default: strand.json)
+                            Remote URLs: https://github.com/user/repo#branch
+                            Requires both arguments to specify custom strand path
 
 Options:
   --init                    Initialize a new strand in current directory
-  --config=<path>           Path to strand configuration file (default: strand.json)
-  --data=<path>             Path to data file or directory (default: current directory)
-  --execution=<path>        Resume in specific execution directory
-  --start-new               Force creation of a new execution directory
+  --config <path>           Path to strand configuration file (alternative to positional arg)
+  --data <path>             Path to data file or directory, or "-" for stdin
+  --input <text>            Use inline text as data input (highest priority)
+  --execution <path>        Resume in specific execution directory
+  --start-new               Start a new execution (creates or reuses directory)
+  --force                   Force operation in directories with existing .strandweave/
   --copy                    Copy data instead of symlinking (for compatibility)
-  --port=<port>             WebSocket server port (default: 7777)
-  --basic, -b               Run in basic TUI mode
+  --port <port>             WebSocket server port (default: 7777)
+  --headless                Run without TUI (for CI/CD and scripts)
   --validate, -v            Validate configuration without running
   --cleanup                 Clean up execution directories
   -y                        Skip confirmation prompts
   --no-autostart            Don't automatically start codons
-  --model=<sonnet|opus>     Override model for all codons (ignores per-codon settings)
-  --anthropic-base-url=<url> Custom Anthropic API base URL
-  --without-proxy           Disable the proxy server
-  --idle-timeout=<seconds>  Idle timeout for WebSocket and proxy servers in seconds (0-255, default: 20)
+  --model <model>           Override model for all codons (ignores per-codon settings)
+  --anthropic-base-url <url> Custom Anthropic API base URL
+  --proxy                   Enable the LLM proxy server (disabled by default)
+  --idle-timeout <seconds>  Idle timeout for WebSocket and proxy servers (0-255, default: 0)
   --help, -h                Show this help message
+
+Execution Safety:
+  Strandweave implements a three-tier safety system for execution directories:
+  - Tier 1: Cannot use ~/.strandweave-executions/ directly (reserved for auto-managed)
+  - Tier 2: Directories with existing .strandweave/ require --force (backs up existing)
+  - Tier 3: Non-empty directories show warning and prompt for confirmation
 
 Execution Isolation:
   Strandweave runs in an isolated execution directory separate from your data.
@@ -149,34 +139,32 @@ Template Variables:
 
 Examples:
   # Run with default data (current directory)
-  bun server/index.ts
+  strandweave
 
-  # Run with specific data directory
-  bun server/index.ts --data=/path/to/project
+  # Run with specific strand and data (positional args)
+  strandweave ./my-strand.json ./my-data
 
-  # Run with specific data file
-  bun server/index.ts --data=/path/to/file.txt
+  # Use inline text as input
+  strandweave strand.json --input "Analyze this text"
 
-  # Resume specific execution
-  bun server/index.ts --execution=/home/.strandweave-executions/1234-abc
+  # Pipe from stdin
+  echo "Design a REST API" | strandweave strand.json -
 
-  # Start fresh execution (ignore existing)
-  bun server/index.ts --data=/path/to/project --start-new
+  # Pipe file contents to stdin
+  cat spec.md | strandweave strand.json --data -
 
-  # Start fresh in specific empty directory
-  bun server/index.ts --data=/path/to/project --execution=/path/to/empty/dir --start-new
+  # Run a strand from a GitHub repository
+  strandweave https://github.com/user/repo ./my-data
 
-  # Copy data instead of symlinking (for Windows/permissions issues)
-  bun server/index.ts --data=/path/to/project --copy
+  # Run a specific branch/tag from a remote repo
+  strandweave https://github.com/user/repo#v1.0.0 ./my-data
+  strandweave https://github.com/user/repo/tree/feature-branch ./my-data
 
-  # Clean up all executions for a data directory
-  bun server/index.ts --cleanup --data=/path/to/project
+  # Run in headless mode for CI/CD
+  strandweave --headless
 
   # Override all codon models to use Opus
-  bun server/index.ts --model=opus
-
-  # Run in basic TUI mode with Sonnet override
-  bun server/index.ts --basic --model=sonnet
+  strandweave --model opus
 `);
     process.exit(0);
   }
@@ -206,7 +194,68 @@ Examples:
 
   // Resolve data source path
   const originalCwd = process.cwd(); // Save original CWD
-  const resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
+
+  // Determine resolved data path based on input mode
+  let resolvedDataPath: string;
+  let inputSourceType: "inline-text" | "stdin" | "path" = "path";
+
+  if (inlineInput) {
+    // Inline text provided via --input
+    const tempFile = generateTempFilePath("input");
+    await fs.promises.writeFile(tempFile, inlineInput);
+    resolvedDataPath = tempFile;
+    inputSourceType = "inline-text";
+    console.log(`📝 Using inline text input (${inlineInput.length} chars)`);
+  } else if (dataSourcePath === "-") {
+    // stdin input
+    try {
+      const stdinContent = await readStdin();
+      const tempFile = generateTempFilePath("stdin");
+      await fs.promises.writeFile(tempFile, stdinContent);
+      resolvedDataPath = tempFile;
+      inputSourceType = "stdin";
+      console.log(`📝 Using stdin input (${stdinContent.length} chars)`);
+    } catch (error) {
+      console.error(`❌ ${(error as Error).message}`);
+      process.exit(1);
+    }
+  } else {
+    // Normal path (existing behavior)
+    resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
+  }
+
+  // Resolve config path before execution setup (needed for strand hash)
+  // Handle remote strands (git URLs)
+  let absoluteConfigPath: string;
+
+  if (isRemoteStrandUrl(configPath)) {
+    console.log(`\n🌐 Fetching remote strand: ${configPath}`);
+
+    try {
+      const cached = await resolveRemoteStrand(configPath);
+      absoluteConfigPath = cached.strandPath;
+
+      if (cached.wasFresh) {
+        console.log(`  📦 Using cached version (fetched ${cached.cachedAt.toLocaleString()})`);
+      } else {
+        console.log(`  ✅ Cloned to cache`);
+      }
+
+      // Show strand summary (no confirmation needed - "power user" model)
+      const parsed = await import("./remote-strand.js").then((m) =>
+        m.parseRemoteStrandUrl(configPath),
+      );
+      const summary = getStrandSummary(absoluteConfigPath, configPath, parsed.ref);
+      displayStrandSummary(summary);
+    } catch (error) {
+      console.error(`\n❌ Failed to fetch remote strand: ${(error as Error).message}`);
+      process.exit(1);
+    }
+  } else {
+    absoluteConfigPath = path.isAbsolute(configPath)
+      ? configPath
+      : path.resolve(originalCwd, configPath);
+  }
 
   // Set up execution environment
   let executionSetup: ExecutionSetup;
@@ -214,12 +263,21 @@ Examples:
     executionSetup = await setupExecutionEnvironment({
       readOnlySourceDataPath: resolvedDataPath,
       executionPath: executionPath ? path.resolve(executionPath) : undefined,
-      useSymlink,
+      // For inline text and stdin, always copy (temp files shouldn't be symlinked)
+      useSymlink: inputSourceType === "path" ? useSymlink : false,
       startNew,
+      forceMode,
+      skipConfirmation,
+      strandPath: absoluteConfigPath,
     });
   } catch (error) {
     console.error(`❌ Execution setup failed: ${(error as Error).message}`);
     process.exit(1);
+  }
+
+  // Log input source type if not a regular path
+  if (inputSourceType !== "path") {
+    console.log(`📥 Input type: ${inputSourceType}`);
   }
 
   console.log(`📁 Data source: ${executionSetup.readOnlySourceDataPath}`);
@@ -247,13 +305,7 @@ Examples:
   }
 
   // Load and validate configuration
-  // Config path is resolved relative to original CWD, not execution dir
-  const absoluteConfigPath = path.isAbsolute(configPath)
-    ? configPath
-    : path.resolve(originalCwd, configPath);
-
-  // Parse CLI arguments into structured config
-  const cliArgs = parseCliArgs(args);
+  // Config path already resolved above before execution setup
 
   // Resolve settings from all 5 config layers
   // (default config, runtime config, strand recommendations, env vars, CLI args)
@@ -373,12 +425,13 @@ Examples:
     const server = new StrandweaveRuntime(serverConfig);
     await server.start();
 
-    if (basicMode) {
+    // TUI is now the default. Use --headless to disable.
+    if (!headlessMode) {
       // Give server a moment to start before connecting
       setTimeout(() => {
         new BasicTUI(server);
       }, 100);
-      console.log("🎮 Running in basic TUI mode");
+      console.log("🎮 Running in TUI mode (use --headless to disable)");
     }
   } catch (error) {
     console.error(

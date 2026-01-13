@@ -79,18 +79,38 @@ describe("Execution Setup - startNew flag", () => {
       expect(result.executionPath).toBe(EXECUTION_DIR);
     });
 
-    it("should throw error for non-empty directory with --start-new", async () => {
-      // Create directory with content
+    it("should prompt for confirmation in non-empty directory with --start-new", async () => {
+      // Create directory with content (no .strandweave/)
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
       await fs.promises.writeFile(path.join(EXECUTION_DIR, "existing.txt"), "existing content");
 
+      // In non-TTY mode (tests), promptConfirmation auto-rejects
+      // This is Tier 3 safety: warn and prompt for non-empty directories
       await expect(
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: EXECUTION_DIR,
           startNew: true,
+          // skipConfirmation not set, so it prompts (and auto-rejects in non-TTY)
         }),
-      ).rejects.toThrow(/Cannot use --start-new with non-empty execution directory/);
+      ).rejects.toThrow(/Operation cancelled by user/);
+    });
+
+    it("should allow non-empty directory with --start-new when skipConfirmation is true", async () => {
+      // Create directory with content (no .strandweave/)
+      await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
+      await fs.promises.writeFile(path.join(EXECUTION_DIR, "existing.txt"), "existing content");
+
+      // With skipConfirmation: true, Tier 3 proceeds with a warning
+      const result = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+        skipConfirmation: true,
+      });
+
+      expect(result.isNewExecution).toBe(true);
+      expect(result.executionPath).toBe(EXECUTION_DIR);
     });
 
     it("should resume existing execution without --start-new", async () => {
@@ -185,14 +205,15 @@ describe("Execution Setup - startNew flag", () => {
       await fs.promises.writeFile(path.join(EXECUTION_DIR, ".DS_Store"), "");
       await fs.promises.writeFile(path.join(EXECUTION_DIR, ".gitignore"), "");
 
-      // Should still throw error - we don't ignore hidden files in the check
+      // Tier 3: Non-empty directory (including hidden files) triggers confirmation
+      // In non-TTY mode, auto-rejects with "Operation cancelled by user"
       await expect(
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: EXECUTION_DIR,
           startNew: true,
         }),
-      ).rejects.toThrow(/Cannot use --start-new with non-empty execution directory/);
+      ).rejects.toThrow(/Operation cancelled by user/);
     });
 
     it("should create valid execution metadata with --start-new", async () => {
@@ -277,12 +298,13 @@ describe("Execution Setup - startNew flag", () => {
       );
       await fs.promises.mkdir(nestedPath, { recursive: true });
 
+      // Tier 1 safety: ~/.strandweave-executions/ is reserved for auto-managed executions
       await expect(
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: nestedPath,
         }),
-      ).rejects.toThrow("Cannot create execution inside another execution directory");
+      ).rejects.toThrow(/reserved for auto-managed executions/);
 
       // Clean up
       await rimrafSimple(path.join(os.homedir(), ".strandweave-executions", "existing-exec"));

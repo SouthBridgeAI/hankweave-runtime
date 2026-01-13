@@ -152,7 +152,7 @@ The server's behavior can be fine-tuned with the following command-line flags:
     -   **Default**: `7777`
     -   **Example**: `bun run server --port=8080`
 
--   **`--basic`** (or **`-b`**): Launches the server in the Basic Terminal UI (TUI) mode. This is an invaluable tool for debugging and manual control, providing a real-time, color-coded log of server events and keyboard shortcuts for interaction.
+-   **`--headless`**: Disables the Terminal UI (TUI) mode. By default, Strandweave runs with TUI enabled, providing a real-time, color-coded log of server events and keyboard shortcuts for interaction. Use `--headless` for CI/CD pipelines or scripted usage where interactive output is not needed.
 
 -   **`--validate`** (or **`-v`**): A crucial pre-flight check. This command parses and validates your configuration file without starting the server. It checks for schema correctness, file existence, and logical consistency, providing a detailed summary and a list of any errors or warnings.
 
@@ -689,7 +689,7 @@ When a codon fails:
 | "State corrupted" | Disk error or crash during write | Server will auto-recover from backup |
 
 **Performance Tuning:**
-- **Large Projects**: Use specific glob patterns in `trackedFiles` to avoid tracking unnecessary files
+- **Large Projects**: Use specific glob patterns in `checkpointedFiles` to avoid tracking unnecessary files
 - **Slow Checkpoints**: Exclude large binary files and build artifacts
 - **Memory Usage**: The server streams logs and doesn't load entire files into memory
 - **API Rate Limits**: The server respects Claude's rate limits automatically

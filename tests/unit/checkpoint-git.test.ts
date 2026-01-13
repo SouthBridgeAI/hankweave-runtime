@@ -86,11 +86,11 @@ describe("CheckpointGit", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
+    const checkpointedFiles = await new Response(proc.stdout).text();
 
-    expect(trackedFiles).toContain("test.log");
-    expect(trackedFiles).toContain("test.tmp");
-    expect(trackedFiles).not.toContain("test.txt");
+    expect(checkpointedFiles).toContain("test.log");
+    expect(checkpointedFiles).toContain("test.tmp");
+    expect(checkpointedFiles).not.toContain("test.txt");
   });
 
   test("commit creates a commit with message", async () => {
@@ -225,11 +225,11 @@ describe("CheckpointGit", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
+    const checkpointedFiles = await new Response(proc.stdout).text();
 
-    expect(trackedFiles).toContain("src/components/Button.tsx");
-    expect(trackedFiles).toContain("src/utils/helper.ts");
-    expect(trackedFiles).toContain("README.md");
+    expect(checkpointedFiles).toContain("src/components/Button.tsx");
+    expect(checkpointedFiles).toContain("src/utils/helper.ts");
+    expect(checkpointedFiles).toContain("README.md");
   });
 
   test("switchToBranch switches to existing branch", async () => {

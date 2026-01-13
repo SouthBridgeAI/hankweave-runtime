@@ -22,7 +22,7 @@ const templates: Record<string, string> = {
       "model": "haiku",
       "continuationMode": "fresh",
       "promptFile": "./prompts/analyze-haiku.md",
-      "trackedFiles": ["analysis-haiku.md"],
+      "checkpointedFiles": ["analysis-haiku.md"],
       "outputFiles": [
         {
           "copy": ["analysis-haiku.md"]
@@ -35,7 +35,7 @@ const templates: Record<string, string> = {
       "model": "gemini-2.5-flash",
       "continuationMode": "fresh",
       "promptFile": "./prompts/analyze-gemini.md",
-      "trackedFiles": ["analysis-gemini.md"],
+      "checkpointedFiles": ["analysis-gemini.md"],
       "outputFiles": [
         {
           "copy": ["analysis-gemini.md"]
@@ -79,7 +79,7 @@ Edit \`strand.json\` to customize your workflow:
 - Add more codons to the \`strand\` array
 - Change the \`model\` (sonnet or opus)
 - Add \`rigSetup\` to prepare your environment
-- Configure \`trackedFiles\` to monitor specific files
+- Configure \`checkpointedFiles\` to track files in checkpoints
 - Use \`recommendations\` to suggest runtime settings`,
 
   "data/sample1.txt": `# Project Overview

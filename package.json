@@ -37,7 +37,7 @@
     "release:major": "bun scripts/release.ts major",
     "fetch-models": "bun scripts/fetch-models-dev.ts",
     "server": "bun server/index.ts",
-    "server:basic": "bun server/index.ts --basic",
+    "server:headless": "bun server/index.ts --headless",
     "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/integration tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts && bun tests/unit/cleanup-after-tests.ts",
     "test:long": "LONG_TESTS=true bun test tests/long-running",
     "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",

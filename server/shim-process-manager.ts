@@ -17,6 +17,8 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
   private process: ChildProcess | undefined;
   private logStream: fs.WriteStream | undefined;
   private killed = false;
+  /** Frontmatter metadata from the prompt file (if any) */
+  public promptFrontmatter?: import("./prompt-frontmatter.js").PromptFrontmatter;
 
   constructor(
     private executionPath: string,
@@ -212,25 +214,40 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
 
   /**
    * Feed prompt content to shim's stdin.
+   * Parses and strips frontmatter from markdown files.
    */
   private async feedPrompt(codon: Codon): Promise<void> {
     if (!this.process?.stdin) {
       throw new Error("Process stdin not available");
     }
 
+    const { parsePromptFrontmatter } = await import("./prompt-frontmatter.js");
     let promptContent: string;
+    let firstFileFrontmatter: import("./prompt-frontmatter.js").PromptFrontmatter | undefined;
 
     if (codon.promptFile) {
       const files = Array.isArray(codon.promptFile) ? codon.promptFile : [codon.promptFile];
       const parts: string[] = [];
-      for (const file of files) {
-        parts.push(fs.readFileSync(file, "utf-8"));
+      for (let i = 0; i < files.length; i++) {
+        const rawContent = fs.readFileSync(files[i], "utf-8");
+        const parsed = parsePromptFrontmatter(rawContent);
+        parts.push(parsed.content);
+        // Only use frontmatter from first file
+        if (i === 0 && parsed.hasFrontmatter) {
+          firstFileFrontmatter = parsed.frontmatter;
+        }
       }
       promptContent = parts.join("\n\n");
     } else if (codon.promptText) {
       promptContent = codon.promptText;
     } else {
       throw new Error("No prompt file or text provided");
+    }
+
+    // Store frontmatter for emission
+    if (firstFileFrontmatter) {
+      this.promptFrontmatter = firstFileFrontmatter;
+      this.logger.log(`Prompt frontmatter: ${JSON.stringify(firstFileFrontmatter)}`);
     }
 
     const processedContent = promptContent
