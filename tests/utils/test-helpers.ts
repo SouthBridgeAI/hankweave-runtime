@@ -779,16 +779,8 @@ export function startServer(config: TestServerConfig): ChildProcess {
   }
 
   // Build args: baseArgs + config flags
-  // Always include --headless to disable TUI in tests (TUI is now the default)
   // Use space-separated syntax (not --flag=value which is deprecated)
-  const args = [
-    ...baseArgs,
-    "--headless",
-    "--config",
-    config.configFile,
-    "--port",
-    String(config.port),
-  ];
+  const args = [...baseArgs, "--config", config.configFile, "--port", String(config.port)];
 
   // Add optional flags
   if (config.proxy) {

@@ -22,8 +22,8 @@ function isNonInteractive(): boolean {
     return true;
   }
 
-  // Check for Bun test environment
-  if (process.env.BUN_TEST || process.argv.some((arg) => arg.includes("bun test"))) {
+  // Check for test environment (Bun sets NODE_ENV=test)
+  if (process.env.NODE_ENV === "test") {
     return true;
   }
 

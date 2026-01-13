@@ -8,6 +8,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 
+
+### Changed
+- 
+
+### Fixed
+- 
+
+## [0.1.34] - 2026-01-13
+
+### Added
+- CLI parser with modern space-separated flag syntax (`--flag value`) and comprehensive validation
+- Remote strand support: run strands directly from Git URLs (GitHub, GitLab, Bitbucket)
+- Remote strand caching system with TTL-based refresh for branches
+- Prompt frontmatter: YAML metadata support in prompt markdown files (name, description, tags, version, author)
+- Inline text input via `--input <text>` flag for quick data passing
+- Stdin support for data input via `--data -` or positional `-` argument
+- `--force` flag for running in existing directories with .strandweave/ (creates backups)
+- Config change detection on resume with SHA-256 hash tracking and user warnings
+- Positional argument support for strand and data paths with smart inference
+- Non-interactive mode detection for CI/CD environments (respects CI env vars, test mode, TTY checks)
+- Three-tier directory safety validation with user confirmation prompts
+- Comprehensive CLI parser tests with 900+ lines of test coverage
+- Version banner on startup showing Strandweave version
+
+### Changed
+- **BREAKING**: Renamed `trackedFiles` to `checkpointedFiles` in configuration schema for clarity
+- TUI now enabled by default (use `--headless` to disable, replaces old `--basic` flag)
+- CLI flag syntax: space-separated now preferred (e.g., `--port 8080` instead of `--port=8080`)
+- Deprecated `--flag=value` syntax with migration warnings (still supported for backward compatibility)
+- Improved help text with examples, positional argument documentation, and remote URL usage
+- Execution setup enhanced with directory existence checks and user prompts
+- Confirmation prompts now timeout after 30 seconds to prevent hangs
+- Help text now shows both positional and flag-based argument formats
+
+### Fixed
+- Confirmation prompts now respect non-interactive environments (CI, tests, pipes)
+- Directory safety validation with user prompts before potentially destructive operations
+
+
+## [0.1.33] - 2026-01-12
+
+### Added
 - Verdaccio integration for local npm registry testing
 - E2E test suite for package installation and executables
 - Test utilities for binary file comparison and executable validation
@@ -21,7 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Test helper utilities for cross-platform compatibility
-
 ## [0.1.32] - 2026-01-12
 
 ### Added
@@ -31,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 
 
 ### Fixed
-- 
+-
 
 ## [0.1.31] - 2026-01-12
 

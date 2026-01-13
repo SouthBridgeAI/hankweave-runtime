@@ -16,6 +16,12 @@ import {
 } from "../../server/utils";
 import { getFreePort } from "../utils/test-helpers.js";
 
+describe("Test Environment", () => {
+  test("NODE_ENV is set to 'test' during Bun test runs", () => {
+    expect(process.env.NODE_ENV).toBe("test");
+  });
+});
+
 describe("escapeShellArg", () => {
   test("escapes single quotes correctly", () => {
     expect(escapeShellArg("test'value")).toBe("'test'\\''value'");

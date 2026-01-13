@@ -450,7 +450,6 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
 
   // Use space-separated syntax (not --flag=value which is deprecated)
   const serverArgs = [
-    "--headless",
     "--config",
     configPath,
     "--data",
