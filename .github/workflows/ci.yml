@@ -4,8 +4,8 @@ on:
   push:
     branches:
       - master
-      # TODO: remove hankweave-npx after merge
-      - hankweave-npx
+      # TODO: remove notion-strand-improvements after merge
+      - notion-strand-improvements
   pull_request:
     branches:
       - master
