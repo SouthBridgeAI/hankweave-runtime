@@ -1847,7 +1847,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
 
       // Start execution
       this.logger.log(
-        `[runCodon] Starting runner execution for codon ${codonId}, previousSessionId: ${previousSessionId || "none"}`,
+        `[runCodon] Starting runner execution for codon ${codonId}, previousSessionId: ${
+          previousSessionId || "none"
+        }`,
         "debug",
       );
 
@@ -1900,7 +1902,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.logger.log(`[runCodon] Error stack: ${toError(error).stack}`, "error");
       const runnerForCleanup = this.codonRunners.get(codonId);
       this.logger.log(
-        `[runCodon] State at error - currentRunId: ${this.currentRunId}, hasRunner: ${!!runnerForCleanup}`,
+        `[runCodon] State at error - currentRunId: ${
+          this.currentRunId
+        }, hasRunner: ${!!runnerForCleanup}`,
         "error",
       );
 
@@ -1996,7 +2000,8 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
         "debug",
       );
       this.logger.log(
-        `[handleSystemMessage] Condition check - subtype=init: true, has_session: ${!!msg.session_id}, has_currentCodon: ${!!this.currentCodon}, currentCodon_status: ${this.currentCodon?.status || "N/A"}`,
+        `[handleSystemMessage] Condition check - subtype=init: true, has_session: ${!!msg.session_id}, has_currentCodon: ${!!this
+          .currentCodon}, currentCodon_status: ${this.currentCodon?.status || "N/A"}`,
         "debug",
       );
     }
@@ -2525,7 +2530,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       ? !!this.codonRunners.get(this.currentCodon.codonId)
       : false;
     this.logger.log(
-      `[handleCodonComplete] currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${hasRunner}`,
+      `[handleCodonComplete] currentCodon=${
+        this.currentCodon?.codonId || "none"
+      }, hasRunner=${hasRunner}`,
       "info",
     );
     this.logger.log(`[handleCodonComplete] Call stack:\n${new Error().stack}`, "debug");
@@ -2862,7 +2869,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       this.cleanupCurrentCodon();
     } else {
       this.logger.log(
-        `[handleCodonComplete] Not clearing current codon state (current is ${this.currentCodon?.codonId || "none"}, completed is ${codonId})`,
+        `[handleCodonComplete] Not clearing current codon state (current is ${
+          this.currentCodon?.codonId || "none"
+        }, completed is ${codonId})`,
         "info",
       );
     }
@@ -4572,7 +4581,9 @@ export class StrandweaveRuntime extends TypedEventEmitter<ServerInternalEvents> 
       ? !!this.codonRunners.get(this.currentCodon.codonId)
       : false;
     this.logger.log(
-      `[cleanupCurrentCodon] Called - currentCodon=${this.currentCodon?.codonId || "none"}, hasRunner=${hasRunner}`,
+      `[cleanupCurrentCodon] Called - currentCodon=${
+        this.currentCodon?.codonId || "none"
+      }, hasRunner=${hasRunner}`,
       "info",
     );
     this.logger.log(`[cleanupCurrentCodon] Stack trace:\n${new Error().stack}`, "debug");
