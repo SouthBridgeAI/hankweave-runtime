@@ -4,11 +4,10 @@ on:
   push:
     branches:
       - master
-      # TODO: remove notion-strand-improvements after merge
-      - notion-strand-improvements
   pull_request:
     branches:
       - master
+      - notion-strand-improvements
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
