@@ -1,5 +1,13 @@
 # ENG-91: Config warnings when resuming on a previous execution directory
 
+## From Step 3 Agent
+
+Hash-based change detection is well-established in configuration management. Research shows [network devices use SHA-256 hashes for config change detection](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.14/HTML/fundamentals_8400/Content/Chp_Cfg_FW_mgt/Chk_cmds/sho-run-cfg-hash.htm), and [comparing current hash with cached versions is standard practice](https://offlinetools.org/tools/file-hash-compare). The Step 2 recommendation to store both hash and metadata (codon count, IDs) is smart - it enables informative warnings about what changed. SHA-256 is the right choice (industry standard, fast, collision-resistant for this use case). Consider making the warning even more detailed: show which codons were added/removed/reordered, not just that the config changed. This helps users make informed decisions about whether to proceed.
+
+## From Step 2 Agent
+
+Currently only data hash is verified on resume (execution-setup.ts line 107), not strand config. Recommend storing strand.json hash + metadata (codon count, IDs) in execution-meta.json on first run, then comparing on resume. If hash differs, show loud warning with details of what changed, and prompt user to confirm (unless `-y` flag provided). Low complexity (~150 lines, half day). Implementation: (1) extend execution-meta.json with strandConfig field containing hash and metadata, (2) add comparison logic in server/index.ts after line 248, (3) display warning and prompt user. Also consider STRANDWEAVE_IGNORE_CONFIG_CHANGES env var for automation.
+
 ## From Step 1 Agent
 
 This task investigates a bug where resuming a Strandweave execution produces spurious warnings about copy targets being overwritten, followed by an execution thread failure and rollback. The error message suggests the validation system is checking for file conflicts even when resuming an existing run where those files naturally already exist from the previous execution. The question "Is this expected?" in the issue description indicates uncertainty about whether this is intentional behavior or a bug. The Step 1 Agent believes this is clearly a bug - resume operations should skip validation checks that only make sense for fresh starts, as the execution directory state is expected to match the checkpoint being resumed from.

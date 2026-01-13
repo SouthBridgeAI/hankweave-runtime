@@ -1,5 +1,13 @@
 # ENG-88: Run strands in existing run directories
 
+## From Step 3 Agent
+
+The three-tier safety system proposed in Step 2 is well-designed and follows security best practices. The key insight is distinguishing between "this is obviously dangerous" (Tier 1: inside .strandweave-executions), "this needs explicit confirmation" (Tier 2: existing Strandweave state), and "user might know what they're doing" (Tier 3: non-empty directory). This mirrors how other tools handle potentially destructive operations - Git won't let you init in a repo but warns about untracked files, Docker warns about overwriting containers, etc. The documentation requirements are critical: users MUST understand they're giving an AI agent filesystem access in their project directory. Consider adding a first-time setup warning that creates a `.strandweave-agreed-to-risks` marker file, so users explicitly acknowledge the risks the first time they run in a project directory.
+
+## From Step 2 Agent
+
+Current restriction (execution-setup.ts lines 63-69) prevents running in non-empty directories with `--start-new`. This is too restrictive - users want to run in project directories. Recommend implementing three-tier safety: (1) Hard error for ~/.strandweave-executions/, (2) Hard error if .strandweave/ already exists, (3) Warning + prompt for other non-empty directories. Implementation: remove restriction but add safety checks (~200 lines, 4-5 hours). Critical: add loud warnings so users understand agents have filesystem access. This enables key workflow: `cd ~/my-project && strandweave --execution=. --start-new`. Document prominently in README with security warnings.
+
 ## From Step 1 Agent
 
 This task addresses a valuable workflow improvement: allowing users to run strands in directories that already contain work or data, rather than forcing fresh execution directories every time. The current limitation is that Strandweave seems to either fail or behave unexpectedly when trying to run in a non-empty directory. The proposed solution is pragmatic: if no `.strandweave` folder exists (meaning this directory hasn't been used for a Strandweave run), proceed normally; if one does exist (indicating a previous run), require `--start-new` with a backup mechanism to preserve the old checkpoint state. This change would enable useful patterns like iterating on a strand against the same working directory or re-running failed strands without manual cleanup.

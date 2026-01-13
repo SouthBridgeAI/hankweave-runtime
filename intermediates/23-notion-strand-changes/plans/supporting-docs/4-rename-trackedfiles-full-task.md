@@ -1,5 +1,13 @@
 # ENG-92: Rename trackedFiles to checkpointedFiles
 
+## From Step 3 Agent
+
+This is a straightforward terminology improvement that needs minimal research - it's about internal API clarity rather than external standards. The deprecation strategy outlined in Step 2 (support both names with auto-migration) is the right approach. One thing to consider: update not just the schema description but also error messages and documentation to emphasize the checkpoint/rollback functionality. When users see "checkpointedFiles" they should immediately understand it relates to the "save game" system. This is low-hanging fruit that improves developer experience significantly for minimal effort. No external research needed - this is purely about better communication of existing functionality.
+
+## From Step 2 Agent
+
+Recommend renaming to `checkpointedFiles` (more accurate than "tracked"). Found usage in 3 files (config.ts, strandweave-runtime.ts, init-command.ts). Implement with deprecation period: support both names, auto-migrate trackedFiles→checkpointedFiles, warn on old usage. Low complexity (4-6 hours including tests). The schema refine() can handle migration automatically. Remove old name after 2-3 versions. Also update schema description to emphasize checkpoint role: "files saved in Git checkpoints after each codon completes, enabling rollback" rather than just "tracked for changes".
+
 ## From Step 1 Agent
 
 This is a straightforward naming improvement to make Strandweave's configuration more intuitive. The current name "trackedFiles" is ambiguous and could imply Git tracking, file watching, or monitoring, when the actual purpose is to specify which files should be included in the shadow Git checkpoint system between codons. The new name "checkpointedFiles" makes the intent crystal clear and aligns with Strandweave's "save game" mental model. The implementation is primarily a find-and-replace operation across the codebase (schema definitions, validation logic, documentation, tests, and example strands), but care must be taken to maintain backward compatibility or provide clear migration guidance for existing strand.json files in the wild.

@@ -1,5 +1,13 @@
 # ENG-87: Frontmatter on prompts
 
+## From Step 3 Agent
+
+The gray-matter library research confirms it's the industry standard - [used by Gatsby, Netlify, Astro, VitePress, and many others](https://github.com/jonschlinkert/gray-matter). The library is battle-tested and handles edge cases like [non-frontmatter YAML in code blocks](https://www.npmjs.com/package/gray-matter) that break other parsers. The [frontmatter best practices](https://vitepress.dev/guide/frontmatter) from major static site generators emphasize: frontmatter must be at the top, use valid YAML, and maintain consistent schema. The Step 2 decision on precedence order (CLI > frontmatter > codon > strand > defaults) aligns with principle of specificity - more specific always wins. One consideration: document the precedence order prominently in examples. Users will be confused if they set `model: opus` in frontmatter but it gets overridden by codon config. Clear documentation prevents support issues.
+
+## From Step 2 Agent
+
+Zero breaking changes - purely additive feature using standard YAML frontmatter. Use `gray-matter` library (industry standard). Define strict schema for validation: core fields (model, continuationMode) affect execution, metadata fields (name, description, tags, version, author) are documentation-only. Critical decision: precedence order is CLI > frontmatter > codon > strand recommendations > defaults (most specific wins). For multiple prompt files, first file's frontmatter takes precedence. Store frontmatter metadata in execution metadata for audit trail. Low-medium complexity (~240 lines, 1 day). High value for prompt reusability and self-documentation. Get precedence rules right from start - changing them later is breaking.
+
 ## From Step 1 Agent
 
 This task proposes adding YAML frontmatter to prompt markdown files to enable better metadata management and organization. Since Strandweave already uses markdown files for prompts, adding frontmatter is a natural extension that would allow including title, comments, author, date, and other metadata without cluttering the actual prompt content. This follows established conventions from tools like Jekyll, Hugo, and various markdown processors. The implementation should be straightforward - add a frontmatter parser (likely using an existing library like gray-matter), extract metadata during prompt loading, and potentially expose this metadata for display in the TUI or for filtering/organization purposes. The main design decision is determining which metadata fields are useful and whether any should be required vs optional.

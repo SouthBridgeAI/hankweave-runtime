@@ -1,5 +1,13 @@
 # ENG-93: Run strands with simple input text as data
 
+## From Step 3 Agent
+
+The stdin convention research provides strong historical validation for using `-` to represent stdin. [Ken Thompson modified sort in Version 5 Unix to accept "-" as stdin](https://www.baeldung.com/linux/dash-in-command-line-parameters), and this spread throughout the ecosystem. The convention is so established that [many tools treat `-` as a pseudo-filename for stdin/stdout](https://linuxvox.com/blog/what-s-the-magic-of-a-dash-in-command-line-parameters/) automatically. This makes `--data=-` or just `-` as a positional argument the obvious choice. The Step 2 finding that file support already exists is excellent - we just need to create temp files from stdin or inline text. One consideration: temp file cleanup strategy should be explicit even if OS handles it eventually. Consider documenting the temp file location in execution metadata for debugging.
+
+## From Step 2 Agent
+
+File support already exists (execution-setup.ts lines 179-196)! What's missing is stdin and inline text support. Recommend two additions: (1) `--data=-` for stdin (Unix convention: `echo "text" | strandweave strand.json -`), and (2) `--data-text="inline text"` for quick experiments without creating files. Implementation is simple - create temp file in os.tmpdir(), then use existing file handling logic. Low complexity (~50-80 lines, 2-3 hours). This significantly improves UX for quick tests and experimentation. Both approaches create temp files that OS will clean up automatically.
+
 ## From Step 1 Agent
 
 This feature would allow users to provide a simple text string as the data input instead of requiring a file or directory, making Strandweave more accessible for quick tests and for strands designed to operate on text content rather than file structures. The proposed interface mirrors Claude Code's `--input` flag, and the implementation would write the provided text to a file in the execution directory instead of creating a read-only symlink to external data. This is particularly useful for "design strands" (presumably strands that generate designs or plans from text descriptions) and for rapid experimentation without needing to set up directory structures. The main implementation question is where to place this text file within the execution directory and how to communicate its location to the strand.
