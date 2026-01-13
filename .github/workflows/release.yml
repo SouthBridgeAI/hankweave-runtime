@@ -139,15 +139,15 @@ jobs:
             "${{ github.workspace }}/releases/strandweave" --init
           fi
 
-      - name: Smoke test - Run headless command
+      - name: Smoke test - Run with TUI
         if: matrix.can_test
         shell: bash
         working-directory: ${{ steps.test-dir.outputs.test_dir }}
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            "${{ github.workspace }}/releases/strandweave.exe" --headless --data ./data
+            "${{ github.workspace }}/releases/strandweave.exe" --data ./data
           else
-            "${{ github.workspace }}/releases/strandweave" --headless --data ./data
+            "${{ github.workspace }}/releases/strandweave" --data ./data
           fi
 
       - name: Upload executable artifact

@@ -452,7 +452,6 @@ export async function launchStrandweave(
 
   // Use space-separated syntax (not --flag=value which is deprecated)
   const serverArgs = [
-    "--headless",
     "--config",
     configPath,
     "--data",

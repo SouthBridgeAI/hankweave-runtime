@@ -366,7 +366,6 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     "bun",
     [
       serverPath,
-      "--headless",
       "--config",
       CODONS_CONFIG,
       "--port",
