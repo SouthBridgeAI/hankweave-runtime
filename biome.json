@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "server/**/*",
+      "!server/llm/*.json",
       "tests/e2e/**/*",
       "tests/utils/**/*",
       "tests/unit/**/*",
