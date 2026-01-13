@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
@@ -8,6 +10,12 @@ import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { initProject } from "./init-command.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
+import {
+  displayStrandSummary,
+  getStrandSummary,
+  isRemoteStrandUrl,
+  resolveRemoteStrand,
+} from "./remote-strand.js";
 import { StrandweaveRuntime } from "./strandweave-runtime.js";
 import type { StrandweaveConfig } from "./types/types.js";
 import { getMetadata, Logger } from "./utils.js";
@@ -17,25 +25,82 @@ import { getMetadata, Logger } from "./utils.js";
 // -------------
 
 /**
+ * Read content from stdin.
+ * Throws if stdin is a TTY (no piped input).
+ */
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) {
+    throw new Error(
+      'No input provided on stdin. Use: echo "text" | strandweave strand.json -'
+    );
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+/**
+ * Generate a unique temporary file path.
+ */
+function generateTempFilePath(prefix: string): string {
+  return path.join(
+    os.tmpdir(),
+    `strandweave-${prefix}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}.txt`
+  );
+}
+
+/**
+ * Get value for a flag, supporting both --flag=value (deprecated) and --flag value syntax.
+ * Returns undefined if flag is not present.
+ */
+function getFlagValue(args: string[], flagName: string): string | undefined {
+  // Check for deprecated --flag=value syntax
+  const equalsIndex = args.findIndex((arg) => arg.startsWith(`${flagName}=`));
+  if (equalsIndex !== -1) {
+    console.warn(
+      `⚠️  Deprecation warning: '${args[equalsIndex]}' uses deprecated syntax. Use '${flagName} <value>' instead.`
+    );
+    return args[equalsIndex].split("=")[1];
+  }
+
+  // Check for --flag value syntax
+  const flagIndex = args.indexOf(flagName);
+  if (flagIndex !== -1 && flagIndex + 1 < args.length) {
+    const nextArg = args[flagIndex + 1];
+    // Make sure next arg is not another flag
+    if (!nextArg.startsWith("-")) {
+      return nextArg;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Parse CLI arguments into a structured config object for resolveSettings()
  */
 function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
   const cliArgs: Partial<StrandweaveConfig> = {};
 
   // Parse port
-  const portArg = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
+  const portArg = getFlagValue(args, "--port");
   if (portArg) {
     cliArgs.port = parseInt(portArg, 10);
   }
 
   // Parse model
-  const modelArg = args.find((arg) => arg.startsWith("--model="))?.split("=")[1];
+  const modelArg = getFlagValue(args, "--model");
   if (modelArg) {
     cliArgs.model = modelArg as "sonnet" | "opus";
   }
 
   // Parse anthropicBaseUrl
-  const baseUrlArg = args.find((arg) => arg.startsWith("--anthropic-base-url="))?.split("=")[1];
+  const baseUrlArg = getFlagValue(args, "--anthropic-base-url");
   if (baseUrlArg) {
     cliArgs.anthropicBaseUrl = baseUrlArg;
   }
@@ -45,13 +110,17 @@ function parseCliArgs(args: string[]): Partial<StrandweaveConfig> {
     cliArgs.autostart = false;
   }
 
-  // Parse withoutProxy
+  // Parse proxy flags (proxy is OFF by default)
+  if (args.includes("--proxy")) {
+    cliArgs.withoutProxy = false; // Enable proxy
+  }
+  // Keep --without-proxy for backward compatibility (now redundant since proxy is off by default)
   if (args.includes("--without-proxy")) {
     cliArgs.withoutProxy = true;
   }
 
   // Parse idleTimeout
-  const idleTimeoutArg = args.find((arg) => arg.startsWith("--idle-timeout="))?.split("=")[1];
+  const idleTimeoutArg = getFlagValue(args, "--idle-timeout");
   if (idleTimeoutArg) {
     cliArgs.idleTimeout = parseInt(idleTimeoutArg, 10);
   }
@@ -69,45 +138,109 @@ async function main() {
 
   // Strict argument validation
   const rawArgs = process.argv.slice(2);
-  const validPatterns = [
-    /^--basic$/,
-    /^-b$/,
-    /^--validate$/,
-    /^-v$/,
-    /^--cleanup$/,
-    /^-y$/,
-    /^--no-autostart$/,
-    /^--start-new$/,
-    /^--config=.+$/,
-    /^--data=.+$/,
-    /^--execution=.+$/,
-    /^--copy$/,
-    /^--anthropic-base-url=.+$/,
-    /^--port=\d+$/,
-    /^--model=(sonnet|opus)$/,
-    /^--without-proxy$/,
-    /^--idle-timeout=\d+$/,
-    /^--init$/,
-    /^--help$/,
-    /^-h$/,
-  ];
-  for (const arg of rawArgs) {
-    if (!validPatterns.some((pattern) => pattern.test(arg))) {
-      console.error(`❌ Error: Unknown argument '${arg}'. Run with --help for available options.`);
-      process.exit(1);
+
+  // Flags that take no value
+  const booleanFlags = new Set([
+    "--headless",
+    "--validate",
+    "-v",
+    "--cleanup",
+    "-y",
+    "--no-autostart",
+    "--start-new",
+    "--copy",
+    "--proxy",
+    "--without-proxy",
+    "--init",
+    "--help",
+    "-h",
+    "--force",
+  ]);
+
+  // Flags that take a value (support both --flag=value and --flag value)
+  const valueFlags = new Set([
+    "--config",
+    "--data",
+    "--execution",
+    "--anthropic-base-url",
+    "--port",
+    "--model",
+    "--idle-timeout",
+    "--input",
+  ]);
+
+  // Validate arguments
+  let i = 0;
+  const positionalArgs: string[] = [];
+  while (i < rawArgs.length) {
+    const arg = rawArgs[i];
+
+    if (arg.startsWith("-")) {
+      // Check for --flag=value syntax
+      const equalsIndex = arg.indexOf("=");
+      const flagName = equalsIndex > 0 ? arg.substring(0, equalsIndex) : arg;
+
+      if (booleanFlags.has(flagName)) {
+        if (equalsIndex > 0) {
+          console.error(`❌ Error: Flag '${flagName}' does not take a value.`);
+          process.exit(1);
+        }
+        i++;
+      } else if (valueFlags.has(flagName)) {
+        if (equalsIndex > 0) {
+          // --flag=value syntax (deprecated but supported)
+          i++;
+        } else {
+          // --flag value syntax
+          if (i + 1 >= rawArgs.length || rawArgs[i + 1].startsWith("-")) {
+            console.error(`❌ Error: Flag '${flagName}' requires a value.`);
+            process.exit(1);
+          }
+          i += 2; // Skip flag and value
+        }
+      } else {
+        console.error(
+          `❌ Error: Unknown argument '${arg}'. Run with --help for available options.`
+        );
+        process.exit(1);
+      }
+    } else {
+      // Positional argument
+      positionalArgs.push(arg);
+      i++;
     }
   }
+
+  // Validate positional args count
+  if (positionalArgs.length > 2) {
+    console.error(
+      `❌ Error: Too many positional arguments. Expected at most 2 (strand-path, data-path), got ${positionalArgs.length}.`
+    );
+    process.exit(1);
+  }
+
   const args = process.argv.slice(2);
+
+  // Parse config path: positional[0] or --config flag, default to "strand.json"
   const configPath =
-    args.find((arg) => arg.startsWith("--config="))?.split("=")[1] || "strand.json";
-  const dataSourcePath = args.find((arg) => arg.startsWith("--data="))?.split("=")[1];
-  const executionPath = args.find((arg) => arg.startsWith("--execution="))?.split("=")[1];
+    positionalArgs[0] || getFlagValue(args, "--config") || "strand.json";
+
+  // Parse data path: positional[1] or --data flag
+  const dataSourcePath = positionalArgs[1] || getFlagValue(args, "--data");
+
+  // Parse execution path
+  const executionPath = getFlagValue(args, "--execution");
+
   const useSymlink = !args.includes("--copy");
-  const basicMode = args.includes("--basic") || args.includes("-b");
+
+  // TUI is now the default! Use --headless to disable
+  const headlessMode = args.includes("--headless");
+
   const validateMode = args.includes("--validate") || args.includes("-v");
   const cleanupMode = args.includes("--cleanup");
   const skipConfirmation = args.includes("-y");
   const startNew = args.includes("--start-new");
+  const forceMode = args.includes("--force");
   const initMode = args.includes("--init");
   // Note: Config-related args (port, model, anthropicBaseUrl, autostart, withoutProxy)
   // are now parsed by parseCliArgs() and handled by resolveSettings()
@@ -116,26 +249,39 @@ async function main() {
     console.log(`
 Strandweave Runtime - Codon Orchestration
 
-Usage: bun server/index.ts [options]
+Usage: strandweave [strand-path] [data-path] [options]
+
+Arguments:
+  strand-path               Path to strand config, or remote Git URL (default: strand.json)
+                            Remote URLs: https://github.com/user/repo#branch
+  data-path                 Path to data file/directory, or "-" for stdin (default: cwd)
 
 Options:
   --init                    Initialize a new strand in current directory
-  --config=<path>           Path to strand configuration file (default: strand.json)
-  --data=<path>             Path to data file or directory (default: current directory)
-  --execution=<path>        Resume in specific execution directory
-  --start-new               Force creation of a new execution directory
+  --config <path>           Path to strand configuration file (alternative to positional arg)
+  --data <path>             Path to data file or directory, or "-" for stdin
+  --input <text>            Use inline text as data input (highest priority)
+  --execution <path>        Resume in specific execution directory
+  --start-new               Start a new execution (creates or reuses directory)
+  --force                   Force operation in directories with existing .strandweave/
   --copy                    Copy data instead of symlinking (for compatibility)
-  --port=<port>             WebSocket server port (default: 7777)
-  --basic, -b               Run in basic TUI mode
+  --port <port>             WebSocket server port (default: 7777)
+  --headless                Run without TUI (for CI/CD and scripts)
   --validate, -v            Validate configuration without running
   --cleanup                 Clean up execution directories
   -y                        Skip confirmation prompts
   --no-autostart            Don't automatically start codons
-  --model=<sonnet|opus>     Override model for all codons (ignores per-codon settings)
-  --anthropic-base-url=<url> Custom Anthropic API base URL
-  --without-proxy           Disable the proxy server
-  --idle-timeout=<seconds>  Idle timeout for WebSocket and proxy servers in seconds (0-255, default: 20)
+  --model <model>           Override model for all codons (ignores per-codon settings)
+  --anthropic-base-url <url> Custom Anthropic API base URL
+  --proxy                   Enable the LLM proxy server (disabled by default)
+  --idle-timeout <seconds>  Idle timeout for WebSocket and proxy servers (0-255, default: 0)
   --help, -h                Show this help message
+
+Execution Safety:
+  Strandweave implements a three-tier safety system for execution directories:
+  - Tier 1: Cannot use ~/.strandweave-executions/ directly (reserved for auto-managed)
+  - Tier 2: Directories with existing .strandweave/ require --force (backs up existing)
+  - Tier 3: Non-empty directories show warning and prompt for confirmation
 
 Execution Isolation:
   Strandweave runs in an isolated execution directory separate from your data.
@@ -149,34 +295,32 @@ Template Variables:
 
 Examples:
   # Run with default data (current directory)
-  bun server/index.ts
+  strandweave
 
-  # Run with specific data directory
-  bun server/index.ts --data=/path/to/project
+  # Run with specific strand and data (positional args)
+  strandweave ./my-strand.json ./my-data
 
-  # Run with specific data file
-  bun server/index.ts --data=/path/to/file.txt
+  # Use inline text as input
+  strandweave strand.json --input "Analyze this text"
 
-  # Resume specific execution
-  bun server/index.ts --execution=/home/.strandweave-executions/1234-abc
+  # Pipe from stdin
+  echo "Design a REST API" | strandweave strand.json -
 
-  # Start fresh execution (ignore existing)
-  bun server/index.ts --data=/path/to/project --start-new
+  # Pipe file contents to stdin
+  cat spec.md | strandweave strand.json --data -
 
-  # Start fresh in specific empty directory
-  bun server/index.ts --data=/path/to/project --execution=/path/to/empty/dir --start-new
+  # Run a strand from a GitHub repository
+  strandweave https://github.com/user/repo ./my-data
 
-  # Copy data instead of symlinking (for Windows/permissions issues)
-  bun server/index.ts --data=/path/to/project --copy
+  # Run a specific branch/tag from a remote repo
+  strandweave https://github.com/user/repo#v1.0.0 ./my-data
+  strandweave https://github.com/user/repo/tree/feature-branch ./my-data
 
-  # Clean up all executions for a data directory
-  bun server/index.ts --cleanup --data=/path/to/project
+  # Run in headless mode for CI/CD
+  strandweave --headless
 
   # Override all codon models to use Opus
-  bun server/index.ts --model=opus
-
-  # Run in basic TUI mode with Sonnet override
-  bun server/index.ts --basic --model=sonnet
+  strandweave --model opus
 `);
     process.exit(0);
   }
@@ -206,7 +350,79 @@ Examples:
 
   // Resolve data source path
   const originalCwd = process.cwd(); // Save original CWD
-  const resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
+
+  // Parse --input flag for inline text
+  const inlineInput = getFlagValue(args, "--input");
+
+  // Determine resolved data path based on input mode
+  let resolvedDataPath: string;
+  let inputSourceType: "inline-text" | "stdin" | "path" = "path";
+
+  if (inlineInput) {
+    // Inline text provided via --input
+    const tempFile = generateTempFilePath("input");
+    await fs.promises.writeFile(tempFile, inlineInput);
+    resolvedDataPath = tempFile;
+    inputSourceType = "inline-text";
+    console.log(`📝 Using inline text input (${inlineInput.length} chars)`);
+  } else if (dataSourcePath === "-") {
+    // stdin input
+    try {
+      const stdinContent = await readStdin();
+      const tempFile = generateTempFilePath("stdin");
+      await fs.promises.writeFile(tempFile, stdinContent);
+      resolvedDataPath = tempFile;
+      inputSourceType = "stdin";
+      console.log(`📝 Using stdin input (${stdinContent.length} chars)`);
+    } catch (error) {
+      console.error(`❌ ${(error as Error).message}`);
+      process.exit(1);
+    }
+  } else {
+    // Normal path (existing behavior)
+    resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
+  }
+
+  // Resolve config path before execution setup (needed for strand hash)
+  // Handle remote strands (git URLs)
+  let absoluteConfigPath: string;
+
+  if (isRemoteStrandUrl(configPath)) {
+    console.log(`\n🌐 Fetching remote strand: ${configPath}`);
+
+    try {
+      const cached = await resolveRemoteStrand(configPath);
+      absoluteConfigPath = cached.strandPath;
+
+      if (cached.wasFresh) {
+        console.log(
+          `  📦 Using cached version (fetched ${cached.cachedAt.toLocaleString()})`
+        );
+      } else {
+        console.log(`  ✅ Cloned to cache`);
+      }
+
+      // Show strand summary (no confirmation needed - "power user" model)
+      const parsed = await import("./remote-strand.js").then((m) =>
+        m.parseRemoteStrandUrl(configPath)
+      );
+      const summary = getStrandSummary(
+        absoluteConfigPath,
+        configPath,
+        parsed.ref
+      );
+      displayStrandSummary(summary);
+    } catch (error) {
+      console.error(
+        `\n❌ Failed to fetch remote strand: ${(error as Error).message}`
+      );
+      process.exit(1);
+    }
+  } else {
+    absoluteConfigPath = path.isAbsolute(configPath)
+      ? configPath
+      : path.resolve(originalCwd, configPath);
+  }
 
   // Set up execution environment
   let executionSetup: ExecutionSetup;
@@ -214,12 +430,21 @@ Examples:
     executionSetup = await setupExecutionEnvironment({
       readOnlySourceDataPath: resolvedDataPath,
       executionPath: executionPath ? path.resolve(executionPath) : undefined,
-      useSymlink,
+      // For inline text and stdin, always copy (temp files shouldn't be symlinked)
+      useSymlink: inputSourceType === "path" ? useSymlink : false,
       startNew,
+      forceMode,
+      skipConfirmation,
+      strandPath: absoluteConfigPath,
     });
   } catch (error) {
     console.error(`❌ Execution setup failed: ${(error as Error).message}`);
     process.exit(1);
+  }
+
+  // Log input source type if not a regular path
+  if (inputSourceType !== "path") {
+    console.log(`📥 Input type: ${inputSourceType}`);
   }
 
   console.log(`📁 Data source: ${executionSetup.readOnlySourceDataPath}`);
@@ -247,10 +472,7 @@ Examples:
   }
 
   // Load and validate configuration
-  // Config path is resolved relative to original CWD, not execution dir
-  const absoluteConfigPath = path.isAbsolute(configPath)
-    ? configPath
-    : path.resolve(originalCwd, configPath);
+  // Config path already resolved above before execution setup
 
   // Parse CLI arguments into structured config
   const cliArgs = parseCliArgs(args);
@@ -267,7 +489,7 @@ Examples:
   // Initialize LLM Provider Registry singleton before ANY config parsing/validation
   // This must happen before validateStrand() since Zod transforms use it for model validation
   const validationLogger = new Logger(
-    path.join(executionSetup.executionPath, "model-validation.log"),
+    path.join(executionSetup.executionPath, "model-validation.log")
   );
   LlmProviderRegistry.getInstance({
     logger: validationLogger,
@@ -282,23 +504,35 @@ Examples:
       const validationResult = await validateStrand(
         absoluteConfigPath,
         executionSetup.executionPath, // Changed from readOnlySourceData
-        validationLogger,
+        validationLogger
       );
 
       // Print summary
       console.log(`✅ Configuration is valid!\n`);
       console.log(`📋 Summary:`);
       console.log(`  - Codons: ${validationResult.codonCount}`);
-      console.log(`  - Total prompt files: ${validationResult.promptFileCount}`);
-      console.log(`  - Total system prompt files: ${validationResult.systemPromptFileCount}`);
-      console.log(`  - Rig setup operations: ${validationResult.rigSetupCount}`);
-      console.log(`  - Codons with file watching: ${validationResult.trackingCodonCount}`);
-      console.log(`  - Codons with checkpoints: ${validationResult.checkpointCodonCount}`);
+      console.log(
+        `  - Total prompt files: ${validationResult.promptFileCount}`
+      );
+      console.log(
+        `  - Total system prompt files: ${validationResult.systemPromptFileCount}`
+      );
+      console.log(
+        `  - Rig setup operations: ${validationResult.rigSetupCount}`
+      );
+      console.log(
+        `  - Codons with file watching: ${validationResult.trackingCodonCount}`
+      );
+      console.log(
+        `  - Codons with checkpoints: ${validationResult.checkpointCodonCount}`
+      );
 
       // Display environment variables
       const hasSystemVars =
-        Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
-      const hasCodonVars = validationResult.environmentVariables.fromCodons.length > 0;
+        Object.keys(validationResult.environmentVariables.fromSystem).length >
+        0;
+      const hasCodonVars =
+        validationResult.environmentVariables.fromCodons.length > 0;
 
       if (hasSystemVars || hasCodonVars) {
         console.log(`\n🔧 Environment Variables:`);
@@ -306,7 +540,7 @@ Examples:
         if (hasSystemVars) {
           console.log(`\n  From System (STRANDWEAVE_ prefixed):`);
           for (const [key, value] of Object.entries(
-            validationResult.environmentVariables.fromSystem,
+            validationResult.environmentVariables.fromSystem
           )) {
             console.log(`    - ${key}: ${value}`);
           }
@@ -314,8 +548,11 @@ Examples:
 
         if (hasCodonVars) {
           console.log(`\n  From Codon Configurations:`);
-          for (const codonEnv of validationResult.environmentVariables.fromCodons) {
-            console.log(`    Codon "${codonEnv.codonName}" (${codonEnv.codonId}):`);
+          for (const codonEnv of validationResult.environmentVariables
+            .fromCodons) {
+            console.log(
+              `    Codon "${codonEnv.codonName}" (${codonEnv.codonId}):`
+            );
             for (const [key, value] of Object.entries(codonEnv.variables)) {
               console.log(`      - ${key}: ${value}`);
             }
@@ -337,7 +574,7 @@ Examples:
     const { codons, warnings } = await validateStrand(
       absoluteConfigPath,
       executionSetup.executionPath, // Changed from readOnlySourceData
-      validationLogger,
+      validationLogger
     );
 
     // Log any non-fatal warnings
@@ -373,16 +610,19 @@ Examples:
     const server = new StrandweaveRuntime(serverConfig);
     await server.start();
 
-    if (basicMode) {
+    // TUI is now the default. Use --headless to disable.
+    if (!headlessMode) {
       // Give server a moment to start before connecting
       setTimeout(() => {
         new BasicTUI(server);
       }, 100);
-      console.log("🎮 Running in basic TUI mode");
+      console.log("🎮 Running in TUI mode (use --headless to disable)");
     }
   } catch (error) {
     console.error(
-      `Failed to start server: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to start server: ${
+        error instanceof Error ? error.message : String(error)
+      }`
     );
     process.exit(1);
   }

@@ -52,7 +52,7 @@ export function createTestCodon(codonData: {
   appendSystemPromptFile?: string | string[];
   appendSystemPromptText?: string;
   description?: string;
-  trackedFiles?: string[];
+  checkpointedFiles?: string[];
   env?: Record<string, string>;
   rigSetup?: unknown[];
   checkpoints?: unknown[];

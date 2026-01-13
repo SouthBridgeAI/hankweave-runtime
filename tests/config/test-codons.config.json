@@ -21,7 +21,7 @@
         "./noTodosPrompt.md"
       ],
       "description": "Write three pick one",
-      "trackedFiles": ["notes/**/*", "*.md"],
+      "checkpointedFiles": ["notes/**/*", "*.md"],
       "outputFiles": [
         {
           "copy": ["notes/favorite_poem.txt"],
@@ -53,7 +53,7 @@
       "continuationMode": "continue-previous",
       "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "description": "Write one more",
-      "trackedFiles": ["notes/**/*"],
+      "checkpointedFiles": ["notes/**/*"],
       "outputFiles": [
         {
           "copy": ["notes/second_favorite_poem.txt"],
@@ -101,7 +101,7 @@
       "continuationMode": "fresh",
       "description": "Convert poems to code",
       "appendSystemPromptFile": ["./noTodosPrompt.md"],
-      "trackedFiles": [
+      "checkpointedFiles": [
         "typescript_code/src/**/*.ts",
         "typescript_code/package.json"
       ],

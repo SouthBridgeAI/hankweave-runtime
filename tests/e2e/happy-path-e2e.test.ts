@@ -155,7 +155,7 @@ interface TestState {
     gitDirExists: boolean;
     commitMessages: string[];
     branches: string[];
-    trackedFiles: string[];
+    checkpointedFiles: string[];
   };
   // State-based fields for new state management
   completedCodons: Array<{
@@ -526,7 +526,7 @@ async function validateCheckpointSystem(): Promise<void> {
     gitDirExists: fs.existsSync(gitDir),
     commitMessages: [],
     branches: [],
-    trackedFiles: [],
+    checkpointedFiles: [],
   };
 
   if (testState.checkpointValidation.gitDirExists) {
@@ -581,7 +581,7 @@ async function validateCheckpointSystem(): Promise<void> {
         },
         encoding: "utf-8",
       });
-      testState.checkpointValidation.trackedFiles = gitFiles.trim()
+      testState.checkpointValidation.checkpointedFiles = gitFiles.trim()
         ? gitFiles
             .trim()
             .split("\n")

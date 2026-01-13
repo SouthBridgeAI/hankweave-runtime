@@ -88,7 +88,7 @@ describe("LLM proxy", () => {
               promptFile: "prompts/1-analyze.md",
               model: "sonnet",
               continuationMode: "fresh",
-              trackedFiles: ["src/**/*.ts", "analysis.md"],
+              checkpointedFiles: ["src/**/*.ts", "analysis.md"],
             },
             {
               id: "codon-2-implementation",
@@ -96,7 +96,7 @@ describe("LLM proxy", () => {
               promptFile: "prompts/2-implement.md",
               model: "sonnet",
               continuationMode: "continue-previous",
-              trackedFiles: ["src/**/*.ts"],
+              checkpointedFiles: ["src/**/*.ts"],
             },
           ],
         },
@@ -121,7 +121,7 @@ describe("LLM proxy", () => {
     );
   });
 
-  test("runs on server port + 1 by default", async (done) => {
+  test("runs on server port + 1 when enabled", async (done) => {
     expect(configPath).toBeDefined();
 
     const tempDir = path.dirname(configPath!);
@@ -134,6 +134,7 @@ describe("LLM proxy", () => {
         port,
         testMode: "integration",
         cwd: tempDir,
+        proxy: true, // Proxy is off by default, enable it for this test
       },
       async (executionDir) => {
         expect(executionDir).toBeDefined();

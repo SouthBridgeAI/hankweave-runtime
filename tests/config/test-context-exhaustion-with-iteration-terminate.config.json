@@ -6,7 +6,7 @@
     "model": "sonnet",
     "continuationMode": "fresh",
     "description": "Setup for context exhaustion test",
-    "trackedFiles": ["large_content/**/*"],
+    "checkpointedFiles": ["large_content/**/*"],
     "appendSystemPromptFile": ["./noTodosPrompt.md"],
     "outputFiles": []
   },
@@ -24,7 +24,7 @@
         "model": "sonnet",
         "continuationMode": "continue-previous",
         "description": "Generate massive content",
-        "trackedFiles": ["large_content/**/*"],
+        "checkpointedFiles": ["large_content/**/*"],
         "appendSystemPromptFile": ["./noTodosPrompt.md"],
         "outputFiles": []
       },
@@ -35,7 +35,7 @@
         "model": "sonnet",
         "continuationMode": "continue-previous",
         "description": "Analyze all accumulated content",
-        "trackedFiles": ["large_content/**/*"],
+        "checkpointedFiles": ["large_content/**/*"],
         "appendSystemPromptFile": ["./noTodosPrompt.md"],
         "outputFiles": []
       }
@@ -48,7 +48,7 @@
     "model": "sonnet",
     "continuationMode": "fresh",
     "description": "Final codon that should never execute",
-    "trackedFiles": ["large_content/**/*"],
+    "checkpointedFiles": ["large_content/**/*"],
     "appendSystemPromptFile": ["./noTodosPrompt.md"],
     "outputFiles": []
   }

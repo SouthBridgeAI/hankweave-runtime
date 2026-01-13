@@ -62,7 +62,7 @@ A **Codon** is the fundamental unit of work in the Strandweave system. It repres
   ],
 
   // Optional file tracking
-  "trackedFiles": [
+  "checkpointedFiles": [
     "src/**/*.ts",    // All TypeScript files in src
     "*.json",         // All JSON files in root
     "!node_modules"   // Exclude node_modules
@@ -348,7 +348,7 @@ This is the key to building multi-turn, context-aware workflows. The server will
 
 ### File Tracking & Checkpointing
 
-When you specify `trackedFiles`, you are enabling two powerful features:
+When you specify `checkpointedFiles`, you are enabling two powerful features:
 
 1. **Live Monitoring**: The server will watch these files for any changes made by Claude's tool use and stream `file.updated` events to the client in real-time.
 
@@ -371,7 +371,7 @@ File tracking uses standard glob patterns with some extensions:
 **Examples:**
 
 ```json
-"trackedFiles": [
+"checkpointedFiles": [
   "src/**/*.ts",     // All TypeScript files in src (recursive)
   "*.json",          // JSON files in project root only
   "docs/**/*",       // Everything in docs directory
@@ -389,7 +389,7 @@ File tracking uses standard glob patterns with some extensions:
 
 #### Important Notes
 
-- If no `trackedFiles` are specified, no checkpoints will be created
+- If no `checkpointedFiles` are specified, no checkpoints will be created
 - Checkpoints only include files that exist and match the patterns
 - Deleted files are tracked and will be restored on rollback
 - Symlinks are resolved and the target files are tracked

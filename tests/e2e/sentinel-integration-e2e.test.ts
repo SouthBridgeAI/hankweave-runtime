@@ -142,7 +142,7 @@ describe("Sentinel Integration: With Sentinels", () => {
         promptFile: path.join(promptsDir, "codon1.md"),
         model: "sonnet",
         continuationMode: "fresh",
-        trackedFiles: ["*.txt"],
+        checkpointedFiles: ["*.txt"],
         sentinels: [
           { sentinelConfig: path.join(sentinelsDir, "text-narrator.json") },
           { sentinelConfig: path.join(sentinelsDir, "entity-tracker.json") },
@@ -593,7 +593,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
         promptFile: path.join(promptsDir, "codon1.md"),
         model: "sonnet",
         continuationMode: "fresh",
-        trackedFiles: ["*.txt"],
+        checkpointedFiles: ["*.txt"],
         // NO sentinels field
       },
     ];

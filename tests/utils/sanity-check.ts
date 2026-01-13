@@ -49,11 +49,11 @@ if (fs.existsSync(testConfigPath)) {
     const codons = strandFile.strand || [];
     console.log(`\nCodons to run:`);
     codons.forEach(
-      (codon: { id?: string; name?: string; model?: string; trackedFiles?: string[] }) => {
+      (codon: { id?: string; name?: string; model?: string; checkpointedFiles?: string[] }) => {
         console.log(`  - ${colors.yellow}${codon.id}${colors.reset}: ${codon.name}`);
         console.log(`    Model: ${codon.model}`);
         console.log(
-          `    Tracked Files: ${codon.trackedFiles ? codon.trackedFiles.join(", ") : "none"}`,
+          `    Tracked Files: ${codon.checkpointedFiles ? codon.checkpointedFiles.join(", ") : "none"}`,
         );
       },
     );

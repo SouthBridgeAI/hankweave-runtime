@@ -446,7 +446,7 @@ describe("validateStrand", () => {
         model: "opus",
         continuationMode: "fresh",
         promptFile: "./prompt1.md",
-        trackedFiles: ["*.md"],
+        checkpointedFiles: ["*.md"],
       },
       {
         id: "codon-2",
@@ -455,7 +455,7 @@ describe("validateStrand", () => {
         continuationMode: "continue-previous",
         promptFile: "./prompt2.md",
         appendSystemPromptFile: "./system.md",
-        trackedFiles: ["*.js"],
+        checkpointedFiles: ["*.js"],
         rigSetup: [
           {
             type: "copy",
@@ -724,7 +724,7 @@ describe("validateStrand", () => {
         model: "opus",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
-        // No trackedFiles
+        // No checkpointedFiles
       },
       {
         id: "codon-2",
@@ -739,7 +739,7 @@ describe("validateStrand", () => {
     const result = await validateStrand(configPath, projectPath, testLogger);
 
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toContain("doesn't track any files");
+    expect(result.warnings[0]).toContain("doesn't checkpoint any files");
   });
 
   test("warns when continuing from loop whose last codon has no output", async () => {
@@ -761,7 +761,7 @@ describe("validateStrand", () => {
             model: "opus",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
-            // No trackedFiles - this is the last codon in the loop
+            // No checkpointedFiles - this is the last codon in the loop
           },
         ],
       },
@@ -780,7 +780,7 @@ describe("validateStrand", () => {
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Continues from previous loop");
     expect(result.warnings[0]).toContain("whose last codon");
-    expect(result.warnings[0]).toContain("doesn't track any files");
+    expect(result.warnings[0]).toContain("doesn't checkpoint any files");
   });
 
   test("throws on empty command", async () => {

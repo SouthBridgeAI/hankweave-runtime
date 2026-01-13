@@ -226,17 +226,43 @@ export class BasicTUI {
 
       case "codon.started": {
         console.log(`\n${timestamp} ${COLORS.cyan}${COLORS.bold}Codon Started${COLORS.reset}`);
-        this.drawBox(
-          event.data.codonName,
-          [
-            `Session: ${COLORS.dim}${event.data.sessionId}${COLORS.reset}`,
-            ...(event.data.previousSessionId
-              ? [`Continuing from: ${COLORS.dim}${event.data.previousSessionId}${COLORS.reset}`]
-              : []),
-            ...(event.data.codonDescription ? [`${event.data.codonDescription}`] : []),
-          ],
-          COLORS.cyan,
-        );
+
+        // Build info lines for the box
+        const infoLines: string[] = [
+          `Session: ${COLORS.dim}${event.data.sessionId}${COLORS.reset}`,
+        ];
+
+        if (event.data.previousSessionId) {
+          infoLines.push(
+            `Continuing from: ${COLORS.dim}${event.data.previousSessionId}${COLORS.reset}`,
+          );
+        }
+
+        // Display prompt metadata from frontmatter if present
+        if (event.data.promptMetadata) {
+          const meta = event.data.promptMetadata;
+          if (meta.name) {
+            infoLines.push(`📝 Prompt: ${meta.name}`);
+          }
+          if (meta.description) {
+            infoLines.push(`   ${COLORS.dim}${meta.description}${COLORS.reset}`);
+          }
+          if (meta.author) {
+            infoLines.push(`   Author: ${COLORS.dim}${meta.author}${COLORS.reset}`);
+          }
+          if (meta.version) {
+            infoLines.push(`   Version: ${COLORS.dim}${meta.version}${COLORS.reset}`);
+          }
+          if (meta.tags && meta.tags.length > 0) {
+            infoLines.push(`   Tags: ${COLORS.dim}${meta.tags.join(", ")}${COLORS.reset}`);
+          }
+        }
+
+        if (event.data.codonDescription) {
+          infoLines.push(event.data.codonDescription);
+        }
+
+        this.drawBox(event.data.codonName, infoLines, COLORS.cyan);
         break;
       }
 

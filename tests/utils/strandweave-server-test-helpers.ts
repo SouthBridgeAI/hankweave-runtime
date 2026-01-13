@@ -450,12 +450,17 @@ export async function launchStrandweave(
   let spawnArgs: string[];
   let needsShell = false;
 
+  // Use space-separated syntax (not --flag=value which is deprecated)
   const serverArgs = [
-    "--basic",
-    `--config=${configPath}`,
-    `--data=${dataSourcePath}`,
-    `--execution=${executionDir}`,
-    `--port=${port}`,
+    "--headless",
+    "--config",
+    configPath,
+    "--data",
+    dataSourcePath,
+    "--execution",
+    executionDir,
+    "--port",
+    String(port),
   ];
 
   if (options.commandOverride) {

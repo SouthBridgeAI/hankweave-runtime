@@ -46,7 +46,7 @@ describe("resolveSettings - Integration Tests", () => {
     // Should have default values
     expect(result.port).toBe(7777);
     expect(result.autostart).toBe(true);
-    expect(result.withoutProxy).toBe(false);
+    expect(result.withoutProxy).toBe(true); // Proxy is off by default
   });
 
   test("merges runtime config file (layer 2)", () => {
@@ -217,7 +217,7 @@ describe("resolveSettings - Integration Tests", () => {
 
     expect(result.port).toBe(8080); // Runtime config wins
     expect(result.autostart).toBe(false); // Runtime config wins
-    expect(result.withoutProxy).toBe(false); // Default (not overridden)
+    expect(result.withoutProxy).toBe(true); // Default (proxy off by default, not overridden)
   });
 
   test("all 5 layers work together with correct precedence", () => {

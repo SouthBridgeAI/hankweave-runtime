@@ -23,7 +23,7 @@
       "./noTodosPrompt.md"
     ],
     "description": "Write three pick one",
-    "trackedFiles": [
+    "checkpointedFiles": [
       "notes/**/*",
       "*.md"
     ],
@@ -64,7 +64,7 @@
           "./noTodosPrompt.md"
         ],
         "description": "Write another poem",
-        "trackedFiles": [
+        "checkpointedFiles": [
           "notes/**/*"
         ],
         "sentinels": [
@@ -83,7 +83,7 @@
           "./noTodosPrompt.md"
         ],
         "description": "Review the poem",
-        "trackedFiles": [
+        "checkpointedFiles": [
           "notes/**/*"
         ],
         "sentinels": [
@@ -120,7 +120,7 @@
     "appendSystemPromptFile": [
       "./noTodosPrompt.md"
     ],
-    "trackedFiles": [
+    "checkpointedFiles": [
       "typescript_code/src/**/*.ts",
       "typescript_code/package.json"
     ]

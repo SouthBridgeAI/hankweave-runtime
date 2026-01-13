@@ -143,8 +143,8 @@ export async function runCheckpointExclusionTests(testDir: string) {
     expect(gitFiles).not.toContain(".env");
     expect(gitFiles).not.toContain(".DS_Store");
 
-    // Verify that the .gitignore itself IS tracked (since it's part of trackedFiles)
-    // trackedFiles includes "typescript_code/package.json" so .gitignore won't be tracked
+    // Verify that the .gitignore itself IS tracked (since it's part of checkpointedFiles)
+    // checkpointedFiles includes "typescript_code/package.json" so .gitignore won't be tracked
     // unless it matches a pattern
 
     // Verify that allowed TypeScript files in src ARE tracked

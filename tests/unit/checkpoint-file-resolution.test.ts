@@ -65,8 +65,8 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
-    expect(trackedFiles.trim()).toBe("");
+    const checkpointedFiles = await new Response(proc.stdout).text();
+    expect(checkpointedFiles.trim()).toBe("");
   });
 
   test("should find files matching accumulated patterns", async () => {
@@ -98,12 +98,12 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
+    const checkpointedFiles = await new Response(proc.stdout).text();
 
-    expect(trackedFiles).toContain("src/main.ts");
-    expect(trackedFiles).toContain("docs/README.md");
-    expect(trackedFiles).toContain("package.json");
-    expect(trackedFiles).not.toContain("src/utils.js"); // .js not in patterns
+    expect(checkpointedFiles).toContain("src/main.ts");
+    expect(checkpointedFiles).toContain("docs/README.md");
+    expect(checkpointedFiles).toContain("package.json");
+    expect(checkpointedFiles).not.toContain("src/utils.js"); // .js not in patterns
   });
 
   test("should respect gitignore rules", async () => {
@@ -138,14 +138,14 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
+    const checkpointedFiles = await new Response(proc.stdout).text();
 
-    expect(trackedFiles).toContain("src.js");
-    expect(trackedFiles).toContain("README.md");
-    expect(trackedFiles).toContain(".gitignore");
-    expect(trackedFiles).not.toContain("node_modules/package.json");
-    expect(trackedFiles).not.toContain("debug.log");
-    expect(trackedFiles).not.toContain(".env");
+    expect(checkpointedFiles).toContain("src.js");
+    expect(checkpointedFiles).toContain("README.md");
+    expect(checkpointedFiles).toContain(".gitignore");
+    expect(checkpointedFiles).not.toContain("node_modules/package.json");
+    expect(checkpointedFiles).not.toContain("debug.log");
+    expect(checkpointedFiles).not.toContain(".env");
   });
 
   test("should handle pattern overlaps correctly", async () => {
@@ -173,14 +173,14 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
+    const checkpointedFiles = await new Response(proc.stdout).text();
 
-    expect(trackedFiles).toContain("src/main.ts");
-    expect(trackedFiles).toContain("src/utils.ts");
-    expect(trackedFiles).toContain("test.ts");
+    expect(checkpointedFiles).toContain("src/main.ts");
+    expect(checkpointedFiles).toContain("src/utils.ts");
+    expect(checkpointedFiles).toContain("test.ts");
 
     // Count occurrences to ensure no duplicates
-    const lines = trackedFiles
+    const lines = checkpointedFiles
       .trim()
       .split("\n")
       .filter((line) => line.length > 0);
@@ -209,9 +209,9 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
-    expect(trackedFiles).toContain("file1.txt");
-    expect(trackedFiles).toContain("file2.txt");
+    const checkpointedFiles = await new Response(proc.stdout).text();
+    expect(checkpointedFiles).toContain("file1.txt");
+    expect(checkpointedFiles).toContain("file2.txt");
 
     // Add a new file and modify existing
     await fs.promises.writeFile(path.join(tempDir, "file3.txt"), "content 3");
@@ -285,15 +285,15 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
+    const checkpointedFiles = await new Response(proc.stdout).text();
 
-    expect(trackedFiles).toContain("src/index.ts");
-    expect(trackedFiles).toContain("src/components/Button.tsx");
-    expect(trackedFiles).toContain("src/components/ui/Modal.tsx");
-    expect(trackedFiles).toContain("src/utils/helpers/format.ts");
-    expect(trackedFiles).toContain("tests/unit/test.spec.ts");
-    expect(trackedFiles).toContain("docs/api/README.md");
-    expect(trackedFiles).toContain("package.json");
+    expect(checkpointedFiles).toContain("src/index.ts");
+    expect(checkpointedFiles).toContain("src/components/Button.tsx");
+    expect(checkpointedFiles).toContain("src/components/ui/Modal.tsx");
+    expect(checkpointedFiles).toContain("src/utils/helpers/format.ts");
+    expect(checkpointedFiles).toContain("tests/unit/test.spec.ts");
+    expect(checkpointedFiles).toContain("docs/api/README.md");
+    expect(checkpointedFiles).toContain("package.json");
   });
 
   test("should handle empty directories gracefully", async () => {
@@ -320,8 +320,8 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
-    expect(trackedFiles.trim()).toBe("");
+    const checkpointedFiles = await new Response(proc.stdout).text();
+    expect(checkpointedFiles.trim()).toBe("");
   });
 
   test("should handle special characters in filenames", async () => {
@@ -346,12 +346,12 @@ describe("Checkpoint File Resolution", () => {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
-    const trackedFiles = await new Response(proc.stdout).text();
+    const checkpointedFiles = await new Response(proc.stdout).text();
 
-    expect(trackedFiles).toContain("file with spaces.txt");
-    expect(trackedFiles).toContain("file-with-dashes.txt");
-    expect(trackedFiles).toContain("file_with_underscores.txt");
-    expect(trackedFiles).toContain("file.with.dots.txt");
+    expect(checkpointedFiles).toContain("file with spaces.txt");
+    expect(checkpointedFiles).toContain("file-with-dashes.txt");
+    expect(checkpointedFiles).toContain("file_with_underscores.txt");
+    expect(checkpointedFiles).toContain("file.with.dots.txt");
   });
 
   test("should clear patterns correctly", async () => {

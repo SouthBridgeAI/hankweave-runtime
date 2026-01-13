@@ -740,7 +740,8 @@ export interface TestServerConfig {
   executionDir?: string; // Explicit execution directory
   useExecutionFlag?: boolean; // Whether to use --execution flag
   startNew?: boolean; // Force new execution
-  withoutProxy?: boolean; // Run server without proxy
+  withoutProxy?: boolean; // Run server without proxy (deprecated - proxy is now off by default)
+  proxy?: boolean; // Enable proxy server (proxy is off by default)
   commandOverride?: {
     // Override the default command (bun server/index.ts)
     command: string; // e.g., "npx", "bunx", "pnpm"
@@ -778,19 +779,31 @@ export function startServer(config: TestServerConfig): ChildProcess {
   }
 
   // Build args: baseArgs + config flags
-  const args = [...baseArgs, `--config=${config.configFile}`, `--port=${config.port}`];
+  // Always include --headless to disable TUI in tests (TUI is now the default)
+  // Use space-separated syntax (not --flag=value which is deprecated)
+  const args = [
+    ...baseArgs,
+    "--headless",
+    "--config",
+    config.configFile,
+    "--port",
+    String(config.port),
+  ];
 
   // Add optional flags
+  if (config.proxy) {
+    args.push("--proxy"); // Enable proxy (proxy is off by default)
+  }
   if (config.withoutProxy) {
-    args.push("--without-proxy");
+    args.push("--without-proxy"); // Deprecated - proxy is now off by default
   }
 
   if (config.useDataFlag && config.dataSourceDir) {
-    args.push(`--data=${config.dataSourceDir}`);
+    args.push("--data", config.dataSourceDir);
   }
 
   if (config.useExecutionFlag && config.executionDir) {
-    args.push(`--execution=${config.executionDir}`);
+    args.push("--execution", config.executionDir);
   }
 
   if (config.startNew) {

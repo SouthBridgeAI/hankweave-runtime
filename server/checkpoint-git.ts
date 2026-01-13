@@ -144,7 +144,7 @@ export class CheckpointGit {
   /**
    * Get resolved files for all tracked patterns
    */
-  private async getTrackedFiles(): Promise<string[]> {
+  private async getCheckpointedFiles(): Promise<string[]> {
     if (this.trackedPatterns.size === 0) {
       return [];
     }
@@ -195,7 +195,7 @@ export class CheckpointGit {
     let commitSha: string | null = null;
     try {
       // Get resolved files to add
-      const files = await this.getTrackedFiles();
+      const files = await this.getCheckpointedFiles();
       this.logger.log(`[CHECKPOINT-COMMIT] Resolved ${files.length} files to track`);
       if (files.length > 0) {
         this.logger.log(

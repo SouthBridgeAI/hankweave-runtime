@@ -458,7 +458,7 @@ Codons inside loops can have `rigSetup` operations, but consider:
       "model": "sonnet",
       "continuationMode": "fresh",
       "promptText": "Implement the next feature from the TODO list",
-      "trackedFiles": ["src/**/*.ts"]
+      "checkpointedFiles": ["src/**/*.ts"]
     },
     {
       "id": "test",
@@ -466,7 +466,7 @@ Codons inside loops can have `rigSetup` operations, but consider:
       "model": "sonnet",
       "continuationMode": "continue-previous",
       "promptText": "Write tests for the feature you just implemented",
-      "trackedFiles": ["tests/**/*.ts"]
+      "checkpointedFiles": ["tests/**/*.ts"]
     },
     {
       "id": "review",
@@ -474,7 +474,7 @@ Codons inside loops can have `rigSetup` operations, but consider:
       "model": "opus",
       "continuationMode": "continue-previous",
       "promptText": "Review the implementation and tests. Suggest improvements.",
-      "trackedFiles": ["**/*.ts"]
+      "checkpointedFiles": ["**/*.ts"]
     }
   ]
 }
@@ -489,7 +489,7 @@ Codons inside loops can have `rigSetup` operations, but consider:
     "model": "sonnet",
     "continuationMode": "fresh",
     "promptText": "Initialize the project structure",
-    "trackedFiles": ["**/*"]
+    "checkpointedFiles": ["**/*"]
   },
   {
     "type": "loop",
@@ -503,7 +503,7 @@ Codons inside loops can have `rigSetup` operations, but consider:
         "model": "sonnet",
         "continuationMode": "continue-previous",
         "promptText": "Process the next batch of documents and add to the analysis",
-        "trackedFiles": ["output/**/*"]
+        "checkpointedFiles": ["output/**/*"]
       }
     ]
   },
@@ -513,7 +513,7 @@ Codons inside loops can have `rigSetup` operations, but consider:
     "model": "sonnet",
     "continuationMode": "fresh",
     "promptText": "Read all processed output and create a final summary",
-    "trackedFiles": ["output/**/*", "summary.md"]
+    "checkpointedFiles": ["output/**/*", "summary.md"]
   }
 ]
 ```
@@ -603,7 +603,7 @@ A complete setup sequence:
 ### Basic Patterns
 ```json
 {
-  "trackedFiles": [
+  "checkpointedFiles": [
     "*.js",           // All JS files in root
     "src/**/*.ts",    // All TS files in src (recursive)
     "docs/**/*",      // Everything in docs
@@ -615,7 +615,7 @@ A complete setup sequence:
 ### Advanced Patterns
 ```json
 {
-  "trackedFiles": [
+  "checkpointedFiles": [
     "**/*.{ts,tsx}",        // TypeScript and TSX files
     "src/**/!(*.test).ts",  // Exclude test files
     "!node_modules",        // Exclude node_modules
@@ -771,7 +771,7 @@ Add an `outputFiles` array to your codon configuration (one or more copy groups)
   "promptFile": "./prompts/analyze.md",
   "model": "sonnet",
   "continuationMode": "fresh",
-  "trackedFiles": ["analysis.md"],
+  "checkpointedFiles": ["analysis.md"],
   "outputFiles": [
     {
       "copy": ["analysis.md"]
@@ -844,7 +844,7 @@ The `copy` array supports glob patterns for flexible file selection:
   "promptFile": "./prompts/generate-docs.md",
   "model": "sonnet",
   "continuationMode": "fresh",
-  "trackedFiles": ["docs/**/*.md", "README.md"],
+  "checkpointedFiles": ["docs/**/*.md", "README.md"],
   "outputFiles": [
     {
       "beforeCopy": [
@@ -880,7 +880,7 @@ The `copy` array supports glob patterns for flexible file selection:
   "model": "sonnet",
   "continuationMode": "fresh",
   "promptFile": "./prompts/analyze.md",
-  "trackedFiles": ["analysis.md"],
+  "checkpointedFiles": ["analysis.md"],
   "outputFiles": [
     {
       "copy": ["analysis.md"]
@@ -914,7 +914,7 @@ The `copy` array supports glob patterns for flexible file selection:
         }
       }
     ],
-    "trackedFiles": [
+    "checkpointedFiles": [
       "backend/src/**/*.ts",
       "backend/package.json"
     ],
@@ -937,7 +937,7 @@ The `copy` array supports glob patterns for flexible file selection:
         }
       }
     ],
-    "trackedFiles": [
+    "checkpointedFiles": [
       "frontend/src/**/*.{ts,tsx}",
       "frontend/package.json"
     ]
@@ -948,7 +948,7 @@ The `copy` array supports glob patterns for flexible file selection:
     "model": "sonnet",
     "continuationMode": "continue-previous",
     "promptText": "Connect the frontend to the backend API and create a working login flow",
-    "trackedFiles": [
+    "checkpointedFiles": [
       "frontend/src/**/*.{ts,tsx}",
       "backend/src/**/*.ts"
     ]
@@ -965,7 +965,7 @@ The `copy` array supports glob patterns for flexible file selection:
     "model": "opus",  // Use more capable model for analysis
     "continuationMode": "fresh",
     "promptFile": "./prompts/analyze-for-migration.md",
-    "trackedFiles": ["migration-plan.md"],
+    "checkpointedFiles": ["migration-plan.md"],
     "appendSystemPromptFile": "./prompts/migration-guidelines.md"
   },
   {
@@ -974,7 +974,7 @@ The `copy` array supports glob patterns for flexible file selection:
     "model": "sonnet",
     "continuationMode": "continue-previous",
     "promptText": "Based on your analysis, create comprehensive tests for the legacy code before we migrate it",
-    "trackedFiles": ["tests/**/*.test.js"]
+    "checkpointedFiles": ["tests/**/*.test.js"]
   },
   {
     "id": "migrate-code",
@@ -982,7 +982,7 @@ The `copy` array supports glob patterns for flexible file selection:
     "model": "sonnet",
     "continuationMode": "continue-previous",
     "promptFile": "./prompts/migrate-to-typescript.md",
-    "trackedFiles": [
+    "checkpointedFiles": [
       "src/**/*.ts",
       "src/**/*.js"  // Track both old and new files
     ]
@@ -1101,7 +1101,7 @@ source .env && bun run server
   "continuationMode": "fresh",
   "promptFile": "./prompts/document.md",
   "appendSystemPromptText": "Use JSDoc format for all documentation",
-  "trackedFiles": [
+  "checkpointedFiles": [
     "src/**/*.js",  // Read source files
     "docs/**/*.md"  // Write documentation
   ]
@@ -1116,7 +1116,7 @@ source .env && bun run server
     "name": "Identify Issues",
     "model": "opus",
     "promptText": "Analyze the codebase for code smells and anti-patterns",
-    "trackedFiles": ["refactoring-plan.md"]
+    "checkpointedFiles": ["refactoring-plan.md"]
   },
   {
     "id": "refactor-step-1",
@@ -1124,7 +1124,7 @@ source .env && bun run server
     "model": "sonnet",
     "continuationMode": "continue-previous",
     "promptText": "Refactor the core module based on your analysis",
-    "trackedFiles": ["src/core/**/*.ts"]
+    "checkpointedFiles": ["src/core/**/*.ts"]
   }
 ]
 ```
