@@ -30,9 +30,7 @@ import { getMetadata, Logger } from "./utils.js";
  */
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) {
-    throw new Error(
-      'No input provided on stdin. Use: echo "text" | strandweave strand.json -'
-    );
+    throw new Error('No input provided on stdin. Use: echo "text" | strandweave strand.json -');
   }
 
   const chunks: Buffer[] = [];
@@ -48,9 +46,7 @@ async function readStdin(): Promise<string> {
 function generateTempFilePath(prefix: string): string {
   return path.join(
     os.tmpdir(),
-    `strandweave-${prefix}-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}.txt`
+    `strandweave-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
   );
 }
 
@@ -63,7 +59,7 @@ function getFlagValue(args: string[], flagName: string): string | undefined {
   const equalsIndex = args.findIndex((arg) => arg.startsWith(`${flagName}=`));
   if (equalsIndex !== -1) {
     console.warn(
-      `⚠️  Deprecation warning: '${args[equalsIndex]}' uses deprecated syntax. Use '${flagName} <value>' instead.`
+      `⚠️  Deprecation warning: '${args[equalsIndex]}' uses deprecated syntax. Use '${flagName} <value>' instead.`,
     );
     return args[equalsIndex].split("=")[1];
   }
@@ -200,7 +196,7 @@ async function main() {
         }
       } else {
         console.error(
-          `❌ Error: Unknown argument '${arg}'. Run with --help for available options.`
+          `❌ Error: Unknown argument '${arg}'. Run with --help for available options.`,
         );
         process.exit(1);
       }
@@ -214,7 +210,7 @@ async function main() {
   // Validate positional args count
   if (positionalArgs.length > 2) {
     console.error(
-      `❌ Error: Too many positional arguments. Expected at most 2 (strand-path, data-path), got ${positionalArgs.length}.`
+      `❌ Error: Too many positional arguments. Expected at most 2 (strand-path, data-path), got ${positionalArgs.length}.`,
     );
     process.exit(1);
   }
@@ -222,8 +218,7 @@ async function main() {
   const args = process.argv.slice(2);
 
   // Parse config path: positional[0] or --config flag, default to "strand.json"
-  const configPath =
-    positionalArgs[0] || getFlagValue(args, "--config") || "strand.json";
+  const configPath = positionalArgs[0] || getFlagValue(args, "--config") || "strand.json";
 
   // Parse data path: positional[1] or --data flag
   const dataSourcePath = positionalArgs[1] || getFlagValue(args, "--data");
@@ -395,27 +390,19 @@ Examples:
       absoluteConfigPath = cached.strandPath;
 
       if (cached.wasFresh) {
-        console.log(
-          `  📦 Using cached version (fetched ${cached.cachedAt.toLocaleString()})`
-        );
+        console.log(`  📦 Using cached version (fetched ${cached.cachedAt.toLocaleString()})`);
       } else {
         console.log(`  ✅ Cloned to cache`);
       }
 
       // Show strand summary (no confirmation needed - "power user" model)
       const parsed = await import("./remote-strand.js").then((m) =>
-        m.parseRemoteStrandUrl(configPath)
+        m.parseRemoteStrandUrl(configPath),
       );
-      const summary = getStrandSummary(
-        absoluteConfigPath,
-        configPath,
-        parsed.ref
-      );
+      const summary = getStrandSummary(absoluteConfigPath, configPath, parsed.ref);
       displayStrandSummary(summary);
     } catch (error) {
-      console.error(
-        `\n❌ Failed to fetch remote strand: ${(error as Error).message}`
-      );
+      console.error(`\n❌ Failed to fetch remote strand: ${(error as Error).message}`);
       process.exit(1);
     }
   } else {
@@ -489,7 +476,7 @@ Examples:
   // Initialize LLM Provider Registry singleton before ANY config parsing/validation
   // This must happen before validateStrand() since Zod transforms use it for model validation
   const validationLogger = new Logger(
-    path.join(executionSetup.executionPath, "model-validation.log")
+    path.join(executionSetup.executionPath, "model-validation.log"),
   );
   LlmProviderRegistry.getInstance({
     logger: validationLogger,
@@ -504,35 +491,23 @@ Examples:
       const validationResult = await validateStrand(
         absoluteConfigPath,
         executionSetup.executionPath, // Changed from readOnlySourceData
-        validationLogger
+        validationLogger,
       );
 
       // Print summary
       console.log(`✅ Configuration is valid!\n`);
       console.log(`📋 Summary:`);
       console.log(`  - Codons: ${validationResult.codonCount}`);
-      console.log(
-        `  - Total prompt files: ${validationResult.promptFileCount}`
-      );
-      console.log(
-        `  - Total system prompt files: ${validationResult.systemPromptFileCount}`
-      );
-      console.log(
-        `  - Rig setup operations: ${validationResult.rigSetupCount}`
-      );
-      console.log(
-        `  - Codons with file watching: ${validationResult.trackingCodonCount}`
-      );
-      console.log(
-        `  - Codons with checkpoints: ${validationResult.checkpointCodonCount}`
-      );
+      console.log(`  - Total prompt files: ${validationResult.promptFileCount}`);
+      console.log(`  - Total system prompt files: ${validationResult.systemPromptFileCount}`);
+      console.log(`  - Rig setup operations: ${validationResult.rigSetupCount}`);
+      console.log(`  - Codons with file watching: ${validationResult.trackingCodonCount}`);
+      console.log(`  - Codons with checkpoints: ${validationResult.checkpointCodonCount}`);
 
       // Display environment variables
       const hasSystemVars =
-        Object.keys(validationResult.environmentVariables.fromSystem).length >
-        0;
-      const hasCodonVars =
-        validationResult.environmentVariables.fromCodons.length > 0;
+        Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
+      const hasCodonVars = validationResult.environmentVariables.fromCodons.length > 0;
 
       if (hasSystemVars || hasCodonVars) {
         console.log(`\n🔧 Environment Variables:`);
@@ -540,7 +515,7 @@ Examples:
         if (hasSystemVars) {
           console.log(`\n  From System (STRANDWEAVE_ prefixed):`);
           for (const [key, value] of Object.entries(
-            validationResult.environmentVariables.fromSystem
+            validationResult.environmentVariables.fromSystem,
           )) {
             console.log(`    - ${key}: ${value}`);
           }
@@ -548,11 +523,8 @@ Examples:
 
         if (hasCodonVars) {
           console.log(`\n  From Codon Configurations:`);
-          for (const codonEnv of validationResult.environmentVariables
-            .fromCodons) {
-            console.log(
-              `    Codon "${codonEnv.codonName}" (${codonEnv.codonId}):`
-            );
+          for (const codonEnv of validationResult.environmentVariables.fromCodons) {
+            console.log(`    Codon "${codonEnv.codonName}" (${codonEnv.codonId}):`);
             for (const [key, value] of Object.entries(codonEnv.variables)) {
               console.log(`      - ${key}: ${value}`);
             }
@@ -574,7 +546,7 @@ Examples:
     const { codons, warnings } = await validateStrand(
       absoluteConfigPath,
       executionSetup.executionPath, // Changed from readOnlySourceData
-      validationLogger
+      validationLogger,
     );
 
     // Log any non-fatal warnings
@@ -620,9 +592,7 @@ Examples:
     }
   } catch (error) {
     console.error(
-      `Failed to start server: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+      `Failed to start server: ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exit(1);
   }
