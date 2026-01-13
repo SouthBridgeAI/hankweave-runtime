@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - master
-      # TODO: remove strandweave-npx after merge
-      - strandweave-npx
   pull_request:
     branches:
       - master
