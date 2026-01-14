@@ -8,13 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- 
+- Contributing documentation (CONTRIBUTING.md) with branch model and release workflow
+- Comprehensive validation mode that performs preflight checks without creating directories
+- Tests for validation mode behavior and data source overwriting
+- Pre-flight checks in release script: branch verification, remote sync, and changelog validation
 
 ### Changed
-- 
+- Improved execution directory behavior: `--start-new --force` now properly overwrites `read_only_data_source` link
+- Refactored validation logic into separate `validate-command.ts` module for better separation of concerns
+- Enhanced release automation with develop → release/alpha merge workflow
+- Release script now validates changelog content before releasing
+- CI now runs on both `develop` and `release/alpha` branches
+- Config change warnings now skip when using `--start-new` (user explicitly wants fresh execution)
+- Help text clarifications for `--validate`, `--start-new`, and `--force` flags
 
 ### Fixed
-- 
+- Validation mode no longer creates execution directories (regression from ENG-90)
+- Data source link now properly refreshed when using `--start-new --force` with different data
 
 ## [0.1.35] - 2026-01-13
 
