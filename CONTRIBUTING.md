@@ -38,7 +38,7 @@ Be good.
 
 ## Release Process
 
-Run the appropriate release command from the `develop` branch:
+Make sure `CHANGELOG.md` is up to date. Run the appropriate release command from the `develop` branch:
 
 ```bash
 bun run release:patch  # for bug fixes (0.1.35 → 0.1.36)
