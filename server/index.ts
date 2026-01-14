@@ -19,6 +19,7 @@ import {
   resolveRemoteHank,
 } from "./remote-hank.js";
 import { getMetadata, Logger } from "./utils.js";
+import { runValidation } from "./validate-command.js";
 
 // -------------
 // Helper Functions
@@ -104,12 +105,18 @@ Options:
   --data <path>             Path to data file or directory, or "-" for stdin
   --input <text>            Use inline text as data input (highest priority)
   --execution <path>        Resume in specific execution directory
-  --start-new               Start a new execution (creates or reuses directory)
+  --start-new               Start a new execution (don't resume existing)
+                            - Creates directory if it doesn't exist
+                            - Requires --force if directory has .hankweave/
   --force                   Force operation in directories with existing .hankweave/
+                            - Backs up existing .hankweave.backup-{timestamp}
+                            - Overwrites read_only_data_source link
   --copy                    Copy data instead of symlinking (for compatibility)
   --port <port>             WebSocket server port (default: 7777)
   --headless                Run without TUI (for CI/CD and scripts)
-  --validate, -v            Validate configuration without running
+  --validate, -v            Validate configuration without creating directories
+                            - Performs comprehensive preflight checks
+                            - No filesystem side effects
   --cleanup                 Clean up execution directories
   -y                        Skip confirmation prompts
   --no-autostart            Don't automatically start codons
@@ -253,6 +260,26 @@ Examples:
       : path.resolve(originalCwd, configPath);
   }
 
+  // ========== VALIDATION MODE BRANCH ==========
+  // This block must run BEFORE any execution setup to prevent directory creation
+  if (validateMode) {
+    try {
+      await runValidation({
+        dataPath: resolvedDataPath,
+        configPath: absoluteConfigPath,
+        executionPath: executionPath ? path.resolve(executionPath) : undefined,
+        startNew,
+      });
+      process.exit(0);
+    } catch (error) {
+      console.error(`❌ Validation failed: ${(error as Error).message}`);
+      process.exit(1);
+    }
+  }
+
+  // ========== NORMAL MODE BRANCH ==========
+  // Only reaches here if NOT in validation mode
+
   // Set up execution environment
   let executionSetup: ExecutionSetup;
   try {
@@ -314,78 +341,18 @@ Examples:
 
   // Initialize LLM Provider Registry singleton before ANY config parsing/validation
   // This must happen before validateHank() since Zod transforms use it for model validation
-  const validationLogger = new Logger(
-    path.join(executionSetup.executionPath, "model-validation.log"),
-  );
+  const serverLogger = new Logger(path.join(executionSetup.executionPath, "model-validation.log"));
   LlmProviderRegistry.getInstance({
-    logger: validationLogger,
+    logger: serverLogger,
     performHealthCheckOnInit: false,
   });
 
   try {
-    // Validation mode
-    if (validateMode) {
-      console.log(`\n🔍 Validating configuration: ${absoluteConfigPath}\n`);
-
-      const validationResult = await validateHank(
-        absoluteConfigPath,
-        executionSetup.executionPath, // Changed from readOnlySourceData
-        validationLogger,
-      );
-
-      // Print summary
-      console.log(`✅ Configuration is valid!\n`);
-      console.log(`📋 Summary:`);
-      console.log(`  - Codons: ${validationResult.codonCount}`);
-      console.log(`  - Total prompt files: ${validationResult.promptFileCount}`);
-      console.log(`  - Total system prompt files: ${validationResult.systemPromptFileCount}`);
-      console.log(`  - Rig setup operations: ${validationResult.rigSetupCount}`);
-      console.log(`  - Codons with file watching: ${validationResult.trackingCodonCount}`);
-      console.log(`  - Codons with checkpoints: ${validationResult.checkpointCodonCount}`);
-
-      // Display environment variables
-      const hasSystemVars =
-        Object.keys(validationResult.environmentVariables.fromSystem).length > 0;
-      const hasCodonVars = validationResult.environmentVariables.fromCodons.length > 0;
-
-      if (hasSystemVars || hasCodonVars) {
-        console.log(`\n🔧 Environment Variables:`);
-
-        if (hasSystemVars) {
-          console.log(`\n  From System (HANKWEAVE_ prefixed):`);
-          for (const [key, value] of Object.entries(
-            validationResult.environmentVariables.fromSystem,
-          )) {
-            console.log(`    - ${key}: ${value}`);
-          }
-        }
-
-        if (hasCodonVars) {
-          console.log(`\n  From Codon Configurations:`);
-          for (const codonEnv of validationResult.environmentVariables.fromCodons) {
-            console.log(`    Codon "${codonEnv.codonName}" (${codonEnv.codonId}):`);
-            for (const [key, value] of Object.entries(codonEnv.variables)) {
-              console.log(`      - ${key}: ${value}`);
-            }
-          }
-        }
-      }
-
-      if (validationResult.warnings.length > 0) {
-        console.log(`\n⚠️  Warnings:`);
-        for (const warning of validationResult.warnings) {
-          console.log(`  - ${warning}`);
-        }
-      }
-
-      process.exit(0);
-    }
-
     // Normal server mode - validate config
     const { codons, warnings } = await validateHank(
       absoluteConfigPath,
-      executionSetup.executionPath, // Changed from readOnlySourceData
-      validationLogger,
+      executionSetup.executionPath,
+      serverLogger,
     );
 
     // Log any non-fatal warnings

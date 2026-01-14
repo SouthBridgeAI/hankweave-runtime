@@ -3,10 +3,11 @@ name: CI
 on:
   push:
     branches:
-      - master
+      - develop
+      - release/alpha
   pull_request:
     branches:
-      - master
+      - develop
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,7 +31,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          install-gemini: 'false'
+          install-gemini: "false"
 
       - name: Run linting
         run: bun run lint
