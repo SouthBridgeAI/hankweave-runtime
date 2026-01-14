@@ -122,19 +122,29 @@ function formatModelForOutput(model) {
 // src/agent/gemini.ts
 import { spawn } from "child_process";
 import { createInterface } from "readline";
+import { createWriteStream } from "fs";
+import { mkdir } from "fs/promises";
+import { resolve, isAbsolute } from "path";
 var GeminiCLI = class {
+  // Track current session ID for log files
   constructor(options) {
     this.options = options;
     this.verbose = options.verbose;
   }
   process = null;
   verbose;
+  rawEventStream = null;
+  // For raw agent events (.jsonl)
+  stderrStream = null;
+  // For stderr (.log)
+  stderrBuffer = "";
+  // Buffer for stderr before streams are initialized
+  currentSessionId = "unknown";
   /**
    * Check if gemini CLI is installed
    */
   static async isInstalled() {
-    return new Promise((resolve2) => {
-      // On Windows, use 'where' instead of 'which'
+    return new Promise((resolve3) => {
       const isWindows = process.platform === "win32";
       const whichCommand = isWindows ? "where" : "which";
       const proc = spawn(whichCommand, ["gemini"], { shell: isWindows });
@@ -150,17 +160,154 @@ var GeminiCLI = class {
             version += data.toString();
           });
           versionProc.on("close", () => {
-            resolve2({
+            resolve3({
               found: true,
               path: path.trim(),
               version: version.trim()
             });
           });
         } else {
-          resolve2({ found: false });
+          resolve3({ found: false });
         }
       });
     });
+  }
+  /**
+   * Initialize debug log streams if --debug-dir is provided
+   */
+  async initializeDebugStreams(sessionId) {
+    if (!this.options.debugDir) return;
+    try {
+      const debugDir = isAbsolute(this.options.debugDir) ? this.options.debugDir : resolve(this.options.cwd, this.options.debugDir);
+      await mkdir(debugDir, { recursive: true });
+      const rawEventPath = resolve(debugDir, `session-${sessionId}.raw.jsonl`);
+      this.rawEventStream = createWriteStream(rawEventPath, {
+        flags: "a",
+        // append mode
+        encoding: "utf8"
+      });
+      const stderrPath = resolve(debugDir, `session-${sessionId}.raw.log`);
+      this.stderrStream = createWriteStream(stderrPath, {
+        flags: "a",
+        // append mode
+        encoding: "utf8"
+      });
+      if (this.stderrBuffer) {
+        this.stderrStream.write(this.stderrBuffer);
+        this.stderrBuffer = "";
+      }
+      this.currentSessionId = sessionId;
+    } catch (err) {
+      throw new Error(
+        `Failed to create debug log files in ${this.options.debugDir}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+  /**
+   * Rename debug log streams from session-unknown to session-{sessionId}
+   */
+  async renameDebugStreams(sessionId) {
+    if (!this.options.debugDir || this.currentSessionId === sessionId) return;
+    try {
+      const debugDir = isAbsolute(this.options.debugDir) ? this.options.debugDir : resolve(this.options.cwd, this.options.debugDir);
+      await this.closeDebugStreams();
+      const { rename } = await import("fs/promises");
+      const oldRawEventPath = resolve(debugDir, `session-${this.currentSessionId}.raw.jsonl`);
+      const newRawEventPath = resolve(debugDir, `session-${sessionId}.raw.jsonl`);
+      const oldStderrPath = resolve(debugDir, `session-${this.currentSessionId}.raw.log`);
+      const newStderrPath = resolve(debugDir, `session-${sessionId}.raw.log`);
+      try {
+        await rename(oldRawEventPath, newRawEventPath);
+      } catch (err) {
+        if (this.verbose) {
+          console.error(`[gemini-cli-shim] Could not rename ${oldRawEventPath}:`, err);
+        }
+      }
+      try {
+        await rename(oldStderrPath, newStderrPath);
+      } catch (err) {
+        if (this.verbose) {
+          console.error(`[gemini-cli-shim] Could not rename ${oldStderrPath}:`, err);
+        }
+      }
+      await this.initializeDebugStreams(sessionId);
+    } catch (err) {
+      throw new Error(
+        `Failed to rename debug log files: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+  /**
+   * Write a raw agent event (JSONL format)
+   */
+  writeRawEvent(event) {
+    if (!this.rawEventStream) return;
+    this.rawEventStream.write(JSON.stringify(event) + "\n");
+  }
+  /**
+   * Write stderr data (buffer if stream not initialized yet)
+   */
+  writeStderr(data) {
+    if (!this.options.debugDir) return;
+    if (this.stderrStream) {
+      this.stderrStream.write(data);
+    } else {
+      this.stderrBuffer += data;
+    }
+  }
+  /**
+   * Close debug log streams
+   */
+  async closeDebugStreams() {
+    const promises = [];
+    if (this.stderrBuffer && !this.stderrStream && this.options.debugDir) {
+      try {
+        const debugDir = isAbsolute(this.options.debugDir) ? this.options.debugDir : resolve(this.options.cwd, this.options.debugDir);
+        await mkdir(debugDir, { recursive: true });
+        const stderrPath = resolve(debugDir, `session-${this.currentSessionId}.raw.log`);
+        const tempStream = createWriteStream(stderrPath, {
+          flags: "a",
+          encoding: "utf8"
+        });
+        await new Promise((resolve3, reject) => {
+          tempStream.write(this.stderrBuffer, (err) => {
+            if (err) reject(err);
+            else {
+              tempStream.end((endErr) => {
+                if (endErr) reject(endErr);
+                else resolve3();
+              });
+            }
+          });
+        });
+        this.stderrBuffer = "";
+      } catch (err) {
+        console.error("[gemini-cli-shim] Error flushing buffered stderr:", err);
+      }
+    }
+    if (this.rawEventStream) {
+      promises.push(
+        new Promise((resolve3, reject) => {
+          this.rawEventStream.end((err) => {
+            if (err) reject(err);
+            else resolve3();
+          });
+        })
+      );
+      this.rawEventStream = null;
+    }
+    if (this.stderrStream) {
+      promises.push(
+        new Promise((resolve3, reject) => {
+          this.stderrStream.end((err) => {
+            if (err) reject(err);
+            else resolve3();
+          });
+        })
+      );
+      this.stderrStream = null;
+    }
+    await Promise.all(promises);
   }
   /**
    * Spawn Gemini CLI process
@@ -180,7 +327,6 @@ var GeminiCLI = class {
     if (this.verbose) {
       console.error("[gemini-cli-shim] Spawning gemini:", args.join(" "));
     }
-    // On Windows, gemini is a .cmd file and needs shell=true
     const isWindows = process.platform === "win32";
     this.process = spawn("gemini", args, {
       cwd: this.options.cwd,
@@ -190,6 +336,9 @@ var GeminiCLI = class {
       },
       shell: isWindows
     });
+    if (this.options.debugDir) {
+      await this.initializeDebugStreams("unknown");
+    }
     const fullPrompt = this.options.appendSystemPrompt ? `${prompt}
 
 Additional instructions: ${this.options.appendSystemPrompt}` : prompt;
@@ -207,14 +356,19 @@ Additional instructions: ${this.options.appendSystemPrompt}` : prompt;
     let stderrData = "";
     let hasSessionError = false;
     let sessionErrorDetected = false;
+    let sessionId = "";
+    let processExitCode = null;
     this.process.stderr.on("data", (data) => {
       const text = data.toString();
       stderrData += text;
+      this.writeStderr(text);
       if (!sessionErrorDetected && (text.includes("Error resuming session:") || text.includes("Invalid session identifier"))) {
         hasSessionError = true;
         sessionErrorDetected = true;
         if (this.verbose) {
-          console.error("[gemini-cli-shim] Session error detected, killing process");
+          console.error(
+            "[gemini-cli-shim] Session error detected, killing process"
+          );
         }
         if (this.process) {
           this.process.kill("SIGKILL");
@@ -242,6 +396,13 @@ Additional instructions: ${this.options.appendSystemPrompt}` : prompt;
         }
         try {
           const event = JSON.parse(trimmed);
+          if (event.type === "init" && event.session_id) {
+            sessionId = event.session_id;
+            if (this.options.debugDir && this.currentSessionId === "unknown") {
+              await this.renameDebugStreams(sessionId);
+            }
+          }
+          this.writeRawEvent(event);
           if (this.verbose) {
             console.error("[gemini event]", JSON.stringify(event));
           }
@@ -262,12 +423,12 @@ Additional instructions: ${this.options.appendSystemPrompt}` : prompt;
     if (hasSessionError) {
       throw new Error("Invalid session ID");
     }
-    await new Promise((resolve2, reject) => {
+    await new Promise((resolve3, reject) => {
       if (!this.process) {
         if (hasSessionError) {
           reject(new Error("Invalid session ID"));
         } else {
-          resolve2();
+          resolve3();
         }
         return;
       }
@@ -282,18 +443,35 @@ Additional instructions: ${this.options.appendSystemPrompt}` : prompt;
           reject(new Error("Process did not exit within timeout"));
         }
       }, 2e3);
-      this.process.on("close", (code) => {
+      this.process.on("close", async (code) => {
         clearTimeout(exitTimeout);
+        processExitCode = code;
+        try {
+          await this.closeDebugStreams();
+        } catch (logErr) {
+          console.error(
+            "[gemini-cli-shim] Error closing debug streams:",
+            logErr
+          );
+        }
         if (hasSessionError) {
           reject(new Error("Invalid session ID"));
         } else if (code === 0 || code === null) {
-          resolve2();
+          resolve3();
         } else {
           reject(new Error(`Gemini CLI exited with code ${code}`));
         }
       });
-      this.process.on("error", (err) => {
+      this.process.on("error", async (err) => {
         clearTimeout(exitTimeout);
+        try {
+          await this.closeDebugStreams();
+        } catch (logErr) {
+          console.error(
+            "[gemini-cli-shim] Error closing debug streams:",
+            logErr
+          );
+        }
         if (hasSessionError) {
           reject(new Error("Invalid session ID"));
         } else {
@@ -376,7 +554,7 @@ function getStandardTools() {
 
 // src/shim.ts
 import { readFileSync } from "fs";
-import { resolve } from "path";
+import { resolve as resolve2 } from "path";
 function emit(message) {
   console.log(JSON.stringify(message));
 }
@@ -398,6 +576,13 @@ async function runShim(prompt, options) {
   let isError = false;
   let resultText = "";
   let systemInitEmitted = false;
+  if (options.debugDir) {
+    try {
+      const { mkdirSync } = await import("fs");
+      mkdirSync(options.debugDir, { recursive: true });
+    } catch (err) {
+    }
+  }
   const defaultSystemPrompt = "Always repeat the results of your tool calls (like file contents or command output) in your text response. This is critical for verification.";
   const combinedSystemPrompt = options.appendSystemPrompt ? `${defaultSystemPrompt}
 ${options.appendSystemPrompt}` : defaultSystemPrompt;
@@ -511,7 +696,7 @@ ${options.appendSystemPrompt}` : defaultSystemPrompt;
               const filePath = info.params?.file_path || info.params?.filePath || info.params?.path;
               if (filePath) {
                 try {
-                  const absolutePath = resolve(options.cwd, filePath);
+                  const absolutePath = resolve2(options.cwd, filePath);
                   content = readFileSync(absolutePath, "utf-8");
                 } catch (e) {
                 }
@@ -613,8 +798,8 @@ ${options.appendSystemPrompt}` : defaultSystemPrompt;
     usage: totalUsage
   };
   emit(resultMsg);
-  await new Promise((resolve2) => {
-    process.stdout.write("", () => resolve2());
+  await new Promise((resolve3) => {
+    process.stdout.write("", () => resolve3());
   });
   return {
     exitCode: isError ? 1 : 0,
@@ -661,8 +846,8 @@ async function emitError(errorMsg, sessionId) {
     session_id: sessionId
   };
   emit(resultMsg);
-  await new Promise((resolve2) => {
-    process.stdout.write("", () => resolve2());
+  await new Promise((resolve3) => {
+    process.stdout.write("", () => resolve3());
   });
 }
 
@@ -692,6 +877,7 @@ Optional Arguments:
   --resume <session_id>        Session ID to continue
   --verbose                    Enable verbose logging to stderr
   --append-system-prompt <txt> Additional system prompt to append
+  --debug-dir <path>           Directory for debug logs and session data
   --self-test                  Run environment verification
   --version                    Print version and exit
   --help                       Print this help and exit
@@ -699,6 +885,7 @@ Optional Arguments:
 Examples:
   echo "Hello" | gemini-cli-shim --model flash
   echo "Continue" | gemini-cli-shim --model pro --resume <session_id>
+  echo "Debug" | gemini-cli-shim --model flash --debug-dir ./debug
   gemini-cli-shim --self-test
 `);
 }
@@ -797,7 +984,9 @@ async function main() {
       model: resolvedModel,
       resume: args.resume,
       verbose: args.verbose,
-      cwd: process.cwd()
+      cwd: process.cwd(),
+      appendSystemPrompt: args.appendSystemPrompt,
+      debugDir: args.debugDir
     });
     process.exit(result.exitCode);
   } catch (err) {

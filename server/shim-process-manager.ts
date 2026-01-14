@@ -178,6 +178,16 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
       this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
 
+    // Generate shim debug directory path based on codon ID
+    // Replace # with - for safe filesystem names
+    const shimDebugDir = path.join(
+      this.executionPath,
+      ".hankweave/logs/shim-debug",
+      codon.id.replace(/#/g, "-"),
+    );
+    args.push("--debug-dir", shimDebugDir);
+    this.logger.log(`Using shim debug directory: ${shimDebugDir}`);
+
     return args;
   }
 
