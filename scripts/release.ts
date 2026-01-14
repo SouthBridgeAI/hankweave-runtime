@@ -209,9 +209,9 @@ async function validateChangelog(): Promise<void> {
     process.exit(1);
   }
 
-  // Extract content between [Unreleased] and next ## heading
+  // Extract content between [Unreleased] and next ## heading (version section)
   const unreleasedMatch = changelog.match(
-    /## \[Unreleased\]([\s\S]*?)(?=\n## |\n#+ |$)/
+    /## \[Unreleased\]([\s\S]*?)(?=\n## |$)/
   );
 
   if (!unreleasedMatch) {
