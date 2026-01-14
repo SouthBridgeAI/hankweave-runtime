@@ -6,7 +6,7 @@ import { parseJSONL } from "../../utils/test-data-helpers.js";
 export function runLogOrderingTests(testDir: string) {
   test("log messages maintain causal ordering", () => {
     // Find the run folder
-    const runsDir = path.join(testDir, ".strandweave/runs");
+    const runsDir = path.join(testDir, ".hankweave/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);
@@ -49,7 +49,7 @@ export function runLogOrderingTests(testDir: string) {
 
   test("stderr output is captured in logs", () => {
     // Find the run folder
-    const runsDir = path.join(testDir, ".strandweave/runs");
+    const runsDir = path.join(testDir, ".hankweave/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);

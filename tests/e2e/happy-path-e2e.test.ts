@@ -95,8 +95,8 @@ import {
   needsBinary,
   setupBinary,
 } from "../utils/binary.js";
-// Import connectStrandweaveClient for sync client
-import { connectStrandweaveClient } from "../utils/strandweave-server-test-helpers.js";
+// Import connectHankweaveClient for sync client
+import { connectHankweaveClient } from "../utils/hankweave-server-test-helpers.js";
 // Import Verdaccio helpers
 import {
   cleanupVerdaccio,
@@ -110,9 +110,9 @@ import {
 // Will be initialized in setupAndRunCodons() after paths are determined
 let serverConfig: TestServerConfig;
 
-// The strandweave-results will be created by the server in its execution directory
+// The hankweave-results will be created by the server in its execution directory
 // Since we're using --data and --start-new, it will be in a temp execution directory
-let strandweaveResultsDir: string;
+let hankweaveResultsDir: string;
 
 // -------------
 // Verdaccio Setup (conditional based on env vars)
@@ -217,7 +217,7 @@ async function setupAndRunCodons(): Promise<void> {
   TEST_RESULTS_DIR = path.join(TEST_CWD, "tests/test-results");
   CODONS_CONFIG = path.join(TEST_CWD, "tests/config/test-codons.config.json");
   TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
-  strandweaveResultsDir = path.join(TEST_CWD, "strandweave-results/");
+  hankweaveResultsDir = path.join(TEST_CWD, "hankweave-results/");
 
   // Initialize server config with determined paths
   serverConfig = {
@@ -244,9 +244,9 @@ async function setupAndRunCodons(): Promise<void> {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
   }
 
-  // Clean up strandweave-results directory if it exists
-  if (fs.existsSync(strandweaveResultsDir)) {
-    fs.rmSync(strandweaveResultsDir, { recursive: true, force: true });
+  // Clean up hankweave-results directory if it exists
+  if (fs.existsSync(hankweaveResultsDir)) {
+    fs.rmSync(hankweaveResultsDir, { recursive: true, force: true });
   }
 
   // Get a free port for this test run
@@ -314,7 +314,7 @@ async function setupAndRunCodons(): Promise<void> {
 
   // Start read-only sync client in background after Codon 1 completes
   console.log(`${colors.blue}Starting read-only sync client in background...${colors.reset}`);
-  const clientSetup = await connectStrandweaveClient(`ws://localhost:${serverConfig.port}`, {
+  const clientSetup = await connectHankweaveClient(`ws://localhost:${serverConfig.port}`, {
     performHandshake: true,
     mode: ClientMode.READONLY,
     sendPreviousEvents: true,
@@ -517,7 +517,7 @@ async function validateCheckpointSystem(): Promise<void> {
     return;
   }
 
-  const checkpointDir = path.join(testState.executionPath, ".strandweave/checkpoints");
+  const checkpointDir = path.join(testState.executionPath, ".hankweave/checkpoints");
   const gitDir = path.join(checkpointDir, ".git");
 
   // Store validation results for tests
@@ -632,9 +632,9 @@ async function runFullCleanup(): Promise<void> {
   // Use the cleanup integration to clean execution directory
   console.log(`\n${colors.blue}Running cleanup integration...${colors.reset}`);
 
-  // Clean up strandweave-results directory if it exists
-  if (fs.existsSync(strandweaveResultsDir)) {
-    fs.rmSync(strandweaveResultsDir, { recursive: true, force: true });
+  // Clean up hankweave-results directory if it exists
+  if (fs.existsSync(hankweaveResultsDir)) {
+    fs.rmSync(hankweaveResultsDir, { recursive: true, force: true });
   }
 
   const cleanupResult = await executeTestCleanup({
@@ -657,7 +657,7 @@ async function runFullCleanup(): Promise<void> {
 
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}`);
 console.log(
-  `${colors.blue}Strandweave Server End-to-End Test (with Execution Isolation)${colors.reset}`,
+  `${colors.blue}Hankweave Server End-to-End Test (with Execution Isolation)${colors.reset}`,
 );
 console.log(`${colors.blue}${"=".repeat(60)}${colors.reset}\n`);
 
@@ -669,21 +669,21 @@ await setupAndRunCodons();
 // NOTE: Many test groups need updates to use testState.executionPath
 // -------------
 
-describe("Strandweave E2E Test", () => {
+describe("Hankweave E2E Test", () => {
   describe("Codon Execution", () => {
     runCodonExecutionTests(testState);
   });
 
-  describe("Strandweave results", () => {
+  describe("Hankweave results", () => {
     it("should contain favorite_poem.txt", () => {
-      expect(fs.existsSync(path.join(strandweaveResultsDir, "notes", "favorite_poem.txt"))).toBe(
+      expect(fs.existsSync(path.join(hankweaveResultsDir, "notes", "favorite_poem.txt"))).toBe(
         true,
       );
     });
 
     it("should NOT contain second_favorite_poem.txt because beforeCopy fails", () => {
       expect(
-        fs.existsSync(path.join(strandweaveResultsDir, "notes", "second_favorite_poem.txt")),
+        fs.existsSync(path.join(hankweaveResultsDir, "notes", "second_favorite_poem.txt")),
       ).toBe(false);
     });
 

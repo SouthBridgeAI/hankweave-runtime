@@ -4,10 +4,10 @@ import { z } from "zod";
 import type { ServerEvent } from "../schemas/event-schemas.js";
 import { type CodonId, EventId } from "../types/branded-types.js";
 import type {
-  StrandweaveGenerateObjectOptions,
-  StrandweaveGenerateObjectResult,
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateObjectOptions,
+  HankweaveGenerateObjectResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../types/llm-call-types.js";
 import type {
   QueuedTrigger,
@@ -28,7 +28,7 @@ import { createTriggerEngine } from "./trigger-engine.js";
  * Represents a single running Sentinel instance.
  *
  * A Sentinel is a parallel observation agent that watches the event stream from
- * the main Strandweave workflow and performs its own analysis, summarization, or data
+ * the main Hankweave workflow and performs its own analysis, summarization, or data
  * extraction. Key characteristics:
  *
  * - **Event-Driven**: Reacts to events based on configured triggers
@@ -107,8 +107,8 @@ export class Sentinel {
     private codonId: CodonId,
     private llmCall: (
       id: string,
-      options: StrandweaveGenerateTextOptions,
-    ) => Promise<StrandweaveGenerateTextResult>,
+      options: HankweaveGenerateTextOptions,
+    ) => Promise<HankweaveGenerateTextResult>,
     private logger?: Logger,
     sentinelDir?: string, // Optional - passed from parent for persistence
     configDirectory?: string, // For resolving relative prompt file paths
@@ -117,8 +117,8 @@ export class Sentinel {
     modelCost?: { input: number; output: number }, // Optional cost per million tokens
     private llmObjectCall?: (
       id: string,
-      options: StrandweaveGenerateObjectOptions,
-    ) => Promise<StrandweaveGenerateObjectResult<unknown>>, // Optional - for structured output
+      options: HankweaveGenerateObjectOptions,
+    ) => Promise<HankweaveGenerateObjectResult<unknown>>, // Optional - for structured output
     private executionPath?: string, // For path resolution
     outputPaths?: SentinelOutputPaths, // From codon config (optional - will auto-generate)
     private sendEventToServer?: (
@@ -489,7 +489,7 @@ export class Sentinel {
       const messages = await this.historyManager.getMessagesToSend(renderedSystemPrompt);
       messages.push({ role: "user", content: userMessage });
 
-      const options: StrandweaveGenerateTextOptions = {
+      const options: HankweaveGenerateTextOptions = {
         messages,
         temperature: this.llmParams.temperature,
         maxOutputTokens: this.llmParams.maxOutputTokens,
@@ -587,7 +587,7 @@ export class Sentinel {
       }
     } else {
       // Non-conversational flow
-      const options: StrandweaveGenerateTextOptions = {
+      const options: HankweaveGenerateTextOptions = {
         messages: [{ role: "user", content: userMessage }],
         system: renderedSystemPrompt,
         temperature: this.llmParams.temperature,
@@ -707,7 +707,7 @@ export class Sentinel {
       };
 
       // Add schema OR enum values depending on mode
-      const options: StrandweaveGenerateObjectOptions =
+      const options: HankweaveGenerateObjectOptions =
         context.output === "enum"
           ? { ...baseOptions, enum: context.enumValues }
           : { ...baseOptions, schema: context.zodSchema };
@@ -820,10 +820,10 @@ export class Sentinel {
         maxRetries: this.llmParams.maxRetries,
       };
 
-      const options: StrandweaveGenerateObjectOptions =
+      const options: HankweaveGenerateObjectOptions =
         context.output === "enum"
-          ? ({ ...baseOptions, enum: context.enumValues } as StrandweaveGenerateObjectOptions)
-          : ({ ...baseOptions, schema: context.zodSchema } as StrandweaveGenerateObjectOptions);
+          ? ({ ...baseOptions, enum: context.enumValues } as HankweaveGenerateObjectOptions)
+          : ({ ...baseOptions, schema: context.zodSchema } as HankweaveGenerateObjectOptions);
 
       try {
         const response = await this.llmObjectCall(this.config.id, options);
@@ -1496,26 +1496,19 @@ export class Sentinel {
 
   /**
    * Generate auto path for logFile.
-   * Format: .strandweave/sentinels/outputs/{id}/{id}-{codon}-{timestamp}.{ext}
+   * Format: .hankweave/sentinels/outputs/{id}/{id}-{codon}-{timestamp}.{ext}
    */
   private generateLogFilePath(executionPath: string): string {
     const timestamp = Date.now();
     const extension = this.config.structuredOutput ? "ndjson" : "md";
     const filename = `${this.config.id}-${this.codonId}-${timestamp}.${extension}`;
 
-    return path.join(
-      executionPath,
-      ".strandweave",
-      "sentinels",
-      "outputs",
-      this.config.id,
-      filename,
-    );
+    return path.join(executionPath, ".hankweave", "sentinels", "outputs", this.config.id, filename);
   }
 
   /**
    * Resolve output path according to path convention.
-   * - Filename only (no '/'): .strandweave/sentinels/outputs/{id}/{filename}
+   * - Filename only (no '/'): .hankweave/sentinels/outputs/{id}/{filename}
    * - Path with '/': execution-dir relative
    */
   private resolveOutputPath(userPath: string, executionPath: string): string {
@@ -1523,15 +1516,8 @@ export class Sentinel {
       // Path with directory - use relative to execution dir
       return path.join(executionPath, userPath);
     }
-    // Filename only - goes to .strandweave/sentinels/outputs/{id}/
-    return path.join(
-      executionPath,
-      ".strandweave",
-      "sentinels",
-      "outputs",
-      this.config.id,
-      userPath,
-    );
+    // Filename only - goes to .hankweave/sentinels/outputs/{id}/
+    return path.join(executionPath, ".hankweave", "sentinels", "outputs", this.config.id, userPath);
   }
 
   /**

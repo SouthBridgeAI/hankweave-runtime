@@ -19,7 +19,7 @@ let inCorrectDir = false;
 try {
   if (fs.existsSync("package.json")) {
     const packageJson = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-    inCorrectDir = packageJson.name === "strandweave" && fs.existsSync("server/index.ts");
+    inCorrectDir = packageJson.name === "hankweave" && fs.existsSync("server/index.ts");
   }
 } catch {
   inCorrectDir = false;
@@ -27,7 +27,7 @@ try {
 checks.push({
   name: "Working directory",
   pass: inCorrectDir,
-  message: inCorrectDir ? "In strandweave root" : "Must run from strandweave root directory",
+  message: inCorrectDir ? "In hankweave root" : "Must run from hankweave root directory",
 });
 
 // Check 2: Test config exists
@@ -55,7 +55,7 @@ checks.push({
 });
 
 // Check 5: No lock file (no server running)
-const lockFile = "tests/test-area/.strandweave/runtime.lock";
+const lockFile = "tests/test-area/.hankweave/runtime.lock";
 const noLockFile = !fs.existsSync(lockFile);
 checks.push({
   name: "Server lock file",

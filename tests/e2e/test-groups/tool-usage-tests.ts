@@ -51,7 +51,7 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
 
   test("tool uses reported via WebSocket for each codon", () => {
     // Find the run folder - there should be exactly one
-    const runsDir = path.join(testDir, ".strandweave/runs");
+    const runsDir = path.join(testDir, ".hankweave/runs");
     let runFolder = "";
 
     if (fs.existsSync(runsDir)) {
@@ -64,7 +64,7 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
     if (!runFolder) return;
 
     for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
-      // Logs are now in .strandweave/runs/{runId}/codon-{codonId}-claude.log
+      // Logs are now in .hankweave/runs/{runId}/codon-{codonId}-claude.log
       const logPath = path.join(runFolder, `${codonId}-claude.log`);
       if (fs.existsSync(logPath)) {
         const logContent = fs.readFileSync(logPath, "utf-8");

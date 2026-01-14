@@ -235,8 +235,8 @@ export class LlmProviderRegistry {
 
   private initializeProviders(): void {
     for (const def of PROVIDER_DEFINITIONS) {
-      // Check STRANDWEAVE_SENTINEL_ prefixed var first, then fall back to standard
-      const sentinelEnvVar = `STRANDWEAVE_SENTINEL_${def.apiKeyEnvVar}`;
+      // Check HANKWEAVE_SENTINEL_ prefixed var first, then fall back to standard
+      const sentinelEnvVar = `HANKWEAVE_SENTINEL_${def.apiKeyEnvVar}`;
       const apiKey = process.env[sentinelEnvVar] || process.env[def.apiKeyEnvVar];
 
       if (!apiKey) {

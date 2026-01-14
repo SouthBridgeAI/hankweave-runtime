@@ -38,12 +38,12 @@ describe("StateManager - getNextCodonToExecute", () => {
 
   beforeEach(async () => {
     tempDir = path.resolve("tests", "test-area", `temp-state-${Date.now()}`);
-    await fs.promises.mkdir(path.join(tempDir, ".strandweave"), {
+    await fs.promises.mkdir(path.join(tempDir, ".hankweave"), {
       recursive: true,
     });
 
     const logger = new Logger(path.join(tempDir, "test.log"));
-    stateManager = new StateManager(path.join(tempDir, ".strandweave"), logger, mockCodons);
+    stateManager = new StateManager(path.join(tempDir, ".hankweave"), logger, mockCodons);
     await stateManager.initialize();
   });
 
@@ -58,7 +58,7 @@ describe("StateManager - getNextCodonToExecute", () => {
       type: "RunStarted",
       data: {
         runId,
-        runFolder: path.join(tempDir, ".strandweave", "runs", runId),
+        runFolder: path.join(tempDir, ".hankweave", "runs", runId),
         gitBranch: `run-${runId}`,
         startingConditions: { type: "fresh" },
         serverPid: process.pid,
@@ -82,7 +82,7 @@ describe("StateManager - getNextCodonToExecute", () => {
 
     // Directly set the state (for testing)
     await fs.promises.writeFile(
-      path.join(tempDir, ".strandweave", "state.json"),
+      path.join(tempDir, ".hankweave", "state.json"),
       JSON.stringify(state),
     );
     await stateManager.initialize();
@@ -103,7 +103,7 @@ describe("StateManager - getNextCodonToExecute", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".strandweave", "state.json"),
+      path.join(tempDir, ".hankweave", "state.json"),
       JSON.stringify(state),
     );
     await stateManager.initialize();
@@ -136,7 +136,7 @@ describe("StateManager - getNextCodonToExecute", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".strandweave", "state.json"),
+      path.join(tempDir, ".hankweave", "state.json"),
       JSON.stringify(state),
     );
     await stateManager.initialize();
@@ -170,7 +170,7 @@ describe("StateManager - getNextCodonToExecute", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".strandweave", "state.json"),
+      path.join(tempDir, ".hankweave", "state.json"),
       JSON.stringify(state),
     );
     await stateManager.initialize();
@@ -186,12 +186,12 @@ describe("StateManager - Cost Calculations", () => {
 
   beforeEach(async () => {
     tempDir = path.resolve("tests", "test-area", `temp-state-${Date.now()}`);
-    await fs.promises.mkdir(path.join(tempDir, ".strandweave"), {
+    await fs.promises.mkdir(path.join(tempDir, ".hankweave"), {
       recursive: true,
     });
 
     const logger = new Logger(path.join(tempDir, "test.log"));
-    stateManager = new StateManager(path.join(tempDir, ".strandweave"), logger);
+    stateManager = new StateManager(path.join(tempDir, ".hankweave"), logger);
     await stateManager.initialize();
   });
 
@@ -209,7 +209,7 @@ describe("StateManager - Cost Calculations", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".strandweave", "state.json"),
+      path.join(tempDir, ".hankweave", "state.json"),
       JSON.stringify(state),
     );
     await stateManager.initialize();
@@ -230,7 +230,7 @@ describe("StateManager - Cost Calculations", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".strandweave", "state.json"),
+      path.join(tempDir, ".hankweave", "state.json"),
       JSON.stringify(state),
     );
     await stateManager.initialize();
@@ -252,7 +252,7 @@ describe("StateManager - Cost Calculations", () => {
       .build();
 
     await fs.promises.writeFile(
-      path.join(tempDir, ".strandweave", "state.json"),
+      path.join(tempDir, ".hankweave", "state.json"),
       JSON.stringify(state),
     );
     await stateManager.initialize();

@@ -1,4 +1,4 @@
-import type { StrandweaveRuntime } from "./strandweave-runtime.js";
+import type { HankweaveRuntime } from "./hankweave-runtime.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
@@ -70,10 +70,10 @@ export class BasicTUI {
   private checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
   private waitingForCheckpoints = false;
 
-  constructor(private server: StrandweaveRuntime) {
+  constructor(private server: HankweaveRuntime) {
     // Print version at the very start
     const version = this.server.config?.version || "unknown";
-    console.log(`${COLORS.bold}${COLORS.cyan}Strandweave v${version}${COLORS.reset}\n`);
+    console.log(`${COLORS.bold}${COLORS.cyan}Hankweave v${version}${COLORS.reset}\n`);
 
     this.connectToServer();
     this.setupKeyboardInput();

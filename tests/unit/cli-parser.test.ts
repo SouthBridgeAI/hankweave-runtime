@@ -150,214 +150,214 @@ describe("parseCliArgs", () => {
   });
 
   // Tests with only positional args
-  test("strandweave ./data (single non-.json arg treated as dataPath)", () => {
+  test("hankweave ./data (single non-.json arg treated as dataPath)", () => {
     const args = ["./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBe("./data");
   });
 
-  test("strandweave my-data-dir (single non-.json arg treated as dataPath)", () => {
+  test("hankweave my-data-dir (single non-.json arg treated as dataPath)", () => {
     const args = ["my-data-dir"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBe("my-data-dir");
   });
 
-  test("strandweave my-config.json (single .json arg treated as strandPath)", () => {
+  test("hankweave my-config.json (single .json arg treated as hankPath)", () => {
     const args = ["my-config.json"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-config.json");
+    expect(result.hankPath).toBe("my-config.json");
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave ./path/to/config.json (single .json path treated as strandPath)", () => {
+  test("hankweave ./path/to/config.json (single .json path treated as hankPath)", () => {
     const args = ["./path/to/config.json"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("./path/to/config.json");
+    expect(result.hankPath).toBe("./path/to/config.json");
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave my-strand.json ./data", () => {
-    const args = ["my-strand.json", "./data"];
+  test("hankweave my-hank.json ./data", () => {
+    const args = ["my-hank.json", "./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
   });
 
-  test("strandweave ./config/strand.json /path/to/data", () => {
-    const args = ["./config/strand.json", "/path/to/data"];
+  test("hankweave ./config/hank.json /path/to/data", () => {
+    const args = ["./config/hank.json", "/path/to/data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("./config/strand.json");
+    expect(result.hankPath).toBe("./config/hank.json");
     expect(result.dataPath).toBe("/path/to/data");
   });
 
-  test("strandweave strand.json - (stdin)", () => {
-    const args = ["strand.json", "-"];
+  test("hankweave hank.json - (stdin)", () => {
+    const args = ["hank.json", "-"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("strand.json");
+    expect(result.hankPath).toBe("hank.json");
     expect(result.dataPath).toBe("-");
   });
 
-  test("strandweave https://github.com/user/repo ./data (remote URL)", () => {
+  test("hankweave https://github.com/user/repo ./data (remote URL)", () => {
     const args = ["https://github.com/user/repo", "./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("https://github.com/user/repo");
+    expect(result.hankPath).toBe("https://github.com/user/repo");
     expect(result.dataPath).toBe("./data");
   });
 
   // Tests with only flags
-  test("strandweave --port 9090", () => {
+  test("hankweave --port 9090", () => {
     const args = ["--port", "9090"];
     const result = parseCliArgs(args);
     expect(result.port).toBe(9090);
     expect(typeof result.port).toBe("number");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port=9090 (deprecated syntax)", () => {
+  test("hankweave --port=9090 (deprecated syntax)", () => {
     const args = ["--port=9090"];
     const result = parseCliArgs(args);
     expect(result.port).toBe(9090);
     expect(consoleWarnSpy.length).toBeGreaterThan(0);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port invalid", () => {
+  test("hankweave --port invalid", () => {
     const args = ["--port", "invalid"];
     const result = parseCliArgs(args);
     expect(Number.isNaN(result.port)).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --model opus", () => {
+  test("hankweave --model opus", () => {
     const args = ["--model", "opus"];
     const result = parseCliArgs(args);
     expect(result.model).toBe("opus");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --model sonnet", () => {
+  test("hankweave --model sonnet", () => {
     const args = ["--model", "sonnet"];
     const result = parseCliArgs(args);
     expect(result.model).toBe("sonnet");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --model=opus (deprecated syntax)", () => {
+  test("hankweave --model=opus (deprecated syntax)", () => {
     const args = ["--model=opus"];
     const result = parseCliArgs(args);
     expect(result.model).toBe("opus");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --model haiku (accepts any string)", () => {
+  test("hankweave --model haiku (accepts any string)", () => {
     const args = ["--model", "haiku"];
     const result = parseCliArgs(args);
     expect(result.model).toBe("haiku");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --anthropic-base-url https://api.example.com", () => {
+  test("hankweave --anthropic-base-url https://api.example.com", () => {
     const args = ["--anthropic-base-url", "https://api.example.com"];
     const result = parseCliArgs(args);
     expect(result.anthropicBaseUrl).toBe("https://api.example.com");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --anthropic-base-url=https://api.example.com/v1 (deprecated syntax)", () => {
+  test("hankweave --anthropic-base-url=https://api.example.com/v1 (deprecated syntax)", () => {
     const args = ["--anthropic-base-url=https://api.example.com/v1"];
     const result = parseCliArgs(args);
     expect(result.anthropicBaseUrl).toBe("https://api.example.com/v1");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --no-autostart", () => {
+  test("hankweave --no-autostart", () => {
     const args = ["--no-autostart"];
     const result = parseCliArgs(args);
     expect(result.autostart).toBe(false);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --no-autostart --port 8080", () => {
+  test("hankweave --no-autostart --port 8080", () => {
     const args = ["--no-autostart", "--port", "8080"];
     const result = parseCliArgs(args);
     expect(result.autostart).toBe(false);
     expect(result.port).toBe(8080);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --proxy", () => {
+  test("hankweave --proxy", () => {
     const args = ["--proxy"];
     const result = parseCliArgs(args);
     expect(result.withoutProxy).toBe(false);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --without-proxy", () => {
+  test("hankweave --without-proxy", () => {
     const args = ["--without-proxy"];
     const result = parseCliArgs(args);
     expect(result.withoutProxy).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --proxy --without-proxy (--without-proxy wins)", () => {
+  test("hankweave --proxy --without-proxy (--without-proxy wins)", () => {
     const args = ["--proxy", "--without-proxy"];
     const result = parseCliArgs(args);
     // Implementation uses includes(), --without-proxy is checked last in code
     expect(result.withoutProxy).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --without-proxy --proxy (--without-proxy still wins)", () => {
+  test("hankweave --without-proxy --proxy (--without-proxy still wins)", () => {
     const args = ["--without-proxy", "--proxy"];
     const result = parseCliArgs(args);
     // Implementation uses includes(), not arg order, so --without-proxy wins
     expect(result.withoutProxy).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --idle-timeout 120", () => {
+  test("hankweave --idle-timeout 120", () => {
     const args = ["--idle-timeout", "120"];
     const result = parseCliArgs(args);
     expect(result.idleTimeout).toBe(120);
     expect(typeof result.idleTimeout).toBe("number");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --idle-timeout=60 (deprecated syntax)", () => {
+  test("hankweave --idle-timeout=60 (deprecated syntax)", () => {
     const args = ["--idle-timeout=60"];
     const result = parseCliArgs(args);
     expect(result.idleTimeout).toBe(60);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --idle-timeout invalid", () => {
+  test("hankweave --idle-timeout invalid", () => {
     const args = ["--idle-timeout", "invalid"];
     const result = parseCliArgs(args);
     expect(Number.isNaN(result.idleTimeout)).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port 9090 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120", () => {
+  test("hankweave --port 9090 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120", () => {
     const args = [
       "--port",
       "9090",
@@ -378,11 +378,11 @@ describe("parseCliArgs", () => {
     expect(result.autostart).toBe(false);
     expect(result.withoutProxy).toBe(false);
     expect(result.idleTimeout).toBe(120);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port=8080 --model sonnet --idle-timeout=60 (mixed syntax)", () => {
+  test("hankweave --port=8080 --model sonnet --idle-timeout=60 (mixed syntax)", () => {
     const args = ["--port=8080", "--model", "sonnet", "--idle-timeout=60"];
     const result = parseCliArgs(args);
 
@@ -392,44 +392,44 @@ describe("parseCliArgs", () => {
     expect(consoleWarnSpy.length).toBe(2); // Two deprecated flags
   });
 
-  test("strandweave --no-autostart --model opus --port 7777 (any order)", () => {
+  test("hankweave --no-autostart --model opus --port 7777 (any order)", () => {
     const args = ["--no-autostart", "--model", "opus", "--port", "7777"];
     const result = parseCliArgs(args);
 
     expect(result.autostart).toBe(false);
     expect(result.model).toBe("opus");
     expect(result.port).toBe(7777);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave (no args)", () => {
+  test("hankweave (no args)", () => {
     const args: string[] = [];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
     expect(result.port).toBeUndefined();
     expect(result.model).toBeUndefined();
   });
 
-  test("strandweave (no recognized flags, no positionals)", () => {
+  test("hankweave (no recognized flags, no positionals)", () => {
     const args: string[] = [];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
     expect(result.port).toBeUndefined();
   });
 
-  test("strandweave --port 8080 --model opus (complete values)", () => {
+  test("hankweave --port 8080 --model opus (complete values)", () => {
     const args = ["--port", "8080", "--model", "opus"];
     const result = parseCliArgs(args);
     expect(result.port).toBe(8080);
     expect(result.model).toBe("opus");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port 8080 (only sets present flags)", () => {
+  test("hankweave --port 8080 (only sets present flags)", () => {
     const args = ["--port", "8080"];
     const result = parseCliArgs(args);
 
@@ -439,22 +439,22 @@ describe("parseCliArgs", () => {
     expect("autostart" in result).toBe(false);
     expect("withoutProxy" in result).toBe(false);
     expect("idleTimeout" in result).toBe(false);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port 8080 --model opus (return type validation)", () => {
+  test("hankweave --port 8080 --model opus (return type validation)", () => {
     const args = ["--port", "8080", "--model", "opus"];
     const result = parseCliArgs(args);
 
     expect(typeof result).toBe("object");
     expect(result).not.toBeNull();
     expect(Array.isArray(result)).toBe(false);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port 8080 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120 (type validation)", () => {
+  test("hankweave --port 8080 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120 (type validation)", () => {
     const args = [
       "--port",
       "8080",
@@ -487,150 +487,150 @@ describe("parseCliArgs", () => {
     if (result.idleTimeout !== undefined) {
       expect(typeof result.idleTimeout).toBe("number");
     }
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port=8080 (warns for deprecated syntax)", () => {
+  test("hankweave --port=8080 (warns for deprecated syntax)", () => {
     const args = ["--port=8080"];
     const result = parseCliArgs(args);
     expect(consoleWarnSpy.length).toBeGreaterThan(0);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port 8080 --model opus (no warnings for preferred syntax)", () => {
+  test("hankweave --port 8080 --model opus (no warnings for preferred syntax)", () => {
     const args = ["--port", "8080", "--model", "opus"];
     const result = parseCliArgs(args);
     expect(consoleWarnSpy.length).toBe(0);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --port=8080 --model=opus --idle-timeout=60 (multiple deprecation warnings)", () => {
+  test("hankweave --port=8080 --model=opus --idle-timeout=60 (multiple deprecation warnings)", () => {
     const args = ["--port=8080", "--model=opus", "--idle-timeout=60"];
     const result = parseCliArgs(args);
     expect(consoleWarnSpy.length).toBe(3);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
   // Combined tests: positional args + flags
-  test("strandweave my-strand.json ./data --port 8080", () => {
-    const args = ["my-strand.json", "./data", "--port", "8080"];
+  test("hankweave my-hank.json ./data --port 8080", () => {
+    const args = ["my-hank.json", "./data", "--port", "8080"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.port).toBe(8080);
   });
 
-  test("strandweave --port 8080 my-strand.json ./data", () => {
-    const args = ["--port", "8080", "my-strand.json", "./data"];
+  test("hankweave --port 8080 my-hank.json ./data", () => {
+    const args = ["--port", "8080", "my-hank.json", "./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.port).toBe(8080);
   });
 
-  test("strandweave my-strand.json --port 8080 ./data", () => {
-    const args = ["my-strand.json", "--port", "8080", "./data"];
+  test("hankweave my-hank.json --port 8080 ./data", () => {
+    const args = ["my-hank.json", "--port", "8080", "./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.port).toBe(8080);
   });
 
-  test("strandweave --headless my-strand.json --no-autostart ./data --model opus", () => {
-    const args = ["--headless", "my-strand.json", "--no-autostart", "./data", "--model", "opus"];
+  test("hankweave --headless my-hank.json --no-autostart ./data --model opus", () => {
+    const args = ["--headless", "my-hank.json", "--no-autostart", "./data", "--model", "opus"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.model).toBe("opus");
     expect(result.autostart).toBe(false);
   });
 
-  test("strandweave --port=8080 my-strand.json --model=opus ./data", () => {
-    const args = ["--port=8080", "my-strand.json", "--model=opus", "./data"];
+  test("hankweave --port=8080 my-hank.json --model=opus ./data", () => {
+    const args = ["--port=8080", "my-hank.json", "--model=opus", "./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.port).toBe(8080);
     expect(result.model).toBe("opus");
   });
 
-  test("strandweave --config my-strand.json --data ./data (flags instead of positional)", () => {
-    const args = ["--config", "my-strand.json", "--data", "./data"];
+  test("hankweave --config my-hank.json --data ./data (flags instead of positional)", () => {
+    const args = ["--config", "my-hank.json", "--data", "./data"];
     const result = parseCliArgs(args);
     // Should not extract flag values as positional args
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave my-strand.json --config other.json ./data", () => {
-    const args = ["my-strand.json", "--config", "other.json", "./data"];
+  test("hankweave my-hank.json --config other.json ./data", () => {
+    const args = ["my-hank.json", "--config", "other.json", "./data"];
     const result = parseCliArgs(args);
     // Positional args are extracted, flag value is not
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
   });
 
-  test("strandweave strand.json --anthropic-base-url https://api.example.com ./data", () => {
-    const args = ["strand.json", "--anthropic-base-url", "https://api.example.com", "./data"];
+  test("hankweave hank.json --anthropic-base-url https://api.example.com ./data", () => {
+    const args = ["hank.json", "--anthropic-base-url", "https://api.example.com", "./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("strand.json");
+    expect(result.hankPath).toBe("hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.anthropicBaseUrl).toBe("https://api.example.com");
   });
 
-  test("strandweave --execution /path/to/exec strand.json ./data", () => {
-    const args = ["--execution", "/path/to/exec", "strand.json", "./data"];
+  test("hankweave --execution /path/to/exec hank.json ./data", () => {
+    const args = ["--execution", "/path/to/exec", "hank.json", "./data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("strand.json");
+    expect(result.hankPath).toBe("hank.json");
     expect(result.dataPath).toBe("./data");
   });
 
-  test("strandweave strand.json ./data --input 'some text'", () => {
-    const args = ["strand.json", "./data", "--input", "some text"];
+  test("hankweave hank.json ./data --input 'some text'", () => {
+    const args = ["hank.json", "./data", "--input", "some text"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("strand.json");
+    expect(result.hankPath).toBe("hank.json");
     expect(result.dataPath).toBe("./data");
   });
 
-  test("strandweave my-strand.json ./data --idle-timeout 120 --port 9090", () => {
-    const args = ["my-strand.json", "./data", "--idle-timeout", "120", "--port", "9090"];
+  test("hankweave my-hank.json ./data --idle-timeout 120 --port 9090", () => {
+    const args = ["my-hank.json", "./data", "--idle-timeout", "120", "--port", "9090"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.idleTimeout).toBe(120);
     expect(result.port).toBe(9090);
   });
 
-  test("strandweave --headless --proxy --no-autostart strand.json data-dir", () => {
-    const args = ["--headless", "--proxy", "--no-autostart", "strand.json", "data-dir"];
+  test("hankweave --headless --proxy --no-autostart hank.json data-dir", () => {
+    const args = ["--headless", "--proxy", "--no-autostart", "hank.json", "data-dir"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("strand.json");
+    expect(result.hankPath).toBe("hank.json");
     expect(result.dataPath).toBe("data-dir");
     expect(result.withoutProxy).toBe(false);
     expect(result.autostart).toBe(false);
   });
 
-  test("strandweave path/with spaces.json path/with spaces/data", () => {
+  test("hankweave path/with spaces.json path/with spaces/data", () => {
     const args = ["path/with spaces.json", "path/with spaces/data"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("path/with spaces.json");
+    expect(result.hankPath).toBe("path/with spaces.json");
     expect(result.dataPath).toBe("path/with spaces/data");
   });
 
-  test("strandweave first.json second (two positional args)", () => {
+  test("hankweave first.json second (two positional args)", () => {
     const args = ["first.json", "second"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("first.json");
+    expect(result.hankPath).toBe("first.json");
     expect(result.dataPath).toBe("second");
   });
 
-  test("strandweave my-strand.json ./data --port 9090 --model opus --no-autostart --proxy", () => {
+  test("hankweave my-hank.json ./data --port 9090 --model opus --no-autostart --proxy", () => {
     const args = [
-      "my-strand.json",
+      "my-hank.json",
       "./data",
       "--port",
       "9090",
@@ -640,7 +640,7 @@ describe("parseCliArgs", () => {
       "--proxy",
     ];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("my-strand.json");
+    expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.port).toBe(9090);
     expect(result.model).toBe("opus");
@@ -649,132 +649,132 @@ describe("parseCliArgs", () => {
   });
 
   // Tests for additional value flags
-  test("strandweave --config my-config.json", () => {
+  test("hankweave --config my-config.json", () => {
     const args = ["--config", "my-config.json"];
     const result = parseCliArgs(args);
     expect(result.configPath).toBe("my-config.json");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --data ./my-data", () => {
+  test("hankweave --data ./my-data", () => {
     const args = ["--data", "./my-data"];
     const result = parseCliArgs(args);
     expect(result.dataFlag).toBe("./my-data");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --execution /path/to/exec", () => {
+  test("hankweave --execution /path/to/exec", () => {
     const args = ["--execution", "/path/to/exec"];
     const result = parseCliArgs(args);
     expect(result.executionPath).toBe("/path/to/exec");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --input 'some text here'", () => {
+  test("hankweave --input 'some text here'", () => {
     const args = ["--input", "some text here"];
     const result = parseCliArgs(args);
     expect(result.inputText).toBe("some text here");
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
   // Tests for additional boolean flags
-  test("strandweave --headless", () => {
+  test("hankweave --headless", () => {
     const args = ["--headless"];
     const result = parseCliArgs(args);
     expect(result.headless).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --validate", () => {
+  test("hankweave --validate", () => {
     const args = ["--validate"];
     const result = parseCliArgs(args);
     expect(result.validate).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave -v (validate shorthand)", () => {
+  test("hankweave -v (validate shorthand)", () => {
     const args = ["-v"];
     const result = parseCliArgs(args);
     expect(result.validate).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --cleanup", () => {
+  test("hankweave --cleanup", () => {
     const args = ["--cleanup"];
     const result = parseCliArgs(args);
     expect(result.cleanup).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave -y (skip confirmation)", () => {
+  test("hankweave -y (skip confirmation)", () => {
     const args = ["-y"];
     const result = parseCliArgs(args);
     expect(result.skipConfirmation).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --start-new", () => {
+  test("hankweave --start-new", () => {
     const args = ["--start-new"];
     const result = parseCliArgs(args);
     expect(result.startNew).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --force", () => {
+  test("hankweave --force", () => {
     const args = ["--force"];
     const result = parseCliArgs(args);
     expect(result.force).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --init", () => {
+  test("hankweave --init", () => {
     const args = ["--init"];
     const result = parseCliArgs(args);
     expect(result.init).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --help", () => {
+  test("hankweave --help", () => {
     const args = ["--help"];
     const result = parseCliArgs(args);
     expect(result.help).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave -h (help shorthand)", () => {
+  test("hankweave -h (help shorthand)", () => {
     const args = ["-h"];
     const result = parseCliArgs(args);
     expect(result.help).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("strandweave --copy", () => {
+  test("hankweave --copy", () => {
     const args = ["--copy"];
     const result = parseCliArgs(args);
     expect(result.copy).toBe(true);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
   // Complex combination test
-  test("strandweave ./data --headless --validate --port 8080 -y", () => {
+  test("hankweave ./data --headless --validate --port 8080 -y", () => {
     const args = ["./data", "--headless", "--validate", "--port", "8080", "-y"];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBeUndefined();
+    expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBe("./data");
     expect(result.headless).toBe(true);
     expect(result.validate).toBe(true);
@@ -782,9 +782,9 @@ describe("parseCliArgs", () => {
     expect(result.skipConfirmation).toBe(true);
   });
 
-  test("strandweave strand.json ./data --config other.json --data /other/data --headless --force", () => {
+  test("hankweave hank.json ./data --config other.json --data /other/data --headless --force", () => {
     const args = [
-      "strand.json",
+      "hank.json",
       "./data",
       "--config",
       "other.json",
@@ -794,7 +794,7 @@ describe("parseCliArgs", () => {
       "--force",
     ];
     const result = parseCliArgs(args);
-    expect(result.strandPath).toBe("strand.json");
+    expect(result.hankPath).toBe("hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.configPath).toBe("other.json");
     expect(result.dataFlag).toBe("/other/data");
@@ -878,21 +878,21 @@ describe("parseCliArgs", () => {
     test("throws when too many positional arguments (3)", () => {
       const args = ["first", "second", "third"];
       expect(() => parseCliArgs(args)).toThrow(
-        "Too many positional arguments. Expected at most 2 (strand-path, data-path), got 3.",
+        "Too many positional arguments. Expected at most 2 (hank-path, data-path), got 3.",
       );
     });
 
     test("throws when too many positional arguments (4)", () => {
       const args = ["first", "second", "third", "fourth"];
       expect(() => parseCliArgs(args)).toThrow(
-        "Too many positional arguments. Expected at most 2 (strand-path, data-path), got 4.",
+        "Too many positional arguments. Expected at most 2 (hank-path, data-path), got 4.",
       );
     });
 
     test("throws when too many positional arguments with flags mixed", () => {
       const args = ["first", "--port", "8080", "second", "third"];
       expect(() => parseCliArgs(args)).toThrow(
-        "Too many positional arguments. Expected at most 2 (strand-path, data-path), got 3.",
+        "Too many positional arguments. Expected at most 2 (hank-path, data-path), got 3.",
       );
     });
 

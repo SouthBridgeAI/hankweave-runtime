@@ -1,5 +1,5 @@
 /**
- * Error severity levels for Strandweave server.
+ * Error severity levels for Hankweave server.
  */
 export enum ErrorSeverity {
   /** Fatal error - requires server shutdown */
@@ -15,7 +15,7 @@ export enum ErrorSeverity {
 /**
  * Custom error classes for different severity levels.
  */
-export class StrandweaveError extends Error {
+export class HankweaveError extends Error {
   constructor(
     message: string,
     public readonly severity: ErrorSeverity,
@@ -23,25 +23,25 @@ export class StrandweaveError extends Error {
     public readonly context?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = "StrandweaveError";
+    this.name = "HankweaveError";
   }
 }
 
-export class FatalError extends StrandweaveError {
+export class FatalError extends HankweaveError {
   constructor(message: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.FATAL, "FATAL_ERROR", context);
     this.name = "FatalError";
   }
 }
 
-export class CodonError extends StrandweaveError {
+export class CodonError extends HankweaveError {
   constructor(message: string, codonId: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.CODON, "CODON_ERROR", { ...context, codonId });
     this.name = "CodonError";
   }
 }
 
-export class OperationError extends StrandweaveError {
+export class OperationError extends HankweaveError {
   constructor(message: string, operation: string, context?: Record<string, unknown>) {
     super(message, ErrorSeverity.OPERATION, "OPERATION_ERROR", {
       ...context,
@@ -51,7 +51,7 @@ export class OperationError extends StrandweaveError {
   }
 }
 
-export class APITimeoutError extends StrandweaveError {
+export class APITimeoutError extends HankweaveError {
   constructor(codonId: string, context?: Record<string, unknown>) {
     super("Claude API request timed out", ErrorSeverity.CODON, "API_TIMEOUT_ERROR", {
       ...context,
@@ -61,7 +61,7 @@ export class APITimeoutError extends StrandweaveError {
   }
 }
 
-export class ContextExceededError extends StrandweaveError {
+export class ContextExceededError extends HankweaveError {
   constructor(
     message: string,
     public readonly originalError: unknown,

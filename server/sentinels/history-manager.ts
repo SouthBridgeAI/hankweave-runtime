@@ -3,12 +3,12 @@ import * as path from "node:path";
 import type { TrimmingStrategy } from "../config-validation/sentinel.schema.js";
 import type { CodonId } from "../types/branded-types.js";
 import type {
-  StrandweaveAssistantModelMessage,
-  StrandweaveModelMessage,
-  StrandweaveSystemModelMessage,
-  StrandweaveUserModelMessage,
+  HankweaveAssistantModelMessage,
+  HankweaveModelMessage,
+  HankweaveSystemModelMessage,
+  HankweaveUserModelMessage,
 } from "../types/input-ai-types.js";
-import { strandweaveModelMessageSchema } from "../types/input-ai-types.js";
+import { hankweaveModelMessageSchema } from "../types/input-ai-types.js";
 import { type Logger, renameWithRetry } from "../utils.js";
 
 // Simple token counter - approximate 4 chars per token
@@ -29,7 +29,7 @@ export const simpleTokenCounter = (text: string): number => {
  */
 export class HistoryManager {
   private history: Array<{
-    message: StrandweaveUserModelMessage | StrandweaveAssistantModelMessage;
+    message: HankweaveUserModelMessage | HankweaveAssistantModelMessage;
     tokens?: number; // Actual token count if available
   }> = [];
   private readonly historyFilePath?: string; // Optional - no file if no dir provided
@@ -141,7 +141,7 @@ export class HistoryManager {
   public async getMessagesToSend(
     systemPrompt: string,
     forceSkipPruning = false,
-  ): Promise<StrandweaveModelMessage[]> {
+  ): Promise<HankweaveModelMessage[]> {
     await this.ensureInitialized();
 
     // Prune if needed (unless explicitly skipped)
@@ -150,8 +150,8 @@ export class HistoryManager {
     }
 
     // Build the messages array with system prompt + history
-    const messages: StrandweaveModelMessage[] = [
-      { role: "system", content: systemPrompt } as StrandweaveSystemModelMessage,
+    const messages: HankweaveModelMessage[] = [
+      { role: "system", content: systemPrompt } as HankweaveSystemModelMessage,
       ...this.history.map((item) => item.message), // Extract just the message
     ];
 
@@ -254,7 +254,7 @@ export class HistoryManager {
    * - Old format: Direct message objects (backward compatibility)
    *
    * Validation:
-   * - Each message validated against strandweaveModelMessageSchema
+   * - Each message validated against hankweaveModelMessageSchema
    * - Only user/assistant messages accepted (system/tool filtered out)
    * - Invalid messages logged and skipped
    * - High corruption rate (>20%) triggers error and fresh start
@@ -270,10 +270,10 @@ export class HistoryManager {
       const content = await fs.readFile(this.historyFilePath, "utf-8");
       const parsed = JSON.parse(content);
 
-      // Validate the loaded data using Strandweave schemas
+      // Validate the loaded data using Hankweave schemas
       if (Array.isArray(parsed)) {
         const valid: Array<{
-          message: StrandweaveUserModelMessage | StrandweaveAssistantModelMessage;
+          message: HankweaveUserModelMessage | HankweaveAssistantModelMessage;
           tokens?: number;
         }> = [];
         const errors: string[] = [];
@@ -285,7 +285,7 @@ export class HistoryManager {
           const messageData = "message" in item ? item.message : item;
           const tokens = "tokens" in item ? item.tokens : undefined;
 
-          const result = strandweaveModelMessageSchema.safeParse(messageData);
+          const result = hankweaveModelMessageSchema.safeParse(messageData);
 
           if (!result.success) {
             errors.push(`Message ${i}: Parse failed - ${result.error.message}`);
@@ -306,7 +306,7 @@ export class HistoryManager {
           }
 
           valid.push({
-            message: result.data as StrandweaveUserModelMessage | StrandweaveAssistantModelMessage,
+            message: result.data as HankweaveUserModelMessage | HankweaveAssistantModelMessage,
             tokens: typeof tokens === "number" ? tokens : undefined,
           });
         }
@@ -379,7 +379,7 @@ export class HistoryManager {
    *
    * File Format:
    * JSON array of { message, tokens } objects where:
-   * - message: StrandweaveUserModelMessage or StrandweaveAssistantModelMessage
+   * - message: HankweaveUserModelMessage or HankweaveAssistantModelMessage
    * - tokens: Optional number (actual token count if available)
    *
    * Called automatically after each addMessagePair() if persistence enabled.

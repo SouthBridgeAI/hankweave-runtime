@@ -50,7 +50,7 @@ describe("CheckpointGit", () => {
   });
 
   test("getPath returns correct checkpoint repository path", () => {
-    const expectedPath = path.join(tempDir, ".strandweave", "checkpoints");
+    const expectedPath = path.join(tempDir, ".hankweave", "checkpoints");
     expect(checkpointGit.getPath()).toBe(expectedPath);
   });
 

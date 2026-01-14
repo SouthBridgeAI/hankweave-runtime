@@ -132,10 +132,10 @@ type ShimName = (typeof SHIM_NAMES)[number];
 
 /**
  * Get the extraction directory path for shims.
- * Uses ~/.strandweave/shims/<version>/ by default.
+ * Uses ~/.hankweave/shims/<version>/ by default.
  */
 export function getShimExtractionDir(): string {
-  const cacheDir = process.env.STRANDWEAVE_CACHE_DIR || path.join(os.homedir(), ".strandweave");
+  const cacheDir = process.env.HANKWEAVE_CACHE_DIR || path.join(os.homedir(), ".hankweave");
   return path.join(cacheDir, "shims", SHIM_VERSION);
 }
 

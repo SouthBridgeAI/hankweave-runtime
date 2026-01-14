@@ -94,18 +94,18 @@ export interface ExecutionSetup {
   executionPath: string; // Absolute path where we run
   dataPathInExecutionDir: string; // Always executionPath + '/read_only_data_source'
   dataHash: string;
-  strandHash?: string; // Hash of strand.json content (for resume detection)
+  hankHash?: string; // Hash of hank.json content (for resume detection)
   isNewExecution: boolean;
   isResuming: boolean;
   linkType: "symlink" | "copy";
-  configChanged?: boolean; // True if strand.json changed since last run
+  configChanged?: boolean; // True if hank.json changed since last run
   meta: {
     createdAt: string;
     lastUsed: string;
     readOnlySourceResolvedDataPath: string;
     version: string;
-    strandHash?: string;
-    strandPath?: string;
+    hankHash?: string;
+    hankPath?: string;
   };
 }
 
@@ -115,9 +115,9 @@ export async function setupExecutionEnvironment(options: {
   useSymlink?: boolean; // Default true, --copy flag sets to false
   dataHashTimeLimit?: number; // Time limit for hashing
   startNew?: boolean; // Force new execution
-  forceMode?: boolean; // Force operation in existing directories with .strandweave
+  forceMode?: boolean; // Force operation in existing directories with .hankweave
   skipConfirmation?: boolean; // Skip confirmation prompts (-y flag)
-  strandPath?: string; // Path to strand.json for hash tracking
+  hankPath?: string; // Path to hank.json for hash tracking
 }): Promise<ExecutionSetup> {
   const {
     readOnlySourceDataPath,
@@ -127,7 +127,7 @@ export async function setupExecutionEnvironment(options: {
     startNew = false,
     forceMode = false,
     skipConfirmation = false,
-    strandPath,
+    hankPath,
   } = options;
 
   // Verify data source exists
@@ -150,18 +150,18 @@ export async function setupExecutionEnvironment(options: {
   let isResuming = false;
   let configChanged = false;
 
-  // Calculate strand hash if path provided
-  let strandHash: string | undefined;
-  if (strandPath && fs.existsSync(strandPath)) {
-    const strandContent = await fs.promises.readFile(strandPath, "utf-8");
-    strandHash = crypto.createHash("sha256").update(strandContent).digest("hex");
+  // Calculate hank hash if path provided
+  let hankHash: string | undefined;
+  if (hankPath && fs.existsSync(hankPath)) {
+    const hankContent = await fs.promises.readFile(hankPath, "utf-8");
+    hankHash = crypto.createHash("sha256").update(hankContent).digest("hex");
   }
 
   if (executionPath) {
     // Explicit execution path provided
 
     // Tier 1: Hard error for managed execution directory
-    const managedExecBase = path.join(os.homedir(), ".strandweave-executions");
+    const managedExecBase = path.join(os.homedir(), ".hankweave-executions");
     if (executionPath.startsWith(managedExecBase)) {
       throw new Error(
         `Cannot use ${managedExecBase}/ as explicit execution directory.\n` +
@@ -176,27 +176,27 @@ export async function setupExecutionEnvironment(options: {
         const entries = await fs.promises.readdir(executionPath);
 
         if (entries.length > 0) {
-          const hasStrandweave = entries.includes(".strandweave");
+          const hasHankweave = entries.includes(".hankweave");
 
-          // Tier 2: Directory already has Strandweave execution
-          if (hasStrandweave) {
+          // Tier 2: Directory already has Hankweave execution
+          if (hasHankweave) {
             if (forceMode) {
-              // Backup existing .strandweave
+              // Backup existing .hankweave
               const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-              const backupPath = path.join(executionPath, `.strandweave.backup-${timestamp}`);
-              await fs.promises.rename(path.join(executionPath, ".strandweave"), backupPath);
+              const backupPath = path.join(executionPath, `.hankweave.backup-${timestamp}`);
+              await fs.promises.rename(path.join(executionPath, ".hankweave"), backupPath);
               console.log(`📦 Backed up existing execution to: ${backupPath}`);
             } else {
               throw new Error(
-                `Directory already contains Strandweave execution: ${executionPath}\n` +
+                `Directory already contains Hankweave execution: ${executionPath}\n` +
                   `Options:\n` +
-                  `  1. Remove .strandweave/ directory and try again\n` +
+                  `  1. Remove .hankweave/ directory and try again\n` +
                   `  2. Use --force to backup existing state and start fresh\n` +
                   `  3. Use a different directory`,
               );
             }
           } else {
-            // Tier 3: Non-empty directory without Strandweave
+            // Tier 3: Non-empty directory without Hankweave
             const { files, directories } = await countDirectoryContents(executionPath);
 
             if (!skipConfirmation && !forceMode) {
@@ -207,13 +207,13 @@ export async function setupExecutionEnvironment(options: {
                 `\n  This directory contains ${files} files and ${directories} directories.`,
               );
               console.log(
-                `  Strandweave agents will have access to READ and MODIFY files in this directory.`,
+                `  Hankweave agents will have access to READ and MODIFY files in this directory.`,
               );
-              console.log(`\n  Strandweave will create:`);
-              console.log(`    ./.strandweave/           (execution metadata)`);
+              console.log(`\n  Hankweave will create:`);
+              console.log(`    ./.hankweave/           (execution metadata)`);
               console.log(`    ./read_only_data_source/  (symlink to data)`);
               console.log(
-                `\n  IMPORTANT: Always use version control. Test strands on non-critical directories first.\n`,
+                `\n  IMPORTANT: Always use version control. Test hanks on non-critical directories first.\n`,
               );
 
               const confirmed = await promptConfirmation("Continue?");
@@ -252,7 +252,7 @@ export async function setupExecutionEnvironment(options: {
       }
 
       // Prevent nested execution
-      if (executionPath.includes("/.strandweave-executions/") && executionPath.includes("/data")) {
+      if (executionPath.includes("/.hankweave-executions/") && executionPath.includes("/data")) {
         throw new Error("Cannot create execution inside another execution directory");
       }
 
@@ -262,7 +262,7 @@ export async function setupExecutionEnvironment(options: {
       }
 
       // Check if it has execution metadata
-      const metaPath = path.join(executionPath, ".strandweave", "execution-meta.json");
+      const metaPath = path.join(executionPath, ".hankweave", "execution-meta.json");
       if (fs.existsSync(metaPath)) {
         // Verify data hash matches
         const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
@@ -274,12 +274,12 @@ export async function setupExecutionEnvironment(options: {
           );
         }
 
-        // Check for strand config changes
-        if (strandHash && meta.strandHash && meta.strandHash !== strandHash) {
+        // Check for hank config changes
+        if (hankHash && meta.hankHash && meta.hankHash !== hankHash) {
           configChanged = true;
-          console.log(`\n⚠️  WARNING: strand.json has changed since last execution.`);
-          console.log(`  Previous hash: ${meta.strandHash.substring(0, 12)}...`);
-          console.log(`  Current hash:  ${strandHash.substring(0, 12)}...`);
+          console.log(`\n⚠️  WARNING: hank.json has changed since last execution.`);
+          console.log(`  Previous hash: ${meta.hankHash.substring(0, 12)}...`);
+          console.log(`  Current hash:  ${hankHash.substring(0, 12)}...`);
           console.log(`  Changes may affect execution behavior.\n`);
 
           if (!skipConfirmation && !forceMode) {
@@ -301,7 +301,7 @@ export async function setupExecutionEnvironment(options: {
     }
   } else {
     // Auto-detect or create execution directory
-    const executionRoot = path.join(os.homedir(), ".strandweave-executions");
+    const executionRoot = path.join(os.homedir(), ".hankweave-executions");
     await fs.promises.mkdir(executionRoot, { recursive: true });
 
     if (startNew) {
@@ -376,7 +376,7 @@ export async function setupExecutionEnvironment(options: {
   }
 
   // Create/update metadata
-  const metaDir = path.join(finalExecutionPath, ".strandweave");
+  const metaDir = path.join(finalExecutionPath, ".hankweave");
   await fs.promises.mkdir(metaDir, { recursive: true });
 
   const existingMetaPath = path.join(metaDir, "execution-meta.json");
@@ -389,8 +389,8 @@ export async function setupExecutionEnvironment(options: {
     readOnlySourceDataPath,
     readOnlySourceResolvedDataPath: await fs.promises.realpath(readOnlySourceDataPath),
     dataHash,
-    strandHash,
-    strandPath,
+    hankHash,
+    hankPath,
     linkType,
     createdAt: isNewExecution
       ? new Date().toISOString()
@@ -405,7 +405,7 @@ export async function setupExecutionEnvironment(options: {
     executionPath: finalExecutionPath,
     dataPathInExecutionDir,
     dataHash,
-    strandHash,
+    hankHash,
     isNewExecution,
     isResuming,
     linkType,

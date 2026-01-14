@@ -33,10 +33,10 @@ export interface VerdaccioSetup {
  */
 export function needsVerdaccio(): boolean {
   return Boolean(
-    process.env.STRANDWEAVE_TEST_USE_NPX ||
-      process.env.STRANDWEAVE_TEST_USE_BUNX ||
-      process.env.STRANDWEAVE_TEST_USE_PNPM_DLX ||
-      process.env.STRANDWEAVE_TEST_USE_DENO,
+    process.env.HANKWEAVE_TEST_USE_NPX ||
+      process.env.HANKWEAVE_TEST_USE_BUNX ||
+      process.env.HANKWEAVE_TEST_USE_PNPM_DLX ||
+      process.env.HANKWEAVE_TEST_USE_DENO,
   );
 }
 
@@ -55,17 +55,17 @@ export function getCommandOverride(): TestServerConfig["commandOverride"] {
   // Use @latest to force package manager to check registry and bypass cache
   const packageWithLatest = `${packageName}@latest`;
 
-  if (process.env.STRANDWEAVE_TEST_USE_NPX) {
+  if (process.env.HANKWEAVE_TEST_USE_NPX) {
     // --yes skips prompts, @latest forces fresh download from registry
     return { command: "npx", args: ["--yes", packageWithLatest] };
   }
-  if (process.env.STRANDWEAVE_TEST_USE_BUNX) {
+  if (process.env.HANKWEAVE_TEST_USE_BUNX) {
     return { command: "bunx", args: [packageWithLatest] };
   }
-  if (process.env.STRANDWEAVE_TEST_USE_PNPM_DLX) {
+  if (process.env.HANKWEAVE_TEST_USE_PNPM_DLX) {
     return { command: "pnpm", args: ["dlx", packageWithLatest] };
   }
-  if (process.env.STRANDWEAVE_TEST_USE_DENO) {
+  if (process.env.HANKWEAVE_TEST_USE_DENO) {
     return { command: "deno", args: ["run", "-A", `npm:${packageWithLatest}`] };
   }
   return undefined;

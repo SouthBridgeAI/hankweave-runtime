@@ -1,9 +1,9 @@
 #!/bin/bash
 
-echo "🧹 Cleaning up Strandweave test environment..."
+echo "🧹 Cleaning up Hankweave test environment..."
 
 # First, check if lock file exists and use the PID from it
-LOCK_FILE="tests/test-area/.strandweave/runtime.lock"
+LOCK_FILE="tests/test-area/.hankweave/runtime.lock"
 if [ -f "$LOCK_FILE" ]; then
     echo "Found lock file: $LOCK_FILE"
     SERVER_PID=$(cat "$LOCK_FILE" 2>/dev/null)

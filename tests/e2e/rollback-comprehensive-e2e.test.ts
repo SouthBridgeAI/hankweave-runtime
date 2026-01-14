@@ -22,7 +22,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import { CodonId, RunId } from "../../server/types/branded-types.js";
-import type { Run, StrandweaveState } from "../../server/types/state-types.js";
+import type { HankweaveState, Run } from "../../server/types/state-types.js";
 import type {
   AssistantActionEvent,
   CheckpointListEvent,
@@ -72,7 +72,7 @@ const testDirConfig: TestDirectoryConfig = {
 interface TestSnapshot {
   name: string;
   directory: string;
-  state: StrandweaveState;
+  state: HankweaveState;
   events: ServerEvent[];
   checkpoints: CheckpointListEvent["data"]["checkpoints"];
   timestamp: string;
@@ -171,7 +171,7 @@ async function getFilePaths(dir: string): Promise<string[]> {
 
 /**
  * Computes a hash for a directory's contents
- * Excludes .strandweave, data, and read_only_data_source directories
+ * Excludes .hankweave, data, and read_only_data_source directories
  */
 async function hashDirectory(dir: string): Promise<string> {
   if (!fs.existsSync(dir)) {
@@ -182,8 +182,8 @@ async function hashDirectory(dir: string): Promise<string> {
   const filePaths = allFilePaths.filter((filePath) => {
     const relativePath = path.relative(dir, filePath);
     return (
-      !relativePath.startsWith(`.strandweave${path.sep}`) &&
-      !relativePath.startsWith(".strandweave/") &&
+      !relativePath.startsWith(`.hankweave${path.sep}`) &&
+      !relativePath.startsWith(".hankweave/") &&
       !relativePath.startsWith(`data${path.sep}`) &&
       !relativePath.startsWith("data/") &&
       relativePath !== "data" &&
@@ -287,7 +287,7 @@ async function createSnapshot(
   await fs.promises.cp(executionPath, snapshotPath, { recursive: true });
 
   // Get current state
-  const statePath = path.join(executionPath, ".strandweave/state.json");
+  const statePath = path.join(executionPath, ".hankweave/state.json");
   const state = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
   console.log(
     `${colors.gray}  State: ${state.runs.length} runs, current: ${state.currentRunId}${colors.reset}`,
@@ -831,7 +831,7 @@ describe("Comprehensive Rollback E2E Test", () => {
 
     // Load git info for each snapshot for analysis tests
     for (const snapshot of testSnapshots) {
-      const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
+      const gitDir = path.join(snapshot.directory, ".hankweave", "checkpoints", ".git");
       if (fs.existsSync(gitDir)) {
         snapshot.git = {
           branches: [],
@@ -854,8 +854,8 @@ describe("Comprehensive Rollback E2E Test", () => {
         console.log(`\nVerifying snapshot: ${snapshot.name}`);
         expect(fs.existsSync(snapshot.directory)).toBe(true);
 
-        const strandweaveDir = path.join(snapshot.directory, ".strandweave");
-        expect(fs.existsSync(strandweaveDir)).toBe(true);
+        const hankweaveDir = path.join(snapshot.directory, ".hankweave");
+        expect(fs.existsSync(hankweaveDir)).toBe(true);
       });
     });
 
@@ -901,8 +901,8 @@ describe("Comprehensive Rollback E2E Test", () => {
 
   describe("Priority 1: Critical Data Integrity & Core Rollback Logic", () => {
     test.each(testSnapshots)("1.1 State File Integrity: $name", (snapshot) => {
-      const statePath = path.join(snapshot.directory, ".strandweave", "state.json");
-      const backupPath = path.join(snapshot.directory, ".strandweave", "state.json.bak");
+      const statePath = path.join(snapshot.directory, ".hankweave", "state.json");
+      const backupPath = path.join(snapshot.directory, ".hankweave", "state.json.bak");
 
       expect(fs.existsSync(statePath)).toBe(true);
       expect(fs.existsSync(backupPath)).toBe(true);
@@ -919,7 +919,7 @@ describe("Comprehensive Rollback E2E Test", () => {
     });
 
     test.each(testSnapshots)("1.2 Git Repository Integrity: $name", (snapshot) => {
-      const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
+      const gitDir = path.join(snapshot.directory, ".hankweave", "checkpoints", ".git");
       expect(fs.existsSync(gitDir)).toBe(true);
 
       try {
@@ -950,7 +950,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
 
       snapshot.state.runs.forEach((run) => {
-        const runFolder = path.join(snapshot.directory, ".strandweave", "runs", run.runId);
+        const runFolder = path.join(snapshot.directory, ".hankweave", "runs", run.runId);
         expect(fs.existsSync(runFolder)).toBe(true);
       });
     });
@@ -972,7 +972,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       }
       fs.mkdirSync(checkoutDir, { recursive: true });
 
-      const gitDir = path.join(snapshot1.directory, ".strandweave", "checkpoints", ".git");
+      const gitDir = path.join(snapshot1.directory, ".hankweave", "checkpoints", ".git");
       execSync(`git --git-dir=${gitDir} --work-tree=${checkoutDir} checkout ${targetSha} -- .`);
 
       const rolledBackHash = await hashDirectory(snapshot2.directory);
@@ -1068,10 +1068,10 @@ describe("Comprehensive Rollback E2E Test", () => {
       const run = snapshot.state.runs[0];
       const registry = LlmProviderRegistry.getInstance();
 
-      // Load the strand config to get the actual codon models
-      const strandConfig = JSON.parse(fs.readFileSync(CODONS_CONFIG, "utf-8"));
+      // Load the hank config to get the actual codon models
+      const hankConfig = JSON.parse(fs.readFileSync(CODONS_CONFIG, "utf-8"));
       const codonModels = new Map<string, string>();
-      for (const codonConfig of strandConfig.strand) {
+      for (const codonConfig of hankConfig.hank) {
         if (codonConfig.model) {
           codonModels.set(codonConfig.id, codonConfig.model);
         }
@@ -1079,7 +1079,7 @@ describe("Comprehensive Rollback E2E Test", () => {
 
       for (const codon of run.codons) {
         if (codon.status === "completed") {
-          // Get the model from the strand config (not from sentinels!)
+          // Get the model from the hank config (not from sentinels!)
           const modelId = codonModels.get(codon.codonId);
           if (!modelId) {
             // No model specified in config - skip validation
@@ -1133,14 +1133,14 @@ describe("Comprehensive Rollback E2E Test", () => {
 
     test.each(testSnapshots)("3.2 Orphaned Artifact Check: $name", (snapshot) => {
       const runIdsInState = new Set(snapshot.state.runs.map((r) => r.runId));
-      const runDirsOnDisk = fs.readdirSync(path.join(snapshot.directory, ".strandweave", "runs"));
+      const runDirsOnDisk = fs.readdirSync(path.join(snapshot.directory, ".hankweave", "runs"));
 
       for (const dir of runDirsOnDisk) {
         expect(runIdsInState.has(RunId(dir))).toBe(true);
       }
 
       for (const run of snapshot.state.runs) {
-        const runDir = path.join(snapshot.directory, ".strandweave", "runs", run.runId);
+        const runDir = path.join(snapshot.directory, ".hankweave", "runs", run.runId);
         expect(fs.existsSync(runDir)).toBe(true);
       }
     });
@@ -1172,7 +1172,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       expect(p3checkpoints.some((cp) => cp.checkpointType === "skipped")).toBe(true);
 
       const aCheckpoint = snapshot.checkpoints[0];
-      const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
+      const gitDir = path.join(snapshot.directory, ".hankweave", "checkpoints", ".git");
       const msg = execSync(`git --git-dir=${gitDir} show -s --format=%B ${aCheckpoint.sha}`, {
         encoding: "utf-8",
       });
@@ -1297,7 +1297,7 @@ describe("Comprehensive Rollback E2E Test", () => {
     test("5.1 State-to-Filesystem Run Integrity", () => {
       for (const snapshot of testSnapshots) {
         for (const run of snapshot.state.runs) {
-          const expectedFolder = path.join(snapshot.directory, ".strandweave", "runs", run.runId);
+          const expectedFolder = path.join(snapshot.directory, ".hankweave", "runs", run.runId);
           expect(fs.existsSync(expectedFolder)).toBe(true);
         }
       }
@@ -1378,7 +1378,7 @@ describe("Comprehensive Rollback E2E Test", () => {
         expect(Array.isArray(snapshot.state.runs)).toBe(true);
         expect(snapshot.state.runs.length).toBeGreaterThan(0);
 
-        const gitDir = path.join(snapshot.directory, ".strandweave", "checkpoints", ".git");
+        const gitDir = path.join(snapshot.directory, ".hankweave", "checkpoints", ".git");
         expect(fs.existsSync(gitDir)).toBe(true);
       }
     });
@@ -1405,7 +1405,7 @@ describe("Comprehensive Rollback E2E Test", () => {
 
   describe("Priority 7: Additional Validation Tests", () => {
     test("7.1 Resource Cleanup: Lock files removed", async () => {
-      const mainLockFilePath = path.join(EXECUTION_DIR, ".strandweave", "runtime.lock");
+      const mainLockFilePath = path.join(EXECUTION_DIR, ".hankweave", "runtime.lock");
 
       // Poll for lock file removal (up to 2 seconds)
       for (let i = 0; i < 20; i++) {
@@ -1420,7 +1420,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       const stateSizes: Array<{ name: string; size: number }> = [];
 
       for (const snapshot of testSnapshots) {
-        const statePath = path.join(snapshot.directory, ".strandweave", "state.json");
+        const statePath = path.join(snapshot.directory, ".hankweave", "state.json");
         if (fs.existsSync(statePath)) {
           const stats = fs.statSync(statePath);
           stateSizes.push({ name: snapshot.name, size: stats.size });
@@ -1591,7 +1591,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       // They're observational logs, not part of execution state
 
       for (const snapshot of testSnapshots) {
-        const outputsDir = path.join(snapshot.directory, ".strandweave", "sentinel-outputs");
+        const outputsDir = path.join(snapshot.directory, ".hankweave", "sentinel-outputs");
 
         if (fs.existsSync(outputsDir)) {
           // If sentinels exist, their outputs should accumulate, never delete
@@ -1667,7 +1667,7 @@ describe("Comprehensive Rollback E2E Test", () => {
       // These files should persist across rollbacks
 
       for (const snapshot of testSnapshots) {
-        const sentinelsDir = path.join(snapshot.directory, ".strandweave", "sentinels");
+        const sentinelsDir = path.join(snapshot.directory, ".hankweave", "sentinels");
 
         if (fs.existsSync(sentinelsDir)) {
           const historyFiles = fs.readdirSync(sentinelsDir).filter((f) => f.endsWith(".json"));

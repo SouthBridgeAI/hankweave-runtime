@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Release automation script for Strandweave
+ * Release automation script for Hankweave
  *
  * Handles version bumping, changelog management, git tagging, and pushing
  * Inspired by pi-mono's release flow
@@ -219,7 +219,7 @@ async function pushToOrigin(version: string): Promise<void> {
  */
 async function main(): Promise<void> {
 	console.log("╔════════════════════════════════════════╗");
-	console.log("║   Strandweave Release Automation      ║");
+	console.log("║   Hankweave Release Automation      ║");
 	console.log("╚════════════════════════════════════════╝");
 	console.log(`\nBump type: ${BUMP_TYPE}`);
 

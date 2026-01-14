@@ -12,7 +12,7 @@ import {
   needsBinary,
   setupBinary,
 } from "../utils/binary.js";
-import { launchStrandweave } from "../utils/strandweave-server-test-helpers.js";
+import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
 import {
   cleanupVerdaccio,
@@ -179,10 +179,10 @@ describe("init command e2e", () => {
 
     // Verify success
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Initialized strand");
+    expect(stdout).toContain("Initialized hank");
 
     // Verify files were created
-    expect(fs.existsSync(path.join(INIT_TEST_DIR, "strand.json"))).toBe(true);
+    expect(fs.existsSync(path.join(INIT_TEST_DIR, "hank.json"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-haiku.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
@@ -190,25 +190,25 @@ describe("init command e2e", () => {
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample2.txt"))).toBe(true);
     expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/notes.txt"))).toBe(true);
 
-    // Verify strand.json is valid JSON and has expected structure
-    const strandContent = fs.readFileSync(path.join(INIT_TEST_DIR, "strand.json"), "utf-8");
-    const strandConfig = JSON.parse(strandContent);
+    // Verify hank.json is valid JSON and has expected structure
+    const hankContent = fs.readFileSync(path.join(INIT_TEST_DIR, "hank.json"), "utf-8");
+    const hankConfig = JSON.parse(hankContent);
 
-    expect(strandConfig).toHaveProperty("meta");
-    expect(strandConfig).toHaveProperty("recommendations");
-    expect(strandConfig).toHaveProperty("strand");
-    expect(Array.isArray(strandConfig.strand)).toBe(true);
-    expect(strandConfig.strand.length).toBe(2);
+    expect(hankConfig).toHaveProperty("meta");
+    expect(hankConfig).toHaveProperty("recommendations");
+    expect(hankConfig).toHaveProperty("hank");
+    expect(Array.isArray(hankConfig.hank)).toBe(true);
+    expect(hankConfig.hank.length).toBe(2);
 
     // Verify first codon has required fields
-    const firstCodon = strandConfig.strand[0];
+    const firstCodon = hankConfig.hank[0];
     expect(firstCodon).toHaveProperty("id");
     expect(firstCodon).toHaveProperty("name");
     expect(firstCodon).toHaveProperty("model");
     expect(firstCodon).toHaveProperty("continuationMode");
 
     // Verify second codon has required fields
-    const secondCodon = strandConfig.strand[1];
+    const secondCodon = hankConfig.hank[1];
     expect(secondCodon).toHaveProperty("id");
     expect(secondCodon).toHaveProperty("name");
     expect(secondCodon).toHaveProperty("model");
@@ -239,15 +239,15 @@ describe("init command e2e", () => {
     fs.rmSync(nonEmptyDir, { recursive: true, force: true });
   }, 30_000); // 30 seconds timeout for this test
 
-  test("generated strand can be executed successfully", async () => {
-    const configPath = path.join(INIT_TEST_DIR, "strand.json");
+  test("generated hank can be executed successfully", async () => {
+    const configPath = path.join(INIT_TEST_DIR, "hank.json");
     const dataDir = path.join(INIT_TEST_DIR, "data");
 
     // Get a free port for the server
     const port = await getFreePort();
 
     // Determine command to use - priority: binary > verdaccio > default
-    const serverOptions: Parameters<typeof launchStrandweave>[0] = {
+    const serverOptions: Parameters<typeof launchHankweave>[0] = {
       configPath,
       dataDir,
       port,
@@ -277,14 +277,14 @@ describe("init command e2e", () => {
 
     // Launch server using the data directory created by init
     // Use INIT_TEST_DIR as both cwd (for output files) and execution directory
-    const server = await launchStrandweave(serverOptions);
+    const server = await launchHankweave(serverOptions);
 
     try {
       // Wait for the run to complete
       await server.waitForRunToComplete(300000);
 
-      // Verify that the analysis files were created in strandweave-results
-      const resultsDir = path.join(INIT_TEST_DIR, "strandweave-results");
+      // Verify that the analysis files were created in hankweave-results
+      const resultsDir = path.join(INIT_TEST_DIR, "hankweave-results");
       expect(fs.existsSync(resultsDir)).toBe(true);
 
       const analysisHaikuFile = path.join(resultsDir, "analysis-haiku.md");

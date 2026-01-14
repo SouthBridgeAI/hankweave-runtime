@@ -4,9 +4,9 @@
 
 However, a simple "Find & Replace" will be dangerous because the *metaphor* has shifted.
 *   **Old Metaphor:** Biological Lifecycle (Tadpole $\to$ Frog, Phases of life).
-*   **New Metaphor:** Genetic Sequencing / Textile Construction (Strands, Weaving, Codons as building blocks, Rigs as machinery).
+*   **New Metaphor:** Genetic Sequencing / Textile Construction (Hanks, Weaving, Codons as building blocks, Rigs as machinery).
 
-We need to edit the docs to align with the new "Strand" metaphor while preserving the technical accuracy.
+We need to edit the docs to align with the new "Hank" metaphor while preserving the technical accuracy.
 
 ---
 
@@ -20,7 +20,7 @@ Rename the files to match the new terminology. This effectively breaks all inter
 
 | Current Filename | **New Filename** |
 | :--- | :--- |
-| `tadpole-folder-structure.md` | **`strandweave-folder-structure.md`** |
+| `tadpole-folder-structure.md` | **`hankweave-folder-structure.md`** |
 | `phase-system.md` | **`codon-system.md`** |
 | `phase-configuration-guide.md` | **`codon-configuration-guide.md`** |
 | `server-protocol.md` | **`server-protocol.md`** (Keep name, heavily edit content) |
@@ -35,20 +35,20 @@ Apply these semantic changes across all markdown files.
 
 | Old Term | New Term | Context/Nuance |
 | :--- | :--- | :--- |
-| **Tadpole** | **Strandweave** | The product name. |
+| **Tadpole** | **Hankweave** | The product name. |
 | **Phase** | **Codon** | The execution unit. Be careful of English usage like "In this phase of development..." $\to$ "In this stage..." |
 | **Workspace Setup** | **Rig Setup** | The preparation steps (`copy`, `command`). |
 | **Workspace** | **Rig** | When referring to the configuration. Use **"Execution Directory"** when referring to the folder on disk. |
 | **Chronicler** | **Sentinel** | The parallel agents. |
-| **Tadprogram** | **Strand** | The full JSON configuration / input package. |
+| **Tadprogram** | **Hank** | The full JSON configuration / input package. |
 | **`phases.json`** | **`codon-sequence.json`** | The default config file name. |
-| **`.tadpole`** | **`.strandweave`** | The hidden state directory. |
-| **`tadpole-results`** | **`strandweave-results`** | The output directory. |
+| **`.tadpole`** | **`.hankweave`** | The hidden state directory. |
+| **`tadpole-results`** | **`hankweave-results`** | The output directory. |
 
 ## 3. Critical Content Updates (File by File)
 
 ### A. `README.md`
-*   **Branding:** Update title to **Strandweave Runtime**.
+*   **Branding:** Update title to **Hankweave Runtime**.
 *   **Intro:** Shift the narrative from "lifecycle management" to "Sequencing AI workflows."
 *   **Quick Start Code Blocks:**
     *   Update the JSON example: Change `workspaceSetup` to `rigSetup`.
@@ -61,20 +61,20 @@ Apply these semantic changes across all markdown files.
     *   Key: `workspaceSetup` $\to$ `rigSetup`.
     *   Key: `chroniclers` $\to$ `sentinels`.
     *   Key: `chroniclerConfig` $\to$ `sentinelConfig`.
-*   **Env Vars:** Update example from `TADPOLE_API_KEY` to `STRANDWEAVE_API_KEY`.
+*   **Env Vars:** Update example from `TADPOLE_API_KEY` to `HANKWEAVE_API_KEY`.
 
 ### C. `codon-system.md` (was `phase-system.md`)
 *   **Concept Definition:** Rewrite the definition of a "Phase".
     *   *Old:* "A Phase is a period of time..."
-    *   *New:* "A **Codon** is a discrete, executable unit of work within a Strand. Like a genetic codon defines a specific instruction, a Strandweave Codon defines a specific prompt and environment configuration."
+    *   *New:* "A **Codon** is a discrete, executable unit of work within a Hank. Like a genetic codon defines a specific instruction, a Hankweave Codon defines a specific prompt and environment configuration."
 *   **State Machine:** Update the diagrams. `phase.started` becomes `codon.started`.
 *   **Thread:** Rename "Execution Thread" logic to refer to "Stitching Codons".
 
-### D. `strandweave-folder-structure.md` (was `tadpole...`)
+### D. `hankweave-folder-structure.md` (was `tadpole...`)
 *   **Directory Tree:** Update the ASCII tree structure.
-    *   `.tadpole/` $\to$ `.strandweave/`
+    *   `.tadpole/` $\to$ `.hankweave/`
     *   `chroniclers/` $\to$ `sentinels/`
-*   **Lock File:** Mention `.strandweave/server.lock`.
+*   **Lock File:** Mention `.hankweave/server.lock`.
 *   **Checkpoints:** Update commit message format example: `checkpoint(rig-setup): codon-1`.
 
 ### E. `server-protocol.md`
@@ -93,10 +93,10 @@ Apply these semantic changes across all markdown files.
 
 ## 4. ASCII Art & Diagram Repair
 
-The documentation contains text-based diagrams. Since "Strandweave" is 11 chars and "Tadpole" is 7, these boxes will break.
+The documentation contains text-based diagrams. Since "Hankweave" is 11 chars and "Tadpole" is 7, these boxes will break.
 
 **Agent Instruction:**
-> "Locate all ASCII diagrams in `.md` files. Re-align the borders of boxes to fit the new, longer terms 'Strandweave' and 'Sentinel'."
+> "Locate all ASCII diagrams in `.md` files. Re-align the borders of boxes to fit the new, longer terms 'Hankweave' and 'Sentinel'."
 
 **Example Repair:**
 ```text
@@ -107,7 +107,7 @@ OLD:
 
 NEW:
 ┌─────────────────┐
-│   Strandweave   │
+│   Hankweave   │
 └─────────────────┘
 ```
 

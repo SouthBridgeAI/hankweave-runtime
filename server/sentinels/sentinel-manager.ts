@@ -5,10 +5,10 @@ import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import type { ServerEvent } from "../schemas/event-schemas.js";
 import { type CodonId, EventId } from "../types/branded-types.js";
 import type {
-  StrandweaveGenerateObjectOptions,
-  StrandweaveGenerateObjectResult,
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateObjectOptions,
+  HankweaveGenerateObjectResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../types/llm-call-types.js";
 import type { SentinelConfig } from "../types/sentinel-types.js";
 import { generateId, type Logger } from "../utils.js";
@@ -67,7 +67,7 @@ export class SentinelManager {
     // Set up sentinel directory if persistence is enabled
     if (options.enablePersistence !== false) {
       const root = options.rootDirectory || ".";
-      this.sentinelDir = path.join(root, ".strandweave", "sentinels", "history");
+      this.sentinelDir = path.join(root, ".hankweave", "sentinels", "history");
     }
 
     // Use injected registry or create a new one
@@ -154,7 +154,7 @@ export class SentinelManager {
   /**
    * Initialize the sentinel directory for persistence.
    *
-   * Creates the .strandweave/sentinels directory if persistence is enabled.
+   * Creates the .hankweave/sentinels directory if persistence is enabled.
    * This method is idempotent - safe to call multiple times. After first
    * successful initialization, subsequent calls return immediately.
    *
@@ -268,12 +268,12 @@ export class SentinelManager {
       outputPathsMap?: Map<string, { logFile?: string; lastValueFile?: string }>;
       llmCallOverride?: (
         sentinelId: string,
-        options: StrandweaveGenerateTextOptions,
-      ) => Promise<StrandweaveGenerateTextResult>;
+        options: HankweaveGenerateTextOptions,
+      ) => Promise<HankweaveGenerateTextResult>;
       llmObjectCallOverride?: (
         sentinelId: string,
-        options: StrandweaveGenerateObjectOptions,
-      ) => Promise<StrandweaveGenerateObjectResult<unknown>>;
+        options: HankweaveGenerateObjectOptions,
+      ) => Promise<HankweaveGenerateObjectResult<unknown>>;
       onExecute?: (id: string, events: ServerEvent[]) => void;
     } = {},
   ): Promise<void> {
@@ -363,8 +363,8 @@ export class SentinelManager {
         // Create the concrete LLM call function for production
         const concreteLlmCall = async (
           sentinelId: string,
-          options: StrandweaveGenerateTextOptions,
-        ): Promise<StrandweaveGenerateTextResult> => {
+          options: HankweaveGenerateTextOptions,
+        ): Promise<HankweaveGenerateTextResult> => {
           if (!config.model) {
             throw new SentinelFatalError(
               sentinelId,
@@ -433,15 +433,15 @@ export class SentinelManager {
         let concreteLlmObjectCall:
           | ((
               id: string,
-              opts: StrandweaveGenerateObjectOptions,
-            ) => Promise<StrandweaveGenerateObjectResult<unknown>>)
+              opts: HankweaveGenerateObjectOptions,
+            ) => Promise<HankweaveGenerateObjectResult<unknown>>)
           | undefined;
 
         if (config.structuredOutput && hasRealProviders && isFullModelId) {
           concreteLlmObjectCall = async (
             sentinelId: string,
-            options: StrandweaveGenerateObjectOptions,
-          ): Promise<StrandweaveGenerateObjectResult<unknown>> => {
+            options: HankweaveGenerateObjectOptions,
+          ): Promise<HankweaveGenerateObjectResult<unknown>> => {
             if (!config.model) {
               throw new SentinelFatalError(
                 sentinelId,

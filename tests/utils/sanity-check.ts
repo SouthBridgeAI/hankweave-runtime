@@ -11,7 +11,7 @@ const colors = {
   gray: "\x1b[90m",
 };
 
-console.log(`\n${colors.blue}=== Strandweave Test Sanity Check ===${colors.reset}\n`);
+console.log(`\n${colors.blue}=== Hankweave Test Sanity Check ===${colors.reset}\n`);
 
 // Get current directory info
 const cwd = process.cwd();
@@ -22,7 +22,7 @@ let isCorrectDir = false;
 if (fs.existsSync("package.json")) {
   try {
     const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-    isCorrectDir = pkg.name === "strandweave";
+    isCorrectDir = pkg.name === "hankweave";
     console.log(`Package name: ${colors.yellow}${pkg.name}${colors.reset}`);
   } catch (_e) {
     console.log(`${colors.red}Error reading package.json${colors.reset}`);
@@ -30,8 +30,8 @@ if (fs.existsSync("package.json")) {
 }
 
 if (!isCorrectDir) {
-  console.log(`\n${colors.red}❌ Not in strandweave root directory!${colors.reset}`);
-  console.log(`Expected to find package.json with name: "strandweave"`);
+  console.log(`\n${colors.red}❌ Not in hankweave root directory!${colors.reset}`);
+  console.log(`Expected to find package.json with name: "hankweave"`);
   process.exit(1);
 }
 
@@ -45,8 +45,8 @@ if (fs.existsSync(testConfigPath)) {
 
   // Parse and show codons
   try {
-    const strandFile = JSON.parse(fs.readFileSync(testConfigPath, "utf-8"));
-    const codons = strandFile.strand || [];
+    const hankFile = JSON.parse(fs.readFileSync(testConfigPath, "utf-8"));
+    const codons = hankFile.hank || [];
     console.log(`\nCodons to run:`);
     codons.forEach(
       (codon: { id?: string; name?: string; model?: string; checkpointedFiles?: string[] }) => {
@@ -106,7 +106,7 @@ console.log(
 );
 
 // Check for existing server
-const lockFilePath = path.join(testAreaPath, ".strandweave/runtime.lock");
+const lockFilePath = path.join(testAreaPath, ".hankweave/runtime.lock");
 if (fs.existsSync(lockFilePath)) {
   console.log(`\n${colors.red}⚠ Lock file exists!${colors.reset} Server may be running`);
   console.log(`Lock file: ${lockFilePath}`);

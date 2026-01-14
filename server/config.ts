@@ -318,7 +318,7 @@ const codonObjectSchema = z.object({
  * Represents one executable codon.
  *
  * NOTE: This schema TRANSFORMS the model field from string to ModelInfo object.
- * This is different from config schemas (strandRecommendationsSchema, runtimeConfigSchema)
+ * This is different from config schemas (hankRecommendationsSchema, runtimeConfigSchema)
  * which keep model as string to allow for config layer merging.
  */
 export const codonSchema = codonObjectSchema
@@ -390,7 +390,7 @@ export const loopSchema = z.object({
 
 /**
  * CodonConfig is a discriminated union of Codon and Loop.
- * Used in strand.json configuration.
+ * Used in hank.json configuration.
  */
 export const codonConfigSchema = z.union([
   codonSchema, // type: "codon" (or omitted, defaults to "codon")
@@ -404,18 +404,15 @@ const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one c
 // -------------
 
 /**
- * Schema for strand metadata
+ * Schema for hank metadata
  */
-export const strandMetaSchema = z.object({
-  name: z
-    .string()
-    .min(1, "Strand name cannot be empty")
-    .describe("Human-readable name for the strand"),
+export const hankMetaSchema = z.object({
+  name: z.string().min(1, "Hank name cannot be empty").describe("Human-readable name for the hank"),
   version: z
     .string()
-    .min(1, "Strand version cannot be empty")
+    .min(1, "Hank version cannot be empty")
     .describe("Version number (e.g., '1.0.0')"),
-  description: z.string().optional().describe("Optional description of what this strand does"),
+  description: z.string().optional().describe("Optional description of what this hank does"),
   author: z.string().optional().describe("Optional author information"),
 });
 
@@ -449,13 +446,13 @@ const sentinelSettingsSchema = z
  * This allows recommendations to be merged with other config layers during resolveSettings().
  * The model string is validated but not transformed, maintaining flexibility for config merging.
  */
-export const strandRecommendationsSchema = z
+export const hankRecommendationsSchema = z
   .object({
     model: z
       .string()
       .optional()
       .describe(
-        "Recommended model for this strand (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')",
+        "Recommended model for this hank (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')",
       ),
     dataHashTimeLimit: z
       .number()
@@ -472,19 +469,19 @@ export const strandRecommendationsSchema = z
   );
 
 /**
- * Schema for strand file (strand.json).
- * Must contain a strand array, with optional meta and recommendations.
+ * Schema for hank file (hank.json).
+ * Must contain a hank array, with optional meta and recommendations.
  */
-export const strandFileSchema = z.object({
-  meta: strandMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
-  recommendations: strandRecommendationsSchema
+export const hankFileSchema = z.object({
+  meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
+  recommendations: hankRecommendationsSchema
     .optional()
     .describe("Architect's recommendations for optimal execution (optional)"),
-  strand: codonConfigArraySchema.describe("The immutable logic sequence (required)"),
+  hank: codonConfigArraySchema.describe("The immutable logic sequence (required)"),
 });
 
 /**
- * Schema for runtime configuration (strandweave.json)
+ * Schema for runtime configuration (hankweave.json)
  *
  * NOTE: This schema keeps model as a STRING (does NOT transform to ModelInfo).
  * This allows runtime config to be merged with other config layers (CLI args, env vars, defaults)
@@ -565,12 +562,12 @@ export type Loop = Omit<z.infer<typeof loopSchema>, "codons"> & {
   codons: Codon[];
 };
 export type CodonConfig = Codon | Loop;
-export type StrandMeta = z.infer<typeof strandMetaSchema>;
+export type HankMeta = z.infer<typeof hankMetaSchema>;
 
-// RuntimeConfig and StrandRecommendations keep model as string (no transform in schemas)
+// RuntimeConfig and HankRecommendations keep model as string (no transform in schemas)
 // This allows for config merging with raw string values
-export type StrandRecommendations = z.infer<typeof strandRecommendationsSchema>;
-export type StrandFile = z.infer<typeof strandFileSchema>;
+export type HankRecommendations = z.infer<typeof hankRecommendationsSchema>;
+export type HankFile = z.infer<typeof hankFileSchema>;
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 
 /**
@@ -578,7 +575,7 @@ export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
  * Extends RuntimeConfig with all fields required (defaults filled in) plus additional internal/execution properties.
  * This is the complete, finalized config assembled from all layers (CLI, env, files, defaults).
  */
-export interface StrandweaveConfig
+export interface HankweaveConfig
   extends Omit<Required<RuntimeConfig>, "model" | "anthropicBaseUrl"> {
   // Fields from RuntimeConfig that remain optional
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
@@ -642,12 +639,12 @@ export interface StrandweaveConfig
 
 /**
  * Default server configuration values.
- * Can be overridden by passing config to StrandweaveRuntime constructor.
+ * Can be overridden by passing config to HankweaveRuntime constructor.
  *
  * Note: execution paths and codons must be provided by the user, as well as cwd
  */
 export const DEFAULT_CONFIG: Omit<
-  StrandweaveConfig,
+  HankweaveConfig,
   | "cwd"
   | "readOnlySourceDataPath"
   | "executionPath"
@@ -660,11 +657,11 @@ export const DEFAULT_CONFIG: Omit<
 > = {
   port: 7777,
   version: PACKAGE_VERSION,
-  outputDirectory: "strandweave-results",
-  executionBaseDir: path.join(os.homedir(), ".strandweave-executions"),
-  lockFile: ".strandweave/runtime.lock",
-  socketLogFile: ".strandweave/logs/websocket.log",
-  serverLogFile: ".strandweave/logs/server.log",
+  outputDirectory: "hankweave-results",
+  executionBaseDir: path.join(os.homedir(), ".hankweave-executions"),
+  lockFile: ".hankweave/runtime.lock",
+  socketLogFile: ".hankweave/logs/websocket.log",
+  serverLogFile: ".hankweave/logs/server.log",
   logParsingInterval: 1000, // Check for new log entries every second
   autostart: true, // Default to current behavior
   dataHashTimeLimit: 5000, // 5 seconds for directory hashing
@@ -684,46 +681,46 @@ export const DEFAULT_CONFIG: Omit<
 // -------------
 
 /**
- * Load and parse a strand file (strand.json).
- * Returns the structured file with meta, recommendations, and strand (codons array).
+ * Load and parse a hank file (hank.json).
+ * Returns the structured file with meta, recommendations, and hank (codons array).
  *
- * @param strandPath - Path to the strand.json file
- * @returns Parsed and validated strand file (with un-branded IDs from Zod)
+ * @param hankPath - Path to the hank.json file
+ * @returns Parsed and validated hank file (with un-branded IDs from Zod)
  * @throws Error with detailed validation messages if file is invalid
  */
-export function loadStrandFile(strandPath: string): z.infer<typeof strandFileSchema> {
+export function loadHankFile(hankPath: string): z.infer<typeof hankFileSchema> {
   try {
-    const content = fs.readFileSync(strandPath, "utf-8");
+    const content = fs.readFileSync(hankPath, "utf-8");
     const rawConfig = JSON.parse(content);
 
-    // Validate with strandFileSchema
-    const result = strandFileSchema.safeParse(rawConfig);
+    // Validate with hankFileSchema
+    const result = hankFileSchema.safeParse(rawConfig);
     if (!result.success) {
       const errors = formatZodErrors(result.error, rawConfig);
-      throw new Error(`Invalid strand file:\n${errors}`);
+      throw new Error(`Invalid hank file:\n${errors}`);
     }
 
     return result.data;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`Strand file not found: ${strandPath}`);
+      throw new Error(`Hank file not found: ${hankPath}`);
     }
     throw error;
   }
 }
 
 /**
- * Load and validate runtime configuration from strandweave.json.
+ * Load and validate runtime configuration from hankweave.json.
  *
  * This file is optional and provides runtime settings like port, model, sentinel config, etc.
  * If the file doesn't exist, returns an empty object (all settings will use defaults or CLI overrides).
  *
- * @param runtimeConfigPath - Path to the strandweave.json file (optional, defaults to "strandweave.json" in cwd)
+ * @param runtimeConfigPath - Path to the hankweave.json file (optional, defaults to "hankweave.json" in cwd)
  * @returns Parsed and validated runtime config, or empty object if file doesn't exist
  * @throws Error with detailed validation messages if file exists but is invalid
  */
 export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
-  const configPath = runtimeConfigPath || path.join(process.cwd(), "strandweave.json");
+  const configPath = runtimeConfigPath || path.join(process.cwd(), "hankweave.json");
 
   // If file doesn't exist, return empty object (runtime config is optional)
   if (!fs.existsSync(configPath)) {
@@ -755,16 +752,16 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
 }
 
 /**
- * Load configuration from STRANDWEAVE_RUNTIME_* environment variables.
+ * Load configuration from HANKWEAVE_RUNTIME_* environment variables.
  *
- * Parses environment variables with the STRANDWEAVE_RUNTIME_ prefix and converts them
+ * Parses environment variables with the HANKWEAVE_RUNTIME_ prefix and converts them
  * to the runtime config structure. Handles type conversions and nested paths.
  *
  * Environment variable mapping:
- * - STRANDWEAVE_RUNTIME_PORT -> port (number)
- * - STRANDWEAVE_RUNTIME_MODEL -> model (enum: "sonnet" | "opus")
- * - STRANDWEAVE_RUNTIME_AUTOSTART -> autostart (boolean)
- * - STRANDWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE -> sentinel.enablePersistence (boolean)
+ * - HANKWEAVE_RUNTIME_PORT -> port (number)
+ * - HANKWEAVE_RUNTIME_MODEL -> model (enum: "sonnet" | "opus")
+ * - HANKWEAVE_RUNTIME_AUTOSTART -> autostart (boolean)
+ * - HANKWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE -> sentinel.enablePersistence (boolean)
  *
  * Type conversions:
  * - Numbers: Parsed from strings (e.g., "8080" -> 8080)
@@ -774,7 +771,7 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
  * @returns Parsed config object from environment variables (validated against schema)
  * @throws Error if environment variables contain invalid values
  */
-export function loadStrandweaveRuntimeEnvVars(): RuntimeConfig {
+export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
   const config: Record<string, unknown> = {};
 
   // Helper to convert snake_case to camelCase
@@ -813,14 +810,14 @@ export function loadStrandweaveRuntimeEnvVars(): RuntimeConfig {
     return value;
   };
 
-  // Process all STRANDWEAVE_RUNTIME_* environment variables
+  // Process all HANKWEAVE_RUNTIME_* environment variables
   for (const [envKey, envValue] of Object.entries(process.env)) {
-    if (!envKey.startsWith("STRANDWEAVE_RUNTIME_") || !envValue) {
+    if (!envKey.startsWith("HANKWEAVE_RUNTIME_") || !envValue) {
       continue;
     }
 
-    // Remove prefix: STRANDWEAVE_RUNTIME_PORT -> PORT
-    const withoutPrefix = envKey.substring("STRANDWEAVE_RUNTIME_".length);
+    // Remove prefix: HANKWEAVE_RUNTIME_PORT -> PORT
+    const withoutPrefix = envKey.substring("HANKWEAVE_RUNTIME_".length);
 
     // Handle nested sentinel config: SENTINEL_ENABLE_PERSISTENCE
     if (withoutPrefix.startsWith("SENTINEL_")) {
@@ -854,28 +851,28 @@ export function loadStrandweaveRuntimeEnvVars(): RuntimeConfig {
  *
  * Configuration layers (in order of precedence, highest to lowest):
  * 1. CLI arguments (passed as cliArgs parameter) - highest priority
- * 2. Environment variables (STRANDWEAVE_RUNTIME_*)
- * 3. Strand file recommendations (strand.json > recommendations)
- * 4. Runtime config file (strandweave.json)
+ * 2. Environment variables (HANKWEAVE_RUNTIME_*)
+ * 3. Hank file recommendations (hank.json > recommendations)
+ * 4. Runtime config file (hankweave.json)
  * 5. Default configuration (DEFAULT_CONFIG) - lowest priority
  *
  * @param options Configuration resolution options
  * @param options.cliArgs CLI arguments to merge (highest priority)
- * @param options.strandPath Path to strand.json file (for extracting recommendations)
- * @param options.runtimeConfigPath Path to strandweave.json (defaults to ./strandweave.json)
- * @returns Fully resolved StrandweaveConfig with all layers merged
+ * @param options.hankPath Path to hank.json file (for extracting recommendations)
+ * @param options.runtimeConfigPath Path to hankweave.json (defaults to ./hankweave.json)
+ * @returns Fully resolved HankweaveConfig with all layers merged
  */
 export function resolveSettings(options?: {
-  cliArgs?: Partial<StrandweaveConfig>;
-  strandPath?: string;
+  cliArgs?: Partial<HankweaveConfig>;
+  hankPath?: string;
   runtimeConfigPath?: string;
-}): Partial<StrandweaveConfig> {
-  const { cliArgs = {}, strandPath, runtimeConfigPath } = options || {};
+}): Partial<HankweaveConfig> {
+  const { cliArgs = {}, hankPath, runtimeConfigPath } = options || {};
 
   // Layer 1 (base): Start with default configuration
-  let config: Partial<StrandweaveConfig> = { ...DEFAULT_CONFIG };
+  let config: Partial<HankweaveConfig> = { ...DEFAULT_CONFIG };
 
-  // Layer 2: Merge runtime config file (strandweave.json)
+  // Layer 2: Merge runtime config file (hankweave.json)
   try {
     const runtimeConfig = loadRuntimeConfig(runtimeConfigPath);
     config = deepMerge(config, runtimeConfig);
@@ -884,21 +881,21 @@ export function resolveSettings(options?: {
     // (loadRuntimeConfig already returns {} for missing files)
   }
 
-  // Layer 3: Merge strand file recommendations (if strand path provided)
-  if (strandPath) {
+  // Layer 3: Merge hank file recommendations (if hank path provided)
+  if (hankPath) {
     try {
-      const strandFile = loadStrandFile(strandPath);
-      if (strandFile.recommendations) {
-        config = deepMerge(config, strandFile.recommendations);
+      const hankFile = loadHankFile(hankPath);
+      if (hankFile.recommendations) {
+        config = deepMerge(config, hankFile.recommendations);
       }
     } catch (_error) {
-      // Strand file errors should not prevent config resolution
-      // The strand file is validated separately during codon loading
+      // Hank file errors should not prevent config resolution
+      // The hank file is validated separately during codon loading
     }
   }
 
-  // Layer 4: Merge environment variables (STRANDWEAVE_RUNTIME_*)
-  const envConfig = loadStrandweaveRuntimeEnvVars();
+  // Layer 4: Merge environment variables (HANKWEAVE_RUNTIME_*)
+  const envConfig = loadHankweaveRuntimeEnvVars();
   config = deepMerge(config, envConfig);
 
   // Layer 5 (highest priority): Merge CLI arguments
@@ -908,20 +905,20 @@ export function resolveSettings(options?: {
 }
 
 /**
- * Load and validate codon configuration from a strand file.
+ * Load and validate codon configuration from a hank file.
  *
- * Loads the strand file (object format with {meta, recommendations, strand}),
- * extracts the strand (codons array), and resolves relative file paths.
+ * Loads the hank file (object format with {meta, recommendations, hank}),
+ * extracts the hank (codons array), and resolves relative file paths.
  *
- * @param configPath - Path to the strand JSON configuration file
+ * @param configPath - Path to the hank JSON configuration file
  * @returns Validated array of codon configurations with resolved paths
  * @throws Error with detailed validation messages if config is invalid
  */
 export function loadCodonSequence(configPath: string): CodonConfig[] {
   try {
-    // Load and validate strand file
-    const strandFile = loadStrandFile(configPath);
-    const rawCodons = strandFile.strand;
+    // Load and validate hank file
+    const hankFile = loadHankFile(configPath);
+    const rawCodons = hankFile.hank;
 
     // Resolve relative paths for promptFile and appendSystemPromptFile
     const configDir = path.dirname(configPath);
@@ -1202,7 +1199,7 @@ export interface ValidationResult {
 }
 
 /**
- * Validate strand configuration with enhanced checks.
+ * Validate hank configuration with enhanced checks.
  *
  * This performs all the validation of loadCodonSequence plus additional
  * checks that are useful for pre-flight validation but not strictly
@@ -1214,7 +1211,7 @@ export interface ValidationResult {
  * @returns Validation result with statistics and warnings
  * @throws Error with detailed messages if validation fails
  */
-export async function validateStrand(
+export async function validateHank(
   configPath: string,
   executionPath: string,
   logger: Logger,
@@ -1236,15 +1233,15 @@ export async function validateStrand(
     },
   };
 
-  // Collect STRANDWEAVE_ prefixed environment variables from system
-  // Exclude STRANDWEAVE_RUNTIME_* (server config) and STRANDWEAVE_SENTINEL_* (sentinel API keys)
+  // Collect HANKWEAVE_ prefixed environment variables from system
+  // Exclude HANKWEAVE_RUNTIME_* (server config) and HANKWEAVE_SENTINEL_* (sentinel API keys)
   for (const key in process.env) {
     if (
-      key.startsWith("STRANDWEAVE_") &&
-      !key.startsWith("STRANDWEAVE_RUNTIME_") &&
-      !key.startsWith("STRANDWEAVE_SENTINEL_")
+      key.startsWith("HANKWEAVE_") &&
+      !key.startsWith("HANKWEAVE_RUNTIME_") &&
+      !key.startsWith("HANKWEAVE_SENTINEL_")
     ) {
-      const newKey = key.substring("STRANDWEAVE_".length);
+      const newKey = key.substring("HANKWEAVE_".length);
       result.environmentVariables.fromSystem[newKey] = process.env[key] || "";
     }
   }
@@ -1579,7 +1576,7 @@ export async function validateStrand(
       );
 
       // Create temporary execution path for self-test
-      const tempExecutionPath = path.join(os.tmpdir(), `strandweave-self-test-exec-${Date.now()}`);
+      const tempExecutionPath = path.join(os.tmpdir(), `hankweave-self-test-exec-${Date.now()}`);
       if (!fs.existsSync(tempExecutionPath)) {
         fs.mkdirSync(tempExecutionPath, { recursive: true });
       }

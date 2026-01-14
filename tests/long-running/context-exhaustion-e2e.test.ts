@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "bun:test";
 import { getFreePort } from "../utils/test-helpers.js";
-import { launchStrandweave } from "../utils/strandweave-server-test-helpers.js";
+import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 
 describe("Context Exhaustion E2E Test", () => {
   it.skipIf(!process.env.LONG_TESTS)(
@@ -11,30 +11,30 @@ describe("Context Exhaustion E2E Test", () => {
     async () => {
       const configPath = "tests/config/test-context-exhaustion.config.json";
       const port = await getFreePort();
-      const strandweave = await launchStrandweave({
+      const hankweave = await launchHankweave({
         configPath,
         port,
         logPrefix: "[context-exhaustion]",
       });
 
       try {
-        await strandweave.waitForEvent("server.ready");
-        await strandweave.waitForCodonStart("initial-setup");
-        await strandweave.waitForCodonCompletion("initial-setup");
+        await hankweave.waitForEvent("server.ready");
+        await hankweave.waitForCodonStart("initial-setup");
+        await hankweave.waitForCodonCompletion("initial-setup");
         console.log("[test] Initial setup completed");
         // Wait for run to complete successfully (not fail!)
         // The loop should terminate on context exceeded and mark codons as completed
-        await strandweave.waitForRunToComplete(10 * 60 * 1_000); // 10 minutes
+        await hankweave.waitForRunToComplete(10 * 60 * 1_000); // 10 minutes
 
         console.log("[test] Run completed successfully");
         // XX:: the easiest way to track context overflow right now is to check server logs
-        expect(strandweave.serverLogFile()).toContain(
-          "[STRANDWEAVE-SERVER] Context exceeded error detected"
+        expect(hankweave.serverLogFile()).toContain(
+          "[HANKWEAVE-SERVER] Context exceeded error detected"
         );
         console.log("[test] Context exceeded detected in logs");
 
         // Verify our new info message about context exceeded completion
-        const events = strandweave.getEvents();
+        const events = hankweave.getEvents();
         const contextExceededInfoEvent = events.find(
           (e) =>
             e.type === "info" &&
@@ -65,7 +65,7 @@ describe("Context Exhaustion E2E Test", () => {
 
         // Verify the final summary file was created
         const summaryFilePath = path.join(
-          strandweave.executionDir,
+          hankweave.executionDir,
           "large_content",
           "final_summary.txt"
         );
@@ -88,7 +88,7 @@ describe("Context Exhaustion E2E Test", () => {
       } finally {
         // Ensure server is stopped even if test fails
         try {
-          await strandweave.stop();
+          await hankweave.stop();
         } catch {
           // Server may already be stopped
         }
@@ -103,28 +103,28 @@ describe("Context Exhaustion E2E Test", () => {
       const configPath =
         "tests/config/test-context-exhaustion-with-iteration-terminate.config.json";
       const port = await getFreePort();
-      const strandweave = await launchStrandweave({
+      const hankweave = await launchHankweave({
         configPath,
         port,
         logPrefix: "[context-exhaustion-no-terminate]",
       });
 
       try {
-        await strandweave.waitForEvent("server.ready");
+        await hankweave.waitForEvent("server.ready");
 
         // Wait for initial setup to complete
-        await strandweave.waitForCodonStart("initial-setup");
-        await strandweave.waitForCodonCompletion("initial-setup");
+        await hankweave.waitForCodonStart("initial-setup");
+        await hankweave.waitForCodonCompletion("initial-setup");
         console.log("[test] Initial setup completed");
 
         // Wait for the run to fail (not complete successfully)
         // The loop should fail when context is exceeded since there's no terminateOn condition
-        await strandweave.waitForRunToFail(10 * 60 * 1_000); // 10 minutes
+        await hankweave.waitForRunToFail(10 * 60 * 1_000); // 10 minutes
         console.log("[test] Run failed as expected");
 
         // Verify context exceeded was detected
-        expect(strandweave.serverLogFile()).toContain(
-          "[STRANDWEAVE-SERVER] Context exceeded error detected"
+        expect(hankweave.serverLogFile()).toContain(
+          "[HANKWEAVE-SERVER] Context exceeded error detected"
         );
         console.log("[test] Context exceeded detected in logs");
 
@@ -142,7 +142,7 @@ describe("Context Exhaustion E2E Test", () => {
       } finally {
         // Ensure server is stopped even if test fails
         try {
-          await strandweave.stop();
+          await hankweave.stop();
         } catch {
           // Server may already be stopped
         }

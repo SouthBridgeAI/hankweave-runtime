@@ -4,14 +4,14 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { DEFAULT_SENTINEL_LLM_PARAMS } from "../../server/sentinels/sentinel-defaults.js";
 import { CodonId } from "../../server/types/branded-types.js";
-import type { StrandweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
+import type { HankweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
 import { createMockLlm } from "../utils/mock-llm.js";
 
 describe("Sentinel LLM Parameters", () => {
   const mockLlm = createMockLlm();
-  let capturedOptions: StrandweaveGenerateTextOptions[] = [];
+  let capturedOptions: HankweaveGenerateTextOptions[] = [];
 
-  const mockLlmCall = async (_id: string, options: StrandweaveGenerateTextOptions) => {
+  const mockLlmCall = async (_id: string, options: HankweaveGenerateTextOptions) => {
     capturedOptions.push(options);
     const result = await mockLlm.generateText(options);
     return result;

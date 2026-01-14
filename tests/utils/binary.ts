@@ -23,10 +23,10 @@ export interface BinarySetup {
 
 /**
  * Checks if Binary setup is needed based on environment variables.
- * Returns true if STRANDWEAVE_TEST_USE_BINARY is set.
+ * Returns true if HANKWEAVE_TEST_USE_BINARY is set.
  */
 export function needsBinary(): boolean {
-  return Boolean(process.env.STRANDWEAVE_TEST_USE_BINARY);
+  return Boolean(process.env.HANKWEAVE_TEST_USE_BINARY);
 }
 
 /**
@@ -36,10 +36,10 @@ function getBinaryName(): string {
   const platform = os.platform();
 
   if (platform === "win32") {
-    return "strandweave-test.exe";
+    return "hankweave-test.exe";
   }
 
-  return "strandweave-test";
+  return "hankweave-test";
 }
 
 /**
@@ -101,12 +101,12 @@ export async function setupBinary(projectRoot: string): Promise<BinarySetup> {
   console.log(`📦 Binary name: ${binaryName}`);
   console.log(`📦 Output path: ${binaryPath}`);
 
-  // Clean up ~/.strandweave directory to ensure fresh state for each test run
-  const strandweaveDir = path.join(os.homedir(), ".strandweave");
-  if (fs.existsSync(strandweaveDir)) {
-    console.log(`\n🧹 Removing ~/.strandweave directory...`);
-    fs.rmSync(strandweaveDir, { recursive: true, force: true });
-    console.log(`${colors.green}✓ Cleaned up ~/.strandweave${colors.reset}`);
+  // Clean up ~/.hankweave directory to ensure fresh state for each test run
+  const hankweaveDir = path.join(os.homedir(), ".hankweave");
+  if (fs.existsSync(hankweaveDir)) {
+    console.log(`\n🧹 Removing ~/.hankweave directory...`);
+    fs.rmSync(hankweaveDir, { recursive: true, force: true });
+    console.log(`${colors.green}✓ Cleaned up ~/.hankweave${colors.reset}`);
   }
 
   // Remove old test binary if it exists
@@ -141,7 +141,7 @@ export async function setupBinary(projectRoot: string): Promise<BinarySetup> {
 
   // Create isolated temp directory for testing (outside project to ensure no access to codebase)
   console.log(`\n📁 Creating isolated test directory...`);
-  const testIsolationDir = await mkdtemp(path.join(os.tmpdir(), "strandweave-binary-test-"));
+  const testIsolationDir = await mkdtemp(path.join(os.tmpdir(), "hankweave-binary-test-"));
   console.log(`${colors.green}✓ Test isolation directory: ${testIsolationDir}${colors.reset}`);
 
   console.log(`${colors.green}\n=== Binary setup complete ===\n${colors.reset}`);

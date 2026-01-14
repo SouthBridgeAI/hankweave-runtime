@@ -148,16 +148,16 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    *
    * @param codon - Codon configuration (not Loop - loops must be expanded first)
    * @param previousSessionId - Session ID to continue from (if any)
-   * @param logPath - Custom log file path (optional, defaults to .strandweave/logs/)
+   * @param logPath - Custom log file path (optional, defaults to .hankweave/logs/)
    */
   async spawn(codon: Codon, previousSessionId: string | null, logPath?: string): Promise<string> {
     if (this.abortController) {
       throw new Error("Session already running");
     }
 
-    // Use provided logPath or default to .strandweave/logs/
+    // Use provided logPath or default to .hankweave/logs/
     const actualLogPath =
-      logPath || path.join(this.executionPath, `.strandweave/logs/log-${codon.id}-sdk.jsonl`);
+      logPath || path.join(this.executionPath, `.hankweave/logs/log-${codon.id}-sdk.jsonl`);
 
     // Ensure log directory exists
     const logsDir = path.dirname(actualLogPath);
@@ -277,14 +277,14 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         options.env[key] = process.env[key];
         this.logger.log(`Passing through Anthropic env var: ${key}`);
       }
-      // Pass through STRANDWEAVE_* variables (with prefix stripped)
-      // Exclude STRANDWEAVE_RUNTIME_* (server config) and STRANDWEAVE_SENTINEL_* (sentinel API keys)
+      // Pass through HANKWEAVE_* variables (with prefix stripped)
+      // Exclude HANKWEAVE_RUNTIME_* (server config) and HANKWEAVE_SENTINEL_* (sentinel API keys)
       else if (
-        key.startsWith("STRANDWEAVE_") &&
-        !key.startsWith("STRANDWEAVE_RUNTIME_") &&
-        !key.startsWith("STRANDWEAVE_SENTINEL_")
+        key.startsWith("HANKWEAVE_") &&
+        !key.startsWith("HANKWEAVE_RUNTIME_") &&
+        !key.startsWith("HANKWEAVE_SENTINEL_")
       ) {
-        const newKey = key.substring("STRANDWEAVE_".length);
+        const newKey = key.substring("HANKWEAVE_".length);
         options.env[newKey] = process.env[key];
         this.logger.log(`Passing through env var: ${newKey}`);
       }

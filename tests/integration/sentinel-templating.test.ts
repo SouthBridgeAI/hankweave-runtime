@@ -6,8 +6,8 @@ import { CodonId } from "../../server/types/branded-types.js";
 import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
-import type { StrandweaveModelMessage } from "../../server/types/input-ai-types.js";
-import type { StrandweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
+import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
+import type { HankweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
 import { mockLlmCall } from "../utils/sentinel-test-harness.js";
 import { Logger } from "../../server/utils.js";
 import { createTypedMockLlmAdapter } from "../utils/mock-llm.js";
@@ -181,8 +181,8 @@ describe("Sentinel Templating Integration", () => {
         }
       };
 
-      let capturedOptions: StrandweaveGenerateTextOptions | undefined;
-      const mockLLMCall = async (id: string, options: StrandweaveGenerateTextOptions) => {
+      let capturedOptions: HankweaveGenerateTextOptions | undefined;
+      const mockLLMCall = async (id: string, options: HankweaveGenerateTextOptions) => {
         capturedOptions = options;
         return {
           text: "Assistant response",
@@ -631,8 +631,8 @@ No tool usage detected.
       };
 
       let capturedPrompt = "";
-      const mockLLMCall = async (id: string, options: StrandweaveGenerateTextOptions) => {
-        // The sentinel always passes StrandweaveGenerateTextOptions
+      const mockLLMCall = async (id: string, options: HankweaveGenerateTextOptions) => {
+        // The sentinel always passes HankweaveGenerateTextOptions
         // Extract the user message content from the options
         if (options.messages && options.messages.length > 0) {
           // Get the last message (should be the user message with the rendered template)

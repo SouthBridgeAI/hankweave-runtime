@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ClientCommand } from "../../server/command-schemas.js";
-import type { StrandweaveState } from "../../server/types/state-types.js";
+import type { HankweaveState } from "../../server/types/state-types.js";
 import type {
   CodonCompletedEvent,
   CodonStartedEvent,
@@ -66,7 +66,7 @@ export async function startVerdaccioRegistry(packageName: string): Promise<Verda
   const { runServer } = await import("verdaccio");
 
   // Create temp storage
-  const storageDir = await mkdtemp(path.join(tmpdir(), "strandweave-verdaccio-"));
+  const storageDir = await mkdtemp(path.join(tmpdir(), "hankweave-verdaccio-"));
 
   // Start Verdaccio
   const server = (await runServer({
@@ -745,13 +745,13 @@ export interface TestServerConfig {
   commandOverride?: {
     // Override the default command (bun server/index.ts)
     command: string; // e.g., "npx", "bunx", "pnpm"
-    args: string[]; // e.g., ["strandweave"], ["dlx", "strandweave"]
+    args: string[]; // e.g., ["hankweave"], ["dlx", "hankweave"]
   };
   env?: Record<string, string>; // Optional custom environment variables (merged with process.env)
 }
 
 export function startServer(config: TestServerConfig): ChildProcess {
-  console.log(`${colors.blue}Starting Strandweave server...${colors.reset}`);
+  console.log(`${colors.blue}Starting Hankweave server...${colors.reset}`);
 
   // Register signal handlers for cleanup
   registerSignalHandlers();
@@ -905,7 +905,7 @@ export async function preserveTestResults(config: PreserveResultsConfig): Promis
   console.log(`\n${colors.blue}Preserving test results...${colors.reset}`);
 
   // Copy the entire runs directory to preserve Claude logs with proper structure
-  const runsDir = path.join(config.testDir, ".strandweave/runs");
+  const runsDir = path.join(config.testDir, ".hankweave/runs");
   if (fs.existsSync(runsDir)) {
     const destRunsDir = path.join(config.testRunDir, "runs");
     copyDirectoryRecursive(runsDir, destRunsDir);
@@ -928,14 +928,14 @@ export async function preserveTestResults(config: PreserveResultsConfig): Promis
   }
 
   // Copy state.json
-  const stateFile = path.join(config.testDir, ".strandweave/state.json");
+  const stateFile = path.join(config.testDir, ".hankweave/state.json");
   if (fs.existsSync(stateFile)) {
     fs.copyFileSync(stateFile, path.join(config.testRunDir, "state.json"));
     console.log(`  ✓ Copied state.json`);
   }
 
   // Copy logs directory (for websocket.log and server.log)
-  const logsDir = path.join(config.testDir, ".strandweave/logs");
+  const logsDir = path.join(config.testDir, ".hankweave/logs");
   if (fs.existsSync(logsDir)) {
     const destLogsDir = path.join(config.testRunDir, "logs");
     copyDirectoryRecursive(logsDir, destLogsDir);
@@ -1059,7 +1059,7 @@ export async function cleanupLockFile(
   testDir: string,
   serverShutdownGracefully: boolean,
 ): Promise<void> {
-  const lockFile = path.join(testDir, ".strandweave/runtime.lock");
+  const lockFile = path.join(testDir, ".hankweave/runtime.lock");
   if (fs.existsSync(lockFile)) {
     if (serverShutdownGracefully) {
       console.log(
@@ -1080,8 +1080,8 @@ export async function cleanupLockFile(
  * Get the server state by reading from the state file.
  * This is used in e2e tests where we don't have direct access to the server instance.
  */
-export async function getServerState(testDir: string): Promise<StrandweaveState> {
-  const statePath = path.join(testDir, ".strandweave", "state.json");
+export async function getServerState(testDir: string): Promise<HankweaveState> {
+  const statePath = path.join(testDir, ".hankweave", "state.json");
   if (!fs.existsSync(statePath)) {
     throw new Error("State file not found");
   }

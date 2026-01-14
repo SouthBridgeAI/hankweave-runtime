@@ -8,16 +8,16 @@ import type { SentinelConfig } from "./sentinel-types.js";
 export type {
   Codon,
   CodonConfig,
+  HankFile,
+  HankMeta,
+  HankRecommendations,
+  HankweaveConfig,
   Loop,
   LoopTermination,
   RigSetupItem,
   RigShellCommand,
   RuntimeConfig,
   ShellCommand,
-  StrandFile,
-  StrandMeta,
-  StrandRecommendations,
-  StrandweaveConfig,
 } from "../config.js";
 
 // -------------
@@ -171,10 +171,10 @@ export interface CodonSentinelEntry {
 
     /**
      * Output file paths for this sentinel in this codon.
-     * If omitted, sentinel auto-generates paths in .strandweave/sentinel-outputs/
+     * If omitted, sentinel auto-generates paths in .hankweave/sentinel-outputs/
      * You can use filenames to join together logs from different sentinels.
      * Path convention:
-     * - Filename only (no '/'): .strandweave/sentinel-outputs/{id}/{filename}
+     * - Filename only (no '/'): .hankweave/sentinel-outputs/{id}/{filename}
      * - Path with '/': {executionPath}/{path}
      */
     outputPaths?: {
@@ -209,7 +209,7 @@ export interface CodonSentinelEntry {
 /**
  * Information for creating a checkpoint commit in the shadow git repository.
  *
- * The checkpoint system creates a shadow git repo in `.strandweave/checkpoints/` that tracks
+ * The checkpoint system creates a shadow git repo in `.hankweave/checkpoints/` that tracks
  * files matching the `checkpointAndWatch` patterns. Each checkpoint creates a commit
  * with detailed metadata about the codon state.
  */
@@ -223,7 +223,7 @@ export interface CheckpointInfo {
   /** Human-readable name of the codon */
   codonName: string;
 
-  /** Unique identifier for this Strandweave runtime run */
+  /** Unique identifier for this Hankweave runtime run */
   runId: string;
 
   /** ISO timestamp when the checkpoint was created */

@@ -14,9 +14,9 @@ export function runTokenUsageTests(testState: TestState, testDir: string) {
 
   for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
     test(`${codonId} token usage events match log messages`, () => {
-      // Log files are now in .strandweave/runs/{runId}/{codonId}-claude.log
+      // Log files are now in .hankweave/runs/{runId}/{codonId}-claude.log
       // We need to find the run directory first
-      const runsDir = path.join(testDir, ".strandweave/runs");
+      const runsDir = path.join(testDir, ".hankweave/runs");
       let runFolder = "";
       if (fs.existsSync(runsDir)) {
         const runFolders = fs.readdirSync(runsDir);

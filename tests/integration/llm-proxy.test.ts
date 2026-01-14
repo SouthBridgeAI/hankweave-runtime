@@ -74,14 +74,14 @@ const runTests = async (
 describe("LLM proxy", () => {
   beforeEach(() => {
     // Create temporary directory
-    const tempDir = mkdtempSync(path.join(tmpdir(), "strandweave-test-"));
+    const tempDir = mkdtempSync(path.join(tmpdir(), "hankweave-test-"));
     configPath = path.join(tempDir, "codons.json");
 
     writeFileSync(
       configPath,
       JSON.stringify(
         {
-          strand: [
+          hank: [
             {
               id: "codon-1-analysis",
               name: "Codon 1: Initial Analysis",
@@ -144,7 +144,7 @@ describe("LLM proxy", () => {
           `http://localhost:${port + 1}/health`
         );
         expect(healthResponse.ok).toBe(true);
-        expect(await healthResponse.text()).toBe("Strandweave Proxy OK");
+        expect(await healthResponse.text()).toBe("Hankweave Proxy OK");
 
         // sleep a bit to make sure we run smth
         await new Promise((resolve) => setTimeout(resolve, 15000));
@@ -152,7 +152,7 @@ describe("LLM proxy", () => {
         // Check if server log contains the logging middleware message
         const logPath = path.join(
           executionDir!,
-          ".strandweave/logs/server.log"
+          ".hankweave/logs/server.log"
         );
         expect(readFileSync(logPath, "utf-8")).toContain(
           "[LOGGING-MIDDLEWARE] Received request"

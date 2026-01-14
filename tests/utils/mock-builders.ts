@@ -2,7 +2,7 @@ import { CodonId, type RunId, SessionId } from "../../server/types/branded-types
 import type * as ST from "../../server/types/state-types.js";
 
 export class StateBuilder {
-  private state: ST.StrandweaveState = {
+  private state: ST.HankweaveState = {
     runs: [],
     currentRunId: null,
     executionPlan: [],
@@ -36,7 +36,7 @@ export class StateBuilder {
     return this;
   }
 
-  build(): ST.StrandweaveState {
+  build(): ST.HankweaveState {
     return JSON.parse(JSON.stringify(this.state));
   }
 }

@@ -7,10 +7,10 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import type {
-  StrandweaveGenerateObjectOptions,
-  StrandweaveGenerateObjectResult,
-  StrandweaveGenerateTextOptions,
-  StrandweaveGenerateTextResult,
+  HankweaveGenerateObjectOptions,
+  HankweaveGenerateObjectResult,
+  HankweaveGenerateTextOptions,
+  HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
 
 describe("Sentinel Output Files - Integration Tests", () => {
@@ -29,7 +29,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
   });
 
   const createMockLlmCall = (responseText = "Mock response") => {
-    return async (_id: string, _options: StrandweaveGenerateTextOptions): Promise<StrandweaveGenerateTextResult> => {
+    return async (_id: string, _options: HankweaveGenerateTextOptions): Promise<HankweaveGenerateTextResult> => {
       return {
         text: responseText,
         finishReason: "stop",
@@ -39,7 +39,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
   };
 
   const createMockObjectCall = (responseObject: unknown) => {
-    return async (_id: string, _options: StrandweaveGenerateObjectOptions): Promise<StrandweaveGenerateObjectResult<unknown>> => {
+    return async (_id: string, _options: HankweaveGenerateObjectOptions): Promise<HankweaveGenerateObjectResult<unknown>> => {
       return {
         object: responseObject,
         finishReason: "stop",
@@ -49,7 +49,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
   };
 
   describe("Auto-Generated Files", () => {
-    test("auto-generates files in .strandweave/sentinels/outputs/", async () => {
+    test("auto-generates files in .hankweave/sentinels/outputs/", async () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
@@ -64,7 +64,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.initialize();
 
       let callCount = 0;
-      const mockLlm = async (id: string, options: StrandweaveGenerateTextOptions) => {
+      const mockLlm = async (id: string, options: HankweaveGenerateTextOptions) => {
         callCount++;
         return {
           text: `Summary ${callCount}`,
@@ -90,8 +90,8 @@ describe("Sentinel Output Files - Integration Tests", () => {
 
       await manager.completeAllWork();
 
-      // Files should be auto-generated in .strandweave/sentinels/outputs/test-sentinel/
-      const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "test-sentinel");
+      // Files should be auto-generated in .hankweave/sentinels/outputs/test-sentinel/
+      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "test-sentinel");
       expect(fs.existsSync(autoDir)).toBe(true);
 
       const files = fs.readdirSync(autoDir);
@@ -152,7 +152,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Find auto-generated file
-      const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "entity-tracker");
+      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "entity-tracker");
       expect(fs.existsSync(autoDir)).toBe(true);
 
       const files = fs.readdirSync(autoDir);
@@ -200,7 +200,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         await manager.shutdown();
 
         // Get the auto-generated file
-        const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "progress-tracker");
+        const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "progress-tracker");
         const files = fs.readdirSync(autoDir);
         codon1File = path.join(autoDir, files[0]);
 
@@ -232,7 +232,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         expect(fs.readFileSync(codon1File, "utf-8")).toBe("\n---\nCodon 1 completed\n");
 
         // Codon 2 has its own file
-        const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "progress-tracker");
+        const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "progress-tracker");
         const files = fs.readdirSync(autoDir);
         expect(files.length).toBe(2); // Both codon files exist
 
@@ -282,7 +282,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Find auto-generated file
-      const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "formatted-log");
+      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "formatted-log");
       const files = fs.readdirSync(autoDir);
       const logPath = path.join(autoDir, files[0]);
 
@@ -346,14 +346,14 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Verify text sentinel output
-      const narratorDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "narrator");
+      const narratorDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "narrator");
       expect(fs.existsSync(narratorDir)).toBe(true);
       const narratorFiles = fs.readdirSync(narratorDir);
       expect(narratorFiles.length).toBe(1);
       expect(narratorFiles[0]).toEndWith(".md");
 
       // Verify structured sentinel output
-      const metricsDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "metrics");
+      const metricsDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "metrics");
       expect(fs.existsSync(metricsDir)).toBe(true);
       const metricsFiles = fs.readdirSync(metricsDir);
       expect(metricsFiles.length).toBe(1);
@@ -404,7 +404,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Find auto-generated file
-      const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "conversational-narrator");
+      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "conversational-narrator");
       const files = fs.readdirSync(autoDir);
       const logPath = path.join(autoDir, files[0]);
 
@@ -436,7 +436,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       });
 
       // Find and make the auto-generated file read-only
-      const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "test-sentinel");
+      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "test-sentinel");
       const files = fs.readdirSync(autoDir);
       const logPath = path.join(autoDir, files[0]);
       fs.chmodSync(logPath, 0o444); // Read-only
@@ -489,7 +489,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Should have auto-generated file
-      const autoDir = path.join(executionPath, ".strandweave", "sentinels", "outputs", "auto-sentinel");
+      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "auto-sentinel");
       expect(fs.existsSync(autoDir)).toBe(true);
 
       const files = fs.readdirSync(autoDir);

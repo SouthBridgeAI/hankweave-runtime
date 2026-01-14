@@ -1,6 +1,6 @@
-# Refactoring Guide: Finalizing the Strandweave Renaming
+# Refactoring Guide: Finalizing the Hankweave Renaming
 
-**Objective**: Complete the transition of terminology by renaming remaining artifacts of "Tadpole", "Phase", "Workspace", and "Chronicler" to "Strandweave", "Codon", "Rig", and "Sentinel" respectively.
+**Objective**: Complete the transition of terminology by renaming remaining artifacts of "Tadpole", "Phase", "Workspace", and "Chronicler" to "Hankweave", "Codon", "Rig", and "Sentinel" respectively.
 
 **Constraint**: Ensure all changes preserve functionality. Most changes are in comments, string literals for logs, test data, and local variable names.
 
@@ -10,7 +10,7 @@ This file contains the bulk of the remaining old terminology in variable names a
 
 ### Rename `tadpoleDir`
 - **Location**: Constructor and private properties.
-- **Change**: Rename `private readonly tadpoleDir: string` to `private readonly strandweaveDir: string` (or `stateDir`).
+- **Change**: Rename `private readonly tadpoleDir: string` to `private readonly hankweaveDir: string` (or `stateDir`).
 - **Update**: Update all references (e.g., `this.statePath = path.join(tadpoleDir, ...)`).
 
 ### Rename `Phase` -> `Codon` (Variables & Comments)
@@ -41,7 +41,7 @@ This file contains the bulk of the remaining old terminology in variable names a
 
 ---
 
-## 2. `server/strandweave-runtime.ts`
+## 2. `server/hankweave-runtime.ts`
 
 ### Log Messages & Comments
 - **Search**: "phase"

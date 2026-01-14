@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 
 
+## [0.1.35] - 2026-01-13
+
+### Changed
+strandweave -> hankweave 
+
 ## [0.1.34] - 2026-01-13
 
 ### Added
@@ -58,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for testing executables on Linux x64/ARM64, macOS Intel/Apple Silicon, Windows x64
 
 ### Changed
-- Improved test infrastructure with StrandweaveServerTestInstance class
+- Improved test infrastructure with HankweaveServerTestInstance class
 - Updated CI/CD workflows with comprehensive platform matrix testing
 - Enhanced error handling and logging throughout runtime extraction
 
@@ -143,7 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive E2E tests for package installation and executables
 
 ### Changed
-- Package name to `@southbridgeai/strandweave` for scoped npm publishing
+- Package name to `@southbridgeai/hankweave` for scoped npm publishing
 - Entry point from `server/index.ts` to `dist/index.js` (built artifact)
 - Init command templates now inlined as strings (removed template files)
 - Server implementation to use runtime-agnostic WebSocket abstraction

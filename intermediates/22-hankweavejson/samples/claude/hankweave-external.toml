@@ -1,0 +1,60 @@
+# Hankweave Configuration - External Codon Sequence
+# This config references an external codon-sequence.toml file
+
+version = "1.0.0"
+
+[server]
+port = 7777
+withoutProxy = false
+
+[paths]
+outputDirectory = "hankweave-results"
+lockFile = ".hankweave/runtime.lock"
+
+[paths.logs]
+websocket = ".hankweave/logs/websocket.log"
+server = ".hankweave/logs/server.log"
+
+[workflow]
+configFile = "codon-sequence.toml"
+autostart = true
+dataHashTimeLimit = 5000
+
+[costs.perMTok]
+input = 3.0
+inputCache = 3.75
+cacheRead = 0.3
+output = 15.0
+
+[llm]
+defaultModel = "sonnet"
+
+[llm.providers.anthropic]
+baseUrl = ""
+
+[llm.providers.openai]
+
+[llm.providers.google]
+
+[llm.providers.groq]
+
+[llm.replay]
+enabled = false
+dataPath = ""
+
+[runtime]
+logParsingInterval = 1000
+toolResultTruncateLength = 2500
+handshakeHistoryLimit = 50
+
+[runtime.bun]
+version = ""
+
+[docker]
+enabled = false
+image = ""
+
+[sentinel]
+enablePersistence = true
+healthCheckGracePeriodMs = 2000
+waitForAllHealthChecks = false

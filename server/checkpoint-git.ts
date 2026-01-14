@@ -6,7 +6,7 @@ import type { Logger } from "./utils.js";
 
 /**
  * Git operations for the checkpoint system.
- * Handles the shadow git repository in .strandweave/checkpoints.
+ * Handles the shadow git repository in .hankweave/checkpoints.
  */
 export class CheckpointGit {
   private executionPath: string;
@@ -17,7 +17,7 @@ export class CheckpointGit {
 
   constructor(executionPath: string, logger: Logger) {
     this.executionPath = executionPath;
-    this.checkpointPath = path.join(executionPath, ".strandweave", "checkpoints");
+    this.checkpointPath = path.join(executionPath, ".hankweave", "checkpoints");
     this.logger = logger;
   }
 
@@ -65,7 +65,7 @@ export class CheckpointGit {
     // Create git config to isolate from user preferences
     const gitConfigPath = path.join(this.checkpointPath, ".gitconfig");
     const gitConfigContent = `[user]
-  name = Strandweave Runtime
+  name = Hankweave Runtime
   email = froggie@southbridge.ai
 [commit]
   gpgsign = false
@@ -89,7 +89,7 @@ export class CheckpointGit {
 
     // Initialize repository
     await this.git.init(false, { "--initial-branch": "main" });
-    await this.git.addConfig("user.name", "Strandweave Runtime");
+    await this.git.addConfig("user.name", "Hankweave Runtime");
     await this.git.addConfig("user.email", "froggie@southbridge.ai");
     await this.git.addConfig("commit.gpgsign", "false");
 

@@ -10,7 +10,7 @@
 
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { strandweaveModelMessageSchema } from "./input-ai-types.js";
+import { hankweaveModelMessageSchema } from "./input-ai-types.js";
 
 // --- Base Schemas ---
 
@@ -19,7 +19,7 @@ import { strandweaveModelMessageSchema } from "./input-ai-types.js";
  * We are intentionally keeping this simple, focusing on the most frequently used options
  * and omitting others like topP, topK, abortSignal, etc.
  */
-export const strandweaveLlmCallParamsSchema = z.object({
+export const hankweaveLlmCallParamsSchema = z.object({
   temperature: z
     .number()
     .min(0)
@@ -53,17 +53,17 @@ export const strandweaveLlmCallParamsSchema = z.object({
  * (in SentinelManager) provides it. Sentinels don't have direct access
  * to the model instance - it's injected by the manager.
  */
-export const strandweaveGenerateTextOptionsSchema = strandweaveLlmCallParamsSchema.extend({
+export const hankweaveGenerateTextOptionsSchema = hankweaveLlmCallParamsSchema.extend({
   model: z.custom<LanguageModel>().optional(), // Optional - provided by concrete implementation
   system: z.string().optional(),
-  messages: z.array(strandweaveModelMessageSchema),
+  messages: z.array(hankweaveModelMessageSchema),
 });
 
 /**
  * The result from a `generateText` call.
  * This is a subset of the AI SDK's `GenerateTextResult`.
  */
-export const strandweaveGenerateTextResultSchema = z.object({
+export const hankweaveGenerateTextResultSchema = z.object({
   text: z.string(),
   finishReason: z.enum(["stop", "length", "content-filter", "tool-calls", "error", "other"]),
   usage: z.object({
@@ -78,14 +78,14 @@ export const strandweaveGenerateTextResultSchema = z.object({
  * Input parameters for a `streamText` call.
  * This is a subset of the AI SDK's `StreamTextOptions`.
  */
-export const strandweaveStreamTextOptionsSchema = strandweaveGenerateTextOptionsSchema; // Same options as generateText
+export const hankweaveStreamTextOptionsSchema = hankweaveGenerateTextOptionsSchema; // Same options as generateText
 
 /**
  * The result from a `streamText` call.
  * We simplify this to focus on the text stream and the final result promise.
  * The textStream is an AsyncIterableStream<string> according to the docs.
  */
-export const strandweaveStreamTextResultSchema = z.object({
+export const hankweaveStreamTextResultSchema = z.object({
   textStream: z.custom<AsyncIterable<string>>(), // AsyncIterableStream<string> is AsyncIterable<string> & ReadableStream<string>
   // We can't easily represent the full promise-based result in Zod,
   // so we'll handle that with TypeScript types.
@@ -101,10 +101,10 @@ export const strandweaveStreamTextResultSchema = z.object({
  * Note: Model is optional for the same reason as in generateText -
  * it's provided by the concrete implementation.
  */
-export const strandweaveGenerateObjectOptionsSchema = strandweaveLlmCallParamsSchema.extend({
+export const hankweaveGenerateObjectOptionsSchema = hankweaveLlmCallParamsSchema.extend({
   model: z.custom<LanguageModel>().optional(), // Optional - provided by concrete implementation
   schema: z.custom<z.ZodSchema<unknown>>().optional(), // Optional for 'no-schema' or enum output
-  messages: z.array(strandweaveModelMessageSchema),
+  messages: z.array(hankweaveModelMessageSchema),
   system: z.string().optional(),
   mode: z.enum(["auto", "json", "tool"]).optional(),
   output: z.enum(["object", "array", "enum", "no-schema"]).optional(),
@@ -117,7 +117,7 @@ export const strandweaveGenerateObjectOptionsSchema = strandweaveLlmCallParamsSc
  * The result from a `generateObject` call.
  * This is a subset of the AI SDK's `GenerateObjectResult`.
  */
-export const strandweaveGenerateObjectResultSchema = z.object({
+export const hankweaveGenerateObjectResultSchema = z.object({
   object: z.any(),
   finishReason: z.enum(["stop", "length", "content-filter", "error", "other"]),
   usage: z.object({
@@ -128,13 +128,13 @@ export const strandweaveGenerateObjectResultSchema = z.object({
 
 // --- Exported TypeScript Types ---
 
-export type StrandweaveLlmCallParams = z.infer<typeof strandweaveLlmCallParamsSchema>;
-export type StrandweaveGenerateTextOptions = z.infer<typeof strandweaveGenerateTextOptionsSchema>;
-export type StrandweaveGenerateTextResult = z.infer<typeof strandweaveGenerateTextResultSchema>;
-export type StrandweaveStreamTextOptions = z.infer<typeof strandweaveStreamTextOptionsSchema>;
+export type HankweaveLlmCallParams = z.infer<typeof hankweaveLlmCallParamsSchema>;
+export type HankweaveGenerateTextOptions = z.infer<typeof hankweaveGenerateTextOptionsSchema>;
+export type HankweaveGenerateTextResult = z.infer<typeof hankweaveGenerateTextResultSchema>;
+export type HankweaveStreamTextOptions = z.infer<typeof hankweaveStreamTextOptionsSchema>;
 // StreamTextResult is complex, so we define it more carefully.
 // According to the docs, textStream is AsyncIterableStream<string> which is AsyncIterable<string> & ReadableStream<string>
-export type StrandweaveStreamTextResult = {
+export type HankweaveStreamTextResult = {
   textStream: AsyncIterable<string> & ReadableStream<string>;
   // The promises for the final state are essential for testing.
   usage: Promise<{ inputTokens: number; outputTokens: number }>;
@@ -142,11 +142,9 @@ export type StrandweaveStreamTextResult = {
   // Add other promises as needed for tests, e.g., `text`.
   text: Promise<string>;
 };
-export type StrandweaveGenerateObjectOptions = z.infer<
-  typeof strandweaveGenerateObjectOptionsSchema
->;
-export type StrandweaveGenerateObjectResult<T> = Omit<
-  z.infer<typeof strandweaveGenerateObjectResultSchema>,
+export type HankweaveGenerateObjectOptions = z.infer<typeof hankweaveGenerateObjectOptionsSchema>;
+export type HankweaveGenerateObjectResult<T> = Omit<
+  z.infer<typeof hankweaveGenerateObjectResultSchema>,
   "object"
 > & { object: T };
 

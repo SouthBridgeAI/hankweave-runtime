@@ -9,7 +9,7 @@ import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { EventId } from "../../server/types/branded-types.js";
 import { createMockLlm } from "../utils/mock-llm.js";
 import { createMockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
-import type { StrandweaveGenerateObjectOptions } from "../../server/types/llm-call-types.js";
+import type { HankweaveGenerateObjectOptions } from "../../server/types/llm-call-types.js";
 
 describe("Structured Output Integration", () => {
   let testDir: string;

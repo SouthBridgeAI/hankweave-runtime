@@ -29,7 +29,7 @@ export class PersistenceError extends Error {
 }
 
 export class StateManager extends TypedEventEmitter<StateManagerEvents> implements ST.StateManager {
-  private state: ST.StrandweaveState;
+  private state: ST.HankweaveState;
   private readonly statePath: string;
   private readonly stateBackupPath: string;
   private readonly logger: Logger;
@@ -48,14 +48,14 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
   };
 
   constructor(
-    private readonly strandweaveDir: string,
+    private readonly hankweaveDir: string,
     logger: Logger,
     private readonly codonConfigs?: CodonConfig[],
   ) {
     super();
     this.logger = logger;
-    this.statePath = path.join(strandweaveDir, "state.json");
-    this.stateBackupPath = path.join(strandweaveDir, "state.json.bak");
+    this.statePath = path.join(hankweaveDir, "state.json");
+    this.stateBackupPath = path.join(hankweaveDir, "state.json.bak");
 
     // Initialize execution planner
     this.planner = new ExecutionPlanner(codonConfigs || []);
@@ -89,7 +89,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
    * Load and validate a state file from disk.
    * @throws Error if file is corrupted or cannot be read
    */
-  private async loadAndValidateStateFile(filePath: string): Promise<ST.StrandweaveState> {
+  private async loadAndValidateStateFile(filePath: string): Promise<ST.HankweaveState> {
     const content = await fs.promises.readFile(filePath, "utf-8");
     const parsedState = JSON.parse(content);
 
@@ -116,7 +116,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
    * Restore state from a parsed and validated state object.
    */
   private restoreStateFromParsed(
-    parsedState: ST.StrandweaveState,
+    parsedState: ST.HankweaveState,
     source: "primary" | "backup",
   ): void {
     this.state = parsedState;
@@ -149,7 +149,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
   }
 
-  getState(): Readonly<ST.StrandweaveState> {
+  getState(): Readonly<ST.HankweaveState> {
     return this.state;
   }
 
@@ -396,7 +396,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
 
     // Referential integrity
-    const typedState = state as ST.StrandweaveState;
+    const typedState = state as ST.HankweaveState;
     if (
       typedState.currentRunId &&
       !typedState.runs.find((r) => r.runId === typedState.currentRunId)
@@ -408,7 +408,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
 
     // Check for orphaned run folders
-    const runsDir = path.join(this.strandweaveDir, "runs");
+    const runsDir = path.join(this.hankweaveDir, "runs");
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);
       const stateRunIds = new Set(typedState.runs.map((r) => r.runId));
@@ -426,7 +426,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     return { valid: errors.length === 0, errors, warnings };
   }
 
-  private isValidStateStructure(state: unknown): state is ST.StrandweaveState {
+  private isValidStateStructure(state: unknown): state is ST.HankweaveState {
     // Basic type checking - can be expanded
     if (!state || typeof state !== "object") return false;
     const s = state as Record<string, unknown>;
@@ -578,7 +578,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
   /**
    * Set the checkpoint git instance for git operations.
-   * Called by StrandweaveRuntime after initializing CheckpointGit.
+   * Called by HankweaveRuntime after initializing CheckpointGit.
    */
   setCheckpointGit(checkpointGit: CheckpointGit): void {
     this.checkpointGit = checkpointGit;
@@ -593,7 +593,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
    * @returns Complete execution thread with all metadata
    *
    * NOTE: The codonConfigs fallback exists for initialization timing issues where the plan
-   * hasn't been built yet (e.g., during StrandweaveRuntime.start() before startNewRun()).
+   * hasn't been built yet (e.g., during HankweaveRuntime.start() before startNewRun()).
    */
   async getExecutionThread(
     targetRunId?: RunId,
@@ -620,7 +620,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
 
     // If using a custom plan different from stored state, create temporary state
-    const stateToAnalyze: ST.StrandweaveState =
+    const stateToAnalyze: ST.HankweaveState =
       effectivePlan !== this.state.executionPlan
         ? { ...this.state, executionPlan: effectivePlan }
         : this.state;
@@ -718,12 +718,9 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     // Add more validation as needed
   }
 
-  private applyTransition(
-    state: ST.StrandweaveState,
-    event: ST.StateTransition,
-  ): ST.StrandweaveState {
+  private applyTransition(state: ST.HankweaveState, event: ST.StateTransition): ST.HankweaveState {
     // Deep clone state to ensure immutability
-    const newState = JSON.parse(JSON.stringify(state)) as ST.StrandweaveState;
+    const newState = JSON.parse(JSON.stringify(state)) as ST.HankweaveState;
 
     switch (event.type) {
       case "RunStarted": {

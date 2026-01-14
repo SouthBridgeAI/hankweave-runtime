@@ -6,7 +6,7 @@ import { setupExecutionEnvironment } from "../../server/execution-setup.js";
 import { rimrafSimple } from "../utils/test-helpers.js";
 
 describe("Execution Setup - startNew flag", () => {
-  const TEST_BASE_DIR = path.join(os.tmpdir(), "strandweave-execution-setup-test");
+  const TEST_BASE_DIR = path.join(os.tmpdir(), "hankweave-execution-setup-test");
   const DATA_SOURCE_DIR = path.join(TEST_BASE_DIR, "data-source");
   const EXECUTION_DIR = path.join(TEST_BASE_DIR, "execution");
 
@@ -34,8 +34,8 @@ describe("Execution Setup - startNew flag", () => {
     // Clean up test directories
     await rimrafSimple(TEST_BASE_DIR);
 
-    // Also clean up any executions created in ~/.strandweave-executions
-    const executionRoot = path.join(os.homedir(), ".strandweave-executions");
+    // Also clean up any executions created in ~/.hankweave-executions
+    const executionRoot = path.join(os.homedir(), ".hankweave-executions");
     if (fs.existsSync(executionRoot) && dataHash) {
       const dirs = await fs.promises.readdir(executionRoot);
       // Only clean up test executions (those with our test data hash)
@@ -59,7 +59,7 @@ describe("Execution Setup - startNew flag", () => {
       expect(result.isResuming).toBe(false);
       expect(result.executionPath).toBe(EXECUTION_DIR);
       expect(fs.existsSync(EXECUTION_DIR)).toBe(true);
-      expect(fs.existsSync(path.join(EXECUTION_DIR, ".strandweave", "execution-meta.json"))).toBe(
+      expect(fs.existsSync(path.join(EXECUTION_DIR, ".hankweave", "execution-meta.json"))).toBe(
         true,
       );
     });
@@ -80,7 +80,7 @@ describe("Execution Setup - startNew flag", () => {
     });
 
     it("should prompt for confirmation in non-empty directory with --start-new", async () => {
-      // Create directory with content (no .strandweave/)
+      // Create directory with content (no .hankweave/)
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
       await fs.promises.writeFile(path.join(EXECUTION_DIR, "existing.txt"), "existing content");
 
@@ -97,7 +97,7 @@ describe("Execution Setup - startNew flag", () => {
     });
 
     it("should allow non-empty directory with --start-new when skipConfirmation is true", async () => {
-      // Create directory with content (no .strandweave/)
+      // Create directory with content (no .hankweave/)
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
       await fs.promises.writeFile(path.join(EXECUTION_DIR, "existing.txt"), "existing content");
 
@@ -116,7 +116,7 @@ describe("Execution Setup - startNew flag", () => {
     it("should resume existing execution without --start-new", async () => {
       // First create an execution directory with metadata
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".strandweave");
+      const metaDir = path.join(EXECUTION_DIR, ".hankweave");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       // Calculate data hash for consistency
@@ -223,7 +223,7 @@ describe("Execution Setup - startNew flag", () => {
         startNew: true,
       });
 
-      const metaPath = path.join(EXECUTION_DIR, ".strandweave", "execution-meta.json");
+      const metaPath = path.join(EXECUTION_DIR, ".hankweave", "execution-meta.json");
       const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
 
       expect(meta.version).toBe("1.0.0");
@@ -291,14 +291,14 @@ describe("Execution Setup - startNew flag", () => {
     it("should prevent creating execution inside another execution directory", async () => {
       const nestedPath = path.join(
         os.homedir(),
-        ".strandweave-executions",
+        ".hankweave-executions",
         "existing-exec",
         "data",
         "nested",
       );
       await fs.promises.mkdir(nestedPath, { recursive: true });
 
-      // Tier 1 safety: ~/.strandweave-executions/ is reserved for auto-managed executions
+      // Tier 1 safety: ~/.hankweave-executions/ is reserved for auto-managed executions
       await expect(
         setupExecutionEnvironment({
           readOnlySourceDataPath: DATA_SOURCE_DIR,
@@ -307,7 +307,7 @@ describe("Execution Setup - startNew flag", () => {
       ).rejects.toThrow(/reserved for auto-managed executions/);
 
       // Clean up
-      await rimrafSimple(path.join(os.homedir(), ".strandweave-executions", "existing-exec"));
+      await rimrafSimple(path.join(os.homedir(), ".hankweave-executions", "existing-exec"));
     });
 
     it("should prevent using data source as execution directory", async () => {
@@ -324,7 +324,7 @@ describe("Execution Setup - startNew flag", () => {
     it("should throw error when resuming with different data source", async () => {
       // Create execution directory with metadata for different data
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".strandweave");
+      const metaDir = path.join(EXECUTION_DIR, ".hankweave");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       const meta = {
@@ -409,14 +409,14 @@ describe("Execution Setup - startNew flag", () => {
       const { hashDataSource } = await import("../../server/data-hasher.js");
       const dataHash = await hashDataSource(DATA_SOURCE_DIR, 30000);
 
-      const executionRoot = path.join(os.homedir(), ".strandweave-executions");
+      const executionRoot = path.join(os.homedir(), ".hankweave-executions");
 
       // Create older execution
       const olderDir = path.join(executionRoot, `1000000-old-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(olderDir, { recursive: true });
-      await fs.promises.mkdir(path.join(olderDir, ".strandweave"), { recursive: true });
+      await fs.promises.mkdir(path.join(olderDir, ".hankweave"), { recursive: true });
       await fs.promises.writeFile(
-        path.join(olderDir, ".strandweave", "execution-meta.json"),
+        path.join(olderDir, ".hankweave", "execution-meta.json"),
         JSON.stringify({
           version: "1.0.0",
           dataHash,
@@ -427,9 +427,9 @@ describe("Execution Setup - startNew flag", () => {
       // Create newer execution
       const newerDir = path.join(executionRoot, `2000000-new-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(newerDir, { recursive: true });
-      await fs.promises.mkdir(path.join(newerDir, ".strandweave"), { recursive: true });
+      await fs.promises.mkdir(path.join(newerDir, ".hankweave"), { recursive: true });
       await fs.promises.writeFile(
-        path.join(newerDir, ".strandweave", "execution-meta.json"),
+        path.join(newerDir, ".hankweave", "execution-meta.json"),
         JSON.stringify({
           version: "1.0.0",
           dataHash,
@@ -457,7 +457,7 @@ describe("Execution Setup - startNew flag", () => {
 
       // Create execution with old timestamps
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const metaDir = path.join(EXECUTION_DIR, ".strandweave");
+      const metaDir = path.join(EXECUTION_DIR, ".hankweave");
       await fs.promises.mkdir(metaDir, { recursive: true });
 
       const { hashDataSource } = await import("../../server/data-hasher.js");
@@ -533,13 +533,13 @@ describe("Execution Setup - startNew flag", () => {
 
   describe("error handling during setup", () => {
     it("should handle errors during metadata write gracefully", async () => {
-      // Create execution directory but make .strandweave read-only
+      // Create execution directory but make .hankweave read-only
       await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
-      const strandweaveDir = path.join(EXECUTION_DIR, ".strandweave");
-      await fs.promises.mkdir(strandweaveDir, { recursive: true });
+      const hankweaveDir = path.join(EXECUTION_DIR, ".hankweave");
+      await fs.promises.mkdir(hankweaveDir, { recursive: true });
 
       // Make directory read-only
-      await fs.promises.chmod(strandweaveDir, 0o444);
+      await fs.promises.chmod(hankweaveDir, 0o444);
 
       try {
         await setupExecutionEnvironment({
@@ -554,7 +554,7 @@ describe("Execution Setup - startNew flag", () => {
         expect(error).toBeTruthy();
       } finally {
         // Restore permissions for cleanup
-        await fs.promises.chmod(strandweaveDir, 0o755);
+        await fs.promises.chmod(hankweaveDir, 0o755);
       }
     });
   });

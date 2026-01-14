@@ -9,7 +9,7 @@ import { createTestCodon, createTestConfig } from "../utils/test-codon-factory.j
 
 // Test directory setup
 const TEST_DIR = path.join(import.meta.dir, "test-state-manager");
-const TEST_STRANDWEAVE_DIR = path.join(TEST_DIR, ".strandweave");
+const TEST_HANKWEAVE_DIR = path.join(TEST_DIR, ".hankweave");
 
 // Mock logger - extends Logger to handle private property
 class MockLogger extends Logger {
@@ -30,13 +30,13 @@ describe("StateManager", () => {
 
   beforeEach(async () => {
     // Create test directory
-    await fs.promises.mkdir(TEST_STRANDWEAVE_DIR, { recursive: true });
+    await fs.promises.mkdir(TEST_HANKWEAVE_DIR, { recursive: true });
 
     // Create mock logger
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger);
+    stateManager = new StateManager(TEST_HANKWEAVE_DIR, mockLogger);
   });
 
   afterEach(async () => {
@@ -62,7 +62,7 @@ describe("StateManager", () => {
 
     test("loads existing state from disk", async () => {
       // Create a state file
-      const existingState: ST.StrandweaveState = {
+      const existingState: ST.HankweaveState = {
         runs: [
           {
             runId: RunId("test-run-1"),
@@ -80,7 +80,7 @@ describe("StateManager", () => {
         executionPlan: [],
       };
 
-      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
+      const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, JSON.stringify(existingState));
 
       await stateManager.initialize();
@@ -96,11 +96,11 @@ describe("StateManager", () => {
 
     test("recovers from backup when main file corrupted", async () => {
       // Create corrupted main file
-      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
+      const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, "{ invalid json");
 
       // Create valid backup
-      const backupState: ST.StrandweaveState = {
+      const backupState: ST.HankweaveState = {
         runs: [
           {
             runId: RunId("backup-run"),
@@ -117,7 +117,7 @@ describe("StateManager", () => {
         executionPlan: [],
       };
 
-      const backupPath = path.join(TEST_STRANDWEAVE_DIR, "state.json.bak");
+      const backupPath = path.join(TEST_HANKWEAVE_DIR, "state.json.bak");
       await fs.promises.writeFile(backupPath, JSON.stringify(backupState));
 
       await stateManager.initialize();
@@ -133,10 +133,10 @@ describe("StateManager", () => {
 
     test("detects crashed runs on startup", async () => {
       // Ensure directory structure exists for atomic writes
-      await fs.promises.mkdir(TEST_STRANDWEAVE_DIR, { recursive: true });
+      await fs.promises.mkdir(TEST_HANKWEAVE_DIR, { recursive: true });
 
       // Create state with running run from dead process
-      const existingState: ST.StrandweaveState = {
+      const existingState: ST.HankweaveState = {
         runs: [
           {
             runId: RunId("crashed-run"),
@@ -170,7 +170,7 @@ describe("StateManager", () => {
         executionPlan: [],
       };
 
-      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
+      const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, JSON.stringify(existingState));
 
       await stateManager.initialize();
@@ -287,7 +287,7 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
 
       // Check that state file exists
-      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
+      const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
       expect(fs.existsSync(statePath)).toBe(true);
 
       // Load and verify content
@@ -408,7 +408,7 @@ describe("StateManager", () => {
       expect(state.runs[0].codons).toHaveLength(5);
 
       // Verify state file is valid
-      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
+      const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
       const savedState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
       expect(savedState.runs[0].codons).toHaveLength(5);
     });
@@ -587,8 +587,8 @@ describe("StateManager", () => {
 
       await stateManager.waitForPendingTransitions();
 
-      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
-      const backupPath = path.join(TEST_STRANDWEAVE_DIR, "state.json.bak");
+      const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
+      const backupPath = path.join(TEST_HANKWEAVE_DIR, "state.json.bak");
 
       // First save creates state file, no backup yet
       expect(fs.existsSync(statePath)).toBe(true);
@@ -619,7 +619,7 @@ describe("StateManager", () => {
 
     test("validates state integrity", () => {
       // Test with valid state
-      const validState: ST.StrandweaveState = {
+      const validState: ST.HankweaveState = {
         runs: [],
         currentRunId: null,
         executionPlan: [],
@@ -637,7 +637,7 @@ describe("StateManager", () => {
       expect(corruptedValidation.errors.some((e) => e.type === "corrupted_data")).toBe(true);
 
       // Test with missing run reference
-      const missingRunState: ST.StrandweaveState = {
+      const missingRunState: ST.HankweaveState = {
         runs: [],
         currentRunId: RunId("non-existent"),
         executionPlan: [],
@@ -753,9 +753,9 @@ describe("StateManager", () => {
       await stateManager.initialize();
 
       // Make directory read-only to cause save error
-      const statePath = path.join(TEST_STRANDWEAVE_DIR, "state.json");
+      const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
       await fs.promises.writeFile(statePath, "dummy");
-      await fs.promises.chmod(TEST_STRANDWEAVE_DIR, 0o444); // Read-only
+      await fs.promises.chmod(TEST_HANKWEAVE_DIR, 0o444); // Read-only
 
       let _errorEmitted = false;
       stateManager.on("transitionError", ({ error }) => {
@@ -777,7 +777,7 @@ describe("StateManager", () => {
       await stateManager.waitForPendingTransitions();
 
       // Restore permissions
-      await fs.promises.chmod(TEST_STRANDWEAVE_DIR, 0o755);
+      await fs.promises.chmod(TEST_HANKWEAVE_DIR, 0o755);
 
       // State should still be updated in memory despite save error
       const state = stateManager.getState();
@@ -806,7 +806,7 @@ describe("StateManager", () => {
       ];
 
       // Create state manager with codon configs
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -864,7 +864,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -890,7 +890,7 @@ describe("StateManager", () => {
       expect(state.executionPlan).toHaveLength(2);
 
       // Create new state manager and load from disk to verify persistence
-      const smReloaded = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smReloaded = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smReloaded.initialize();
 
       const reloadedState = smReloaded.getState();
@@ -917,7 +917,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -942,7 +942,7 @@ describe("StateManager", () => {
     });
 
     test("handles codon not found in plan", async () => {
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, []);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, []);
       await smWithConfigs.initialize();
 
       // Try to expand non-existent codon - should return early without error
@@ -974,7 +974,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1020,7 +1020,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1060,7 +1060,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1092,7 +1092,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1114,7 +1114,7 @@ describe("StateManager", () => {
     });
 
     test("returns false for codon not found in plan", async () => {
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, []);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, []);
       await smWithConfigs.initialize();
 
       // Codon doesn't exist in plan
@@ -1123,7 +1123,7 @@ describe("StateManager", () => {
     });
 
     test("returns false if no codon configs provided", async () => {
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger);
       await smWithConfigs.initialize();
 
       // No codon configs means no loops
@@ -1157,7 +1157,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1212,7 +1212,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1254,7 +1254,7 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_STRANDWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan

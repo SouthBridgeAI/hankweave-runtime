@@ -6,18 +6,18 @@ import { BasicTUI } from "./basic-tui.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
 import { parseCliArgs } from "./cli-parser.js";
-import { resolveSettings, validateStrand } from "./config.js";
+import { resolveSettings, validateHank } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
+import { HankweaveRuntime } from "./hankweave-runtime.js";
 import { initProject } from "./init-command.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import {
-  displayStrandSummary,
-  getStrandSummary,
-  isRemoteStrandUrl,
-  resolveRemoteStrand,
-} from "./remote-strand.js";
-import { StrandweaveRuntime } from "./strandweave-runtime.js";
+  displayHankSummary,
+  getHankSummary,
+  isRemoteHankUrl,
+  resolveRemoteHank,
+} from "./remote-hank.js";
 import { getMetadata, Logger } from "./utils.js";
 
 // -------------
@@ -30,7 +30,7 @@ import { getMetadata, Logger } from "./utils.js";
  */
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) {
-    throw new Error('No input provided on stdin. Use: echo "text" | strandweave strand.json -');
+    throw new Error('No input provided on stdin. Use: echo "text" | hankweave hank.json -');
   }
 
   const chunks: Buffer[] = [];
@@ -46,7 +46,7 @@ async function readStdin(): Promise<string> {
 function generateTempFilePath(prefix: string): string {
   return path.join(
     os.tmpdir(),
-    `strandweave-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
+    `hankweave-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
   );
 }
 
@@ -56,7 +56,7 @@ function generateTempFilePath(prefix: string): string {
 
 async function main() {
   // Print version banner
-  console.log(`\nStrandweave v${getMetadata().version}\n`);
+  console.log(`\nHankweave v${getMetadata().version}\n`);
 
   const args = process.argv.slice(2);
 
@@ -70,7 +70,7 @@ async function main() {
   }
 
   // Extract values with defaults
-  const configPath = cliArgs.strandPath || cliArgs.configPath || "strand.json";
+  const configPath = cliArgs.hankPath || cliArgs.configPath || "hank.json";
   const dataSourcePath = cliArgs.dataPath || cliArgs.dataFlag;
   const executionPath = cliArgs.executionPath;
   const inlineInput = cliArgs.inputText;
@@ -86,28 +86,26 @@ async function main() {
 
   if (cliArgs.help) {
     console.log(`
-Strandweave Runtime - Codon Orchestration
+Hankweave Runtime - Codon Orchestration
 
-Usage: strandweave [data-path] [options]
-       strandweave [strand-path] [data-path] [options]
+Usage: hankweave [hank-path] [data-path] [options]
 
 Arguments:
   data-path                 Path to data file/directory, or "-" for stdin (default: cwd)
                             When only one argument provided:
-                            - If ends with .json: treated as strand-path
+                            - If ends with .json: treated as hank-path
                             - Otherwise: treated as data-path
-  strand-path               Path to strand config, or remote Git URL (default: strand.json)
+  hank-path                Path to hank config, or remote Git URL (default: hank.json)
                             Remote URLs: https://github.com/user/repo#branch
-                            Requires both arguments to specify custom strand path
-
+                            Requires both arguments to specify custom hank path
 Options:
-  --init                    Initialize a new strand in current directory
-  --config <path>           Path to strand configuration file (alternative to positional arg)
+  --init                    Initialize a new hank in current directory
+  --config <path>           Path to hank configuration file (alternative to positional arg)
   --data <path>             Path to data file or directory, or "-" for stdin
   --input <text>            Use inline text as data input (highest priority)
   --execution <path>        Resume in specific execution directory
   --start-new               Start a new execution (creates or reuses directory)
-  --force                   Force operation in directories with existing .strandweave/
+  --force                   Force operation in directories with existing .hankweave/
   --copy                    Copy data instead of symlinking (for compatibility)
   --port <port>             WebSocket server port (default: 7777)
   --headless                Run without TUI (for CI/CD and scripts)
@@ -122,13 +120,13 @@ Options:
   --help, -h                Show this help message
 
 Execution Safety:
-  Strandweave implements a three-tier safety system for execution directories:
-  - Tier 1: Cannot use ~/.strandweave-executions/ directly (reserved for auto-managed)
-  - Tier 2: Directories with existing .strandweave/ require --force (backs up existing)
+  Hankweave implements a three-tier safety system for execution directories:
+  - Tier 1: Cannot use ~/.hankweave-executions/ directly (reserved for auto-managed)
+  - Tier 2: Directories with existing .hankweave/ require --force (backs up existing)
   - Tier 3: Non-empty directories show warning and prompt for confirmation
 
 Execution Isolation:
-  Strandweave runs in an isolated execution directory separate from your data.
+  Hankweave runs in an isolated execution directory separate from your data.
   This enables clean rollbacks and multiple execution tracking.
 
   Your data is accessed via: <execution-dir>/read_only_data_source/
@@ -139,32 +137,32 @@ Template Variables:
 
 Examples:
   # Run with default data (current directory)
-  strandweave
+  hankweave
 
-  # Run with specific strand and data (positional args)
-  strandweave ./my-strand.json ./my-data
+  # Run with specific hank and data (positional args)
+  hankweave ./my-hank.json ./my-data
 
   # Use inline text as input
-  strandweave strand.json --input "Analyze this text"
+  hankweave hank.json --input "Analyze this text"
 
   # Pipe from stdin
-  echo "Design a REST API" | strandweave strand.json -
+  echo "Design a REST API" | hankweave hank.json -
 
   # Pipe file contents to stdin
-  cat spec.md | strandweave strand.json --data -
+  cat spec.md | hankweave hank.json --data -
 
-  # Run a strand from a GitHub repository
-  strandweave https://github.com/user/repo ./my-data
+  # Run a hank from a GitHub repository
+  hankweave https://github.com/user/repo ./my-data
 
   # Run a specific branch/tag from a remote repo
-  strandweave https://github.com/user/repo#v1.0.0 ./my-data
-  strandweave https://github.com/user/repo/tree/feature-branch ./my-data
+  hankweave https://github.com/user/repo#v1.0.0 ./my-data
+  hankweave https://github.com/user/repo/tree/feature-branch ./my-data
 
   # Run in headless mode for CI/CD
-  strandweave --headless
+  hankweave --headless
 
   # Override all codon models to use Opus
-  strandweave --model opus
+  hankweave --model opus
 `);
     process.exit(0);
   }
@@ -224,16 +222,16 @@ Examples:
     resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
   }
 
-  // Resolve config path before execution setup (needed for strand hash)
-  // Handle remote strands (git URLs)
+  // Resolve config path before execution setup (needed for hank hash)
+  // Handle remote hanks (git URLs)
   let absoluteConfigPath: string;
 
-  if (isRemoteStrandUrl(configPath)) {
-    console.log(`\n🌐 Fetching remote strand: ${configPath}`);
+  if (isRemoteHankUrl(configPath)) {
+    console.log(`\n🌐 Fetching remote hank: ${configPath}`);
 
     try {
-      const cached = await resolveRemoteStrand(configPath);
-      absoluteConfigPath = cached.strandPath;
+      const cached = await resolveRemoteHank(configPath);
+      absoluteConfigPath = cached.hankPath;
 
       if (cached.wasFresh) {
         console.log(`  📦 Using cached version (fetched ${cached.cachedAt.toLocaleString()})`);
@@ -241,14 +239,12 @@ Examples:
         console.log(`  ✅ Cloned to cache`);
       }
 
-      // Show strand summary (no confirmation needed - "power user" model)
-      const parsed = await import("./remote-strand.js").then((m) =>
-        m.parseRemoteStrandUrl(configPath),
-      );
-      const summary = getStrandSummary(absoluteConfigPath, configPath, parsed.ref);
-      displayStrandSummary(summary);
+      // Show hank summary (no confirmation needed - "power user" model)
+      const parsed = await import("./remote-hank.js").then((m) => m.parseRemoteHankUrl(configPath));
+      const summary = getHankSummary(absoluteConfigPath, configPath, parsed.ref);
+      displayHankSummary(summary);
     } catch (error) {
-      console.error(`\n❌ Failed to fetch remote strand: ${(error as Error).message}`);
+      console.error(`\n❌ Failed to fetch remote hank: ${(error as Error).message}`);
       process.exit(1);
     }
   } else {
@@ -268,7 +264,7 @@ Examples:
       startNew,
       forceMode,
       skipConfirmation,
-      strandPath: absoluteConfigPath,
+      hankPath: absoluteConfigPath,
     });
   } catch (error) {
     console.error(`❌ Execution setup failed: ${(error as Error).message}`);
@@ -308,16 +304,16 @@ Examples:
   // Config path already resolved above before execution setup
 
   // Resolve settings from all 5 config layers
-  // (default config, runtime config, strand recommendations, env vars, CLI args)
-  // Note: We're now in the execution directory, so strandweave.json will be
+  // (default config, runtime config, hank recommendations, env vars, CLI args)
+  // Note: We're now in the execution directory, so hankweave.json will be
   // auto-discovered from process.cwd() if it exists
   const resolvedConfig = resolveSettings({
     cliArgs,
-    strandPath: absoluteConfigPath,
+    hankPath: absoluteConfigPath,
   });
 
   // Initialize LLM Provider Registry singleton before ANY config parsing/validation
-  // This must happen before validateStrand() since Zod transforms use it for model validation
+  // This must happen before validateHank() since Zod transforms use it for model validation
   const validationLogger = new Logger(
     path.join(executionSetup.executionPath, "model-validation.log"),
   );
@@ -331,7 +327,7 @@ Examples:
     if (validateMode) {
       console.log(`\n🔍 Validating configuration: ${absoluteConfigPath}\n`);
 
-      const validationResult = await validateStrand(
+      const validationResult = await validateHank(
         absoluteConfigPath,
         executionSetup.executionPath, // Changed from readOnlySourceData
         validationLogger,
@@ -356,7 +352,7 @@ Examples:
         console.log(`\n🔧 Environment Variables:`);
 
         if (hasSystemVars) {
-          console.log(`\n  From System (STRANDWEAVE_ prefixed):`);
+          console.log(`\n  From System (HANKWEAVE_ prefixed):`);
           for (const [key, value] of Object.entries(
             validationResult.environmentVariables.fromSystem,
           )) {
@@ -386,7 +382,7 @@ Examples:
     }
 
     // Normal server mode - validate config
-    const { codons, warnings } = await validateStrand(
+    const { codons, warnings } = await validateHank(
       absoluteConfigPath,
       executionSetup.executionPath, // Changed from readOnlySourceData
       validationLogger,
@@ -404,7 +400,7 @@ Examples:
     // Create server configuration by merging all config layers with execution properties
     const serverConfig = {
       // Start with resolved config from all 5 layers
-      // (default config, runtime config, strand recommendations, env vars, CLI args)
+      // (default config, runtime config, hank recommendations, env vars, CLI args)
       ...resolvedConfig,
 
       // Override with execution-specific properties (these are not part of the config system)
@@ -422,7 +418,7 @@ Examples:
       codons,
     };
 
-    const server = new StrandweaveRuntime(serverConfig);
+    const server = new HankweaveRuntime(serverConfig);
     await server.start();
 
     // TUI is now the default. Use --headless to disable.

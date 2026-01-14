@@ -103,7 +103,7 @@ describe("ShimProcessManager spawn behavior", () => {
     await fs.promises.mkdir(tempDir, { recursive: true });
 
     // Create project structure
-    await fs.promises.mkdir(path.join(tempDir, ".strandweave", "logs"), {
+    await fs.promises.mkdir(path.join(tempDir, ".hankweave", "logs"), {
       recursive: true,
     });
 

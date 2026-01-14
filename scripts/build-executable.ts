@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Build script for Strandweave standalone executable
+ * Build script for Hankweave standalone executable
  *
- * This script compiles the Strandweave server into a single standalone
+ * This script compiles the Hankweave server into a single standalone
  * executable that includes all necessary Claude SDK files embedded.
  *
  * Usage:
@@ -11,7 +11,7 @@
  * Arguments:
  *   target   - Build target: linux-x64, linux-arm64, darwin-x64, darwin-arm64, windows-x64
  *              Defaults to current platform
- *   output   - Output filename (defaults to 'strandweave' or 'strandweave.exe' for Windows)
+ *   output   - Output filename (defaults to 'hankweave' or 'hankweave.exe' for Windows)
  *
  * Examples:
  *   bun scripts/build-executable.ts                          # Build for current platform
@@ -85,7 +85,7 @@ function getBunTarget(target?: string): string | undefined {
 async function main() {
   const args = process.argv.slice(2);
   const target = args[0];
-  const outputBase = args[1] || "strandweave";
+  const outputBase = args[1] || "hankweave";
 
   // Ensure output directory exists
   if (!fs.existsSync(OUTPUT_DIR)) {
@@ -102,7 +102,7 @@ async function main() {
   const cliBundle = path.join(SDK_PATH, "cli.bundle");
 
   try {
-    console.log("🔨 Building Strandweave standalone executable\n");
+    console.log("🔨 Building Hankweave standalone executable\n");
 
     // Read version from package.json for build-time constants
     const packageJson = JSON.parse(fs.readFileSync("package.json", "utf-8"));

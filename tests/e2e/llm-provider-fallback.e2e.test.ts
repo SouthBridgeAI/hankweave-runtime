@@ -29,7 +29,7 @@ describe("Provider Fallback Scenarios", () => {
         // Clear all API keys
         for (const def of PROVIDER_DEFINITIONS) {
           delete process.env[def.apiKeyEnvVar];
-          delete process.env[`STRANDWEAVE_SENTINEL_${def.apiKeyEnvVar}`];
+          delete process.env[`HANKWEAVE_SENTINEL_${def.apiKeyEnvVar}`];
         }
 
         const registry = new LlmProviderRegistry({ logger: mockLogger });

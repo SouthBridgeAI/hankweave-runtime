@@ -4,7 +4,7 @@ import {
   serverEventDataSchemas,
   serverEventTypes,
 } from "../schemas/event-schemas.js";
-import { strandweaveLlmCallParamsSchema } from "../types/llm-call-types.js";
+import { hankweaveLlmCallParamsSchema } from "../types/llm-call-types.js";
 
 // Helper function to check if a string is a valid event type or wildcard
 const isValidEventType = (type: string): boolean => {
@@ -401,7 +401,7 @@ export const sentinelConfigSchema = z
     errorHandling: errorHandlingSchema,
 
     // Optional LLM parameters
-    llmParams: strandweaveLlmCallParamsSchema.optional(),
+    llmParams: hankweaveLlmCallParamsSchema.optional(),
 
     // Required model field - accepts full model IDs (e.g., "anthropic/claude-3-5-sonnet-20241022")
     model: z
@@ -474,7 +474,7 @@ export const sentinelsArraySchema = z.array(sentinelConfigSchema);
 // Export types derived from schemas (single source of truth)
 export type SentinelConfig = z.infer<typeof sentinelConfigSchema>;
 export type TrimmingStrategy = z.infer<typeof trimmingStrategySchema>;
-export type SentinelLlmParams = z.infer<typeof strandweaveLlmCallParamsSchema>;
+export type SentinelLlmParams = z.infer<typeof hankweaveLlmCallParamsSchema>;
 export type ConversationalConfig = z.infer<typeof sentinelConfigSchema>["conversational"];
 export type SentinelTrigger = z.infer<typeof sentinelTriggerSchema>;
 export type SentinelExecution = z.infer<typeof sentinelExecutionSchema>;

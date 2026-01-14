@@ -57,7 +57,7 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     const codonLogCosts: Record<string, number> = {};
 
     // Find the run folder
-    const runsDir = path.join(testDir, ".strandweave/runs");
+    const runsDir = path.join(testDir, ".hankweave/runs");
     let runFolder = "";
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);

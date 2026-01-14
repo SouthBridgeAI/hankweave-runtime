@@ -1,4 +1,4 @@
-import type { StrandweaveConfig } from "./types/types.js";
+import type { HankweaveConfig } from "./types/types.js";
 
 /**
  * Flags that take a value (support both --flag=value and --flag value)
@@ -69,18 +69,18 @@ export function getFlagValue(args: string[], flagName: string): string | undefin
 /**
  * Result of parsing CLI arguments
  */
-export interface ParsedCliArgs extends Partial<StrandweaveConfig> {
+export interface ParsedCliArgs extends Partial<HankweaveConfig> {
   // Positional arguments
-  strandPath?: string;
+  hankPath?: string;
   dataPath?: string;
 
-  // Value flags (not in StrandweaveConfig)
+  // Value flags (not in HankweaveConfig)
   configPath?: string; // --config
   dataFlag?: string; // --data
   executionPath?: string; // --execution
   inputText?: string; // --input
 
-  // Boolean flags (not in StrandweaveConfig)
+  // Boolean flags (not in HankweaveConfig)
   headless?: boolean; // --headless
   validate?: boolean; // --validate, -v
   cleanup?: boolean; // --cleanup
@@ -94,12 +94,12 @@ export interface ParsedCliArgs extends Partial<StrandweaveConfig> {
 
 /**
  * Parse CLI arguments into a structured config object with positional args.
- * Extracts both configuration flags and positional arguments (strand path, data path).
+ * Extracts both configuration flags and positional arguments (hank path, data path).
  *
  * Positional argument logic:
  * - 0 positional args: both undefined
- * - 1 positional arg: treated as dataPath (strandPath will default to "strand.json")
- * - 2 positional args: first is strandPath, second is dataPath
+ * - 1 positional arg: treated as dataPath (hankPath will default to "hank.json")
+ * - 2 positional args: first is hankPath, second is dataPath
  *
  * Throws errors for:
  * - Unknown flags
@@ -159,23 +159,23 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   // Validate: no more than 2 positional arguments
   if (positional.length > 2) {
     throw new Error(
-      `Too many positional arguments. Expected at most 2 (strand-path, data-path), got ${positional.length}.`,
+      `Too many positional arguments. Expected at most 2 (hank-path, data-path), got ${positional.length}.`,
     );
   }
 
   // Set positional args with smart logic:
   // If only 1 arg:
-  //   - If it ends with .json, treat it as strandPath (strand config file)
-  //   - Otherwise, treat it as dataPath (strand defaults to "strand.json")
-  // If 2+ args, first is strandPath, second is dataPath
+  //   - If it ends with .json, treat it as hankPath (hank config file)
+  //   - Otherwise, treat it as dataPath (hank defaults to "hank.json")
+  // If 2+ args, first is hankPath, second is dataPath
   if (positional.length === 1) {
     if (positional[0].endsWith(".json")) {
-      result.strandPath = positional[0];
+      result.hankPath = positional[0];
     } else {
       result.dataPath = positional[0];
     }
   } else if (positional.length === 2) {
-    result.strandPath = positional[0];
+    result.hankPath = positional[0];
     result.dataPath = positional[1];
   }
 

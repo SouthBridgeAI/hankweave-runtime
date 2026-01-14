@@ -48,10 +48,10 @@ describe("LlmProviderRegistry", () => {
       delete process.env.OPENAI_API_KEY;
       delete process.env.GOOGLE_API_KEY;
       delete process.env.GROQ_API_KEY;
-      delete process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY;
-      delete process.env.STRANDWEAVE_SENTINEL_OPENAI_API_KEY;
-      delete process.env.STRANDWEAVE_SENTINEL_GOOGLE_API_KEY;
-      delete process.env.STRANDWEAVE_SENTINEL_GROQ_API_KEY;
+      delete process.env.HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY;
+      delete process.env.HANKWEAVE_SENTINEL_OPENAI_API_KEY;
+      delete process.env.HANKWEAVE_SENTINEL_GOOGLE_API_KEY;
+      delete process.env.HANKWEAVE_SENTINEL_GROQ_API_KEY;
 
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
@@ -203,8 +203,8 @@ describe("LlmProviderRegistry", () => {
     it("should report providers as unavailable when API keys missing", () => {
       delete process.env.ANTHROPIC_API_KEY;
       delete process.env.OPENAI_API_KEY;
-      delete process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY;
-      delete process.env.STRANDWEAVE_SENTINEL_OPENAI_API_KEY;
+      delete process.env.HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY;
+      delete process.env.HANKWEAVE_SENTINEL_OPENAI_API_KEY;
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
       const statuses = registry.getProviderStatus();
@@ -301,7 +301,7 @@ describe("LlmProviderRegistry", () => {
 
     it("should return error for providers of unavailable models", () => {
       delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.STRANDWEAVE_SENTINEL_ANTHROPIC_API_KEY;
+      delete process.env.HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY;
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
       const providerResult = registry.getProviderForModel("claude-3-5-sonnet-20241022");
