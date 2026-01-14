@@ -101,6 +101,8 @@ async function checkCurrentBranch(expectedBranch: string): Promise<void> {
 
 /**
  * Check if local branches are in sync with remote
+ * Allows local to be ahead (will be pushed during release)
+ * but not behind or diverged
  */
 async function checkRemoteSync(branches: string[]): Promise<void> {
   console.log("\n🔄 Checking remote sync...");
@@ -130,14 +132,49 @@ async function checkRemoteSync(branches: string[]): Promise<void> {
       });
 
       if (localCommit !== remoteCommit) {
-        console.error(`Error: Branch ${branch} is not in sync with remote.`);
-        console.error(`\nTo sync:`);
-        console.error(`  git checkout ${branch}`);
-        console.error(`  git pull origin ${branch}`);
-        process.exit(1);
-      }
+        // Check if local is ahead, behind, or diverged
+        const commitsAhead = await exec(
+          `git rev-list --count origin/${branch}..${branch}`,
+          { silent: true }
+        );
+        const commitsBehind = await exec(
+          `git rev-list --count ${branch}..origin/${branch}`,
+          { silent: true }
+        );
 
-      console.log(`✓ ${branch} is in sync with origin/${branch}`);
+        const ahead = parseInt(commitsAhead);
+        const behind = parseInt(commitsBehind);
+
+        if (behind > 0 && ahead > 0) {
+          // Diverged
+          console.error(
+            `Error: Branch ${branch} has diverged from remote.`
+          );
+          console.error(
+            `  Local is ${ahead} commit(s) ahead and ${behind} commit(s) behind.`
+          );
+          console.error(`\nYou need to reconcile the branches:`);
+          console.error(`  git checkout ${branch}`);
+          console.error(`  git pull origin ${branch}`);
+          process.exit(1);
+        } else if (behind > 0) {
+          // Behind remote
+          console.error(
+            `Error: Branch ${branch} is ${behind} commit(s) behind remote.`
+          );
+          console.error(`\nTo sync:`);
+          console.error(`  git checkout ${branch}`);
+          console.error(`  git pull origin ${branch}`);
+          process.exit(1);
+        } else if (ahead > 0) {
+          // Ahead of remote - this is OK, we'll push during release
+          console.log(
+            `✓ ${branch} is ${ahead} commit(s) ahead of origin/${branch} (will be pushed during release)`
+          );
+        }
+      } else {
+        console.log(`✓ ${branch} is in sync with origin/${branch}`);
+      }
     } catch (error) {
       console.error(
         `Error checking branch ${branch}:`,
