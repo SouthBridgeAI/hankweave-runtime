@@ -1,1 +1,0 @@
-Based on our previous discussion and the contents of `analysis.md`, please implement the suggested improvements directly into the source files.
