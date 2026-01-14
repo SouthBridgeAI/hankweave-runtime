@@ -31,7 +31,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          install-gemini: 'false'
+          install-gemini: "false"
 
       - name: Run linting
         run: bun run lint
