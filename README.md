@@ -112,7 +112,7 @@ A **hank** is a sequence of codons (blocks of agentic work). A **codon** is a si
 ├─────────────────────────────────────────────────────┤
 │                                                     │
 │  PROMPT                                             │
-│  "Read the CSV files in data/ and create           │
+│  "Read the CSV files in data/ and create            │
 │   strict Zod schemas in src/schema/"                │
 │                                                     │
 │  MODEL: claude-sonnet                               │
@@ -146,27 +146,27 @@ Each codon inside a hank gets its own context window - no accumulated confusion,
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  HANK: data-codebook                                                          │
+│  HANK: data-codebook                                                         │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐  │
-│  │ Observe  │──▶│  Schema  │──▶│  Enrich  │──▶│ Annotate │──▶│ Diagrams │  │
-│  │ (gemini) │   │ (sonnet) │   │ (gemini) │   │ (sonnet) │   │ (sonnet) │  │
-│  └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘  │
-│       │              │              │              │              │         │
-│       ▼              ▼              ▼              ▼              ▼         │
-│  observations   zod schemas    enriched      annotated     visualizations  │
-│  + questions                    context       schemas                       │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐    │
+│  │ Observe  │──▶│  Schema  │──▶│  Enrich  │──▶│ Annotate │──▶│ Diagrams │    │
+│  │ (gemini) │   │ (sonnet) │   │ (gemini) │   │ (sonnet) │   │ (sonnet) │    │
+│  └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘    │
+│       │              │              │              │              │          │
+│       ▼              ▼              ▼              ▼              ▼          │
+│  observations   zod schemas    enriched      annotated     visualizations    │
+│  + questions                    context       schemas                        │
 │                                                                              │
 │                                                              │               │
 │                                                              ▼               │
-│                                                        ┌──────────┐         │
-│                                                        │  Report  │         │
-│                                                        │ (gemini) │         │
-│                                                        └──────────┘         │
+│                                                        ┌──────────┐          │
+│                                                        │  Report  │          │
+│                                                        │ (gemini) │          │
+│                                                        └──────────┘          │
 │                                                              │               │
 │                                                              ▼               │
-│                                                        PDF codebook         │
+│                                                        PDF codebook          │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -219,15 +219,15 @@ Loops let codons iterate until a termination condition is met.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  LOOP: schema-refinement                                                 │
+│  LOOP: schema-refinement                                                │
 │  Terminates: 5 iterations OR context exhausted                          │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌────────────┐   ┌────────────┐   ┌────────────┐                      │
-│  │   Schema   │──▶│  Validate  │──▶│  Tighten   │──────┐               │
-│  └────────────┘   └────────────┘   └────────────┘      │               │
-│        ▲                                               │               │
-│        └───────────────────────────────────────────────┘               │
+│  ┌────────────┐   ┌────────────┐   ┌────────────┐                       │
+│  │   Schema   │──▶│  Validate  │──▶│  Tighten   │──────┐                │
+│  └────────────┘   └────────────┘   └────────────┘      │                │
+│        ▲                                               │                │
+│        └───────────────────────────────────────────────┘                │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -248,13 +248,13 @@ Codons aren't locked to a single hank. The schema loop from the codebook hank ca
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  HANK: agentic-search                                                    │
+│  HANK: agentic-search                                                   │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌────────────┐   ┌────────────────────┐   ┌────────────┐              │
-│  │  Observe   │──▶│  Schema Loop       │──▶│  Build     │              │
-│  │            │   │  (reused)          │   │  Index     │              │
-│  └────────────┘   └────────────────────┘   └────────────┘              │
+│  ┌────────────┐   ┌────────────────────┐   ┌────────────┐               │
+│  │  Observe   │──▶│  Schema Loop       │──▶│  Build     │               │
+│  │            │   │  (reused)          │   │  Index     │               │
+│  └────────────┘   └────────────────────┘   └────────────┘               │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```

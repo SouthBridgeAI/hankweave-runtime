@@ -150,6 +150,49 @@ describe("Execution Setup - startNew flag", () => {
       expect(result.isResuming).toBe(true);
       expect(result.executionPath).toBe(EXECUTION_DIR);
     });
+
+    it("should overwrite read_only_data_source with --start-new --force", async () => {
+      // First create execution with original data
+      await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+      });
+
+      // Verify old data is accessible
+      const oldFile = path.join(EXECUTION_DIR, "read_only_data_source", "test.txt");
+      expect(fs.existsSync(oldFile)).toBe(true);
+      const oldContent = await fs.promises.readFile(oldFile, "utf-8");
+      expect(oldContent).toBe("test content");
+
+      // Create a completely different data source
+      const NEW_DATA_SOURCE = path.join(TEST_BASE_DIR, "new-data");
+      await fs.promises.mkdir(NEW_DATA_SOURCE, { recursive: true });
+      await fs.promises.writeFile(path.join(NEW_DATA_SOURCE, "new.txt"), "new content");
+
+      // Run with --start-new --force on same directory but different data
+      await setupExecutionEnvironment({
+        readOnlySourceDataPath: NEW_DATA_SOURCE,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+        forceMode: true,
+        skipConfirmation: true,
+      });
+
+      // Verify read_only_data_source points to new data
+      const newFile = path.join(EXECUTION_DIR, "read_only_data_source", "new.txt");
+      expect(fs.existsSync(newFile)).toBe(true);
+      const newContent = await fs.promises.readFile(newFile, "utf-8");
+      expect(newContent).toBe("new content");
+
+      // Verify old data files are gone from read_only_data_source
+      expect(fs.existsSync(oldFile)).toBe(false);
+
+      // Verify .hankweave.backup-* directory exists
+      const execDirContents = await fs.promises.readdir(EXECUTION_DIR);
+      const backupDir = execDirContents.find((name) => name.startsWith(".hankweave.backup-"));
+      expect(backupDir).toBeTruthy();
+    });
   });
 
   describe("with auto-detected execution path", () => {

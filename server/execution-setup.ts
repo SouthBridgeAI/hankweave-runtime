@@ -274,8 +274,8 @@ export async function setupExecutionEnvironment(options: {
           );
         }
 
-        // Check for hank config changes
-        if (hankHash && meta.hankHash && meta.hankHash !== hankHash) {
+        // Check for hank config changes (skip when starting new - user explicitly wants fresh execution)
+        if (!startNew && hankHash && meta.hankHash && meta.hankHash !== hankHash) {
           configChanged = true;
           console.log(`\n⚠️  WARNING: hank.json has changed since last execution.`);
           console.log(`  Previous hash: ${meta.hankHash.substring(0, 12)}...`);
@@ -341,6 +341,18 @@ export async function setupExecutionEnvironment(options: {
   // Set up data access (symlink or copy)
   let linkType: "symlink" | "copy" = useSymlink ? "symlink" : "copy";
   if (isNewExecution || !fs.existsSync(dataPathInExecutionDir)) {
+    // Remove existing read_only_data_source if it exists
+    // (handles --start-new --force case where directory was reused)
+    if (fs.existsSync(dataPathInExecutionDir)) {
+      console.log(`🗑️  Removing existing data link: ${dataPathInExecutionDir}`);
+      await fs.promises.rm(dataPathInExecutionDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      });
+    }
+
     if (stats.isDirectory()) {
       // --- Directory Logic (Existing, but with new destination) ---
       if (useSymlink) {
