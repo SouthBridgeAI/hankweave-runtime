@@ -406,7 +406,7 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
    * Run the shim's self-test to verify environment setup.
    * Executes the shim with --self-test flag and returns the results.
    *
-   * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.mjs"])
+   * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.js"])
    * @returns Promise resolving to self-test results
    * @throws Error if self-test execution fails or returns invalid JSON
    */
