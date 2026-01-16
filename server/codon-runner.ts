@@ -28,13 +28,13 @@ import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js
  * Execution contexts:
  * 1. Source (development):
  *    - Current file is in server/codon-runner.ts
- *    - Shims are at shims/gemini/index.mjs (project root)
- *    - Need to go up one level: ../shims/gemini/index.mjs
+ *    - Shims are at shims/gemini/index.js (project root)
+ *    - Need to go up one level: ../shims/gemini/index.js
  *
  * 2. Bundled NPX package (npx @southbridgeai/hankweave):
  *    - Current file is in dist/index.js (bundled)
- *    - Shims are at dist/shims/gemini/index.mjs
- *    - Need to use same directory: ./shims/gemini/index.mjs
+ *    - Shims are at dist/shims/gemini/index.js
+ *    - Need to use same directory: ./shims/gemini/index.js
  *
  * 3. Compiled executable (hankweave binary):
  *    - Shims are embedded in the executable
@@ -66,10 +66,10 @@ async function resolveShimPath(currentFilePath: string): Promise<string> {
 
   if (isRunningFromDist) {
     // Running from dist/index.js -> shims are at dist/shims/
-    return path.resolve(currentDir, "shims/gemini/index.mjs");
+    return path.resolve(currentDir, "shims/gemini/index.js");
   }
   // Running from server/codon-runner.ts -> shims are at ../shims/
-  return path.resolve(currentDir, "../shims/gemini/index.mjs");
+  return path.resolve(currentDir, "../shims/gemini/index.js");
 }
 
 /**

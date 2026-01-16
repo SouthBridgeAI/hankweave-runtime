@@ -131,7 +131,7 @@ describe("Gemini Shim Integration Test", () => {
     logger = new Logger(logPath);
 
     // Get absolute path to gemini shim
-    geminiShimPath = path.resolve("shims/gemini/index.mjs");
+    geminiShimPath = path.resolve("shims/gemini/index.js");
 
     console.log(`\n🧪 Integration test directory: ${tempDir}`);
     console.log(`📦 Gemini shim path: ${geminiShimPath}`);
