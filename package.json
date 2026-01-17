@@ -3,7 +3,6 @@
   "version": "0.1.36",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": "Southbridge",
-  "license": "MIT",
   "keywords": [
     "hankweave"
   ],
@@ -18,8 +17,7 @@
   "files": [
     "dist",
     "shims",
-    "README.md",
-    "LICENSE"
+    "README.md"
   ],
   "engines": {
     "node": ">=18.0.0"
