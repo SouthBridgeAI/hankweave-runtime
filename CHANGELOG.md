@@ -12,8 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Debug directory support for shims (`--debug-dir` flag, logs stored in `.hankweave/logs/shim-debug/{codon-id}/`)
 
 ### Changed
-- Package configuration for public npm publishing:
-  - Changed npm access from "restricted" to "public"
+- Package configuration:
   - Removed LICENSE field from package.json
   - Added homepage link to Terms of Service
   - Excluded README.md and LICENSE from published package files

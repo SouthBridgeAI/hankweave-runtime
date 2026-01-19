@@ -9,7 +9,7 @@
   "homepage": "https://www.southbridge.ai/blog/terms-of-service",
   "type": "module",
   "publishConfig": {
-    "access": "public"
+    "access": "restricted"
   },
   "bin": {
     "hankweave": "dist/index.js"
