@@ -408,13 +408,23 @@ async function mergeToReleaseAlpha(version: string): Promise<void> {
     await exec("git merge develop --no-edit");
     console.log("✓ Merged develop into release/alpha");
 
-    // Remove intermediates directory
-    console.log("Removing intermediates/ from release/alpha...");
-    await exec("git rm -rf intermediates/");
-    await exec(
-      'git commit -m "chore: remove intermediates/ from release branch"'
+    // Remove intermediates directory if it exists in git
+    console.log("Checking for intermediates/ in git...");
+    const intermediatesExists = await exec(
+      "git ls-files intermediates/ | head -n 1",
+      { silent: true }
     );
-    console.log("✓ Removed intermediates/");
+
+    if (intermediatesExists) {
+      console.log("Removing intermediates/ from release/alpha...");
+      await exec("git rm -rf intermediates/");
+      await exec(
+        'git commit -m "chore: remove intermediates/ from release branch"'
+      );
+      console.log("✓ Removed intermediates/");
+    } else {
+      console.log("✓ intermediates/ not tracked in git, skipping removal");
+    }
 
     // Create tag on release/alpha
     const tag = `v${version}`;
