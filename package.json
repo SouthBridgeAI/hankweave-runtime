@@ -6,6 +6,7 @@
   "keywords": [
     "hankweave"
   ],
+  "homepage": "https://www.southbridge.ai/blog/terms-of-service",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -16,8 +17,7 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
-    "shims",
-    "README.md"
+    "shims"
   ],
   "engines": {
     "node": ">=20.0.0"
