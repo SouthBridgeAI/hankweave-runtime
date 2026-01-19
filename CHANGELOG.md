@@ -8,17 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- 
-
-### Changed
-- 
-
-### Fixed
-- 
-
-## [0.1.37] - 2026-01-19
-
-### Added
 - `--version` CLI flag for printing version number without banner
 - Debug directory support for shims (`--debug-dir` flag, logs stored in `.hankweave/logs/shim-debug/{codon-id}/`)
 
@@ -30,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Excluded README.md and LICENSE from published package files
   - Increased minimum Node.js version from 18.0.0 to 20.0.0
 - Gemini shim consolidated to single `index.js` file (removed `index.mjs` and standalone README)
-- Init command E2E test timeouts adjusted for reliability
+- Init command E2E test timeouts adjusted for reliability 
 
 ## [0.1.36] - 2026-01-14
 
