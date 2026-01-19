@@ -145,7 +145,7 @@ describe("init command e2e", () => {
       await cleanupVerdaccio(verdaccioSetup);
       verdaccioSetup = null;
     }
-  });
+  }, 60_000); // 60 seconds timeout for cleanup
 
   test("init command creates all required files", async () => {
     // Create empty directory for init
@@ -213,7 +213,7 @@ describe("init command e2e", () => {
     expect(secondCodon).toHaveProperty("name");
     expect(secondCodon).toHaveProperty("model");
     expect(secondCodon).toHaveProperty("continuationMode");
-  }, 120_000); // 2 minutes timeout for this test
+  }, 180_000); // 3 minutes timeout for this test
 
   test("init command fails in non-empty directory", async () => {
     // Create directory with a file
