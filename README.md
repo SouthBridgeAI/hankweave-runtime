@@ -39,9 +39,9 @@ The Hankweave runtime is a **server** that orchestrates agent harnesses - Claude
 ┌─────────────────────────┐             ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
 │       CONSUMERS         │             │ Claude  │ │ Gemini  │ │  Codex  │ │  Cline  │
 │                         │             │ Code    │ │ CLI     │ │         │ │         │
-│  Basic CLI (included)   │             └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘
-│  Data pipelines         │                  │          │           │           │
-│  CI systems             │                  └──────────┴───────────┴───────────┘
+│  Basic CLI (included)   │             └────┬────┘ └────┬────┘ └────┬────┘ └─────┬───┘
+│  Data pipelines         │                  │           │           │            │
+│  CI systems             │                  └───────────┴───────────┴────────────┘
 │  Custom UIs             │                                    │
 │                         │                                    ▼
 └─────────────────────────┘             ┌─────────────────────────────────────────────┐

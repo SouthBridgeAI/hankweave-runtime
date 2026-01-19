@@ -178,6 +178,16 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
       this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
 
+    // Generate shim debug directory path based on codon ID
+    // Replace # with - for safe filesystem names
+    const shimDebugDir = path.join(
+      this.executionPath,
+      ".hankweave/logs/shim-debug",
+      codon.id.replace(/#/g, "-"),
+    );
+    args.push("--debug-dir", shimDebugDir);
+    this.logger.log(`Using shim debug directory: ${shimDebugDir}`);
+
     return args;
   }
 
@@ -396,7 +406,7 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
    * Run the shim's self-test to verify environment setup.
    * Executes the shim with --self-test flag and returns the results.
    *
-   * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.mjs"])
+   * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.js"])
    * @returns Promise resolving to self-test results
    * @throws Error if self-test execution fails or returns invalid JSON
    */

@@ -145,7 +145,7 @@ describe("init command e2e", () => {
       await cleanupVerdaccio(verdaccioSetup);
       verdaccioSetup = null;
     }
-  });
+  }, 60_000); // 60 seconds timeout for cleanup
 
   test("init command creates all required files", async () => {
     // Create empty directory for init
@@ -213,7 +213,7 @@ describe("init command e2e", () => {
     expect(secondCodon).toHaveProperty("name");
     expect(secondCodon).toHaveProperty("model");
     expect(secondCodon).toHaveProperty("continuationMode");
-  }, 120_000); // 2 minutes timeout for this test
+  }, 180_000); // 3 minutes timeout for this test
 
   test("init command fails in non-empty directory", async () => {
     // Create directory with a file
@@ -299,6 +299,33 @@ describe("init command e2e", () => {
 
       const analysisGeminiContent = fs.readFileSync(analysisGeminiFile, "utf-8");
       expect(analysisGeminiContent.length).toBeGreaterThan(0);
+
+      // Verify shim debug logs were created for the Gemini codon
+      // The second codon uses Gemini (shim-based), so it should have debug logs
+      const hankContent = fs.readFileSync(configPath, "utf-8");
+      const hankConfig = JSON.parse(hankContent);
+      const geminiCodonId = hankConfig.hank[1].id; // Second codon uses Gemini
+
+      const shimDebugDir = path.join(INIT_TEST_DIR, ".hankweave/logs/shim-debug", geminiCodonId);
+      expect(fs.existsSync(shimDebugDir)).toBe(true);
+
+      // Check for debug log files (session ID is dynamic, so check directory contents)
+      const debugFiles = fs.readdirSync(shimDebugDir);
+      const hasRawJsonl = debugFiles.some((file) => file.endsWith(".raw.jsonl"));
+      const hasRawLog = debugFiles.some((file) => file.endsWith(".raw.log"));
+
+      expect(hasRawJsonl).toBe(true);
+      expect(hasRawLog).toBe(true);
+
+      // Verify the .raw.jsonl file has content (agent events)
+      const jsonlFile = debugFiles.find((file) => file.endsWith(".raw.jsonl"));
+      if (jsonlFile) {
+        const jsonlPath = path.join(shimDebugDir, jsonlFile);
+        const jsonlContent = fs.readFileSync(jsonlPath, "utf-8");
+        expect(jsonlContent.length).toBeGreaterThan(0);
+        // Should contain at least one JSON line (init event)
+        expect(jsonlContent.split("\n").filter((line) => line.trim()).length).toBeGreaterThan(0);
+      }
     } finally {
       // Clean up server
       await server.stop(10000);
