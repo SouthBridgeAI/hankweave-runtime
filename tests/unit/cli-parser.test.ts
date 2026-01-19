@@ -762,6 +762,22 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
+  test("hankweave --version", () => {
+    const args = ["--version"];
+    const result = parseCliArgs(args);
+    expect(result.showVersion).toBe(true);
+    expect(result.hankPath).toBeUndefined();
+    expect(result.dataPath).toBeUndefined();
+  });
+
+  test("hankweave -V (version shorthand)", () => {
+    const args = ["-V"];
+    const result = parseCliArgs(args);
+    expect(result.showVersion).toBe(true);
+    expect(result.hankPath).toBeUndefined();
+    expect(result.dataPath).toBeUndefined();
+  });
+
   test("hankweave --copy", () => {
     const args = ["--copy"];
     const result = parseCliArgs(args);
@@ -843,6 +859,16 @@ describe("parseCliArgs", () => {
     test("throws when boolean flag --init has value", () => {
       const args = ["--init=project"];
       expect(() => parseCliArgs(args)).toThrow("Flag '--init' does not take a value.");
+    });
+
+    test("throws when boolean flag --version has value", () => {
+      const args = ["--version=1.0.0"];
+      expect(() => parseCliArgs(args)).toThrow("Flag '--version' does not take a value.");
+    });
+
+    test("throws when boolean flag -V has value", () => {
+      const args = ["-V=1.0.0"];
+      expect(() => parseCliArgs(args)).toThrow("Flag '-V' does not take a value.");
     });
 
     test("throws when value flag has no value (end of args)", () => {

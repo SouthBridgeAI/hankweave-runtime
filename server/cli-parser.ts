@@ -31,6 +31,8 @@ const BOOLEAN_FLAGS = new Set([
   "--init",
   "--help",
   "-h",
+  "--version",
+  "-V",
   "--force",
 ]);
 
@@ -69,7 +71,7 @@ export function getFlagValue(args: string[], flagName: string): string | undefin
 /**
  * Result of parsing CLI arguments
  */
-export interface ParsedCliArgs extends Partial<HankweaveConfig> {
+export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version"> {
   // Positional arguments
   hankPath?: string;
   dataPath?: string;
@@ -89,6 +91,7 @@ export interface ParsedCliArgs extends Partial<HankweaveConfig> {
   force?: boolean; // --force
   init?: boolean; // --init
   help?: boolean; // --help, -h
+  showVersion?: boolean; // --version, -V (renamed to avoid conflict with HankweaveConfig.version)
   copy?: boolean; // --copy
 }
 
@@ -232,6 +235,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.force = args.includes("--force");
   result.init = args.includes("--init");
   result.help = args.includes("--help") || args.includes("-h");
+  result.showVersion = args.includes("--version") || args.includes("-V");
   result.copy = args.includes("--copy");
 
   return result;

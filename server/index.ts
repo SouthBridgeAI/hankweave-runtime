@@ -56,9 +56,6 @@ function generateTempFilePath(prefix: string): string {
 // -------------
 
 async function main() {
-  // Print version banner
-  console.log(`\nHankweave v${getMetadata().version}\n`);
-
   const args = process.argv.slice(2);
 
   // Parse ALL CLI arguments in one place (with validation)
@@ -69,6 +66,15 @@ async function main() {
     console.error(`❌ Error: ${(error as Error).message}`);
     process.exit(1);
   }
+
+  // Handle version flag - print version and exit
+  if (cliArgs.showVersion) {
+    console.log(getMetadata().version);
+    process.exit(0);
+  }
+
+  // Print version banner
+  console.log(`\nHankweave v${getMetadata().version}\n`);
 
   // Extract values with defaults
   const configPath = cliArgs.hankPath || cliArgs.configPath || "hank.json";
