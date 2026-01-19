@@ -32,7 +32,6 @@ const BOOLEAN_FLAGS = new Set([
   "--help",
   "-h",
   "--version",
-  "-V",
   "--force",
 ]);
 
@@ -235,7 +234,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.force = args.includes("--force");
   result.init = args.includes("--init");
   result.help = args.includes("--help") || args.includes("-h");
-  result.showVersion = args.includes("--version") || args.includes("-V");
+  result.showVersion = args.includes("--version");
   result.copy = args.includes("--copy");
 
   return result;
