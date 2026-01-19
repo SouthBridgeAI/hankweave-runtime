@@ -31,6 +31,7 @@ external-docs/
 intermediates/
 CLAUDE.md
 spec.md
+README.md
 
 # Test artifacts
 test-install*/
@@ -43,6 +44,5 @@ bun.lockb
 
 # Keep these
 !dist/
-!README.md
 !LICENSE
 !package.json

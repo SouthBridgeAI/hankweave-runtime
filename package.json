@@ -8,7 +8,7 @@
   ],
   "type": "module",
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   },
   "bin": {
     "hankweave": "dist/index.js"
@@ -20,7 +20,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "build": "bun scripts/build.ts",
