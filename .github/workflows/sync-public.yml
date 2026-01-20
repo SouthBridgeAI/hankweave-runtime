@@ -1,0 +1,103 @@
+name: Sync to Public
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to sync (e.g., 0.1.41)'
+        required: true
+        type: string
+      initial_sync:
+        description: 'Initial sync (push full history instead of snapshot)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    name: Sync to Public Repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate version format
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Version must be in format X.Y.Z (e.g., 0.1.41)"
+            exit 1
+          fi
+          echo "✓ Version format valid: $VERSION"
+
+      - name: Checkout private repo at tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+          path: private
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Verify tag exists
+        working-directory: private
+        run: |
+          if ! git rev-parse v${{ inputs.version }} >/dev/null 2>&1; then
+            echo "Error: Tag v${{ inputs.version }} does not exist"
+            exit 1
+          fi
+          echo "✓ Tag v${{ inputs.version }} exists"
+
+      - name: Extract changelog
+        run: bun private/scripts/sync-public.ts extract-changelog --version ${{ inputs.version }}
+
+      - name: Prepare snapshot
+        if: "!inputs.initial_sync"
+        run: bun private/scripts/sync-public.ts prepare-snapshot --version ${{ inputs.version }}
+
+      - name: Clone public repo
+        run: |
+          git clone https://x-access-token:${{ secrets.PUBLIC_REPO_PAT }}@github.com/SouthBridgeAI/hankweave-runtime.git public
+          cd public
+          if git ls-remote --heads origin release/alpha | grep -q release/alpha; then
+            git checkout release/alpha
+            echo "✓ Checked out existing release/alpha branch"
+          else
+            git checkout --orphan release/alpha
+            git rm -rf . 2>/dev/null || true
+            echo "✓ Created new release/alpha branch"
+          fi
+
+      - name: Initial sync (full history)
+        if: inputs.initial_sync
+        run: bun private/scripts/sync-public.ts initial-sync --version ${{ inputs.version }}
+
+      - name: Snapshot sync
+        if: "!inputs.initial_sync"
+        run: bun private/scripts/sync-public.ts snapshot-sync --version ${{ inputs.version }}
+
+      - name: Create tag
+        run: bun private/scripts/sync-public.ts create-tag --version ${{ inputs.version }}
+
+      - name: Push to public repo
+        run: bun private/scripts/sync-public.ts push --version ${{ inputs.version }}
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║                    Sync Complete! 🎉                        ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "Version: v${{ inputs.version }}"
+          echo "Sync type: ${{ inputs.initial_sync && 'Initial (full history)' || 'Snapshot' }}"
+          echo ""
+          echo "What happens next:"
+          echo "  1. Public repo's release.yml will trigger on the tag push"
+          echo "  2. It will publish 'hankweave' to npm"
+          echo "  3. It will build binaries and create a GitHub release"
+          echo ""
+          echo "Public repo: https://github.com/SouthBridgeAI/hankweave-runtime"
+          echo "Public release: https://github.com/SouthBridgeAI/hankweave-runtime/releases/tag/v${{ inputs.version }}"
