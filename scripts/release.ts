@@ -394,7 +394,62 @@ async function pushDevelop(): Promise<void> {
 }
 
 /**
+ * Files to strip from release/alpha (internal-only files)
+ * These are removed after merging develop to keep release/alpha clean.
+ *
+ * Note: public-release-files/ is NOT stripped here because the sync-public
+ * workflow needs it to transform files for the public repo.
+ */
+const INTERNAL_FILES_TO_STRIP = [
+  "intermediates/",
+  "external-docs/",
+  "CLAUDE.md",
+  "CONTRIBUTING.md",
+];
+
+/**
+ * Strip internal files from the current branch
+ */
+async function stripInternalFiles(): Promise<boolean> {
+  console.log("\n🧹 Stripping internal files from release/alpha...");
+
+  const filesToRemove: string[] = [];
+
+  for (const file of INTERNAL_FILES_TO_STRIP) {
+    // Check if file/directory exists in git
+    const exists = await exec(`git ls-files ${file} | head -n 1`, {
+      silent: true,
+    });
+
+    if (exists) {
+      filesToRemove.push(file);
+    }
+  }
+
+  if (filesToRemove.length === 0) {
+    console.log("✓ No internal files to strip");
+    return false;
+  }
+
+  // Remove all files in a single git rm command
+  const rmArgs = filesToRemove.join(" ");
+  await exec(`git rm -rf ${rmArgs}`);
+
+  // Commit the removal
+  await exec(
+    'git commit -m "chore: strip internal files from release branch"'
+  );
+
+  console.log(`✓ Stripped: ${filesToRemove.join(", ")}`);
+  return true;
+}
+
+/**
  * Merge develop to release/alpha and create tag
+ *
+ * Internal files (intermediates/, external-docs/, CLAUDE.md, etc.) are stripped
+ * after the merge to keep release/alpha clean. Public-facing transformations
+ * (README, .github/, package.json) happen during sync-to-public.
  */
 async function mergeToReleaseAlpha(version: string): Promise<void> {
   console.log("\n🔀 Merging to release/alpha...");
@@ -408,23 +463,8 @@ async function mergeToReleaseAlpha(version: string): Promise<void> {
     await exec("git merge develop --no-edit");
     console.log("✓ Merged develop into release/alpha");
 
-    // Remove intermediates directory if it exists in git
-    console.log("Checking for intermediates/ in git...");
-    const intermediatesExists = await exec(
-      "git ls-files intermediates/ | head -n 1",
-      { silent: true }
-    );
-
-    if (intermediatesExists) {
-      console.log("Removing intermediates/ from release/alpha...");
-      await exec("git rm -rf intermediates/");
-      await exec(
-        'git commit -m "chore: remove intermediates/ from release branch"'
-      );
-      console.log("✓ Removed intermediates/");
-    } else {
-      console.log("✓ intermediates/ not tracked in git, skipping removal");
-    }
+    // Strip internal files
+    await stripInternalFiles();
 
     // Create tag on release/alpha
     const tag = `v${version}`;
@@ -434,7 +474,10 @@ async function mergeToReleaseAlpha(version: string): Promise<void> {
     // Push release/alpha and tag
     console.log("\n🚀 Pushing release/alpha and tag to origin...");
     console.log(`\nAbout to push release/alpha and tag ${tag} to origin.`);
-    console.log("This will trigger the release workflow");
+    console.log("This will trigger the release workflow.");
+    console.log(
+      "To sync to public repo, run the 'Sync to Public' workflow after this completes."
+    );
     console.log("\nPress Ctrl+C to cancel, or Enter to continue...");
 
     // Wait for user input
