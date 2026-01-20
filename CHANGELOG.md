@@ -7,14 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- 
-
 ### Changed
-- 
-
-### Fixed
-- 
+- Switched to npm trusted publishing (OIDC) for secure, token-less releases with provenance attestation
 
 ## [0.1.38] - 2026-01-19
 
