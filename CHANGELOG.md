@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Excluded README.md and LICENSE from published package files
   - Increased minimum Node.js version from 18.0.0 to 20.0.0
 - Gemini shim consolidated to single `index.js` file (removed `index.mjs` and standalone README)
-- Init command E2E test timeouts adjusted for reliability 
+- Init command E2E test timeouts adjusted for reliability
 
 ## [0.1.36] - 2026-01-14
 
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.35] - 2026-01-13
 
 ### Changed
-strandweave -> hankweave 
+strandweave -> hankweave
 
 ## [0.1.34] - 2026-01-13
 
@@ -102,10 +102,10 @@ strandweave -> hankweave
 ## [0.1.32] - 2026-01-12
 
 ### Added
-- 
+-
 
 ### Changed
-- 
+-
 
 ### Fixed
 -
@@ -113,46 +113,46 @@ strandweave -> hankweave
 ## [0.1.31] - 2026-01-12
 
 ### Added
-- 
+-
 
 ### Changed
-- 
+-
 
 ### Fixed
-- 
+-
 
 ## [0.1.30] - 2026-01-12
 
 ### Added
-- 
+-
 
 ### Changed
-- 
+-
 
 ### Fixed
-- 
+-
 
 ## [0.1.29] - 2026-01-12
 
 ### Added
-- 
+-
 
 ### Changed
-- 
+-
 
 ### Fixed
-- 
+-
 
 ## [0.1.28] - 2026-01-12
 
 ### Added
-- 
+-
 
 ### Changed
-- 
+-
 
 ### Fixed
-- 
+-
 
 ## [0.1.27] - 2026-01-12
 
