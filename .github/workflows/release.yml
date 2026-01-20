@@ -6,8 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write   # Needed for creating GitHub releases
-  id-token: write   # Needed for npm trusted publishing (OIDC)
+  contents: write
 
 env:
   CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -64,9 +63,11 @@ jobs:
         run: bun test tests/integration
 
       - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "=== Publishing package to npm via trusted publishing (OIDC) ==="
-          npm publish --provenance
+          echo "=== Publishing package to npm ==="
+          npm publish
           echo ""
           echo "✓ Published: ${{ steps.pkg-info.outputs.name }}@${{ steps.pkg-info.outputs.version }}"
 

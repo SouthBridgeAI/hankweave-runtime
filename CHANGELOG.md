@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 
 
+## [0.1.40] - 2026-01-20
+
+### Changed
+- Reverted to token-based npm publishing (OIDC requires public package)
+
 ## [0.1.39] - 2026-01-20
 
 ### Changed
