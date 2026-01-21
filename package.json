@@ -1,5 +1,5 @@
 {
-  "name": "@southbridgeai/hankweave",
+  "name": "hankweave",
   "version": "0.1.41",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
@@ -9,10 +9,10 @@
   "keywords": [
     "hankweave"
   ],
-  "homepage": "https://www.southbridge.ai/blog/terms-of-service",
+  "homepage": "https://github.com/SouthBridgeAI/hankweave-runtime",
   "type": "module",
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   },
   "bin": {
     "hankweave": "dist/index.js"
