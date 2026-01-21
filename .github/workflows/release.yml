@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write  # Required for npm OIDC trusted publishing
 
 jobs:
   publish-npm:
@@ -72,11 +71,10 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Publish to npm (OIDC trusted publishing)
-        # Uses GitHub OIDC for authentication - no NPM_TOKEN needed
-        # Requires npm trusted publishing to be configured for this repo
-        # See: https://docs.npmjs.com/generating-provenance-statements
-        run: npm publish --provenance --access public
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
   build-executables:
     name: Build ${{ matrix.target }}
