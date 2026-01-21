@@ -27,7 +27,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: bun install
+      run: bun install --frozen-lockfile
 
     - name: Install gemini-cli globally
       if: inputs.install-gemini == 'true'
