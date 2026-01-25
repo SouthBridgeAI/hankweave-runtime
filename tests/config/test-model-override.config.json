@@ -1,0 +1,57 @@
+{
+  "hank": [
+    {
+      "id": "codon-1",
+      "name": "Pre-Loop Codon",
+      "promptText": "Create a simple file at <%PROJECT_DIR%>/output/step1.txt with the text 'Step 1 completed'.",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p output",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "description": "Initial step using Opus"
+    },
+    {
+      "type": "loop",
+      "id": "test-loop",
+      "name": "Model Override Test Loop",
+      "description": "Loop to test model override across iterations",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 2
+      },
+      "codons": [
+        {
+          "id": "codon-a",
+          "name": "Loop Codon A",
+          "promptText": "Create a file in <%PROJECT_DIR%>/output/ directory with a name starting with 'loop_a_' followed by a unique identifier (like a timestamp or random number). Write the text 'Loop A iteration completed' to it.",
+          "model": "sonnet",
+          "continuationMode": "continue-previous",
+          "description": "Loop step A using Sonnet"
+        },
+        {
+          "id": "codon-b",
+          "name": "Loop Codon B",
+          "promptText": "Create a file in <%PROJECT_DIR%>/output/ directory with a name starting with 'loop_b_' followed by a unique identifier (like a timestamp or random number). Write the text 'Loop B iteration completed' to it.",
+          "model": "opus",
+          "continuationMode": "continue-previous",
+          "description": "Loop step B using Opus"
+        }
+      ]
+    },
+    {
+      "id": "codon-2",
+      "name": "Post-Loop Codon",
+      "promptText": "Create a final file at <%PROJECT_DIR%>/output/final.txt with the text 'All steps completed'.",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "description": "Final step using Sonnet"
+    }
+  ]
+}

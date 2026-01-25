@@ -778,6 +778,21 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
+  test("hankweave --ignore-data-mismatch", () => {
+    const args = ["--ignore-data-mismatch"];
+    const result = parseCliArgs(args);
+    expect(result.ignoreDataMismatch).toBe(true);
+    expect(result.hankPath).toBeUndefined();
+    expect(result.dataPath).toBeUndefined();
+  });
+
+  test("hankweave --ignore-data-mismatch with --execution", () => {
+    const args = ["--execution", "/path/to/exec", "--ignore-data-mismatch"];
+    const result = parseCliArgs(args);
+    expect(result.executionPath).toBe("/path/to/exec");
+    expect(result.ignoreDataMismatch).toBe(true);
+  });
+
   // Complex combination test
   test("hankweave ./data --headless --validate --port 8080 -y", () => {
     const args = ["./data", "--headless", "--validate", "--port", "8080", "-y"];

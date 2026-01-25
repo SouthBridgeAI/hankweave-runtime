@@ -9,7 +9,6 @@ import {
   getExtractedCliPath,
   needsExtraction,
 } from "./claude-runtime-extractor.js";
-import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -84,7 +83,6 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
-    private model?: ModelInfo,
   ) {
     super();
   }
@@ -216,8 +214,8 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * Build SDK options from codon configuration.
    */
   private buildSDKOptions(codon: Codon, previousSessionId: string | null): Options {
-    // Use model override if provided, otherwise use codon model
-    const modelInfo = this.model || codon.model;
+    // Model override is already applied in loadCodonSequence(), so just use codon.model
+    const modelInfo = codon.model;
 
     const options: Options = {
       model: modelInfo.modelId,
@@ -301,13 +299,6 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     if (codon.env) {
       this.logger.log("Applying codon-specific environment variables...");
       Object.assign(options.env, codon.env);
-    }
-
-    // Log model usage
-    if (this.model) {
-      this.logger.log(
-        `Using model override: ${modelInfo.modelId} (codon config specified: ${codon.model.modelId})`,
-      );
     }
 
     return options;

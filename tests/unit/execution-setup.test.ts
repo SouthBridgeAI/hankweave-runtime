@@ -392,6 +392,73 @@ describe("Execution Setup - startNew flag", () => {
         }),
       ).rejects.toThrow(/Data source mismatch/);
     });
+
+    it("should allow resume with different data when ignoreDataMismatch is true", async () => {
+      // Create execution directory with metadata for different data
+      await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
+      const metaDir = path.join(EXECUTION_DIR, ".hankweave");
+      await fs.promises.mkdir(metaDir, { recursive: true });
+
+      const meta = {
+        version: "1.0.0",
+        readOnlySourceDataPath: "/some/other/path",
+        readOnlySourceResolvedDataPath: "/some/other/path",
+        dataHash: "differenthash123",
+        linkType: "symlink",
+        createdAt: new Date().toISOString(),
+        lastUsed: new Date().toISOString(),
+      };
+
+      await fs.promises.writeFile(
+        path.join(metaDir, "execution-meta.json"),
+        JSON.stringify(meta, null, 2),
+      );
+
+      // With ignoreDataMismatch, should succeed instead of throwing
+      const result = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        ignoreDataMismatch: true,
+      });
+
+      expect(result.isResuming).toBe(true);
+      expect(result.executionPath).toBe(EXECUTION_DIR);
+    });
+
+    it("should not affect matching data when ignoreDataMismatch is true", async () => {
+      // Create execution directory with matching data hash
+      await fs.promises.mkdir(EXECUTION_DIR, { recursive: true });
+      const metaDir = path.join(EXECUTION_DIR, ".hankweave");
+      await fs.promises.mkdir(metaDir, { recursive: true });
+
+      const { hashDataSource } = await import("../../server/data-hasher.js");
+      const dataHash = await hashDataSource(DATA_SOURCE_DIR, 30000);
+
+      const meta = {
+        version: "1.0.0",
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        readOnlySourceResolvedDataPath: DATA_SOURCE_DIR,
+        dataHash,
+        linkType: "symlink",
+        createdAt: new Date().toISOString(),
+        lastUsed: new Date().toISOString(),
+      };
+
+      await fs.promises.writeFile(
+        path.join(metaDir, "execution-meta.json"),
+        JSON.stringify(meta, null, 2),
+      );
+
+      // Should work normally when hashes match
+      const result = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        ignoreDataMismatch: true,
+      });
+
+      expect(result.isResuming).toBe(true);
+      expect(result.executionPath).toBe(EXECUTION_DIR);
+    });
   });
 
   describe("symlink and copy behavior", () => {

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,7 +7,7 @@ import { BasicTUI } from "./basic-tui.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
 import { parseCliArgs } from "./cli-parser.js";
-import { resolveSettings, validateHank } from "./config.js";
+import { ensureSchemaUrl, resolveSettings, validateHank } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { HankweaveRuntime } from "./hankweave-runtime.js";
@@ -42,13 +43,29 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * Generate a unique temporary file path.
+ * Get a stable, content-based file path for inline/stdin input.
+ * This ensures the same input content produces the same data hash across runs,
+ * enabling proper resume functionality with --execution.
+ *
+ * The path is deterministic based on content hash, stored in ~/.hankweave-cache/inputs/
+ * to persist across runs. If the file already exists, we reuse it (preserving mtime)
+ * which keeps the data hash stable.
  */
-function generateTempFilePath(prefix: string): string {
-  return path.join(
-    os.tmpdir(),
-    `hankweave-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
-  );
+async function getStableInputPath(content: string, type: "input" | "stdin"): Promise<string> {
+  const contentHash = crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
+  const cacheDir = path.join(os.homedir(), ".hankweave-cache", "inputs");
+
+  // Ensure cache directory exists
+  await fs.promises.mkdir(cacheDir, { recursive: true });
+
+  const filePath = path.join(cacheDir, `${type}-${contentHash}.txt`);
+
+  // Only write if file doesn't exist (preserves mtime for stable hashing)
+  if (!fs.existsSync(filePath)) {
+    await fs.promises.writeFile(filePath, content);
+  }
+
+  return filePath;
 }
 
 // -------------
@@ -90,6 +107,7 @@ async function main() {
   const startNew = cliArgs.startNew || false;
   const forceMode = cliArgs.force || false;
   const initMode = cliArgs.init || false;
+  const ignoreDataMismatch = cliArgs.ignoreDataMismatch || false;
 
   if (cliArgs.help) {
     console.log(`
@@ -117,6 +135,9 @@ Options:
   --force                   Force operation in directories with existing .hankweave/
                             - Backs up existing .hankweave.backup-{timestamp}
                             - Overwrites read_only_data_source link
+  --ignore-data-mismatch    Skip data hash verification when resuming
+                            - Allows resuming even if data has changed
+                            - Use when you know the change is safe
   --copy                    Copy data instead of symlinking (for compatibility)
   --port <port>             WebSocket server port (default: 7777)
   --headless                Run without TUI (for CI/CD and scripts)
@@ -212,18 +233,16 @@ Examples:
 
   if (inlineInput) {
     // Inline text provided via --input
-    const tempFile = generateTempFilePath("input");
-    await fs.promises.writeFile(tempFile, inlineInput);
-    resolvedDataPath = tempFile;
+    // Use stable content-based path for consistent data hashing across runs
+    resolvedDataPath = await getStableInputPath(inlineInput, "input");
     inputSourceType = "inline-text";
     console.log(`📝 Using inline text input (${inlineInput.length} chars)`);
   } else if (dataSourcePath === "-") {
     // stdin input
     try {
       const stdinContent = await readStdin();
-      const tempFile = generateTempFilePath("stdin");
-      await fs.promises.writeFile(tempFile, stdinContent);
-      resolvedDataPath = tempFile;
+      // Use stable content-based path for consistent data hashing across runs
+      resolvedDataPath = await getStableInputPath(stdinContent, "stdin");
       inputSourceType = "stdin";
       console.log(`📝 Using stdin input (${stdinContent.length} chars)`);
     } catch (error) {
@@ -266,6 +285,14 @@ Examples:
       : path.resolve(originalCwd, configPath);
   }
 
+  // Resolve settings from all 5 config layers EARLY
+  // (default config, runtime config, hank overrides, env vars, CLI args)
+  // This needs to happen before validation mode so we have the resolved model
+  const resolvedConfig = resolveSettings({
+    cliArgs,
+    hankPath: absoluteConfigPath,
+  });
+
   // ========== VALIDATION MODE BRANCH ==========
   // This block must run BEFORE any execution setup to prevent directory creation
   if (validateMode) {
@@ -275,6 +302,7 @@ Examples:
         configPath: absoluteConfigPath,
         executionPath: executionPath ? path.resolve(executionPath) : undefined,
         startNew,
+        modelOverride: resolvedConfig.model, // Pass resolved model override (from all config layers)
       });
       process.exit(0);
     } catch (error) {
@@ -298,6 +326,7 @@ Examples:
       forceMode,
       skipConfirmation,
       hankPath: absoluteConfigPath,
+      ignoreDataMismatch,
     });
   } catch (error) {
     console.error(`❌ Execution setup failed: ${(error as Error).message}`);
@@ -335,15 +364,12 @@ Examples:
 
   // Load and validate configuration
   // Config path already resolved above before execution setup
+  // Settings were already resolved earlier (before validation mode check)
 
-  // Resolve settings from all 5 config layers
-  // (default config, runtime config, hank recommendations, env vars, CLI args)
-  // Note: We're now in the execution directory, so hankweave.json will be
-  // auto-discovered from process.cwd() if it exists
-  const resolvedConfig = resolveSettings({
-    cliArgs,
-    hankPath: absoluteConfigPath,
-  });
+  // Display model override message if model is set from any config layer
+  if (resolvedConfig.model) {
+    console.log(`⚙️  Using global model override: ${resolvedConfig.model} (applies to all codons)`);
+  }
 
   // Initialize LLM Provider Registry singleton before ANY config parsing/validation
   // This must happen before validateHank() since Zod transforms use it for model validation
@@ -353,13 +379,20 @@ Examples:
     performHealthCheckOnInit: false,
   });
 
+  // Auto-add $schema for editor support if missing
+  const schemaAdded = ensureSchemaUrl(absoluteConfigPath);
+  if (schemaAdded) {
+    console.log(`✨ Added $schema to ${path.basename(absoluteConfigPath)} for editor support`);
+  }
+
   try {
     // Normal server mode - validate config
-    const { codons, warnings } = await validateHank(
-      absoluteConfigPath,
-      executionSetup.executionPath,
-      serverLogger,
-    );
+    const { codons, warnings } = await validateHank({
+      configPath: absoluteConfigPath,
+      executionPath: executionSetup.executionPath,
+      logger: serverLogger,
+      modelOverride: resolvedConfig.model, // Use resolved model from all config layers
+    });
 
     // Log any non-fatal warnings
     if (warnings.length > 0) {
@@ -373,7 +406,7 @@ Examples:
     // Create server configuration by merging all config layers with execution properties
     const serverConfig = {
       // Start with resolved config from all 5 layers
-      // (default config, runtime config, hank recommendations, env vars, CLI args)
+      // (default config, runtime config, hank overrides, env vars, CLI args)
       ...resolvedConfig,
 
       // Override with execution-specific properties (these are not part of the config system)

@@ -392,7 +392,7 @@ async function fetchRemoteHank(parsed: RemoteHankRef, cacheDir: string): Promise
  * @returns Hank summary
  */
 export function getHankSummary(hankPath: string, sourceUrl: string, ref: string): HankSummary {
-  const hankFile = loadHankFile(hankPath);
+  const hankFile = loadHankFile({ hankPath });
 
   // Flatten codons to get all codon names (handling loops)
   const codonNames: string[] = [];

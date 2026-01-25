@@ -180,6 +180,8 @@ export interface LaunchServerOptions {
     command: string;
     args: string[];
   };
+  /** Additional CLI args to append to the server command */
+  extraArgs?: string[];
 }
 
 /**
@@ -458,6 +460,7 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     executionDir,
     "--port",
     String(port),
+    ...(options.extraArgs ?? []),
   ];
 
   if (options.commandOverride) {

@@ -286,8 +286,6 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
-        // TODO: look into this
-        undefined, // No runtime model override (would come from runtime config)
       );
     } else {
       // Use Shim for non-Anthropic models (e.g., Gemini)
@@ -301,8 +299,6 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
-        // TODO: look into this
-        undefined, // No runtime model override (would come from runtime config)
       );
     }
 

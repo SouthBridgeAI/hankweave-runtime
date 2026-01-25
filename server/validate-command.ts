@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, validateHank } from "./config.js";
+import { DEFAULT_CONFIG, ensureSchemaUrl, validateHank } from "./config.js";
 import { hashDataSource } from "./data-hasher.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { Logger } from "./utils.js";
@@ -142,6 +142,8 @@ export interface ValidateOptions {
   executionPath?: string;
   /** Whether --start-new was provided */
   startNew: boolean;
+  /** Optional model override from CLI --model flag */
+  modelOverride?: string;
 }
 
 /**
@@ -156,7 +158,7 @@ export interface ValidateOptions {
  * @throws Error if validation fails
  */
 export async function runValidation(options: ValidateOptions): Promise<void> {
-  const { dataPath, configPath, executionPath, startNew } = options;
+  const { dataPath, configPath, executionPath, startNew, modelOverride } = options;
 
   // 1. Verify data source exists (validation should fail fast if it doesn't)
   if (!fs.existsSync(dataPath)) {
@@ -188,15 +190,26 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
     performHealthCheckOnInit: false,
   });
 
-  // 6. Print validation header
+  // 6. Auto-add $schema for editor support if missing
+  const schemaAdded = ensureSchemaUrl(configPath);
+  if (schemaAdded) {
+    console.log(`✨ Added $schema to ${path.basename(configPath)} for editor support`);
+  }
+
+  // 7. Print validation header
   console.log(`\n🔍 Validating configuration: ${configPath}\n`);
   console.log(`📁 Data source: ${dataPath}`);
   console.log(`🏃 Would execute in: ${paths.executionPath}`);
 
-  // 7. Run validation
-  const validationResult = await validateHank(configPath, paths.executionPath, validationLogger);
+  // 8. Run validation
+  const validationResult = await validateHank({
+    configPath,
+    executionPath: paths.executionPath,
+    logger: validationLogger,
+    modelOverride, // Pass through CLI model override if provided
+  });
 
-  // 8. Display results
+  // 9. Display results
   displayValidationResult({
     configPath,
     dataPath,

@@ -118,6 +118,7 @@ export async function setupExecutionEnvironment(options: {
   forceMode?: boolean; // Force operation in existing directories with .hankweave
   skipConfirmation?: boolean; // Skip confirmation prompts (-y flag)
   hankPath?: string; // Path to hank.json for hash tracking
+  ignoreDataMismatch?: boolean; // Skip data hash verification on resume
 }): Promise<ExecutionSetup> {
   const {
     readOnlySourceDataPath,
@@ -128,6 +129,7 @@ export async function setupExecutionEnvironment(options: {
     forceMode = false,
     skipConfirmation = false,
     hankPath,
+    ignoreDataMismatch = false,
   } = options;
 
   // Verify data source exists
@@ -149,6 +151,7 @@ export async function setupExecutionEnvironment(options: {
   let isNewExecution = false;
   let isResuming = false;
   let configChanged = false;
+  let relinkDataSource = false;
 
   // Calculate hank hash if path provided
   let hankHash: string | undefined;
@@ -267,11 +270,20 @@ export async function setupExecutionEnvironment(options: {
         // Verify data hash matches
         const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
         if (meta.dataHash !== dataHash) {
-          throw new Error(
-            `Data source mismatch. Execution directory was created for different data.\n` +
-              `Expected hash: ${meta.dataHash}\n` +
-              `Current hash: ${dataHash}`,
-          );
+          if (ignoreDataMismatch) {
+            console.warn(
+              `⚠️  Data source mismatch (ignored via --ignore-data-mismatch):\n` +
+                `   Expected hash: ${meta.dataHash}\n` +
+                `   Current hash: ${dataHash}`,
+            );
+            relinkDataSource = true;
+          } else {
+            throw new Error(
+              `Data source mismatch. Execution directory was created for different data.\n` +
+                `Expected hash: ${meta.dataHash}\n` +
+                `Current hash: ${dataHash}`,
+            );
+          }
         }
 
         // Check for hank config changes (skip when starting new - user explicitly wants fresh execution)
@@ -340,7 +352,7 @@ export async function setupExecutionEnvironment(options: {
 
   // Set up data access (symlink or copy)
   let linkType: "symlink" | "copy" = useSymlink ? "symlink" : "copy";
-  if (isNewExecution || !fs.existsSync(dataPathInExecutionDir)) {
+  if (isNewExecution || relinkDataSource || !fs.existsSync(dataPathInExecutionDir)) {
     // Remove existing read_only_data_source if it exists
     // (handles --start-new --force case where directory was reused)
     if (fs.existsSync(dataPathInExecutionDir)) {

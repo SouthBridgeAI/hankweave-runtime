@@ -93,7 +93,7 @@ describe("Model Validation", () => {
         ];
 
         writeHankConfig(configPath, config);
-        const result = loadCodonSequence(configPath);
+        const result = loadCodonSequence({ configPath });
 
         expect(result).toHaveLength(1);
         const codon = result[0];
@@ -119,7 +119,7 @@ describe("Model Validation", () => {
         ];
 
         writeHankConfig(configPath, config);
-        const result = loadCodonSequence(configPath);
+        const result = loadCodonSequence({ configPath });
 
         expect(result).toHaveLength(1);
         const codon = result[0];
@@ -142,7 +142,7 @@ describe("Model Validation", () => {
       ];
 
       writeHankConfig(configPath, config);
-      expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
+      expect(() => loadCodonSequence({ configPath })).toThrow("Invalid model");
     });
 
     test("throws error for empty model string", () => {
@@ -157,7 +157,7 @@ describe("Model Validation", () => {
       ];
 
       writeHankConfig(configPath, config);
-      expect(() => loadCodonSequence(configPath)).toThrow();
+      expect(() => loadCodonSequence({ configPath })).toThrow();
     });
 
     test("validates model in loop codons", () => {
@@ -183,12 +183,12 @@ describe("Model Validation", () => {
       ];
 
       writeHankConfig(configPath, config);
-      expect(() => loadCodonSequence(configPath)).toThrow("Invalid model");
+      expect(() => loadCodonSequence({ configPath })).toThrow("Invalid model");
     });
   });
 
-  describe("in hankRecommendationsSchema (keeps as string)", () => {
-    const tempDir = path.resolve("tests", "test-area", "temp-recommendations-model-test");
+  describe("in hankOverridesSchema (keeps as string)", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-overrides-model-test");
     const hankPath = path.join(tempDir, "test-hank.json");
 
     beforeEach(() => {
@@ -200,12 +200,12 @@ describe("Model Validation", () => {
       cleanup(tempDir);
     });
 
-    test("accepts valid model in recommendations", () => {
+    test("accepts valid model in overrides", () => {
       const models = ["sonnet", "opus", "haiku"];
 
       for (const model of models) {
         const hankContent = {
-          recommendations: {
+          overrides: {
             model,
           },
           hank: [
@@ -220,17 +220,17 @@ describe("Model Validation", () => {
         };
 
         createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
-        const result = loadHankFile(hankPath);
+        const result = loadHankFile({ hankPath: hankPath });
 
-        // Model should stay as string in recommendations
-        expect(result.recommendations?.model).toBe(model);
-        expect(typeof result.recommendations?.model).toBe("string");
+        // Model should stay as string in overrides
+        expect(result.overrides?.model).toBe(model);
+        expect(typeof result.overrides?.model).toBe("string");
       }
     });
 
-    test("throws error for invalid model in recommendations", () => {
+    test("throws error for invalid model in overrides", () => {
       const hankContent = {
-        recommendations: {
+        overrides: {
           model: "gpt-4-turbo",
         },
         hank: [
@@ -245,12 +245,12 @@ describe("Model Validation", () => {
       };
 
       createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
-      expect(() => loadHankFile(hankPath)).toThrow("Invalid");
+      expect(() => loadHankFile({ hankPath: hankPath })).toThrow("Invalid");
     });
 
-    test("allows undefined model in recommendations", () => {
+    test("allows undefined model in overrides", () => {
       const hankContent = {
-        recommendations: {
+        overrides: {
           dataHashTimeLimit: 5000,
           // No model field
         },
@@ -266,9 +266,9 @@ describe("Model Validation", () => {
       };
 
       createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
-      const result = loadHankFile(hankPath);
+      const result = loadHankFile({ hankPath: hankPath });
 
-      expect(result.recommendations?.model).toBeUndefined();
+      expect(result.overrides?.model).toBeUndefined();
     });
   });
 
@@ -363,13 +363,286 @@ describe("Model Validation", () => {
       writeHankConfig(configPath, config);
 
       try {
-        loadCodonSequence(configPath);
+        loadCodonSequence({ configPath });
         throw new Error("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(Error);
         const message = (error as Error).message;
         expect(message).toContain("Invalid model");
         expect(message).toContain("nonexistent-model");
+      }
+    });
+  });
+
+  describe("codon field validation error messages", () => {
+    const tempDir = path.resolve("tests", "test-area", "temp-codon-field-error-test");
+    const configPath = path.join(tempDir, "test-config.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+    });
+
+    test("provides helpful error for typo: systemPromptFile → appendSystemPromptFile", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "opus",
+          continuationMode: "fresh",
+          promptText: "Test prompt",
+          systemPromptFile: "./system.md", // Wrong field name!
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        // Should suggest correct field name
+        expect(message).toContain("systemPromptFile");
+        expect(message).toContain("appendSystemPromptFile");
+        expect(message.toLowerCase()).toContain("did you mean");
+      }
+    });
+
+    test("provides helpful error for typo: trackedFiles → checkpointedFiles", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "opus",
+          continuationMode: "fresh",
+          promptText: "Test prompt",
+          trackedFiles: ["*.md"], // Wrong field name!
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        expect(message).toContain("trackedFiles");
+        expect(message).toContain("checkpointedFiles");
+        expect(message.toLowerCase()).toContain("did you mean");
+      }
+    });
+
+    test("provides helpful error for unknown codon field", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "opus",
+          continuationMode: "fresh",
+          promptText: "Test prompt",
+          unknownField: "value", // Completely unknown
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        // Should mention the field name and valid fields
+        expect(message).toContain("unknownField");
+        expect(message.toLowerCase()).toMatch(/unrecognized|unknown/);
+      }
+    });
+
+    test("catches unrecognized fields in loop codons", () => {
+      createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+      const config = [
+        {
+          type: "loop",
+          id: "test-loop",
+          name: "Test Loop",
+          terminateOn: { type: "iterationLimit", limit: 2 },
+          codons: [
+            {
+              id: "loop-codon",
+              name: "Loop Codon",
+              model: "opus",
+              continuationMode: "fresh",
+              promptFile: "./prompt.md",
+              trackedFiles: ["*.md"], // Wrong! Should be checkpointedFiles
+            },
+          ],
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        // Should at least identify the problematic field
+        expect(message).toContain("trackedFiles");
+        // Note: typo suggestions for deeply nested codons within loops
+        // go through loopSchema's inner codonSchema which doesn't have
+        // our detailed error handler, so we don't always get suggestions
+      }
+    });
+
+    test("nested loop codon typo preserves context and suggestion", () => {
+      createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+      const config = [
+        {
+          type: "loop",
+          id: "loop-ctx",
+          name: "Loop Context",
+          terminateOn: { type: "iterationLimit", limit: 1 },
+          codons: [
+            {
+              id: "nested-codon",
+              name: "Nested Codon",
+              model: "opus",
+              continuationMode: "fresh",
+              promptFile: "./prompt.md",
+              trackedFiles: ["*.md"], // Wrong field name!
+            },
+          ],
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        // Expect loop context and a typo suggestion for nested codon fields
+        expect(message).toMatch(/loop-ctx|Loop Context/i);
+        expect(message).toContain("trackedFiles");
+        expect(message).toContain("checkpointedFiles");
+        expect(message.toLowerCase()).toContain("did you mean");
+      }
+    });
+
+    test("reports all unrecognized fields in a single codon", () => {
+      const config = [
+        {
+          id: "multi-unknown",
+          name: "Multi Unknown",
+          model: "opus",
+          continuationMode: "fresh",
+          promptText: "Test prompt",
+          unknownFieldOne: "value",
+          unknownFieldTwo: "value",
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        expect(message).toContain("unknownFieldOne");
+        expect(message).toContain("unknownFieldTwo");
+      }
+    });
+
+    test("error message includes codon ID and name for context", () => {
+      const config = [
+        {
+          id: "my-codon-id",
+          name: "My Codon Name",
+          model: "opus",
+          continuationMode: "fresh",
+          promptText: "Test",
+          systemPromptFile: "./system.md", // Wrong field
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        // Error should include codon context
+        expect(message).toMatch(/my-codon-id|My Codon Name/i);
+      }
+    });
+
+    test("error message includes loop ID and name for context", () => {
+      const config = [
+        {
+          type: "loop",
+          id: "my-loop-id",
+          name: "My Loop Name",
+          terminateOn: { type: "iterationLimit", limit: 2 },
+          unknownLoopField: "value", // Unknown field in loop
+          codons: [
+            {
+              id: "loop-codon",
+              name: "Loop Codon",
+              model: "opus",
+              continuationMode: "fresh",
+              promptText: "Test",
+            },
+          ],
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        // Error should include loop context
+        expect(message).toMatch(/my-loop-id|My Loop Name/i);
+      }
+    });
+
+    test("provides better error than 'Invalid input' for unrecognized fields", () => {
+      // This test verifies the fix for the original issue where
+      // z.union() gave generic "Invalid input" errors
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "opus",
+          continuationMode: "fresh",
+          promptText: "Test prompt",
+          systemPromptFile: "./system.md", // Wrong field
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+
+      try {
+        loadCodonSequence({ configPath });
+        throw new Error("Should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        // Should NOT contain the generic "Invalid input" error
+        // Instead should have helpful context
+        expect(message).not.toMatch(/^.*hank\.0: Invalid input$/m);
+        expect(message).toContain("systemPromptFile");
       }
     });
   });
@@ -423,7 +696,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.codonCount).toBe(1);
     expect(result.promptFileCount).toBe(1);
@@ -469,7 +746,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.codonCount).toBe(2);
     expect(result.promptFileCount).toBe(2);
@@ -500,9 +781,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      "Duplicate codon ID",
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow("Duplicate codon ID");
   });
 
   test("warns about duplicate codon names", async () => {
@@ -526,7 +811,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain('Duplicate codon name "Duplicate Name"');
@@ -546,7 +835,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is empty");
@@ -567,7 +860,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("is large");
@@ -597,7 +894,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(0);
@@ -629,7 +930,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.rigSetupCount).toBe(1);
     expect(result.warnings).toHaveLength(1);
@@ -660,9 +965,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      "Invalid target path",
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow("Invalid target path");
   });
 
   test("warns about potentially dangerous commands", async () => {
@@ -687,7 +996,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Potentially dangerous command detected");
@@ -708,7 +1021,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("but there's no previous codon");
@@ -736,7 +1053,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("doesn't checkpoint any files");
@@ -775,7 +1096,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Continues from previous loop");
@@ -806,9 +1131,13 @@ describe("validateHank", () => {
 
     writeHankConfig(configPath, config);
     // Union schema reports "Invalid input" at top level, nested errors contain "Command cannot be empty"
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      "Failed to load codon config",
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow("Failed to load codon config");
   });
 
   test("delegates to loadCodonSequence for basic validation", async () => {
@@ -820,7 +1149,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow();
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow();
   });
 
   test("counts codons inside loops correctly", async () => {
@@ -869,7 +1204,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     // Should count: 1 standalone + 2 in loop + 1 final = 4 total codons
     expect(result.codonCount).toBe(4);
@@ -907,9 +1246,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      "Duplicate codon ID",
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow("Duplicate codon ID");
   });
 
   test("throws when codon ID conflicts with loop ID", async () => {
@@ -944,7 +1287,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow("Duplicate");
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow("Duplicate");
   });
 
   test("validates codons inside loops with proper context in error messages", async () => {
@@ -972,7 +1321,7 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    expect(() => loadCodonSequence(configPath)).toThrow(
+    expect(() => loadCodonSequence({ configPath })).toThrow(
       /Loop.*my-loop.*promptFile.*does not exist/,
     );
   });
@@ -1012,7 +1361,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     // Should not throw, but should have warnings
     expect(result.warnings.length).toBeGreaterThan(0);
@@ -1043,9 +1396,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      /contextExceeded.*fresh.*infinite/i,
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow(/contextExceeded.*fresh.*infinite/i);
   });
 
   test("throws when contextExceeded loop with multiple codons has any fresh codon", async () => {
@@ -1079,9 +1436,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      /contextExceeded.*fresh.*infinite/i,
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow(/contextExceeded.*fresh.*infinite/i);
   });
 
   test("allows contextExceeded loop with all continue-previous codons", async () => {
@@ -1115,7 +1476,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1151,9 +1516,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      /continue-previous.*contextExceeded.*context.*exhausted/i,
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow(/continue-previous.*contextExceeded.*context.*exhausted/i);
   });
 
   test("allows codon after contextExceeded loop with fresh continuationMode", async () => {
@@ -1187,7 +1556,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1217,7 +1590,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
     // Should not throw
     expect(result.codonCount).toBe(1);
   });
@@ -1243,7 +1620,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1269,9 +1650,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      /continue-previous.*model differs.*session ID/i,
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow(/continue-previous.*model differs.*session ID/i);
   });
 
   test("throws when codon after loop has different model with continue-previous", async () => {
@@ -1306,9 +1691,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      /continue-previous.*model differs.*session ID/i,
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow(/continue-previous.*model differs.*session ID/i);
   });
 
   test("throws when codon after loop with multiple codons has different model", async () => {
@@ -1350,9 +1739,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      /continue-previous.*model differs.*session ID/i,
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow(/continue-previous.*model differs.*session ID/i);
   });
 
   test("throws when codons inside loop have different models with continue-previous", async () => {
@@ -1387,9 +1780,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    await expect(validateHank(configPath, projectPath, testLogger)).rejects.toThrow(
-      /continue-previous.*model differs.*previous codon in loop.*session ID/i,
-    );
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow(/continue-previous.*model differs.*previous codon in loop.*session ID/i);
   });
 
   test("allows codons inside loop with different models when using fresh", async () => {
@@ -1424,7 +1821,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
     // Should not throw
     expect(result.codonCount).toBe(2);
   });
@@ -1457,7 +1858,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     // Should have run self-tests
     expect(result.shimSelfTests).toBeDefined();
@@ -1527,7 +1932,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     // Should have run self-tests
     expect(result.shimSelfTests).toBeDefined();
@@ -1558,7 +1967,11 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank(configPath, projectPath, testLogger);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
 
     // Check shimSelfTests structure
     expect(result.shimSelfTests).toBeDefined();
@@ -1606,7 +2019,7 @@ describe("loadHankFile", () => {
         description: "A test hank",
         author: "Test Author",
       },
-      recommendations: {
+      overrides: {
         model: "sonnet" as ModelName,
         dataHashTimeLimit: 10000,
         sentinel: {
@@ -1628,13 +2041,13 @@ describe("loadHankFile", () => {
 
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    const result = loadHankFile(hankPath);
+    const result = loadHankFile({ hankPath: hankPath });
 
     expect(result.meta).toEqual(hankContent.meta);
-    // Check recommendations fields (model stays as string)
-    expect(result.recommendations?.model).toBe("sonnet");
-    expect(result.recommendations?.dataHashTimeLimit).toBe(10000);
-    expect(result.recommendations?.sentinel).toEqual(hankContent.recommendations.sentinel);
+    // Check overrides fields (model stays as string)
+    expect(result.overrides?.model).toBe("sonnet");
+    expect(result.overrides?.dataHashTimeLimit).toBe(10000);
+    expect(result.overrides?.sentinel).toEqual(hankContent.overrides.sentinel);
     expect(result.hank).toHaveLength(1);
     expect(result.hank[0].id).toBe("test-codon");
   });
@@ -1654,20 +2067,22 @@ describe("loadHankFile", () => {
 
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    const result = loadHankFile(hankPath);
+    const result = loadHankFile({ hankPath: hankPath });
 
     expect(result.meta).toBeUndefined();
-    expect(result.recommendations).toBeUndefined();
+    expect(result.overrides).toBeUndefined();
     expect(result.hank).toHaveLength(1);
   });
 
   test("throws error for missing file", () => {
-    expect(() => loadHankFile("/nonexistent/hank.json")).toThrow("Hank file not found");
+    expect(() => loadHankFile({ hankPath: "/nonexistent/hank.json" })).toThrow(
+      "Hank file not found",
+    );
   });
 
   test("throws error for invalid JSON", () => {
     createTestFile(hankPath, "{ invalid json }");
-    expect(() => loadHankFile(hankPath)).toThrow();
+    expect(() => loadHankFile({ hankPath: hankPath })).toThrow();
   });
 
   test("throws error for missing hank array", () => {
@@ -1680,7 +2095,7 @@ describe("loadHankFile", () => {
     };
 
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
-    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
+    expect(() => loadHankFile({ hankPath: hankPath })).toThrow("Invalid hank file");
   });
 
   test("throws error for empty meta name", () => {
@@ -1701,12 +2116,12 @@ describe("loadHankFile", () => {
     };
 
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
-    expect(() => loadHankFile(hankPath)).toThrow();
+    expect(() => loadHankFile({ hankPath: hankPath })).toThrow();
   });
 
-  test("validates recommendations model enum", () => {
+  test("validates overrides model enum", () => {
     const hankContent = {
-      recommendations: {
+      overrides: {
         model: "invalid-model", // Invalid model
       },
       hank: [
@@ -1721,14 +2136,14 @@ describe("loadHankFile", () => {
     };
 
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
-    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
+    expect(() => loadHankFile({ hankPath: hankPath })).toThrow("Invalid hank file");
   });
 
-  test("throws error on typos in recommendations", () => {
-    // With .strict() mode enabled, typos in recommendations are caught
+  test("throws error on typos in overrides", () => {
+    // With .strict() mode enabled, typos in overrides are caught
     // and users get immediate feedback instead of silent failures.
     const hankContent = {
-      recommendations: {
+      overrides: {
         modle: "opus", // Typo! Should be "model"
         dataHashTimeLimit: 10000, // Valid field
       },
@@ -1746,12 +2161,12 @@ describe("loadHankFile", () => {
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
     // Should throw with helpful error message about unrecognized keys
-    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
+    expect(() => loadHankFile({ hankPath: hankPath })).toThrow("Invalid hank file");
   });
 
-  test("throws error on multiple typos in recommendations", () => {
+  test("throws error on multiple typos in overrides", () => {
     const hankContent = {
-      recommendations: {
+      overrides: {
         modle: "opus", // Typo! Should be "model"
         dataHashTimeLimittt: 10000, // Typo! Should be "dataHashTimeLimit"
       },
@@ -1768,12 +2183,12 @@ describe("loadHankFile", () => {
 
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
+    expect(() => loadHankFile({ hankPath: hankPath })).toThrow("Invalid hank file");
   });
 
-  test("throws error on typos in recommendations.sentinel", () => {
+  test("throws error on typos in overrides.sentinel", () => {
     const hankContent = {
-      recommendations: {
+      overrides: {
         model: "opus",
         sentinel: {
           enablePersistence: true,
@@ -1793,7 +2208,7 @@ describe("loadHankFile", () => {
 
     createTestFile(hankPath, JSON.stringify(hankContent, null, 2));
 
-    expect(() => loadHankFile(hankPath)).toThrow("Invalid hank file");
+    expect(() => loadHankFile({ hankPath: hankPath })).toThrow("Invalid hank file");
   });
 });
 
@@ -2265,7 +2680,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, validConfig);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     expect(result[0].type).toBe("codon");
@@ -2291,7 +2706,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("throws on invalid model names", () => {
@@ -2306,7 +2721,88 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
+  });
+
+  test("allows model override even when codon model is invalid", () => {
+    const invalidConfig = [
+      {
+        id: "test-codon",
+        name: "Test Codon",
+        model: "invalid-model-name", // Placeholder in hank file
+        continuationMode: "fresh",
+        promptText: "Test prompt",
+      },
+    ];
+
+    writeHankConfig(configPath, invalidConfig);
+
+    expect(() => loadCodonSequence({ configPath, modelOverride: "sonnet" })).not.toThrow();
+
+    const result = loadCodonSequence({ configPath, modelOverride: "sonnet" });
+    expect(result).toHaveLength(1);
+    const codon = result[0] as import("../../server/types/types.js").Codon;
+    expect(codon.model.modelId).toContain("sonnet");
+  });
+
+  test("applies model override to codons inside loops", () => {
+    const promptPath = path.join(tempDir, "prompt.md");
+    createTestFile(promptPath, "Test prompt");
+
+    const loopConfig = [
+      {
+        type: "loop",
+        id: "test-loop",
+        name: "Test Loop",
+        terminateOn: {
+          type: "iterationLimit",
+          limit: 2,
+        },
+        codons: [
+          {
+            id: "codon-1",
+            name: "Codon 1",
+            model: "opus",
+            continuationMode: "fresh",
+            promptFile: promptPath,
+          },
+          {
+            id: "codon-2",
+            name: "Codon 2",
+            model: "sonnet",
+            continuationMode: "fresh",
+            promptFile: promptPath,
+          },
+        ],
+      },
+    ];
+
+    writeHankConfig(configPath, loopConfig);
+
+    const result = loadCodonSequence({ configPath, modelOverride: "haiku" });
+    expect(result).toHaveLength(1);
+    const loop = result[0] as import("../../server/types/types.js").Loop;
+    expect(loop.type).toBe("loop");
+    for (const codon of loop.codons) {
+      expect(codon.model.modelId).toContain("haiku");
+    }
+  });
+
+  test("throws when model override is invalid", () => {
+    const validConfig = [
+      {
+        id: "test-codon",
+        name: "Test Codon",
+        model: "sonnet",
+        continuationMode: "fresh",
+        promptText: "Test prompt",
+      },
+    ];
+
+    writeHankConfig(configPath, validConfig);
+    expect(() => loadCodonSequence({ configPath, modelOverride: "invalid-model-name" })).toThrow(
+      "Invalid model",
+    );
   });
 
   test("validates promptFile XOR promptText", () => {
@@ -2320,7 +2816,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, neitherConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
 
     // Both provided - loadCodonSequence doesn't actually validate this case, it just uses promptFile if both are provided
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
@@ -2337,7 +2833,7 @@ describe("loadCodonSequence", () => {
 
     writeHankConfig(configPath, bothConfig);
     // This actually doesn't throw - it just uses promptFile
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
     const codon = result[0];
     expect(codon.type).not.toBe("loop");
     if (codon.type !== "loop") {
@@ -2362,7 +2858,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, bothConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("resolves relative paths correctly", () => {
@@ -2378,7 +2874,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     const codon = result[0];
     if (codon.type !== "loop") {
@@ -2401,7 +2897,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     const codon = result[0];
     if (codon.type !== "loop") {
@@ -2429,7 +2925,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidRigConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("throws on non-existent prompt files", () => {
@@ -2444,7 +2940,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("throws on unreadable files", () => {
@@ -2466,7 +2962,7 @@ describe("loadCodonSequence", () => {
       ];
 
       writeHankConfig(configPath, config);
-      expect(() => loadCodonSequence(configPath)).toThrow();
+      expect(() => loadCodonSequence({ configPath })).toThrow();
 
       // Restore permissions for cleanup
       fs.chmodSync(promptPath, 0o644);
@@ -2503,7 +2999,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -2549,7 +3045,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     if (result[0].type === "loop") {
@@ -2600,7 +3096,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(3);
     expect(result[0].type).toBe("codon"); // Regular codon (defaults to "codon")
@@ -2635,7 +3131,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     if (result[0].type === "loop") {
@@ -2679,7 +3175,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     if (result[0].type === "loop") {
@@ -2702,7 +3198,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("throws on loop with empty codons array", () => {
@@ -2720,7 +3216,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow("at least one codon");
+    expect(() => loadCodonSequence({ configPath })).toThrow("at least one codon");
   });
 
   test("throws on loop with invalid termination type", () => {
@@ -2745,7 +3241,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("throws on iterationLimit with invalid limit", () => {
@@ -2771,7 +3267,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow("at least 1");
+    expect(() => loadCodonSequence({ configPath })).toThrow("at least 1");
   });
 
   test("throws on nested loops", () => {
@@ -2808,7 +3304,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("throws on loop codon missing promptFile or promptText", () => {
@@ -2834,7 +3330,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("throws on non-existent prompt file in loop codon", () => {
@@ -2860,7 +3356,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, invalidConfig);
-    expect(() => loadCodonSequence(configPath)).toThrow();
+    expect(() => loadCodonSequence({ configPath })).toThrow();
   });
 
   test("allows rigSetup in loop codons", () => {
@@ -2899,7 +3395,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     // Should load successfully
     expect(result).toHaveLength(1);
@@ -2934,7 +3430,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence(configPath);
+    const result = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     const codon = result[0];

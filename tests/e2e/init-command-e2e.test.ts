@@ -195,7 +195,6 @@ describe("init command e2e", () => {
     const hankConfig = JSON.parse(hankContent);
 
     expect(hankConfig).toHaveProperty("meta");
-    expect(hankConfig).toHaveProperty("recommendations");
     expect(hankConfig).toHaveProperty("hank");
     expect(Array.isArray(hankConfig.hank)).toBe(true);
     expect(hankConfig.hank.length).toBe(2);

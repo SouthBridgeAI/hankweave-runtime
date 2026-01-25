@@ -10,7 +10,7 @@ export type {
   CodonConfig,
   HankFile,
   HankMeta,
-  HankRecommendations,
+  HankOverrides,
   HankweaveConfig,
   Loop,
   LoopTermination,

@@ -67,12 +67,12 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.autostart).toBe(false);
   });
 
-  test("merges hank file recommendations (layer 3)", () => {
+  test("merges hank file overrides (layer 3)", () => {
     const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
       hankPath,
       JSON.stringify({
-        recommendations: {
+        overrides: {
           model: "sonnet",
           dataHashTimeLimit: 15000,
           sentinel: {
@@ -139,12 +139,12 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.model).toBe("sonnet"); // From env
   });
 
-  test("environment variables override hank recommendations", () => {
+  test("environment variables override hank overrides", () => {
     const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
       hankPath,
       JSON.stringify({
-        recommendations: {
+        overrides: {
           model: "sonnet",
           dataHashTimeLimit: 10000,
         },
@@ -168,7 +168,7 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.dataHashTimeLimit).toBe(10000); // From hank
   });
 
-  test("hank recommendations override runtime config", () => {
+  test("hank overrides override runtime config", () => {
     const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
     fs.writeFileSync(
       runtimeConfigPath,
@@ -182,7 +182,7 @@ describe("resolveSettings - Integration Tests", () => {
     fs.writeFileSync(
       hankPath,
       JSON.stringify({
-        recommendations: {
+        overrides: {
           model: "opus", // Override runtime config
         },
         hank: [
@@ -233,12 +233,12 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    // Layer 3: Hank recommendations
+    // Layer 3: Hank overrides
     const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
       hankPath,
       JSON.stringify({
-        recommendations: {
+        overrides: {
           model: "opus", // Override runtime config
           dataHashTimeLimit: 15000,
         },
@@ -291,12 +291,12 @@ describe("resolveSettings - Integration Tests", () => {
       })
     );
 
-    // Layer 3: Hank recommendations
+    // Layer 3: Hank overrides
     const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
       hankPath,
       JSON.stringify({
-        recommendations: {
+        overrides: {
           sentinel: {
             enablePersistence: false, // Override
             waitForAllHealthChecks: true, // Add new field
@@ -343,12 +343,12 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.port).toBe(7777);
   });
 
-  test("handles hank file without recommendations", () => {
+  test("handles hank file without overrides", () => {
     const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
       hankPath,
       JSON.stringify({
-        // No recommendations field
+        // No overrides field
         hank: [
           {
             id: "test",
@@ -377,12 +377,12 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.port).toBe(7777);
   });
 
-  test("handles empty recommendations in hank file", () => {
+  test("handles empty overrides in hank file", () => {
     const hankPath = path.join(TEST_DIR, "hank.json");
     fs.writeFileSync(
       hankPath,
       JSON.stringify({
-        recommendations: {}, // Empty
+        overrides: {}, // Empty
         hank: [
           {
             id: "test",

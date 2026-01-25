@@ -366,8 +366,14 @@ async function addUnreleasedSection(): Promise<void> {
 async function createReleaseCommit(version: string): Promise<void> {
   console.log("\n💾 Creating release commit...");
 
-  // Stage changes
-  await Bun.$`git add package.json CHANGELOG.md`;
+  // Regenerate schemas to ensure they're fresh in the tagged commit
+  // (schemas flow to public repo via sync, so they must be up-to-date)
+  console.log("🔄 Regenerating JSON schemas...");
+  await exec("bun run generate-schemas");
+  console.log("✓ Schemas regenerated");
+
+  // Stage changes (including fresh schemas)
+  await Bun.$`git add package.json CHANGELOG.md schemas/`;
 
   // Commit
   await Bun.$`git commit -m ${"Release v" + version}`;

@@ -33,6 +33,7 @@ const BOOLEAN_FLAGS = new Set([
   "-h",
   "--version",
   "--force",
+  "--ignore-data-mismatch",
 ]);
 
 /**
@@ -92,6 +93,7 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   help?: boolean; // --help, -h
   showVersion?: boolean; // --version, -V (renamed to avoid conflict with HankweaveConfig.version)
   copy?: boolean; // --copy
+  ignoreDataMismatch?: boolean; // --ignore-data-mismatch
 }
 
 /**
@@ -236,6 +238,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.help = args.includes("--help") || args.includes("-h");
   result.showVersion = args.includes("--version");
   result.copy = args.includes("--copy");
+  result.ignoreDataMismatch = args.includes("--ignore-data-mismatch");
 
   return result;
 }

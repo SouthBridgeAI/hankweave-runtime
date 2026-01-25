@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://unpkg.com/hankweave@latest/schemas/hankweave.schema.json",
+  "title": "Hankweave Runtime Configuration",
+  "description": "Schema for hankweave.json - runtime settings for the Hankweave server. See https://hankweave.dev/reference/configuration for documentation.",
+  "$ref": "#/definitions/HankweaveRuntimeConfiguration",
+  "definitions": {
+    "HankweaveRuntimeConfiguration": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "WebSocket server port"
+        },
+        "autostart": {
+          "type": "boolean",
+          "description": "If true, run immediately on client connect"
+        },
+        "withoutProxy": {
+          "type": "boolean",
+          "description": "Bypass internal LLM proxy"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "User's preferred default model. Can be a short name like 'sonnet' or 'opus', a Gemini model like 'gemini-2.0-flash', or any model supported by the configured providers. Validation happens at runtime via LLMRegistry."
+        },
+        "anthropicBaseUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Custom Anthropic API base URL (for corporate proxies)"
+        },
+        "outputDirectory": {
+          "type": "string",
+          "description": "Where to put results (relative to CWD)"
+        },
+        "executionBaseDir": {
+          "type": "string",
+          "description": "Where to create temp execution environments"
+        },
+        "logParsingInterval": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "Interval for parsing Claude log files (milliseconds)"
+        },
+        "dataHashTimeLimit": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "Time limit for hashing directories (milliseconds)"
+        },
+        "idleTimeout": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "Idle timeout for WebSocket and proxy servers in seconds (0-255). This is the maximum amount of time a connection is allowed to be idle before the server closes it. A connection is idling if there is no data sent or received."
+        },
+        "sentinel": {
+          "type": "object",
+          "properties": {
+            "enablePersistence": {
+              "type": "boolean",
+              "description": "Enable filesystem persistence for sentinel outputs"
+            },
+            "healthCheckGracePeriodMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "Grace period for sentinel health checks (milliseconds)"
+            },
+            "waitForAllHealthChecks": {
+              "type": "boolean",
+              "description": "Wait for all health checks before loading sentinels"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Sentinel system configuration"
+        },
+        "$schema": {
+          "type": "string",
+          "description": "JSON Schema URL for editor support"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

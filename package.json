@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.1.43",
+  "version": "0.1.44",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -20,13 +20,15 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
-    "shims"
+    "shims",
+    "schemas"
   ],
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
+    "generate-schemas": "bun scripts/generate-schemas.ts",
+    "build": "bun run generate-schemas && bun scripts/build.ts",
     "prepublishOnly": "bun run build",
     "typecheck": "bun run tsc --noEmit && echo 'Type check passed ✅'",
     "tc": "bun typecheck",
@@ -60,7 +62,10 @@
     "@biomejs/biome": "2.0.6",
     "@types/bun": "latest",
     "@types/lodash.merge": "^4.6.9",
-    "verdaccio": "^6.2.4"
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "verdaccio": "^6.2.4",
+    "zod-to-json-schema": "^3.25.1"
   },
   "peerDependencies": {
     "typescript": "^5.9.2"

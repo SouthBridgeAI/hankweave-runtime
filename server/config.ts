@@ -24,6 +24,42 @@ export const TIMEOUTS = {
   CODON_CLEANUP_DELAY_MS: 100, // 100ms delay for codon cleanup
 } as const;
 
+/**
+ * Common typos/mistakes mapped to correct field names.
+ * Used to provide helpful "Did you mean X?" suggestions.
+ */
+export const FIELD_TYPO_MAP: Record<string, string> = {
+  // System prompt typos
+  systemPromptFile: "appendSystemPromptFile",
+  systemPromptText: "appendSystemPromptText",
+  systemPrompt: "appendSystemPromptFile or appendSystemPromptText",
+
+  // Prompt typos
+  prompt: "promptFile or promptText",
+  prompts: "promptFile",
+  promptFiles: "promptFile",
+
+  // Checkpointing typos
+  trackedFiles: "checkpointedFiles",
+  tracking: "checkpointedFiles",
+  tracked: "checkpointedFiles",
+  watchedFiles: "checkpointedFiles",
+  fileTracking: "checkpointedFiles",
+
+  // Rig typos
+  rig: "rigSetup",
+  setup: "rigSetup",
+  preSetup: "rigSetup",
+
+  // Other typos
+  environment: "env",
+  envVars: "env",
+  outputs: "outputFiles",
+  output: "outputFiles",
+  continuation: "continuationMode",
+  mode: "continuationMode",
+};
+
 // -------------
 // Error Formatting
 // -------------
@@ -31,54 +67,88 @@ export const TIMEOUTS = {
 /**
  * Format Zod validation errors into a user-friendly message.
  * Provides context about which codon has the error and what field is affected.
+ *
+ * Handles both:
+ * - Direct codon array validation (path: [0, "field"])
+ * - Hank file validation (path: ["hank", 0, "field"])
  */
 function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
   const errors: string[] = [];
 
   for (const issue of error.issues) {
-    const path = issue.path;
+    // Clone the path to avoid mutation
+    let adjustedPath = [...issue.path];
     let errorMsg = "";
 
-    // Determine if this is a codon-level error
-    if (path[0] === undefined && issue.code === "too_small") {
-      errorMsg = `  - ${issue.message}`;
-    } else if (typeof path[0] === "number") {
-      // This is an error in a specific codon
-      const codonIndex = path[0];
-      const codonData = Array.isArray(rawConfig) ? rawConfig[codonIndex] : null;
-      const codonId = codonData?.id || `index ${codonIndex}`;
-      const codonName = codonData?.name || "unnamed";
+    // Handle paths that start with "hank" (from hankFileSchema)
+    // Convert ["hank", 0, "field"] to [0, "field"] and extract the hank array
+    let hankArray: unknown[] | null = null;
+    if (adjustedPath[0] === "hank") {
+      const hankFile = rawConfig as { hank?: unknown[] };
+      if (hankFile?.hank && Array.isArray(hankFile.hank)) {
+        hankArray = hankFile.hank;
+      }
+      adjustedPath = adjustedPath.slice(1); // Remove "hank" prefix
+    } else if (Array.isArray(rawConfig)) {
+      hankArray = rawConfig;
+    }
 
-      if (path.length === 1) {
-        // Top-level codon error
-        errorMsg = `  - Codon "${codonName}" (${codonId}): ${issue.message}`;
+    // Determine if this is a codon-level error
+    if (adjustedPath[0] === undefined && issue.code === "too_small") {
+      errorMsg = `  - ${issue.message}`;
+    } else if (typeof adjustedPath[0] === "number") {
+      // This is an error in a specific codon/loop
+      const codonIndex = adjustedPath[0];
+      const codonData = hankArray ? hankArray[codonIndex] : null;
+      const codonId = (codonData as Record<string, unknown>)?.id || `index ${codonIndex}`;
+      const codonName = (codonData as Record<string, unknown>)?.name || "unnamed";
+      const isLoop = (codonData as Record<string, unknown>)?.type === "loop";
+      const itemType = isLoop ? "Loop" : "Codon";
+
+      if (isLoop && adjustedPath[1] === "codons" && typeof adjustedPath[2] === "number") {
+        const nestedIndex = adjustedPath[2];
+        const nestedCodons = (codonData as Record<string, unknown>)?.codons;
+        const nestedData = Array.isArray(nestedCodons)
+          ? (nestedCodons[nestedIndex] as Record<string, unknown> | undefined)
+          : undefined;
+        const nestedId = nestedData?.id || `index ${nestedIndex}`;
+        const nestedName = nestedData?.name || "unnamed";
+
+        if (adjustedPath.length === 3) {
+          errorMsg = `  - ${itemType} "${codonName}" (${codonId}) -> Codon "${nestedName}" (${nestedId}): ${issue.message}`;
+        } else {
+          const fieldPath = adjustedPath.slice(3).join(".");
+          errorMsg = `  - ${itemType} "${codonName}" (${codonId}) -> Codon "${nestedName}" (${nestedId}) - ${fieldPath}: ${issue.message}`;
+        }
+      } else if (adjustedPath.length === 1) {
+        // Top-level codon/loop error
+        errorMsg = `  - ${itemType} "${codonName}" (${codonId}): ${issue.message}`;
       } else {
         // Field-specific error
-        const fieldPath = path.slice(1).join(".");
-        errorMsg = `  - Codon "${codonName}" (${codonId}) - ${fieldPath}: ${issue.message}`;
+        const fieldPath = adjustedPath.slice(1).join(".");
+        errorMsg = `  - ${itemType} "${codonName}" (${codonId}) - ${fieldPath}: ${issue.message}`;
       }
     } else if (issue.code === "unrecognized_keys") {
       // Handle unrecognized keys specially
       const keys = (issue as z.ZodIssue & { keys?: string[] }).keys?.join(", ");
-      const codonIndex = typeof path[0] === "number" ? path[0] : undefined;
-      const codonData =
-        codonIndex !== undefined && Array.isArray(rawConfig) ? rawConfig[codonIndex] : null;
-      const codonId = codonData?.id || (codonIndex !== undefined ? `index ${codonIndex}` : "");
-      const codonName = codonData?.name || "unnamed";
+      const codonIndex = typeof adjustedPath[0] === "number" ? adjustedPath[0] : undefined;
+      const codonData = codonIndex !== undefined && hankArray ? hankArray[codonIndex] : null;
+      const codonId =
+        (codonData as Record<string, unknown>)?.id ||
+        (codonIndex !== undefined ? `index ${codonIndex}` : "");
+      const codonName = (codonData as Record<string, unknown>)?.name || "unnamed";
 
       if (codonIndex !== undefined) {
-        const itemType = codonData?.type === "loop" ? "Loop" : "Codon";
-        const validFields =
-          codonData?.type === "loop"
-            ? "type, id, name, description, terminateOn, codons"
-            : "type, id, name, promptFile, promptText, appendSystemPromptFile, appendSystemPromptText, model, continuationMode, rigSetup, description, checkpointedFiles, env, outputFiles, sentinels";
+        const isLoop = (codonData as Record<string, unknown>)?.type === "loop";
+        const itemType = isLoop ? "Loop" : "Codon";
+        const validFields = isLoop ? VALID_LOOP_FIELDS.join(", ") : VALID_CODON_FIELDS.join(", ");
         errorMsg = `  - ${itemType} "${codonName}" (${codonId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: ${validFields}.`;
       } else {
         errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
       }
     } else {
       // Generic error
-      const fieldPath = path.join(".");
+      const fieldPath = issue.path.join(".");
       errorMsg = `  - ${fieldPath || "Configuration"}: ${issue.message}`;
     }
 
@@ -226,7 +296,7 @@ function modelValidationError(model: string | undefined) {
  * Base codon object schema (before refinements).
  * The type field is optional and defaults to "codon".
  */
-const codonObjectSchema = z.object({
+export const codonObjectSchema = z.object({
   type: z
     .literal("codon")
     .optional()
@@ -397,7 +467,175 @@ export const codonConfigSchema = z.union([
   loopSchema.strict(), // type: "loop"
 ]);
 
-const codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one codon required");
+// Note: codonConfigArraySchema is kept for backwards compatibility but
+// hankFileSchema now uses codonConfigArraySchemaWithDetailedErrors for better errors
+const _codonConfigArraySchema = z.array(codonConfigSchema).min(1, "At least one codon required");
+
+// -------------
+// Field Validation (Derived from Schemas)
+// -------------
+
+/**
+ * Valid fields for codon objects - derived from codonObjectSchema.
+ * This ensures the valid field list stays in sync with the schema automatically.
+ */
+export const VALID_CODON_FIELDS = Object.keys(codonObjectSchema.shape) as Array<
+  keyof typeof codonObjectSchema.shape
+>;
+
+/**
+ * Valid fields for loop objects - derived from loopSchema.
+ * This ensures the valid field list stays in sync with the schema automatically.
+ */
+export const VALID_LOOP_FIELDS = Object.keys(loopSchema.shape) as Array<
+  keyof typeof loopSchema.shape
+>;
+
+/**
+ * Helper function to check for unrecognized fields and provide typo suggestions.
+ * Returns an error message if unrecognized fields are found, or null if valid.
+ */
+function checkUnrecognizedFields(
+  item: Record<string, unknown>,
+  isLoop: boolean,
+): Array<{
+  field: string;
+  suggestion: string | null;
+  validFields: readonly string[];
+}> {
+  const validFields: readonly string[] = isLoop ? VALID_LOOP_FIELDS : VALID_CODON_FIELDS;
+  const results: Array<{
+    field: string;
+    suggestion: string | null;
+    validFields: readonly string[];
+  }> = [];
+
+  for (const key of Object.keys(item)) {
+    if (!validFields.includes(key)) {
+      const suggestion = FIELD_TYPO_MAP[key] || null;
+      results.push({ field: key, suggestion, validFields });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Schema for the hank array that validates each item individually.
+ *
+ * This provides much better error messages than z.union() by:
+ * 1. Detecting item type and using the correct schema
+ * 2. Catching unrecognized keys with typo suggestions
+ * 3. Providing codon-specific context in errors
+ *
+ * The key insight is that z.union() gives generic "Invalid input" errors when
+ * neither branch matches (e.g., when a codon has an unrecognized field).
+ * By validating each item individually, we can provide detailed errors.
+ */
+const codonConfigArraySchemaWithDetailedErrors = z
+  .array(z.unknown())
+  .min(1, "At least one codon required")
+  .superRefine((items, ctx) => {
+    for (const [index, item] of items.entries()) {
+      // Skip non-objects
+      if (!item || typeof item !== "object") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: `Item at index ${index} must be an object (codon or loop)`,
+        });
+        continue;
+      }
+
+      const itemObj = item as Record<string, unknown>;
+      const itemType = itemObj.type;
+      const isLoop = itemType === "loop";
+      // Check for unrecognized fields FIRST with typo suggestions (top-level item)
+      const unrecognizedChecks = checkUnrecognizedFields(itemObj, isLoop);
+      for (const { field, suggestion, validFields } of unrecognizedChecks) {
+        if (suggestion) {
+          // Known typo - provide helpful suggestion
+          // Don't include itemLabel here since formatZodErrors adds context
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [index, field],
+            message: `Unknown field "${field}". Did you mean "${suggestion}"?`,
+          });
+        } else {
+          // Unknown field - list valid options
+          ctx.addIssue({
+            code: z.ZodIssueCode.unrecognized_keys,
+            keys: [field],
+            path: [index],
+            message: `Unrecognized field "${field}". Valid fields are: ${validFields.join(", ")}.`,
+          });
+        }
+      }
+
+      // If this is a loop, also check nested codons for unrecognized fields
+      if (isLoop && Array.isArray(itemObj.codons)) {
+        for (const [codonIndex, codon] of itemObj.codons.entries()) {
+          if (!codon || typeof codon !== "object") {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [index, "codons", codonIndex],
+              message: `Loop codon at index ${codonIndex} must be an object`,
+            });
+            continue;
+          }
+
+          const codonObj = codon as Record<string, unknown>;
+          const nestedChecks = checkUnrecognizedFields(codonObj, false);
+          for (const { field, suggestion, validFields } of nestedChecks) {
+            if (suggestion) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, "codons", codonIndex, field],
+                message: `Unknown field "${field}". Did you mean "${suggestion}"?`,
+              });
+            } else {
+              ctx.addIssue({
+                code: z.ZodIssueCode.unrecognized_keys,
+                keys: [field],
+                path: [index, "codons", codonIndex],
+                message: `Unrecognized field "${field}". Valid fields are: ${validFields.join(", ")}.`,
+              });
+            }
+          }
+        }
+      }
+
+      // Validate against the appropriate schema
+      const schema = isLoop ? loopSchema.strict() : codonSchema;
+      const result = schema.safeParse(item);
+
+      if (!result.success) {
+        // Forward each error with the correct path
+        for (const issue of result.error.issues) {
+          // Skip unrecognized_keys only for top-level items (already handled above)
+          if (issue.code === "unrecognized_keys" && issue.path.length === 0) {
+            continue;
+          }
+
+          ctx.addIssue({
+            ...issue,
+            path: [index, ...issue.path],
+          });
+        }
+      }
+    }
+  })
+  .transform((items) => {
+    // After superRefine passes, re-validate and transform each item
+    // This is needed because superRefine doesn't transform the data
+    return items.map((item) => {
+      const itemType = (item as Record<string, unknown>)?.type;
+      if (itemType === "loop") {
+        return loopSchema.strict().parse(item);
+      }
+      return codonSchema.parse(item);
+    });
+  });
 
 // -------------
 // New Config System Schemas
@@ -418,7 +656,7 @@ export const hankMetaSchema = z.object({
 
 /**
  * Shared schema for sentinel system settings.
- * Used in both recommendations and runtime config.
+ * Used in both overrides and runtime config.
  */
 const sentinelSettingsSchema = z
   .object({
@@ -440,45 +678,109 @@ const sentinelSettingsSchema = z
   .strict();
 
 /**
- * Schema for architect's recommendations
+ * Schema for architect's overrides
  *
  * NOTE: This schema keeps model as a STRING (does NOT transform to ModelInfo).
- * This allows recommendations to be merged with other config layers during resolveSettings().
+ * This allows overrides to be merged with other config layers during resolveSettings().
  * The model string is validated but not transformed, maintaining flexibility for config merging.
  */
-export const hankRecommendationsSchema = z
+export const hankOverridesSchema = z
   .object({
     model: z
       .string()
       .optional()
       .describe(
-        "Recommended model for this hank (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')",
+        "Override model for this hank (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')",
       ),
     dataHashTimeLimit: z
       .number()
       .int()
       .positive()
       .optional()
-      .describe("Recommended time limit for data hashing in milliseconds"),
-    sentinel: sentinelSettingsSchema.optional().describe("Recommended sentinel system settings"),
+      .describe("Override time limit for data hashing in milliseconds"),
+    sentinel: sentinelSettingsSchema.optional().describe("Override sentinel system settings"),
   })
   .strict()
   .refine(
-    (recommendations) => modelValidationRefinement(recommendations.model),
-    (recommendations) => modelValidationError(recommendations.model),
+    (overrides) => modelValidationRefinement(overrides.model),
+    (overrides) => modelValidationError(overrides.model),
   );
 
 /**
  * Schema for hank file (hank.json).
- * Must contain a hank array, with optional meta and recommendations.
+ *
+ * Must contain a hank array, with optional meta and overrides.
+ *
+ * Uses codonConfigArraySchemaWithDetailedErrors for better validation errors
+ * when codon fields have typos or unrecognized fields.
  */
 export const hankFileSchema = z.object({
   meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
-  recommendations: hankRecommendationsSchema
+  overrides: hankOverridesSchema
     .optional()
-    .describe("Architect's recommendations for optimal execution (optional)"),
-  hank: codonConfigArraySchema.describe("The immutable logic sequence (required)"),
+    .describe("Architect's overrides for optimal execution (optional)"),
+  hank: codonConfigArraySchemaWithDetailedErrors.describe(
+    "The immutable logic sequence (required)",
+  ),
 });
+
+// -------------
+// Schemas for JSON Schema Generation (authoring/input types)
+// IMPORTANT: Keep these synchronized with the runtime schemas above.
+// The test suite (json-schema.test.ts) includes parity tests to catch drift.
+// See the "Schema Strictness Reference" table in the implementation plan for strictness behavior.
+// -------------
+
+/**
+ * Authoring schema for loops - uses codonObjectSchema (no transform) instead of codonSchema.
+ * This describes what users write in JSON files.
+ *
+ * STRICTNESS: .strict() is called here directly, matching how loopSchema.strict() is called
+ * in the codonConfigSchema union (config.ts line 467). Both result in strict validation.
+ */
+export const loopAuthoringSchema = z
+  .object({
+    type: z.literal("loop").describe("Type discriminator - required for loops"),
+    id: z.string().min(1).describe("Unique identifier for this loop"),
+    name: z.string().min(1).describe("Human-readable name displayed in UI and logs"),
+    description: z.string().optional().describe("Optional description shown to users"),
+    terminateOn: loopTerminationSchema.describe("Termination condition for the loop"),
+    codons: z
+      .array(codonObjectSchema.strict())
+      .min(1)
+      .describe("Array of codons to execute in each iteration"),
+  })
+  .strict(); // Matches loopSchema.strict() in codonConfigSchema
+
+/**
+ * Authoring schema for codon config - union of codon and loop, both using input types.
+ *
+ * STRICTNESS: Mirrors codonConfigSchema (config.ts line 465-468).
+ * - codonObjectSchema.strict() matches codonSchema which has .strict() at line 394
+ * - loopAuthoringSchema already has .strict() (see above)
+ */
+export const codonConfigAuthoringSchema = z.union([
+  codonObjectSchema.strict(), // Matches codonSchema's built-in .strict()
+  loopAuthoringSchema, // Already .strict()
+]);
+
+/**
+ * Authoring schema for hank files - used for JSON Schema generation.
+ * Explicitly allows $schema for editor support.
+ *
+ * STRICTNESS: NOT strict - matches hankFileSchema (config.ts line 712) which allows
+ * unknown keys at root level. This is intentional: $schema and other unknown keys
+ * should be allowed at the root for extensibility.
+ */
+export const hankFileAuthoringSchema = z.object({
+  $schema: z.string().optional().describe("JSON Schema URL for editor support"),
+  meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
+  overrides: hankOverridesSchema.optional().describe("Architect's overrides (optional)"),
+  hank: z
+    .array(codonConfigAuthoringSchema)
+    .min(1)
+    .describe("The immutable logic sequence (required)"),
+}); // NOT .strict() - intentionally allows unknown root keys like $schema
 
 /**
  * Schema for runtime configuration (hankweave.json)
@@ -564,9 +866,9 @@ export type Loop = Omit<z.infer<typeof loopSchema>, "codons"> & {
 export type CodonConfig = Codon | Loop;
 export type HankMeta = z.infer<typeof hankMetaSchema>;
 
-// RuntimeConfig and HankRecommendations keep model as string (no transform in schemas)
+// RuntimeConfig and HankOverrides keep model as string (no transform in schemas)
 // This allows for config merging with raw string values
-export type HankRecommendations = z.infer<typeof hankRecommendationsSchema>;
+export type HankOverrides = z.infer<typeof hankOverridesSchema>;
 export type HankFile = z.infer<typeof hankFileSchema>;
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 
@@ -680,18 +982,92 @@ export const DEFAULT_CONFIG: Omit<
 // Configuration Loading
 // -------------
 
+/** Default schema URL for hank.json files (unpkg CDN for npm package) */
+export const HANK_SCHEMA_URL = "https://unpkg.com/hankweave@latest/schemas/hank.schema.json";
+
+/**
+ * Ensure a hank.json file has a $schema property for editor support.
+ * If missing, adds it and writes the file back.
+ *
+ * @param hankPath - Path to the hank.json file
+ * @returns true if $schema was added, false if it already existed
+ */
+export function ensureSchemaUrl(hankPath: string): boolean {
+  try {
+    const content = fs.readFileSync(hankPath, "utf-8");
+    const rawConfig = JSON.parse(content);
+
+    // Already has $schema - nothing to do
+    if (rawConfig.$schema) {
+      return false;
+    }
+
+    // Add $schema at the beginning of the object
+    const updatedConfig = {
+      $schema: HANK_SCHEMA_URL,
+      ...rawConfig,
+    };
+
+    // Write back with same formatting (2-space indent)
+    fs.writeFileSync(hankPath, `${JSON.stringify(updatedConfig, null, 2)}\n`);
+    return true;
+  } catch {
+    // If anything goes wrong (file not found, invalid JSON, etc.), silently skip
+    // The actual validation will catch these errors with proper messages
+    return false;
+  }
+}
+
 /**
  * Load and parse a hank file (hank.json).
- * Returns the structured file with meta, recommendations, and hank (codons array).
+ * Returns the structured file with meta, overrides, and hank (codons array).
  *
  * @param hankPath - Path to the hank.json file
  * @returns Parsed and validated hank file (with un-branded IDs from Zod)
  * @throws Error with detailed validation messages if file is invalid
  */
-export function loadHankFile(hankPath: string): z.infer<typeof hankFileSchema> {
+export function loadHankFile(options: {
+  hankPath: string;
+  modelOverride?: string;
+}): z.infer<typeof hankFileSchema> {
   try {
+    const { hankPath, modelOverride } = options;
     const content = fs.readFileSync(hankPath, "utf-8");
     const rawConfig = JSON.parse(content);
+
+    // Apply model override directly to the raw hank JSON before schema validation.
+    // This keeps the full Zod validation + model transformation pipeline intact while ensuring per-codon model strings don't block a
+    // valid global override.
+    // It avoids duplicating schemas or bypassing validation, and makes override
+    // semantics explicit: we validate the effective config that will run.
+    const applyModelOverrideRecursive = (configs: unknown): unknown => {
+      if (!Array.isArray(configs)) {
+        return configs;
+      }
+      return configs.map((config) => {
+        if (!config || typeof config !== "object") {
+          return config;
+        }
+        const configObj = config as Record<string, unknown>;
+        if (configObj.type === "loop") {
+          return {
+            ...configObj,
+            codons: applyModelOverrideRecursive(configObj.codons),
+          };
+        }
+        return {
+          ...configObj,
+          model: modelOverride,
+        };
+      });
+    };
+
+    if (modelOverride && rawConfig && typeof rawConfig === "object") {
+      const configObj = rawConfig as Record<string, unknown>;
+      if ("hank" in configObj) {
+        configObj.hank = applyModelOverrideRecursive(configObj.hank);
+      }
+    }
 
     // Validate with hankFileSchema
     const result = hankFileSchema.safeParse(rawConfig);
@@ -703,7 +1079,7 @@ export function loadHankFile(hankPath: string): z.infer<typeof hankFileSchema> {
     return result.data;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`Hank file not found: ${hankPath}`);
+      throw new Error(`Hank file not found: ${options.hankPath}`);
     }
     throw error;
   }
@@ -852,13 +1228,13 @@ export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
  * Configuration layers (in order of precedence, highest to lowest):
  * 1. CLI arguments (passed as cliArgs parameter) - highest priority
  * 2. Environment variables (HANKWEAVE_RUNTIME_*)
- * 3. Hank file recommendations (hank.json > recommendations)
+ * 3. Hank file overrides (hank.json > overrides)
  * 4. Runtime config file (hankweave.json)
  * 5. Default configuration (DEFAULT_CONFIG) - lowest priority
  *
  * @param options Configuration resolution options
  * @param options.cliArgs CLI arguments to merge (highest priority)
- * @param options.hankPath Path to hank.json file (for extracting recommendations)
+ * @param options.hankPath Path to hank.json file (for extracting overrides)
  * @param options.runtimeConfigPath Path to hankweave.json (defaults to ./hankweave.json)
  * @returns Fully resolved HankweaveConfig with all layers merged
  */
@@ -881,12 +1257,13 @@ export function resolveSettings(options?: {
     // (loadRuntimeConfig already returns {} for missing files)
   }
 
-  // Layer 3: Merge hank file recommendations (if hank path provided)
+  // Layer 3: Merge hank file overrides (if hank path provided)
   if (hankPath) {
     try {
-      const hankFile = loadHankFile(hankPath);
-      if (hankFile.recommendations) {
-        config = deepMerge(config, hankFile.recommendations);
+      const hankFile = loadHankFile({ hankPath });
+
+      if (hankFile.overrides) {
+        config = deepMerge(config, hankFile.overrides);
       }
     } catch (_error) {
       // Hank file errors should not prevent config resolution
@@ -907,17 +1284,23 @@ export function resolveSettings(options?: {
 /**
  * Load and validate codon configuration from a hank file.
  *
- * Loads the hank file (object format with {meta, recommendations, hank}),
+ * Loads the hank file (object format with {meta, overrides, hank}),
  * extracts the hank (codons array), and resolves relative file paths.
+ * Optionally applies model override to all codons.
  *
- * @param configPath - Path to the hank JSON configuration file
- * @returns Validated array of codon configurations with resolved paths
+ * @param options.configPath - Path to the hank JSON configuration file
+ * @param options.modelOverride - Optional model to override all codon models
+ * @returns Validated array of codon configurations with resolved paths (and overridden models if specified)
  * @throws Error with detailed validation messages if config is invalid
  */
-export function loadCodonSequence(configPath: string): CodonConfig[] {
+export function loadCodonSequence(options: {
+  configPath: string;
+  modelOverride?: string;
+}): CodonConfig[] {
+  const { configPath, modelOverride } = options;
   try {
-    // Load and validate hank file
-    const hankFile = loadHankFile(configPath);
+    // Load and validate hank file (apply model override before validation when provided)
+    const hankFile = loadHankFile({ hankPath: configPath, modelOverride });
     const rawCodons = hankFile.hank;
 
     // Resolve relative paths for promptFile and appendSystemPromptFile
@@ -1205,18 +1588,21 @@ export interface ValidationResult {
  * checks that are useful for pre-flight validation but not strictly
  * required for running.
  *
- * @param configPath - Path to configuration file
- * @param executionPath - Execution directory for relative path resolution
- * @param logger - Logger instance for writing self-test logs
+ * @param options.configPath - Path to configuration file
+ * @param options.executionPath - Execution directory for relative path resolution
+ * @param options.logger - Logger instance for writing self-test logs
+ * @param options.modelOverride - Optional model to override all codon models
  * @returns Validation result with statistics and warnings
  * @throws Error with detailed messages if validation fails
  */
-export async function validateHank(
-  configPath: string,
-  executionPath: string,
-  logger: Logger,
-): Promise<ValidationResult> {
-  const codons = loadCodonSequence(configPath);
+export async function validateHank(options: {
+  configPath: string;
+  executionPath: string;
+  logger: Logger;
+  modelOverride?: string;
+}): Promise<ValidationResult> {
+  const { configPath, executionPath, logger, modelOverride } = options;
+  const codons = loadCodonSequence({ configPath, modelOverride });
 
   const result: ValidationResult = {
     codons,
