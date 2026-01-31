@@ -28,13 +28,13 @@ import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js
  * Execution contexts:
  * 1. Source (development):
  *    - Current file is in server/codon-runner.ts
- *    - Shims are at shims/gemini/index.js (project root)
- *    - Need to go up one level: ../shims/gemini/index.js
+ *    - Shims are at shims/{provider}/index.js (project root)
+ *    - Need to go up one level: ../shims/{provider}/index.js
  *
  * 2. Bundled NPX package (npx @southbridgeai/hankweave):
  *    - Current file is in dist/index.js (bundled)
- *    - Shims are at dist/shims/gemini/index.js
- *    - Need to use same directory: ./shims/gemini/index.js
+ *    - Shims are at dist/shims/{provider}/index.js
+ *    - Need to use same directory: ./shims/{provider}/index.js
  *
  * 3. Compiled executable (hankweave binary):
  *    - Shims are embedded in the executable
@@ -42,19 +42,31 @@ import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js
  *    - Return path to extracted shim
  *
  * @param currentFilePath - Path to current file (from import.meta.url)
+ * @param providerId - Provider ID (e.g., "google", "openai")
  * @returns Absolute path to the shim
  * @throws Error if shims are not available
  */
-async function resolveShimPath(currentFilePath: string): Promise<string> {
+async function resolveShimPath(currentFilePath: string, providerId: string): Promise<string> {
+  // Map provider ID to shim name
+  const shimNameMap: Record<string, string> = {
+    google: "gemini",
+    openai: "codex",
+  };
+
+  const shimName = shimNameMap[providerId.toLowerCase()];
+  if (!shimName) {
+    throw new Error(`No shim available for provider: ${providerId}`);
+  }
+
   // Check if running from compiled executable
   if (isCompiledExecutable()) {
     // Extract shims if needed
-    if (needsShimExtraction("gemini")) {
+    if (needsShimExtraction(shimName as "gemini" | "codex")) {
       await extractShimFiles();
     }
 
-    // Return path to extracted gemini shim
-    return getExtractedShimPath("gemini");
+    // Return path to extracted shim
+    return getExtractedShimPath(shimName as "gemini" | "codex");
   }
 
   const currentDir = path.dirname(currentFilePath);
@@ -66,10 +78,10 @@ async function resolveShimPath(currentFilePath: string): Promise<string> {
 
   if (isRunningFromDist) {
     // Running from dist/index.js -> shims are at dist/shims/
-    return path.resolve(currentDir, "shims/gemini/index.js");
+    return path.resolve(currentDir, `shims/${shimName}/index.js`);
   }
   // Running from server/codon-runner.ts -> shims are at ../shims/
-  return path.resolve(currentDir, "../shims/gemini/index.js");
+  return path.resolve(currentDir, `../shims/${shimName}/index.js`);
 }
 
 /**
@@ -102,6 +114,7 @@ export interface CodonRunnerConfig {
   logParsingInterval?: number;
   anthropicBaseUrl?: string;
   logPath: string;
+  globalSystemPrompt?: string | null;
 }
 
 /**
@@ -122,6 +135,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private readonly processManager: ShimProcessManager | ClaudeAgentSDKManager;
   private readonly logPath: string;
   private isCleanedUp = false;
+
+  // Track successful result for post-success SDK error handling
+  // See: intermediates/31-fixing-claude-sdk-bug/bug_investigation.md
+  private successResultReceived = false;
 
   constructor(config: CodonRunnerConfig) {
     super();
@@ -145,12 +162,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    * CodonRunner supports:
    * - Anthropic models via ClaudeAgentSDKManager
    * - Google models via ShimProcessManager (gemini shim)
+   * - OpenAI models via ShimProcessManager (codex shim)
    *
    * @param model - The ModelInfo to check
    * @returns true if the model can be executed, false otherwise
    */
   static canRun(model: ModelInfo): boolean {
-    const supportedProviders = ["anthropic", "google"];
+    const supportedProviders = ["anthropic", "google", "openai"];
     return supportedProviders.includes(model.providerId.toLowerCase());
   }
 
@@ -207,7 +225,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         );
 
         const __filename = fileURLToPath(import.meta.url);
-        const shimPath = await resolveShimPath(__filename);
+        const shimPath = await resolveShimPath(__filename, modelInfo.providerId);
 
         const manager = new ShimProcessManager(
           executionPath,
@@ -216,7 +234,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           anthropicBaseUrl,
         );
 
-        result = await manager.runSelfTest(getRuntimeCommand(shimPath));
+        result = await manager.runSelfTest(getRuntimeCommand(shimPath), modelInfo.providerId);
       }
 
       // Log results
@@ -259,7 +277,14 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       onSystemMessage: (msg) => this.emit("systemMessage", msg),
       onAssistantMessage: (msg) => this.emit("assistantMessage", msg),
       onUserMessage: (msg) => this.emit("userMessage", msg),
-      onResultMessage: (msg) => this.emit("resultMessage", msg),
+      onResultMessage: (msg) => {
+        // Track successful completion for post-success SDK error handling
+        // Only set on actual success, not on error results
+        if (msg.subtype === "success") {
+          this.successResultReceived = true;
+        }
+        this.emit("resultMessage", msg);
+      },
     });
   }
 
@@ -286,6 +311,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
+        this.config.globalSystemPrompt ?? null,
       );
     } else {
       // Use Shim for non-Anthropic models (e.g., Gemini)
@@ -299,6 +325,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
+        this.config.globalSystemPrompt ?? null,
       );
     }
 
@@ -308,7 +335,25 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     });
 
     processManager.on("error", (error: Error) => {
-      this.emit("error", error);
+      // Handle known SDK bug: error emitted after successful completion
+      // The SDK sometimes emits "only prompt commands are supported in streaming mode"
+      // after already reporting success. In this case, treat as successful completion.
+      // See: intermediates/31-fixing-claude-sdk-bug/bug_investigation.md
+      if (this.successResultReceived) {
+        this.config.logger.log(
+          `[CodonRunner] [POST-SUCCESS-ERROR] Post-success SDK error suppressed: ${error.message}`,
+          "error",
+        );
+        this.config.logger.log(
+          `[CodonRunner] Treating as successful exit (SDK cleanup error after conversation completed)`,
+          "info",
+        );
+        // Transform error into normal exit - conversation completed successfully
+        this.emit("exit", 0, false);
+      } else {
+        // No success result yet - this is a real error, forward it
+        this.emit("error", error);
+      }
     });
 
     processManager.on("stdout", (data: string) => {
@@ -340,7 +385,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     } else {
       // ShimProcessManager needs command array
       const __filename = fileURLToPath(import.meta.url);
-      const shimPath = await resolveShimPath(__filename);
+      const shimPath = await resolveShimPath(__filename, this.config.codon.model.providerId);
 
       await this.processManager.spawn(
         getRuntimeCommand(shimPath),

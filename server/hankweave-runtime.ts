@@ -196,11 +196,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     } as HankweaveConfig;
 
     // Update logger to use execution path
-    this.logger = new Logger(path.join(this.config.executionPath, this.config.serverLogFile));
+    // Check if serverLogFile is already absolute to avoid path duplication on Windows
+    const serverLogPath = path.isAbsolute(this.config.serverLogFile)
+      ? this.config.serverLogFile
+      : path.join(this.config.executionPath, this.config.serverLogFile);
+    this.logger = new Logger(serverLogPath);
     this.serverStartTime = new Date();
 
     // Make lockFile path absolute (relative to execution path)
-    this.config.lockFile = path.join(this.config.executionPath, this.config.lockFile);
+    // Check if lockFile is already absolute to avoid path duplication on Windows
+    this.config.lockFile = path.isAbsolute(this.config.lockFile)
+      ? this.config.lockFile
+      : path.join(this.config.executionPath, this.config.lockFile);
 
     // Initialize state manager with execution path
     const hankweaveDir = path.join(this.config.executionPath, ".hankweave");
@@ -381,6 +388,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(
       `Starting Hankweave Runtime v${this.config.version} in ${this.config.executionPath}`,
     );
+    this.logger.log(`[DEBUG] Platform: ${process.platform}, Arch: ${process.arch}`);
+    this.logger.log(`[DEBUG] Node version: ${process.version}`);
 
     // Start proxy server first (if not disabled)
     if (!this.config.withoutProxy) {
@@ -393,22 +402,32 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         this.config.anthropicBaseUrl || "https://api.anthropic.com",
         this.logger,
       );
+      this.logger.log(`[DEBUG] About to start proxy runner...`);
       this.proxyRunner.start();
+      this.logger.log(`[DEBUG] Proxy runner started`);
     } else {
       this.logger.log("Proxy server disabled");
     }
 
     // Initialize checkpoint system (checks for existing .hankweave)
+    this.logger.log(`[DEBUG] Initializing checkpoints...`);
     await this.initializeCheckpoints();
+    this.logger.log(`[DEBUG] Checkpoints initialized`);
 
     // Initialize state manager
+    this.logger.log(`[DEBUG] Initializing state manager...`);
     await this.stateManager.initialize();
+    this.logger.log(`[DEBUG] State manager initialized`);
 
     // Initialize event journal
+    this.logger.log(`[DEBUG] Initializing event journal...`);
     await this.eventJournal.initialize();
+    this.logger.log(`[DEBUG] Event journal initialized`);
 
     // Initialize SentinelManager (creates .hankweave/sentinels directory)
+    this.logger.log(`[DEBUG] Initializing sentinel manager...`);
     await this.sentinelManager.initialize();
+    this.logger.log(`[DEBUG] Sentinel manager initialized`);
 
     // Codon 2: Set up event callback for sentinel events
     this.sentinelManager.setEventCallback((sentinelEvent) => {
@@ -566,24 +585,34 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Start WebSocket server
-    this.server = serve<ClientData>({
-      port: this.config.port,
-      websocket: {
-        upgrade: () => {
-          // Initialize connection data before WebSocket opens
-          const now = new Date();
-          return {
-            id: generateId(),
-            connectionTime: now,
-            lastActivity: now,
-            handshakeComplete: false,
-          };
+    this.logger.log(`[DEBUG] About to start WebSocket server on port ${this.config.port}...`);
+    try {
+      this.server = serve<ClientData>({
+        port: this.config.port,
+        websocket: {
+          upgrade: () => {
+            // Initialize connection data before WebSocket opens
+            const now = new Date();
+            return {
+              id: generateId(),
+              connectionTime: now,
+              lastActivity: now,
+              handshakeComplete: false,
+            };
+          },
+          open: (ws) => this.handleConnection(ws),
+          message: (ws, message) => this.handleMessage(ws, message),
+          close: (ws) => this.handleClose(ws),
         },
-        open: (ws) => this.handleConnection(ws),
-        message: (ws, message) => this.handleMessage(ws, message),
-        close: (ws) => this.handleClose(ws),
-      },
-    });
+      });
+      this.logger.log(`[DEBUG] serve() call completed successfully`);
+    } catch (error) {
+      this.logger.log(`[ERROR] Failed to start WebSocket server: ${error}`, "error");
+      if (error instanceof Error && error.stack) {
+        this.logger.log(`Stack: ${error.stack}`, "error");
+      }
+      throw error;
+    }
 
     this.logger.log(`WebSocket server listening on port ${this.config.port}`);
 
@@ -1250,6 +1279,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       runId: string;
       startTime: string;
       lastHeartbeat: string;
+      port?: number; // Optional for backward compatibility with old lock files
     }
 
     const lockData: LockFile = {
@@ -1257,6 +1287,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       runId,
       startTime: new Date().toISOString(),
       lastHeartbeat: new Date().toISOString(),
+      port: this.config.port ?? 7777, // NOTE: Use ?? not || (port 0 is valid but falsy)
     };
 
     const lockDir = path.dirname(this.config.lockFile);
@@ -1406,11 +1437,49 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Run rig setup operations if configured and we don't ask for explicit skip
     // and there is no existing rig setup checkpoint for this codon
-    if (!skipPreCommands && !rigSetupCheckpoint && codon.rigSetup) {
+    if (!skipPreCommands && !rigSetupCheckpoint && codon.rigSetup && codon.rigSetup.length > 0) {
+      const rigSetupCount = codon.rigSetup.length;
+      const rigSetupStartTime = Date.now();
+
+      // CRITICAL: Initialize counters BEFORE the loop for completion event
+      let rigSetupCompletedCount = 0;
+      let rigSetupFailedCount = 0;
+
       this.logger.log(`Running rig setup for codon: ${codon.name}`);
+
+      // Emit rig setup started info event
+      // MESSAGE FORMAT CONTRACT: TUI uses string matching on "Rig setup started"
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Rig setup started for codon '${codon.name}': ${rigSetupCount} operation${rigSetupCount !== 1 ? "s" : ""}`,
+        },
+      } as InfoEvent);
+
       let lastCopiedPath: string | null = null;
 
       for (const [index, item] of codon.rigSetup.entries()) {
+        const operationNum = index + 1;
+        const operationType = item.type;
+        const operationDetails =
+          item.type === "copy" && item.copy
+            ? `${item.copy.from} → ${item.copy.to}`
+            : item.type === "command" && item.command
+              ? `'${item.command.run}'`
+              : "unknown";
+
+        // Emit operation start info event
+        // MESSAGE FORMAT CONTRACT: TUI uses string matching on "Rig operation"
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "info",
+          data: {
+            message: `Rig operation ${operationNum}/${rigSetupCount}: ${operationType} ${operationDetails}`,
+          },
+        } as InfoEvent);
         try {
           if (item.type === "copy" && item.copy) {
             const targetPath = path.join(this.config.executionPath, item.copy.to);
@@ -1439,6 +1508,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
                 : this.config.executionPath;
             this.logger.log(`Ran command in ${resolvedWorkingDir}: ${item.command.run}`);
           }
+          // Operation succeeded
+          rigSetupCompletedCount++;
         } catch (error) {
           const errorObj = toError(error);
           const errorMessage = errorObj.message;
@@ -1458,11 +1529,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             this.logger.log(`[DEBUG] Rig setup error stderr: ${stderr}`, "error");
           }
 
-          // Check if this operation allows failure
-          if (item.allowFailure) {
+          // Check if this operation allows failure (either per-operation or global flag)
+          // NOTE: Use nullish coalescing since ignoreRigFailures is optional in the type
+          const ignoreFailure = item.allowFailure || (this.config.ignoreRigFailures ?? false);
+          if (ignoreFailure) {
+            const reason = item.allowFailure ? "allowFailure=true" : "--ignore-rig-failures";
             // Log warning but continue execution
             this.logger.log(
-              `Rig setup operation failed (allowFailure=true) at item ${
+              `Rig setup operation failed (${reason}) at item ${
                 index + 1
               } (${JSON.stringify(item)}): ${errorMessage}`,
               "info",
@@ -1474,13 +1548,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
               timestamp: new Date().toISOString(),
               type: "error",
               data: {
-                message: `Rig setup operation failed but continuing (allowFailure=true): ${errorMessage}`,
+                message: `Rig setup operation failed but continuing (${reason}): ${errorMessage}`,
                 context: `Codon ${codon.id} - ${item.type} operation (item ${index + 1})`,
                 codon: codon.id,
                 fatal: false,
                 severity: ErrorSeverity.OPERATION,
               },
             } as ErrorEvent);
+
+            // Operation failed but allowed
+            rigSetupFailedCount++;
 
             // Continue to next rig setup item
             continue;
@@ -1541,6 +1618,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           return;
         }
       }
+
+      // Emit rig setup completed info event
+      // MESSAGE FORMAT CONTRACT: TUI uses string matching on "Rig setup completed" and "failed"
+      const rigSetupDuration = Date.now() - rigSetupStartTime;
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Rig setup completed for codon '${codon.name}' (${rigSetupDuration}ms, ${rigSetupCompletedCount} succeeded${rigSetupFailedCount > 0 ? `, ${rigSetupFailedCount} failed` : ""})`,
+        },
+      } as InfoEvent);
     }
 
     // Transition to starting after preparing (regardless of rig setup)
@@ -1846,6 +1935,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         logParsingInterval: this.config.logParsingInterval,
         anthropicBaseUrl: this.proxyRunner?.proxyUrl,
         logPath, // Pass the run-specific log path
+        globalSystemPrompt: this.config.globalSystemPrompt,
       });
       this.codonRunners.set(codonId, runner);
 
@@ -2059,7 +2149,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       };
 
       // Log the session ID update
-      this.logger.log(`Claude started codon ${codonId} with session ID: ${msg.session_id}`);
+      this.logger.log(`Started codon ${codonId} with session ID: ${msg.session_id}`);
 
       // Send info event with codon ID
       this.emit("event", {
@@ -2067,7 +2157,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         timestamp: new Date().toISOString(),
         type: "info",
         data: {
-          message: `Claude started codon ${codonId} with session ID: ${msg.session_id}`,
+          message: `Started codon ${codonId} with session ID: ${msg.session_id}`,
         },
       } as InfoEvent);
     } else if (msg.subtype === "init") {
@@ -2543,7 +2633,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }, hasRunner=${hasRunner}`,
       "info",
     );
-    this.logger.log(`[handleCodonComplete] Call stack:\n${new Error().stack}`, "debug");
 
     // Get the current codon from the in-memory state first
     if (!this.currentCodon) {

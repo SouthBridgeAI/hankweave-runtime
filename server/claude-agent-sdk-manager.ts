@@ -9,6 +9,7 @@ import {
   getExtractedCliPath,
   needsExtraction,
 } from "./claude-runtime-extractor.js";
+import { PromptBuilder } from "./prompt-builder.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -75,16 +76,22 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
   private killed = false;
   private sessionId: string | undefined;
   private syntheticPid: number | undefined;
-  /** Frontmatter metadata from the prompt file (if any) */
-  public promptFrontmatter?: import("./prompt-frontmatter.js").PromptFrontmatter;
+  private promptBuilder: PromptBuilder;
 
   constructor(
     private executionPath: string,
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
+    private globalSystemPrompt?: string | null,
   ) {
     super();
+    this.promptBuilder = new PromptBuilder(executionPath, logger, globalSystemPrompt);
+  }
+
+  /** Frontmatter metadata from the prompt file (if any) */
+  get promptFrontmatter(): import("./prompt-frontmatter.js").PromptFrontmatter | undefined {
+    return this.promptBuilder.getLastFrontmatter();
   }
 
   /**
@@ -170,13 +177,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     const options = this.buildSDKOptions(codon, previousSessionId);
 
     // Build prompt content (strips frontmatter if present)
-    const { content: promptContent, frontmatter } = this.buildPrompt(codon);
-
-    // Store frontmatter for emission with codon.started event
-    if (frontmatter) {
-      this.promptFrontmatter = frontmatter;
-      this.logger.log(`Prompt frontmatter: ${JSON.stringify(frontmatter)}`);
-    }
+    const { content: promptContent } = this.promptBuilder.buildPromptContent(codon);
 
     this.logger.log(`Starting Claude Agent SDK for codon ${codon.id}`);
     this.logger.log(`Working directory: ${this.executionPath}`);
@@ -240,7 +241,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     }
 
     // Handle system prompt if provided
-    const systemPrompt = this.buildSystemPrompt(codon);
+    const systemPrompt = this.promptBuilder.buildSystemPrompt(codon);
     if (systemPrompt) {
       options.systemPrompt = {
         type: "preset",
@@ -302,76 +303,6 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     }
 
     return options;
-  }
-
-  /**
-   * Build system prompt from file or text.
-   */
-  private buildSystemPrompt(codon: Codon): string | null {
-    let content: string | null = null;
-
-    if (codon.appendSystemPromptFile) {
-      const files = Array.isArray(codon.appendSystemPromptFile)
-        ? codon.appendSystemPromptFile
-        : [codon.appendSystemPromptFile];
-
-      const parts: string[] = [];
-      for (const file of files) {
-        parts.push(fs.readFileSync(file, "utf-8"));
-      }
-      content = parts.join("\n\n");
-    } else if (codon.appendSystemPromptText) {
-      content = codon.appendSystemPromptText;
-    }
-
-    if (content) {
-      // Replace template variables
-      return content
-        .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
-        .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-        .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
-    }
-
-    return null;
-  }
-
-  /**
-   * Build prompt content from file or text.
-   * Parses and strips frontmatter from markdown files.
-   */
-  private buildPrompt(codon: Codon): {
-    content: string;
-    frontmatter?: import("./prompt-frontmatter.js").PromptFrontmatter;
-  } {
-    const { parsePromptFrontmatter } = require("./prompt-frontmatter.js");
-    let promptContent: string;
-    let firstFileFrontmatter: import("./prompt-frontmatter.js").PromptFrontmatter | undefined;
-
-    if (codon.promptFile) {
-      const files = Array.isArray(codon.promptFile) ? codon.promptFile : [codon.promptFile];
-      const parts: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const rawContent = fs.readFileSync(files[i], "utf-8");
-        const parsed = parsePromptFrontmatter(rawContent);
-        parts.push(parsed.content);
-        // Only use frontmatter from first file
-        if (i === 0 && parsed.hasFrontmatter) {
-          firstFileFrontmatter = parsed.frontmatter;
-        }
-      }
-      promptContent = parts.join("\n\n");
-    } else if (codon.promptText) {
-      promptContent = codon.promptText;
-    } else {
-      throw new Error("No prompt file or text provided");
-    }
-
-    const processedContent = promptContent
-      .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
-      .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-      .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
-
-    return { content: processedContent, frontmatter: firstFileFrontmatter };
   }
 
   /**

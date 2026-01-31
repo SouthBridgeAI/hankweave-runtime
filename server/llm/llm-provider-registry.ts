@@ -144,6 +144,110 @@ export class LlmProviderRegistry {
       // Combine models from both sources
       const allProviders = [...validatedData.providers, ...customModels.providers];
 
+      // Manually inject GPT 5.2 models (released December 2025)
+      const gpt52Models: ModelInfo[] = [
+        {
+          providerId: "openai",
+          modelId: "gpt-5.2-high",
+          name: "GPT-5.2 High",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 1.75,
+            output: 14,
+            cache_read: 0.175,
+          },
+          limit: {
+            context: 128000,
+            output: 16384,
+          },
+          modalities: {
+            input: ["text", "image"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2025-12-11",
+          last_updated: "2025-12-11",
+        },
+        {
+          providerId: "openai",
+          modelId: "gpt-5.2-xhigh",
+          name: "GPT-5.2 XHigh",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 3.5,
+            output: 28,
+            cache_read: 0.35,
+          },
+          limit: {
+            context: 128000,
+            output: 16384,
+          },
+          modalities: {
+            input: ["text", "image"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2025-12-12",
+          last_updated: "2025-12-12",
+        },
+        {
+          providerId: "openai",
+          modelId: "gpt-5.2-codex-high",
+          name: "GPT-5.2 Codex High",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 1.75,
+            output: 14,
+            cache_read: 0.175,
+          },
+          limit: {
+            context: 128000,
+            output: 16384,
+          },
+          modalities: {
+            input: ["text", "image"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2025-12-09",
+          last_updated: "2025-12-09",
+        },
+        {
+          providerId: "openai",
+          modelId: "gpt-5.2-codex-xhigh",
+          name: "GPT-5.2 Codex XHigh",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 3.5,
+            output: 28,
+            cache_read: 0.35,
+          },
+          limit: {
+            context: 128000,
+            output: 16384,
+          },
+          modalities: {
+            input: ["text", "image"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2025-12-10",
+          last_updated: "2025-12-10",
+        },
+      ];
+
       // Process each provider's models
       // Note: We load all models regardless of blocklist, and check blocklist during resolution
       for (const provider of allProviders) {
@@ -162,6 +266,14 @@ export class LlmProviderRegistry {
             this.models.set(model.modelId.toLowerCase(), model); // Keep short ID for AI SDK compatibility
           }
         }
+      }
+
+      // Register GPT 5.2 models
+      for (const model of gpt52Models) {
+        const fullModelId = `${model.providerId}/${model.modelId}`;
+        this.uniqueModels.add(fullModelId.toLowerCase());
+        this.models.set(fullModelId.toLowerCase(), model);
+        this.models.set(model.modelId.toLowerCase(), model);
       }
 
       this.logger?.log(`Loaded ${this.uniqueModels.size} unique models from data files`, "info");
@@ -394,6 +506,8 @@ export class LlmProviderRegistry {
   /**
    * Find models matching the query using fuzzy matching
    * Returns the most recent model above the similarity threshold
+   *
+   * @internal Match object: { model: ModelInfo, score: number, hasExactWordMatch: boolean }
    */
   private fuzzyMatchModels(
     modelName: string,
@@ -401,7 +515,7 @@ export class LlmProviderRegistry {
     ignoreBlockList: boolean,
     providerId?: string,
   ): ModelInfo | null {
-    const matches: Array<{ model: ModelInfo; score: number }> = [];
+    const matches: Array<{ model: ModelInfo; score: number; hasExactWordMatch: boolean }> = [];
     const preferredProvider = providerId || this.getPreferredProvider(modelName);
 
     // Search through all unique models
@@ -447,6 +561,8 @@ export class LlmProviderRegistry {
       // Additional boost for word-level matches (helps with typos and version numbers)
       // If search has multiple words, boost models where all words closely match
       const searchWords = lowerModelName.split(/[-_\s]+/).filter((w) => w.length >= 3);
+      let hasExactWordMatch = false;
+
       if (searchWords.length >= 2) {
         const modelIdWords = lowerModelId.split(/[-_\s]+/);
         const nameWords = lowerName.split(/[-_\s]+/);
@@ -458,7 +574,7 @@ export class LlmProviderRegistry {
             return (
               mw === sw ||
               mw.includes(sw) ||
-              sw.includes(mw) ||
+              // Removed sw.includes(mw) to prevent "xhigh" from matching "high"
               this.calculateStringSimilarity(sw, mw) >= 0.75
             );
           }),
@@ -469,11 +585,30 @@ export class LlmProviderRegistry {
             return (
               mw === sw ||
               mw.includes(sw) ||
-              sw.includes(mw) ||
+              // Removed sw.includes(mw) to prevent "xhigh" from matching "high"
               this.calculateStringSimilarity(sw, mw) >= 0.75
             );
           }),
         );
+
+        // Track whether ALL words are exact matches (not just fuzzy)
+        if (allWordsMatchId) {
+          const hasExactWordMatchId = searchWords.every((sw) =>
+            modelIdWords.some((mw) => mw === sw),
+          );
+          if (hasExactWordMatchId) {
+            hasExactWordMatch = true;
+          }
+        }
+
+        if (allWordsMatchName) {
+          const hasExactWordMatchName = searchWords.every((sw) =>
+            nameWords.some((mw) => mw === sw),
+          );
+          if (hasExactWordMatchName) {
+            hasExactWordMatch = true;
+          }
+        }
 
         if (allWordsMatchId) {
           modelIdScore = Math.min(1.0, modelIdScore + 0.15); // Boost word-level matches
@@ -492,7 +627,7 @@ export class LlmProviderRegistry {
       }
 
       if (score >= threshold) {
-        matches.push({ model, score });
+        matches.push({ model, score, hasExactWordMatch });
       }
     }
 
@@ -513,6 +648,11 @@ export class LlmProviderRegistry {
         if (aIsPreferred !== bIsPreferred) {
           return aIsPreferred ? -1 : 1;
         }
+      }
+
+      // When scores are close, prefer exact word matches over fuzzy matches
+      if (a.hasExactWordMatch !== b.hasExactWordMatch) {
+        return a.hasExactWordMatch ? -1 : 1;
       }
 
       // Inline date comparison - Pad YYYY-MM to YYYY-MM-01 for comparison

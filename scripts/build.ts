@@ -8,7 +8,7 @@
  * 3. Creates a standalone executable that works with node/bun/pnpm
  */
 
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -41,6 +41,7 @@ async function build() {
     external: [
       // Keep AI SDK packages external - they have their own dependencies
       "@anthropic-ai/claude-agent-sdk",
+      "@openai/codex-sdk",
       "ai",
       "@ai-sdk/anthropic",
       "@ai-sdk/google",
@@ -72,8 +73,12 @@ async function build() {
   const withShebang = `#!/usr/bin/env node\n${content}`;
   await Bun.write(outfile, withShebang);
 
-  // Make executable
-  await Bun.$`chmod +x ${outfile}`;
+  // Make executable (Unix-only, silently skip on Windows)
+  try {
+    await Bun.$`chmod +x ${outfile}`;
+  } catch {
+    // chmod fails on Windows, which is expected
+  }
 
   // Copy shims directory to dist
   console.log("📋 Copying shims directory...");
@@ -81,7 +86,7 @@ async function build() {
   const shimsTarget = join(distDir, "shims");
 
   if (existsSync(shimsSource)) {
-    await Bun.$`cp -r ${shimsSource} ${shimsTarget}`;
+    await cp(shimsSource, shimsTarget, { recursive: true });
     console.log(`✅ Copied shims to ${shimsTarget}`);
   } else {
     console.warn("⚠️  Warning: shims directory not found at", shimsSource);

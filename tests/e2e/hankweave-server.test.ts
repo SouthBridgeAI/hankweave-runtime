@@ -83,7 +83,9 @@ describe("hankweave server", () => {
 
       // Wait for the run to complete successfully after rollback
       // This will throw if the run doesn't complete successfully
-      await secondServer.waitForRunToComplete();
+      // Use a longer timeout since Codon 3 still needs to complete after all the
+      // stop/restart overhead (Codons 1-2 + restart take ~80s, leaving time for Codon 3)
+      await secondServer.waitForRunToComplete(150_000);
     } finally {
       // Clean up the second server if it's running
       if (
@@ -99,7 +101,7 @@ describe("hankweave server", () => {
         await hankweave.stop();
       }
     }
-  }, 180_000);
+  }, 300_000); // 5 minute timeout to accommodate LLM call variability
 
   it("recovers from server KILL and resumes from where it stopped", async () => {
     // testing a case of "ungracious" interruption (crash/SIGKILL)
@@ -155,7 +157,9 @@ describe("hankweave server", () => {
 
       // Wait for the run to complete successfully after rollback
       // This will throw if the run doesn't complete successfully
-      await hankweave.waitForRunToComplete();
+      // Use a longer timeout since Codon 3 still needs to complete after all the
+      // kill/restart overhead (Codons 1-2 + restart take ~80s, leaving time for Codon 3)
+      await hankweave.waitForRunToComplete(150_000);
     } finally {
       // Clean up the second server if it's running
       if (
@@ -166,7 +170,7 @@ describe("hankweave server", () => {
         await hankweave.stop();
       }
     }
-  }, 180_000);
+  }, 300_000); // 5 minute timeout to accommodate LLM call variability
 
   it("allows a second client to connect and stream event history", async () => {
     // Launch hankweave with ping event generation

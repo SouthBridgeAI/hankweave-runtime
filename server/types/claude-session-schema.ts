@@ -234,7 +234,8 @@ export const userMessageSchema = z.object({
 export const resultMessageSchema = z
   .object({
     type: z.literal("result"),
-    subtype: z.enum(["success", "error"]),
+    // Note: SDK can send "error_during_execution" for internal SDK errors after completion
+    subtype: z.enum(["success", "error", "error_during_execution"]),
 
     // Whether the session ended in error
     is_error: z.boolean(),

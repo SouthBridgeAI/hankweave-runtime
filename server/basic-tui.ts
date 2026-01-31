@@ -62,6 +62,11 @@ const SYMBOLS = {
  *
  * Usage: Run server with --basic flag
  * Controls: [n] next codon, [s] skip current, [q] quit
+ *
+ * Attach mode:
+ * - Connect to already-running server by port
+ * - Read-only: commands are disabled
+ * - [q] disconnects without stopping server
  */
 export class BasicTUI {
   private ws: WebSocket | null = null;
@@ -69,19 +74,39 @@ export class BasicTUI {
   private handshakeComplete = false;
   private checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
   private waitingForCheckpoints = false;
+  private attachMode: boolean;
+  private port: number;
+  private server: HankweaveRuntime | null;
 
-  constructor(private server: HankweaveRuntime) {
-    // Print version at the very start
-    const version = this.server.config?.version || "unknown";
-    console.log(`${COLORS.bold}${COLORS.cyan}Hankweave v${version}${COLORS.reset}\n`);
+  /**
+   * Create TUI.
+   * @param serverOrPort - HankweaveRuntime instance OR { port: number } for attach mode
+   */
+  constructor(serverOrPort: HankweaveRuntime | { port: number }) {
+    if ("port" in serverOrPort) {
+      // Attach mode - connect to existing server by port
+      this.attachMode = true;
+      this.port = serverOrPort.port;
+      this.server = null;
+      console.log(`${COLORS.bold}${COLORS.cyan}Hankweave TUI - Attach Mode${COLORS.reset}`);
+      console.log(
+        `${COLORS.yellow}${SYMBOLS.arrow} READ-ONLY: Commands are disabled${COLORS.reset}\n`,
+      );
+    } else {
+      // Normal mode - connect to provided runtime
+      this.attachMode = false;
+      this.server = serverOrPort;
+      this.port = this.server.config?.port || 7777;
+      const version = this.server.config?.version || "unknown";
+      console.log(`${COLORS.bold}${COLORS.cyan}Hankweave v${version}${COLORS.reset}\n`);
+    }
 
     this.connectToServer();
     this.setupKeyboardInput();
   }
 
   private connectToServer(): void {
-    const port = this.server.config?.port || 7777;
-    const url = `ws://localhost:${port}`;
+    const url = `ws://localhost:${this.port}`;
 
     console.log(`${COLORS.dim}${SYMBOLS.pipe} Connecting to ${url}...${COLORS.reset}`);
 
@@ -428,7 +453,21 @@ export class BasicTUI {
       }
 
       case "info": {
-        console.log(`\n${timestamp} ${COLORS.blue}Info${COLORS.reset}: ${event.data.message}`);
+        const message = event.data.message;
+        // Highlight rig setup events with specific styling
+        // MESSAGE FORMAT CONTRACT: Uses string matching on specific phrases
+        if (message.includes("Rig setup started")) {
+          console.log(`\n${timestamp} ${COLORS.yellow}${SYMBOLS.arrow} ${message}${COLORS.reset}`);
+        } else if (message.includes("Rig setup completed")) {
+          const isSuccess = !message.includes("failed");
+          const color = isSuccess ? COLORS.green : COLORS.yellow;
+          const symbol = isSuccess ? SYMBOLS.check : SYMBOLS.dot;
+          console.log(`${timestamp} ${color}${symbol} ${message}${COLORS.reset}`);
+        } else if (message.includes("Rig operation")) {
+          console.log(`${timestamp} ${COLORS.dim}  ${SYMBOLS.pipe} ${message}${COLORS.reset}`);
+        } else {
+          console.log(`\n${timestamp} ${COLORS.blue}Info${COLORS.reset}: ${message}`);
+        }
         break;
       }
 
@@ -702,8 +741,15 @@ export class BasicTUI {
 
     stdin.on("data", async (key: string) => {
       try {
+        // Handle commands - some are blocked in attach mode
         switch (key) {
           case "n":
+            if (this.attachMode) {
+              console.log(
+                `\n${COLORS.yellow}${SYMBOLS.cross} Read-only mode: command 'n' not available${COLORS.reset}`,
+              );
+              break;
+            }
             console.log(
               `\n${COLORS.cyan}${SYMBOLS.arrow} Advancing to next codon...${COLORS.reset}`,
             );
@@ -714,6 +760,12 @@ export class BasicTUI {
             break;
 
           case "s":
+            if (this.attachMode) {
+              console.log(
+                `\n${COLORS.yellow}${SYMBOLS.cross} Read-only mode: command 's' not available${COLORS.reset}`,
+              );
+              break;
+            }
             console.log(
               `\n${COLORS.yellow}${SYMBOLS.arrow} Skipping current codon...${COLORS.reset}`,
             );
@@ -724,6 +776,12 @@ export class BasicTUI {
             break;
 
           case "f":
+            if (this.attachMode) {
+              console.log(
+                `\n${COLORS.yellow}${SYMBOLS.cross} Read-only mode: command 'f' not available${COLORS.reset}`,
+              );
+              break;
+            }
             console.log(
               `\n${COLORS.red}${SYMBOLS.arrow} Force stopping current codon...${COLORS.reset}`,
             );
@@ -735,6 +793,7 @@ export class BasicTUI {
             break;
 
           case "l":
+            // Read-only safe - just lists checkpoints
             console.log(
               `\n${COLORS.magenta}${SYMBOLS.arrow} Requesting checkpoint list...${COLORS.reset}`,
             );
@@ -745,16 +804,32 @@ export class BasicTUI {
             break;
 
           case "r":
+            if (this.attachMode) {
+              console.log(
+                `\n${COLORS.yellow}${SYMBOLS.cross} Read-only mode: command 'r' not available${COLORS.reset}`,
+              );
+              break;
+            }
             await this.showRollbackMenu();
             break;
 
           case "q":
           case "\u0003": // Ctrl+C
-            console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Shutting down...${COLORS.reset}`);
-            if (this.ws) {
-              this.ws.close();
+            if (this.attachMode) {
+              // Attach mode: just disconnect without stopping server
+              console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Disconnecting...${COLORS.reset}`);
+              if (this.ws) {
+                this.ws.close();
+              }
+              process.exit(0);
+            } else {
+              // Normal mode: shut down server
+              console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Shutting down...${COLORS.reset}`);
+              if (this.ws) {
+                this.ws.close();
+              }
+              this.server?.shutdown("user request");
             }
-            this.server.shutdown("user request");
             break;
         }
       } catch (error) {

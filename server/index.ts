@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+console.log("[MODULE] Loading server/index.ts...");
+
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -20,6 +22,7 @@ import {
   resolveRemoteHank,
 } from "./remote-hank.js";
 import { getMetadata, Logger } from "./utils.js";
+import { renderHankStructure } from "./validate-ascii.js";
 import { runValidation } from "./validate-command.js";
 
 // -------------
@@ -94,7 +97,7 @@ async function main() {
   console.log(`\nHankweave v${getMetadata().version}\n`);
 
   // Extract values with defaults
-  const configPath = cliArgs.hankPath || cliArgs.configPath || "hank.json";
+  // Note: configPath is resolved later with directory-aware logic
   const dataSourcePath = cliArgs.dataPath || cliArgs.dataFlag;
   const executionPath = cliArgs.executionPath;
   const inlineInput = cliArgs.inputText;
@@ -147,6 +150,8 @@ Options:
   --cleanup                 Clean up execution directories
   -y                        Skip confirmation prompts
   --no-autostart            Don't automatically start codons
+  --ignore-rig-failures     Ignore rig setup failures (continue as if allowFailure=true for all)
+  --attach                  Connect TUI to an already-running server (read-only mode)
   --model <model>           Override model for all codons (ignores per-codon settings)
   --anthropic-base-url <url> Custom Anthropic API base URL
   --proxy                   Enable the LLM proxy server (disabled by default)
@@ -212,6 +217,38 @@ Examples:
     }
   }
 
+  // Handle attach mode - connect to existing server
+  if (cliArgs.attach) {
+    let port: number;
+
+    if (cliArgs.port !== undefined) {
+      // Explicit --port takes precedence
+      port = cliArgs.port;
+    } else if (cliArgs.executionPath) {
+      // Try to read port from lock file
+      const lockPath = path.join(cliArgs.executionPath, ".hankweave", "runtime.lock");
+      try {
+        const lockContent = await fs.promises.readFile(lockPath, "utf-8");
+        const lockData = JSON.parse(lockContent);
+        // NOTE: Use !== undefined for port (port 0 is valid but falsy)
+        port = lockData.port !== undefined ? lockData.port : 7777;
+        console.log(`📁 Read port ${port} from lock file: ${lockPath}`);
+      } catch {
+        console.error(`❌ Could not read lock file: ${lockPath}`);
+        console.error("   Use --port to specify the server port directly.");
+        process.exit(1);
+      }
+    } else {
+      // Default to standard port
+      port = 7777;
+    }
+
+    console.log(`🔌 Attaching to server on port ${port}...`);
+    new BasicTUI({ port });
+    // Don't exit - let the TUI run
+    return;
+  }
+
   // Ensure Claude SDK is available (unless we're in cleanup or validate mode)
   // this is a basic check for when we are running using en executable
   // more thorough checks happen during selftests
@@ -219,7 +256,11 @@ Examples:
     try {
       await ClaudeAgentSDKManager.ensureSdkAvailable();
     } catch (error) {
+      console.error("[ERROR] ClaudeAgentSDKManager.ensureSdkAvailable() threw an error!");
       console.error(`\n❌ ${(error as Error).message}\n`);
+      if (error instanceof Error && error.stack) {
+        console.error(`Stack: ${error.stack}`);
+      }
       process.exit(1);
     }
   }
@@ -253,6 +294,48 @@ Examples:
     // Normal path (existing behavior)
     resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
   }
+
+  // Directory-aware config path resolution
+  // Priority order:
+  // 1. Explicit --hank/--config flag (if directory, append /hank.json)
+  // 2. Data directory discovery (if data path is dir with hank.json and no explicit config)
+  // 3. Default to ./hank.json
+  let resolvedConfigPath = cliArgs.hankPath || cliArgs.configPath;
+
+  // If explicit hank path is a directory, look for hank.json inside
+  if (resolvedConfigPath && !isRemoteHankUrl(resolvedConfigPath)) {
+    const absolutePath = path.isAbsolute(resolvedConfigPath)
+      ? resolvedConfigPath
+      : path.resolve(originalCwd, resolvedConfigPath);
+    try {
+      const stats = await fs.promises.stat(absolutePath);
+      if (stats.isDirectory()) {
+        resolvedConfigPath = path.join(absolutePath, "hank.json");
+        console.log(`📁 Using hank.json from directory: ${resolvedConfigPath}`);
+      }
+    } catch {
+      // Path doesn't exist yet, let it fail later with proper error message
+    }
+  }
+
+  // If no explicit hank path and data path is a directory containing hank.json, use it
+  if (!resolvedConfigPath && resolvedDataPath && inputSourceType === "path") {
+    try {
+      const stats = await fs.promises.stat(resolvedDataPath);
+      if (stats.isDirectory()) {
+        const potentialConfig = path.join(resolvedDataPath, "hank.json");
+        if (fs.existsSync(potentialConfig)) {
+          resolvedConfigPath = potentialConfig;
+          console.log(`📁 Found hank.json in data directory: ${resolvedConfigPath}`);
+        }
+      }
+    } catch {
+      // Path doesn't exist or can't be accessed, continue with default
+    }
+  }
+
+  // Default to hank.json in current directory
+  const configPath = resolvedConfigPath || "hank.json";
 
   // Resolve config path before execution setup (needed for hank hash)
   // Handle remote hanks (git URLs)
@@ -306,7 +389,26 @@ Examples:
       });
       process.exit(0);
     } catch (error) {
-      console.error(`❌ Validation failed: ${(error as Error).message}`);
+      // Format validation errors with breathing room
+      const errorMessage = (error as Error).message;
+      const errorLines = errorMessage.split("\n");
+
+      if (errorLines.length > 1) {
+        // Multi-line error - add spacing and formatting
+        console.error(`\n❌ Validation failed:\n`);
+        console.error(`   ${errorLines[0]}\n`); // Header line
+
+        // Add indentation and spacing for each error
+        for (let i = 1; i < errorLines.length; i++) {
+          const line = errorLines[i].trim();
+          if (line) {
+            console.error(`   • ${line}\n`);
+          }
+        }
+      } else {
+        // Single-line error
+        console.error(`\n❌ Validation failed: ${errorMessage}\n`);
+      }
       process.exit(1);
     }
   }
@@ -329,6 +431,7 @@ Examples:
       ignoreDataMismatch,
     });
   } catch (error) {
+    console.error("[ERROR] Execution setup failed!");
     console.error(`❌ Execution setup failed: ${(error as Error).message}`);
     process.exit(1);
   }
@@ -387,16 +490,33 @@ Examples:
 
   try {
     // Normal server mode - validate config
-    const { codons, warnings } = await validateHank({
+    const validationResult = await validateHank({
       configPath: absoluteConfigPath,
       executionPath: executionSetup.executionPath,
       logger: serverLogger,
       modelOverride: resolvedConfig.model, // Use resolved model from all config layers
     });
 
+    const { codons, globalSystemPrompt, warnings } = validationResult;
+
+    // Display ASCII structure visualization before execution
+    const terminalWidth =
+      process.stdout.isTTY && process.stdout.columns > 0 ? process.stdout.columns : 80;
+
+    const structure = renderHankStructure(codons, {
+      terminalWidth,
+      hankMeta: validationResult.hankMeta,
+      hasGlobalSystemPrompt: globalSystemPrompt !== null,
+      configPath: absoluteConfigPath,
+      promptLineCounts: validationResult.promptLineCounts,
+    });
+
+    console.log(structure);
+    console.log("");
+
     // Log any non-fatal warnings
     if (warnings.length > 0) {
-      console.log("\n⚠️  Configuration warnings:");
+      console.log("⚠️  Configuration warnings:");
       for (const warning of warnings) {
         console.log(`  - ${warning}`);
       }
@@ -422,6 +542,9 @@ Examples:
 
       // Required: codons from validation
       codons,
+
+      // Optional: global system prompt (ENG-122)
+      globalSystemPrompt,
     };
 
     const server = new HankweaveRuntime(serverConfig);
@@ -436,14 +559,35 @@ Examples:
       console.log("🎮 Running in TUI mode (use --headless to disable)");
     }
   } catch (error) {
-    console.error(
-      `Failed to start server: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    console.error("[ERROR] Server startup failed!");
+    console.error(`Error message: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof Error && error.stack) {
+      console.error(`Stack trace:\n${error.stack}`);
+    }
+    if (error instanceof Error && "cause" in error && error.cause) {
+      console.error(`Cause: ${error.cause}`);
+    }
     process.exit(1);
   }
 }
 
 // Run main if this is the main module
 if (import.meta.main) {
-  main();
+  console.log("[MODULE] server/index.ts is being executed as main module");
+  console.log(`[MODULE] Platform: ${process.platform}, Arch: ${process.arch}`);
+  console.log(
+    `[MODULE] Bun version: ${process.versions.bun || "N/A"}, Node version: ${process.version}`,
+  );
+  console.log("[MODULE] About to call main()...");
+
+  try {
+    await main();
+  } catch (error) {
+    console.error("[MODULE] Unhandled error in main()!");
+    console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof Error && error.stack) {
+      console.error(`Stack:\n${error.stack}`);
+    }
+    process.exit(1);
+  }
 }

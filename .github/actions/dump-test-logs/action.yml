@@ -1,0 +1,42 @@
+name: 'Dump Test Logs'
+description: 'Dumps server logs and test directory contents for debugging test failures'
+
+inputs:
+  test-dir-pattern:
+    description: 'Pattern to find test directory (e.g., "tests/test-area/init-test-*")'
+    required: false
+    default: 'tests/test-area/init-test-*'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Dump server logs
+      shell: bash
+      run: |
+        echo "=== Dumping server logs from latest test run ==="
+        TEST_DIR=$(ls -td ${{ inputs.test-dir-pattern }} 2>/dev/null | head -1)
+        if [ -n "$TEST_DIR" ] && [ -d "$TEST_DIR" ]; then
+          echo "Test directory: $TEST_DIR"
+          if [ -f "$TEST_DIR/server.log" ]; then
+            echo "=== Server Log ==="
+            cat "$TEST_DIR/server.log"
+          else
+            echo "No server.log found"
+          fi
+          if [ -f "$TEST_DIR/debug.log" ]; then
+            echo "=== Debug Log ==="
+            cat "$TEST_DIR/debug.log"
+          else
+            echo "No debug.log found"
+          fi
+          if [ -f "$TEST_DIR/model-validation.log" ]; then
+            echo "=== Model Validation Log ==="
+            cat "$TEST_DIR/model-validation.log"
+          else
+            echo "No model-validation.log found"
+          fi
+          echo "=== Directory contents ==="
+          ls -la "$TEST_DIR" || true
+        else
+          echo "No test directory found matching pattern: ${{ inputs.test-dir-pattern }}"
+        fi

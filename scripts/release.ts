@@ -35,7 +35,7 @@ const PACKAGE_JSON_PATH = resolve(ROOT, "package.json");
  */
 async function exec(
   command: string,
-  options: { silent?: boolean } = {}
+  options: { silent?: boolean } = {},
 ): Promise<string> {
   try {
     const proc = Bun.spawn(["sh", "-c", command], {
@@ -69,7 +69,7 @@ async function checkGitStatus(): Promise<void> {
 
   if (status) {
     console.error(
-      "Error: Uncommitted changes detected. Commit or stash first."
+      "Error: Uncommitted changes detected. Commit or stash first.",
     );
     console.error("\nUncommitted changes:");
     console.error(status);
@@ -115,7 +115,7 @@ async function checkRemoteSync(branches: string[]): Promise<void> {
       // Check if remote branch exists
       const remoteBranch = await exec(
         `git rev-parse --verify origin/${branch}`,
-        { silent: true }
+        { silent: true },
       );
 
       if (!remoteBranch) {
@@ -135,11 +135,11 @@ async function checkRemoteSync(branches: string[]): Promise<void> {
         // Check if local is ahead, behind, or diverged
         const commitsAhead = await exec(
           `git rev-list --count origin/${branch}..${branch}`,
-          { silent: true }
+          { silent: true },
         );
         const commitsBehind = await exec(
           `git rev-list --count ${branch}..origin/${branch}`,
-          { silent: true }
+          { silent: true },
         );
 
         const ahead = parseInt(commitsAhead);
@@ -147,11 +147,9 @@ async function checkRemoteSync(branches: string[]): Promise<void> {
 
         if (behind > 0 && ahead > 0) {
           // Diverged
+          console.error(`Error: Branch ${branch} has diverged from remote.`);
           console.error(
-            `Error: Branch ${branch} has diverged from remote.`
-          );
-          console.error(
-            `  Local is ${ahead} commit(s) ahead and ${behind} commit(s) behind.`
+            `  Local is ${ahead} commit(s) ahead and ${behind} commit(s) behind.`,
           );
           console.error(`\nYou need to reconcile the branches:`);
           console.error(`  git checkout ${branch}`);
@@ -160,7 +158,7 @@ async function checkRemoteSync(branches: string[]): Promise<void> {
         } else if (behind > 0) {
           // Behind remote
           console.error(
-            `Error: Branch ${branch} is ${behind} commit(s) behind remote.`
+            `Error: Branch ${branch} is ${behind} commit(s) behind remote.`,
           );
           console.error(`\nTo sync:`);
           console.error(`  git checkout ${branch}`);
@@ -169,7 +167,7 @@ async function checkRemoteSync(branches: string[]): Promise<void> {
         } else if (ahead > 0) {
           // Ahead of remote - this is OK, we'll push during release
           console.log(
-            `✓ ${branch} is ${ahead} commit(s) ahead of origin/${branch} (will be pushed during release)`
+            `✓ ${branch} is ${ahead} commit(s) ahead of origin/${branch} (will be pushed during release)`,
           );
         }
       } else {
@@ -178,7 +176,7 @@ async function checkRemoteSync(branches: string[]): Promise<void> {
     } catch (error) {
       console.error(
         `Error checking branch ${branch}:`,
-        (error as Error).message
+        (error as Error).message,
       );
       process.exit(1);
     }
@@ -204,14 +202,14 @@ async function validateChangelog(): Promise<void> {
   if (!changelog.includes("## [Unreleased]")) {
     console.error("Error: No [Unreleased] section found in CHANGELOG.md");
     console.error(
-      "Please add a ## [Unreleased] section and list your changes there."
+      "Please add a ## [Unreleased] section and list your changes there.",
     );
     process.exit(1);
   }
 
   // Extract content between [Unreleased] and next ## heading (version section)
   const unreleasedMatch = changelog.match(
-    /## \[Unreleased\]([\s\S]*?)(?=\n## |$)/
+    /## \[Unreleased\]([\s\S]*?)(?=\n## |$)/,
   );
 
   if (!unreleasedMatch) {
@@ -221,21 +219,43 @@ async function validateChangelog(): Promise<void> {
 
   const unreleasedContent = unreleasedMatch[1].trim();
 
-  // Check if there's actual content (not just empty bullets or whitespace)
-  const hasContent = /^[^-\s]|\n[^-\s]|- .+\S/.test(unreleasedContent);
+  // Check for actual bullet point content (not just "- " empty bullets or section headers)
+  // Match lines that start with "- " followed by actual text (not just whitespace)
+  const bulletPointsWithContent = unreleasedContent.match(/^- .+\S/gm) || [];
+  const hasContent = bulletPointsWithContent.length > 0;
 
   if (!hasContent) {
-    console.error("Error: [Unreleased] section is empty.");
-    console.error("Please add your changes to the CHANGELOG before releasing.");
-    console.error("\nExample:");
+    console.error("\n⚠️  Warning: [Unreleased] section has no changelog entries.");
+    console.error("The release will have empty release notes.\n");
+    console.error("Expected format:");
     console.error("  ## [Unreleased]");
     console.error("  ");
     console.error("  ### Added");
     console.error("  - New feature description");
-    process.exit(1);
-  }
+    console.error("  ");
+    console.error("  ### Fixed");
+    console.error("  - Bug fix description\n");
 
-  console.log("✓ CHANGELOG has content in [Unreleased] section");
+    // Ask for confirmation to proceed without changelog
+    console.log(
+      "Press Enter to continue anyway, or Ctrl+C to cancel and add changelog entries...",
+    );
+    try {
+      await Bun.$`sh -c "read"`.quiet();
+      console.log("⚠️  Proceeding without changelog entries");
+    } catch {
+      console.log("\nRelease cancelled. Please update CHANGELOG.md and try again.");
+      process.exit(1);
+    }
+  } else {
+    console.log("✓ CHANGELOG has content in [Unreleased] section:");
+    for (const entry of bulletPointsWithContent.slice(0, 5)) {
+      console.log(`    ${entry}`);
+    }
+    if (bulletPointsWithContent.length > 5) {
+      console.log(`    ... and ${bulletPointsWithContent.length - 5} more`);
+    }
+  }
 }
 
 /**
@@ -309,7 +329,7 @@ async function updateChangelog(version: string): Promise<void> {
   // Replace [Unreleased] with [version] - date
   const updatedChangelog = changelog.replace(
     "## [Unreleased]",
-    `## [${version}] - ${date}`
+    `## [${version}] - ${date}`,
   );
 
   await Bun.write(CHANGELOG_PATH, updatedChangelog);
@@ -442,9 +462,7 @@ async function stripInternalFiles(): Promise<boolean> {
   await exec(`git rm -rf ${rmArgs}`);
 
   // Commit the removal
-  await exec(
-    'git commit -m "chore: strip internal files from release branch"'
-  );
+  await exec('git commit -m "chore: strip intermediates and planning files"');
 
   console.log(`✓ Stripped: ${filesToRemove.join(", ")}`);
   return true;
@@ -482,7 +500,7 @@ async function mergeToReleaseAlpha(version: string): Promise<void> {
     console.log(`\nAbout to push release/alpha and tag ${tag} to origin.`);
     console.log("This will trigger the release workflow.");
     console.log(
-      "To sync to public repo, run the 'Sync to Public' workflow after this completes."
+      "To sync to public repo, run the 'Sync to Public' workflow after this completes.",
     );
     console.log("\nPress Ctrl+C to cancel, or Enter to continue...");
 
@@ -495,19 +513,19 @@ async function mergeToReleaseAlpha(version: string): Promise<void> {
   } catch (error) {
     console.error(
       "\n❌ Merge to release/alpha failed:",
-      (error as Error).message
+      (error as Error).message,
     );
     console.error("\nRecovery steps:");
     console.error("  1. Check current branch: git branch");
     console.error(
-      "  2. If on release/alpha, checkout develop: git checkout develop"
+      "  2. If on release/alpha, checkout develop: git checkout develop",
     );
     console.error("  3. Reset release/alpha if needed:");
     console.error("     git checkout release/alpha");
     console.error("     git reset --hard origin/release/alpha");
     console.error("  4. The develop branch has been pushed successfully.");
     console.error(
-      "     You can manually merge and push when the issue is resolved."
+      "     You can manually merge and push when the issue is resolved.",
     );
     throw error;
   }
@@ -567,7 +585,7 @@ async function main(): Promise<void> {
     console.log("  1. ✓ Created release commits on develop");
     console.log("  2. ✓ Pushed develop to origin");
     console.log(
-      "  3. ✓ Merged develop → release/alpha (excluding intermediates/)"
+      "  3. ✓ Merged develop → release/alpha (excluding intermediates/)",
     );
     console.log("  4. ✓ Created tag v" + newVersion + " on release/alpha");
     console.log("  5. ✓ Pushed release/alpha and tag to origin");

@@ -81,8 +81,10 @@ describe("Path validation", () => {
     expect(invalid.error).toContain("does not exist");
   });
 
-  test("handles Windows path separators", () => {
+  test("handles Windows path separators", async () => {
     if (process.platform === "win32") {
+      // Create the target directory first
+      await fs.promises.mkdir(path.join(projectDir, "local"), { recursive: true });
       const result = validateCopyPath("C:\\templates\\file.txt", "local\\file.txt", projectDir);
       expect(result.valid).toBe(true);
     }
@@ -156,6 +158,17 @@ describe("Path validation", () => {
 });
 
 describe("Command execution validation", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = path.resolve("tests", "test-area", `temp-test-cmds-${Date.now()}`);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
   // Mock validation for command execution
   function validateCommand(
     command: string,
@@ -195,7 +208,7 @@ describe("Command execution validation", () => {
     ];
 
     dangerousCommands.forEach((cmd) => {
-      const result = validateCommand(cmd, "/tmp");
+      const result = validateCommand(cmd, tempDir);
       expect(result.valid).toBe(false);
       expect(result.error).toContain("dangerous");
     });
@@ -211,7 +224,7 @@ describe("Command execution validation", () => {
     ];
 
     safeCommands.forEach((cmd) => {
-      const result = validateCommand(cmd, "/tmp");
+      const result = validateCommand(cmd, tempDir);
       expect(result.valid).toBe(true);
     });
   });

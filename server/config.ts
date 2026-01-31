@@ -8,7 +8,7 @@ import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { CodonId } from "./types/branded-types.js";
 import type { ModelName, ShimSelfTestResult } from "./types/types.js";
-import { deepMerge, getMetadata, type Logger } from "./utils.js";
+import { deepMerge, getMetadata, type Logger, rmSyncWithRetry } from "./utils.js";
 
 // Get version from package metadata
 const PACKAGE_VERSION = getMetadata().version;
@@ -22,6 +22,22 @@ export const TIMEOUTS = {
   PROCESS_KILL_GRACE_MS: 5000, // 5 seconds grace period before SIGKILL
   LOG_PARSER_DELAY_MS: 100, // 100ms delay for log parsing
   CODON_CLEANUP_DELAY_MS: 100, // 100ms delay for codon cleanup
+  SELF_TEST_TIMEOUT_MS: process.platform === "win32" ? 60000 : 30000, // 60s on Windows, 30s elsewhere
+} as const;
+
+/**
+ * Platform-specific retry configuration for directory cleanup.
+ * Windows requires more retries and longer delays due to file locking after process termination.
+ */
+export const CLEANUP_RETRY_CONFIG = {
+  windows: {
+    maxRetries: 10, // More retries for Windows file locking issues
+    initialDelay: 50, // Start with 50ms, doubles each retry (exponential backoff)
+  },
+  default: {
+    maxRetries: 5, // Standard retries for Unix-like systems
+    initialDelay: 10, // Start with 10ms
+  },
 } as const;
 
 /**
@@ -707,6 +723,23 @@ export const hankOverridesSchema = z
   );
 
 /**
+ * Schema for hank requirements (things that must be true for hank to run).
+ */
+export const hankRequirementsSchema = z.object({
+  env: z
+    .array(
+      z
+        .string()
+        .transform((s) => s.trim()) // Handle accidental whitespace in var names
+        .refine((s) => s.length > 0, {
+          message: "Environment variable name cannot be empty",
+        }),
+    )
+    .optional()
+    .describe("Environment variables that must be set for this hank to run"),
+});
+
+/**
  * Schema for hank file (hank.json).
  *
  * Must contain a hank array, with optional meta and overrides.
@@ -714,15 +747,30 @@ export const hankOverridesSchema = z
  * Uses codonConfigArraySchemaWithDetailedErrors for better validation errors
  * when codon fields have typos or unrecognized fields.
  */
-export const hankFileSchema = z.object({
-  meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
-  overrides: hankOverridesSchema
-    .optional()
-    .describe("Architect's overrides for optimal execution (optional)"),
-  hank: codonConfigArraySchemaWithDetailedErrors.describe(
-    "The immutable logic sequence (required)",
-  ),
-});
+export const hankFileSchema = z
+  .object({
+    meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
+    overrides: hankOverridesSchema
+      .optional()
+      .describe("Architect's overrides for optimal execution (optional)"),
+    requirements: hankRequirementsSchema
+      .optional()
+      .describe("Requirements that must be met for this hank to run (optional)"),
+    globalSystemPromptFile: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .describe("Global system prompt file(s) applied to all codons (relative to hank file)"),
+    globalSystemPromptText: z
+      .string()
+      .optional()
+      .describe("Global system prompt text applied to all codons"),
+    hank: codonConfigArraySchemaWithDetailedErrors.describe(
+      "The immutable logic sequence (required)",
+    ),
+  })
+  .refine((data) => !(data.globalSystemPromptFile && data.globalSystemPromptText), {
+    message: "Cannot specify both globalSystemPromptFile and globalSystemPromptText",
+  });
 
 // -------------
 // Schemas for JSON Schema Generation (authoring/input types)
@@ -836,6 +884,14 @@ export const runtimeConfigSchema = z
         "Idle timeout for WebSocket and proxy servers in seconds (0-255). This is the maximum amount of time a connection is allowed to be idle before the server closes it. A connection is idling if there is no data sent or received.",
       ),
 
+    // Rig Setup Behavior
+    // NOTE: Use .optional() WITHOUT .default() to keep TypeScript type optional.
+    // Defaults are handled at runtime with nullish coalescing.
+    ignoreRigFailures: z
+      .boolean()
+      .optional()
+      .describe("If true, ignore all rig setup failures (useful for resume workflows)"),
+
     // Sentinel System
     sentinel: sentinelSettingsSchema.optional().describe("Sentinel system configuration"),
   })
@@ -878,10 +934,13 @@ export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
  * This is the complete, finalized config assembled from all layers (CLI, env, files, defaults).
  */
 export interface HankweaveConfig
-  extends Omit<Required<RuntimeConfig>, "model" | "anthropicBaseUrl"> {
+  extends Omit<Required<RuntimeConfig>, "model" | "anthropicBaseUrl" | "ignoreRigFailures"> {
   // Fields from RuntimeConfig that remain optional
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
   anthropicBaseUrl?: string;
+
+  /** If true, ignore all rig setup failures (useful for resume workflows) */
+  ignoreRigFailures?: boolean;
 
   /**
    * Model setting - behavior depends on resolution layer:
@@ -908,6 +967,9 @@ export interface HankweaveConfig
 
   /** Path to the codon configuration file (for resolving relative sentinel paths) */
   configPath?: string;
+
+  /** Optional global system prompt applied to all codons */
+  globalSystemPrompt?: string | null;
 
   /** Maximum length for tool result content before truncation (default: 2500) */
   toolResultTruncateLength: number;
@@ -1162,7 +1224,8 @@ export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
       key === "autostart" ||
       key === "withoutProxy" ||
       key === "enablePersistence" ||
-      key === "waitForAllHealthChecks"
+      key === "waitForAllHealthChecks" ||
+      key === "ignoreRigFailures"
     ) {
       return value === "true" || value === "1";
     }
@@ -1282,6 +1345,45 @@ export function resolveSettings(options?: {
 }
 
 /**
+ * Load and resolve global system prompt content.
+ * Returns raw text with template variables intact (replacement happens at runtime).
+ * @throws Error if globalSystemPromptFile references a file that doesn't exist
+ */
+export function loadGlobalSystemPrompt(
+  hankFile: z.infer<typeof hankFileSchema>,
+  hankDir: string,
+): string | null {
+  if (hankFile.globalSystemPromptText) {
+    return hankFile.globalSystemPromptText;
+  }
+
+  if (hankFile.globalSystemPromptFile) {
+    const files = Array.isArray(hankFile.globalSystemPromptFile)
+      ? hankFile.globalSystemPromptFile
+      : [hankFile.globalSystemPromptFile];
+
+    const parts: string[] = [];
+    for (const file of files) {
+      const absolutePath = path.isAbsolute(file) ? file : path.resolve(hankDir, file);
+      try {
+        parts.push(fs.readFileSync(absolutePath, "utf-8"));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          throw new Error(
+            `Global system prompt file not found: ${absolutePath}\n` +
+              `  (configured via globalSystemPromptFile in hank.json)`,
+          );
+        }
+        throw error;
+      }
+    }
+    return parts.join("\n\n");
+  }
+
+  return null;
+}
+
+/**
  * Load and validate codon configuration from a hank file.
  *
  * Loads the hank file (object format with {meta, overrides, hank}),
@@ -1290,13 +1392,13 @@ export function resolveSettings(options?: {
  *
  * @param options.configPath - Path to the hank JSON configuration file
  * @param options.modelOverride - Optional model to override all codon models
- * @returns Validated array of codon configurations with resolved paths (and overridden models if specified)
+ * @returns Object with validated codons array and optional global system prompt
  * @throws Error with detailed validation messages if config is invalid
  */
-export function loadCodonSequence(options: {
-  configPath: string;
-  modelOverride?: string;
-}): CodonConfig[] {
+export function loadCodonSequence(options: { configPath: string; modelOverride?: string }): {
+  codons: CodonConfig[];
+  globalSystemPrompt: string | null;
+} {
   const { configPath, modelOverride } = options;
   try {
     // Load and validate hank file (apply model override before validation when provided)
@@ -1542,7 +1644,14 @@ export function loadCodonSequence(options: {
       };
     }
 
-    return resolvedConfig.map((config) => transformIds(config as CodonConfig));
+    // Load global system prompt (if configured)
+    // Note: configDir is already declared above (line 1249)
+    const globalSystemPrompt = loadGlobalSystemPrompt(hankFile, configDir);
+
+    return {
+      codons: resolvedConfig.map((config) => transformIds(config as CodonConfig)),
+      globalSystemPrompt,
+    };
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to load codon config from ${configPath}: ${error.message}`);
@@ -1557,6 +1666,11 @@ export function loadCodonSequence(options: {
 
 export interface ValidationResult {
   codons: CodonConfig[];
+  globalSystemPrompt: string | null;
+  /** Hank metadata (name, version, etc.) from the hank file */
+  hankMeta?: HankMeta;
+  /** Map of codon ID to total prompt line count (sum of all prompt files) */
+  promptLineCounts: Map<string, number>;
   codonCount: number;
   promptFileCount: number;
   systemPromptFileCount: number;
@@ -1582,6 +1696,30 @@ export interface ValidationResult {
 }
 
 /**
+ * Validate required environment variables are set.
+ * Checks both the direct variable name and the HANKWEAVE_ prefixed version.
+ * Returns { valid: boolean, missing: string[] }
+ */
+export function validateRequiredEnv(requiredEnv: string[] | undefined): {
+  valid: boolean;
+  missing: string[];
+} {
+  if (!requiredEnv || requiredEnv.length === 0) {
+    return { valid: true, missing: [] };
+  }
+
+  const missing = requiredEnv.filter((key) => {
+    // Check both direct and HANKWEAVE_ prefixed versions
+    const directValue = process.env[key];
+    const prefixedValue = process.env[`HANKWEAVE_${key}`];
+    const value = directValue || prefixedValue;
+    return value === undefined || value === "";
+  });
+
+  return { valid: missing.length === 0, missing };
+}
+
+/**
  * Validate hank configuration with enhanced checks.
  *
  * This performs all the validation of loadCodonSequence plus additional
@@ -1602,10 +1740,31 @@ export async function validateHank(options: {
   modelOverride?: string;
 }): Promise<ValidationResult> {
   const { configPath, executionPath, logger, modelOverride } = options;
-  const codons = loadCodonSequence({ configPath, modelOverride });
+
+  // Load hank file first to get requirements
+  const hankFile = loadHankFile({ hankPath: configPath, modelOverride });
+
+  // Validate required environment variables early (fail fast)
+  if (hankFile.requirements?.env) {
+    const envValidation = validateRequiredEnv(hankFile.requirements.env);
+    if (!envValidation.valid) {
+      throw new Error(
+        `Missing required environment variables: ${envValidation.missing.join(", ")}\n` +
+          `These are declared in the hank's requirements.env field.`,
+      );
+    }
+  }
+
+  const { codons, globalSystemPrompt } = loadCodonSequence({
+    configPath,
+    modelOverride,
+  });
 
   const result: ValidationResult = {
     codons,
+    globalSystemPrompt,
+    hankMeta: hankFile.meta,
+    promptLineCounts: new Map<string, number>(),
     codonCount: 0, // Will be counted recursively
     promptFileCount: 0,
     systemPromptFileCount: 0,
@@ -1753,12 +1912,13 @@ export async function validateHank(options: {
       });
     }
 
-    // Count prompt files
+    // Count prompt files and their line counts
     if (codon.promptFile) {
       const files = Array.isArray(codon.promptFile) ? codon.promptFile : [codon.promptFile];
       result.promptFileCount += files.length;
 
-      // Verify files are readable (loadCodonSequence checks existence)
+      let totalLines = 0;
+      // Verify files are readable (loadCodonSequence checks existence) and count lines
       for (const file of files) {
         try {
           const stats = await fs.promises.stat(file);
@@ -1773,11 +1933,16 @@ export async function validateHank(options: {
               )}MB)`,
             );
           }
+          // Count lines in the file
+          const content = await fs.promises.readFile(file, "utf-8");
+          totalLines += content.split("\n").length;
         } catch (error) {
           // Should not happen as loadCodonSequence already checked
           throw new Error(`${codonLabel}: Cannot stat prompt file "${file}": ${error}`);
         }
       }
+      // Store total line count for this codon
+      result.promptLineCounts.set(codon.id, totalLines);
     }
 
     // Count system prompt files
@@ -1932,7 +2097,6 @@ export async function validateHank(options: {
 
   // Collect unique models and run self-tests for shims
   // Only run self-tests if explicitly requested (e.g., in --validate mode)
-
   const uniqueModels = new Map<string, ModelInfo>();
 
   function collectModelsRecursive(config: CodonConfig): void {
@@ -2024,7 +2188,18 @@ export async function validateHank(options: {
       } finally {
         // Clean up temporary execution path
         if (fs.existsSync(tempExecutionPath)) {
-          fs.rmSync(tempExecutionPath, { recursive: true, force: true });
+          // Use platform-specific retry configuration (Windows needs more retries/delays)
+          const isWindows = process.platform === "win32";
+          const retryConfig = isWindows
+            ? CLEANUP_RETRY_CONFIG.windows
+            : CLEANUP_RETRY_CONFIG.default;
+
+          rmSyncWithRetry(tempExecutionPath, {
+            recursive: true,
+            force: true,
+            ...retryConfig,
+            logger,
+          });
         }
       }
     }

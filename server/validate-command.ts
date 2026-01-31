@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ValidationResult } from "./config.js";
 import { DEFAULT_CONFIG, ensureSchemaUrl, validateHank } from "./config.js";
 import { hashDataSource } from "./data-hasher.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { Logger } from "./utils.js";
+import { renderHankStructure } from "./validate-ascii.js";
 
 // -------------
 // Path Determination (for validation mode)
@@ -67,41 +69,61 @@ interface ValidationDisplayOptions {
   configPath: string;
   dataPath: string;
   executionPath: string;
-  result: {
-    codonCount: number;
-    promptFileCount: number;
-    systemPromptFileCount: number;
-    rigSetupCount: number;
-    trackingCodonCount: number;
-    checkpointCodonCount: number;
-    environmentVariables: {
-      fromSystem: Record<string, string>;
-      fromCodons: Array<{
-        codonId: string;
-        codonName: string;
-        variables: Record<string, string>;
-      }>;
-    };
-    warnings: string[];
-  };
+  result: ValidationResult;
 }
 
 function displayValidationResult(options: ValidationDisplayOptions): void {
-  console.log(`\n✅ Configuration is valid!\n`);
-  console.log(`📋 Summary:`);
-  console.log(`  - Codons: ${options.result.codonCount}`);
-  console.log(`  - Total prompt files: ${options.result.promptFileCount}`);
-  console.log(`  - Total system prompt files: ${options.result.systemPromptFileCount}`);
-  console.log(`  - Rig setup operations: ${options.result.rigSetupCount}`);
-  console.log(`  - Codons with file watching: ${options.result.trackingCodonCount}`);
-  console.log(`  - Codons with checkpoints: ${options.result.checkpointCodonCount}`);
+  console.log(`\n✓ Configuration is valid!\n`);
+
+  // ASCII structure visualization
+  const terminalWidth =
+    process.stdout.isTTY && process.stdout.columns > 0 ? process.stdout.columns : 80;
+
+  const structure = renderHankStructure(options.result.codons, {
+    terminalWidth,
+    hankMeta: options.result.hankMeta,
+    hasGlobalSystemPrompt: options.result.globalSystemPrompt !== null,
+    configPath: options.configPath,
+    promptLineCounts: options.result.promptLineCounts,
+  });
+
+  console.log(structure);
+  console.log("");
+
+  // Summary box with rounded corners
+  const useColor = process.stdout.isTTY ?? false;
+  const green = useColor ? "\x1b[32m" : "";
+  const cyan = useColor ? "\x1b[36m" : "";
+  const bold = useColor ? "\x1b[1m" : "";
+  const dim = useColor ? "\x1b[2m" : "";
+  const reset = useColor ? "\x1b[0m" : "";
+
+  // Build summary stats line
+  const stats = [
+    `${options.result.codonCount} codons`,
+    `${options.result.promptFileCount} prompts`,
+    `${options.result.systemPromptFileCount} system prompts`,
+    `${options.result.rigSetupCount} rigs`,
+    `${options.result.checkpointCodonCount} checkpoints`,
+  ].join(" • ");
+
+  // Calculate box width (fit to terminal or default 80)
+  const boxWidth = Math.min(terminalWidth - 2, Math.max(stats.length + 6, 50));
+  const innerWidth = boxWidth - 4;
+
+  // Render the summary box
+  console.log(
+    `${cyan}╭─ ${green}${bold}GOOD TO RUN!${reset}${cyan} ${"─".repeat(Math.max(0, innerWidth - 12))}╮${reset}`,
+  );
+  console.log(`${cyan}│${reset}  ${dim}${stats.padEnd(innerWidth)}${reset}${cyan}│${reset}`);
+  console.log(`${cyan}╰${"─".repeat(innerWidth + 2)}╯${reset}`);
 
   // Display environment variables
   const hasSystemVars = Object.keys(options.result.environmentVariables.fromSystem).length > 0;
   const hasCodonVars = options.result.environmentVariables.fromCodons.length > 0;
 
   if (hasSystemVars || hasCodonVars) {
-    console.log(`\n🔧 Environment Variables:`);
+    console.log(`\nEnvironment Variables:`);
 
     if (hasSystemVars) {
       console.log(`\n  From System (HANKWEAVE_ prefixed):`);
@@ -122,7 +144,7 @@ function displayValidationResult(options: ValidationDisplayOptions): void {
   }
 
   if (options.result.warnings.length > 0) {
-    console.log(`\n⚠️  Warnings:`);
+    console.log(`\nWarnings:`);
     for (const warning of options.result.warnings) {
       console.log(`  - ${warning}`);
     }

@@ -339,7 +339,7 @@ async function setupAndRunCodons(): Promise<void> {
     }>((resolve, reject) => {
       const timeout = setTimeout(
         () => reject(new Error("Timed out waiting for RunCompleted event")),
-        180_000, // 3 minutes - wait for entire run to complete
+        300_000, // 5 minutes - wait for entire run to complete (increased for Gemini model in codon-3)
       );
 
       if (!testState.syncClient) {
@@ -465,7 +465,7 @@ async function setupAndRunCodons(): Promise<void> {
     console.log(`${colors.red}✗ Codon 3 did not start${colors.reset}`);
   }
 
-  testState.codon3Completed = await testState.client.waitForCodonCompletion("codon-3", 120000);
+  testState.codon3Completed = await testState.client.waitForCodonCompletion("codon-3", 180000);
   console.log(`${colors.green}✓ Codon 3 completed${colors.reset}`);
 
   // Wait for sync client background collection to complete

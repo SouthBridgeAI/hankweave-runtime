@@ -547,6 +547,396 @@ describe("LlmProviderRegistry", () => {
       });
     });
 
+    describe("GPT 5.2 models (manually injected)", () => {
+      beforeEach(() => {
+        registry = new LlmProviderRegistry({ logger: mockLogger });
+      });
+
+      describe("exact matching", () => {
+        it("should resolve gpt-5.2-high by exact model ID", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-high");
+            expect(result.matchType).toBe("exact-with-inferred-provider");
+          }
+        });
+
+        it("should resolve gpt-5.2-xhigh by exact model ID", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-xhigh");
+            expect(result.matchType).toBe("exact-with-inferred-provider");
+          }
+        });
+
+        it("should resolve gpt-5.2-high with explicit provider", () => {
+          const result = registry.resolveModel({
+            providerId: "openai",
+            model: "gpt-5.2-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-high");
+            expect(result.matchType).toBe("exact");
+          }
+        });
+
+        it("should resolve gpt-5.2-xhigh with explicit provider", () => {
+          const result = registry.resolveModel({
+            providerId: "openai",
+            model: "gpt-5.2-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-xhigh");
+            expect(result.matchType).toBe("exact");
+          }
+        });
+
+        it("should resolve with full model ID openai/gpt-5.2-high", () => {
+          const result = registry.resolveModel({
+            model: "openai/gpt-5.2-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-high");
+          }
+        });
+
+        it("should resolve with full model ID openai/gpt-5.2-xhigh", () => {
+          const result = registry.resolveModel({
+            model: "openai/gpt-5.2-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-xhigh");
+          }
+        });
+
+        it("should resolve gpt-5.2-codex-high by exact model ID", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2-codex-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+            expect(result.matchType).toBe("exact-with-inferred-provider");
+          }
+        });
+
+        it("should resolve gpt-5.2-codex-xhigh by exact model ID", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2-codex-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+            expect(result.matchType).toBe("exact-with-inferred-provider");
+          }
+        });
+
+        it("should resolve gpt-5.2-codex-high with explicit provider", () => {
+          const result = registry.resolveModel({
+            providerId: "openai",
+            model: "gpt-5.2-codex-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+            expect(result.matchType).toBe("exact");
+          }
+        });
+
+        it("should resolve gpt-5.2-codex-xhigh with explicit provider", () => {
+          const result = registry.resolveModel({
+            providerId: "openai",
+            model: "gpt-5.2-codex-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+            expect(result.matchType).toBe("exact");
+          }
+        });
+
+        it("should resolve with full model ID openai/gpt-5.2-codex-high", () => {
+          const result = registry.resolveModel({
+            model: "openai/gpt-5.2-codex-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+          }
+        });
+
+        it("should resolve with full model ID openai/gpt-5.2-codex-xhigh", () => {
+          const result = registry.resolveModel({
+            model: "openai/gpt-5.2-codex-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+          }
+        });
+      });
+
+      describe("fuzzy matching", () => {
+        it("should fuzzy match 'gpt-5.2 codex' to base codex model", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2 codex",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match base gpt-5.2-codex (most recent: 2026-01-14)
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt-5.2 codex high' with dashes to correct variant", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2 codex high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt-5.2 codex xhigh' with dashes to correct variant", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2 codex xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt-5.2 codex high' to a codex variant (spaces)", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2 codex high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match the correct variant based on exact word matching
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt-5.2 codex xhigh' to a codex variant (spaces)", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.2 codex xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match the correct variant based on exact word matching
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt 5.2 codex high' to a codex variant (no dashes)", () => {
+          const result = registry.resolveModel({
+            model: "gpt 5.2 codex high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match the correct variant based on exact word matching
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt 5.2 codex xhigh' to a codex variant (no dashes)", () => {
+          const result = registry.resolveModel({
+            model: "gpt 5.2 codex xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match the correct variant based on exact word matching
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt 5.2 codex high' with spaces", () => {
+          const result = registry.resolveModel({
+            model: "gpt 5.2 codex high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match the correct variant based on exact word matching
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt 5.2 codex xhigh' with spaces", () => {
+          const result = registry.resolveModel({
+            model: "gpt 5.2 codex xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match the correct variant based on exact word matching
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should match 'GPT-5.2-Codex-High' (mixed case)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.2-Codex-High",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+            // Can be exact-with-inferred-provider or fuzzy depending on case-insensitive matching
+          }
+        });
+
+        it("should match 'GPT-5.2-Codex-XHigh' (mixed case)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.2-Codex-XHigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+            // Can be exact-with-inferred-provider or fuzzy depending on case-insensitive matching
+          }
+        });
+
+        it("should fuzzy match 'gpt-52 codex' to base codex model", () => {
+          const result = registry.resolveModel({
+            model: "gpt-52 codex",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match base gpt-5.2-codex (most recent: 2026-01-14)
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt 5.2 codex' to base codex model", () => {
+          const result = registry.resolveModel({
+            model: "gpt 5.2 codex",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            // Should match base gpt-5.2-codex (most recent: 2026-01-14)
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+      });
+
+      describe("case insensitive matching", () => {
+        it("should resolve GPT-5.2-HIGH (uppercase)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.2-HIGH",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-high");
+          }
+        });
+
+        it("should resolve GPT-5.2-XHIGH (uppercase)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.2-XHIGH",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-xhigh");
+          }
+        });
+
+        it("should resolve GPT-5.2-CODEX-HIGH (uppercase)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.2-CODEX-HIGH",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-high");
+          }
+        });
+
+        it("should resolve GPT-5.2-CODEX-XHIGH (uppercase)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.2-CODEX-XHIGH",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+          }
+        });
+      });
+    });
+
     describe("blocklist handling", () => {
       beforeEach(() => {
         registry = new LlmProviderRegistry({

@@ -63,7 +63,7 @@ export function validateModel(
   const canRun = CodonRunner.canRun(resolveResult.modelInfo);
 
   if (!canRun) {
-    const supportedProviders = ["anthropic", "google"];
+    const supportedProviders = ["anthropic", "google", "openai"];
     const providerName = resolveResult.modelInfo.providerId;
     return {
       valid: false,

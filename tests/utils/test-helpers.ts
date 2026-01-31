@@ -742,6 +742,7 @@ export interface TestServerConfig {
   startNew?: boolean; // Force new execution
   withoutProxy?: boolean; // Run server without proxy (deprecated - proxy is now off by default)
   proxy?: boolean; // Enable proxy server (proxy is off by default)
+  noAutostart?: boolean; // Don't auto-start codons on server launch (useful for capturing early events)
   commandOverride?: {
     // Override the default command (bun server/index.ts)
     command: string; // e.g., "npx", "bunx", "pnpm"
@@ -800,6 +801,10 @@ export function startServer(config: TestServerConfig): ChildProcess {
 
   if (config.startNew) {
     args.push("--start-new");
+  }
+
+  if (config.noAutostart) {
+    args.push("--no-autostart");
   }
 
   console.log(`${colors.gray}Command: ${command} ${args.join(" ")}${colors.reset}`);

@@ -93,7 +93,7 @@ describe("Model Validation", () => {
         ];
 
         writeHankConfig(configPath, config);
-        const result = loadCodonSequence({ configPath });
+        const { codons: result } = loadCodonSequence({ configPath });
 
         expect(result).toHaveLength(1);
         const codon = result[0];
@@ -119,7 +119,7 @@ describe("Model Validation", () => {
         ];
 
         writeHankConfig(configPath, config);
-        const result = loadCodonSequence({ configPath });
+        const { codons: result } = loadCodonSequence({ configPath });
 
         expect(result).toHaveLength(1);
         const codon = result[0];
@@ -231,7 +231,7 @@ describe("Model Validation", () => {
     test("throws error for invalid model in overrides", () => {
       const hankContent = {
         overrides: {
-          model: "gpt-4-turbo",
+          model: "invalid-model-xyz",
         },
         hank: [
           {
@@ -1130,14 +1130,14 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    // Union schema reports "Invalid input" at top level, nested errors contain "Command cannot be empty"
+    // loadHankFile now validates schema first and throws "Invalid hank file" with detailed errors
     await expect(
       validateHank({
         configPath,
         executionPath: projectPath,
         logger: testLogger,
       }),
-    ).rejects.toThrow("Failed to load codon config");
+    ).rejects.toThrow("Invalid hank file");
   });
 
   test("delegates to loadCodonSequence for basic validation", async () => {
@@ -1891,7 +1891,7 @@ describe("validateHank", () => {
       expect(test.result.overall).toBeDefined();
       expect(typeof test.result.overall.passed).toBe("boolean");
     }
-  }, 10_000); // 10 second timeout for self-tests
+  }, 30_000); // 30 second timeout for self-tests (slower on Windows CI)
 
   test("collects unique models from loops", async () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
@@ -2325,7 +2325,7 @@ describe("loadRuntimeConfig", () => {
 
   test("throws error for invalid model enum", () => {
     const runtimeContent = {
-      model: "gpt-4", // Only "sonnet" and "opus" are valid
+      model: "invalid-model-xyz",
     };
 
     createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
@@ -2581,7 +2581,7 @@ describe("loadHankweaveRuntimeEnvVars", () => {
   });
 
   test("throws error for invalid model enum", () => {
-    process.env.HANKWEAVE_RUNTIME_MODEL = "gpt-4";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "invalid-model-xyz";
 
     expect(() => loadHankweaveRuntimeEnvVars()).toThrow(
       "Invalid environment variable configuration",
@@ -2610,6 +2610,20 @@ describe("loadHankweaveRuntimeEnvVars", () => {
     expect(() => loadHankweaveRuntimeEnvVars()).toThrow(
       "Invalid environment variable configuration",
     );
+  });
+
+  test("parses boolean ignoreRigFailures env var (true)", () => {
+    process.env.HANKWEAVE_RUNTIME_IGNORE_RIG_FAILURES = "true";
+
+    const result = loadHankweaveRuntimeEnvVars();
+    expect(result.ignoreRigFailures).toBe(true);
+  });
+
+  test("parses boolean ignoreRigFailures env var (false)", () => {
+    process.env.HANKWEAVE_RUNTIME_IGNORE_RIG_FAILURES = "false";
+
+    const result = loadHankweaveRuntimeEnvVars();
+    expect(result.ignoreRigFailures).toBe(false);
   });
 
   test("handles all supported fields", () => {
@@ -2680,7 +2694,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, validConfig);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     expect(result[0].type).toBe("codon");
@@ -2739,7 +2753,7 @@ describe("loadCodonSequence", () => {
 
     expect(() => loadCodonSequence({ configPath, modelOverride: "sonnet" })).not.toThrow();
 
-    const result = loadCodonSequence({ configPath, modelOverride: "sonnet" });
+    const { codons: result } = loadCodonSequence({ configPath, modelOverride: "sonnet" });
     expect(result).toHaveLength(1);
     const codon = result[0] as import("../../server/types/types.js").Codon;
     expect(codon.model.modelId).toContain("sonnet");
@@ -2779,7 +2793,7 @@ describe("loadCodonSequence", () => {
 
     writeHankConfig(configPath, loopConfig);
 
-    const result = loadCodonSequence({ configPath, modelOverride: "haiku" });
+    const { codons: result } = loadCodonSequence({ configPath, modelOverride: "haiku" });
     expect(result).toHaveLength(1);
     const loop = result[0] as import("../../server/types/types.js").Loop;
     expect(loop.type).toBe("loop");
@@ -2833,7 +2847,7 @@ describe("loadCodonSequence", () => {
 
     writeHankConfig(configPath, bothConfig);
     // This actually doesn't throw - it just uses promptFile
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
     const codon = result[0];
     expect(codon.type).not.toBe("loop");
     if (codon.type !== "loop") {
@@ -2874,7 +2888,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     const codon = result[0];
     if (codon.type !== "loop") {
@@ -2897,7 +2911,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     const codon = result[0];
     if (codon.type !== "loop") {
@@ -2999,7 +3013,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -3045,7 +3059,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     if (result[0].type === "loop") {
@@ -3096,7 +3110,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(3);
     expect(result[0].type).toBe("codon"); // Regular codon (defaults to "codon")
@@ -3131,7 +3145,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     if (result[0].type === "loop") {
@@ -3175,7 +3189,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     if (result[0].type === "loop") {
@@ -3395,7 +3409,7 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     // Should load successfully
     expect(result).toHaveLength(1);
@@ -3430,12 +3444,273 @@ describe("loadCodonSequence", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = loadCodonSequence({ configPath });
+    const { codons: result } = loadCodonSequence({ configPath });
 
     expect(result).toHaveLength(1);
     const codon = result[0];
     if (codon.type !== "loop") {
       expect(codon.rigSetup).toHaveLength(1);
     }
+  });
+});
+
+// -------------
+// ENG-121: Required Environment Variables Tests
+// -------------
+
+import { hankFileSchema, validateRequiredEnv } from "../../server/config";
+
+describe("validateRequiredEnv (ENG-121)", () => {
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedEnv = captureEnv();
+  });
+
+  afterEach(() => {
+    restoreEnv(savedEnv);
+  });
+
+  test("should pass when all required keys are present", () => {
+    process.env.TEST_KEY_1 = "value1";
+    process.env.TEST_KEY_2 = "value2";
+
+    const result = validateRequiredEnv(["TEST_KEY_1", "TEST_KEY_2"]);
+    expect(result.valid).toBe(true);
+    expect(result.missing).toHaveLength(0);
+  });
+
+  test("should fail with missing keys", () => {
+    process.env.TEST_KEY_1 = "value1";
+    delete process.env.TEST_KEY_2;
+
+    const result = validateRequiredEnv(["TEST_KEY_1", "TEST_KEY_2"]);
+    expect(result.valid).toBe(false);
+    expect(result.missing).toContain("TEST_KEY_2");
+  });
+
+  test("should treat empty string as missing", () => {
+    process.env.EMPTY_KEY = "";
+
+    const result = validateRequiredEnv(["EMPTY_KEY"]);
+    expect(result.valid).toBe(false);
+    expect(result.missing).toContain("EMPTY_KEY");
+  });
+
+  test("should pass with empty array", () => {
+    const result = validateRequiredEnv([]);
+    expect(result.valid).toBe(true);
+  });
+
+  test("should pass with undefined", () => {
+    const result = validateRequiredEnv(undefined);
+    expect(result.valid).toBe(true);
+  });
+
+  test("should accept HANKWEAVE_ prefixed env vars", () => {
+    // Required key is "API_KEY", but user sets HANKWEAVE_API_KEY
+    delete process.env.API_KEY;
+    process.env.HANKWEAVE_API_KEY = "prefixed-value";
+
+    const result = validateRequiredEnv(["API_KEY"]);
+    expect(result.valid).toBe(true);
+    expect(result.missing).toHaveLength(0);
+  });
+
+  test("should prefer direct env var over prefixed version", () => {
+    // Both set - direct value should be used (doesn't matter for validation, but documents behavior)
+    process.env.API_KEY = "direct-value";
+    process.env.HANKWEAVE_API_KEY = "prefixed-value";
+
+    const result = validateRequiredEnv(["API_KEY"]);
+    expect(result.valid).toBe(true);
+  });
+
+  test("should fail when neither direct nor prefixed var is set", () => {
+    delete process.env.MISSING_KEY;
+    delete process.env.HANKWEAVE_MISSING_KEY;
+
+    const result = validateRequiredEnv(["MISSING_KEY"]);
+    expect(result.valid).toBe(false);
+    expect(result.missing).toContain("MISSING_KEY");
+  });
+
+  test("should treat empty prefixed var as missing", () => {
+    delete process.env.EMPTY_PREFIXED;
+    process.env.HANKWEAVE_EMPTY_PREFIXED = "";
+
+    const result = validateRequiredEnv(["EMPTY_PREFIXED"]);
+    expect(result.valid).toBe(false);
+    expect(result.missing).toContain("EMPTY_PREFIXED");
+  });
+});
+
+// Minimal valid codon for schema tests (schema requires at least one codon)
+const MINIMAL_CODON = {
+  id: "test",
+  name: "Test",
+  model: "sonnet",
+  continuationMode: "fresh" as const,
+  promptText: "Test",
+};
+
+describe("hankFileSchema with requirements (ENG-121)", () => {
+  test("should accept valid requirements.env", () => {
+    const config = {
+      requirements: {
+        env: ["ANTHROPIC_API_KEY", "CUSTOM_KEY"],
+      },
+      hank: [MINIMAL_CODON],
+    };
+
+    expect(() => hankFileSchema.parse(config)).not.toThrow();
+  });
+
+  test("should reject non-string values in env array", () => {
+    const config = {
+      requirements: {
+        env: ["VALID_KEY", 123],
+      },
+      hank: [MINIMAL_CODON],
+    };
+
+    expect(() => hankFileSchema.parse(config)).toThrow();
+  });
+
+  test("should reject empty string env names after trim", () => {
+    const config = {
+      requirements: {
+        env: ["VALID_KEY", "   "],
+      },
+      hank: [MINIMAL_CODON],
+    };
+
+    expect(() => hankFileSchema.parse(config)).toThrow(/empty/i);
+  });
+
+  test("should trim whitespace from env variable names", () => {
+    // Schema should transform "  API_KEY  " to "API_KEY"
+    const config = {
+      requirements: {
+        env: ["  ANTHROPIC_API_KEY  ", "SOME_KEY"],
+      },
+      hank: [MINIMAL_CODON],
+    };
+
+    const result = hankFileSchema.parse(config);
+    expect(result.requirements?.env?.[0]).toBe("ANTHROPIC_API_KEY");
+  });
+});
+
+// -------------
+// ENG-122: Global System Prompts Tests
+// -------------
+
+import { loadGlobalSystemPrompt } from "../../server/config";
+
+describe("global system prompt schema (ENG-122)", () => {
+  test("should accept globalSystemPromptFile", () => {
+    const config = {
+      globalSystemPromptFile: "./system-prompt.md",
+      hank: [MINIMAL_CODON],
+    };
+    expect(() => hankFileSchema.parse(config)).not.toThrow();
+  });
+
+  test("should accept globalSystemPromptText", () => {
+    const config = {
+      globalSystemPromptText: "You are a helpful assistant.",
+      hank: [MINIMAL_CODON],
+    };
+    expect(() => hankFileSchema.parse(config)).not.toThrow();
+  });
+
+  test("should reject both file and text", () => {
+    const config = {
+      globalSystemPromptFile: "./system-prompt.md",
+      globalSystemPromptText: "Conflicting prompt",
+      hank: [MINIMAL_CODON],
+    };
+    expect(() => hankFileSchema.parse(config)).toThrow(/both/i);
+  });
+
+  test("should accept array of files", () => {
+    const config = {
+      globalSystemPromptFile: ["./part1.md", "./part2.md"],
+      hank: [MINIMAL_CODON],
+    };
+    expect(() => hankFileSchema.parse(config)).not.toThrow();
+  });
+});
+
+describe("loadGlobalSystemPrompt (ENG-122)", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-global-prompt-test");
+
+  beforeEach(() => {
+    cleanup(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    cleanup(tempDir);
+  });
+
+  test("should load from file path", () => {
+    const promptFile = path.join(tempDir, "prompt.md");
+    fs.writeFileSync(promptFile, "Global instructions here.");
+
+    const result = loadGlobalSystemPrompt(
+      { globalSystemPromptFile: "prompt.md", hank: [] },
+      tempDir,
+    );
+
+    expect(result).toBe("Global instructions here.");
+  });
+
+  test("should return text directly", () => {
+    const result = loadGlobalSystemPrompt(
+      { globalSystemPromptText: "Inline prompt", hank: [] },
+      tempDir,
+    );
+
+    expect(result).toBe("Inline prompt");
+  });
+
+  test("should concatenate multiple files", () => {
+    fs.writeFileSync(path.join(tempDir, "p1.md"), "Part 1");
+    fs.writeFileSync(path.join(tempDir, "p2.md"), "Part 2");
+
+    const result = loadGlobalSystemPrompt(
+      { globalSystemPromptFile: ["p1.md", "p2.md"], hank: [] },
+      tempDir,
+    );
+
+    expect(result).toBe("Part 1\n\nPart 2");
+  });
+
+  test("should return null when no global prompt configured", () => {
+    const result = loadGlobalSystemPrompt({ hank: [] }, tempDir);
+    expect(result).toBeNull();
+  });
+
+  test("should throw error when file does not exist", () => {
+    expect(() =>
+      loadGlobalSystemPrompt({ globalSystemPromptFile: "nonexistent.md", hank: [] }, tempDir),
+    ).toThrow(/not found/i);
+  });
+
+  test("should preserve template variables in loaded content", () => {
+    // Template variables like <%EXECUTION_DIR%> should NOT be replaced at load time
+    const promptFile = path.join(tempDir, "templated.md");
+    fs.writeFileSync(promptFile, "Working in <%EXECUTION_DIR%> with data from <%DATA_DIR%>");
+
+    const result = loadGlobalSystemPrompt(
+      { globalSystemPromptFile: "templated.md", hank: [] },
+      tempDir,
+    );
+
+    // Template variables should be intact (replacement happens at runtime)
+    expect(result).toContain("<%EXECUTION_DIR%>");
+    expect(result).toContain("<%DATA_DIR%>");
   });
 });

@@ -146,7 +146,8 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
     for (const file of files) {
       // Normalize path to remove leading "./"
       const normalizedPath = file.path.startsWith("./") ? file.path.slice(2) : file.path;
-      const parts = normalizedPath.split(path.sep);
+      // Glob patterns always use forward slashes, even on Windows
+      const parts = normalizedPath.split("/");
       let currentPath = "";
       let parent: FileNode | null = null;
 
@@ -633,7 +634,10 @@ export async function copyFiles(
 
     // Copy the file or directory recursively using Node.js built-in fs.cp
     // The recursive option handles both files and directories uniformly
-    await fs.promises.cp(sourcePath, destPath, { recursive: true });
+    // verbatimSymlinks: preserves symlinks as symlinks rather than dereferencing them.
+    // This prevents EINVAL errors when copying node_modules/.bin/ which contains
+    // symlinks pointing to parent directories.
+    await fs.promises.cp(sourcePath, destPath, { recursive: true, verbatimSymlinks: true });
   }
 }
 
@@ -807,6 +811,74 @@ export function renameWithRetrySync(
 
   // Should never reach here, but TypeScript doesn't know that
   throw lastError || new Error("Rename failed after retries");
+}
+
+/**
+ * Synchronous directory/file removal with retry logic for Windows file locking issues.
+ *
+ * On Windows, file handles can take time to release after process termination,
+ * causing EBUSY/EPERM errors when trying to delete directories. This function
+ * retries the operation with exponential backoff to handle these transient errors.
+ *
+ * @param targetPath - Path to file or directory to remove
+ * @param options - Removal and retry configuration options
+ * @param options.recursive - Allow recursive removal of directories (default: false)
+ * @param options.force - Continue even if path doesn't exist (default: false)
+ * @param options.maxRetries - Maximum number of retry attempts (default: 5)
+ * @param options.initialDelay - Initial delay in milliseconds (default: 10ms)
+ * @param options.logger - Optional logger for debugging retry attempts
+ * @throws Error if removal fails after all retries or encounters non-retryable error
+ *
+ * @example
+ * ```ts
+ * rmSyncWithRetry(tempDir, { recursive: true, force: true, logger });
+ * ```
+ */
+export function rmSyncWithRetry(
+  targetPath: string,
+  options: {
+    recursive?: boolean;
+    force?: boolean;
+    maxRetries?: number;
+    initialDelay?: number;
+    logger?: Logger;
+  } = {},
+): void {
+  const { recursive = false, force = false, maxRetries = 5, initialDelay = 10, logger } = options;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      fs.rmSync(targetPath, { recursive, force });
+      return; // Success!
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      lastError = err;
+
+      // Only retry on file locking errors
+      if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "EACCES") {
+        if (attempt < maxRetries - 1) {
+          const delay = initialDelay * 2 ** attempt;
+          logger?.log(
+            `Directory locked, retrying removal in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+            "debug",
+          );
+          // Synchronous sleep using busy-wait (not ideal but necessary for sync context)
+          const start = Date.now();
+          while (Date.now() - start < delay) {
+            // Busy wait
+          }
+          continue;
+        }
+      }
+
+      // Non-retryable error or max retries exceeded
+      throw error;
+    }
+  }
+
+  // Should never reach here, but TypeScript doesn't know that
+  throw lastError || new Error("Remove failed after retries");
 }
 
 // -------------

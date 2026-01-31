@@ -389,7 +389,7 @@ describe("CheckpointGit", () => {
     expect(checkpoints[3].branch).toBe("main");
     expect(checkpoints[4].message).toBe("Initial checkpoint setup");
     expect(checkpoints[4].branch).toBe("main");
-  });
+  }, 15000); // 15 seconds timeout for git operations + sleeps
 
   test("switchToBranch throws when not initialized", async () => {
     await expect(checkpointGit.switchToBranch("some-branch")).rejects.toThrow(

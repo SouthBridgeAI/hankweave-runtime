@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.1.44",
+  "version": "0.1.48",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -76,6 +76,7 @@
     "@ai-sdk/groq": "^2.0.11",
     "@ai-sdk/openai": "^2.0.18",
     "@anthropic-ai/claude-agent-sdk": "^0.1.70",
+    "@openai/codex-sdk": "^0.87.0",
     "ai": "^5.0.15",
     "crossws": "^0.4.1",
     "eta": "^3.5.0",

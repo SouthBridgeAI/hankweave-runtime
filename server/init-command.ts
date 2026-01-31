@@ -39,6 +39,19 @@ const templates: Record<string, string> = {
           "copy": ["analysis-gemini.md"]
         }
       ]
+    },
+    {
+      "id": "analyze-codex",
+      "name": "Analyze Project (Codex)",
+      "model": "gpt-5.1-codex-max",
+      "continuationMode": "fresh",
+      "promptFile": "./prompts/analyze-codex.md",
+      "checkpointedFiles": ["analysis-codex.md"],
+      "outputFiles": [
+        {
+          "copy": ["analysis-codex.md"]
+        }
+      ]
     }
   ]
 }`,
@@ -62,6 +75,16 @@ Your analysis should include:
 1. Very brief overview of the files in that directory
 
 Please create your analysis in a file called \`analysis-gemini.md\` in the execution directory.`,
+
+  "prompts/analyze-codex.md": `# Project Analysis (Codex)
+
+Please analyze the files in the \`data\` directory located in the current working directory (do not go to other directories) and create a comprehensive analysis report.
+
+Your analysis should include:
+
+1. Very brief overview of the files in that directory
+
+**Important:** Please create your analysis in a file called \`analysis-codex.md\` in the execution directory using the \`Write\` tool. Do NOT use PowerShell commands (like Set-Content) on Windows.`,
 
   "README.md": `# Hank
 
@@ -168,6 +191,7 @@ export async function initProject(targetDir: string): Promise<void> {
   console.log("  - hank.json");
   console.log("  - prompts/analyze-haiku.md");
   console.log("  - prompts/analyze-gemini.md");
+  console.log("  - prompts/analyze-codex.md");
   console.log("  - data/sample1.txt");
   console.log("  - data/sample2.txt");
   console.log("  - data/notes.txt");

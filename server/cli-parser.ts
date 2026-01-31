@@ -33,6 +33,8 @@ const BOOLEAN_FLAGS = new Set([
   "-h",
   "--version",
   "--force",
+  "--ignore-rig-failures",
+  "--attach",
   "--ignore-data-mismatch",
 ]);
 
@@ -93,6 +95,8 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   help?: boolean; // --help, -h
   showVersion?: boolean; // --version, -V (renamed to avoid conflict with HankweaveConfig.version)
   copy?: boolean; // --copy
+  ignoreRigFailures?: boolean; // --ignore-rig-failures
+  attach?: boolean; // --attach
   ignoreDataMismatch?: boolean; // --ignore-data-mismatch
 }
 
@@ -206,6 +210,11 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     result.autostart = false;
   }
 
+  // Parse ignoreRigFailures (only set when flag is present)
+  if (args.includes("--ignore-rig-failures")) {
+    result.ignoreRigFailures = true;
+  }
+
   // Parse proxy flags (proxy is OFF by default)
   if (args.includes("--proxy")) {
     result.withoutProxy = false; // Enable proxy
@@ -238,6 +247,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.help = args.includes("--help") || args.includes("-h");
   result.showVersion = args.includes("--version");
   result.copy = args.includes("--copy");
+  result.attach = args.includes("--attach");
   result.ignoreDataMismatch = args.includes("--ignore-data-mismatch");
 
   return result;

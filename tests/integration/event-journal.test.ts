@@ -97,7 +97,7 @@ describe("EventJournal with FileEventStorage", () => {
     const { events, totalEvents } = await journal.getMostRecentEvents(1);
     expect(totalEvents).toBe(expectedTotalEvents);
     expect(events[0].id).toBe(lastEventId);
-  });
+  }, 10000);
 
   it("streams the full log", async () => {
     const stream = await journal.streamAllEvents();
@@ -130,5 +130,5 @@ describe("EventJournal with FileEventStorage", () => {
     expect(await computeFileHash(destinationPath)).toBe(
       await computeFileHash(eventsFilePath)
     );
-  });
+  }, 10000);
 });

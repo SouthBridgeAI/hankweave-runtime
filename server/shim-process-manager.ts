@@ -2,7 +2,9 @@ import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
+import { ensureCodexAvailable } from "./codex-runtime-extractor.js";
 import { TIMEOUTS } from "./config.js";
+import { PromptBuilder } from "./prompt-builder.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { type Codon, isContextExceeded, type ShimSelfTestResult } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
@@ -16,16 +18,22 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
   private process: ChildProcess | undefined;
   private logStream: fs.WriteStream | undefined;
   private killed = false;
-  /** Frontmatter metadata from the prompt file (if any) */
-  public promptFrontmatter?: import("./prompt-frontmatter.js").PromptFrontmatter;
+  private promptBuilder: PromptBuilder;
 
   constructor(
     private executionPath: string,
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
+    private globalSystemPrompt?: string | null,
   ) {
     super();
+    this.promptBuilder = new PromptBuilder(executionPath, logger, globalSystemPrompt);
+  }
+
+  /** Frontmatter metadata from the prompt file (if any) */
+  get promptFrontmatter(): import("./prompt-frontmatter.js").PromptFrontmatter | undefined {
+    return this.promptBuilder.getLastFrontmatter();
   }
 
   /**
@@ -90,6 +98,21 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     if (codon.env) {
       this.logger.log("Applying codon-specific environment variables...");
       Object.assign(env, codon.env);
+    }
+
+    // For OpenAI/Codex models, ensure codex binary is available
+    // and set CODEX_PATH_OVERRIDE to point to it
+    if (codon.model.providerId.toLowerCase() === "openai") {
+      try {
+        this.logger.log("Ensuring codex binary is available for OpenAI model...");
+        const codexPath = await ensureCodexAvailable();
+        env.CODEX_PATH_OVERRIDE = codexPath;
+        this.logger.log(`Set CODEX_PATH_OVERRIDE to: ${codexPath}`);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.logger.log(`Failed to ensure codex binary: ${errorMsg}`, "error");
+        throw new Error(`Cannot spawn codex shim: ${errorMsg}`);
+      }
     }
 
     // Combine shim command with shim flags
@@ -162,55 +185,20 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     }
 
     // Handle system prompt if provided
-    const systemPrompt = this.buildSystemPrompt(codon);
+    const systemPrompt = this.promptBuilder.buildSystemPrompt(codon);
     if (systemPrompt) {
       args.push("--append-system-prompt", escapeShellArg(systemPrompt));
       this.logger.log(`Added system prompt to shim (${systemPrompt.length} chars)`);
       this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
 
-    // Generate shim debug directory path based on codon ID
-    // Replace # with - for safe filesystem names
-    const shimDebugDir = path.join(
-      this.executionPath,
-      ".hankweave/logs/shim-debug",
-      codon.id.replace(/#/g, "-"),
-    );
+    // Use shared shim debug directory for all codons
+    // Sessions are stored by UUID, preventing collisions
+    const shimDebugDir = path.join(this.executionPath, ".hankweave/logs/shim-debug");
     args.push("--debug-dir", shimDebugDir);
     this.logger.log(`Using shim debug directory: ${shimDebugDir}`);
 
     return args;
-  }
-
-  /**
-   * Build system prompt from file or text.
-   */
-  private buildSystemPrompt(codon: Codon): string | null {
-    let content: string | null = null;
-
-    if (codon.appendSystemPromptFile) {
-      const files = Array.isArray(codon.appendSystemPromptFile)
-        ? codon.appendSystemPromptFile
-        : [codon.appendSystemPromptFile];
-
-      const parts: string[] = [];
-      for (const file of files) {
-        parts.push(fs.readFileSync(file, "utf-8"));
-      }
-      content = parts.join("\n\n");
-    } else if (codon.appendSystemPromptText) {
-      content = codon.appendSystemPromptText;
-    }
-
-    if (content) {
-      // Replace template variables
-      return content
-        .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
-        .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-        .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
-    }
-
-    return null;
   }
 
   /**
@@ -222,39 +210,8 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
       throw new Error("Process stdin not available");
     }
 
-    const { parsePromptFrontmatter } = await import("./prompt-frontmatter.js");
-    let promptContent: string;
-    let firstFileFrontmatter: import("./prompt-frontmatter.js").PromptFrontmatter | undefined;
-
-    if (codon.promptFile) {
-      const files = Array.isArray(codon.promptFile) ? codon.promptFile : [codon.promptFile];
-      const parts: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const rawContent = fs.readFileSync(files[i], "utf-8");
-        const parsed = parsePromptFrontmatter(rawContent);
-        parts.push(parsed.content);
-        // Only use frontmatter from first file
-        if (i === 0 && parsed.hasFrontmatter) {
-          firstFileFrontmatter = parsed.frontmatter;
-        }
-      }
-      promptContent = parts.join("\n\n");
-    } else if (codon.promptText) {
-      promptContent = codon.promptText;
-    } else {
-      throw new Error("No prompt file or text provided");
-    }
-
-    // Store frontmatter for emission
-    if (firstFileFrontmatter) {
-      this.promptFrontmatter = firstFileFrontmatter;
-      this.logger.log(`Prompt frontmatter: ${JSON.stringify(firstFileFrontmatter)}`);
-    }
-
-    const processedContent = promptContent
-      .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
-      .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-      .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
+    // Build prompt content using prompt builder (handles frontmatter parsing and template replacement)
+    const { content: processedContent } = this.promptBuilder.buildPromptContent(codon);
 
     this.process.stdin.write(processedContent);
     this.process.stdin.end();
@@ -398,10 +355,11 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
    * Executes the shim with --self-test flag and returns the results.
    *
    * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.js"])
+   * @param providerId - Optional provider ID (e.g., "openai", "google") to set up provider-specific requirements
    * @returns Promise resolving to self-test results
    * @throws Error if self-test execution fails or returns invalid JSON
    */
-  async runSelfTest(command: string[]): Promise<ShimSelfTestResult> {
+  async runSelfTest(command: string[], providerId?: string): Promise<ShimSelfTestResult> {
     this.logger.log("Running shim self-test...");
 
     const [bin, ...binArgs] = command;
@@ -410,11 +368,27 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     const fullCommand = `${bin} ${args.join(" ")}`;
     this.logger.log(`Executing self-test: ${fullCommand}`);
 
+    // Set up environment variables
+    const env = { ...process.env };
+
+    // For OpenAI models, ensure codex binary is available
+    if (providerId?.toLowerCase() === "openai") {
+      try {
+        const codexPath = await ensureCodexAvailable();
+        env.CODEX_PATH_OVERRIDE = codexPath;
+        this.logger.log(`Set CODEX_PATH_OVERRIDE for self-test: ${codexPath}`);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.logger.log(`Failed to ensure codex binary for self-test: ${errorMsg}`, "error");
+        // Continue with self-test anyway - it should fail gracefully with a clear message
+      }
+    }
+
     return new Promise((resolve, reject) => {
       const childProcess = spawn(bin, args, {
         cwd: this.executionPath,
         stdio: ["ignore", "pipe", "pipe"], // No stdin, capture stdout/stderr
-        env: { ...process.env }, // Use current environment (includes API keys)
+        env,
       });
 
       let stdout = "";
@@ -425,14 +399,39 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
       });
 
       childProcess.stderr?.on("data", (data) => {
-        stderr += data.toString();
-        this.logger.log(`Self-test stderr: ${data.toString()}`, "debug");
+        const chunk = data.toString();
+        stderr += chunk;
+        this.logger.log(`Self-test stderr: ${chunk}`, "debug");
       });
 
-      const timeout = setTimeout(() => {
+      const timeout = setTimeout(async () => {
         childProcess.kill("SIGTERM");
-        reject(new Error("Self-test timed out after 30 seconds"));
-      }, 30000);
+
+        // Wait for process to terminate and release file handles (Windows)
+        // This mirrors the grace period pattern in the stop() method
+        await new Promise<void>((resolve) => {
+          const checkInterval = setInterval(() => {
+            if (childProcess.killed || childProcess.exitCode !== null) {
+              clearInterval(checkInterval);
+              resolve();
+            }
+          }, TIMEOUTS.LOG_PARSER_DELAY_MS);
+
+          // Force kill after grace period if still running
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            if (!childProcess.killed && childProcess.exitCode === null) {
+              this.logger.log("Force killing self-test process with SIGKILL", "debug");
+              childProcess.kill("SIGKILL");
+            }
+            resolve();
+          }, TIMEOUTS.PROCESS_KILL_GRACE_MS);
+        });
+
+        reject(
+          new Error(`Self-test timed out after ${TIMEOUTS.SELF_TEST_TIMEOUT_MS / 1000} seconds`),
+        );
+      }, TIMEOUTS.SELF_TEST_TIMEOUT_MS);
 
       childProcess.on("close", (code) => {
         clearTimeout(timeout);

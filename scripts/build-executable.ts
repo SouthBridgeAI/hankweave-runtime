@@ -23,9 +23,11 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getCodexPlatform } from "../server/codex-runtime-extractor.js";
 
 // Configuration
 const SDK_PATH = "node_modules/@anthropic-ai/claude-agent-sdk";
+const CODEX_SDK_PATH = "node_modules/@openai/codex-sdk";
 const ENTRY_POINT = "server/index.ts";
 const OUTPUT_DIR = "releases";
 
@@ -94,7 +96,7 @@ async function main() {
 
   // Determine output filename (in releases directory)
   const isWindows = target?.startsWith("windows");
-  const outputFileName = isWindows ? `${outputBase}.exe` : outputBase;
+  const outputFileName = isWindows && !outputBase.endsWith(".exe") ? `${outputBase}.exe` : outputBase;
   const outputFile = path.join(OUTPUT_DIR, outputFileName);
 
   // Prepare cli.bundle path for cleanup in finally block
@@ -115,17 +117,25 @@ async function main() {
     console.log(`   Target: ${buildTarget}`);
     console.log(`   Date: ${buildDate}\n`);
 
-    // Verify SDK exists
+    // Verify SDKs exist
     if (!fs.existsSync(SDK_PATH)) {
       console.error(`❌ Claude Agent SDK not found at ${SDK_PATH}`);
       console.error("   Run 'bun install' first.");
       process.exit(1);
     }
 
-    // Determine ripgrep platform
+    if (!fs.existsSync(CODEX_SDK_PATH)) {
+      console.error(`❌ Codex SDK not found at ${CODEX_SDK_PATH}`);
+      console.error("   Run 'bun install' first.");
+      process.exit(1);
+    }
+
+    // Determine ripgrep and codex platforms
     const ripgrepPlatform = getRipgrepPlatform(target);
+    const codexPlatform = getCodexPlatform(target);
     console.log(`📦 Target: ${target || "current platform"}`);
     console.log(`📦 Ripgrep platform: ${ripgrepPlatform}`);
+    console.log(`📦 Codex platform: ${codexPlatform}`);
 
     // Copy cli.js to cli.bundle to avoid Bun treating it as an entry point
     // Bun has special handling for .js files that prevents them from being embedded properly
@@ -134,6 +144,8 @@ async function main() {
     console.log(`   ✓ Created temporary cli.bundle`);
 
     // Build the list of files to embed (use relative paths - they work better with embedding)
+    const codexBinaryName = isWindows ? "codex.exe" : "codex";
+
     const filesToEmbed = [
       // Claude Agent SDK files
       // Note: We embed cli.bundle instead of cli.js to avoid Bun's special .js handling
@@ -143,8 +155,11 @@ async function main() {
       path.join(SDK_PATH, "tree-sitter-bash.wasm"),
       path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, ripgrepPlatform === "x64-win32" ? "rg.exe" : "rg"),
       path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, "ripgrep.node"),
+      // Codex SDK binary (platform-specific)
+      path.join(CODEX_SDK_PATH, "vendor", codexPlatform, "codex", codexBinaryName),
       // Shim files (use .js extension for embedding compatibility)
       path.join("shims", "gemini", "index.js"),
+      path.join("shims", "codex", "index.js"),
     ];
 
     // Verify all files exist

@@ -934,4 +934,75 @@ describe("parseCliArgs", () => {
       expect(() => parseCliArgs(args)).toThrow("Flag '--headless' does not take a value.");
     });
   });
+
+  // ENG-119: --ignore-rig-failures flag tests
+  describe("--ignore-rig-failures flag (ENG-119)", () => {
+    test("should parse --ignore-rig-failures flag", () => {
+      const args = ["--ignore-rig-failures", "hank.json", "./data"];
+      const result = parseCliArgs(args);
+      expect(result.ignoreRigFailures).toBe(true);
+    });
+
+    test("should default ignoreRigFailures to false/undefined", () => {
+      const args = ["hank.json", "./data"];
+      const result = parseCliArgs(args);
+      expect(result.ignoreRigFailures).toBeFalsy();
+    });
+
+    test("should work with other flags", () => {
+      const args = ["--ignore-rig-failures", "--port", "8080", "hank.json"];
+      const result = parseCliArgs(args);
+      expect(result.ignoreRigFailures).toBe(true);
+      expect(result.port).toBe(8080);
+    });
+
+    // [P2] Avoid overriding config with false when flag absent
+    // When --ignore-rig-failures is not provided, the property should not be set
+    // (similar to --no-autostart behavior). This allows hankweave.json/env values
+    // to take effect, since CLI args are the highest-precedence layer.
+    test("should not set ignoreRigFailures property when flag is absent", () => {
+      const args = ["hank.json", "./data"];
+      const result = parseCliArgs(args);
+      // The property should not exist in the result object
+      expect("ignoreRigFailures" in result).toBe(false);
+      expect(result.ignoreRigFailures).toBeUndefined();
+    });
+
+    test("should not set ignoreRigFailures even with other flags present", () => {
+      const args = ["--port", "8080", "--model", "opus", "hank.json"];
+      const result = parseCliArgs(args);
+      // The property should not exist in the result object
+      expect("ignoreRigFailures" in result).toBe(false);
+      expect(result.ignoreRigFailures).toBeUndefined();
+    });
+  });
+
+  // ENG-103: --attach flag tests
+  describe("--attach flag (ENG-103)", () => {
+    test("should parse --attach flag", () => {
+      const args = ["--attach"];
+      const result = parseCliArgs(args);
+      expect(result.attach).toBe(true);
+    });
+
+    test("should parse --attach with --port", () => {
+      const args = ["--attach", "--port", "9999"];
+      const result = parseCliArgs(args);
+      expect(result.attach).toBe(true);
+      expect(result.port).toBe(9999);
+    });
+
+    test("should parse --attach with --execution", () => {
+      const args = ["--attach", "--execution", "/path/to/exec"];
+      const result = parseCliArgs(args);
+      expect(result.attach).toBe(true);
+      expect(result.executionPath).toBe("/path/to/exec");
+    });
+
+    test("should default attach to false/undefined", () => {
+      const args = ["hank.json", "./data"];
+      const result = parseCliArgs(args);
+      expect(result.attach).toBeFalsy();
+    });
+  });
 });

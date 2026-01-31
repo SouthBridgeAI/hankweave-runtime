@@ -6,6 +6,10 @@ inputs:
     description: 'Install gemini-cli globally'
     required: false
     default: 'true'
+  codex-auth-json:
+    description: 'Codex auth.json content for authentication (codex binary is bundled with @openai/codex-sdk)'
+    required: false
+    default: ''
   registry-url:
     description: 'Optional registry URL for npm publishing'
     required: false
@@ -33,3 +37,21 @@ runs:
       if: inputs.install-gemini == 'true'
       shell: bash
       run: npm install -g @google/gemini-cli
+
+    - name: Setup Codex authentication
+      if: inputs.codex-auth-json != ''
+      shell: bash
+      run: |
+        # Create ~/.codex directory
+        mkdir -p ~/.codex
+
+        # Create auth.json from input (codex binary is bundled with @openai/codex-sdk package)
+        echo '${{ inputs.codex-auth-json }}' > ~/.codex/auth.json
+
+        # Verify file was created (for debugging)
+        if [ -f ~/.codex/auth.json ]; then
+          echo "✓ auth.json created successfully"
+        else
+          echo "✗ Failed to create auth.json"
+          exit 1
+        fi

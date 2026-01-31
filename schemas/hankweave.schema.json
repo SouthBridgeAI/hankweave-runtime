@@ -55,6 +55,10 @@
           "maximum": 255,
           "description": "Idle timeout for WebSocket and proxy servers in seconds (0-255). This is the maximum amount of time a connection is allowed to be idle before the server closes it. A connection is idling if there is no data sent or received."
         },
+        "ignoreRigFailures": {
+          "type": "boolean",
+          "description": "If true, ignore all rig setup failures (useful for resume workflows)"
+        },
         "sentinel": {
           "type": "object",
           "properties": {

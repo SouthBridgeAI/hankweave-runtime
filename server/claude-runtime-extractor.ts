@@ -18,10 +18,15 @@
  */
 
 import { execSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  needsExtraction as baseNeedsExtraction,
+  extractFiles,
+  type FileToExtract,
+  getComponentExtractionDir,
+} from "./runtime-extractor-base.js";
 
 // SDK version for directory naming
 const SDK_VERSION = "0.1.70";
@@ -51,8 +56,7 @@ function getPlatformKey(): string {
  * Uses ~/.hankweave/claude-sdk/<version>/ by default.
  */
 export function getExtractionDir(): string {
-  const cacheDir = process.env.HANKWEAVE_CACHE_DIR || path.join(os.homedir(), ".hankweave");
-  return path.join(cacheDir, "claude-sdk", SDK_VERSION);
+  return getComponentExtractionDir("claude-sdk", SDK_VERSION);
 }
 
 /**
@@ -80,82 +84,8 @@ export async function hasEmbeddedFiles(): Promise<boolean> {
  * Returns true if the files don't exist or are outdated.
  */
 export function needsExtraction(): boolean {
-  const extractDir = getExtractionDir();
-  const cliPath = getExtractedCliPath();
-  const markerPath = path.join(extractDir, ".extraction-complete");
-
-  // Check if marker file exists (indicates successful extraction)
-  if (!fs.existsSync(markerPath)) {
-    return true;
-  }
-
-  // Check if cli.js exists
-  if (!fs.existsSync(cliPath)) {
-    return true;
-  }
-
-  // Check marker content matches our version
-  try {
-    const marker = fs.readFileSync(markerPath, "utf-8").trim();
-    if (marker !== SDK_VERSION) {
-      return true;
-    }
-  } catch {
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Compute a hash of the embedded files for verification.
- */
-function computeFileHash(content: Buffer | string): string {
-  return createHash("md5").update(content).digest("hex").slice(0, 12);
-}
-
-/**
- * Read an embedded file from Bun.embeddedFiles.
- *
- * Throws if the file doesn't exist or can't be read.
- */
-async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
-  // Normalize to forward slashes
-  const normalizedPath = embeddedPath.replace(/\\/g, "/");
-  const basename = path.basename(normalizedPath);
-  // Also check for basename with trailing dot (Bun adds this for extensionless files)
-  const basenameWithDot = `${basename}.`;
-
-  // Try to find in Bun.embeddedFiles
-  const embeddedFiles = (
-    globalThis as {
-      Bun?: { embeddedFiles?: Iterable<Blob & { name: string }> };
-    }
-  ).Bun?.embeddedFiles;
-  if (embeddedFiles) {
-    for (const file of embeddedFiles) {
-      // The file.name might be the full path or just the basename
-      // Bun sometimes strips paths when embedding
-      // Bun also adds a trailing dot for extensionless files with --asset-naming [name].[ext]
-      const fileBasename = path.basename(file.name);
-      if (
-        file.name === normalizedPath ||
-        file.name === embeddedPath ||
-        file.name === basename ||
-        file.name === basenameWithDot ||
-        fileBasename === basename ||
-        fileBasename === basenameWithDot
-      ) {
-        const buffer = await file.arrayBuffer();
-        if (buffer.byteLength > 0) {
-          return buffer;
-        }
-      }
-    }
-  }
-
-  // File not found in embedded files
-  throw new Error(`Embedded file not found: ${embeddedPath}`);
+  const extractionDir = getExtractionDir();
+  return baseNeedsExtraction(extractionDir, SDK_VERSION, ".extraction-complete", ["cli.js"]);
 }
 
 /**
@@ -175,111 +105,40 @@ async function readEmbeddedFile(embeddedPath: string): Promise<ArrayBuffer> {
  * - vendor/ripgrep/<platform>/ - Platform-specific ripgrep binaries
  */
 export async function extractClaudeSdkFiles(): Promise<string> {
-  const extractDir = getExtractionDir();
-  const cliPath = getExtractedCliPath();
-  const markerPath = path.join(extractDir, ".extraction-complete");
+  const platformKey = getPlatformKey();
+  const rgBinaryName = platformKey === "x64-win32" ? "rg.exe" : "rg";
 
-  console.log(`📦 Extracting Claude SDK files to: ${extractDir}`);
-
-  // Debug: List all embedded files to see what's available
-  // Bun.embeddedFiles is available in compiled executables
-  const embeddedFiles = (
-    globalThis as {
-      Bun?: { embeddedFiles?: Iterable<Blob & { name: string }> };
-    }
-  ).Bun?.embeddedFiles;
-  if (embeddedFiles) {
-    console.log("📋 Embedded files available:");
-    for (const file of embeddedFiles) {
-      console.log(`   - ${file.name} (${file.size} bytes)`);
-    }
-  }
-
-  // Create extraction directory
-  try {
-    fs.mkdirSync(extractDir, { recursive: true });
-  } catch (error) {
-    console.error(`❌ Failed to create extraction directory: ${(error as Error).message}`);
-    throw error;
-  }
-
-  // Files to extract (paths must match what was embedded during build)
+  // Build file extraction configuration
   // Note: WASM files are optional - they're for syntax highlighting and SVG rendering
-  // The core Claude Code CLI functionality works without them
   // Note: cli.js is embedded as cli.bundle to avoid Bun's special .js handling
-  const filesToExtract = [
-    { embeddedName: "cli.bundle", outputName: "cli.js", required: true },
-    { embeddedName: "resvg.wasm", outputName: "resvg.wasm", required: false }, // SVG rendering
-    { embeddedName: "tree-sitter.wasm", outputName: "tree-sitter.wasm", required: false }, // Syntax parsing
-    { embeddedName: "tree-sitter-bash.wasm", outputName: "tree-sitter-bash.wasm", required: false }, // Bash syntax
+  const filesToExtract: FileToExtract[] = [
+    { embeddedPath: "cli.bundle", outputPath: "cli.js", required: true },
+    { embeddedPath: "resvg.wasm", outputPath: "resvg.wasm", required: false },
+    { embeddedPath: "tree-sitter.wasm", outputPath: "tree-sitter.wasm", required: false },
+    { embeddedPath: "tree-sitter-bash.wasm", outputPath: "tree-sitter-bash.wasm", required: false },
+    {
+      embeddedPath: `vendor/ripgrep/${platformKey}/${rgBinaryName}`,
+      outputPath: `vendor/ripgrep/${platformKey}/${rgBinaryName}`,
+      required: false,
+      makeExecutable: true,
+    },
+    {
+      embeddedPath: `vendor/ripgrep/${platformKey}/ripgrep.node`,
+      outputPath: `vendor/ripgrep/${platformKey}/ripgrep.node`,
+      required: false,
+    },
   ];
 
-  // Extract main files
-  for (const file of filesToExtract) {
-    // Path matches what was embedded: node_modules/@anthropic-ai/claude-agent-sdk/<file>
-    const embeddedPath = `${EMBEDDED_SDK_PATH}/${file.embeddedName}`;
-    const destPath = path.join(extractDir, file.outputName);
+  // Use base extraction engine
+  await extractFiles({
+    componentName: "claude-sdk",
+    version: SDK_VERSION,
+    embeddedBasePath: EMBEDDED_SDK_PATH,
+    filesToExtract,
+    markerFileName: ".extraction-complete",
+  });
 
-    try {
-      const content = await readEmbeddedFile(embeddedPath);
-      await Bun.write(destPath, content);
-      console.log(`  ✓ Extracted ${file.outputName} (${computeFileHash(Buffer.from(content))})`);
-    } catch (error) {
-      if (file.required) {
-        throw new Error(`Failed to extract ${file.outputName}: ${(error as Error).message}`);
-      }
-      console.warn(`  ⚠ Could not extract ${file.outputName}: ${(error as Error).message}`);
-    }
-  }
-
-  // Extract ripgrep binaries for current platform
-  const platformKey = getPlatformKey();
-  const ripgrepDestDir = path.join(extractDir, "vendor/ripgrep", platformKey);
-
-  try {
-    fs.mkdirSync(ripgrepDestDir, { recursive: true });
-
-    // Determine ripgrep binary name based on platform
-    const rgBinaryName = platformKey === "x64-win32" ? "rg.exe" : "rg";
-    const rgNodeName = "ripgrep.node";
-
-    // Extract rg binary
-    // Note: We pass the full path but readEmbeddedFile will also check by basename
-    const rgEmbeddedPath = `${EMBEDDED_SDK_PATH}/vendor/ripgrep/${platformKey}/${rgBinaryName}`;
-    const rgDestPath = path.join(ripgrepDestDir, rgBinaryName);
-    try {
-      const rgContent = await readEmbeddedFile(rgEmbeddedPath);
-      await Bun.write(rgDestPath, rgContent);
-
-      // Make rg executable on Unix systems
-      if (platformKey !== "x64-win32") {
-        fs.chmodSync(rgDestPath, 0o755);
-      }
-      console.log(`  ✓ Extracted vendor/ripgrep/${platformKey}/${rgBinaryName}`);
-    } catch (error) {
-      console.warn(`  ⚠ Could not extract ${rgBinaryName}: ${(error as Error).message}`);
-    }
-
-    // Extract ripgrep.node
-    const nodeEmbeddedPath = `${EMBEDDED_SDK_PATH}/vendor/ripgrep/${platformKey}/${rgNodeName}`;
-    const nodeDestPath = path.join(ripgrepDestDir, rgNodeName);
-    try {
-      const nodeContent = await readEmbeddedFile(nodeEmbeddedPath);
-      await Bun.write(nodeDestPath, nodeContent);
-      console.log(`  ✓ Extracted vendor/ripgrep/${platformKey}/${rgNodeName}`);
-    } catch (error) {
-      console.warn(`  ⚠ Could not extract ${rgNodeName}: ${(error as Error).message}`);
-    }
-  } catch (error) {
-    console.warn(`  ⚠ Could not setup ripgrep directory: ${(error as Error).message}`);
-    console.warn("    (ripgrep functionality may be unavailable)");
-  }
-
-  // Write extraction marker
-  fs.writeFileSync(markerPath, SDK_VERSION);
-  console.log(`✅ Claude SDK extraction complete`);
-
-  return cliPath;
+  return getExtractedCliPath();
 }
 
 /**

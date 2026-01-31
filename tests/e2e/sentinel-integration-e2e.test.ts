@@ -159,7 +159,8 @@ describe("Sentinel Integration: With Sentinels", () => {
       fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
     }
 
-    // Start server
+    // Start server with noAutostart so we can connect before codon starts
+    // This ensures we capture sentinel.loaded events
     const serverConfig: TestServerConfig = {
       testRunDir: TEST_RUN_DIR,
       configFile: codonConfigPath,
@@ -169,20 +170,21 @@ describe("Sentinel Integration: With Sentinels", () => {
       cwd: testDir,
       useDataFlag: true,
       startNew: true,
+      noAutostart: true, // Don't auto-start - we'll trigger manually after connecting
     };
 
-    console.log(`${colors.blue}Starting server with sentinels...${colors.reset}`);
+    console.log(`${colors.blue}Starting server with sentinels (noAutostart)...${colors.reset}`);
     serverProcess = startServer(serverConfig);
 
-    // Wait for server to start
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Connect client
-    console.log(`${colors.blue}Connecting client...${colors.reset}`);
+    // Connect client with retry logic - connect as early as possible
+    console.log(`${colors.blue}Connecting client (with retry)...${colors.reset}`);
     client = new TestWSClient();
-    await client.connect(TEST_PORT, {
+    await client.connectWithRetry(TEST_PORT, {
       performHandshake: true,
       mode: ClientMode.READANDWRITE,
+      maxRetries: 30,
+      retryDelay: 500,
+      timeout: 10000,
     });
 
     // Get server ready event
@@ -192,6 +194,14 @@ describe("Sentinel Integration: With Sentinels", () => {
       console.log(`${colors.green}✓ Server ready at ${executionPath}${colors.reset}`);
     }
 
+    // Now trigger the first codon to start - client is connected and will capture all events
+    console.log(`${colors.blue}Triggering codon start...${colors.reset}`);
+    const { generateId } = await import("../../server/utils.js");
+    client.sendCommand({
+      id: generateId(),
+      type: "codon.next",
+    });
+
     // Wait for codon to complete
     console.log(`${colors.blue}Waiting for codon to complete...${colors.reset}`);
     const codonComplete = await client.waitForEvent("codon.completed", 120000);
@@ -199,12 +209,21 @@ describe("Sentinel Integration: With Sentinels", () => {
     expect((codonComplete as CodonCompletedEvent).data.success).toBe(true);
     console.log(`${colors.green}✓ Codon completed${colors.reset}`);
 
-    // Wait for sentinel work to complete and state to be persisted
-    // Need to wait for:
-    // 1. Sentinel queues to drain
-    // 2. Unload events to fire
-    // 3. State to be written to disk
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    // Wait for sentinel work to complete (queue draining, outputs written)
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // Request server shutdown to trigger sentinel unload events
+    // This cleanly unloads sentinels before server stops
+    console.log(`${colors.blue}Requesting server shutdown...${colors.reset}`);
+    client.sendCommand({
+      id: generateId(),
+      type: "server.shutdown",
+      data: { reason: "test-complete" },
+    });
+
+    // Wait for server to process shutdown and emit unload events
+    // The unload events should be emitted before the connection closes
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
     events = client.getEvents();
   });
