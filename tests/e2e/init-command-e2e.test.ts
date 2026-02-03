@@ -5,6 +5,7 @@ import { once } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ServerReadyEvent } from "../../server/schemas/event-schemas.js";
 import type { HankweaveState } from "../../server/types/state-types.js";
 import {
   type BinarySetup,
@@ -308,20 +309,21 @@ describe("init command e2e", () => {
     const server = await launchHankweave(serverOptions);
 
     try {
+      const readyEvent = (await server.waitForEvent("server.ready")) as ServerReadyEvent;
+      const agentRootPath = readyEvent.data.agentRootPath;
+
       // Wait for the run to complete
       await server.waitForRunToComplete(300000);
 
-      // Verify that the analysis files were created in hankweave-results
-      const resultsDir = path.join(INIT_TEST_DIR, "hankweave-results");
-      expect(fs.existsSync(resultsDir)).toBe(true);
-
-      const analysisHaikuFile = path.join(resultsDir, "analysis-haiku.md");
+      // Verify that the analysis files were created in the agent workspace
+      // With the new default behavior, outputs stay in agentRoot/ instead of being copied to hankweave-results/
+      const analysisHaikuFile = path.join(agentRootPath, "analysis-haiku.md");
       expect(fs.existsSync(analysisHaikuFile)).toBe(true);
 
-      const analysisGeminiFile = path.join(resultsDir, "analysis-gemini.md");
+      const analysisGeminiFile = path.join(agentRootPath, "analysis-gemini.md");
       expect(fs.existsSync(analysisGeminiFile)).toBe(true);
 
-      const analysisCodexFile = path.join(resultsDir, "analysis-codex.md");
+      const analysisCodexFile = path.join(agentRootPath, "analysis-codex.md");
 
       // On Windows, PowerShell write commands may be blocked by test policy
       // Verify codon completion instead of file output as a fallback

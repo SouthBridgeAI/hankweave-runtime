@@ -17,7 +17,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     tempDir = path.resolve(
       "tests",
       "test-area",
-      `temp-sdk-integration-${Date.now()}`
+      `temp-sdk-integration-${Date.now()}`,
     );
     executionPath = path.join(tempDir, "execution");
     await fs.promises.mkdir(executionPath, { recursive: true });
@@ -52,8 +52,9 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
     const manager1 = new ClaudeAgentSDKManager(
       executionPath,
+      executionPath, // Use same path for agentRoot in tests
       logger,
-      logParser1
+      logParser1,
     );
 
     const codon1 = createTestCodon({
@@ -112,8 +113,9 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
     const manager2 = new ClaudeAgentSDKManager(
       executionPath,
+      executionPath, // Use same path for agentRoot in tests
       logger,
-      logParser2
+      logParser2,
     );
 
     const codon2 = createTestCodon({
@@ -137,7 +139,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       manager2.on("exit", (code, contextExceeded) => {
         clearTimeout(timeout);
         console.log(
-          `    ✓ Continuation session completed (exit code: ${code})`
+          `    ✓ Continuation session completed (exit code: ${code})`,
         );
         if (contextExceeded) {
           console.log("    ⚠️  Context exceeded");
@@ -170,7 +172,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     logParser2.stop();
 
     console.log(
-      "\n✅ Test passed: Continuation session returns same session ID\n"
+      "\n✅ Test passed: Continuation session returns same session ID\n",
     );
   }, 120000); // 2 minute timeout for the whole test
 
@@ -191,8 +193,9 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
     const manager1 = new ClaudeAgentSDKManager(
       executionPath,
+      executionPath, // Use same path for agentRoot in tests
       logger,
-      logParser1
+      logParser1,
     );
 
     const codon1 = createTestCodon({
@@ -241,8 +244,9 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
     const manager2 = new ClaudeAgentSDKManager(
       executionPath,
+      executionPath, // Use same path for agentRoot in tests
       logger,
-      logParser2
+      logParser2,
     );
 
     const codon2 = createTestCodon({
@@ -288,7 +292,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     logParser2.stop();
 
     console.log(
-      "\n✅ Test passed: Fresh session creates different session ID\n"
+      "\n✅ Test passed: Fresh session creates different session ID\n",
     );
   }, 120000); // 2 minute timeout for the whole test
 
@@ -306,7 +310,12 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     });
 
     // Create Claude Agent SDK Manager
-    const manager = new ClaudeAgentSDKManager(executionPath, logger, logParser);
+    const manager = new ClaudeAgentSDKManager(
+      executionPath,
+      executionPath,
+      logger,
+      logParser,
+    );
 
     console.log("\n  Running self-test...");
 
@@ -315,7 +324,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
     console.log(`    ✓ Self-test completed`);
     console.log(
-      `      Overall: ${result.overall.passed ? "PASSED" : "FAILED"}`
+      `      Overall: ${result.overall.passed ? "PASSED" : "FAILED"}`,
     );
     console.log(`      Message: ${result.overall.message}`);
 
@@ -331,7 +340,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     expect(result.agent.name).toBe("claude-agent-sdk");
     expect(typeof result.agent.found).toBe("boolean");
     console.log(
-      `    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`
+      `    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`,
     );
 
     expect(result.checks).toBeDefined();
@@ -345,7 +354,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       expect(typeof check.passed).toBe("boolean");
       expect(check.message).toBeDefined();
       console.log(
-        `      - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`
+        `      - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`,
       );
     }
 

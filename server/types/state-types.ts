@@ -227,6 +227,13 @@ export interface RunningCodon extends BaseCodon {
   assistantMessageCount: number;
 
   /**
+   * Number of extensions performed so far.
+   * 0 initially, increments with each extension.
+   * Used for tracking progress and enforcing maxExtensions.
+   */
+  extensionCount: number;
+
+  /**
    * Sentinels loaded for this codon.
    * Updated in-place during execution.
    */
@@ -275,6 +282,12 @@ export interface CompletingSentinelsCodon extends BaseCodon {
    * Number of assistant messages received.
    */
   assistantMessageCount: number;
+
+  /**
+   * Extension count from the running state.
+   * Preserved during sentinel completion.
+   */
+  extensionCount: number;
 
   /**
    * Sentinels being completed.
@@ -339,6 +352,12 @@ export interface CompletedCodon extends BaseCodon {
    * Used by: Cost accuracy warnings
    */
   resultMessageReceived: boolean;
+
+  /**
+   * Final count of extensions performed.
+   * Used for reporting and debugging.
+   */
+  extensionCount: number;
 
   // Checkpoints
   rigSetupCheckpoint?: string;
@@ -411,6 +430,12 @@ export interface FailedCodon extends BaseCodon {
    */
   partialCost: number;
   partialTokens: TokenUsage;
+
+  /**
+   * Number of extensions performed before failure.
+   * Only present if codon reached running state and attempted extensions.
+   */
+  extensionCount?: number;
 
   // Checkpoints
   rigSetupCheckpoint?: string;
@@ -861,6 +886,9 @@ export type StateTransition =
 
           // For marking context exceeded
           contextExceeded?: boolean;
+
+          // For extensions
+          extensionCount?: number;
         };
       };
     }
@@ -921,6 +949,25 @@ export type StateTransition =
         runId: RunId;
         codonId: CodonId;
         newCount: number; // New total count
+      };
+    }
+
+  // ===== Extension Tracking =====
+
+  /**
+   * Extension count update.
+   * Incremented when a codon extends.
+   *
+   * Triggered by: Extension trigger in hankweave-runtime
+   * State changes:
+   * - Updates extensionCount on RunningCodon
+   */
+  | {
+      type: "ExtensionCountUpdated";
+      data: {
+        runId: RunId;
+        codonId: CodonId;
+        extensionCount: number; // New extension count
       };
     }
 

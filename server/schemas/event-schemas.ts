@@ -119,6 +119,7 @@ const checkpointQueryInfoSchema = z.object({
 export const serverReadyEventDataSchema = z.object({
   serverVersion: z.string(),
   executionPath: z.string(),
+  agentRootPath: z.string(), // Agent workspace directory (where agents work)
   dataPath: z.string(),
 });
 
@@ -164,6 +165,17 @@ export const codonCompletedEventDataSchema = z.object({
   duration: z.number(),
   exitStatus: processExitSchema,
   failureReason: failureReasonSchema.optional(),
+  /** True when the failure was ignored due to onFailure: 'ignore' configuration */
+  failureIgnored: z.boolean().optional(),
+});
+
+export const codonExtendedEventDataSchema = z.object({
+  codonId: z.string(),
+  codonName: z.string(),
+  extensionNumber: z.number().int().positive(),
+  exhaustWithPrompt: z.string(),
+  cumulativeTokens: tokenUsageSchema,
+  cumulativeCost: z.number(),
 });
 
 export const assistantActionEventDataSchema = z.object({
@@ -298,6 +310,40 @@ export const rollbackCompletedEventDataSchema = z.object({
   autoRestart: z.boolean(),
 });
 
+// -----------------
+// Archive Events (archiveOnSuccess feature)
+// -----------------
+
+export const archiveCompletedEventDataSchema = z.object({
+  codonId: z.string(),
+  archivedPaths: z.array(z.string()),
+});
+
+export const archivePartialEventDataSchema = z.object({
+  codonId: z.string(),
+  archivedPaths: z.array(z.string()),
+  failedPaths: z.array(
+    z.object({
+      path: z.string(),
+      error: z.string(),
+    }),
+  ),
+});
+
+export const rollbackArchiveRestoreEventDataSchema = z.object({
+  codonId: z.string(),
+  restoredPaths: z.array(z.string()),
+  failedPaths: z
+    .array(
+      z.object({
+        path: z.string(),
+        error: z.string(),
+      }),
+    )
+    .optional(),
+  status: z.enum(["completed", "partial", "failed"]),
+});
+
 export const pongEventDataSchema = z.object({
   message: z.string(),
   timestamp: z.string(),
@@ -320,6 +366,7 @@ export const stateTransitionEventDataSchema = z.object({
     "CostsUpdated",
     "CostsIncremented",
     "AssistantMessageCountUpdated",
+    "ExtensionCountUpdated",
     "CheckpointCreated",
     "InitialCheckpointSet",
     "CodonFinalCostSet",
@@ -421,6 +468,13 @@ export const codonCompletedEventSchema = baseEventSchema.extend({
   data: codonCompletedEventDataSchema,
 });
 
+export const codonExtendedEventSchema = baseEventSchema.extend({
+  type: z.literal("codon.extended"),
+  data: codonExtendedEventDataSchema,
+});
+
+export type CodonExtendedEvent = z.infer<typeof codonExtendedEventSchema>;
+
 export const assistantActionEventSchema = baseEventSchema.extend({
   type: z.literal("assistant.action"),
   data: assistantActionEventDataSchema,
@@ -494,6 +548,22 @@ export const rollbackProgressEventSchema = baseEventSchema.extend({
 export const rollbackCompletedEventSchema = baseEventSchema.extend({
   type: z.literal("rollback.completed"),
   data: rollbackCompletedEventDataSchema,
+});
+
+// Archive event schemas
+export const archiveCompletedEventSchema = baseEventSchema.extend({
+  type: z.literal("archive.completed"),
+  data: archiveCompletedEventDataSchema,
+});
+
+export const archivePartialEventSchema = baseEventSchema.extend({
+  type: z.literal("archive.partial"),
+  data: archivePartialEventDataSchema,
+});
+
+export const rollbackArchiveRestoreEventSchema = baseEventSchema.extend({
+  type: z.literal("rollback.archiveRestore"),
+  data: rollbackArchiveRestoreEventDataSchema,
 });
 
 export const pongEventSchema = baseEventSchema.extend({
@@ -659,6 +729,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   stateSnapshotEventSchema,
   codonStartedEventSchema,
   codonCompletedEventSchema,
+  codonExtendedEventSchema,
   assistantActionEventSchema,
   tokenUsageEventSchema,
   toolResultEventSchema,
@@ -674,6 +745,9 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   rollbackRigCleanupEventSchema,
   rollbackProgressEventSchema,
   rollbackCompletedEventSchema,
+  rollbackArchiveRestoreEventSchema,
+  archiveCompletedEventSchema,
+  archivePartialEventSchema,
   pongEventSchema,
   historyBatchEventSchema,
   stateTransitionEventSchema,
@@ -711,6 +785,9 @@ export type RollbackCodonCheckpointEvent = z.infer<typeof rollbackCodonCheckpoin
 export type RollbackRigCleanupEvent = z.infer<typeof rollbackRigCleanupEventSchema>;
 export type RollbackProgressEvent = z.infer<typeof rollbackProgressEventSchema>;
 export type RollbackCompletedEvent = z.infer<typeof rollbackCompletedEventSchema>;
+export type RollbackArchiveRestoreEvent = z.infer<typeof rollbackArchiveRestoreEventSchema>;
+export type ArchiveCompletedEvent = z.infer<typeof archiveCompletedEventSchema>;
+export type ArchivePartialEvent = z.infer<typeof archivePartialEventSchema>;
 export type PongEvent = z.infer<typeof pongEventSchema>;
 export type HistoryBatchEvent = z.infer<typeof historyBatchEventSchema>;
 export type StateTransitionEvent = z.infer<typeof stateTransitionEventSchema>;
@@ -754,6 +831,7 @@ export type SentinelTriggeredEvent = z.infer<typeof sentinelTriggeredEventSchema
 const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "codon.started",
   "codon.completed",
+  "codon.extended",
   "state.snapshot",
   "server.idle",
   "token.usage",
@@ -765,7 +843,10 @@ const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "rollback.codonCheckpoint",
   "rollback.completed",
   "rollback.rigCleanup",
+  "rollback.archiveRestore",
   "state.transition",
+  "archive.completed",
+  "archive.partial",
 ] as const;
 
 /**
@@ -832,6 +913,7 @@ const CONNECTION_STATE_EVENT_TYPES = new Set<ServerEventType>(CONNECTION_STATE_E
 export type ServerStateEvent =
   | CodonStartedEvent
   | CodonCompletedEvent
+  | CodonExtendedEvent
   | StateSnapshotEvent
   | ServerIdleEvent
   | TokenUsageEvent
@@ -843,7 +925,10 @@ export type ServerStateEvent =
   | RollbackCodonCheckpointEvent
   | RollbackCompletedEvent
   | RollbackRigCleanupEvent
-  | StateTransitionEvent;
+  | RollbackArchiveRestoreEvent
+  | StateTransitionEvent
+  | ArchiveCompletedEvent
+  | ArchivePartialEvent;
 
 /**
  * Union type representing all agentic backbone events.
@@ -1010,6 +1095,7 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "state.snapshot": stateSnapshotEventDataSchema,
   "codon.started": codonStartedEventDataSchema,
   "codon.completed": codonCompletedEventDataSchema,
+  "codon.extended": codonExtendedEventDataSchema,
   "assistant.action": assistantActionEventDataSchema,
   "token.usage": tokenUsageEventDataSchema,
   "tool.result": toolResultEventDataSchema,
@@ -1025,6 +1111,9 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "rollback.rigCleanup": rollbackRigCleanupEventDataSchema,
   "rollback.progress": rollbackProgressEventDataSchema,
   "rollback.completed": rollbackCompletedEventDataSchema,
+  "rollback.archiveRestore": rollbackArchiveRestoreEventDataSchema,
+  "archive.completed": archiveCompletedEventDataSchema,
+  "archive.partial": archivePartialEventDataSchema,
   pong: pongEventDataSchema,
   "history.batch": historyBatchEventDataSchema,
   "state.transition": stateTransitionEventDataSchema,

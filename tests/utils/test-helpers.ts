@@ -563,6 +563,19 @@ export class TestWSClient {
   }
 
   async disconnect(): Promise<void> {
+    // Clear all pending event waiters to prevent dangling promises
+    for (const [type, waiters] of this.eventPromises) {
+      for (const waiter of waiters) {
+        // Reject with a disconnected error rather than letting them time out
+        try {
+          waiter.reject(new Error(`Client disconnected while waiting for event: ${type}`));
+        } catch {
+          // Ignore - waiter might already be resolved
+        }
+      }
+    }
+    this.eventPromises.clear();
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;

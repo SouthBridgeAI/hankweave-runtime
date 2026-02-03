@@ -1,0 +1,20 @@
+{
+  "id": "extension-tracker",
+  "name": "Extension Tracker Sentinel",
+  "description": "Tracks codon extension events and writes summaries",
+  "model": "anthropic/claude-haiku-4-5",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "codon.extended"
+    ]
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "output": {
+    "format": "json",
+    "file": "extension-tracking.jsonl"
+  },
+  "userPromptText": "A codon extension just occurred:\n\nCodon: {{codonName}} ({{codonId}})\nExtension Number: {{extensionNumber}}\nCumulative Cost: ${{cumulativeCost}}\n\nProvide a brief JSON summary with fields: extensionNumber, codonId, observedAt (current timestamp)"
+}

@@ -292,10 +292,30 @@ export class BasicTUI {
       }
 
       case "codon.completed": {
-        const status = event.data.success ? COLORS.green : COLORS.red;
-        const statusSymbol = event.data.success ? SYMBOLS.check : SYMBOLS.cross;
+        const failureIgnored = event.data.failureIgnored;
+
+        // Determine status color and symbol based on success/failure/ignored
+        let status: string;
+        let statusSymbol: string;
+        let statusText: string;
+
+        if (failureIgnored) {
+          // Yellow for ignored failures
+          status = COLORS.yellow;
+          statusSymbol = "⚠";
+          statusText = "Codon Failed (Ignored)";
+        } else if (event.data.success) {
+          status = COLORS.green;
+          statusSymbol = SYMBOLS.check;
+          statusText = "Codon Completed";
+        } else {
+          status = COLORS.red;
+          statusSymbol = SYMBOLS.cross;
+          statusText = "Codon Failed";
+        }
+
         console.log(
-          `\n${timestamp} ${status}${COLORS.bold}Codon Completed${COLORS.reset} ${status}${statusSymbol}${COLORS.reset}`,
+          `\n${timestamp} ${status}${COLORS.bold}${statusText}${COLORS.reset} ${status}${statusSymbol}${COLORS.reset}`,
         );
 
         const details = [
@@ -317,6 +337,16 @@ export class BasicTUI {
         }
 
         this.drawBox(`Codon ${event.data.codonId}`, details, status);
+        break;
+      }
+
+      case "codon.extended": {
+        console.log(`\n${timestamp} ${COLORS.yellow}${COLORS.bold}Codon Extended${COLORS.reset}`);
+        const infoLines = [
+          `Extension #: ${COLORS.bold}${event.data.extensionNumber}${COLORS.reset}`,
+          `Cumulative Cost: ${COLORS.yellow}$${event.data.cumulativeCost.toFixed(4)}${COLORS.reset}`,
+        ];
+        this.drawBox(`Codon ${event.data.codonId}`, infoLines, COLORS.yellow);
         break;
       }
 

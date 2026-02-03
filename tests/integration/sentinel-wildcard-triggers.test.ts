@@ -12,27 +12,107 @@ import { Logger } from "../../server/utils.js";
 import { createTypedMockLlmAdapter } from "../utils/mock-llm.js";
 
 // Mock events for testing
-const createMockEvent = (type: ServerEvent["type"], id?: string): ServerEvent => {
+const createMockEvent = (
+  type: ServerEvent["type"],
+  id?: string,
+): ServerEvent => {
   const baseId = id || `event-${Date.now()}-${Math.random()}`;
   const timestamp = new Date().toISOString();
 
   switch (type) {
     case "assistant.action":
-      return { id: baseId, timestamp, type, data: { codonId: "test-codon", action: "message", content: "Test" } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: { codonId: "test-codon", action: "message", content: "Test" },
+      };
     case "tool.result":
-      return { id: baseId, timestamp, type, data: { codonId: "test-codon", toolUseId: "test", toolName: "Test", result: "ok", truncated: false, originalLength: 2, executionTimeMs: 10, isError: false } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: {
+          codonId: "test-codon",
+          toolUseId: "test",
+          toolName: "Test",
+          result: "ok",
+          truncated: false,
+          originalLength: 2,
+          executionTimeMs: 10,
+          isError: false,
+        },
+      };
     case "file.updated":
-      return { id: baseId, timestamp, type, data: { path: "test.txt", filename: "test.txt", content: "test", action: "modified" } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: {
+          path: "test.txt",
+          filename: "test.txt",
+          content: "test",
+          action: "modified",
+        },
+      };
     case "token.usage":
-      return { id: baseId, timestamp, type, data: { codonId: "test-codon", inputTokens: 100, outputTokens: 50, cacheCreationTokens: 0, cacheReadTokens: 0, totalCost: 0.01 } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: {
+          codonId: "test-codon",
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          totalCost: 0.01,
+        },
+      };
     case "codon.started":
-      return { id: baseId, timestamp, type, data: { codonId: "test-codon", codonName: "Test Codon", sessionId: "test-session", startTime: timestamp } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: {
+          codonId: "test-codon",
+          codonName: "Test Codon",
+          sessionId: "test-session",
+          startTime: timestamp,
+        },
+      };
     case "codon.completed":
-      return { id: baseId, timestamp, type, data: { codonId: "test-codon", success: true, cost: 0.01, duration: 1000, exitStatus: { type: "success" } } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: {
+          codonId: "test-codon",
+          success: true,
+          cost: 0.01,
+          duration: 1000,
+          exitStatus: { type: "success" },
+        },
+      };
     case "server.ready":
-      return { id: baseId, timestamp, type, data: { serverVersion: "1.0.0", executionPath: "/test", dataPath: "/test/data" } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: {
+          serverVersion: "1.0.0",
+          executionPath: "/test",
+          agentRootPath: "/test/agentRoot",
+          dataPath: "/test/agentRoot/read_only_data_source",
+        },
+      };
     case "error":
-      return { id: baseId, timestamp, type, data: { message: "Test error", fatal: false, severity: "codon" } };
+      return {
+        id: baseId,
+        timestamp,
+        type,
+        data: { message: "Test error", fatal: false, severity: "codon" },
+      };
     case "info":
       return { id: baseId, timestamp, type, data: { message: "Test info" } };
     default:
@@ -44,7 +124,10 @@ const createMockEvent = (type: ServerEvent["type"], id?: string): ServerEvent =>
 // Enhanced mock logger with event tracking
 class TestLogger extends Logger {
   public logs: Array<{ message: string; level: string }> = [];
-  public llmCalls: Array<{ id: string; eventsOrMessages: ServerEvent[] | HankweaveModelMessage[] }> = [];
+  public llmCalls: Array<{
+    id: string;
+    eventsOrMessages: ServerEvent[] | HankweaveModelMessage[];
+  }> = [];
   private trackedEvents: ServerEvent[] = [];
 
   constructor() {
@@ -67,10 +150,11 @@ class TestLogger extends Logger {
   }
 
   hasLog(pattern: string | RegExp, level?: string): boolean {
-    return this.logs.some(log => {
-      const messageMatches = typeof pattern === 'string'
-        ? log.message.includes(pattern)
-        : pattern.test(log.message);
+    return this.logs.some((log) => {
+      const messageMatches =
+        typeof pattern === "string"
+          ? log.message.includes(pattern)
+          : pattern.test(log.message);
       const levelMatches = level ? log.level === level : true;
       return messageMatches && levelMatches;
     });
@@ -84,13 +168,19 @@ class TestLogger extends Logger {
   // Mock LLM function that tracks calls with new typed interface
   mockLlm = createTypedMockLlmAdapter(() => {
     // Use the tracked events for backward compatibility
-    this.llmCalls.push({ id: "mock", eventsOrMessages: [...this.trackedEvents] });
+    this.llmCalls.push({
+      id: "mock",
+      eventsOrMessages: [...this.trackedEvents],
+    });
     this.trackedEvents = []; // Clear after recording
     return Promise.resolve(`Mock response ${this.llmCalls.length}`);
   });
 }
 
-const TEMP_SENTINEL_DIR = path.resolve(process.cwd(), "tests/test-area/temp-sentinels-wildcard");
+const TEMP_SENTINEL_DIR = path.resolve(
+  process.cwd(),
+  "tests/test-area/temp-sentinels-wildcard",
+);
 
 beforeAll(() => {
   if (!fs.existsSync(TEMP_SENTINEL_DIR)) {
@@ -108,11 +198,9 @@ afterEach(async () => {
 });
 
 describe("Wildcard Event Trigger Tests", () => {
-
   describe("Event Trigger with Wildcard", () => {
     it("should trigger on any event type with '*' wildcard", async () => {
       const logger = new TestLogger();
-
 
       const config: SentinelConfig = {
         id: "wildcard-any-event",
@@ -120,10 +208,10 @@ describe("Wildcard Event Trigger Tests", () => {
         model: "sonnet",
         trigger: {
           type: "event",
-          on: ["*"]
+          on: ["*"],
         },
         execution: { strategy: "immediate" },
-        userPromptText: "Process these events: {{events}}"
+        userPromptText: "Process these events: {{events}}",
       };
 
       const sentinel = new Sentinel(
@@ -134,7 +222,7 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Test various event types
@@ -142,7 +230,7 @@ describe("Wildcard Event Trigger Tests", () => {
         createMockEvent("assistant.action"),
         createMockEvent("tool.result"),
         createMockEvent("file.updated"),
-        createMockEvent("token.usage")
+        createMockEvent("token.usage"),
       ];
 
       for (const event of events) {
@@ -153,15 +241,13 @@ describe("Wildcard Event Trigger Tests", () => {
         expect(logger.hasLog("✓ Trigger MATCHED")).toBe(true);
 
         // Give time for async execution
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await new Promise((resolve) => setTimeout(resolve, 10));
         expect(logger.llmCalls.length).toBeGreaterThan(0);
       }
-
     });
 
     it("should work with count strategy to trigger after N any events", async () => {
       const logger = new TestLogger();
-
 
       const config: SentinelConfig = {
         id: "wildcard-count",
@@ -169,13 +255,13 @@ describe("Wildcard Event Trigger Tests", () => {
         model: "sonnet",
         trigger: {
           type: "event",
-          on: ["*"]
+          on: ["*"],
         },
         execution: {
           strategy: "count",
-          threshold: 3
+          threshold: 3,
         },
-        userPromptText: "Batch of {{events.length}} events"
+        userPromptText: "Batch of {{events.length}} events",
       };
 
       const sentinel = new Sentinel(
@@ -186,7 +272,7 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Send various events
@@ -199,15 +285,13 @@ describe("Wildcard Event Trigger Tests", () => {
       sentinel.handleEvent(createMockEvent("file.updated"));
 
       // Should trigger after 3rd event
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1);
       expect(logger.llmCalls[0].eventsOrMessages).toHaveLength(3);
-
     });
 
     it("should work with debounce strategy for wildcard events", async () => {
       const logger = new TestLogger();
-
 
       const config: SentinelConfig = {
         id: "wildcard-debounce",
@@ -215,13 +299,13 @@ describe("Wildcard Event Trigger Tests", () => {
         model: "sonnet",
         trigger: {
           type: "event",
-          on: ["*"]
+          on: ["*"],
         },
         execution: {
           strategy: "debounce",
-          milliseconds: 100
+          milliseconds: 100,
         },
-        userPromptText: "Debounced events: {{events.length}}"
+        userPromptText: "Debounced events: {{events.length}}",
       };
 
       const sentinel = new Sentinel(
@@ -232,7 +316,7 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Send rapid events
@@ -244,19 +328,17 @@ describe("Wildcard Event Trigger Tests", () => {
       expect(logger.llmCalls.length).toBe(0);
 
       // Wait for debounce timer
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       // Should have batched all events
       expect(logger.llmCalls.length).toBe(1);
       expect(logger.llmCalls[0].eventsOrMessages).toHaveLength(3);
-
     });
   });
 
   describe("Sequence Trigger with Wildcard", () => {
     it("should match wildcard steps in consecutive patterns", async () => {
       const logger = new TestLogger();
-
 
       const config: SentinelConfig = {
         id: "wildcard-sequence",
@@ -268,11 +350,11 @@ describe("Wildcard Event Trigger Tests", () => {
           pattern: [
             { type: "assistant.action" },
             { type: "*" },
-            { type: "tool.result" }
-          ]
+            { type: "tool.result" },
+          ],
         },
         execution: { strategy: "immediate" },
-        userPromptText: "Sequence matched: {{events.length}} events"
+        userPromptText: "Sequence matched: {{events.length}} events",
       };
 
       const sentinel = new Sentinel(
@@ -283,7 +365,7 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Send pattern: assistant.action, file.updated (wildcard match), tool.result
@@ -292,16 +374,14 @@ describe("Wildcard Event Trigger Tests", () => {
       sentinel.handleEvent(createMockEvent("tool.result"));
 
       // Should have matched the pattern
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1);
       expect(logger.llmCalls[0].eventsOrMessages).toHaveLength(3);
       expect(logger.hasLog("PATTERN MATCHED")).toBe(true);
-
     });
 
     it("should match complex patterns with multiple wildcards", async () => {
       const logger = new TestLogger();
-
 
       const config: SentinelConfig = {
         id: "complex-wildcard",
@@ -315,11 +395,11 @@ describe("Wildcard Event Trigger Tests", () => {
             { type: "assistant.action" },
             { type: "*" },
             { type: "*" },
-            { type: "tool.result" }
-          ]
+            { type: "tool.result" },
+          ],
         },
         execution: { strategy: "immediate" },
-        userPromptText: "Complex pattern: {{events.length}} events"
+        userPromptText: "Complex pattern: {{events.length}} events",
       };
 
       const sentinel = new Sentinel(
@@ -330,26 +410,24 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Send the pattern
       sentinel.handleEvent(createMockEvent("assistant.action"));
       sentinel.handleEvent(createMockEvent("assistant.action"));
-      sentinel.handleEvent(createMockEvent("file.updated"));  // Wildcard 1
-      sentinel.handleEvent(createMockEvent("token.usage"));   // Wildcard 2
+      sentinel.handleEvent(createMockEvent("file.updated")); // Wildcard 1
+      sentinel.handleEvent(createMockEvent("token.usage")); // Wildcard 2
       sentinel.handleEvent(createMockEvent("tool.result"));
 
       // Should match the 5-event pattern
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1);
       expect(logger.llmCalls[0].eventsOrMessages).toHaveLength(5);
-
     });
 
     it("should work with non-consecutive sequence patterns", async () => {
       const logger = new TestLogger();
-
 
       const config: SentinelConfig = {
         id: "non-consecutive-wildcard",
@@ -361,12 +439,12 @@ describe("Wildcard Event Trigger Tests", () => {
           pattern: [
             { type: "assistant.action" },
             { type: "*" },
-            { type: "tool.result" }
+            { type: "tool.result" },
           ],
-          options: { consecutive: false }
+          options: { consecutive: false },
         },
         execution: { strategy: "immediate" },
-        userPromptText: "Non-consecutive pattern"
+        userPromptText: "Non-consecutive pattern",
       };
 
       const sentinel = new Sentinel(
@@ -377,21 +455,20 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Send pattern with interleaved events
       sentinel.handleEvent(createMockEvent("assistant.action"));
-      sentinel.handleEvent(createMockEvent("codon.started"));    // Ignored
-      sentinel.handleEvent(createMockEvent("file.updated"));     // Wildcard match
-      sentinel.handleEvent(createMockEvent("codon.completed"));  // Ignored
+      sentinel.handleEvent(createMockEvent("codon.started")); // Ignored
+      sentinel.handleEvent(createMockEvent("file.updated")); // Wildcard match
+      sentinel.handleEvent(createMockEvent("codon.completed")); // Ignored
       sentinel.handleEvent(createMockEvent("tool.result"));
 
       // Should match despite interleaved events
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1);
       expect(logger.llmCalls[0].eventsOrMessages).toHaveLength(3);
-
     });
   });
 
@@ -407,11 +484,11 @@ describe("Wildcard Event Trigger Tests", () => {
           type: "event",
           on: ["*"],
           conditions: [
-            { operator: "equals", path: "codonId", value: "test-codon" }
-          ]
+            { operator: "equals", path: "codonId", value: "test-codon" },
+          ],
         },
         execution: { strategy: "immediate" },
-        userPromptText: "Event with codonId: {{events.length}}"
+        userPromptText: "Event with codonId: {{events.length}}",
       };
 
       const sentinel = new Sentinel(
@@ -422,14 +499,14 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Send event with matching codonId
       const eventWithCodon = createMockEvent("assistant.action");
       sentinel.handleEvent(eventWithCodon);
 
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1);
 
       // Send event without codonId (should not match condition)
@@ -438,12 +515,17 @@ describe("Wildcard Event Trigger Tests", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "server.ready",
-        data: { serverVersion: "1.0.0", executionPath: "/test", dataPath: "/test/data" }
+        data: {
+          serverVersion: "1.0.0",
+          executionPath: "/test",
+          agentRootPath: "/test/agentRoot",
+          dataPath: "/test/agentRoot/read_only_data_source",
+        },
       };
 
       sentinel.handleEvent(eventWithoutCodon);
 
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1); // Should not have increased
     });
   });
@@ -458,10 +540,10 @@ describe("Wildcard Event Trigger Tests", () => {
         model: "sonnet",
         trigger: {
           type: "event",
-          on: ["assistant.action", "*", "tool.result"]
+          on: ["assistant.action", "*", "tool.result"],
         },
         execution: { strategy: "immediate" },
-        userPromptText: "Mixed trigger: {{events.length}}"
+        userPromptText: "Mixed trigger: {{events.length}}",
       };
 
       const sentinel = new Sentinel(
@@ -472,24 +554,24 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Should match explicit assistant.action
       sentinel.handleEvent(createMockEvent("assistant.action"));
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1);
 
       // Should match explicit tool.result
       logger.clear();
       sentinel.handleEvent(createMockEvent("tool.result"));
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(2);
 
       // Should match any other event via wildcard
       logger.clear();
       sentinel.handleEvent(createMockEvent("file.updated"));
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(3);
     });
   });
@@ -498,7 +580,6 @@ describe("Wildcard Event Trigger Tests", () => {
     it("should capture all events in sequence interest filter with wildcard", async () => {
       const logger = new TestLogger();
 
-
       const config: SentinelConfig = {
         id: "wildcard-interest",
         name: "Wildcard Interest Filter",
@@ -506,13 +587,10 @@ describe("Wildcard Event Trigger Tests", () => {
         trigger: {
           type: "sequence",
           interestFilter: { on: ["*"] },
-          pattern: [
-            { type: "assistant.action" },
-            { type: "tool.result" }
-          ]
+          pattern: [{ type: "assistant.action" }, { type: "tool.result" }],
         },
         execution: { strategy: "immediate" },
-        userPromptText: "Sequence from all events"
+        userPromptText: "Sequence from all events",
       };
 
       const sentinel = new Sentinel(
@@ -523,19 +601,18 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       // Send events that form a consecutive pattern at the end
       sentinel.handleEvent(createMockEvent("file.updated"));
-      sentinel.handleEvent(createMockEvent("assistant.action"));  // Pattern start
-      sentinel.handleEvent(createMockEvent("tool.result"));       // Pattern end
+      sentinel.handleEvent(createMockEvent("assistant.action")); // Pattern start
+      sentinel.handleEvent(createMockEvent("tool.result")); // Pattern end
 
       // Should match the consecutive pattern
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       expect(logger.llmCalls.length).toBe(1);
       expect(logger.llmCalls[0].eventsOrMessages).toHaveLength(2); // assistant.action + tool.result
-
     });
   });
 
@@ -543,20 +620,19 @@ describe("Wildcard Event Trigger Tests", () => {
     it("should handle high-frequency wildcard triggers efficiently", async () => {
       const logger = new TestLogger();
 
-
       const config: SentinelConfig = {
         id: "high-freq-wildcard",
         name: "High Frequency Wildcard",
         model: "sonnet",
         trigger: {
           type: "event",
-          on: ["*"]
+          on: ["*"],
         },
         execution: {
           strategy: "debounce",
-          milliseconds: 50
+          milliseconds: 50,
         },
-        userPromptText: "Batched events: {{events.length}}"
+        userPromptText: "Batched events: {{events.length}}",
       };
 
       const sentinel = new Sentinel(
@@ -567,20 +643,25 @@ describe("Wildcard Event Trigger Tests", () => {
         TEMP_SENTINEL_DIR,
         undefined, // configDirectory
         new Date(), // runStartTime
-        logger.trackEvents // onExecute callback
+        logger.trackEvents, // onExecute callback
       );
 
       const startTime = Date.now();
 
       // Send 20 rapid events of different types
       for (let i = 0; i < 20; i++) {
-        const eventTypes: ServerEvent["type"][] = ["assistant.action", "tool.result", "file.updated", "token.usage"];
+        const eventTypes: ServerEvent["type"][] = [
+          "assistant.action",
+          "tool.result",
+          "file.updated",
+          "token.usage",
+        ];
         const eventType = eventTypes[i % eventTypes.length];
         sentinel.handleEvent(createMockEvent(eventType, `event-${i}`));
       }
 
       // Wait for debounce
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const endTime = Date.now();
 
@@ -590,7 +671,6 @@ describe("Wildcard Event Trigger Tests", () => {
 
       // Should be efficient (less than 200ms for 20 events + debounce)
       expect(endTime - startTime).toBeLessThan(200);
-
     });
   });
 });

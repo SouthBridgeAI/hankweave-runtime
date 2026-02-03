@@ -31,8 +31,8 @@ describe("CheckpointGit", () => {
     const logPath = path.join(tempDir, "test.log");
     logger = new Logger(logPath);
 
-    // Initialize CheckpointGit
-    checkpointGit = new CheckpointGit(tempDir, logger);
+    // Initialize CheckpointGit (for tests, use same dir for execution and agent root)
+    checkpointGit = new CheckpointGit(tempDir, tempDir, logger);
   });
 
   afterEach(async () => {
@@ -57,7 +57,7 @@ describe("CheckpointGit", () => {
   test("initialize creates git repository", async () => {
     await checkpointGit.initialize();
 
-    const gitDir = path.join(checkpointGit.getPath(), ".git");
+    const gitDir = path.join(checkpointGit.getPath(), ".hankweavecheckpoints");
     expect(fs.existsSync(gitDir)).toBe(true);
   });
 
@@ -78,7 +78,7 @@ describe("CheckpointGit", () => {
 
     // Verify only pattern-matching files were tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -116,7 +116,7 @@ describe("CheckpointGit", () => {
 
     // Get current HEAD before commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -161,7 +161,7 @@ describe("CheckpointGit", () => {
 
     // To check git state, we need to use the same env vars that CheckpointGit uses
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -217,7 +217,7 @@ describe("CheckpointGit", () => {
 
     // Verify files were tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -248,7 +248,7 @@ describe("CheckpointGit", () => {
 
     // Verify we're on test-branch
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -268,7 +268,7 @@ describe("CheckpointGit", () => {
 
     // Should now be on the new branch
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -458,12 +458,12 @@ describe("CheckpointGit", () => {
     const firstCommit = await checkpointGit.commit("Marker commit");
 
     // Create a new CheckpointGit instance for the same directory
-    const checkpointGit2 = new CheckpointGit(tempDir, logger);
+    const checkpointGit2 = new CheckpointGit(tempDir, tempDir, logger);
     await checkpointGit2.initialize();
 
     // Verify it can see the existing commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit2.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit2.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -519,5 +519,89 @@ describe("CheckpointGit", () => {
     // All operations should succeed with serialization
     expect(failureCount).toBe(0);
     expect(indexLockErrors).toBe(0);
+  });
+
+  test("initialize migrates legacy .git directory to .hankweavecheckpoints", async () => {
+    // Use existing test pattern with test-area directory
+    const migrationTempDir = path.resolve(
+      "tests",
+      "test-area",
+      `temp-test-migration-${Date.now()}`,
+    );
+    const checkpointPath = path.join(migrationTempDir, ".hankweave", "checkpoints");
+
+    try {
+      // Create legacy structure with a real git repo
+      await fs.promises.mkdir(checkpointPath, { recursive: true });
+
+      // Initialize a git repo at the legacy location
+      const legacyGitDir = path.join(checkpointPath, ".git");
+      await Bun.spawn(["git", "init", "--bare", legacyGitDir]).exited;
+
+      // Verify legacy exists
+      expect(fs.existsSync(legacyGitDir)).toBe(true);
+      expect(fs.existsSync(path.join(checkpointPath, ".hankweavecheckpoints"))).toBe(false);
+
+      // Initialize CheckpointGit - should trigger migration
+      const logPath = path.join(migrationTempDir, "test.log");
+      const migrationLogger = new Logger(logPath);
+      // For migration test, use migrationTempDir as both executionPath and agentRootPath
+      const migrationCheckpointGit = new CheckpointGit(
+        migrationTempDir,
+        migrationTempDir,
+        migrationLogger,
+      );
+      await migrationCheckpointGit.initialize();
+
+      // Verify migration happened
+      expect(fs.existsSync(legacyGitDir)).toBe(false);
+      expect(fs.existsSync(path.join(checkpointPath, ".hankweavecheckpoints"))).toBe(true);
+    } finally {
+      rmSync(migrationTempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("checkpoint directory is not detected as git submodule when committed", async () => {
+    const submoduleTempDir = path.resolve(
+      "tests",
+      "test-area",
+      `temp-test-submodule-${Date.now()}`,
+    );
+
+    try {
+      await fs.promises.mkdir(submoduleTempDir, { recursive: true });
+
+      // Initialize a parent git repo
+      await Bun.spawn(["git", "init"], { cwd: submoduleTempDir }).exited;
+      await Bun.spawn(["git", "config", "user.email", "test@test.com"], {
+        cwd: submoduleTempDir,
+      }).exited;
+      await Bun.spawn(["git", "config", "user.name", "Test"], {
+        cwd: submoduleTempDir,
+      }).exited;
+
+      // Create checkpoint structure with .hankweavecheckpoints
+      const checkpointPath = path.join(submoduleTempDir, ".hankweave", "checkpoints");
+      const hwgitPath = path.join(checkpointPath, ".hankweavecheckpoints");
+      await fs.promises.mkdir(hwgitPath, { recursive: true });
+      await fs.promises.writeFile(path.join(hwgitPath, "HEAD"), "ref: refs/heads/main");
+
+      // Stage the .hankweave directory
+      await Bun.spawn(["git", "add", ".hankweave"], { cwd: submoduleTempDir }).exited;
+
+      // Check for submodule mode (160000)
+      const proc = Bun.spawn(["git", "ls-files", "--stage"], {
+        cwd: submoduleTempDir,
+      });
+      const output = await new Response(proc.stdout).text();
+
+      // Should NOT contain mode 160000 (submodule)
+      expect(output).not.toContain("160000");
+
+      // Should contain the .hankweavecheckpoints files as regular files
+      expect(output).toContain(".hankweave/checkpoints/.hankweavecheckpoints/HEAD");
+    } finally {
+      rmSync(submoduleTempDir, { recursive: true, force: true });
+    }
   });
 });

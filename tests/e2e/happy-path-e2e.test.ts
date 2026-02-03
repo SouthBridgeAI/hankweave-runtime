@@ -33,6 +33,7 @@ import { runEarlyCodonFailureTests } from "./test-groups/early-codon-failure-tes
 import { runErrorEventTests } from "./test-groups/error-event-tests.js";
 import { runEventIntegrityTests } from "./test-groups/event-integrity-tests.js";
 import { runEventJournalTests } from "./test-groups/event-journal-tests.js";
+import { runFailurePolicyTests } from "./test-groups/failure-policy-tests.js";
 import { runFileContentTests } from "./test-groups/file-content-tests.js";
 import { runFileSystemEdgeCasesTests } from "./test-groups/file-system-edge-cases-tests.js";
 import { runFileSystemTests } from "./test-groups/file-system-tests.js";
@@ -110,10 +111,6 @@ import {
 // Will be initialized in setupAndRunCodons() after paths are determined
 let serverConfig: TestServerConfig;
 
-// The hankweave-results will be created by the server in its execution directory
-// Since we're using --data and --start-new, it will be in a temp execution directory
-let hankweaveResultsDir: string;
-
 // -------------
 // Verdaccio Setup (conditional based on env vars)
 // -------------
@@ -149,6 +146,7 @@ interface TestState {
   testStartTime: number;
   cleanupResult?: CleanupIntegrationResult;
   executionPath?: string; // New: track where server is executing
+  agentRootPath?: string; // New: track where agent works (inside executionPath)
   dataPath?: string; // New: track where data is accessible
   checkpointValidation?: {
     checkpointDirExists: boolean;
@@ -217,7 +215,6 @@ async function setupAndRunCodons(): Promise<void> {
   TEST_RESULTS_DIR = path.join(TEST_CWD, "tests/test-results");
   CODONS_CONFIG = path.join(TEST_CWD, "tests/config/test-codons.config.json");
   TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
-  hankweaveResultsDir = path.join(TEST_CWD, "hankweave-results/");
 
   // Initialize server config with determined paths
   serverConfig = {
@@ -242,11 +239,6 @@ async function setupAndRunCodons(): Promise<void> {
   }
   if (!fs.existsSync(TEST_RUN_DIR)) {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
-  }
-
-  // Clean up hankweave-results directory if it exists
-  if (fs.existsSync(hankweaveResultsDir)) {
-    fs.rmSync(hankweaveResultsDir, { recursive: true, force: true });
   }
 
   // Get a free port for this test run
@@ -292,9 +284,11 @@ async function setupAndRunCodons(): Promise<void> {
   if (readyEvent.type === "server.ready") {
     // Capture execution paths from server
     testState.executionPath = readyEvent.data.executionPath;
+    testState.agentRootPath = readyEvent.data.agentRootPath;
     testState.dataPath = readyEvent.data.dataPath;
     console.log(`${colors.green}✓ Server ready${colors.reset}`);
     console.log(`  Execution path: ${testState.executionPath}`);
+    console.log(`  Agent root path: ${testState.agentRootPath}`);
     console.log(`  Data path: ${testState.dataPath}`);
   }
 
@@ -518,7 +512,7 @@ async function validateCheckpointSystem(): Promise<void> {
   }
 
   const checkpointDir = path.join(testState.executionPath, ".hankweave/checkpoints");
-  const gitDir = path.join(checkpointDir, ".git");
+  const gitDir = path.join(checkpointDir, ".hankweavecheckpoints");
 
   // Store validation results for tests
   testState.checkpointValidation = {
@@ -632,11 +626,6 @@ async function runFullCleanup(): Promise<void> {
   // Use the cleanup integration to clean execution directory
   console.log(`\n${colors.blue}Running cleanup integration...${colors.reset}`);
 
-  // Clean up hankweave-results directory if it exists
-  if (fs.existsSync(hankweaveResultsDir)) {
-    fs.rmSync(hankweaveResultsDir, { recursive: true, force: true });
-  }
-
   const cleanupResult = await executeTestCleanup({
     executionPath: testState.executionPath,
     dataSourcePath: DATA_SOURCE_FILE,
@@ -675,30 +664,75 @@ describe("Hankweave E2E Test", () => {
   });
 
   describe("Hankweave results", () => {
-    it("should contain favorite_poem.txt", () => {
-      expect(fs.existsSync(path.join(hankweaveResultsDir, "notes", "favorite_poem.txt"))).toBe(
-        true,
-      );
-    });
+    // With the new default behavior, outputs stay in the execution directory
+    // and are NOT copied to an external outputDirectory (unless explicitly configured)
 
-    it("should NOT contain second_favorite_poem.txt because beforeCopy fails", () => {
+    it("should have favorite_poem.txt in execution directory", () => {
+      if (!testState.executionPath) {
+        throw new Error("Execution path not available");
+      }
+      // File exists in execution directory where agent wrote it
       expect(
-        fs.existsSync(path.join(hankweaveResultsDir, "notes", "second_favorite_poem.txt")),
-      ).toBe(false);
+        fs.existsSync(
+          path.join(
+            testState.agentRootPath || testState.executionPath,
+            "notes",
+            "favorite_poem.txt",
+          ),
+        ),
+      ).toBe(true);
     });
 
-    it("should have executed beforeCopy command for codon-1", () => {
+    it("should have second_favorite_poem.txt in execution directory", () => {
+      if (!testState.executionPath) {
+        throw new Error("Execution path not available");
+      }
+      // File exists in agent root where agent wrote it
+      expect(
+        fs.existsSync(
+          path.join(
+            testState.agentRootPath || testState.executionPath,
+            "notes",
+            "second_favorite_poem.txt",
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    it("should NOT have executed beforeCopy command (outputDirectory not configured)", () => {
       if (!testState.executionPath) {
         throw new Error("Execution path not available");
       }
 
-      // Check that the beforeCopy command created the log file in the execution directory
-      const beforeCopyLogPath = path.join(testState.executionPath, "notes", "beforecopy_log.txt");
-      expect(fs.existsSync(beforeCopyLogPath)).toBe(true);
+      // With the new default behavior, beforeCopy commands only run when outputDirectory is configured
+      // Since outputDirectory is undefined by default, beforeCopy commands should NOT have run
+      const agentRoot = testState.agentRootPath || testState.executionPath;
+      const beforeCopyLogPath = path.join(agentRoot, "notes", "beforecopy_log.txt");
+      expect(fs.existsSync(beforeCopyLogPath)).toBe(false);
+    });
 
-      // Check the content of the log file
-      const logContent = fs.readFileSync(beforeCopyLogPath, "utf-8");
-      expect(logContent).toContain("Before copy command executed for codon-1");
+    it("should NOT have archived beforecopy_log.txt (file never created because outputDirectory not configured)", () => {
+      if (!testState.executionPath) {
+        throw new Error("Execution path not available");
+      }
+
+      // Since beforeCopy only runs when outputDirectory is configured,
+      // the beforecopy_log.txt file was never created, so there's nothing to archive.
+      // The archiveOnSuccess for codon-2 should result in no files being archived
+      // (non-existent files are skipped with an info log)
+      const rigArchivePath = path.join(testState.executionPath, "rigArchive");
+
+      // rigArchive directory may or may not exist depending on whether any files were archived
+      // If it exists, check that beforecopy_log.txt is NOT there
+      if (fs.existsSync(rigArchivePath)) {
+        const codon2ArchivePath = path.join(
+          rigArchivePath,
+          "codon-2",
+          "notes",
+          "beforecopy_log.txt",
+        );
+        expect(fs.existsSync(codon2ArchivePath)).toBe(false);
+      }
     });
   });
 
@@ -719,7 +753,7 @@ describe("Hankweave E2E Test", () => {
           throw new Error("Execution path not available");
         }
 
-        const notesDir = path.join(testState.executionPath, "notes");
+        const notesDir = path.join(testState.agentRootPath || testState.executionPath, "notes");
         expect(fs.existsSync(notesDir)).toBe(true);
 
         // Check for poem files in notes directory
@@ -746,7 +780,10 @@ describe("Hankweave E2E Test", () => {
           throw new Error("Execution path not available");
         }
 
-        const tsCodeDir = path.join(testState.executionPath, "typescript_code/src");
+        const tsCodeDir = path.join(
+          testState.agentRootPath || testState.executionPath,
+          "typescript_code/src",
+        );
         if (fs.existsSync(tsCodeDir)) {
           const files = fs.readdirSync(tsCodeDir);
           const tsFiles = files.filter((f) => f.endsWith(".ts"));
@@ -774,7 +811,7 @@ describe("Hankweave E2E Test", () => {
 
         // Check that the poem_guides.txt file is accessible in read_only_data_source
         const dataSourcePath = path.join(
-          testState.executionPath,
+          testState.agentRootPath || testState.executionPath,
           "read_only_data_source",
           "poem_guides.txt",
         );
@@ -789,7 +826,7 @@ describe("Hankweave E2E Test", () => {
 
   describe("File System State", () => {
     // Pass execution path instead of data source path
-    runFileSystemTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
+    runFileSystemTests(testState, testState.agentRootPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Log Files", () => {
@@ -833,7 +870,7 @@ describe("Hankweave E2E Test", () => {
   });
 
   describe("File Content", () => {
-    runFileContentTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
+    runFileContentTests(testState.agentRootPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("File Watching", () => {
@@ -849,7 +886,7 @@ describe("Hankweave E2E Test", () => {
   });
 
   describe("File Tree", () => {
-    runFileTreeTests(testState, testState.executionPath || path.dirname(DATA_SOURCE_FILE));
+    runFileTreeTests(testState, testState.agentRootPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Info Events", () => {
@@ -857,7 +894,7 @@ describe("Hankweave E2E Test", () => {
   });
 
   describe("Pre-start Commands", () => {
-    runPreStartCommandsTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
+    runPreStartCommandsTests(testState.agentRootPath || path.dirname(DATA_SOURCE_FILE));
   });
 
   describe("Tool Usage", () => {
@@ -885,7 +922,9 @@ describe("Hankweave E2E Test", () => {
   });
 
   describe("Checkpoint System", () => {
-    runCheckpointSystemTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
+    const execPath = testState.executionPath || path.dirname(DATA_SOURCE_FILE);
+    const agentPath = testState.agentRootPath || execPath;
+    runCheckpointSystemTests(execPath, agentPath);
   });
 
   describe("Message Ordering", () => {
@@ -894,7 +933,9 @@ describe("Hankweave E2E Test", () => {
 
   // New test groups
   describe("Checkpoint Exclusion", () => {
-    runCheckpointExclusionTests(testState.executionPath || path.dirname(DATA_SOURCE_FILE));
+    const execPath = testState.executionPath || path.dirname(DATA_SOURCE_FILE);
+    const agentPath = testState.agentRootPath || execPath;
+    runCheckpointExclusionTests(execPath, agentPath);
   });
 
   describe("File Watching - Negative Cases", () => {
@@ -943,7 +984,7 @@ describe("Hankweave E2E Test", () => {
   describe("File System Edge Cases", () => {
     runFileSystemEdgeCasesTests(
       testState,
-      testState.executionPath || path.dirname(DATA_SOURCE_FILE),
+      testState.agentRootPath || testState.executionPath || path.dirname(DATA_SOURCE_FILE),
     );
   });
 
@@ -969,6 +1010,10 @@ describe("Hankweave E2E Test", () => {
 
   describe("Error Event Metadata", () => {
     runErrorEventTests(testState);
+  });
+
+  describe("Failure Policy (onFailure configurations)", () => {
+    runFailurePolicyTests(testState);
   });
 
   describe("Sentinel Integration", () => {

@@ -86,6 +86,20 @@ describe("UnifiedFileResolver", () => {
     expect(files).toEqual(["file.txt"]);
   });
 
+  test("ignores checkpoint .hankweavecheckpoints directory", async () => {
+    // Create .hankweave/checkpoints/.hankweavecheckpoints structure
+    const checkpointPath = path.join(tempDir, ".hankweave", "checkpoints", ".hankweavecheckpoints");
+    await fs.promises.mkdir(checkpointPath, { recursive: true });
+    await fs.promises.writeFile(path.join(checkpointPath, "HEAD"), "ref: refs/heads/main");
+    await fs.promises.writeFile(path.join(checkpointPath, "config"), "git config");
+    await fs.promises.writeFile(path.join(tempDir, "file.txt"), "content");
+
+    const files = await resolver.resolveFiles(tempDir, ["**/*"]);
+
+    expect(files).toEqual(["file.txt"]);
+    expect(files.some((f) => f.includes(".hankweavecheckpoints"))).toBe(false);
+  });
+
   test("handles multiple patterns", async () => {
     // Create various files
     await fs.promises.writeFile(path.join(tempDir, "script.js"), "js");

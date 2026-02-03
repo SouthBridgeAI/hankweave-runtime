@@ -8,11 +8,13 @@ import type {
   RollbackCompletedEvent,
 } from "../../server/types/types.js";
 import { connectHankweaveClient, launchHankweave } from "../utils/hankweave-server-test-helpers.js";
+import { getFreePort } from "../utils/test-helpers.js";
 
 describe("hankweave server", () => {
   it("starts and stops when asked to", async () => {
-    console.log("DEBUG: Launching with port 9001");
-    const hankweave = await launchHankweave({ port: 9001 });
+    const port = await getFreePort();
+    console.log(`DEBUG: Launching with dynamic port ${port}`);
+    const hankweave = await launchHankweave({ port });
 
     expect(hankweave.hasLockFile()).toBeTrue();
 
@@ -36,7 +38,8 @@ describe("hankweave server", () => {
 
   it("recovers from server STOP and resumes from where it stopped", async () => {
     // testing a case of "gracious" interruption
-    const hankweave = await launchHankweave({ port: 9003 });
+    const port = await getFreePort();
+    const hankweave = await launchHankweave({ port });
     const codonOne = CodonId("codon-1");
     const codonTwo = CodonId("codon-2");
     const execDir = hankweave.executionDir; // Save execution directory for reuse
@@ -68,7 +71,7 @@ describe("hankweave server", () => {
 
       // relaunch the server and request previous events to capture rollback
       secondServer = await launchHankweave({
-        port: 9003,
+        port,
         executionDir: execDir,
         reuseTestDirectory: true,
         sendPreviousEvents: true,
@@ -105,7 +108,8 @@ describe("hankweave server", () => {
 
   it("recovers from server KILL and resumes from where it stopped", async () => {
     // testing a case of "ungracious" interruption (crash/SIGKILL)
-    let hankweave = await launchHankweave({ port: 9005 });
+    const port = await getFreePort();
+    let hankweave = await launchHankweave({ port });
     const codonOne = CodonId("codon-1");
     const codonTwo = CodonId("codon-2");
     const execDir = hankweave.executionDir; // Save execution directory for reuse
@@ -142,7 +146,7 @@ describe("hankweave server", () => {
 
       // relaunch the server and request previous events to capture rollback
       hankweave = await launchHankweave({
-        port: 9005,
+        port,
         executionDir: execDir,
         reuseTestDirectory: true,
         sendPreviousEvents: true,
@@ -176,8 +180,9 @@ describe("hankweave server", () => {
     // Launch hankweave with ping event generation
     // Note: ping commands generate pong events, which are connection-state events
     // and are NOT journaled. Only server-state events from codon execution are journaled.
+    const port = await getFreePort();
     const hankweave = await launchHankweave({
-      port: 9007,
+      port,
       generatePingEvents: 150,
     });
     const codonOne = CodonId("codon-1");

@@ -1,21 +1,39 @@
 import type { HankweaveConfig } from "./types/types.js";
 
 /**
+ * Show deprecation warnings for old flags.
+ * Called after parsing to inform users about preferred alternatives.
+ */
+export function showDeprecationWarnings(args: ParsedCliArgs): void {
+  if (args.ignoreDataMismatch) {
+    console.warn(`⚠️  --ignore-data-mismatch is deprecated. Use --force instead.`);
+  }
+}
+
+/**
  * Flags that take a value (support both --flag=value and --flag value)
+ * Short aliases: -p (port), -o (output), -e (execution), -i (input), -m (model)
  */
 const VALUE_FLAGS = new Set([
   "--config",
   "--data",
   "--execution",
+  "-e",
   "--anthropic-base-url",
   "--port",
+  "-p",
   "--model",
+  "-m",
   "--idle-timeout",
   "--input",
+  "-i",
+  "--output",
+  "-o",
 ]);
 
 /**
  * Boolean flags (do not take a value)
+ * Short aliases: -v (validate), -h (help), -y (skip confirmation), -n (start-new)
  */
 const BOOLEAN_FLAGS = new Set([
   "--headless",
@@ -25,6 +43,8 @@ const BOOLEAN_FLAGS = new Set([
   "-y",
   "--no-autostart",
   "--start-new",
+  "--new",
+  "-n",
   "--copy",
   "--proxy",
   "--without-proxy",
@@ -33,9 +53,10 @@ const BOOLEAN_FLAGS = new Set([
   "-h",
   "--version",
   "--force",
+  "-f",
   "--ignore-rig-failures",
   "--attach",
-  "--ignore-data-mismatch",
+  "--ignore-data-mismatch", // Deprecated: use --force instead
 ]);
 
 /**
@@ -81,23 +102,24 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   // Value flags (not in HankweaveConfig)
   configPath?: string; // --config
   dataFlag?: string; // --data
-  executionPath?: string; // --execution
-  inputText?: string; // --input
+  executionPath?: string; // --execution, -e
+  inputText?: string; // --input, -i
+  outputPath?: string; // --output, -o
 
   // Boolean flags (not in HankweaveConfig)
   headless?: boolean; // --headless
   validate?: boolean; // --validate, -v
   cleanup?: boolean; // --cleanup
   skipConfirmation?: boolean; // -y
-  startNew?: boolean; // --start-new
-  force?: boolean; // --force
+  startNew?: boolean; // --start-new, --new, -n
+  force?: boolean; // --force, -f
   init?: boolean; // --init
   help?: boolean; // --help, -h
-  showVersion?: boolean; // --version, -V (renamed to avoid conflict with HankweaveConfig.version)
+  showVersion?: boolean; // --version
   copy?: boolean; // --copy
   ignoreRigFailures?: boolean; // --ignore-rig-failures
   attach?: boolean; // --attach
-  ignoreDataMismatch?: boolean; // --ignore-data-mismatch
+  ignoreDataMismatch?: boolean; // --ignore-data-mismatch (deprecated, use --force)
 }
 
 /**
@@ -187,14 +209,14 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     result.dataPath = positional[1];
   }
 
-  // Parse port
-  const portArg = getFlagValue(args, "--port");
+  // Parse port (-p, --port)
+  const portArg = getFlagValue(args, "--port") || getFlagValue(args, "-p");
   if (portArg) {
     result.port = parseInt(portArg, 10);
   }
 
-  // Parse model
-  const modelArg = getFlagValue(args, "--model");
+  // Parse model (-m, --model)
+  const modelArg = getFlagValue(args, "--model") || getFlagValue(args, "-m");
   if (modelArg) {
     result.model = modelArg as "sonnet" | "opus";
   }
@@ -233,16 +255,17 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   // Parse value flags (non-config)
   result.configPath = getFlagValue(args, "--config");
   result.dataFlag = getFlagValue(args, "--data");
-  result.executionPath = getFlagValue(args, "--execution");
-  result.inputText = getFlagValue(args, "--input");
+  result.executionPath = getFlagValue(args, "--execution") || getFlagValue(args, "-e");
+  result.inputText = getFlagValue(args, "--input") || getFlagValue(args, "-i");
+  result.outputPath = getFlagValue(args, "--output") || getFlagValue(args, "-o");
 
   // Parse boolean flags (non-config)
   result.headless = args.includes("--headless");
   result.validate = args.includes("--validate") || args.includes("-v");
   result.cleanup = args.includes("--cleanup");
   result.skipConfirmation = args.includes("-y");
-  result.startNew = args.includes("--start-new");
-  result.force = args.includes("--force");
+  result.startNew = args.includes("--start-new") || args.includes("--new") || args.includes("-n");
+  result.force = args.includes("--force") || args.includes("-f");
   result.init = args.includes("--init");
   result.help = args.includes("--help") || args.includes("-h");
   result.showVersion = args.includes("--version");

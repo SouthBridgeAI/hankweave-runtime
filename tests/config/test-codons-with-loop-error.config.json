@@ -5,7 +5,7 @@
       "id": "setup-codon",
       "name": "Setup Codon",
       "promptText": "Create a directory called 'notes' and write a file called 'setup.txt' with the text 'Setup complete'.",
-      "model": "sonnet",
+      "model": "haiku",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -16,13 +16,9 @@
           }
         }
       ],
-      "appendSystemPromptFile": [
-        "./noTodosPrompt.md"
-      ],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "description": "Initial setup",
-      "checkpointedFiles": [
-        "notes/**/*"
-      ]
+      "checkpointedFiles": ["notes/**/*"]
     },
     {
       "type": "loop",
@@ -38,29 +34,21 @@
           "id": "write-iteration",
           "name": "Write Iteration File",
           "promptText": "Write a file to <%PROJECT_DIR%>/notes/iteration_<TIMESTAMP>.txt with content: 'Iteration number X' (where X is the iteration number). Make sure each file is unique.",
-          "model": "sonnet",
+          "model": "haiku",
           "continuationMode": "continue-previous",
-          "appendSystemPromptFile": [
-            "./noTodosPrompt.md"
-          ],
+          "appendSystemPromptFile": ["./noTodosPrompt.md"],
           "description": "Write iteration marker",
-          "checkpointedFiles": [
-            "notes/**/*"
-          ]
+          "checkpointedFiles": ["notes/**/*"]
         },
         {
           "id": "review-iteration",
           "name": "Review Iteration",
           "promptText": "Review the iteration file you just created and write a brief comment about it to <%PROJECT_DIR%>/notes/review_<TIMESTAMP>.txt.",
-          "model": "sonnet",
+          "model": "haiku",
           "continuationMode": "continue-previous",
-          "appendSystemPromptFile": [
-            "./noTodosPrompt.md"
-          ],
+          "appendSystemPromptFile": ["./noTodosPrompt.md"],
           "description": "Review the iteration work",
-          "checkpointedFiles": [
-            "notes/**/*"
-          ],
+          "checkpointedFiles": ["notes/**/*"],
           "rigSetup": [
             {
               "type": "command",
@@ -77,15 +65,11 @@
       "id": "final-codon",
       "name": "Final Codon",
       "promptText": "Create a file <%PROJECT_DIR%>/notes/final.txt with the content 'Final codon reached'.",
-      "model": "sonnet",
+      "model": "haiku",
       "continuationMode": "fresh",
-      "appendSystemPromptFile": [
-        "./noTodosPrompt.md"
-      ],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "description": "Final codon after loop",
-      "checkpointedFiles": [
-        "notes/**/*"
-      ]
+      "checkpointedFiles": ["notes/**/*"]
     }
   ]
 }

@@ -5,7 +5,7 @@
       "id": "setup-codon",
       "name": "Setup Codon",
       "promptText": "Create a simple file at <%PROJECT_DIR%>/notes/initial.txt with the text 'Initial setup complete'.",
-      "model": "sonnet",
+      "model": "haiku",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -16,13 +16,9 @@
           }
         }
       ],
-      "appendSystemPromptFile": [
-        "./noTodosPrompt.md"
-      ],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "description": "Initial setup",
-      "checkpointedFiles": [
-        "notes/**/*"
-      ]
+      "checkpointedFiles": ["notes/**/*"]
     },
     {
       "type": "loop",
@@ -38,7 +34,7 @@
           "id": "loop-codon-with-setup",
           "name": "Loop Codon with Rig Setup",
           "promptText": "Write a short message to <%PROJECT_DIR%>/notes/message_<TIMESTAMP>.txt. Each iteration should be unique.",
-          "model": "sonnet",
+          "model": "haiku",
           "continuationMode": "continue-previous",
           "rigSetup": [
             {
@@ -58,13 +54,9 @@
               "allowFailure": false
             }
           ],
-          "appendSystemPromptFile": [
-            "./noTodosPrompt.md"
-          ],
+          "appendSystemPromptFile": ["./noTodosPrompt.md"],
           "description": "Codon with rig setup that may fail",
-          "checkpointedFiles": [
-            "notes/**/*"
-          ]
+          "checkpointedFiles": ["notes/**/*"]
         }
       ]
     },
@@ -72,15 +64,11 @@
       "id": "final-codon",
       "name": "Final Codon",
       "promptText": "Create a summary file at <%PROJECT_DIR%>/notes/summary.txt that says 'All codons completed successfully'.",
-      "model": "sonnet",
+      "model": "haiku",
       "continuationMode": "fresh",
-      "appendSystemPromptFile": [
-        "./noTodosPrompt.md"
-      ],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "description": "Final verification",
-      "checkpointedFiles": [
-        "notes/**/*"
-      ]
+      "checkpointedFiles": ["notes/**/*"]
     }
   ]
 }

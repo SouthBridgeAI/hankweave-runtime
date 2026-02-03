@@ -1,0 +1,45 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "id": "setup-codon",
+      "name": "Setup Codon",
+      "promptText": "Create a directory called 'notes' in <%PROJECT_DIR%> if it doesn't exist. Then create a file at <%PROJECT_DIR%>/notes/setup_complete.txt with the text 'Setup complete'.",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "description": "Setup for extension test",
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
+      "checkpointedFiles": ["notes/**/*"]
+    },
+    {
+      "id": "extending-codon",
+      "name": "Extending Codon",
+      "promptText": "Write a short poem (4 lines) about nature and save it to <%PROJECT_DIR%>/notes/poem_1.txt",
+      "model": "haiku",
+      "continuationMode": "continue-previous",
+      "description": "A codon that will extend multiple times",
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
+      "checkpointedFiles": ["notes/**/*"],
+      "exhaustWithPrompt": "Continue writing more poems. Write another short 4-line poem about a different topic and save it to <%PROJECT_DIR%>/notes/poem_<TIMESTAMP>.txt. Make each poem unique.",
+      "maxExtensions": 3,
+      "sentinels": [
+        {
+          "sentinelConfig": "./sentinel-triggers/extension-tracker.sentinel.json"
+        },
+        {
+          "sentinelConfig": "./sentinel-triggers/extension-activity-tracker.sentinel.json"
+        }
+      ]
+    },
+    {
+      "id": "final-codon",
+      "name": "Final Codon After Extensions",
+      "promptText": "Create a summary file at <%PROJECT_DIR%>/notes/summary.txt listing all the poem files you can find in the notes directory.",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "description": "Final codon to verify workflow continues after extensions",
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
+      "checkpointedFiles": ["notes/**/*"]
+    }
+  ]
+}

@@ -26,6 +26,7 @@ describe("Model Override E2E Test", () => {
       // Wait for server ready
       const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
       const executionPath = readyEvent.data.executionPath;
+      const agentRootPath = readyEvent.data.agentRootPath;
 
       // Expected codons (in order):
       // 1. codon-1 (configured as opus, should run as haiku)
@@ -87,7 +88,7 @@ describe("Model Override E2E Test", () => {
       expect(currentRun.codons.length).toBe(6);
 
       // Check that all output files were created
-      const outputDir = path.join(executionPath, "output");
+      const outputDir = path.join(agentRootPath, "output");
       expect(fs.existsSync(outputDir)).toBe(true);
 
       const outputFiles = fs.readdirSync(outputDir);
@@ -110,11 +111,17 @@ describe("Model Override E2E Test", () => {
         const logContent = fs.readFileSync(logPath, "utf-8");
         const lines = logContent.trim().split("\n");
 
-        // Line 2 (index 1) contains the init message with model info
-        expect(lines.length).toBeGreaterThanOrEqual(2);
+        // Parse all lines and filter out hook_response messages
+        expect(lines.length).toBeGreaterThanOrEqual(1);
+        const entries = lines.map((line) => JSON.parse(line));
 
-        const initLine = lines[1];
-        const initMessage = JSON.parse(initLine);
+        // Ignore hook_response system messages that precede init
+        const filteredEntries = entries.filter(
+          (e) => !(e.type === "system" && e.subtype === "hook_response"),
+        );
+
+        expect(filteredEntries.length).toBeGreaterThanOrEqual(1);
+        const initMessage = filteredEntries[0];
 
         // Verify it's the init message
         expect(initMessage.type).toBe("system");

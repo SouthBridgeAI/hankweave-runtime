@@ -28,6 +28,18 @@ export class PersistenceError extends Error {
   }
 }
 
+/**
+ * Result of expanding the next iteration of a loop.
+ * If a loop terminated, includes the loop ID and its archiveOnSuccess paths.
+ */
+export interface ExpandIterationResult {
+  loopTerminated?: {
+    loopId: string;
+    archiveOnSuccess?: string[];
+    completedIterations: number;
+  };
+}
+
 export class StateManager extends TypedEventEmitter<StateManagerEvents> implements ST.StateManager {
   private state: ST.HankweaveState;
   private readonly statePath: string;
@@ -181,11 +193,13 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
    * Expand next iteration of a loop after codon completion.
    * Checks if this completed codon is part of a loop and expands the next iteration if needed.
    * Automatically validates and stores the updated plan.
+   *
+   * @returns Information about loop termination if a loop ended
    */
   async expandNextIterationForCodon(params: {
     codonId: CodonId;
     contextExceeded?: boolean;
-  }): Promise<void> {
+  }): Promise<ExpandIterationResult> {
     const { codonId, contextExceeded = false } = params;
     const plan = this.state.executionPlan;
     const entry = plan.find((e) => e.codonId === codonId);
@@ -193,7 +207,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
     // Early exit if codon is not part of a loop
     if (!loopContext) {
-      return;
+      return {};
     }
 
     const newPlan = this.planner.expandNextIteration({
@@ -201,6 +215,8 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
       completedCodonId: codonId,
       contextExceeded,
     });
+
+    let result: ExpandIterationResult = {};
 
     // Enhanced logging with loop context
     if (newPlan.length > plan.length) {
@@ -238,12 +254,23 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
           `[STATE-MANAGER] Loop '${loopConfig.name}' terminated after ${completedIterations} iteration(s) - ${reason}`,
           "info",
         );
+
+        // Return loop termination info for archiveOnSuccess processing
+        result = {
+          loopTerminated: {
+            loopId: loopContext.loopId,
+            archiveOnSuccess: loopConfig.archiveOnSuccess,
+            completedIterations,
+          },
+        };
       }
     }
 
     this.planner.validatePlan(newPlan);
     this.state.executionPlan = newPlan;
     await this.save();
+
+    return result;
   }
 
   /**
@@ -262,8 +289,17 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     const plan = this.state.executionPlan;
     const codonEntry = plan.find((p) => p.codonId === codonId);
 
+    // Check 1: Extension codons accept context exceeded
+    // Extract base codon ID (remove loop instance suffix like #0, #1)
+    const baseCodonId = codonId.includes("#") ? codonId.split("#")[0] : codonId;
+    const codonConfig = this.codonConfigs?.find((c) => c.type === "codon" && c.id === baseCodonId);
+    if (codonConfig && codonConfig.type === "codon" && codonConfig.exhaustWithPrompt) {
+      return true; // Extension codons accept context exceeded as success
+    }
+
+    // Check 2: Loop codons that terminate on context exceeded
     if (!codonEntry?.loopContext) {
-      // Not in a loop - context exceeded is never acceptable
+      // Not in a loop and not an extension codon
       return false;
     }
 
@@ -940,6 +976,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                 cacheReadTokens: 0,
               },
               assistantMessageCount: 0,
+              extensionCount: 0,
             };
             run.codons[codonIndex] = runningCodon;
             break;
@@ -1053,6 +1090,10 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
             }
             if ("loopContext" in currentCodon) {
               failedCodon.loopContext = currentCodon.loopContext;
+            }
+            // Copy extensionCount if codon reached running state with extensions
+            if ("extensionCount" in currentCodon) {
+              failedCodon.extensionCount = (currentCodon as ST.RunningCodon).extensionCount;
             }
             if (metadata?.checkpointSha) {
               failedCodon.errorCheckpoint = metadata.checkpointSha;
@@ -1180,6 +1221,17 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
         } else if (codon.status === "skipped" && "assistantMessageCount" in codon) {
           // Update count for skipped codons that were running before skip
           codon.assistantMessageCount = event.data.newCount;
+        }
+        break;
+      }
+
+      case "ExtensionCountUpdated": {
+        const run = newState.runs.find((r) => r.runId === event.data.runId);
+        if (!run) break;
+
+        const codon = run.codons.find((c) => c.codonId === event.data.codonId);
+        if (codon && codon.status === "running") {
+          (codon as ST.RunningCodon).extensionCount = event.data.extensionCount;
         }
         break;
       }

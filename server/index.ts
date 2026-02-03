@@ -8,7 +8,7 @@ import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
-import { parseCliArgs } from "./cli-parser.js";
+import { parseCliArgs, showDeprecationWarnings } from "./cli-parser.js";
 import { ensureSchemaUrl, resolveSettings, validateHank } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
@@ -93,6 +93,9 @@ async function main() {
     process.exit(0);
   }
 
+  // Show deprecation warnings for old flags (before any other output)
+  showDeprecationWarnings(cliArgs);
+
   // Print version banner
   console.log(`\nHankweave v${getMetadata().version}\n`);
 
@@ -101,6 +104,7 @@ async function main() {
   const dataSourcePath = cliArgs.dataPath || cliArgs.dataFlag;
   const executionPath = cliArgs.executionPath;
   const inlineInput = cliArgs.inputText;
+  const outputPath = cliArgs.outputPath; // --output flag
 
   const useSymlink = !cliArgs.copy;
   const headlessMode = cliArgs.headless || false;
@@ -110,53 +114,55 @@ async function main() {
   const startNew = cliArgs.startNew || false;
   const forceMode = cliArgs.force || false;
   const initMode = cliArgs.init || false;
+  // --ignore-data-mismatch is deprecated, --force now handles this too
   const ignoreDataMismatch = cliArgs.ignoreDataMismatch || false;
 
   if (cliArgs.help) {
     console.log(`
 Hankweave Runtime - Codon Orchestration
 
-Usage: hankweave [hank-path] [data-path] [options]
+Usage: hankweave [options] [config-or-data-path]
 
 Arguments:
-  data-path                 Path to data file/directory, or "-" for stdin (default: cwd)
+  config-or-data-path       Path to hank.json or project directory
                             When only one argument provided:
                             - If ends with .json: treated as hank-path
                             - Otherwise: treated as data-path
-  hank-path                Path to hank config, or remote Git URL (default: hank.json)
-                            Remote URLs: https://github.com/user/repo#branch
-                            Requires both arguments to specify custom hank path
-Options:
-  --init                    Initialize a new hank in current directory
-  --config <path>           Path to hank configuration file (alternative to positional arg)
-  --data <path>             Path to data file or directory, or "-" for stdin
-  --input <text>            Use inline text as data input (highest priority)
-  --execution <path>        Resume in specific execution directory
-  --start-new               Start a new execution (don't resume existing)
-                            - Creates directory if it doesn't exist
-                            - Requires --force if directory has .hankweave/
-  --force                   Force operation in directories with existing .hankweave/
-                            - Backs up existing .hankweave.backup-{timestamp}
-                            - Overwrites read_only_data_source link
-  --ignore-data-mismatch    Skip data hash verification when resuming
-                            - Allows resuming even if data has changed
-                            - Use when you know the change is safe
-  --copy                    Copy data instead of symlinking (for compatibility)
-  --port <port>             WebSocket server port (default: 7777)
+
+Execution Control:
+  -e, --execution <path>    Use specific execution directory
+                            Creates if doesn't exist, resumes if has state
+  -n, --new, --start-new    Start new execution, never resume
+                            Use -n -f to overwrite existing state
+  -f, --force               Override safety checks (hash mismatch, existing state)
+  -y                        Non-interactive mode, skip confirmation prompts
+
+Output:
+  -o, --output <path>       Copy outputs to this path (default: stay in execution dir)
+
+Configuration:
+  --config <path>           Path to hank.json (alternative to positional arg)
+  --data <path>             Path to data source (default: config directory)
+  -i, --input <text>        Use inline text as data input (highest priority)
+  -m, --model <model>       Model override (sonnet|opus|gemini-flash|etc)
+
+Server:
+  -p, --port <port>         WebSocket server port (default: 7777)
   --headless                Run without TUI (for CI/CD and scripts)
-  --validate, -v            Validate configuration without creating directories
-                            - Performs comprehensive preflight checks
-                            - No filesystem side effects
-  --cleanup                 Clean up execution directories
-  -y                        Skip confirmation prompts
   --no-autostart            Don't automatically start codons
-  --ignore-rig-failures     Ignore rig setup failures (continue as if allowFailure=true for all)
-  --attach                  Connect TUI to an already-running server (read-only mode)
-  --model <model>           Override model for all codons (ignores per-codon settings)
-  --anthropic-base-url <url> Custom Anthropic API base URL
   --proxy                   Enable the LLM proxy server (disabled by default)
+  --anthropic-base-url <url> Custom Anthropic API base URL
   --idle-timeout <seconds>  Idle timeout for WebSocket and proxy servers (0-255, default: 0)
-  --help, -h                Show this help message
+
+Other:
+  --init                    Initialize a new hank in current directory
+  -v, --validate            Validate configuration without running
+  --cleanup                 Remove execution artifacts
+  --copy                    Copy data instead of symlinking (for compatibility)
+  --ignore-rig-failures     Ignore rig setup failures
+  --attach                  Connect TUI to an already-running server (read-only mode)
+  -h, --help                Show this help
+  --version                 Show version
 
 Execution Safety:
   Hankweave implements a three-tier safety system for execution directories:
@@ -164,44 +170,16 @@ Execution Safety:
   - Tier 2: Directories with existing .hankweave/ require --force (backs up existing)
   - Tier 3: Non-empty directories show warning and prompt for confirmation
 
-Execution Isolation:
-  Hankweave runs in an isolated execution directory separate from your data.
-  This enables clean rollbacks and multiple execution tracking.
-
-  Your data is accessed via: <execution-dir>/read_only_data_source/
-
-Template Variables:
-  <%EXECUTION_DIR%>  - The execution directory path
-  <%DATA_DIR%>       - The data directory path (execution-dir/read_only_data_source)
-
 Examples:
-  # Run with default data (current directory)
-  hankweave
+  hankweave                           Run with hank.json in current directory
+  hankweave ./my-project              Run project, resume if possible
+  hankweave ./my-project -n           Start fresh execution (--new)
+  hankweave -e ./my-exec              Use specific execution directory
+  hankweave -o ./results              Copy outputs to ./results
+  hankweave -m opus -p 8080           Use opus model on port 8080
 
-  # Run with specific hank and data (positional args)
-  hankweave ./my-hank.json ./my-data
-
-  # Use inline text as input
-  hankweave hank.json --input "Analyze this text"
-
-  # Pipe from stdin
-  echo "Design a REST API" | hankweave hank.json -
-
-  # Pipe file contents to stdin
-  cat spec.md | hankweave hank.json --data -
-
-  # Run a hank from a GitHub repository
-  hankweave https://github.com/user/repo ./my-data
-
-  # Run a specific branch/tag from a remote repo
-  hankweave https://github.com/user/repo#v1.0.0 ./my-data
-  hankweave https://github.com/user/repo/tree/feature-branch ./my-data
-
-  # Run in headless mode for CI/CD
-  hankweave --headless
-
-  # Override all codon models to use Opus
-  hankweave --model opus
+Outputs are stored in ~/.hankweave-executions/{id}/outputs/ by default.
+Use --output to copy them elsewhere.
 `);
     process.exit(0);
   }
@@ -534,11 +512,17 @@ Examples:
       configPath: absoluteConfigPath,
       readOnlySourceDataPath: executionSetup.readOnlySourceDataPath,
       executionPath: executionSetup.executionPath,
+      agentRootPath: executionSetup.agentRootPath,
+      rigArchivePath: executionSetup.rigArchivePath,
       dataPathInExecutionDir: executionSetup.dataPathInExecutionDir,
       dataHash: executionSetup.dataHash,
       isNewExecution: executionSetup.isNewExecution,
       isResuming: executionSetup.isResuming,
       linkType: executionSetup.linkType,
+
+      // Output directory: CLI flag takes precedence, then resolved config
+      // If neither is set, outputDirectory remains undefined (outputs stay in execution dir)
+      outputDirectory: outputPath || resolvedConfig.outputDirectory,
 
       // Required: codons from validation
       codons,

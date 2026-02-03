@@ -1,0 +1,30 @@
+{
+  "hank": [
+    {
+      "id": "failing-codon",
+      "name": "This Will Fail (Ignored)",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "promptText": "Intentionally fail by attempting an impossible operation",
+      "onFailure": "ignore",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "exit 1",
+            "workingDirectory": "."
+          }
+        }
+      ],
+      "checkpointedFiles": ["output.txt"]
+    },
+    {
+      "id": "continuation-codon",
+      "name": "Should Run After Failure",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "promptText": "Write 'success' to output.txt",
+      "checkpointedFiles": ["output.txt"]
+    }
+  ]
+}

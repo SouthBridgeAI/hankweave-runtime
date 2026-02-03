@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CodonRunner } from "../../server/codon-runner.js";
-import type { CodonId } from "../../server/types/branded-types.js";
+import { type CodonId, SessionId } from "../../server/types/branded-types.js";
 import { Logger } from "../../server/utils.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
 
@@ -64,6 +64,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         codon,
         codonId: "test-codon" as CodonId,
         executionPath: tempDir,
+        agentRootPath: tempDir, // Use same path for tests
         logger,
         logPath: testLogPath,
         logParsingInterval: 50, // Fast parsing for test
@@ -99,7 +100,9 @@ describe("CodonRunner post-success SDK error handling", () => {
       // Now simulate the SDK crash - this is what triggers the error event
       // In real scenario: SDK emits success, then error_during_execution, then crashes
       const processManager = (
-        runner as unknown as { processManager: { emit: (event: string, error: Error) => void } }
+        runner as unknown as {
+          processManager: { emit: (event: string, error: Error) => void };
+        }
       ).processManager;
       processManager.emit("error", new Error("Claude Code process exited with code 1"));
 
@@ -135,6 +138,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         codon,
         codonId: "test-codon" as CodonId,
         executionPath: tempDir,
+        agentRootPath: tempDir, // Use same path for tests
         logger,
         logPath: emptyLogPath,
       });
@@ -160,7 +164,9 @@ describe("CodonRunner post-success SDK error handling", () => {
 
       // Simulate SDK error without prior success
       const processManager = (
-        runner as unknown as { processManager: { emit: (event: string, error: Error) => void } }
+        runner as unknown as {
+          processManager: { emit: (event: string, error: Error) => void };
+        }
       ).processManager;
       processManager.emit("error", new Error("Real SDK error - no success"));
 
@@ -213,6 +219,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         codon,
         codonId: "test-codon" as CodonId,
         executionPath: tempDir,
+        agentRootPath: tempDir, // Use same path for tests
         logger,
         logPath: failedLogPath,
         logParsingInterval: 50,
@@ -241,7 +248,9 @@ describe("CodonRunner post-success SDK error handling", () => {
 
       // Simulate SDK error after failed conversation
       const processManager = (
-        runner as unknown as { processManager: { emit: (event: string, error: Error) => void } }
+        runner as unknown as {
+          processManager: { emit: (event: string, error: Error) => void };
+        }
       ).processManager;
       processManager.emit("error", new Error("SDK cleanup error"));
 
@@ -273,6 +282,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         codon,
         codonId: "test-codon" as CodonId,
         executionPath: tempDir,
+        agentRootPath: tempDir, // Use same path for tests
         logger,
         logPath: emptyLogPath,
       });
@@ -321,6 +331,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         codon,
         codonId: "test-codon" as CodonId,
         executionPath: tempDir,
+        agentRootPath: tempDir, // Use same path for tests
         logger,
         logPath: successLogPath,
         logParsingInterval: 50,
@@ -340,6 +351,118 @@ describe("CodonRunner post-success SDK error handling", () => {
       successReceived = (runner as unknown as { successResultReceived: boolean })
         .successResultReceived;
       expect(successReceived).toBe(true);
+
+      const logParserStop = (runner as unknown as { logParser: { stop: () => void } }).logParser;
+      logParserStop.stop();
+    });
+
+    test("should reset successResultReceived between extensions", async () => {
+      // Regression test: Ensures successResultReceived is properly reset between extensions.
+      // Previously, this flag persisted across extensions, causing extension failures
+      // to be masked as successes when SDK errors occurred.
+
+      // Create a log with success result
+      const successLogPath = path.join(tempDir, "success-with-extension.jsonl");
+      const successLog = `${[
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: "test-session",
+          model: "claude-sonnet-4-5",
+          cwd: "/test",
+          tools: ["Read"],
+          mcp_servers: [],
+          permissionMode: "bypassPermissions",
+          apiKeySource: "ANTHROPIC_API_KEY",
+        }),
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "Initial run completed successfully",
+          num_turns: 10,
+          duration_ms: 5000,
+          duration_api_ms: 4000,
+        }),
+      ].join("\n")}\n`;
+      await fs.promises.writeFile(successLogPath, successLog);
+
+      // Create test codon WITH extension config
+      const codon = createTestCodon({
+        id: "test-codon",
+        name: "Test Codon",
+        promptText: "Test prompt",
+        model: "sonnet",
+        continuationMode: "fresh",
+        exhaustWithPrompt: "Continue with extension", // Enable extensions
+      });
+
+      runner = new CodonRunner({
+        codon,
+        codonId: "test-codon" as CodonId,
+        executionPath: tempDir,
+        agentRootPath: tempDir, // Use tempDir for both in tests
+        logger,
+        logPath: successLogPath,
+        logParsingInterval: 50,
+        extensionConfig: {
+          maxExtensions: 5,
+          exhaustWithPrompt: "Continue with extension",
+        },
+        shouldInterrupt: () => false,
+        onExtension: () => {
+          // Extension callback - empty for this test
+        },
+      });
+
+      // Start parsing to trigger success result
+      const logParser = (runner as unknown as { logParser: { start: () => void } }).logParser;
+      logParser.start();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // Verify: successResultReceived is true after initial success
+      let successReceived = (runner as unknown as { successResultReceived: boolean })
+        .successResultReceived;
+      expect(successReceived).toBe(true);
+
+      // Prevent real SDK spawn during this unit test
+      // (performExtension -> runExtension -> spawn -> SDK query)
+      (
+        runner as unknown as {
+          runExtension: (sessionId: SessionId, exhaustionPrompt: string) => Promise<void>;
+        }
+      ).runExtension = async () => {};
+
+      // Now simulate triggering an extension by calling performExtension directly
+      // In real scenarios, this happens when the process exits and shouldExtendCodon returns true
+      const performExtension = (
+        runner as unknown as {
+          performExtension: (
+            sessionId: string,
+            extensionConfig: { exhaustWithPrompt: string },
+            onExtension: () => void,
+            previousExitCode: number,
+            wasContextExceeded: boolean,
+          ) => Promise<void>;
+        }
+      ).performExtension;
+
+      await performExtension.call(
+        runner,
+        SessionId("test-session"),
+        { exhaustWithPrompt: "Continue with extension" },
+        () => {},
+        0, // previousExitCode
+        false, // wasContextExceeded
+      );
+
+      // After performExtension resets per-extension state,
+      // successResultReceived should be false (ready for the next extension's success tracking)
+      successReceived = (runner as unknown as { successResultReceived: boolean })
+        .successResultReceived;
+
+      // Verify the flag was properly reset
+      expect(successReceived).toBe(false);
 
       const logParserStop = (runner as unknown as { logParser: { stop: () => void } }).logParser;
       logParserStop.stop();

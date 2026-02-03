@@ -159,6 +159,7 @@ describe("StateManager", () => {
                   cacheReadTokens: 0,
                 },
                 assistantMessageCount: 0,
+                extensionCount: 0,
               },
             ],
             status: "running",

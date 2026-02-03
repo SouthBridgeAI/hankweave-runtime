@@ -2,9 +2,14 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-export async function runCheckpointSystemTests(testDir: string) {
-  const checkpointDir = path.join(testDir, ".hankweave/checkpoints");
-  const gitDir = path.join(checkpointDir, ".git");
+/**
+ * Checkpoint system tests.
+ * @param executionPath - Where .hankweave/checkpoints lives
+ * @param agentRootPath - Where agent files live (git work tree)
+ */
+export async function runCheckpointSystemTests(executionPath: string, agentRootPath: string) {
+  const checkpointDir = path.join(executionPath, ".hankweave/checkpoints");
+  const gitDir = path.join(checkpointDir, ".hankweavecheckpoints");
 
   test("checkpoint directory structure created", () => {
     expect(fs.existsSync(checkpointDir)).toBe(true);
@@ -35,11 +40,11 @@ export async function runCheckpointSystemTests(testDir: string) {
     const { execSync } = await import("node:child_process");
     try {
       const gitLog = execSync("git log --oneline", {
-        cwd: testDir,
+        cwd: agentRootPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: testDir,
+          GIT_WORK_TREE: agentRootPath,
         },
         encoding: "utf-8",
       });
@@ -62,11 +67,11 @@ export async function runCheckpointSystemTests(testDir: string) {
     const { execSync } = await import("node:child_process");
     try {
       const gitLog = execSync("git log --pretty=format:%s", {
-        cwd: testDir,
+        cwd: agentRootPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: testDir,
+          GIT_WORK_TREE: agentRootPath,
         },
         encoding: "utf-8",
       });
@@ -96,11 +101,11 @@ export async function runCheckpointSystemTests(testDir: string) {
     const { execSync } = await import("node:child_process");
     try {
       const gitFiles = execSync("git ls-files", {
-        cwd: testDir,
+        cwd: agentRootPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: testDir,
+          GIT_WORK_TREE: agentRootPath,
         },
         encoding: "utf-8",
       });
@@ -125,13 +130,13 @@ export async function runCheckpointSystemTests(testDir: string) {
 
       // Verify specific files that should be tracked based on what Claude created
       // Note: Some files might not exist if Claude didn't create them
-      if (fs.existsSync(path.join(testDir, "notes/favorite_poem.txt"))) {
+      if (fs.existsSync(path.join(agentRootPath, "notes/favorite_poem.txt"))) {
         expect(checkpointedFiles).toContain("notes/favorite_poem.txt");
       }
       expect(checkpointedFiles).toContain("notes/second_favorite_poem.txt");
       expect(checkpointedFiles).toContain("typescript_code/src/poem1.ts");
       // poem2.ts might not always be created by Claude
-      if (fs.existsSync(path.join(testDir, "typescript_code/src/poem2.ts"))) {
+      if (fs.existsSync(path.join(agentRootPath, "typescript_code/src/poem2.ts"))) {
         expect(checkpointedFiles).toContain("typescript_code/src/poem2.ts");
       }
     } catch (error) {
@@ -143,11 +148,11 @@ export async function runCheckpointSystemTests(testDir: string) {
     const { execSync } = await import("node:child_process");
     try {
       const gitBranches = execSync("git branch", {
-        cwd: testDir,
+        cwd: agentRootPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: testDir,
+          GIT_WORK_TREE: agentRootPath,
         },
         encoding: "utf-8",
       });
@@ -175,11 +180,11 @@ export async function runCheckpointSystemTests(testDir: string) {
     const { execSync } = await import("node:child_process");
     try {
       const gitStatus = execSync("git status --porcelain", {
-        cwd: testDir,
+        cwd: agentRootPath,
         env: {
           ...process.env,
           GIT_DIR: gitDir,
-          GIT_WORK_TREE: testDir,
+          GIT_WORK_TREE: agentRootPath,
         },
         encoding: "utf-8",
       });

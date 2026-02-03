@@ -80,13 +80,14 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
   constructor(
     private executionPath: string,
+    private agentRootPath: string,
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
     private globalSystemPrompt?: string | null,
   ) {
     super();
-    this.promptBuilder = new PromptBuilder(executionPath, logger, globalSystemPrompt);
+    this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
   }
 
   /** Frontmatter metadata from the prompt file (if any) */
@@ -151,14 +152,32 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * Spawn a Claude Agent SDK session for the given codon configuration.
    * Sets up logging, environment, and message handling.
    *
+   * This unified method handles both normal codon execution and exhaustion extensions.
+   * From Claude's perspective, both are identical: resume a session with a new prompt.
+   * The difference is only where the prompt comes from.
+   *
    * @param codon - Codon configuration (not Loop - loops must be expanded first)
-   * @param previousSessionId - Session ID to continue from (if any)
-   * @param logPath - Custom log file path (optional, defaults to .hankweave/logs/)
+   * @param sessionToResume - Session ID to resume (if any). When provided with exhaustionPrompt,
+   *                          always resumes regardless of codon.continuationMode.
+   * @param options - Optional spawn configuration
+   * @param options.logPath - Custom log file path (defaults to .hankweave/logs/)
+   * @param options.exhaustionPrompt - If provided, activates exhaustion mode: uses this prompt
+   *                                   instead of codon config, appends to log, forces resume.
    */
-  async spawn(codon: Codon, previousSessionId: string | null, logPath?: string): Promise<string> {
+  async spawn(
+    codon: Codon,
+    sessionToResume: string | null,
+    options?: {
+      logPath?: string;
+      exhaustionPrompt?: string;
+    },
+  ): Promise<string> {
     if (this.abortController) {
       throw new Error("Session already running");
     }
+
+    const { logPath, exhaustionPrompt } = options ?? {};
+    const isExhaustionMode = !!exhaustionPrompt;
 
     // Use provided logPath or default to .hankweave/logs/
     const actualLogPath =
@@ -170,17 +189,29 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       fs.mkdirSync(logsDir, { recursive: true });
     }
 
-    // Create log stream
-    this.logStream = fs.createWriteStream(actualLogPath);
+    // Create log stream - append mode for exhaustion (extensions continue the same log)
+    this.logStream = fs.createWriteStream(
+      actualLogPath,
+      isExhaustionMode ? { flags: "a" } : undefined,
+    );
+
+    // Build prompt content
+    const promptContent = this.promptBuilder.buildPromptForExecution(codon, exhaustionPrompt);
 
     // Build Claude Agent SDK options
-    const options = this.buildSDKOptions(codon, previousSessionId);
+    // In exhaustion mode with sessionToResume, always resume
+    // Otherwise, respect codon.continuationMode (normal case)
+    const sdkOptions = this.buildSDKOptions(codon, isExhaustionMode ? null : sessionToResume);
 
-    // Build prompt content (strips frontmatter if present)
-    const { content: promptContent } = this.promptBuilder.buildPromptContent(codon);
+    // Force resume when in exhaustion mode with a session to resume
+    if (sessionToResume && isExhaustionMode) {
+      sdkOptions.continue = true;
+      sdkOptions.resume = sessionToResume;
+    }
 
     this.logger.log(`Starting Claude Agent SDK for codon ${codon.id}`);
     this.logger.log(`Working directory: ${this.executionPath}`);
+    this.logger.log(`Session to resume: ${sessionToResume || "none"}`);
     this.logger.log(`Prompt content (${promptContent.length} chars):\n${promptContent}`);
 
     // Create abort controller
@@ -195,7 +226,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     // Start the query in the background
     this.logger.log(`[SPAWN-DEBUG] About to call runQuery`, "debug");
 
-    const queryPromise = this.runQuery(promptContent, options, codon.id);
+    const queryPromise = this.runQuery(promptContent, sdkOptions, codon.id);
     this.logger.log(`[SPAWN-DEBUG] runQuery called, promise returned`, "debug");
 
     queryPromise.catch((error) => {
@@ -220,7 +251,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
 
     const options: Options = {
       model: modelInfo.modelId,
-      cwd: this.executionPath,
+      cwd: this.agentRootPath, // Agents work in agentRootPath (not executionPath)
       permissionMode: "bypassPermissions",
       abortController: this.abortController,
       settingSources: ["user"],
@@ -256,7 +287,16 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     if (!options.env) options.env = {};
 
     // Pass through essential system environment variables that Claude Code SDK needs
-    const essentialVars = ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "LC_ALL"];
+    const essentialVars = [
+      "PATH",
+      "HOME",
+      "USER",
+      "SHELL",
+      "TMPDIR",
+      "LANG",
+      "LC_ALL",
+      "CLAUDE_CONFIG_DIR",
+    ];
     for (const key of essentialVars) {
       if (process.env[key]) {
         options.env[key] = process.env[key];
@@ -264,6 +304,10 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     }
 
     // Pass through critical environment variables that Claude Code SDK needs
+    const hasOAuthToken =
+      !!process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+      !!process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
+
     for (const key in process.env) {
       // Pass through CLAUDE_CODE_* variables (OAuth authentication, etc.)
       if (key.startsWith("CLAUDE_CODE_")) {
@@ -272,9 +316,16 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       }
       // Pass through specific ANTHROPIC_* variables that won't conflict with OAuth
       // Exclude ANTHROPIC_API_KEY to avoid conflicts with CLAUDE_CODE_OAUTH_TOKEN
-      else if (key.startsWith("ANTHROPIC_") && key !== "ANTHROPIC_API_KEY") {
-        options.env[key] = process.env[key];
-        this.logger.log(`Passing through Anthropic env var: ${key}`);
+      else if (key.startsWith("ANTHROPIC_")) {
+        if (key === "ANTHROPIC_API_KEY") {
+          if (!hasOAuthToken) {
+            options.env[key] = process.env[key];
+            this.logger.log(`Passing through Anthropic env var: ${key}`);
+          }
+        } else {
+          options.env[key] = process.env[key];
+          this.logger.log(`Passing through Anthropic env var: ${key}`);
+        }
       }
       // Pass through HANKWEAVE_* variables (with prefix stripped)
       // Exclude HANKWEAVE_RUNTIME_* (server config) and HANKWEAVE_SENTINEL_* (sentinel API keys)

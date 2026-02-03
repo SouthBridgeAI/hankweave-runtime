@@ -55,7 +55,8 @@ describe("WebSocket Logging", () => {
         data: {
           serverVersion: "1.0.0",
           executionPath: "/path/to/execution",
-          dataPath: "/path/to/data",
+          agentRootPath: "/path/to/execution/agentRoot",
+          dataPath: "/path/to/execution/agentRoot/read_only_data_source",
         },
       };
 
@@ -575,7 +576,11 @@ describe("WebSocket Logging", () => {
         JSON.stringify({
           loggedAt: "2025-01-19T10:00:01.000Z",
           direction: "out",
-          message: { id: "2", type: "test", timestamp: "2025-01-19T10:00:01.000Z" },
+          message: {
+            id: "2",
+            type: "test",
+            timestamp: "2025-01-19T10:00:01.000Z",
+          },
         }),
       ].join("\n");
 

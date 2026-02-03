@@ -36,19 +36,21 @@ async function runSessionToCompletion(
     parsingInterval: 100,
   });
 
-  // Create manager
-  const manager = new ShimProcessManager(executionPath, logger, logParser);
+  // Create manager (use executionPath for both since this is a simple integration test)
+  const manager = new ShimProcessManager(
+    executionPath,
+    executionPath,
+    logger,
+    logParser,
+  );
 
   console.log(`  Spawning codex shim for ${codon.id}...`);
 
   // Spawn process - pass the same logPath so parser and manager use the same file
   const command = ["bun", "run", codexShimPath];
-  const actualLogPath = await manager.spawn(
-    command,
-    codon,
-    previousSessionId,
-    sessionLogPath,
-  );
+  const actualLogPath = await manager.spawn(command, codon, previousSessionId, {
+    logPath: sessionLogPath,
+  });
   console.log(`    ✓ Spawned codex shim, log: ${actualLogPath}`);
 
   console.log(`  Waiting for completion...`);
@@ -451,8 +453,13 @@ describe("Codex Shim Integration Test", () => {
       parsingInterval: 100,
     });
 
-    // Create manager
-    const manager = new ShimProcessManager(executionPath, logger, logParser);
+    // Create manager (use executionPath for both since this is a simple integration test)
+    const manager = new ShimProcessManager(
+      executionPath,
+      executionPath,
+      logger,
+      logParser,
+    );
 
     console.log("\n  Running self-test...");
 

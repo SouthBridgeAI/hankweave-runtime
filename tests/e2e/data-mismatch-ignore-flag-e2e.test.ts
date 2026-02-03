@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ServerReadyEvent } from "../../server/schemas/event-schemas.js";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
 
@@ -62,10 +63,14 @@ describe("--ignore-data-mismatch relink behavior", () => {
     });
 
     try {
-      await secondServer.waitForEvent("server.ready", 30_000);
+      const secondReadyEvent = (await secondServer.waitForEvent(
+        "server.ready",
+        30_000,
+      )) as ServerReadyEvent;
+      const agentRootPath = secondReadyEvent.data.agentRootPath;
 
       const linkedDataPath = path.join(
-        executionDir,
+        agentRootPath,
         "read_only_data_source",
         path.basename(dataPathB),
       );

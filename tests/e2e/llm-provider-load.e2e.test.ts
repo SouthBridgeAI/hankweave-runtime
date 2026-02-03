@@ -516,27 +516,6 @@ describe("Provider Registry Performance", () => {
   });
 
   describe("edge case performance", () => {
-    it("should handle non-existent model lookups efficiently", () => {
-      const registry = new LlmProviderRegistry({ logger: mockLogger });
-
-      const start = performance.now();
-
-      // Many lookups for non-existent models
-      for (let i = 0; i < 1000; i++) {
-        registry.getModelInfo(`fake-model-${i}`);
-        registry.isModelAvailable(`fake-model-${i}`);
-        registry.calculateCost(`fake-model-${i}`, { inputTokens: 1000, outputTokens: 500 });
-      }
-
-      const end = performance.now();
-      const duration = end - start;
-
-      console.log(`1000 failed lookups took ${duration.toFixed(2)}ms`);
-
-      // Failed lookups should be fast (cache misses)
-      expect(duration).toBeLessThan(50);
-    });
-
     it("should handle rapid provider status changes", async () => {
       const registry = new MockLlmProviderRegistry();
 

@@ -1,0 +1,20 @@
+{
+  "hank": [
+    {
+      "type": "loop",
+      "id": "test-loop",
+      "name": "Test Loop with Ignored Failures",
+      "terminateOn": { "type": "iterationLimit", "limit": 3 },
+      "codons": [
+        {
+          "id": "loop-codon",
+          "name": "Codon That May Fail",
+          "model": "haiku",
+          "continuationMode": "continue-previous",
+          "promptText": "Do something that might fail",
+          "onFailure": "ignore"
+        }
+      ]
+    }
+  ]
+}

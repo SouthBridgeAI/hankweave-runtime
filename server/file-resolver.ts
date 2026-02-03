@@ -37,7 +37,11 @@ export class UnifiedFileResolver {
       // Don't follow symlinks
       followSymbolicLinks: false,
       // Don't use gitignore - we'll handle it ourselves
-      ignore: [".git/**"],
+      ignore: [
+        ".git/**",
+        ".hankweave/checkpoints/.hankweavecheckpoints/**",
+        ".hankweave.backup-*/checkpoints/.hankweavecheckpoints/**",
+      ],
     });
 
     // Filter through ignore rules
@@ -62,8 +66,23 @@ export class UnifiedFileResolver {
     // Create new ignore instance
     const ig = ignore();
 
-    // Always ignore .git directory
+    // Always ignore .git directory (user's git)
     ig.add(".git");
+
+    // Always ignore the checkpoint shadow git directory
+    // Use leading slash for path patterns and trailing slash for directory-only matching
+    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints/");
+    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints/**");
+
+    // Also ignore any quarantine directories (created when both .git and .hankweavecheckpoints exist)
+    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints-quarantine-*/");
+    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints-quarantine-*/**");
+
+    // Also ignore checkpoint git directories in backup directories (created by --start-new --force)
+    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints/");
+    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints/**");
+    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints-quarantine-*/");
+    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints-quarantine-*/**");
 
     // IMPORTANT: Always ignore the read_only_data_source directory for checkpoints
     // This is enforced here, not via gitignore

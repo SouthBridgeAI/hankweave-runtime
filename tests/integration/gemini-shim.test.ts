@@ -18,7 +18,7 @@ async function runSessionToCompletion(
   geminiShimPath: string,
   codon: Codon,
   previousSessionId: string | null,
-  timeoutMs: number = 60000
+  timeoutMs: number = 60000,
 ): Promise<{
   sessionId: string;
   logPath: string;
@@ -37,18 +37,20 @@ async function runSessionToCompletion(
   });
 
   // Create manager
-  const manager = new ShimProcessManager(executionPath, logger, logParser);
+  const manager = new ShimProcessManager(
+    executionPath,
+    executionPath,
+    logger,
+    logParser,
+  );
 
   console.log(`  Spawning gemini shim for ${codon.id}...`);
 
   // Spawn process - pass the same logPath so parser and manager use the same file
   const command = ["bun", "run", geminiShimPath];
-  const actualLogPath = await manager.spawn(
-    command,
-    codon,
-    previousSessionId,
-    sessionLogPath
-  );
+  const actualLogPath = await manager.spawn(command, codon, previousSessionId, {
+    logPath: sessionLogPath,
+  });
   console.log(`    ✓ Spawned gemini shim, log: ${actualLogPath}`);
 
   console.log(`  Waiting for completion...`);
@@ -121,7 +123,7 @@ describe("Gemini Shim Integration Test", () => {
     tempDir = path.resolve(
       "tests",
       "test-area",
-      `temp-gemini-integration-${Date.now()}`
+      `temp-gemini-integration-${Date.now()}`,
     );
     executionPath = path.join(tempDir, "execution");
     await fs.promises.mkdir(executionPath, { recursive: true });
@@ -154,7 +156,7 @@ describe("Gemini Shim Integration Test", () => {
     // Check if GOOGLE_API_KEY or GEMINI_API_KEY is set
     if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
       console.log(
-        "⏭️  Skipping test: No GOOGLE_API_KEY or GEMINI_API_KEY found"
+        "⏭️  Skipping test: No GOOGLE_API_KEY or GEMINI_API_KEY found",
       );
       return;
     }
@@ -174,7 +176,7 @@ describe("Gemini Shim Integration Test", () => {
         logger,
         geminiShimPath,
         codon,
-        null
+        null,
       );
 
     console.log("\n  Verifying log file exists and has content...");
@@ -201,14 +203,14 @@ describe("Gemini Shim Integration Test", () => {
     console.log(`    ✓ Found ${systemMessages.length} system message(s)`);
     if (systemMessages[0]) {
       console.log(
-        `      - Session ID: ${systemMessages[0].session_id || "N/A"}`
+        `      - Session ID: ${systemMessages[0].session_id || "N/A"}`,
       );
       console.log(`      - Model: ${systemMessages[0].model || "N/A"}`);
     }
 
     // Check for assistant messages
     const assistantMessages = allMessages.filter(
-      (msg) => msg.type === "assistant"
+      (msg) => msg.type === "assistant",
     );
     expect(assistantMessages.length).toBeGreaterThan(0);
     console.log(`    ✓ Found ${assistantMessages.length} assistant message(s)`);
@@ -221,7 +223,7 @@ describe("Gemini Shim Integration Test", () => {
           console.log(
             `      - Response: "${text.substring(0, 50)}${
               text.length > 50 ? "..." : ""
-            }"`
+            }"`,
           );
         }
       }
@@ -238,7 +240,7 @@ describe("Gemini Shim Integration Test", () => {
         console.log(
           `      - Token usage: ${
             resultMessages[0].usage.input_tokens || 0
-          } in / ${resultMessages[0].usage.output_tokens || 0} out`
+          } in / ${resultMessages[0].usage.output_tokens || 0} out`,
         );
       }
     }
@@ -252,7 +254,7 @@ describe("Gemini Shim Integration Test", () => {
     // Check if GOOGLE_API_KEY or GEMINI_API_KEY is set
     if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
       console.log(
-        "⏭️  Skipping test: No GOOGLE_API_KEY or GEMINI_API_KEY found"
+        "⏭️  Skipping test: No GOOGLE_API_KEY or GEMINI_API_KEY found",
       );
       return;
     }
@@ -277,7 +279,7 @@ describe("Gemini Shim Integration Test", () => {
       logger,
       geminiShimPath,
       codon1,
-      null
+      null,
     );
 
     console.log(`    ✓ First session ID: ${firstSessionId}`);
@@ -302,7 +304,7 @@ describe("Gemini Shim Integration Test", () => {
       logger,
       geminiShimPath,
       codon2,
-      firstSessionId
+      firstSessionId,
     );
 
     console.log(`    ✓ Continuation session ID: ${continuationSessionId}`);
@@ -333,7 +335,12 @@ describe("Gemini Shim Integration Test", () => {
     });
 
     // Create manager
-    const manager = new ShimProcessManager(executionPath, logger, logParser);
+    const manager = new ShimProcessManager(
+      executionPath,
+      executionPath,
+      logger,
+      logParser,
+    );
 
     console.log("\n  Running self-test...");
 
@@ -343,7 +350,7 @@ describe("Gemini Shim Integration Test", () => {
 
     console.log(`    ✓ Self-test completed`);
     console.log(
-      `      Overall: ${result.overall.passed ? "PASSED" : "FAILED"}`
+      `      Overall: ${result.overall.passed ? "PASSED" : "FAILED"}`,
     );
     console.log(`      Message: ${result.overall.message}`);
 
@@ -359,7 +366,7 @@ describe("Gemini Shim Integration Test", () => {
     expect(result.agent.name).toBe("gemini-cli");
     expect(typeof result.agent.found).toBe("boolean");
     console.log(
-      `    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`
+      `    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`,
     );
 
     expect(result.checks).toBeDefined();
@@ -373,7 +380,7 @@ describe("Gemini Shim Integration Test", () => {
       expect(typeof check.passed).toBe("boolean");
       expect(check.message).toBeDefined();
       console.log(
-        `      - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`
+        `      - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`,
       );
     }
 

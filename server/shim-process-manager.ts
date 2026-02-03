@@ -22,13 +22,14 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
 
   constructor(
     private executionPath: string,
+    private agentRootPath: string,
     private logger: Logger,
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
     private globalSystemPrompt?: string | null,
   ) {
     super();
-    this.promptBuilder = new PromptBuilder(executionPath, logger, globalSystemPrompt);
+    this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
   }
 
   /** Frontmatter metadata from the prompt file (if any) */
@@ -40,20 +41,33 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
    * Spawn a shim process for the given codon configuration.
    * Sets up logging, environment, and process monitoring.
    *
+   * This unified method handles both normal codon execution and exhaustion extensions.
+   * From the shim's perspective, both are identical: resume a session with a new prompt.
+   * The difference is only where the prompt comes from.
+   *
    * @param command - Command to execute (e.g., ["claude"] or ["bun", "run", "shims/gemini/dist/index.mjs"])
    * @param codon - Codon configuration (not Loop - loops must be expanded first)
-   * @param previousSessionId - Session ID to continue from (if any)
-   * @param logPath - Custom log file path (optional, defaults to .hankweave/logs/)
+   * @param sessionToResume - Session ID to resume (if any)
+   * @param options - Optional spawn configuration
+   * @param options.logPath - Custom log file path (defaults to .hankweave/logs/)
+   * @param options.exhaustionPrompt - If provided, activates exhaustion mode: uses this prompt
+   *                                   instead of codon config, appends to log.
    */
   async spawn(
     command: string[],
     codon: Codon,
-    previousSessionId: string | null,
-    logPath?: string,
+    sessionToResume: string | null,
+    options?: {
+      logPath?: string;
+      exhaustionPrompt?: string;
+    },
   ): Promise<string> {
     if (this.process) {
       throw new Error("Process already running");
     }
+
+    const { logPath, exhaustionPrompt } = options ?? {};
+    const isExhaustionMode = !!exhaustionPrompt;
 
     // Use provided logPath or default to .hankweave/logs/
     const actualLogPath =
@@ -65,13 +79,99 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
       fs.mkdirSync(logsDir, { recursive: true });
     }
 
-    // Create log stream
-    this.logStream = fs.createWriteStream(actualLogPath);
+    // Create log stream - append mode for exhaustion (extensions continue the same log)
+    this.logStream = fs.createWriteStream(
+      actualLogPath,
+      isExhaustionMode ? { flags: "a" } : undefined,
+    );
 
     // Build shim arguments
-    const args = this.buildShimArgs(codon, previousSessionId);
+    // In exhaustion mode, always resume regardless of continuationMode
+    const args = this.buildShimArgs(codon, sessionToResume, isExhaustionMode);
 
     // Set up environment
+    const env = this.buildEnvironment(codon);
+
+    // For OpenAI/Codex models, ensure codex binary is available
+    // and set CODEX_PATH_OVERRIDE to point to it
+    if (codon.model.providerId.toLowerCase() === "openai") {
+      try {
+        this.logger.log("Ensuring codex binary is available for OpenAI model...");
+        const codexPath = await ensureCodexAvailable();
+        env.CODEX_PATH_OVERRIDE = codexPath;
+        this.logger.log(`Set CODEX_PATH_OVERRIDE to: ${codexPath}`);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.logger.log(`Failed to ensure codex binary: ${errorMsg}`, "error");
+        throw new Error(`Cannot spawn codex shim: ${errorMsg}`);
+      }
+    }
+
+    // Combine shim command with shim flags
+    // Example: ["bun", "run", "shim.ts"] + ["--model", "gemini...", "-p", "..."]
+    const [bin, ...binArgs] = command;
+    const finalArgs = [...binArgs, ...args];
+
+    // Log the exact command being run
+    const fullCommand = `${bin} ${finalArgs.join(" ")}`;
+    this.logger.log(`Executing Agent: ${fullCommand}`);
+    this.logger.log(`Working directory: ${this.agentRootPath}`);
+    this.logger.log(`Session to resume: ${sessionToResume || "none"}`);
+
+    // Additional debugging
+    this.logger.log(`Current process.cwd(): ${process.cwd()}`);
+    this.logger.log(`Absolute agentRootPath: ${path.resolve(this.agentRootPath)}`);
+    this.logger.log(`Agent root path exists: ${fs.existsSync(this.agentRootPath)}`);
+    this.logger.log(
+      `Agent root path is directory: ${
+        fs.existsSync(this.agentRootPath) && fs.statSync(this.agentRootPath).isDirectory()
+      }`,
+    );
+
+    // Spawn process - agents work in agentRootPath (not executionPath)
+    this.process = spawn(bin, finalArgs, {
+      cwd: this.agentRootPath,
+      stdio: ["pipe", "pipe", "pipe"],
+      env,
+    });
+
+    this.killed = false;
+
+    // Pipe stdout to log file with error handling
+    if (this.process.stdout) {
+      this.process.stdout.pipe(this.logStream);
+
+      // Handle pipe errors
+      this.process.stdout.on("error", (error) => {
+        this.logger.log(`Stdout pipe error: ${error.message}`, "error");
+      });
+
+      this.logStream.on("error", (error) => {
+        this.logger.log(`Log stream error: ${error.message}`, "error");
+      });
+    }
+
+    // Set up event handlers
+    this.setupProcessHandlers();
+
+    // Feed prompt to stdin
+    const promptContent = this.promptBuilder.buildPromptForExecution(codon, exhaustionPrompt);
+    if (this.process.stdin) {
+      this.process.stdin.write(promptContent);
+      this.process.stdin.end();
+    }
+    this.logger.log(`Fed prompt to shim (${promptContent.length} chars)`);
+    this.logger.log(`Prompt content:\n${promptContent}`);
+
+    this.logger.log(`Shim process started for codon ${codon.id} (PID: ${this.process.pid})`);
+
+    return actualLogPath;
+  }
+
+  /**
+   * Build environment variables for the shim process.
+   */
+  private buildEnvironment(codon: Codon): NodeJS.ProcessEnv {
     const env = { ...process.env }; // Start with server's environment
 
     // Pass through HANKWEAVE_ prefixed variables from server environment
@@ -100,87 +200,33 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
       Object.assign(env, codon.env);
     }
 
-    // For OpenAI/Codex models, ensure codex binary is available
-    // and set CODEX_PATH_OVERRIDE to point to it
-    if (codon.model.providerId.toLowerCase() === "openai") {
-      try {
-        this.logger.log("Ensuring codex binary is available for OpenAI model...");
-        const codexPath = await ensureCodexAvailable();
-        env.CODEX_PATH_OVERRIDE = codexPath;
-        this.logger.log(`Set CODEX_PATH_OVERRIDE to: ${codexPath}`);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        this.logger.log(`Failed to ensure codex binary: ${errorMsg}`, "error");
-        throw new Error(`Cannot spawn codex shim: ${errorMsg}`);
-      }
-    }
-
-    // Combine shim command with shim flags
-    // Example: ["bun", "run", "shim.ts"] + ["--model", "gemini...", "-p", "..."]
-    const [bin, ...binArgs] = command;
-    const finalArgs = [...binArgs, ...args];
-
-    // Log the exact command being run
-    const fullCommand = `${bin} ${finalArgs.join(" ")}`;
-    this.logger.log(`Executing Agent: ${fullCommand}`);
-    this.logger.log(`Working directory: ${this.executionPath}`);
-
-    // Additional debugging
-    this.logger.log(`Current process.cwd(): ${process.cwd()}`);
-    this.logger.log(`Absolute executionPath: ${path.resolve(this.executionPath)}`);
-    this.logger.log(`Execution path exists: ${fs.existsSync(this.executionPath)}`);
-    this.logger.log(
-      `Execution path is directory: ${
-        fs.existsSync(this.executionPath) && fs.statSync(this.executionPath).isDirectory()
-      }`,
-    );
-
-    // Spawn process
-    this.process = spawn(bin, finalArgs, {
-      cwd: this.executionPath,
-      stdio: ["pipe", "pipe", "pipe"],
-      env,
-    });
-
-    this.killed = false;
-
-    // Pipe stdout to log file with error handling
-    if (this.process.stdout) {
-      this.process.stdout.pipe(this.logStream);
-
-      // Handle pipe errors
-      this.process.stdout.on("error", (error) => {
-        this.logger.log(`Stdout pipe error: ${error.message}`, "error");
-      });
-
-      this.logStream.on("error", (error) => {
-        this.logger.log(`Log stream error: ${error.message}`, "error");
-      });
-    }
-
-    // Set up event handlers
-    this.setupProcessHandlers();
-
-    // Feed prompt to stdin
-    await this.feedPrompt(codon);
-
-    this.logger.log(`Shim process started for codon ${codon.id} (PID: ${this.process.pid})`);
-
-    return actualLogPath;
+    return env;
   }
 
   /**
    * Build command line arguments for shim.
    * Only includes arguments supported by all shims.
+   *
+   * @param codon - Codon configuration
+   * @param previousSessionId - Session ID to resume (if any)
+   * @param isExhaustionMode - True if this is an extension (exhaustion mode)
    */
-  private buildShimArgs(codon: Codon, previousSessionId: string | null): string[] {
+  private buildShimArgs(
+    codon: Codon,
+    previousSessionId: string | null,
+    isExhaustionMode = false,
+  ): string[] {
     // Model override is already applied in loadCodonSequence(), so just use codon.model
     const modelInfo = codon.model;
     const modelId = modelInfo.modelId;
 
     const args = ["--model", modelId, "-p"];
 
-    if (codon.continuationMode === "continue-previous" && previousSessionId) {
+    // Resume session if:
+    // 1. We're in extension mode (exhaustion), OR
+    // 2. Codon has continue-previous mode
+    // This ensures extensions always resume regardless of codon's continuationMode
+    if (previousSessionId && (isExhaustionMode || codon.continuationMode === "continue-previous")) {
       args.push("--resume", previousSessionId);
     }
 
@@ -199,25 +245,6 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     this.logger.log(`Using shim debug directory: ${shimDebugDir}`);
 
     return args;
-  }
-
-  /**
-   * Feed prompt content to shim's stdin.
-   * Parses and strips frontmatter from markdown files.
-   */
-  private async feedPrompt(codon: Codon): Promise<void> {
-    if (!this.process?.stdin) {
-      throw new Error("Process stdin not available");
-    }
-
-    // Build prompt content using prompt builder (handles frontmatter parsing and template replacement)
-    const { content: processedContent } = this.promptBuilder.buildPromptContent(codon);
-
-    this.process.stdin.write(processedContent);
-    this.process.stdin.end();
-
-    this.logger.log(`Fed prompt to shim (${processedContent.length} chars)`);
-    this.logger.log(`Prompt content:\n${processedContent}`);
   }
 
   /**

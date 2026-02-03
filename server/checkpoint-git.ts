@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import simpleGit, { type SimpleGit } from "simple-git";
 import { fileResolver } from "./file-resolver.js";
-import type { Logger } from "./utils.js";
+import { type Logger, renameWithRetry } from "./utils.js";
+
+/** Name of the checkpoint git directory. Using .hankweavecheckpoints instead of .git to prevent
+ *  Git from treating execution environments as submodules when committed. */
+const CHECKPOINT_GIT_DIR = ".hankweavecheckpoints";
 
 /**
  * Git operations for the checkpoint system.
@@ -10,15 +14,87 @@ import type { Logger } from "./utils.js";
  */
 export class CheckpointGit {
   private executionPath: string;
+  private agentRootPath: string; // Work tree where agent files live
   private checkpointPath: string;
   private git: SimpleGit | null = null;
   private logger: Logger;
   private trackedPatterns: Set<string> = new Set();
 
-  constructor(executionPath: string, logger: Logger) {
+  constructor(executionPath: string, agentRootPath: string, logger: Logger) {
+    // Defensive check: agentRootPath must be a string
+    if (typeof agentRootPath !== "string") {
+      throw new Error(
+        `CheckpointGit: agentRootPath must be a string, got ${typeof agentRootPath}: ${JSON.stringify(agentRootPath)}`,
+      );
+    }
     this.executionPath = executionPath;
+    this.agentRootPath = agentRootPath;
     this.checkpointPath = path.join(executionPath, ".hankweave", "checkpoints");
     this.logger = logger;
+  }
+
+  /**
+   * Migrate backup directories from legacy .git to .hankweavecheckpoints.
+   * Called conditionally when the main checkpoint needed migration.
+   */
+  private async migrateBackupDirectories(): Promise<void> {
+    // Skip if we're somehow running inside a backup directory (shouldn't happen, but be defensive)
+    if (this.executionPath.includes(".hankweave.backup-")) {
+      return;
+    }
+
+    // When --start-new --force runs, it renames the ENTIRE .hankweave directory to
+    // .hankweave.backup-{timestamp}. This means backups have the structure:
+    //   {executionPath}/.hankweave.backup-{timestamp}/checkpoints/.git
+    //
+    // These backup directories live at the same level as .hankweave (both are direct
+    // children of executionPath). We need to scan them and migrate any legacy .git.
+    const executionRoot = this.executionPath;
+
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      const entries = await fs.promises.readdir(executionRoot, {
+        withFileTypes: true,
+      });
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name.startsWith(".hankweave.backup-")) {
+          // Backup checkpoints are at .hankweave.backup-{timestamp}/checkpoints/.git
+          const backupCheckpointPath = path.join(executionRoot, entry.name, "checkpoints");
+          const legacyGitDir = path.join(backupCheckpointPath, ".git");
+          const newGitDir = path.join(backupCheckpointPath, CHECKPOINT_GIT_DIR);
+
+          if (fs.existsSync(legacyGitDir) && !fs.existsSync(newGitDir)) {
+            this.logger.log(`Migrating backup directory: ${entry.name}/checkpoints/.git`);
+            try {
+              await renameWithRetry(legacyGitDir, newGitDir, {
+                logger: this.logger,
+              });
+              successCount++;
+            } catch (error) {
+              // Non-fatal for backups - just log and continue
+              this.logger.log(
+                `Warning: Could not migrate ${entry.name}/checkpoints/.git: ${error}`,
+                "error", // Logger only supports "info" | "error" | "debug", using "error" for warnings
+              );
+              failCount++;
+            }
+          }
+        }
+      }
+
+      // Log summary if any backups were processed
+      if (successCount > 0 || failCount > 0) {
+        this.logger.log(
+          `Backup migration complete: ${successCount} succeeded, ${failCount} failed`,
+          failCount > 0 ? "error" : "info", // Logger only supports "info" | "error" | "debug"
+        );
+      }
+    } catch (error) {
+      // If we can't read the execution directory, just skip backup migration
+      this.logger.log(`Could not scan for backup directories: ${error}`, "debug");
+    }
   }
 
   /**
@@ -29,22 +105,79 @@ export class CheckpointGit {
     // Create checkpoint directory
     await fs.promises.mkdir(this.checkpointPath, { recursive: true });
 
-    // Check if repository already exists
-    const gitDir = path.join(this.checkpointPath, ".git");
+    // Migration: rename legacy .git to .hankweavecheckpoints
+    const legacyGitDir = path.join(this.checkpointPath, ".git");
+    const newGitDir = path.join(this.checkpointPath, CHECKPOINT_GIT_DIR);
+    let didMigration = false;
+
+    if (fs.existsSync(legacyGitDir)) {
+      if (!fs.existsSync(newGitDir)) {
+        // Normal migration: legacy exists, new doesn't
+        this.logger.log("Migrating legacy .git directory to .hankweavecheckpoints...");
+        try {
+          await renameWithRetry(legacyGitDir, newGitDir, {
+            logger: this.logger,
+          });
+          this.logger.log("Successfully migrated checkpoint directory to .hankweavecheckpoints");
+          didMigration = true;
+        } catch (error) {
+          this.logger.log(
+            `Failed to migrate checkpoint directory: ${error}. ` +
+              `To fix manually, rename '${legacyGitDir}' to '${newGitDir}'.`,
+            "error",
+          );
+          throw new Error(`Critical error during checkpoint migration: ${error}`);
+        }
+      } else {
+        // Edge case: both exist - quarantine the legacy .git
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        const quarantinePath = path.join(
+          this.checkpointPath,
+          `.hankweavecheckpoints-quarantine-${timestamp}`,
+        );
+        this.logger.log(
+          `Warning: Both .git and .hankweavecheckpoints exist in checkpoints directory. ` +
+            `Quarantining .git to ${path.basename(quarantinePath)}`,
+          "error", // Logger only supports "info" | "error" | "debug", using "error" for warnings
+        );
+        try {
+          await renameWithRetry(legacyGitDir, quarantinePath, {
+            logger: this.logger,
+          });
+          didMigration = true; // Also consider quarantine as migration for backup scanning
+        } catch (error) {
+          this.logger.log(
+            `Could not quarantine legacy .git: ${error}. ` +
+              `Git submodule detection may still occur. ` +
+              `To fix manually, delete or rename '${legacyGitDir}'.`,
+            "error", // Logger only supports "info" | "error" | "debug", using "error" for warnings
+          );
+        }
+      }
+    }
+
+    // Conditionally migrate backup directories (only if main checkpoint needed migration)
+    if (didMigration) {
+      await this.migrateBackupDirectories();
+    }
+
+    // Check if repository already exists (using new name)
+    const gitDir = path.join(this.checkpointPath, CHECKPOINT_GIT_DIR);
     const repoExists = fs.existsSync(gitDir);
 
     if (repoExists) {
       // Repository exists - just set up git instance
-      this.git = simpleGit(this.executionPath, {
+      // Work tree is agentRootPath where agent files live
+      this.git = simpleGit(this.agentRootPath, {
         // Disable parallel processes to avoid lock contention
         maxConcurrentProcesses: 1,
         config: [
-          `core.worktree=${this.executionPath}`,
-          `core.gitdir=${path.join(this.checkpointPath, ".git")}`,
+          `core.worktree=${this.agentRootPath}`,
+          `core.gitdir=${path.join(this.checkpointPath, CHECKPOINT_GIT_DIR)}`,
         ],
       }).env({
-        GIT_DIR: path.join(this.checkpointPath, ".git"),
-        GIT_WORK_TREE: this.executionPath,
+        GIT_DIR: path.join(this.checkpointPath, CHECKPOINT_GIT_DIR),
+        GIT_WORK_TREE: this.agentRootPath,
         HOME: this.checkpointPath,
         XDG_CONFIG_HOME: this.checkpointPath,
       });
@@ -73,16 +206,17 @@ export class CheckpointGit {
     await fs.promises.writeFile(gitConfigPath, gitConfigContent);
 
     // Initialize git with proper environment
-    this.git = simpleGit(this.executionPath, {
+    // Work tree is agentRootPath where agent files live
+    this.git = simpleGit(this.agentRootPath, {
       // Disable parallel processes to avoid lock contention
       maxConcurrentProcesses: 1,
       config: [
-        `core.worktree=${this.executionPath}`,
-        `core.gitdir=${path.join(this.checkpointPath, ".git")}`,
+        `core.worktree=${this.agentRootPath}`,
+        `core.gitdir=${path.join(this.checkpointPath, CHECKPOINT_GIT_DIR)}`,
       ],
     }).env({
-      GIT_DIR: path.join(this.checkpointPath, ".git"),
-      GIT_WORK_TREE: this.executionPath,
+      GIT_DIR: path.join(this.checkpointPath, CHECKPOINT_GIT_DIR),
+      GIT_WORK_TREE: this.agentRootPath,
       HOME: this.checkpointPath,
       XDG_CONFIG_HOME: this.checkpointPath,
     });
@@ -92,6 +226,20 @@ export class CheckpointGit {
     await this.git.addConfig("user.name", "Hankweave Runtime");
     await this.git.addConfig("user.email", "froggie@southbridge.ai");
     await this.git.addConfig("commit.gpgsign", "false");
+
+    // Add .gitignore to exclude rigArchive/ from checkpoints (archives are tracked via manifest, not git)
+    const gitignorePath = path.join(this.executionPath, ".gitignore");
+    const rigArchiveIgnore = "# Hankweave archive directory - not checkpointed\nrigArchive/\n";
+
+    if (fs.existsSync(gitignorePath)) {
+      // Append if not already present
+      const existing = await fs.promises.readFile(gitignorePath, "utf-8");
+      if (!existing.includes("rigArchive/")) {
+        await fs.promises.appendFile(gitignorePath, `\n${rigArchiveIgnore}`);
+      }
+    } else {
+      await fs.promises.writeFile(gitignorePath, rigArchiveIgnore);
+    }
 
     // Initial empty commit (don't add .gitignore to avoid conflicts with user's project)
     const result = await this.git.commit("Initial checkpoint setup", {
@@ -151,7 +299,8 @@ export class CheckpointGit {
 
     const patterns = Array.from(this.trackedPatterns);
     // Use the unified file resolver to get files respecting gitignore
-    const files = await fileResolver.resolveFiles(this.executionPath, patterns);
+    // Search in agentRootPath where agent files live (the git work tree)
+    const files = await fileResolver.resolveFiles(this.agentRootPath, patterns);
     return files;
   }
 

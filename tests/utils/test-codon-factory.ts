@@ -57,6 +57,8 @@ export function createTestCodon(codonData: {
   rigSetup?: unknown[];
   checkpoints?: unknown[];
   sentinels?: unknown[];
+  exhaustWithPrompt?: string;
+  maxExtensions?: number;
 }): Codon {
   ensureRegistryInitialized();
 

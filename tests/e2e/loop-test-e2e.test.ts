@@ -27,6 +27,7 @@ describe("Loop E2E Test", () => {
       // Wait for server ready and capture execution path
       const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
       const executionPath = readyEvent.data.executionPath;
+      const agentRootPath = readyEvent.data.agentRootPath;
 
       // Expected codons:
       // 1. codon-1 (regular)
@@ -137,25 +138,43 @@ describe("Loop E2E Test", () => {
       expect(codon3?.data.success).toBe(true);
 
       // Verify file output from loop iterations
-      const notesDir = path.join(executionPath, "notes");
+      const notesDir = path.join(agentRootPath, "notes");
       expect(fs.existsSync(notesDir)).toBe(true);
 
       const files = fs.readdirSync(notesDir);
 
-      // Find all additional poem files (should be 2 - one per iteration)
+      // Note: additional_poem_*.txt files are archived (see config archiveOnSuccess),
+      // so they should NOT be in notes/ but in the archive
       const additionalPoemFiles = files.filter(
         (f) => f.startsWith("additional_poem_") && f.endsWith(".txt"),
       );
-      expect(additionalPoemFiles.length).toBe(2);
+      expect(additionalPoemFiles.length).toBe(0); // Files are archived, not in agentRoot
+
+      // Verify additional_poem files exist in archive
+      const rigArchivePath = path.join(executionPath, "rigArchive");
+      const archive0Dir = path.join(rigArchivePath, "refine-poems-0", "review-poem-0", "notes");
+      const archive1Dir = path.join(rigArchivePath, "refine-poems-1", "review-poem-1", "notes");
+
+      if (fs.existsSync(archive0Dir)) {
+        const archive0Files = fs.readdirSync(archive0Dir);
+        const archive0Poems = archive0Files.filter((f) => f.startsWith("additional_poem_"));
+        expect(archive0Poems.length).toBeGreaterThan(0);
+      }
+      if (fs.existsSync(archive1Dir)) {
+        const archive1Files = fs.readdirSync(archive1Dir);
+        const archive1Poems = archive1Files.filter((f) => f.startsWith("additional_poem_"));
+        expect(archive1Poems.length).toBeGreaterThan(0);
+      }
 
       // Find all poem review files (should be 2 - one per iteration)
+      // These are NOT archived, so they should still be in notes/
       const poemReviewFiles = files.filter(
         (f) => f.startsWith("poem_review_") && f.endsWith(".txt"),
       );
       expect(poemReviewFiles.length).toBe(2);
 
-      // Verify files are not empty
-      for (const file of [...additionalPoemFiles, ...poemReviewFiles]) {
+      // Verify review files are not empty
+      for (const file of poemReviewFiles) {
         const filePath = path.join(notesDir, file);
         expect(fs.existsSync(filePath)).toBe(true);
         const content = fs.readFileSync(filePath, "utf-8");
@@ -357,7 +376,7 @@ describe("Loop E2E Test", () => {
     try {
       // Wait for server ready
       const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
-      const executionPath = readyEvent.data.executionPath;
+      const agentRootPath = readyEvent.data.agentRootPath;
 
       // Expected codons:
       // 1. setup-codon (regular)
@@ -405,7 +424,7 @@ describe("Loop E2E Test", () => {
       }
 
       // Verify rig setup log was created (from the command that doesn't fail)
-      const setupLogPath = path.join(executionPath, "notes", "setup_log.txt");
+      const setupLogPath = path.join(agentRootPath, "notes", "setup_log.txt");
       expect(fs.existsSync(setupLogPath)).toBe(true);
 
       // Should have 2 entries (one per loop iteration)
@@ -421,17 +440,17 @@ describe("Loop E2E Test", () => {
       expect(rigSetupErrors.length).toBeGreaterThan(0);
 
       // Verify that copied.txt was NOT created (because cp command failed)
-      const copiedPath = path.join(executionPath, "notes", "copied.txt");
+      const copiedPath = path.join(agentRootPath, "notes", "copied.txt");
       expect(fs.existsSync(copiedPath)).toBe(false);
 
       // Verify message files were created (2 iterations)
-      const notesDir = path.join(executionPath, "notes");
+      const notesDir = path.join(agentRootPath, "notes");
       const files = fs.readdirSync(notesDir);
       const messageFiles = files.filter((f) => f.startsWith("message_") && f.endsWith(".txt"));
       expect(messageFiles.length).toBe(2);
 
       // Verify summary file was created by final codon
-      const summaryPath = path.join(executionPath, "notes", "summary.txt");
+      const summaryPath = path.join(agentRootPath, "notes", "summary.txt");
       expect(fs.existsSync(summaryPath)).toBe(true);
       const summaryContent = fs.readFileSync(summaryPath, "utf-8");
       expect(summaryContent.length).toBeGreaterThan(0);
@@ -449,6 +468,45 @@ describe("Loop E2E Test", () => {
     }
   }, 600_000); // 10 minute timeout
 
+  it("should expand loop iterations when rig setup fails and onFailure=ignore", async () => {
+    const configPath = "tests/config/test-failure-loop-rig-setup-ignore.hank.json";
+    const port = await getFreePort();
+    const hankweave = await launchHankweave({
+      configPath,
+      port,
+      logPrefix: "[loop-rig-ignore]",
+    });
+
+    try {
+      await hankweave.waitForEvent("server.ready");
+      await hankweave.waitForRunToComplete(30_000);
+
+      const finalState = hankweave.getState();
+      const currentRun = finalState.runs[0];
+      expect(currentRun).toBeDefined();
+
+      const failedLoopCodons = currentRun.codons.filter((codon) =>
+        codon.codonId.startsWith("rig-setup-failure#"),
+      );
+      const ignoredCodonIds = failedLoopCodons.map((codon) => codon.codonId).sort();
+      expect(ignoredCodonIds).toEqual([
+        CodonId("rig-setup-failure#0"),
+        CodonId("rig-setup-failure#1"),
+      ]);
+
+      for (const codon of failedLoopCodons) {
+        expect(codon.status).toBe("failed");
+        if (codon.status === "failed") {
+          expect(codon.failedDuring).toBe("preparing");
+        }
+      }
+    } finally {
+      if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {
+        await hankweave.stop();
+      }
+    }
+  }, 120_000);
+
   it("should handle rollback from interrupted codon inside loop iteration", async () => {
     const configPath = "tests/config/test-codons-with-loop-error.config.json";
     const port = await getFreePort();
@@ -462,6 +520,7 @@ describe("Loop E2E Test", () => {
       // Wait for server ready
       const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
       const executionPath = readyEvent.data.executionPath;
+      const agentRootPath = readyEvent.data.agentRootPath;
 
       await hankweave.waitForCodonStart("setup-codon");
       const setupCompleted = (await hankweave.waitForCodonCompletion(
@@ -475,7 +534,7 @@ describe("Loop E2E Test", () => {
 
       // run will fail because of the existing dir new-notes
       // let's clean up and restart
-      const offendingDir = path.join(executionPath, "new-notes");
+      const offendingDir = path.join(agentRootPath, "new-notes");
       fs.rmSync(offendingDir, { recursive: true });
 
       // Small delay before reconnecting
@@ -493,11 +552,15 @@ describe("Loop E2E Test", () => {
         sendPreviousEvents: true,
       });
 
+      // Wait for new server ready and capture agentRootPath again
+      const restartReadyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
+      const restartAgentRootPath = restartReadyEvent.data.agentRootPath;
+
       await hankweave.waitForRunToComplete();
 
       // make sure we have all the artifacts from all the codons
       // 2 iterations + review files
-      const notesDir = path.join(executionPath, "notes");
+      const notesDir = path.join(restartAgentRootPath, "notes");
       expect(fs.existsSync(notesDir)).toBe(true);
 
       const files = fs.readdirSync(notesDir);
@@ -506,7 +569,7 @@ describe("Loop E2E Test", () => {
 
       expect(files.filter((f) => f.startsWith("review_") && f.endsWith(".txt")).length).toBe(2);
 
-      const finalPath = path.join(executionPath, "notes", "final.txt");
+      const finalPath = path.join(restartAgentRootPath, "notes", "final.txt");
       expect(fs.existsSync(finalPath)).toBe(true);
       const finalContent = fs.readFileSync(finalPath, "utf-8");
       expect(finalContent.trim()).toBe("Final codon reached");
@@ -517,4 +580,133 @@ describe("Loop E2E Test", () => {
       }
     }
   }, 600_000); // 10 minute timeout
+
+  it("should archive and restore files across loop iterations during rollback", async () => {
+    const configPath = "tests/config/test-codons-loop-with-archive.config.json";
+    const port = await getFreePort();
+    let hankweave = await launchHankweave({
+      configPath,
+      port,
+      logPrefix: "[loop-archive-test]",
+    });
+
+    try {
+      // Wait for server ready
+      const readyEvent = (await hankweave.waitForEvent("server.ready")) as ServerReadyEvent;
+      const executionPath = readyEvent.data.executionPath;
+      const agentRootPath = readyEvent.data.agentRootPath;
+      const rigArchivePath = path.join(executionPath, "rigArchive");
+
+      // Expected codons:
+      // 1. setup-codon
+      // 2. process-iteration#0 (creates temp/ files, archives them)
+      // 3. process-iteration#1 (creates temp/ files, archives them)
+      // 4. final-codon
+
+      // Wait for all codons to complete
+      await hankweave.waitForCodonStart("setup-codon");
+      await hankweave.waitForCodonCompletion("setup-codon");
+
+      await hankweave.waitForCodonStart("process-iteration#0");
+      const iteration0Completed = (await hankweave.waitForCodonCompletion(
+        "process-iteration#0",
+      )) as CodonCompletedEvent;
+      expect(iteration0Completed.data.success).toBe(true);
+
+      // Wait a moment for archive to complete
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Verify archive.completed event was emitted for iteration 0
+      const archive0Events = hankweave.getEvents().filter((e) => e.type === "archive.completed");
+      const archive0Event = archive0Events.find(
+        (e) => "codonId" in e.data && e.data.codonId === "process-iteration#0",
+      );
+      expect(archive0Event).toBeDefined();
+
+      if (archive0Event && "archivedPaths" in archive0Event.data) {
+        console.log(
+          `  Archived paths from iteration 0: ${JSON.stringify(archive0Event.data.archivedPaths)}`,
+        );
+      }
+
+      // Verify temp files are archived
+      const resultsDir = path.join(agentRootPath, "results");
+      expect(fs.existsSync(resultsDir)).toBe(true); // Results remain (not archived)
+
+      await hankweave.waitForCodonStart("process-iteration#1");
+      const iteration1Completed = (await hankweave.waitForCodonCompletion(
+        "process-iteration#1",
+      )) as CodonCompletedEvent;
+      expect(iteration1Completed.data.success).toBe(true);
+
+      // Wait a moment for archive to complete
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Verify temp files from iteration 1 are archived separately
+      const archive1 = path.join(rigArchivePath, "archive-loop-1", "process-iteration-1");
+      expect(fs.existsSync(archive1)).toBe(true);
+
+      await hankweave.waitForCodonStart("final-codon");
+      await hankweave.waitForCodonCompletion("final-codon");
+
+      await hankweave.waitForRunToComplete();
+
+      // Now test rollback and restoration
+      // Stop server to enable rollback
+      await hankweave.stop();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Restart and request rollback to after iteration 0
+      hankweave = await launchHankweave({
+        configPath,
+        port,
+        logPrefix: "[loop-archive-test-restart]",
+        executionDir: executionPath,
+        reuseTestDirectory: true,
+        sendPreviousEvents: true,
+      });
+
+      await hankweave.waitForEvent("server.ready");
+
+      // Request rollback to iteration 0 completion
+      hankweave.sendCommand({
+        id: "test-rollback-1",
+        type: "rollback.toCodon",
+        data: {
+          codonId: "process-iteration#0",
+          checkpointType: "completed",
+          autoRestart: false,
+        },
+      });
+
+      // Wait for rollback to complete
+      const rollbackEvent = await hankweave.waitForEvent("rollback.completed", 30_000);
+      expect(rollbackEvent.type).toBe("rollback.completed");
+
+      // Check for archive restoration event
+      const restoreEvents = hankweave
+        .getEvents()
+        .filter((e) => e.type === "rollback.archiveRestore");
+      expect(restoreEvents.length).toBeGreaterThan(0);
+
+      // Verify iteration 1 archives were restored to agentRoot
+      // (because we rolled back past when they were archived)
+      const restoredTempDir = path.join(agentRootPath, "temp");
+      expect(fs.existsSync(restoredTempDir)).toBe(true);
+
+      // Verify iteration 1 archive is gone (files restored)
+      const archive1Path = path.join(rigArchivePath, "archive-loop-1", "process-iteration-1");
+      expect(fs.existsSync(archive1Path)).toBe(false);
+
+      // Verify iteration 0 archive still exists (not affected by rollback)
+      const archive0Path = path.join(rigArchivePath, "archive-loop-0", "process-iteration-0");
+      expect(fs.existsSync(archive0Path)).toBe(true);
+
+      await hankweave.stop();
+    } finally {
+      if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {
+        await hankweave.stop();
+      }
+    }
+  }, 600_000);
 });

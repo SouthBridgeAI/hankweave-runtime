@@ -19,17 +19,17 @@ import {
 // Test configuration similar to e2e tests
 const TEST_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../.."
+  "../..",
 );
 const EXECUTION_DIR = path.join(
   TEST_ROOT,
-  "tests/test-area/hankweave-server-integration"
+  "tests/test-area/hankweave-server-integration",
 );
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const CODONS_CONFIG = path.join(
   TEST_ROOT,
-  "tests/config/test-codons.config.json"
+  "tests/config/test-codons.config.json",
 );
 
 // Create a minimal config
@@ -40,7 +40,7 @@ let serverUrl = "";
 const TEST_TIMESTAMP = generateTestTimestamp();
 const TEST_RUN_DIR = path.join(
   TEST_RESULTS_DIR,
-  `server-integration-${TEST_TIMESTAMP}`
+  `server-integration-${TEST_TIMESTAMP}`,
 );
 
 /**
@@ -62,7 +62,7 @@ describe("HankweaveRuntime", () => {
    */
   async function connectAndRegisterClient(
     url: string,
-    options?: Parameters<typeof connectHankweaveClient>[1]
+    options?: Parameters<typeof connectHankweaveClient>[1],
   ) {
     const result = await connectHankweaveClient(url, options);
     testClients.push(result.client);
@@ -103,7 +103,7 @@ describe("HankweaveRuntime", () => {
     const stateFile = path.join(hankweaveDir, "state.json");
     fs.writeFileSync(
       stateFile,
-      JSON.stringify({ runs: [], currentRunId: null, executionPlan: [] })
+      JSON.stringify({ runs: [], currentRunId: null, executionPlan: [] }),
     );
 
     // Load codon configs if they exist
@@ -122,6 +122,8 @@ describe("HankweaveRuntime", () => {
       port: serverPort,
       cwd: EXECUTION_DIR,
       executionPath: EXECUTION_DIR,
+      agentRootPath: EXECUTION_DIR, // Use same path for tests
+      rigArchivePath: path.join(EXECUTION_DIR, "rigArchive"),
       dataPathInExecutionDir: dataDir,
       readOnlySourceDataPath: dataDir,
       dataHash: "test-hash-" + TEST_TIMESTAMP,
@@ -175,7 +177,7 @@ describe("HankweaveRuntime", () => {
         // Server might already be shut down from a test
         console.log(
           "Server already shut down or error during shutdown:",
-          error
+          error,
         );
       }
     }
@@ -255,7 +257,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "test-ping-1",
         type: "ping",
-      })
+      }),
     );
 
     // Wait for pong response
@@ -301,7 +303,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "test-ping-broadcast-1",
         type: "ping.broadcast",
-      })
+      }),
     );
 
     // Wait for both pong responses
@@ -359,7 +361,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "test-ping-multiple-1",
         type: "ping",
-      })
+      }),
     );
 
     const pingResponses = await pingPromise;
@@ -399,7 +401,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "test-ping-broadcast-multiple-1",
         type: "ping.broadcast",
-      })
+      }),
     );
 
     const broadcastResponses = await broadcastPromise;
@@ -420,7 +422,7 @@ describe("HankweaveRuntime", () => {
       serverUrl,
       {
         mode: ClientMode.READONLY,
-      }
+      },
     );
 
     // Verify handshake response
@@ -436,7 +438,7 @@ describe("HankweaveRuntime", () => {
       {
         mode: ClientMode.READONLY,
         sendPreviousEvents: false,
-      }
+      },
     );
 
     // Verify handshake response
@@ -456,14 +458,14 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "test-ping-1",
         type: "ping",
-      })
+      }),
     );
 
     firstClient.send(
       JSON.stringify({
         id: "test-ping-2",
         type: "ping.broadcast",
-      })
+      }),
     );
 
     // Wait a bit for events to be processed and stored
@@ -492,7 +494,7 @@ describe("HankweaveRuntime", () => {
 
     // Look for specific event types we expect
     const eventTypes = (handshakeResponse?.data.eventHistory ?? []).map(
-      (e: any) => e.type
+      (e: any) => e.type,
     );
     // server.ready is a connection state event and not journaled, so it won't be in history
     expect(eventTypes).not.toContain("server.ready");
@@ -512,7 +514,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "setup-ping",
         type: "ping",
-      })
+      }),
     );
 
     // Wait for events to be processed
@@ -550,7 +552,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "ping-1",
         type: "ping",
-      })
+      }),
     );
 
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -559,7 +561,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "ping-2",
         type: "ping",
-      })
+      }),
     );
 
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -568,7 +570,7 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({
         id: "ping-3",
         type: "ping.broadcast",
-      })
+      }),
     );
 
     // Wait for all events to be processed
@@ -641,7 +643,7 @@ describe("HankweaveRuntime", () => {
         data: {
           reason: "running integration test",
         },
-      })
+      }),
     );
 
     // Wait for server to shut down
@@ -675,7 +677,7 @@ describe("HankweaveRuntime", () => {
           JSON.stringify({
             id: `ping-history-${i}`,
             type: "ping",
-          })
+          }),
         );
         await new Promise((resolve) => setTimeout(resolve, 30));
       }
@@ -685,7 +687,7 @@ describe("HankweaveRuntime", () => {
 
     async function streamHistory(
       client: WebSocket,
-      data?: Record<string, unknown>
+      data?: Record<string, unknown>,
     ): Promise<{ batches: HistoryBatchEvent[]; events: ServerEvent[] }> {
       return await new Promise<{
         batches: HistoryBatchEvent[];
@@ -695,7 +697,7 @@ describe("HankweaveRuntime", () => {
         const events: ServerEvent[] = [];
         const timeout = setTimeout(
           () => reject(new Error("Timed out waiting for history.batch")),
-          3000
+          3000,
         );
         const originalOnMessage = client.onmessage;
 
@@ -720,7 +722,7 @@ describe("HankweaveRuntime", () => {
             id: `test-history-${Date.now()}`,
             type: "history.sync",
             ...(data && Object.keys(data).length > 0 ? { data } : {}),
-          })
+          }),
         );
       });
     }
@@ -792,13 +794,13 @@ describe("HankweaveRuntime", () => {
         serverUrl,
         {
           mode: ClientMode.READONLY,
-        }
+        },
       );
       const { client: secondClient } = await connectAndRegisterClient(
         serverUrl,
         {
           mode: ClientMode.READANDWRITE,
-        }
+        },
       );
 
       const secondClientMessages: ServerEvent[] = [];
@@ -811,7 +813,7 @@ describe("HankweaveRuntime", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(
-        secondClientMessages.some((msg) => msg.type === "history.batch")
+        secondClientMessages.some((msg) => msg.type === "history.batch"),
       ).toBe(false);
     });
   });
@@ -837,7 +839,7 @@ describe("HankweaveRuntime", () => {
         JSON.stringify({
           id: "test-readonly-ping",
           type: "ping",
-        })
+        }),
       );
 
       const pongResponse = await pongPromise;
@@ -866,7 +868,7 @@ describe("HankweaveRuntime", () => {
         JSON.stringify({
           id: "test-readonly-ping-broadcast",
           type: "ping.broadcast",
-        })
+        }),
       );
 
       const errorResponse = await errorPromise;
@@ -898,11 +900,11 @@ describe("HankweaveRuntime", () => {
               resolve(
                 messages.length > 0
                   ? messages[messages.length - 1]
-                  : { accepted: true }
+                  : { accepted: true },
               ),
-            2000
+            2000,
           );
-        }
+        },
       );
 
       // Send ping.broadcast command (state-modifying)
@@ -910,7 +912,7 @@ describe("HankweaveRuntime", () => {
         JSON.stringify({
           id: "test-readwrite-ping-broadcast",
           type: "ping.broadcast",
-        })
+        }),
       );
 
       const response = await responsePromise;
@@ -941,7 +943,7 @@ describe("HankweaveRuntime", () => {
         JSON.stringify({
           id: "test-no-handshake",
           type: "ping",
-        })
+        }),
       );
 
       const errorResponse = await errorPromise;
@@ -956,19 +958,19 @@ describe("HankweaveRuntime", () => {
         serverUrl,
         {
           mode: ClientMode.READONLY,
-        }
+        },
       );
       const { client: readwriteClient1 } = await connectAndRegisterClient(
         serverUrl,
         {
           mode: ClientMode.READANDWRITE,
-        }
+        },
       );
       const { client: readwriteClient2 } = await connectAndRegisterClient(
         serverUrl,
         {
           mode: ClientMode.READANDWRITE,
-        }
+        },
       );
 
       // Track messages received by each client
@@ -1008,7 +1010,7 @@ describe("HankweaveRuntime", () => {
         JSON.stringify({
           id: "test-broadcast-error",
           type: "ping.broadcast",
-        })
+        }),
       );
 
       // Wait for error to be processed
@@ -1024,10 +1026,10 @@ describe("HankweaveRuntime", () => {
 
       // Other clients should NOT have received the error
       const readwrite1Errors = readwriteMessages1.filter(
-        (m) => m.type === "error"
+        (m) => m.type === "error",
       );
       const readwrite2Errors = readwriteMessages2.filter(
-        (m) => m.type === "error"
+        (m) => m.type === "error",
       );
 
       expect(readwrite1Errors.length).toBe(0);

@@ -51,6 +51,7 @@ const _createCompletedCodon = (
       cacheReadTokens: 0,
     },
     resultMessageReceived: true,
+    extensionCount: 0,
     completionCheckpoint: "commit-123",
   };
   // Add loopContext for testing (will be typed properly in Step 6)

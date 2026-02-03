@@ -67,6 +67,16 @@ export const FIELD_TYPO_MAP: Record<string, string> = {
   setup: "rigSetup",
   preSetup: "rigSetup",
 
+  // Archive typos
+  archiveRigs: "archiveOnSuccess",
+  rigTeardown: "archiveOnSuccess",
+  teardown: "archiveOnSuccess",
+  archive: "archiveOnSuccess",
+  cleanup: "archiveOnSuccess",
+  archiveRig: "archiveOnSuccess",
+  archiving: "archiveOnSuccess",
+  archives: "archiveOnSuccess",
+
   // Other typos
   environment: "env",
   envVars: "env",
@@ -397,6 +407,69 @@ export const codonObjectSchema = z.object({
     .describe(
       "Sentinels to run during this codon. Sentinels are parallel observation agents that process the event stream. Each entry is a wrapper object with sentinelConfig (portable sentinel configuration, file or inline) and settings (codon-specific settings like output paths and load requirements). This wrapper pattern keeps sentinel configs reusable across codons.",
     ),
+  archiveOnSuccess: z
+    .array(
+      z
+        .string()
+        .min(1, "Archive path cannot be empty")
+        .refine((p) => !p.includes(".."), {
+          message: "Archive path cannot contain parent traversal (..)",
+        })
+        .refine((p) => !p.startsWith("/"), {
+          message: "Archive path must be relative, not absolute",
+        }),
+    )
+    .optional()
+    .describe(
+      "Paths to archive after successful completion. These files/directories are moved to rigArchive/ after the codon completes successfully. Paths are relative to the agent workspace (agentRoot/). Archived files can be restored during rollback.",
+    ),
+  onFailure: z
+    .enum(["abort", "retry", "ignore"])
+    .optional()
+    .describe(
+      "How to handle codon failure. 'abort' (default): Use existing failure behavior (server stays active for retriable errors, shuts down for non-retriable). " +
+        "'retry': Automatically retry up to maxAttempts times if the error is retriable. " +
+        "'ignore': Record the failure but continue to the next codon.",
+    ),
+  retryConfig: z
+    .object({
+      maxAttempts: z
+        .number()
+        .int()
+        .min(1)
+        .max(10)
+        .optional()
+        .default(3)
+        .describe("Maximum number of retry attempts (1-10, default: 3)"),
+      delayMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(60000)
+        .optional()
+        .default(1000)
+        .describe("Delay between retries in milliseconds (0-60000, default: 1000)"),
+    })
+    .optional()
+    .describe(
+      "Configuration for retry behavior. Only used when onFailure is 'retry'. " +
+        "Note: Retry counters are in-memory only - if the server restarts mid-retry, " +
+        "the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore.",
+    ),
+  exhaustWithPrompt: z
+    .string()
+    .optional()
+    .describe(
+      "Prompt to send when extending codon until context exhaustion. When set, the codon will automatically continue with this prompt after each successful completion until context is exhausted.",
+    ),
+  maxExtensions: z
+    .number()
+    .int()
+    .positive()
+    .default(100)
+    .describe(
+      "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops.",
+    ),
 });
 
 /**
@@ -417,6 +490,19 @@ export const codonSchema = codonObjectSchema
     message:
       "Cannot specify both appendSystemPromptFile and appendSystemPromptText. Use one or the other to add system-level instructions. Fix: Remove one of these fields.",
   })
+  .refine(
+    (data) => {
+      // retryConfig only makes sense with onFailure: "retry"
+      if (data.retryConfig && data.onFailure !== "retry") {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        "retryConfig can only be used when onFailure is 'retry'. Fix: Either set onFailure to 'retry' or remove the retryConfig field.",
+    },
+  )
   .transform((codon, ctx) => {
     const registry = LlmProviderRegistry.getInstance();
     const result = validateModel(codon.model, registry);
@@ -471,6 +557,22 @@ export const loopSchema = z.object({
     .min(1, "Loop must contain at least one codon. Fix: Add codons to the loop.")
     .describe(
       "Array of codons to execute in each iteration. Only Codon objects allowed (no nested loops).",
+    ),
+  archiveOnSuccess: z
+    .array(
+      z
+        .string()
+        .min(1, "Archive path cannot be empty")
+        .refine((p) => !p.includes(".."), {
+          message: "Archive path cannot contain parent traversal (..)",
+        })
+        .refine((p) => !p.startsWith("/"), {
+          message: "Archive path must be relative, not absolute",
+        }),
+    )
+    .optional()
+    .describe(
+      "Paths to archive when the loop terminates. These files/directories are moved to rigArchive/ after the loop completes all iterations. Executes once at the end, not per iteration. Paths are relative to the agent workspace (agentRoot/).",
     ),
 });
 
@@ -797,6 +899,12 @@ export const loopAuthoringSchema = z
       .array(codonObjectSchema.strict())
       .min(1)
       .describe("Array of codons to execute in each iteration"),
+    archiveOnSuccess: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        "Paths to archive when the loop terminates. Paths are relative to the agent workspace.",
+      ),
   })
   .strict(); // Matches loopSchema.strict() in codonConfigSchema
 
@@ -934,7 +1042,10 @@ export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
  * This is the complete, finalized config assembled from all layers (CLI, env, files, defaults).
  */
 export interface HankweaveConfig
-  extends Omit<Required<RuntimeConfig>, "model" | "anthropicBaseUrl" | "ignoreRigFailures"> {
+  extends Omit<
+    Required<RuntimeConfig>,
+    "model" | "anthropicBaseUrl" | "ignoreRigFailures" | "outputDirectory"
+  > {
   // Fields from RuntimeConfig that remain optional
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
   anthropicBaseUrl?: string;
@@ -948,6 +1059,13 @@ export interface HankweaveConfig
    * - If set via Recommendations/Defaults (layers 4-5): Used as fallback for codons without model specified
    */
   model?: ModelName;
+
+  /**
+   * Where to copy outputs (relative to CWD).
+   * If undefined, outputs stay in {executionPath}/outputs/ only.
+   * If set, outputs are copied to this path after each codon completes.
+   */
+  outputDirectory?: string;
 
   // Additional internal properties (not in RuntimeConfig)
   /** Server version for client compatibility checks */
@@ -980,9 +1098,13 @@ export interface HankweaveConfig
   // Execution-specific properties (from ExecutionSetup)
   /** Original data location (for reference only) */
   readOnlySourceDataPath: string;
-  /** Primary directory where everything runs */
+  /** Primary directory where everything runs (outer directory) */
   executionPath: string;
-  /** executionPath + '/data' - ONLY for setup */
+  /** Agent workspace directory (executionPath + '/agentRoot') */
+  agentRootPath: string;
+  /** Archive storage directory (executionPath + '/rigArchive') */
+  rigArchivePath: string;
+  /** agentRootPath + '/read_only_data_source' */
   dataPathInExecutionDir: string;
   /** Hash of the data directory structure */
   dataHash: string;
@@ -1012,16 +1134,20 @@ export const DEFAULT_CONFIG: Omit<
   | "cwd"
   | "readOnlySourceDataPath"
   | "executionPath"
+  | "agentRootPath"
+  | "rigArchivePath"
   | "dataPathInExecutionDir"
   | "dataHash"
   | "isNewExecution"
   | "isResuming"
   | "linkType"
   | "codons"
+  | "outputDirectory" // Now optional - outputs stay in execution dir by default
 > = {
   port: 7777,
   version: PACKAGE_VERSION,
-  outputDirectory: "hankweave-results",
+  // Note: outputDirectory is now undefined by default
+  // Outputs stay in {executionPath}/outputs/ unless explicitly configured
   executionBaseDir: path.join(os.homedir(), ".hankweave-executions"),
   lockFile: ".hankweave/runtime.lock",
   socketLogFile: ".hankweave/logs/websocket.log",
@@ -2045,6 +2171,28 @@ export async function validateHank(options: {
           );
         }
 
+        // Cannot continue from a codon with exhaustWithPrompt
+        // The codon only completes when context is exhausted, so there's nothing to continue from
+        if (previousConfig.type === "codon" && previousConfig.exhaustWithPrompt) {
+          throw new Error(
+            `${codonLabel}: Cannot use continuationMode "continue-previous" after a codon with exhaustWithPrompt. ` +
+              `Codon "${previousConfig.name}" (${previousConfig.id}) only completes when context is exhausted, ` +
+              `meaning there's no meaningful conversation to continue. Change to "fresh" to start a new conversation.`,
+          );
+        }
+
+        // Cannot continue from a loop containing a codon with exhaustWithPrompt (last codon in the loop)
+        if (previousConfig.type === "loop") {
+          const lastCodonInLoop = previousConfig.codons[previousConfig.codons.length - 1];
+          if (lastCodonInLoop.exhaustWithPrompt) {
+            throw new Error(
+              `${codonLabel}: Cannot use continuationMode "continue-previous" after a loop whose last codon has exhaustWithPrompt. ` +
+                `Loop "${previousConfig.name}" (${previousConfig.id}) ends with codon "${lastCodonInLoop.id}" which exhausts context, ` +
+                `meaning there's no meaningful conversation to continue. Change to "fresh" to start a new conversation.`,
+            );
+          }
+        }
+
         // Determine which codon to check based on whether previous config is a loop or codon
         let codonToCheck: Codon;
         let warningContext: string;
@@ -2093,6 +2241,24 @@ export async function validateHank(options: {
   // Global warnings
   if (result.codonCount === 0) {
     throw new Error("Configuration must contain at least one codon");
+  }
+
+  // Warn about dangerous pattern: onFailure: "ignore" followed by continuationMode: "continue-previous"
+  // This only checks top-level codons - inside loops the pattern may be intentional
+  for (let i = 0; i < codons.length - 1; i++) {
+    const current = codons[i];
+    const next = codons[i + 1];
+
+    // Skip if current is a loop or next is a loop
+    if (current.type === "loop" || next.type === "loop") continue;
+
+    if (current.onFailure === "ignore" && next.continuationMode === "continue-previous") {
+      result.warnings.push(
+        `Codon '${current.name}' (${current.id}): This codon is set to 'onFailure: ignore', but the next codon ` +
+          `'${next.name}' uses 'continuationMode: continue-previous'. If this codon fails, the conversation ` +
+          `state may be inconsistent and the next codon may fail or behave unexpectedly.`,
+      );
+    }
   }
 
   // Collect unique models and run self-tests for shims

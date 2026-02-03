@@ -4,11 +4,8 @@
     {
       "id": "codon-1",
       "name": "Codon 1: TestCodon1",
-      "promptFile": [
-        "./codon1Prompt1.md",
-        "./codon1Prompt2.md"
-      ],
-      "model": "sonnet",
+      "promptFile": ["./codon1Prompt1.md", "./codon1Prompt2.md"],
+      "model": "haiku",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -25,15 +22,10 @@
         "./noTodosPrompt.md"
       ],
       "description": "Write three pick one",
-      "checkpointedFiles": [
-        "notes/**/*",
-        "*.md"
-      ],
+      "checkpointedFiles": ["notes/**/*", "*.md"],
       "outputFiles": [
         {
-          "copy": [
-            "notes/favorite_poem.txt"
-          ],
+          "copy": ["notes/favorite_poem.txt"],
           "beforeCopy": [
             {
               "type": "command",
@@ -58,20 +50,15 @@
       "id": "codon-2",
       "name": "Codon 2: Schema Generation",
       "promptText": "Can you put your second favorite of the poems you just made into the notes folder as '<%PROJECT_DIR%>/notes/second_favorite_poem.txt'?",
-      "model": "sonnet",
+      "model": "haiku",
       "continuationMode": "continue-previous",
-      "appendSystemPromptFile": [
-        "./noTodosPrompt.md"
-      ],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "description": "Write one more",
-      "checkpointedFiles": [
-        "notes/**/*"
-      ],
+      "checkpointedFiles": ["notes/**/*"],
+      "archiveOnSuccess": ["notes/beforecopy_log.txt"],
       "outputFiles": [
         {
-          "copy": [
-            "notes/second_favorite_poem.txt"
-          ],
+          "copy": ["notes/second_favorite_poem.txt"],
           "beforeCopy": [
             {
               "type": "command",
@@ -115,9 +102,7 @@
       ],
       "continuationMode": "fresh",
       "description": "Convert poems to code",
-      "appendSystemPromptFile": [
-        "./noTodosPrompt.md"
-      ],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "checkpointedFiles": [
         "typescript_code/src/**/*.ts",
         "typescript_code/package.json"

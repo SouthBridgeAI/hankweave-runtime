@@ -1,57 +1,59 @@
-{"hank": [
-  {
-    "id": "initial-setup",
-    "name": "Initial Setup Codon",
-    "promptText": "Create a directory called 'large_content' in <%PROJECT_DIR%> if it doesn't exist. Then create an empty file at <%PROJECT_DIR%>/large_content/setup_complete.txt with the text 'Setup complete'.",
-    "model": "sonnet",
-    "continuationMode": "fresh",
-    "description": "Setup for context exhaustion test",
-    "checkpointedFiles": ["large_content/**/*"],
-    "appendSystemPromptFile": ["./noTodosPrompt.md"],
-    "outputFiles": []
-  },
-  {
-    "type": "loop",
-    "id": "context-exhaustion-loop",
-    "name": "Context Exhaustion Loop",
-    "description": "Loop that generates massive amounts of content to exhaust context",
-    "terminateOn": {
-      "type": "contextExceeded"
+{
+  "hank": [
+    {
+      "id": "initial-setup",
+      "name": "Initial Setup Codon",
+      "promptText": "Create a directory called 'large_content' in <%PROJECT_DIR%> if it doesn't exist. Then create an empty file at <%PROJECT_DIR%>/large_content/setup_complete.txt with the text 'Setup complete'.",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "description": "Setup for context exhaustion test",
+      "checkpointedFiles": ["large_content/**/*"],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
+      "outputFiles": []
     },
-    "codons": [
-      {
-        "id": "generate-content",
-        "name": "Generate Large Content",
-        "promptText": "Generate a VERY LONG detailed analysis (at least 45000 words) about a random topic and save it to <%PROJECT_DIR%>/large_content/content_<TIMESTAMP>.md. Include extensive code examples, detailed explanations, and comprehensive documentation. Make each iteration completely different with unique content.",
-        "model": "sonnet",
-        "continuationMode": "continue-previous",
-        "description": "Generate massive content",
-        "checkpointedFiles": ["large_content/**/*"],
-        "appendSystemPromptFile": ["./noTodosPrompt.md"],
-        "outputFiles": []
+    {
+      "type": "loop",
+      "id": "context-exhaustion-loop",
+      "name": "Context Exhaustion Loop",
+      "description": "Loop that generates massive amounts of content to exhaust context",
+      "terminateOn": {
+        "type": "contextExceeded"
       },
-      {
-        "id": "analyze-content",
-        "name": "Analyze Content",
-        "promptText": "Read ALL the content files in <%PROJECT_DIR%>/large_content/ and write a comprehensive 23000+ word analysis comparing them all. Save your analysis to <%PROJECT_DIR%>/large_content/analysis_<TIMESTAMP>.md. Reference specific details from each file.",
-        "model": "sonnet",
-        "continuationMode": "continue-previous",
-        "description": "Analyze all accumulated content",
-        "checkpointedFiles": ["large_content/**/*"],
-        "appendSystemPromptFile": ["./noTodosPrompt.md"],
-        "outputFiles": []
-      }
-    ]
-  },
-  {
-    "id": "final-codon",
-    "name": "Final Codon After Loop",
-    "promptText": "Create a summary file at <%PROJECT_DIR%>/large_content/final_summary.txt with the text 'Loop completed due to context exceeded. Final codon executed successfully.'",
-    "model": "sonnet",
-    "continuationMode": "fresh",
-    "description": "Final codon to verify workflow continues",
-    "checkpointedFiles": ["large_content/**/*"],
-    "appendSystemPromptFile": ["./noTodosPrompt.md"],
-    "outputFiles": []
-  }
-]}
+      "codons": [
+        {
+          "id": "generate-content",
+          "name": "Generate Large Content",
+          "promptText": "Generate a VERY LONG detailed analysis (at least 45000 words) about a random topic and save it to <%PROJECT_DIR%>/large_content/content_<TIMESTAMP>.md. Include extensive code examples, detailed explanations, and comprehensive documentation. Make each iteration completely different with unique content.",
+          "model": "haiku",
+          "continuationMode": "continue-previous",
+          "description": "Generate massive content",
+          "checkpointedFiles": ["large_content/**/*"],
+          "appendSystemPromptFile": ["./noTodosPrompt.md"],
+          "outputFiles": []
+        },
+        {
+          "id": "analyze-content",
+          "name": "Analyze Content",
+          "promptText": "Read ALL the content files in <%PROJECT_DIR%>/large_content/ and write a comprehensive 23000+ word analysis comparing them all. Save your analysis to <%PROJECT_DIR%>/large_content/analysis_<TIMESTAMP>.md. Reference specific details from each file.",
+          "model": "haiku",
+          "continuationMode": "continue-previous",
+          "description": "Analyze all accumulated content",
+          "checkpointedFiles": ["large_content/**/*"],
+          "appendSystemPromptFile": ["./noTodosPrompt.md"],
+          "outputFiles": []
+        }
+      ]
+    },
+    {
+      "id": "final-codon",
+      "name": "Final Codon After Loop",
+      "promptText": "Create a summary file at <%PROJECT_DIR%>/large_content/final_summary.txt with the text 'Loop completed due to context exceeded. Final codon executed successfully.'",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "description": "Final codon to verify workflow continues",
+      "checkpointedFiles": ["large_content/**/*"],
+      "appendSystemPromptFile": ["./noTodosPrompt.md"],
+      "outputFiles": []
+    }
+  ]
+}

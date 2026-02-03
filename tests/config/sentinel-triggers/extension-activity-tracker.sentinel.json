@@ -1,0 +1,21 @@
+{
+  "id": "extension-activity-tracker",
+  "name": "Extension Activity Tracker",
+  "description": "Tracks assistant actions across extensions to verify sentinel persistence. Should see actions from ALL extensions as one continuous codon.",
+  "model": "anthropic/claude-haiku-4-5",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action"
+    ]
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 8000
+  },
+  "output": {
+    "format": "text",
+    "file": "activity-summary.txt"
+  },
+  "userPromptText": "You are tracking assistant activity for a codon that may extend multiple times. Count the number of assistant actions in this batch and note any patterns.\n\nActions received (<%- it.events.length %> total):\n<% it.events.forEach(function(event, i) { %>\n<%- i+1 %>. <%- event.data.content ? event.data.content.substring(0, 100) : '(no content)' %>\n<% }); %>\n\nRespond with a single line: 'Batch processed: X actions from codon activity'"
+}

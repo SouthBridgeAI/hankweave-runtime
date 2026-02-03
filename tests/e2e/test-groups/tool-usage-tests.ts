@@ -27,7 +27,7 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
     expect(toolCounts.Write || 0).toBeGreaterThanOrEqual(4);
   });
 
-  test("at least 1 file-finding operation (Glob, find, or ls)", () => {
+  test("at least 1 file-finding operation or direct data file read", () => {
     // Count Glob tool uses
     const globCount = toolCounts.Glob || 0;
 
@@ -41,8 +41,16 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
       return /\b(find|ls)\b/.test(command);
     }).length;
 
-    const totalFileFindingOps = globCount + bashFileFindingCount;
-    expect(totalFileFindingOps).toBeGreaterThanOrEqual(1);
+    // Count direct reads of data files (e.g., read_only_data_source/poem_guides.txt)
+    const dataReadCount = assistantActionEvents.filter((e) => {
+      const actionEvent = e as AssistantActionEvent;
+      if (actionEvent.data?.toolName !== "Read") return false;
+      const filePath = actionEvent.data?.toolInput?.file_path;
+      return typeof filePath === "string" && filePath.includes("read_only_data_source");
+    }).length;
+
+    const totalDiscoveryOps = globCount + bashFileFindingCount + dataReadCount;
+    expect(totalDiscoveryOps).toBeGreaterThanOrEqual(1);
   });
 
   test("at least 2 Read tool uses", () => {

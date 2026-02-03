@@ -189,7 +189,7 @@ export function runDualIdSystemTests(testState: TestState) {
     }
   });
 
-  test("info events about Claude starting appear before codon.started", () => {
+  test("info events about codon starting appear before codon.started", () => {
     // For each codon, find the pair of events
     ["codon-1", "codon-2", "codon-3"].forEach((codonId) => {
       const codonStarted = testState.events.find(
@@ -203,7 +203,7 @@ export function runDualIdSystemTests(testState: TestState) {
         const infoEvent = testState.events.find(
           (e) =>
             e.type === "info" &&
-            e.data.message === `Claude started codon ${codonId} with session ID: ${sessionId}`,
+            e.data.message === `Started codon ${codonId} with session ID: ${sessionId}`,
         );
 
         expect(infoEvent).toBeDefined();

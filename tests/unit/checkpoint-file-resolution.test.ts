@@ -33,8 +33,8 @@ describe("Checkpoint File Resolution", () => {
     // Create mock logger
     mockLogger = new MockLogger("");
 
-    // Initialize CheckpointGit
-    checkpointGit = new CheckpointGit(tempDir, mockLogger);
+    // Initialize CheckpointGit (for tests, use same dir for execution and agent root)
+    checkpointGit = new CheckpointGit(tempDir, tempDir, mockLogger);
     await checkpointGit.initialize();
   });
 
@@ -57,7 +57,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify no files were added to the commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -90,7 +90,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify correct files were tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -130,7 +130,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify gitignored files are not tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -165,7 +165,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify all TypeScript files are tracked (no duplicates in git)
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -201,7 +201,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify both files are in first commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -277,7 +277,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify all expected files are tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -312,7 +312,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify no files were added
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -338,7 +338,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Verify all files with special characters are tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
@@ -380,7 +380,7 @@ describe("Checkpoint File Resolution", () => {
 
     // Check what changed in the second commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".git"),
+      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 

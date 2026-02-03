@@ -72,7 +72,7 @@ export class ClaudeLogParser {
       clearInterval(this.logTimer);
       this.logTimer = undefined;
     }
-    // NEW: Clear buffer to free memory
+    // Clear buffer to free memory
     this.buffer = "";
     this.lastPosition = 0;
   }

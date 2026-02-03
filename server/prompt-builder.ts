@@ -12,7 +12,7 @@ export class PromptBuilder {
   private lastFrontmatter?: PromptFrontmatter;
 
   constructor(
-    private executionPath: string,
+    private agentRootPath: string,
     private logger: Logger,
     private globalSystemPrompt?: string | null,
   ) {}
@@ -109,13 +109,52 @@ export class PromptBuilder {
   }
 
   /**
+   * Process prompt variables in a string (for exhaustion/extension prompts).
+   * Replaces template variables: <%PROJECT_DIR%>, <%EXECUTION_DIR%>, <%DATA_DIR%>
+   *
+   * @param prompt - Raw prompt text with template variables
+   * @returns Prompt with variables substituted
+   */
+  public processPromptVariables(prompt: string): string {
+    return this.applyTemplateReplacements(prompt);
+  }
+
+  /**
+   * Build prompt content for execution, handling both normal and exhaustion modes.
+   * This consolidates the prompt choosing logic used by both managers.
+   *
+   * @param codon - Codon configuration
+   * @param exhaustionPrompt - Optional exhaustion prompt (activates exhaustion mode)
+   * @returns Processed prompt content ready for execution
+   */
+  public buildPromptForExecution(codon: Codon, exhaustionPrompt?: string): string {
+    if (exhaustionPrompt) {
+      // Exhaustion mode: use the exhaustion prompt directly with variable substitution
+      const processed = this.processPromptVariables(exhaustionPrompt);
+      this.logger.log(`Exhaustion mode: using prompt (${processed.length} chars)`);
+      return processed;
+    }
+
+    // Normal mode: build from codon config (strips frontmatter if present)
+    const { content } = this.buildPromptContent(codon);
+    return content;
+  }
+
+  /**
    * Apply template variable replacements to content.
-   * Supports: <%PROJECT_DIR%>, <%EXECUTION_DIR%>, <%DATA_DIR%>
+   * All workspace variables resolve to agentRootPath (where agents work).
+   *
+   * Supports:
+   * - <%AGENT_ROOT%>    - Canonical variable for agent workspace (recommended)
+   * - <%PROJECT_DIR%>   - Silent alias for AGENT_ROOT
+   * - <%EXECUTION_DIR%> - Silent alias for AGENT_ROOT
+   * - <%DATA_DIR%>      - Data directory (agentRootPath/read_only_data_source)
    */
   private applyTemplateReplacements(content: string): string {
     return content
-      .replace(/<%PROJECT_DIR%>/g, this.executionPath) // Legacy support
-      .replace(/<%EXECUTION_DIR%>/g, this.executionPath)
-      .replace(/<%DATA_DIR%>/g, path.join(this.executionPath, "read_only_data_source"));
+      .replace(/<%AGENT_ROOT%>/g, this.agentRootPath)
+      .replace(/<%PROJECT_DIR%>/g, this.agentRootPath) // Silent alias
+      .replace(/<%EXECUTION_DIR%>/g, this.agentRootPath) // Silent alias
+      .replace(/<%DATA_DIR%>/g, path.join(this.agentRootPath, "read_only_data_source"));
   }
 }

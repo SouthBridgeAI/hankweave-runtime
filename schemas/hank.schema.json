@@ -1038,6 +1038,54 @@
                       "additionalProperties": false
                     },
                     "description": "Sentinels to run during this codon. Sentinels are parallel observation agents that process the event stream. Each entry is a wrapper object with sentinelConfig (portable sentinel configuration, file or inline) and settings (codon-specific settings like output paths and load requirements). This wrapper pattern keeps sentinel configs reusable across codons."
+                  },
+                  "archiveOnSuccess": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Paths to archive after successful completion. These files/directories are moved to rigArchive/ after the codon completes successfully. Paths are relative to the agent workspace (agentRoot/). Archived files can be restored during rollback."
+                  },
+                  "onFailure": {
+                    "type": "string",
+                    "enum": [
+                      "abort",
+                      "retry",
+                      "ignore"
+                    ],
+                    "description": "How to handle codon failure. 'abort' (default): Use existing failure behavior (server stays active for retriable errors, shuts down for non-retriable). 'retry': Automatically retry up to maxAttempts times if the error is retriable. 'ignore': Record the failure but continue to the next codon."
+                  },
+                  "retryConfig": {
+                    "type": "object",
+                    "properties": {
+                      "maxAttempts": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 3,
+                        "description": "Maximum number of retry attempts (1-10, default: 3)"
+                      },
+                      "delayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 60000,
+                        "default": 1000,
+                        "description": "Delay between retries in milliseconds (0-60000, default: 1000)"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
+                  },
+                  "exhaustWithPrompt": {
+                    "type": "string",
+                    "description": "Prompt to send when extending codon until context exhaustion. When set, the codon will automatically continue with this prompt after each successful completion until context is exhausted."
+                  },
+                  "maxExtensions": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "default": 100,
+                    "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
                   }
                 },
                 "required": [
@@ -2065,6 +2113,54 @@
                             "additionalProperties": false
                           },
                           "description": "Sentinels to run during this codon. Sentinels are parallel observation agents that process the event stream. Each entry is a wrapper object with sentinelConfig (portable sentinel configuration, file or inline) and settings (codon-specific settings like output paths and load requirements). This wrapper pattern keeps sentinel configs reusable across codons."
+                        },
+                        "archiveOnSuccess": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Paths to archive after successful completion. These files/directories are moved to rigArchive/ after the codon completes successfully. Paths are relative to the agent workspace (agentRoot/). Archived files can be restored during rollback."
+                        },
+                        "onFailure": {
+                          "type": "string",
+                          "enum": [
+                            "abort",
+                            "retry",
+                            "ignore"
+                          ],
+                          "description": "How to handle codon failure. 'abort' (default): Use existing failure behavior (server stays active for retriable errors, shuts down for non-retriable). 'retry': Automatically retry up to maxAttempts times if the error is retriable. 'ignore': Record the failure but continue to the next codon."
+                        },
+                        "retryConfig": {
+                          "type": "object",
+                          "properties": {
+                            "maxAttempts": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 10,
+                              "default": 3,
+                              "description": "Maximum number of retry attempts (1-10, default: 3)"
+                            },
+                            "delayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 60000,
+                              "default": 1000,
+                              "description": "Delay between retries in milliseconds (0-60000, default: 1000)"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
+                        },
+                        "exhaustWithPrompt": {
+                          "type": "string",
+                          "description": "Prompt to send when extending codon until context exhaustion. When set, the codon will automatically continue with this prompt after each successful completion until context is exhausted."
+                        },
+                        "maxExtensions": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "default": 100,
+                          "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
                         }
                       },
                       "required": [
@@ -2077,6 +2173,14 @@
                     },
                     "minItems": 1,
                     "description": "Array of codons to execute in each iteration"
+                  },
+                  "archiveOnSuccess": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Paths to archive when the loop terminates. Paths are relative to the agent workspace."
                   }
                 },
                 "required": [

@@ -55,6 +55,7 @@ export class SentinelManager {
   private sentinelFailureCounts: Map<string, number> = new Map();
   private providerRegistry: LlmProviderRegistry;
   private healthCheckPromise?: Promise<void>;
+  private providerInitPromise?: Promise<void>;
   private logger?: Logger;
   private options: SentinelManagerOptions;
   private codonId?: CodonId;
@@ -78,7 +79,7 @@ export class SentinelManager {
         performHealthCheckOnInit: false,
       });
 
-    this.initializeProviderRegistry(options.waitForHealthChecks);
+    this.providerInitPromise = this.initializeProviderRegistry(options.waitForHealthChecks);
   }
 
   private async initializeProviderRegistry(waitForHealthChecks = false): Promise<void> {
@@ -276,7 +277,7 @@ export class SentinelManager {
       ) => Promise<HankweaveGenerateObjectResult<unknown>>;
       onExecute?: (id: string, events: ServerEvent[]) => void;
     } = {},
-  ): Promise<void> {
+  ): Promise<{ loadedIds: string[] }> {
     // Destructure options for cleaner code
     const {
       configDirectory,
@@ -304,6 +305,23 @@ export class SentinelManager {
     // Simple rule: If override provided, use it. Otherwise, use real providers.
     const useOverride = !!(mockOrFallbackLlmCall || mockOrFallbackLlmObjectCall);
 
+    // Optionally wait for provider health checks before loading sentinels
+    if (!useOverride) {
+      const shouldWaitForProviders =
+        this.options.waitForHealthChecks ||
+        (this.options.healthCheckGracePeriodMs !== undefined &&
+          this.options.healthCheckGracePeriodMs > 0);
+
+      if (shouldWaitForProviders) {
+        if (!this.providerInitPromise) {
+          this.providerInitPromise = this.initializeProviderRegistry(
+            this.options.waitForHealthChecks,
+          );
+        }
+        await this.providerInitPromise;
+      }
+    }
+
     // Hoist provider availability check outside loop (only if NOT using override)
     const hasRealProviders =
       !useOverride &&
@@ -311,6 +329,8 @@ export class SentinelManager {
       Array.from(this.providerRegistry.getProviderStatus().values()).some(
         (s) => s.status === "available",
       );
+
+    const loadedIds: string[] = [];
 
     for (const config of configs) {
       let sentinel: Sentinel | undefined; // Hoist outside try block
@@ -550,6 +570,8 @@ export class SentinelManager {
         // Initialize failure counter
         this.sentinelFailureCounts.set(config.id, 0);
 
+        loadedIds.push(config.id);
+
         this.logger?.log(
           `[SentinelManager] Loaded sentinel '${config.id}' for codon '${codonId}'`,
           "info",
@@ -569,6 +591,7 @@ export class SentinelManager {
     }
 
     this.logger?.log(`Loaded ${this.sentinels.length} sentinels for codon ${codonId}`, "info");
+    return { loadedIds };
   }
 
   /**

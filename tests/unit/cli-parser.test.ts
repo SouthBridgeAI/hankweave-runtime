@@ -1005,4 +1005,82 @@ describe("parseCliArgs", () => {
       expect(result.attach).toBeFalsy();
     });
   });
+
+  describe("--output flag", () => {
+    test("should parse --output flag with path", () => {
+      const args = ["--output", "./results", "hank.json"];
+      const result = parseCliArgs(args);
+      expect(result.outputPath).toBe("./results");
+    });
+
+    test("should parse --output flag with absolute path", () => {
+      const args = ["--output", "/tmp/hankweave-output"];
+      const result = parseCliArgs(args);
+      expect(result.outputPath).toBe("/tmp/hankweave-output");
+    });
+
+    test("should default outputPath to undefined", () => {
+      const args = ["hank.json", "./data"];
+      const result = parseCliArgs(args);
+      expect(result.outputPath).toBeUndefined();
+    });
+
+    test("should work with other flags", () => {
+      const args = ["--output", "./results", "--port", "8080", "hank.json"];
+      const result = parseCliArgs(args);
+      expect(result.outputPath).toBe("./results");
+      expect(result.port).toBe(8080);
+    });
+  });
+
+  describe("short aliases", () => {
+    test("-p should work as --port", () => {
+      const result = parseCliArgs(["-p", "9000"]);
+      expect(result.port).toBe(9000);
+    });
+
+    test("-o should work as --output", () => {
+      const result = parseCliArgs(["-o", "./out"]);
+      expect(result.outputPath).toBe("./out");
+    });
+
+    test("-e should work as --execution", () => {
+      const result = parseCliArgs(["-e", "/path/to/exec"]);
+      expect(result.executionPath).toBe("/path/to/exec");
+    });
+
+    test("-i should work as --input", () => {
+      const result = parseCliArgs(["-i", "some text"]);
+      expect(result.inputText).toBe("some text");
+    });
+
+    test("-m should work as --model", () => {
+      const result = parseCliArgs(["-m", "opus"]);
+      expect(result.model).toBe("opus");
+    });
+
+    test("-n should work as --start-new", () => {
+      const result = parseCliArgs(["-n"]);
+      expect(result.startNew).toBe(true);
+    });
+
+    test("--new should work as --start-new", () => {
+      const result = parseCliArgs(["--new"]);
+      expect(result.startNew).toBe(true);
+    });
+
+    test("-f should work as --force", () => {
+      const result = parseCliArgs(["-f"]);
+      expect(result.force).toBe(true);
+    });
+
+    test("combining short flags: -n -f -e ./exec -m opus -p 8080", () => {
+      const result = parseCliArgs(["-n", "-f", "-e", "./exec", "-m", "opus", "-p", "8080"]);
+      expect(result.startNew).toBe(true);
+      expect(result.force).toBe(true);
+      expect(result.executionPath).toBe("./exec");
+      expect(result.model).toBe("opus");
+      expect(result.port).toBe(8080);
+    });
+  });
 });

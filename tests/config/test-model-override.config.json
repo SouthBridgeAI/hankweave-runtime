@@ -1,4 +1,5 @@
 {
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
   "hank": [
     {
       "id": "codon-1",

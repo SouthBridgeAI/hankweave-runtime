@@ -85,11 +85,23 @@ async function resolveShimPath(currentFilePath: string, providerId: string): Pro
 }
 
 /**
+ * Information about an extension, passed to the onExtension callback
+ */
+export interface ExtensionInfo {
+  extensionNumber: number;
+  sessionId: SessionId;
+  previousExitCode: number;
+  wasContextExceeded: boolean;
+  /** The prompt being used for this extension */
+  exhaustWithPrompt: string;
+}
+
+/**
  * Events emitted by CodonRunner during execution
  */
 export interface CodonRunnerEvents extends Record<string, unknown[]> {
-  // Process lifecycle
-  exit: [code: number, contextExceeded: boolean];
+  // Process lifecycle - extensionCount is the final count when codon truly completes
+  exit: [code: number, contextExceeded: boolean, extensionCount: number];
   error: [error: Error];
 
   // Log parser events (forwarded with specific types)
@@ -104,18 +116,59 @@ export interface CodonRunnerEvents extends Record<string, unknown[]> {
 }
 
 /**
- * Configuration for creating a CodonRunner
+ * Extension configuration for codons that support context exhaustion
  */
-export interface CodonRunnerConfig {
+export interface ExtensionConfig {
+  /** Prompt to send for each extension */
+  exhaustWithPrompt: string;
+  /** Maximum number of extensions before forcing completion (default: 100) */
+  maxExtensions: number;
+}
+
+/**
+ * Base configuration shared by all CodonRunner instances
+ */
+interface BaseCodonRunnerConfig {
   codon: Codon;
   codonId: CodonId;
   executionPath: string;
+  agentRootPath: string; // Agent workspace directory (where agents work)
   logger: Logger;
   logParsingInterval?: number;
   anthropicBaseUrl?: string;
   logPath: string;
   globalSystemPrompt?: string | null;
 }
+
+/**
+ * Configuration for a CodonRunner without extension support
+ */
+interface CodonRunnerConfigWithoutExtension extends BaseCodonRunnerConfig {
+  extensionConfig?: undefined;
+  shouldInterrupt?: undefined;
+  onExtension?: undefined;
+}
+
+/**
+ * Configuration for a CodonRunner with extension support.
+ * When extensions are enabled, interrupt check and event callbacks are required.
+ */
+interface CodonRunnerConfigWithExtension extends BaseCodonRunnerConfig {
+  /** Extension configuration - enables automatic re-running until context exhaustion */
+  extensionConfig: ExtensionConfig;
+  /** Required: Check if user requested skip/force-stop */
+  shouldInterrupt: () => boolean;
+  /** Required: Called on each extension to emit events and update state */
+  onExtension: (info: ExtensionInfo) => void;
+}
+
+/**
+ * Configuration for creating a CodonRunner.
+ *
+ * Uses discriminated union: when extensionConfig is provided,
+ * shouldInterrupt and onExtension become required.
+ */
+export type CodonRunnerConfig = CodonRunnerConfigWithoutExtension | CodonRunnerConfigWithExtension;
 
 /**
  * CodonRunner encapsulates all logic needed to execute a single codon.
@@ -129,16 +182,78 @@ export interface CodonRunnerConfig {
  * The runner owns both the LogParser and ProcessManager instances,
  * ensuring they are created together, used together, and cleaned up together.
  */
+/**
+ * Failure reasons that prevent extension
+ */
+type FailureReason =
+  | { type: "timeout"; retriable: boolean }
+  | { type: "rate-limit"; retriable: boolean }
+  | { type: "api-error"; retriable: boolean }
+  | { type: "unknown"; retriable: boolean };
+
+/**
+ * Determines whether a codon should extend based on exit conditions.
+ * Pure function for unit testing.
+ *
+ * Extension triggers when ALL conditions are met:
+ * - Extension config provided
+ * - Not interrupted (skip/force-stop)
+ * - Under max extensions
+ * - Exit code 0
+ * - Result message received
+ * - No failure reason
+ * - Context not yet exceeded
+ */
+export function shouldExtendCodon(params: {
+  exitCode: number;
+  resultMessageReceived: boolean;
+  isContextExceeded: boolean;
+  extensionConfig: ExtensionConfig | undefined;
+  extensionCount: number;
+  isInterrupted: boolean;
+  failureReason: FailureReason | undefined;
+}): boolean {
+  // Cannot extend if no extension config
+  if (!params.extensionConfig) return false;
+
+  // Cannot extend if interrupted (user skip/force-stop)
+  if (params.isInterrupted) return false;
+
+  // Cannot extend if we've hit the max
+  if (params.extensionCount >= params.extensionConfig.maxExtensions) return false;
+
+  // Cannot extend if exit wasn't clean
+  if (params.exitCode !== 0) return false;
+
+  // Cannot extend if we didn't receive a result message (indicates crash or timeout)
+  if (!params.resultMessageReceived) return false;
+
+  // Cannot extend if we have a failure reason
+  if (params.failureReason !== undefined) return false;
+
+  // Cannot extend if context is already exceeded (we're done!)
+  if (params.isContextExceeded) return false;
+
+  // All conditions met - extend!
+  return true;
+}
+
 export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private readonly config: CodonRunnerConfig;
   private readonly logParser: ClaudeLogParser;
-  private readonly processManager: ShimProcessManager | ClaudeAgentSDKManager;
+  private processManager: ShimProcessManager | ClaudeAgentSDKManager;
   private readonly logPath: string;
   private isCleanedUp = false;
 
   // Track successful result for post-success SDK error handling
   // See: intermediates/31-fixing-claude-sdk-bug/bug_investigation.md
   private successResultReceived = false;
+
+  // Extension state - tracked internally
+  private extensionCount = 0;
+  private resultMessageReceived = false;
+  private failureReason: FailureReason | undefined = undefined;
+  private currentSessionId: SessionId | null = null;
 
   constructor(config: CodonRunnerConfig) {
     super();
@@ -209,8 +324,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           "info",
         );
 
+        // For self-tests, use executionPath as agentRootPath (temporary directory, no nested structure)
         const manager = new ClaudeAgentSDKManager(
           executionPath,
+          executionPath, // Self-tests don't need the full nested structure
           logger,
           tempLogParser,
           anthropicBaseUrl,
@@ -227,8 +344,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         const __filename = fileURLToPath(import.meta.url);
         const shimPath = await resolveShimPath(__filename, modelInfo.providerId);
 
+        // For self-tests, use executionPath as agentRootPath (temporary directory, no nested structure)
         const manager = new ShimProcessManager(
           executionPath,
+          executionPath, // Self-tests don't need the full nested structure
           logger,
           tempLogParser,
           anthropicBaseUrl,
@@ -273,8 +392,14 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       parsingInterval: this.config.logParsingInterval ?? 100,
       logger: this.config.logger,
 
-      // Forward log parser events to our listeners
-      onSystemMessage: (msg) => this.emit("systemMessage", msg),
+      // Forward log parser events to our listeners, and track state for extensions
+      onSystemMessage: (msg) => {
+        // Track session ID from init messages
+        if (msg.subtype === "init" && msg.session_id) {
+          this.currentSessionId = msg.session_id as SessionId;
+        }
+        this.emit("systemMessage", msg);
+      },
       onAssistantMessage: (msg) => this.emit("assistantMessage", msg),
       onUserMessage: (msg) => this.emit("userMessage", msg),
       onResultMessage: (msg) => {
@@ -283,6 +408,25 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         if (msg.subtype === "success") {
           this.successResultReceived = true;
         }
+
+        // Track that we received a result message (needed for extension decision)
+        this.resultMessageReceived = true;
+
+        // Check for failure reasons that would prevent extension
+        if (msg.subtype === "error") {
+          // Determine failure reason from error type
+          const errorText = String(msg.error || "").toLowerCase();
+          if (errorText.includes("timeout") || errorText.includes("timed out")) {
+            this.failureReason = { type: "timeout", retriable: true };
+          } else if (errorText.includes("rate") || errorText.includes("429")) {
+            this.failureReason = { type: "rate-limit", retriable: true };
+          } else if (errorText.includes("api") || errorText.includes("500")) {
+            this.failureReason = { type: "api-error", retriable: true };
+          } else {
+            this.failureReason = { type: "unknown", retriable: false };
+          }
+        }
+
         this.emit("resultMessage", msg);
       },
     });
@@ -308,6 +452,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
 
       processManager = new ClaudeAgentSDKManager(
         this.config.executionPath,
+        this.config.agentRootPath,
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
@@ -322,6 +467,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
 
       processManager = new ShimProcessManager(
         this.config.executionPath,
+        this.config.agentRootPath,
         this.config.logger,
         this.logParser,
         this.config.anthropicBaseUrl,
@@ -330,8 +476,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     }
 
     // Forward process manager events to our listeners
+    // The exit handler implements the internal extension loop
     processManager.on("exit", (code: number, isContextExceeded: boolean) => {
-      this.emit("exit", code, isContextExceeded);
+      this.handleProcessExit(code, isContextExceeded);
     });
 
     processManager.on("error", (error: Error) => {
@@ -349,7 +496,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           "info",
         );
         // Transform error into normal exit - conversation completed successfully
-        this.emit("exit", 0, false);
+        this.emit("exit", 0, false, this.extensionCount);
       } else {
         // No success result yet - this is a real error, forward it
         this.emit("error", error);
@@ -368,20 +515,147 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
-   * Start executing the codon
+   * Handle process exit - implements internal extension loop.
+   *
+   * When the process exits, this checks if we should extend:
+   * - If yes: calls onExtension callback, resets state, and re-runs
+   * - If no: emits final "exit" event with extensionCount
+   */
+  private async handleProcessExit(code: number, isContextExceeded: boolean): Promise<void> {
+    // Check if we should extend - only possible when extensionConfig is provided
+    // The discriminated union guarantees shouldInterrupt exists when extensionConfig does
+    const isInterrupted = this.config.shouldInterrupt?.() ?? false;
+
+    const shouldExtend = shouldExtendCodon({
+      exitCode: code,
+      resultMessageReceived: this.resultMessageReceived,
+      isContextExceeded,
+      extensionConfig: this.config.extensionConfig,
+      extensionCount: this.extensionCount,
+      isInterrupted,
+      failureReason: this.failureReason,
+    });
+
+    // Type narrowing: if shouldExtend is true, extensionConfig must be defined
+    // (shouldExtendCodon returns false when extensionConfig is undefined)
+    // Also check currentSessionId - we need it to resume the session
+    if (shouldExtend && this.currentSessionId && this.config.extensionConfig) {
+      // Now TypeScript knows this.config is CodonRunnerConfigWithExtension
+      // Pass currentSessionId explicitly to avoid non-null assertion in performExtension
+      await this.performExtension(
+        this.currentSessionId,
+        this.config.extensionConfig,
+        this.config.onExtension,
+        code,
+        isContextExceeded,
+      );
+    } else {
+      // No more extensions - emit final exit
+      this.emit("exit", code, isContextExceeded, this.extensionCount);
+    }
+  }
+
+  /**
+   * Perform an extension: notify callback, reset state, re-run with prompt override.
+   *
+   * Parameters are passed explicitly to avoid type narrowing issues with class properties.
+   */
+  private async performExtension(
+    sessionId: SessionId,
+    extensionConfig: ExtensionConfig,
+    onExtension: (info: ExtensionInfo) => void,
+    previousExitCode: number,
+    wasContextExceeded: boolean,
+  ): Promise<void> {
+    this.extensionCount++;
+
+    const extensionPrompt = extensionConfig.exhaustWithPrompt;
+
+    this.config.logger.log(
+      `CodonRunner: Extending codon ${this.config.codonId} (extension #${this.extensionCount})`,
+      "info",
+    );
+
+    // Notify runtime via callback (emit events, update state)
+    onExtension({
+      extensionNumber: this.extensionCount,
+      sessionId,
+      previousExitCode,
+      wasContextExceeded,
+      exhaustWithPrompt: extensionPrompt,
+    });
+
+    // Reset per-extension state
+    this.resultMessageReceived = false;
+    this.failureReason = undefined;
+    this.successResultReceived = false;
+
+    // Keep log parser running (don't stop/restart to avoid re-parsing entire log)
+    // The parser will continue tracking from its current position
+
+    // Re-run with the extension prompt
+    await this.runExtension(sessionId, extensionPrompt);
+  }
+
+  /**
+   * Internal method to run an extension (resume session with exhaustion prompt).
+   *
+   * Uses the same spawn() method as initial run, but with exhaustionPrompt option.
+   * This activates exhaustion mode: appends to log, forces resume.
+   */
+  private async runExtension(sessionId: SessionId, exhaustionPrompt: string): Promise<void> {
+    // Spawn using the unified spawn method with exhaustion mode
+    if (this.processManager instanceof ClaudeAgentSDKManager) {
+      await this.processManager.spawn(this.config.codon, sessionId, {
+        logPath: this.logPath,
+        exhaustionPrompt,
+      });
+    } else {
+      // ShimProcessManager
+      const __filename = fileURLToPath(import.meta.url);
+      const shimPath = await resolveShimPath(__filename, this.config.codon.model.providerId);
+
+      await this.processManager.spawn(getRuntimeCommand(shimPath), this.config.codon, sessionId, {
+        logPath: this.logPath,
+        exhaustionPrompt,
+      });
+    }
+
+    const pid = this.processManager.getPid();
+    this.config.logger.log(
+      `CodonRunner: Extension spawned for codon ${this.config.codonId} (PID: ${pid})`,
+      "info",
+    );
+
+    // Log parser continues running (already started during initial run)
+  }
+
+  /**
+   * Start executing the codon.
+   *
+   * If extensionConfig is provided, the runner will automatically extend
+   * until context is exhausted or maxExtensions is reached.
    *
    * @param previousSessionId - Optional session ID to continue from
    */
   async run(previousSessionId?: SessionId): Promise<void> {
+    // Reset extension state at start of new run
+    this.extensionCount = 0;
+    this.resultMessageReceived = false;
+    this.failureReason = undefined;
+    this.currentSessionId = null;
+
     this.config.logger.log(
       `CodonRunner: Starting execution of codon ${this.config.codonId}`,
       "info",
     );
 
-    // Spawn using the appropriate method based on process manager type
+    // Spawn using the unified spawn method
     if (this.processManager instanceof ClaudeAgentSDKManager) {
       // Claude Agent SDK doesn't need a command array
-      await this.processManager.spawn(this.config.codon, previousSessionId || null, this.logPath);
+      await this.processManager.spawn(this.config.codon, previousSessionId || null, {
+        logPath: this.logPath,
+      });
     } else {
       // ShimProcessManager needs command array
       const __filename = fileURLToPath(import.meta.url);
@@ -391,7 +665,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         getRuntimeCommand(shimPath),
         this.config.codon,
         previousSessionId || null,
-        this.logPath,
+        { logPath: this.logPath },
       );
     }
 
@@ -405,6 +679,14 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     setTimeout(() => {
       this.logParser.start();
     }, TIMEOUTS.LOG_PARSER_DELAY_MS);
+  }
+
+  /**
+   * Get the current extension count.
+   * Returns 0 if no extensions have occurred.
+   */
+  getExtensionCount(): number {
+    return this.extensionCount;
   }
 
   /**

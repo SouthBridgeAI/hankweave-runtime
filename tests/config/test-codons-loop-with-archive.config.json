@@ -1,0 +1,45 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "id": "setup-codon",
+      "name": "Setup Codon",
+      "promptText": "Create a file at <%PROJECT_DIR%>/notes/initial.txt with text 'Initial setup complete'",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "description": "Initial setup",
+      "checkpointedFiles": ["notes/**/*"]
+    },
+    {
+      "type": "loop",
+      "id": "archive-loop",
+      "name": "Loop with Archive",
+      "description": "Loop that archives temp files",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 2
+      },
+      "codons": [
+        {
+          "id": "process-iteration",
+          "name": "Process Iteration",
+          "promptText": "Create a temp file at <%PROJECT_DIR%>/temp/iteration.json with content '{\"iteration\": 1, \"data\": \"processing\"}'. Then create a result file at <%PROJECT_DIR%>/results/result.txt with 'Iteration complete'. If the files already exist, overwrite them.",
+          "model": "haiku",
+          "continuationMode": "continue-previous",
+          "description": "Process with temp files",
+          "checkpointedFiles": ["temp/**/*", "results/**/*"],
+          "archiveOnSuccess": ["temp/**/*"]
+        }
+      ]
+    },
+    {
+      "id": "final-codon",
+      "name": "Final Summary",
+      "promptText": "Create <%PROJECT_DIR%>/summary.txt with text 'All iterations completed'",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "description": "Final summary",
+      "checkpointedFiles": ["*.txt"]
+    }
+  ]
+}

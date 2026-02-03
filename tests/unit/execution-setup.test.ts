@@ -16,7 +16,9 @@ describe("Execution Setup - startNew flag", () => {
 
     // Create some dummy files in data source
     await fs.promises.writeFile(path.join(DATA_SOURCE_DIR, "test.txt"), "test content");
-    await fs.promises.mkdir(path.join(DATA_SOURCE_DIR, "subdir"), { recursive: true });
+    await fs.promises.mkdir(path.join(DATA_SOURCE_DIR, "subdir"), {
+      recursive: true,
+    });
     await fs.promises.writeFile(
       path.join(DATA_SOURCE_DIR, "subdir", "nested.txt"),
       "nested content",
@@ -159,8 +161,8 @@ describe("Execution Setup - startNew flag", () => {
         startNew: true,
       });
 
-      // Verify old data is accessible
-      const oldFile = path.join(EXECUTION_DIR, "read_only_data_source", "test.txt");
+      // Verify old data is accessible (now inside agentRoot/)
+      const oldFile = path.join(EXECUTION_DIR, "agentRoot", "read_only_data_source", "test.txt");
       expect(fs.existsSync(oldFile)).toBe(true);
       const oldContent = await fs.promises.readFile(oldFile, "utf-8");
       expect(oldContent).toBe("test content");
@@ -179,8 +181,8 @@ describe("Execution Setup - startNew flag", () => {
         skipConfirmation: true,
       });
 
-      // Verify read_only_data_source points to new data
-      const newFile = path.join(EXECUTION_DIR, "read_only_data_source", "new.txt");
+      // Verify read_only_data_source points to new data (inside agentRoot/)
+      const newFile = path.join(EXECUTION_DIR, "agentRoot", "read_only_data_source", "new.txt");
       expect(fs.existsSync(newFile)).toBe(true);
       const newContent = await fs.promises.readFile(newFile, "utf-8");
       expect(newContent).toBe("new content");
@@ -284,7 +286,8 @@ describe("Execution Setup - startNew flag", () => {
         startNew: true,
       });
 
-      const dataPath = path.join(EXECUTION_DIR, "read_only_data_source");
+      // Data is now inside agentRoot/
+      const dataPath = path.join(EXECUTION_DIR, "agentRoot", "read_only_data_source");
       expect(fs.existsSync(dataPath)).toBe(true);
 
       // Verify files are accessible through the link/copy
@@ -390,7 +393,7 @@ describe("Execution Setup - startNew flag", () => {
           readOnlySourceDataPath: DATA_SOURCE_DIR,
           executionPath: EXECUTION_DIR,
         }),
-      ).rejects.toThrow(/Data source mismatch/);
+      ).rejects.toThrow(/Data source has changed/);
     });
 
     it("should allow resume with different data when ignoreDataMismatch is true", async () => {
@@ -472,16 +475,16 @@ describe("Execution Setup - startNew flag", () => {
 
       expect(result.linkType).toBe("copy");
 
-      // Verify files were actually copied
+      // Verify files were actually copied (now inside agentRoot/)
       const testContent = await fs.promises.readFile(
-        path.join(EXECUTION_DIR, "read_only_data_source", "test.txt"),
+        path.join(EXECUTION_DIR, "agentRoot", "read_only_data_source", "test.txt"),
         "utf-8",
       );
       expect(testContent).toBe("test content");
 
       // Modify the copy and verify original is unchanged
       await fs.promises.writeFile(
-        path.join(EXECUTION_DIR, "read_only_data_source", "test.txt"),
+        path.join(EXECUTION_DIR, "agentRoot", "read_only_data_source", "test.txt"),
         "modified content",
       );
 
@@ -506,8 +509,13 @@ describe("Execution Setup - startNew flag", () => {
         startNew: true,
       });
 
-      // Verify symlink was preserved in copy
-      const destSymlink = path.join(EXECUTION_DIR, "read_only_data_source", "symlink.txt");
+      // Verify symlink was preserved in copy (now inside agentRoot/)
+      const destSymlink = path.join(
+        EXECUTION_DIR,
+        "agentRoot",
+        "read_only_data_source",
+        "symlink.txt",
+      );
       const stats = await fs.promises.lstat(destSymlink);
       expect(stats.isSymbolicLink()).toBe(true);
     });
@@ -524,7 +532,9 @@ describe("Execution Setup - startNew flag", () => {
       // Create older execution
       const olderDir = path.join(executionRoot, `1000000-old-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(olderDir, { recursive: true });
-      await fs.promises.mkdir(path.join(olderDir, ".hankweave"), { recursive: true });
+      await fs.promises.mkdir(path.join(olderDir, ".hankweave"), {
+        recursive: true,
+      });
       await fs.promises.writeFile(
         path.join(olderDir, ".hankweave", "execution-meta.json"),
         JSON.stringify({
@@ -537,7 +547,9 @@ describe("Execution Setup - startNew flag", () => {
       // Create newer execution
       const newerDir = path.join(executionRoot, `2000000-new-${dataHash.substring(0, 6)}`);
       await fs.promises.mkdir(newerDir, { recursive: true });
-      await fs.promises.mkdir(path.join(newerDir, ".hankweave"), { recursive: true });
+      await fs.promises.mkdir(path.join(newerDir, ".hankweave"), {
+        recursive: true,
+      });
       await fs.promises.writeFile(
         path.join(newerDir, ".hankweave", "execution-meta.json"),
         JSON.stringify({

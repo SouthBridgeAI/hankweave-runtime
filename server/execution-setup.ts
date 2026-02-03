@@ -91,8 +91,10 @@ async function countDirectoryContents(
 
 export interface ExecutionSetup {
   readOnlySourceDataPath: string; // Absolute path to original data
-  executionPath: string; // Absolute path where we run
-  dataPathInExecutionDir: string; // Always executionPath + '/read_only_data_source'
+  executionPath: string; // Absolute path where we run (outer directory)
+  agentRootPath: string; // Absolute path to agent workspace (executionPath + '/agentRoot')
+  rigArchivePath: string; // Absolute path to archive storage (executionPath + '/rigArchive')
+  dataPathInExecutionDir: string; // Always agentRootPath + '/read_only_data_source'
   dataHash: string;
   hankHash?: string; // Hash of hank.json content (for resume detection)
   isNewExecution: boolean;
@@ -167,7 +169,7 @@ export async function setupExecutionEnvironment(options: {
     const managedExecBase = path.join(os.homedir(), ".hankweave-executions");
     if (executionPath.startsWith(managedExecBase)) {
       throw new Error(
-        `Cannot use ${managedExecBase}/ as explicit execution directory.\n` +
+        `❌ Cannot use ~/.hankweave-executions/ as explicit execution directory.\n` +
           `This location is reserved for auto-managed executions.\n` +
           `Use a different path for --execution.`,
       );
@@ -191,11 +193,16 @@ export async function setupExecutionEnvironment(options: {
               console.log(`📦 Backed up existing execution to: ${backupPath}`);
             } else {
               throw new Error(
-                `Directory already contains Hankweave execution: ${executionPath}\n` +
+                `❌ Directory already contains execution state: ${executionPath}/.hankweave\n` +
+                  `This directory has an existing Hankweave execution.\n` +
                   `Options:\n` +
-                  `  1. Remove .hankweave/ directory and try again\n` +
-                  `  2. Use --force to backup existing state and start fresh\n` +
-                  `  3. Use a different directory`,
+                  `  • Resume this execution (default):\n` +
+                  `      hankweave --execution ${executionPath}\n` +
+                  `  • Start fresh, backup existing state:\n` +
+                  `      hankweave --execution ${executionPath} --start-new --force\n` +
+                  `      (state backed up to .hankweave.backup-{timestamp})\n` +
+                  `  • Use a different directory:\n` +
+                  `      hankweave --execution ./other-dir`,
               );
             }
           } else {
@@ -243,70 +250,83 @@ export async function setupExecutionEnvironment(options: {
       isResuming = false;
       finalExecutionPath = executionPath;
     } else {
-      // Without --start-new, existing logic applies
+      // Without --start-new flag
+      // Behavior: create dir if missing, use if no .hankweave, resume if has .hankweave
+
       if (!fs.existsSync(executionPath)) {
-        throw new Error(`Execution directory not found: ${executionPath}`);
-      }
-
-      // Verify it's a directory
-      const stats = await fs.promises.stat(executionPath);
-      if (!stats.isDirectory()) {
-        throw new Error(`Execution path is not a directory: ${executionPath}`);
-      }
-
-      // Prevent nested execution
-      if (executionPath.includes("/.hankweave-executions/") && executionPath.includes("/data")) {
-        throw new Error("Cannot create execution inside another execution directory");
-      }
-
-      // Prevent using data source as execution
-      if (path.resolve(executionPath) === path.resolve(readOnlySourceDataPath)) {
-        throw new Error("Execution directory cannot be the same as data source");
-      }
-
-      // Check if it has execution metadata
-      const metaPath = path.join(executionPath, ".hankweave", "execution-meta.json");
-      if (fs.existsSync(metaPath)) {
-        // Verify data hash matches
-        const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
-        if (meta.dataHash !== dataHash) {
-          if (ignoreDataMismatch) {
-            console.warn(
-              `⚠️  Data source mismatch (ignored via --ignore-data-mismatch):\n` +
-                `   Expected hash: ${meta.dataHash}\n` +
-                `   Current hash: ${dataHash}`,
-            );
-            relinkDataSource = true;
-          } else {
-            throw new Error(
-              `Data source mismatch. Execution directory was created for different data.\n` +
-                `Expected hash: ${meta.dataHash}\n` +
-                `Current hash: ${dataHash}`,
-            );
-          }
+        // Directory doesn't exist - create it for new execution
+        await fs.promises.mkdir(executionPath, { recursive: true });
+        console.log(`Created execution directory: ${executionPath}`);
+        isNewExecution = true;
+      } else {
+        // Directory exists - verify it's a directory
+        const stats = await fs.promises.stat(executionPath);
+        if (!stats.isDirectory()) {
+          throw new Error(`Execution path is not a directory: ${executionPath}`);
         }
 
-        // Check for hank config changes (skip when starting new - user explicitly wants fresh execution)
-        if (!startNew && hankHash && meta.hankHash && meta.hankHash !== hankHash) {
-          configChanged = true;
-          console.log(`\n⚠️  WARNING: hank.json has changed since last execution.`);
-          console.log(`  Previous hash: ${meta.hankHash.substring(0, 12)}...`);
-          console.log(`  Current hash:  ${hankHash.substring(0, 12)}...`);
-          console.log(`  Changes may affect execution behavior.\n`);
+        // Prevent nested execution
+        if (executionPath.includes("/.hankweave-executions/") && executionPath.includes("/data")) {
+          throw new Error("Cannot create execution inside another execution directory");
+        }
 
-          if (!skipConfirmation && !forceMode) {
-            const confirmed = await promptConfirmation("Continue with modified config?");
-            if (!confirmed) {
-              throw new Error("Operation cancelled by user.");
+        // Prevent using data source as execution
+        if (path.resolve(executionPath) === path.resolve(readOnlySourceDataPath)) {
+          throw new Error("Execution directory cannot be the same as data source");
+        }
+
+        // Check if it has execution metadata
+        const metaPath = path.join(executionPath, ".hankweave", "execution-meta.json");
+        if (fs.existsSync(metaPath)) {
+          // Has .hankweave - verify hash and resume
+          const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
+          if (meta.dataHash !== dataHash) {
+            if (ignoreDataMismatch || forceMode) {
+              console.warn(
+                `⚠️  Data source mismatch (ignored via --force):\n` +
+                  `   Expected hash: ${meta.dataHash}\n` +
+                  `   Current hash: ${dataHash}`,
+              );
+              relinkDataSource = true;
+            } else {
+              throw new Error(
+                `❌ Data source has changed since this execution was created.\n` +
+                  `  Execution:     ${executionPath}\n` +
+                  `  Expected hash: ${meta.dataHash}\n` +
+                  `  Current hash:  ${dataHash}\n` +
+                  `Options:\n` +
+                  `  • Use anyway (keep execution state, use new data):\n` +
+                  `      hankweave --execution ${executionPath} --force\n` +
+                  `  • Start fresh in this directory:\n` +
+                  `      hankweave --execution ${executionPath} --start-new --force\n` +
+                  `  • Let Hankweave find/create appropriate execution:\n` +
+                  `      hankweave`,
+              );
             }
           }
-        }
 
-        isResuming = true;
-      } else {
-        // Directory exists but no metadata - treat as fresh execution
-        isNewExecution = true;
-        console.log(`Using existing directory as execution directory: ${executionPath}`);
+          // Check for hank config changes
+          if (hankHash && meta.hankHash && meta.hankHash !== hankHash) {
+            configChanged = true;
+            console.log(`\n⚠️  WARNING: hank.json has changed since last execution.`);
+            console.log(`  Previous hash: ${meta.hankHash.substring(0, 12)}...`);
+            console.log(`  Current hash:  ${hankHash.substring(0, 12)}...`);
+            console.log(`  Changes may affect execution behavior.\n`);
+
+            if (!skipConfirmation && !forceMode) {
+              const confirmed = await promptConfirmation("Continue with modified config?");
+              if (!confirmed) {
+                throw new Error("Operation cancelled by user.");
+              }
+            }
+          }
+
+          isResuming = true;
+        } else {
+          // Directory exists but no .hankweave - treat as fresh execution
+          isNewExecution = true;
+          console.log(`Using existing directory as execution directory: ${executionPath}`);
+        }
       }
 
       finalExecutionPath = executionPath;
@@ -348,7 +368,14 @@ export async function setupExecutionEnvironment(options: {
     }
   }
 
-  const dataPathInExecutionDir = path.join(finalExecutionPath, "read_only_data_source");
+  // Create the new directory structure: agentRoot/ and rigArchive/
+  const agentRootPath = path.join(finalExecutionPath, "agentRoot");
+  const rigArchivePath = path.join(finalExecutionPath, "rigArchive");
+  const dataPathInExecutionDir = path.join(agentRootPath, "read_only_data_source");
+
+  // Ensure agentRoot/ and rigArchive/ directories exist
+  await fs.promises.mkdir(agentRootPath, { recursive: true });
+  await fs.promises.mkdir(rigArchivePath, { recursive: true });
 
   // Set up data access (symlink or copy)
   let linkType: "symlink" | "copy" = useSymlink ? "symlink" : "copy";
@@ -403,6 +430,15 @@ export async function setupExecutionEnvironment(options: {
   const metaDir = path.join(finalExecutionPath, ".hankweave");
   await fs.promises.mkdir(metaDir, { recursive: true });
 
+  // Create empty archive manifest if it doesn't exist (for archiveOnSuccess feature)
+  const archiveManifestPath = path.join(metaDir, "archive-manifest.json");
+  if (!fs.existsSync(archiveManifestPath)) {
+    await fs.promises.writeFile(
+      archiveManifestPath,
+      JSON.stringify({ version: "1.0.0", entries: [] }, null, 2),
+    );
+  }
+
   const existingMetaPath = path.join(metaDir, "execution-meta.json");
   const existingMeta = fs.existsSync(existingMetaPath)
     ? JSON.parse(await fs.promises.readFile(existingMetaPath, "utf-8"))
@@ -427,6 +463,8 @@ export async function setupExecutionEnvironment(options: {
   return {
     readOnlySourceDataPath,
     executionPath: finalExecutionPath,
+    agentRootPath,
+    rigArchivePath,
     dataPathInExecutionDir,
     dataHash,
     hankHash,

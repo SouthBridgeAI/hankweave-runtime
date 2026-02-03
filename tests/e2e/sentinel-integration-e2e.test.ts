@@ -187,14 +187,30 @@ describe("Sentinel Integration: With Sentinels", () => {
       timeout: 10000,
     });
 
-    // Get server ready event
+    // Get server ready event - this is all beforeAll does now
     const readyEvent = await client.waitForEvent("server.ready", 10000);
     if (readyEvent.type === "server.ready") {
       executionPath = readyEvent.data.executionPath;
       console.log(`${colors.green}✓ Server ready at ${executionPath}${colors.reset}`);
     }
+  });
 
-    // Now trigger the first codon to start - client is connected and will capture all events
+  afterAll(() => {
+    // Synchronous cleanup to avoid timeout issues
+    if (client) {
+      client.disconnect().catch(() => {}); // Fire and forget
+    }
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill("SIGKILL");
+    }
+  });
+
+  // This test runs first and does the actual codon execution
+  // Other tests depend on the events captured here
+  it("should complete codon with sentinels and capture events", async () => {
+    if (!client) throw new Error("Client not initialized");
+
+    // Trigger the first codon to start
     console.log(`${colors.blue}Triggering codon start...${colors.reset}`);
     const { generateId } = await import("../../server/utils.js");
     client.sendCommand({
@@ -213,7 +229,6 @@ describe("Sentinel Integration: With Sentinels", () => {
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
     // Request server shutdown to trigger sentinel unload events
-    // This cleanly unloads sentinels before server stops
     console.log(`${colors.blue}Requesting server shutdown...${colors.reset}`);
     client.sendCommand({
       id: generateId(),
@@ -222,21 +237,15 @@ describe("Sentinel Integration: With Sentinels", () => {
     });
 
     // Wait for server to process shutdown and emit unload events
-    // The unload events should be emitted before the connection closes
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
+    // Capture events for subsequent tests
     events = client.getEvents();
-  });
-
-  afterAll(async () => {
-    if (client) {
-      await client.disconnect();
-    }
-    if (serverProcess && !serverProcess.killed) {
-      serverProcess.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-  });
+    expect(events.length).toBeGreaterThan(0);
+    console.log(
+      `${colors.green}✓ Captured ${events.length} events for subsequent tests${colors.reset}`,
+    );
+  }, 180000); // 3 minute timeout for this test
 
   describe("Sentinel Lifecycle Events", () => {
     it("should emit sentinel.loaded events for all 3 sentinels", () => {
@@ -650,29 +659,46 @@ describe("Sentinel Integration: Zero Sentinels", () => {
       mode: ClientMode.READANDWRITE,
     });
 
-    // Get server ready event
+    // Get server ready event - this is all beforeAll does now
     const readyEvent = await client.waitForEvent("server.ready", 10000);
     if (readyEvent.type === "server.ready") {
       executionPath = readyEvent.data.executionPath;
       console.log(`${colors.green}✓ Server ready at ${executionPath}${colors.reset}`);
     }
-
-    // Wait for codon to complete
-    await client.waitForEvent("codon.completed", 60000);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    events = client.getEvents();
   });
 
-  afterAll(async () => {
+  afterAll(() => {
+    // Synchronous cleanup to avoid timeout issues
     if (client) {
-      await client.disconnect();
+      client.disconnect().catch(() => {}); // Fire and forget
     }
     if (serverProcess && !serverProcess.killed) {
-      serverProcess.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      serverProcess.kill("SIGKILL");
     }
   });
+
+  // This test runs first and waits for the auto-started codon to complete
+  it("should complete codon without sentinels and capture events", async () => {
+    if (!client) throw new Error("Client not initialized");
+
+    // Server was started with autostart, so codon is already running
+    // Wait for codon to complete
+    console.log(`${colors.blue}Waiting for codon to complete...${colors.reset}`);
+    const codonComplete = await client.waitForEvent("codon.completed", 60000);
+    expect(codonComplete.type).toBe("codon.completed");
+    expect((codonComplete as CodonCompletedEvent).data.success).toBe(true);
+    console.log(`${colors.green}✓ Codon completed${colors.reset}`);
+
+    // Short wait for any final events
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Capture events for subsequent tests
+    events = client.getEvents();
+    expect(events.length).toBeGreaterThan(0);
+    console.log(
+      `${colors.green}✓ Captured ${events.length} events for subsequent tests${colors.reset}`,
+    );
+  }, 90000); // 90 second timeout
 
   describe("State Transitions Without Sentinels", () => {
     it("should skip completing-sentinels state when sentinelCount is 0", () => {

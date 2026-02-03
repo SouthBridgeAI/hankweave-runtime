@@ -1,0 +1,33 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "type": "loop",
+      "id": "rig-setup-ignore-loop",
+      "name": "Rig Setup Ignore Loop",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 2
+      },
+      "codons": [
+        {
+          "id": "rig-setup-failure",
+          "name": "Rig Setup Failure (Ignored)",
+          "model": "haiku",
+          "continuationMode": "fresh",
+          "promptText": "This codon should not run because rig setup fails.",
+          "onFailure": "ignore",
+          "rigSetup": [
+            {
+              "type": "command",
+              "command": {
+                "run": "exit 1",
+                "workingDirectory": "project"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

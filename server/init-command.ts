@@ -58,7 +58,7 @@ const templates: Record<string, string> = {
 
   "prompts/analyze-haiku.md": `# Project Analysis (Haiku)
 
-Please analyze the files in the \`data\` directory located in the current working directory (do not go to other directories) and create a comprehensive analysis report.
+Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
 
 Your analysis should include:
 
@@ -68,7 +68,9 @@ Please create your analysis in a file called \`analysis-haiku.md\` in the execut
 
   "prompts/analyze-gemini.md": `# Project Analysis (Gemini)
 
-Please analyze the files in the \`data\` directory located in the current working directory (do not go to other directories) and create a comprehensive analysis report.
+Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
+
+**Important:** Use bash/shell commands (like \`ls\` and \`cat\`) to list and read files in the \`read_only_data_source\` directory. Do not use the native LS or Read tools for this directory as it may be a symlink.
 
 Your analysis should include:
 
@@ -78,7 +80,7 @@ Please create your analysis in a file called \`analysis-gemini.md\` in the execu
 
   "prompts/analyze-codex.md": `# Project Analysis (Codex)
 
-Please analyze the files in the \`data\` directory located in the current working directory (do not go to other directories) and create a comprehensive analysis report.
+Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
 
 Your analysis should include:
 

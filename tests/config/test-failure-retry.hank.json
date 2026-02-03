@@ -1,0 +1,16 @@
+{
+  "hank": [
+    {
+      "id": "flaky-codon",
+      "name": "May Fail Initially",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "promptText": "Attempt to read a file that may not exist initially",
+      "onFailure": "retry",
+      "retryConfig": {
+        "maxAttempts": 3,
+        "delayMs": 500
+      }
+    }
+  ]
+}

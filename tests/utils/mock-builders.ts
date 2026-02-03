@@ -62,6 +62,7 @@ export function createCompletedCodon(
       cacheReadTokens: 0,
     },
     resultMessageReceived: true,
+    extensionCount: 0,
     completionCheckpoint: "abc123",
   };
 }
@@ -86,6 +87,7 @@ export function createRunningCodon(
       cacheReadTokens: 0,
     },
     assistantMessageCount: 0,
+    extensionCount: 0,
   };
 }
 

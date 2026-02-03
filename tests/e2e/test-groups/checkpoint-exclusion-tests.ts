@@ -2,26 +2,34 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-export async function runCheckpointExclusionTests(testDir: string) {
-  const checkpointDir = path.join(testDir, ".hankweave/checkpoints");
-  const gitDir = path.join(checkpointDir, ".git");
+/**
+ * Checkpoint exclusion tests.
+ * @param executionPath - Where .hankweave/checkpoints lives
+ * @param agentRootPath - Where agent files live (git work tree)
+ */
+export async function runCheckpointExclusionTests(executionPath: string, agentRootPath: string) {
+  const checkpointDir = path.join(executionPath, ".hankweave/checkpoints");
+  const gitDir = path.join(checkpointDir, ".hankweavecheckpoints");
 
   test("checkpoint system excludes non-tracked files", async () => {
     const { execSync } = await import("node:child_process");
 
-    // Create some files that shouldn't be tracked
-    fs.writeFileSync(path.join(testDir, "untracked.txt"), "should not be in git");
-    fs.writeFileSync(path.join(testDir, "notes/untracked.log"), "also not tracked");
-    fs.mkdirSync(path.join(testDir, ".hankweave/temp"), { recursive: true });
-    fs.writeFileSync(path.join(testDir, ".hankweave/temp/file.txt"), "internal file");
+    // Create some files that shouldn't be tracked (in agentRootPath where agent works)
+    fs.writeFileSync(path.join(agentRootPath, "untracked.txt"), "should not be in git");
+    fs.writeFileSync(path.join(agentRootPath, "notes/untracked.log"), "also not tracked");
+    fs.mkdirSync(path.join(executionPath, ".hankweave/temp"), {
+      recursive: true,
+    });
+    fs.writeFileSync(path.join(executionPath, ".hankweave/temp/file.txt"), "internal file");
 
     // Check git status shows them as untracked
+    // Work tree is agentRootPath where agent files live
     const gitStatus = execSync("git status --porcelain", {
-      cwd: testDir,
+      cwd: agentRootPath,
       env: {
         ...process.env,
         GIT_DIR: gitDir,
-        GIT_WORK_TREE: testDir,
+        GIT_WORK_TREE: agentRootPath,
       },
       encoding: "utf-8",
     });
@@ -31,13 +39,13 @@ export async function runCheckpointExclusionTests(testDir: string) {
     // notes/untracked.log is UN-excluded by "!notes/**/*" but not added to git yet
     expect(gitStatus).toContain("?? notes/untracked.log");
 
-    // .hankweave directory should never be tracked
+    // .hankweave directory should never be tracked (it's outside agentRootPath)
     const gitFiles = execSync("git ls-files", {
-      cwd: testDir,
+      cwd: agentRootPath,
       env: {
         ...process.env,
         GIT_DIR: gitDir,
-        GIT_WORK_TREE: testDir,
+        GIT_WORK_TREE: agentRootPath,
       },
       encoding: "utf-8",
     });
@@ -49,11 +57,11 @@ export async function runCheckpointExclusionTests(testDir: string) {
     const { execSync } = await import("node:child_process");
 
     const gitLog = execSync("git log --pretty=format:%B%n---", {
-      cwd: testDir,
+      cwd: agentRootPath,
       env: {
         ...process.env,
         GIT_DIR: gitDir,
-        GIT_WORK_TREE: testDir,
+        GIT_WORK_TREE: agentRootPath,
       },
       encoding: "utf-8",
     });
@@ -78,11 +86,11 @@ export async function runCheckpointExclusionTests(testDir: string) {
 
     // Get commit times
     const gitLog = execSync("git log --pretty=format:'%H|%ct|%s'", {
-      cwd: testDir,
+      cwd: agentRootPath,
       env: {
         ...process.env,
         GIT_DIR: gitDir,
-        GIT_WORK_TREE: testDir,
+        GIT_WORK_TREE: agentRootPath,
       },
       encoding: "utf-8",
     });
@@ -104,8 +112,8 @@ export async function runCheckpointExclusionTests(testDir: string) {
   test("checkpoint system respects .gitignore in subfolders", async () => {
     const { execSync } = await import("node:child_process");
 
-    // Codon 3 copies typescript_structure which has a .gitignore
-    const typescriptDir = path.join(testDir, "typescript_code");
+    // Codon 3 copies typescript_structure which has a .gitignore (in agentRootPath)
+    const typescriptDir = path.join(agentRootPath, "typescript_code");
     const gitignorePath = path.join(typescriptDir, ".gitignore");
 
     // Verify .gitignore exists
@@ -128,11 +136,11 @@ export async function runCheckpointExclusionTests(testDir: string) {
 
     // Get all files tracked by the checkpoint git
     const gitFiles = execSync("git ls-files", {
-      cwd: testDir,
+      cwd: agentRootPath,
       env: {
         ...process.env,
         GIT_DIR: gitDir,
-        GIT_WORK_TREE: testDir,
+        GIT_WORK_TREE: agentRootPath,
       },
       encoding: "utf-8",
     });

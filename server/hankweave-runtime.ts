@@ -2,8 +2,9 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { minimatch } from "minimatch";
+import { ArchiveManifestManager } from "./archive-manifest.js";
 import { CheckpointGit } from "./checkpoint-git.js";
-import { CodonRunner } from "./codon-runner.js";
+import { CodonRunner, type ExtensionInfo } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { EventJournal } from "./event-journal.js";
@@ -15,6 +16,7 @@ import { ProxyRunner } from "./llm-proxy.js";
 import type {
   AssistantActionEvent,
   CodonCompletedEvent,
+  CodonExtendedEvent,
   CodonStartedEvent,
   ErrorEvent,
   FileTreeUpdatedEvent,
@@ -161,10 +163,21 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private checkpointGit: CheckpointGit | null = null;
   private checkpointingEnabled = true;
 
+  // Archive manifest for archiveOnSuccess feature
+  private archiveManifest: ArchiveManifestManager | null = null;
+
   // Failure tracking
   private codonFailureReason?: FailureReason;
   private isForceStopping = false;
   private resultMessageReceived = false;
+
+  // Retry tracking for onFailure: "retry" policy
+  // NOTE: These counters are in-memory only. If the server restarts mid-retry,
+  // the counter is lost and the codon remains in failed state. Users can
+  // manually retry via checkpoint restore. This is acceptable for transient
+  // failures (the target of auto-retry) which won't persist across restarts.
+  private retryAttempts = new Map<string, number>(); // codonId -> attempt count
+  private retryAccumulatedCost = new Map<string, number>(); // codonId -> total cost across retries
 
   // Rollback state
   private isRollingBack = false;
@@ -727,6 +740,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       data: {
         serverVersion: this.config.version,
         executionPath: this.config.executionPath,
+        agentRootPath: this.config.agentRootPath,
         dataPath: this.config.dataPathInExecutionDir,
       },
     };
@@ -1337,8 +1351,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * 5. Start file watching if configured
    * 6. Send codon.started event
    * 7. Spawn Claude process with prompt
+   *
+   * @param codonId - The codon to start
+   * @param skipPreCommands - If true, skip rig setup (for runner failures where rig setup already succeeded)
+   * @param isAutoRetry - If true, skip continuation run creation (for automatic retries within same run)
    */
-  private async startCodon(codonId: CodonId, skipPreCommands?: boolean): Promise<void> {
+  private async startCodon(
+    codonId: CodonId,
+    skipPreCommands?: boolean,
+    isAutoRetry?: boolean,
+  ): Promise<void> {
     // Look up in execution plan (Step 4 of looping codons plan)
     const entry = this.stateManager.getCodonById(codonId);
     if (!entry) {
@@ -1381,8 +1403,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Check if this codon was already attempted in current run
+    // Skip this check during auto-retry (we want to stay in the same run)
     const currentRun = this.stateManager.getCurrentRun();
-    if (currentRun) {
+    if (currentRun && !isAutoRetry) {
       const previousAttempt = currentRun.codons.find((p) => p.codonId === codonId);
       if (previousAttempt && isTerminalCodonStatus(previousAttempt.status)) {
         // Codon was already attempted and finished - start new run
@@ -1482,7 +1505,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         } as InfoEvent);
         try {
           if (item.type === "copy" && item.copy) {
-            const targetPath = path.join(this.config.executionPath, item.copy.to);
+            const targetPath = path.join(this.config.agentRootPath, item.copy.to);
             this.logger.log(`Copying ${item.copy.from} to ${targetPath}`);
             // Check if target path already exists
             if (fs.existsSync(targetPath)) {
@@ -1505,7 +1528,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             const resolvedWorkingDir =
               item.command.workingDirectory === "lastCopied" && lastCopiedPath
                 ? lastCopiedPath
-                : this.config.executionPath;
+                : this.config.agentRootPath;
             this.logger.log(`Ran command in ${resolvedWorkingDir}: ${item.command.run}`);
           }
           // Operation succeeded
@@ -1608,7 +1631,88 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             },
           } as ErrorEvent);
 
-          // Clean up and handle error
+          // Apply failure policy
+          const action = this.resolveFailurePolicy(codonId, codon, this.codonFailureReason);
+
+          if (action === "continue") {
+            // Emit codon.completed event with failureIgnored flag
+            // (Early failure paths don't go through handleCodonComplete)
+            this.emit("event", {
+              id: EventId(generateId()),
+              timestamp: new Date().toISOString(),
+              type: "codon.completed",
+              data: {
+                codonId: codonId,
+                success: false,
+                cost: 0, // No cost incurred during rig setup
+                duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
+                exitStatus: { type: "error", code: exitCode },
+                failureReason: this.codonFailureReason,
+                failureIgnored: true,
+              },
+            } as CodonCompletedEvent);
+
+            // Emit info event about the ignored failure
+            this.emit("event", {
+              id: EventId(generateId()),
+              timestamp: new Date().toISOString(),
+              type: "info",
+              data: {
+                message: `Codon ${codonId} rig setup failed, continuing (onFailure=ignore)`,
+              },
+            } as InfoEvent);
+
+            this.cleanupCurrentCodon();
+
+            await this.stateManager.waitForPendingTransitions();
+            await this.stateManager.expandNextIterationForCodon({
+              codonId: CodonId(codonId),
+              contextExceeded: false,
+            });
+
+            // Ignored failure - proceed to next codon
+            if (this.config.autostart) {
+              await this.autoStartNextCodon();
+            }
+            return;
+          }
+
+          if (action === "retry") {
+            // Rig setup failures with retry policy - retry the codon
+            // (rig setup will run again since we're not skipping)
+            const attempts = this.retryAttempts.get(codonId) || 0;
+            const maxAttempts = codon.retryConfig?.maxAttempts ?? 3;
+            const delayMs = codon.retryConfig?.delayMs ?? 1000;
+
+            if (attempts < maxAttempts) {
+              this.retryAttempts.set(codonId, attempts + 1);
+
+              this.emit("event", {
+                id: EventId(generateId()),
+                timestamp: new Date().toISOString(),
+                type: "info",
+                data: {
+                  message: `Retrying codon ${codonId} after rig setup failure (attempt ${attempts + 1}/${maxAttempts})`,
+                },
+              } as InfoEvent);
+
+              this.cleanupCurrentCodon();
+              await this.delay(delayMs);
+
+              // Check if shutdown was requested during delay
+              if (this.isShuttingDown) {
+                this.logger.log(`Server shutting down, skipping retry for ${codonId}`);
+                return;
+              }
+
+              // Don't skip rig setup on retry - that's what failed!
+              // Pass isAutoRetry=true to prevent creating a new run
+              await this.startCodon(codonId, false, true);
+              return;
+            }
+          }
+
+          // Fall through to original error handling for shutdown cases
           this.cleanupCurrentCodon();
           await this.handleError(
             toError(error),
@@ -1691,7 +1795,64 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         },
       } as ErrorEvent);
 
+      // Apply failure policy (sentinel failures respect codon onFailure config)
+      const action = this.resolveFailurePolicy(codonId, codon, this.codonFailureReason);
+
+      if (action === "continue") {
+        // Emit codon.completed event with failureIgnored flag
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "codon.completed",
+          data: {
+            codonId: codonId,
+            success: false,
+            cost: 0,
+            duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
+            exitStatus: { type: "error", code: -1 },
+            failureReason: this.codonFailureReason,
+            failureIgnored: true,
+          },
+        } as CodonCompletedEvent);
+
+        // Emit info event
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "info",
+          data: {
+            message: `Codon ${codonId} sentinel load failed, continuing (onFailure=ignore)`,
+          },
+        } as InfoEvent);
+
+        this.cleanupCurrentCodon();
+
+        await this.stateManager.waitForPendingTransitions();
+        await this.stateManager.expandNextIterationForCodon({
+          codonId: CodonId(codonId),
+          contextExceeded: false,
+        });
+
+        if (this.config.autostart) {
+          await this.autoStartNextCodon();
+        }
+        return;
+      }
+
+      // shutdown/stay-active - original behavior
+      // Note: Sentinel failures have retriable=false, so retry policy falls through to shutdown
       this.cleanupCurrentCodon();
+
+      if (action === "shutdown") {
+        if (this.currentRunId) {
+          this.stateManager.transition({
+            type: "RunFailed",
+            data: { runId: this.currentRunId },
+          });
+          await this.stateManager.waitForPendingTransitions();
+        }
+        await this.shutdown("sentinel load failure");
+      }
       return;
     }
 
@@ -1805,8 +1966,66 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           },
         } as ErrorEvent);
 
-        // Clean up and return
+        // Apply failure policy
+        const action = this.resolveFailurePolicy(codonId, codon, this.codonFailureReason);
+
+        if (action === "continue") {
+          // Emit codon.completed event with failureIgnored flag
+          this.emit("event", {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "codon.completed",
+            data: {
+              codonId: codonId,
+              success: false,
+              cost: 0,
+              duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
+              exitStatus: { type: "error", code: -1 },
+              failureReason: this.codonFailureReason,
+              failureIgnored: true,
+            },
+          } as CodonCompletedEvent);
+
+          // Emit info event
+          this.emit("event", {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "info",
+            data: {
+              message: `Codon ${codonId} continuation session not found, continuing (onFailure=ignore)`,
+            },
+          } as InfoEvent);
+
+          // Note: This is an unusual case - ignoring a continuation failure
+          // The next codon may also fail if it expects to continue
+          this.cleanupCurrentCodon();
+
+          await this.stateManager.waitForPendingTransitions();
+          await this.stateManager.expandNextIterationForCodon({
+            codonId: CodonId(codonId),
+            contextExceeded: false,
+          });
+
+          if (this.config.autostart) {
+            await this.autoStartNextCodon();
+          }
+          return;
+        }
+
+        // shutdown/stay-active - let existing behavior proceed
+        // (Missing continuation is non-retriable, so retry policy won't apply)
         this.cleanupCurrentCodon();
+
+        if (action === "shutdown") {
+          if (this.currentRunId) {
+            this.stateManager.transition({
+              type: "RunFailed",
+              data: { runId: this.currentRunId },
+            });
+            await this.stateManager.waitForPendingTransitions();
+          }
+          await this.shutdown("continuation session not found");
+        }
         return;
       }
     }
@@ -1839,15 +2058,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Send initial file states if any exist
     if (codon.checkpointedFiles && codon.checkpointedFiles.length > 0) {
       // Use the unified file resolver to get files respecting gitignore
+      // Files are resolved relative to agentRootPath (where agent outputs live)
       const resolvedFiles = await fileResolver.resolveFiles(
-        this.config.executionPath,
+        this.config.agentRootPath,
         codon.checkpointedFiles,
       );
 
       // Get file contents for each resolved file
       const files = await Promise.all(
         resolvedFiles.map(async (filePath) => {
-          const fullPath = path.join(this.config.executionPath, filePath);
+          const fullPath = path.join(this.config.agentRootPath, filePath);
           const stats = await fs.promises.stat(fullPath);
           const content = await fs.promises.readFile(fullPath, "utf-8");
           return {
@@ -1927,16 +2147,34 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       const logPath = path.join(runFolder, logFileName);
 
       // Create runner for this codon and store in map (single source of truth)
-      const runner = new CodonRunner({
+      // Build config with proper discriminated union structure
+      const baseConfig = {
         codon,
         codonId,
         executionPath: this.config.executionPath,
+        agentRootPath: this.config.agentRootPath,
         logger: this.logger,
         logParsingInterval: this.config.logParsingInterval,
         anthropicBaseUrl: this.proxyRunner?.proxyUrl,
-        logPath, // Pass the run-specific log path
+        logPath,
         globalSystemPrompt: this.config.globalSystemPrompt,
-      });
+      };
+
+      // Extension config is only provided when exhaustWithPrompt is set
+      // The discriminated union requires shouldInterrupt and onExtension when extensionConfig is present
+      const runner = codon.exhaustWithPrompt
+        ? new CodonRunner({
+            ...baseConfig,
+            extensionConfig: {
+              exhaustWithPrompt: codon.exhaustWithPrompt,
+              maxExtensions: codon.maxExtensions ?? 100,
+            },
+            shouldInterrupt: () => this.isSkippingCodon || this.isForceStopping,
+            onExtension: (info: ExtensionInfo) => {
+              this.handleExtension(codonId, codon, info);
+            },
+          })
+        : new CodonRunner(baseConfig);
       this.codonRunners.set(codonId, runner);
 
       // Subscribe to runner events
@@ -2058,14 +2296,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Process lifecycle events
-    runner.on("exit", (code: number, isContextExceeded: boolean) => {
+    // CodonRunner now handles extension loop internally - exit is only emitted when truly done
+    runner.on("exit", (code: number, isContextExceeded: boolean, extensionCount: number) => {
       if (isContextExceeded) {
         this.logger.log(
           `[HANKWEAVE-SERVER] Context exceeded error detected for codon ${codonId}`,
           "error",
         );
       }
-      this.handleCodonComplete(code, isContextExceeded);
+
+      // Codon is truly complete (extension loop finished if any)
+      this.handleCodonComplete(code, isContextExceeded, extensionCount);
     });
 
     runner.on("error", (error: Error) => {
@@ -2619,9 +2860,60 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private async handleCodonComplete(exitCode: number, isContextExceeded: boolean): Promise<void> {
+  /**
+   * Handle extension notification from CodonRunner.
+   * Called when CodonRunner decides to extend and before it re-runs.
+   *
+   * This method:
+   * 1. Emits codon.extended event for TUI/clients
+   * 2. Updates state with new extension count
+   */
+  private handleExtension(codonId: CodonId, codon: Codon, info: ExtensionInfo): void {
+    // Get current state for cumulative costs
+    const currentState = this.stateManager.getCodonInCurrentRun(codonId);
+    if (!currentState || currentState.status !== "running") {
+      this.logger.log(`Cannot handle extension for ${codonId}: not in running state`, "error");
+      return;
+    }
+
+    // Emit extension event for TUI/clients
+    // Use info.exhaustWithPrompt (guaranteed by ExtensionInfo) instead of codon.exhaustWithPrompt
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "codon.extended",
+      data: {
+        codonId: codonId,
+        codonName: codon.name,
+        extensionNumber: info.extensionNumber,
+        exhaustWithPrompt: info.exhaustWithPrompt,
+        cumulativeTokens: currentState.currentTokens,
+        cumulativeCost: currentState.currentCost,
+      },
+    } as CodonExtendedEvent);
+
+    this.logger.log(`Codon ${codonId} extending (extension #${info.extensionNumber})`, "info");
+
+    // Update state with extension count
+    if (this.currentRunId) {
+      this.stateManager.transition({
+        type: "ExtensionCountUpdated",
+        data: {
+          runId: this.currentRunId,
+          codonId: codonId,
+          extensionCount: info.extensionNumber,
+        },
+      });
+    }
+  }
+
+  private async handleCodonComplete(
+    exitCode: number,
+    isContextExceeded: boolean,
+    extensionCount: number,
+  ): Promise<void> {
     this.logger.log(
-      `[handleCodonComplete] ======= ENTERED handleCodonComplete - exitCode=${exitCode}, isContextExceeded=${isContextExceeded} =======`,
+      `[handleCodonComplete] ======= ENTERED handleCodonComplete - exitCode=${exitCode}, isContextExceeded=${isContextExceeded}, extensionCount=${extensionCount} =======`,
       "info",
     );
     const hasRunner = this.currentCodon
@@ -2641,6 +2933,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     const codonId = this.currentCodon.codonId;
+    const codonConfig = this.currentCodon.codon; // Save codon config before potential cleanup
     const wasSkipped = this.isSkippingCodon;
 
     // Now get the codon from state manager to ensure we have the latest status
@@ -2825,6 +3118,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             resultMessageReceived: this.resultMessageReceived,
             checkpointSha: checkpointSha || "", // Ensure we always have a string
             contextExceeded: isContextExceeded,
+            extensionCount,
             ...(finalStatus === "failed" && {
               failedDuring: wasSkipped ? currentStatus : updatedCodon.status,
               failureReason: this.codonFailureReason || {
@@ -2857,7 +3151,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // The design decision to report 0 for skipped codons is handled here
-    const reportedCost = finalStatus === "skipped" ? 0 : finalCost;
+    // For retried codons, include accumulated cost from failed attempts
+    const accumulatedRetryCost = this.retryAccumulatedCost.get(codonId) || 0;
+    const reportedCost = finalStatus === "skipped" ? 0 : finalCost + accumulatedRetryCost;
+
+    // Determine if this failure will be ignored (for event reporting)
+    const willIgnoreFailure =
+      finalStatus === "failed" && this.currentCodon?.codon.onFailure === "ignore";
 
     this.emit("event", {
       id: EventId(generateId()),
@@ -2866,7 +3166,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       data: {
         codonId,
         success: finalStatus === "completed",
-        cost: reportedCost, // Use the authoritative, persisted cost
+        cost: reportedCost, // Use the authoritative, persisted cost (includes retry costs)
         duration: Date.now() - new Date(currentCodon.startTime).getTime(),
         exitStatus:
           finalStatus === "skipped"
@@ -2875,13 +3175,21 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
               ? { type: "success" }
               : { type: "error", code: exitCode },
         failureReason: finalStatus === "failed" ? this.codonFailureReason : undefined,
+        // Mark if this failure will be ignored due to onFailure config
+        failureIgnored: willIgnoreFailure ? true : undefined,
       },
     } as CodonCompletedEvent);
 
     // Send state snapshot
     await this.sendStateSnapshot();
 
-    if (finalStatus === "completed" && this.currentCodon.codon.outputFiles) {
+    // Copy outputs to external directory only if outputDirectory is configured
+    // If outputDirectory is undefined, outputs stay in {executionPath}/outputs/ only
+    if (
+      finalStatus === "completed" &&
+      this.currentCodon.codon.outputFiles &&
+      this.config.outputDirectory
+    ) {
       for (const [groupIndex, outItem] of this.currentCodon.codon.outputFiles.entries()) {
         let beforeCopySuccess = false;
         try {
@@ -2926,13 +3234,40 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
+    // Execute archiveOnSuccess if configured (after outputFiles, before loop expansion)
+    if (finalStatus === "completed" && this.currentCodon?.codon.archiveOnSuccess) {
+      const loopCtx = currentCodon.loopContext;
+      await this.executeArchiveRigs(
+        this.currentCodon.codon.archiveOnSuccess,
+        codonId,
+        checkpointSha || "orphan", // Use 'orphan' if no checkpoint (shouldn't happen for completed)
+        loopCtx ? { loopId: loopCtx.loopId, iteration: loopCtx.iteration } : undefined,
+        false, // not a loop-level archive
+      );
+    }
+
     // Loop expansion logic
     // Check if this completed codon is part of a loop and expand next iteration if needed
     if (finalStatus === "completed" || finalStatus === "skipped") {
-      await this.stateManager.expandNextIterationForCodon({
+      const expansionResult = await this.stateManager.expandNextIterationForCodon({
         codonId: CodonId(codonId),
         contextExceeded: isContextExceeded,
       });
+
+      // Handle loop termination archives
+      if (expansionResult.loopTerminated?.archiveOnSuccess?.length) {
+        const { loopId, archiveOnSuccess, completedIterations } = expansionResult.loopTerminated;
+        this.logger.log(
+          `Loop '${loopId}' terminated after ${completedIterations} iterations, executing archiveOnSuccess`,
+        );
+        await this.executeArchiveRigs(
+          archiveOnSuccess,
+          loopId, // Use loop ID as the codon ID for archive path construction
+          checkpointSha || "orphan",
+          undefined, // No loop context for loop-level archives
+          true, // This IS a loop-level archive
+        );
+      }
     }
 
     // Clean up - now happens after state is persisted
@@ -2977,6 +3312,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Handle next steps
     if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
+      // Clear retry counters for this codon (cost was already included in event emission)
+      this.retryAttempts.delete(codonId);
+      this.retryAccumulatedCost.delete(codonId);
+
       if (this.config.autostart) {
         await this.autoStartNextCodon();
       } else {
@@ -2992,21 +3331,224 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         } as import("./types/types.js").ServerIdleEvent);
       }
     } else if (finalStatus === "failed" && !this.isShuttingDown) {
-      if (this.codonFailureReason?.retriable) {
-        this.logger.log(`Codon failed with retriable error. Server remains active.`);
-      } else {
-        // Non-retriable failure - shut down run
-        if (this.currentRunId) {
-          this.stateManager.transition({
-            type: "RunFailed",
-            data: { runId: this.currentRunId },
-          });
-          // Wait for this transition too
-          await this.stateManager.waitForPendingTransitions();
+      const action = this.resolveFailurePolicy(
+        CodonId(codonId),
+        codonConfig,
+        this.codonFailureReason,
+      );
+
+      switch (action) {
+        case "shutdown":
+          // Non-retriable failure or exhausted retries - fail the run and shutdown
+          if (this.currentRunId) {
+            this.stateManager.transition({
+              type: "RunFailed",
+              data: { runId: this.currentRunId },
+            });
+            await this.stateManager.waitForPendingTransitions();
+          }
+          await this.shutdown("codon failure");
+          break;
+
+        case "stay-active":
+          // Retriable failure with abort policy - server stays active for manual retry
+          this.logger.log(`Codon failed with retriable error. Server remains active.`);
+          break;
+
+        case "retry": {
+          const attempts = this.retryAttempts.get(codonId) || 0;
+          const maxAttempts = codonConfig.retryConfig?.maxAttempts ?? 3;
+          const delayMs = codonConfig.retryConfig?.delayMs ?? 1000;
+
+          // Accumulate cost from this failed attempt before retrying
+          // Note: this.currentCodon is already cleaned up at this point, use finalCost from state
+          const currentCost = finalCost;
+          const accumulatedCost = (this.retryAccumulatedCost.get(codonId) || 0) + currentCost;
+          this.retryAccumulatedCost.set(codonId, accumulatedCost);
+
+          this.retryAttempts.set(codonId, attempts + 1);
+
+          this.logger.log(
+            `Retry ${attempts + 1}/${maxAttempts} for codon ${codonId} in ${delayMs}ms`,
+          );
+
+          // Emit info event about the retry
+          this.emit("event", {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "info",
+            data: {
+              message: `Retrying codon ${codonId} (attempt ${attempts + 1}/${maxAttempts})`,
+            },
+          } as InfoEvent);
+
+          await this.delay(delayMs);
+
+          // Check if server is shutting down before retrying
+          // (User may have requested shutdown during the delay period)
+          if (this.isShuttingDown) {
+            this.logger.log(`Server shutting down, skipping retry for ${codonId}`);
+            return;
+          }
+
+          // NOTE: Cleanup already happened above for all status values.
+          // Do NOT call cleanupCurrentCodon() again here.
+
+          // Retry the codon with skipPreCommands=true (rig setup already succeeded)
+          // and isAutoRetry=true to prevent creating a new continuation run
+          await this.startCodon(CodonId(codonId), true, true);
+          break;
         }
-        await this.shutdown("codon failure");
+
+        case "continue": {
+          // Clear retry counters for this codon
+          this.retryAttempts.delete(codonId);
+          this.retryAccumulatedCost.delete(codonId);
+
+          // Emit info event about the ignored failure
+          this.emit("event", {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "info",
+            data: {
+              message: `Codon ${codonId} failed, continuing (onFailure=ignore)`,
+            },
+          } as InfoEvent);
+
+          // Note: The codon.completed event was already emitted above with failureIgnored flag
+
+          // Run loop expansion (normally only for completed/skipped, but also for ignored failures)
+          await this.stateManager.expandNextIterationForCodon({
+            codonId: CodonId(codonId),
+            contextExceeded: false, // Failed codon, not context exceeded
+          });
+
+          // Check if there's a next codon to run
+          const thread = await analyzeExecutionThread(
+            this.stateManager.getState(),
+            undefined,
+            undefined,
+            this.logger,
+          );
+          const hasNextCodon = thread.nextCodonId !== null;
+
+          if (hasNextCodon) {
+            // Auto-start next codon if configured
+            if (this.config.autostart) {
+              await this.autoStartNextCodon();
+            } else {
+              this.emit("event", {
+                id: EventId(generateId()),
+                timestamp: new Date().toISOString(),
+                type: "server.idle",
+                data: {
+                  reason: "codon-completed",
+                  message: `Codon ${codonId} failed (ignored). Use 'codon.next' to continue.`,
+                },
+              } as import("./types/types.js").ServerIdleEvent);
+            }
+          } else {
+            // This was the last codon - mark run as completed
+            // The run succeeded overall because all codons were executed (some failed-but-ignored)
+            if (this.currentRunId) {
+              this.stateManager.transition({
+                type: "RunCompleted",
+                data: { runId: this.currentRunId },
+              });
+              await this.stateManager.waitForPendingTransitions();
+            }
+            // Emit idle with all-codons-completed since all codons have run
+            this.emit("event", {
+              id: EventId(generateId()),
+              timestamp: new Date().toISOString(),
+              type: "server.idle",
+              data: {
+                reason: "all-codons-completed",
+                message: `Run completed. Last codon ${codonId} failed (ignored).`,
+              },
+            } as import("./types/types.js").ServerIdleEvent);
+          }
+          break;
+        }
       }
     }
+  }
+
+  // -------------
+  // Failure Policy Helpers
+  // -------------
+
+  /**
+   * Determine how to proceed after a codon failure based on its onFailure configuration.
+   * This is the single source of truth for failure policy decisions.
+   *
+   * @param codonId The ID of the failed codon
+   * @param codon The codon configuration
+   * @param failureReason The reason for the failure (may be undefined)
+   * @returns 'shutdown' | 'stay-active' | 'retry' | 'continue' indicating the action to take
+   */
+  private resolveFailurePolicy(
+    codonId: CodonId,
+    codon: Codon,
+    failureReason: FailureReason | undefined,
+  ): "shutdown" | "stay-active" | "retry" | "continue" {
+    const onFailure = codon.onFailure || "abort";
+    const isRetriable = failureReason?.retriable === true;
+
+    this.logger.log(
+      `Resolving failure policy for codon ${codonId}: onFailure=${onFailure}, retriable=${isRetriable}`,
+      "info",
+    );
+
+    switch (onFailure) {
+      case "abort":
+        // Preserve existing behavior: retriable errors stay active, non-retriable shutdown
+        return isRetriable ? "stay-active" : "shutdown";
+
+      case "retry": {
+        // Only retry if the error is retriable
+        if (!isRetriable) {
+          this.logger.log(
+            `Codon ${codonId} has onFailure=retry but error is not retriable, falling back to abort`,
+            "info",
+          );
+          return "shutdown";
+        }
+
+        const attempts = this.retryAttempts.get(codonId) || 0;
+        const maxAttempts = codon.retryConfig?.maxAttempts ?? 3;
+
+        if (attempts < maxAttempts) {
+          return "retry";
+        }
+
+        this.logger.log(
+          `Codon ${codonId} exhausted ${maxAttempts} retry attempts, aborting`,
+          "info",
+        );
+        return "shutdown";
+      }
+
+      case "ignore":
+        this.logger.log(
+          `Ignoring failure for codon ${codonId} due to onFailure: 'ignore' configuration`,
+          "info",
+        );
+        return "continue";
+
+      default: {
+        // TypeScript exhaustiveness check
+        const _exhaustive: never = onFailure;
+        return "shutdown";
+      }
+    }
+  }
+
+  /**
+   * Simple delay helper for retry timing.
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // -------------
@@ -3036,7 +3578,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         filePath = input?.file_path || null;
         content = input?.content || "";
         if (filePath) {
-          action = fs.existsSync(path.join(this.config.executionPath, filePath))
+          action = fs.existsSync(path.join(this.config.agentRootPath, filePath))
             ? "modified"
             : "created";
         }
@@ -3060,7 +3602,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Make path relative if it's absolute
     if (path.isAbsolute(filePath)) {
-      filePath = path.relative(this.config.executionPath, filePath);
+      filePath = path.relative(this.config.agentRootPath, filePath);
     }
 
     // Check if file matches any watch pattern
@@ -3076,7 +3618,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Read current file content if not provided
     if (!content) {
-      const fullPath = path.join(this.config.executionPath, filePath);
+      const fullPath = path.join(this.config.agentRootPath, filePath);
       if (fs.existsSync(fullPath)) {
         try {
           content = fs.readFileSync(fullPath, "utf-8");
@@ -3116,7 +3658,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Build file tree for all watched patterns
     const allTrees = await Promise.all(
-      this.watchedPatterns.map((pattern) => buildFileTree(this.config.executionPath, pattern)),
+      this.watchedPatterns.map((pattern) => buildFileTree(this.config.agentRootPath, pattern)),
     );
 
     // Merge all trees into one
@@ -3812,7 +4354,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         await this.stateManager.waitForPendingTransitions();
       }
 
-      // 5. Reset git to the target checkpoint
+      // 5. Capture archive entries to restore BEFORE git reset
+      let entriesToRestore: import("./archive-manifest.js").ArchiveEntry[] = [];
+      if (this.archiveManifest) {
+        entriesToRestore = this.archiveManifest.getEntriesAfterCheckpoint(sha);
+        this.logger.log(
+          `Found ${entriesToRestore.length} archive entries to restore during direct rollback`,
+        );
+      }
+
+      // 6. Reset git to the target checkpoint
       if (this.checkpointGit) {
         this.logger.log(`Resetting to checkpoint ${sha.substring(0, 7)}`);
         await this.checkpointGit.resetToCheckpoint(sha);
@@ -3831,7 +4382,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         } as import("./types/types.js").RollbackCodonCheckpointEvent);
       }
 
-      // 6. Start new continuation run
+      // 7. Restore archived files back to agentRoot/
+      if (entriesToRestore.length > 0) {
+        await this.restoreArchiveEntries(entriesToRestore, sha);
+      }
+
+      // 8. Reload manifest from disk (git restored it to checkpoint state)
+      if (this.archiveManifest) {
+        await this.archiveManifest.reload();
+      }
+
+      // 10. Start new continuation run
       const afterCodon = checkpointType === "rig-setup" ? null : targetCodon.codon.codonId;
       await this.startNewRun({
         type: "continuation",
@@ -3843,7 +4404,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         reason: "rollback",
       });
 
-      // 7. Emit rollback completed event
+      // 11. Emit rollback completed event
       const newRun = this.stateManager.getCurrentRun();
       this.emit("event", {
         id: EventId(generateId()),
@@ -3860,7 +4421,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         },
       } as import("./types/types.js").RollbackCompletedEvent);
 
-      // 8. Auto-restart if requested
+      // 12. Auto-restart if requested
       if (autoRestart && newRun) {
         this.logger.log("Auto-starting next codon after rollback");
         await this.autoStartNextCodon();
@@ -4279,8 +4840,28 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as import("./types/types.js").RollbackProgressEvent);
 
+    // Capture archive entries to restore BEFORE git reset
+    // (After git reset, manifest will be restored to checkpoint state)
+    let entriesToRestore: import("./archive-manifest.js").ArchiveEntry[] = [];
+    if (this.archiveManifest) {
+      entriesToRestore = this.archiveManifest.getEntriesAfterCheckpoint(targetSha);
+      this.logger.log(
+        `Found ${entriesToRestore.length} archive entries to restore during rollback`,
+      );
+    }
+
     if (this.checkpointGit) {
       await this.checkpointGit.resetToCheckpoint(targetSha);
+    }
+
+    // Restore archived files back to agentRoot/
+    if (entriesToRestore.length > 0) {
+      await this.restoreArchiveEntries(entriesToRestore, targetSha);
+    }
+
+    // Reload manifest from disk (git restored it to checkpoint state)
+    if (this.archiveManifest) {
+      await this.archiveManifest.reload();
     }
 
     this.emit("event", {
@@ -4419,6 +5000,273 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   /**
+   * Execute archiveOnSuccess for a codon - moves files to rigArchive/ after successful completion.
+   *
+   * @param archiveOnSuccess - Array of paths to archive (relative to agentRoot/)
+   * @param codonId - The codon ID (with iteration suffix for loops)
+   * @param checkpointSha - The checkpoint SHA at time of archiving
+   * @param loopContext - Loop context if codon is part of a loop
+   * @param isLoopLevelArchive - If true, this is a loop-level archive (uses -loop suffix)
+   */
+  private async executeArchiveRigs(
+    archiveOnSuccess: string[],
+    codonId: string,
+    checkpointSha: string,
+    loopContext?: { loopId: string; iteration: number },
+    isLoopLevelArchive = false,
+  ): Promise<void> {
+    if (!archiveOnSuccess || archiveOnSuccess.length === 0) return;
+    if (!this.archiveManifest) {
+      this.logger.log("Archive manifest not initialized, skipping archiveOnSuccess", "error");
+      return;
+    }
+
+    this.logger.log(`Executing archiveOnSuccess for ${codonId}: ${archiveOnSuccess.join(", ")}`);
+
+    // Resolve glob patterns to actual files
+    const resolvedFiles = await fileResolver.resolveFiles(
+      this.config.agentRootPath,
+      archiveOnSuccess,
+    );
+
+    this.logger.log(`Resolved ${resolvedFiles.length} files to archive from patterns`);
+
+    const results: { path: string; success: boolean; error?: string }[] = [];
+
+    for (const sourcePath of resolvedFiles) {
+      const fullSourcePath = path.join(this.config.agentRootPath, sourcePath);
+
+      // Build archive destination path
+      // Note: Only codonId needs sanitization (# -> -) since loop IDs don't contain #
+      let archiveSubdir: string;
+      if (isLoopLevelArchive) {
+        // Loop-level archive: rigArchive/<loopId>-loop/<path>
+        // (codonId here is actually the loop ID)
+        archiveSubdir = `${codonId}-loop`;
+      } else if (loopContext) {
+        // Loop codon: rigArchive/<loopId>-<iteration>/<codonId>/<path>
+        archiveSubdir = path.join(
+          `${loopContext.loopId}-${loopContext.iteration}`,
+          codonId.replace(/#/g, "-"), // Only codonId needs sanitization
+        );
+      } else {
+        // Non-loop codon: rigArchive/<codonId>/<path>
+        archiveSubdir = codonId.replace(/#/g, "-");
+      }
+
+      const archivePath = path.join(this.config.rigArchivePath, archiveSubdir, sourcePath);
+
+      try {
+        // Check if source exists
+        if (!fs.existsSync(fullSourcePath)) {
+          this.logger.log(`Archive source not found (skipping): ${sourcePath}`, "info");
+          results.push({ path: sourcePath, success: true }); // Not an error, just skip
+          continue;
+        }
+
+        // Create archive directory
+        await fs.promises.mkdir(path.dirname(archivePath), { recursive: true });
+
+        // Remove existing archive if present (overwrite semantics)
+        if (fs.existsSync(archivePath)) {
+          this.logger.log(`Archive path collision, overwriting: ${archivePath}`, "error");
+          await fs.promises.rm(archivePath, { recursive: true, force: true });
+        }
+
+        // Move files (copy then remove)
+        await fs.promises.cp(fullSourcePath, archivePath, { recursive: true });
+        await fs.promises.rm(fullSourcePath, { recursive: true, force: true });
+
+        // Record in manifest
+        await this.archiveManifest.addEntry({
+          sourcePath,
+          archivePath: path.relative(this.config.executionPath, archivePath),
+          codonId,
+          loopContext: isLoopLevelArchive ? undefined : loopContext,
+          checkpointSha,
+          timestamp: new Date().toISOString(),
+        });
+
+        this.logger.log(`Archived: ${sourcePath} → ${archivePath}`, "info");
+        results.push({ path: sourcePath, success: true });
+      } catch (error) {
+        // Graceful degradation: log error and continue with next path
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.logger.log(`Failed to archive ${sourcePath}: ${errorMsg}`, "error");
+        results.push({ path: sourcePath, success: false, error: errorMsg });
+      }
+    }
+
+    // Emit archive completed event (includes partial successes)
+    const successfulPaths = results.filter((r) => r.success).map((r) => r.path);
+    const failedResults = results.filter((r) => !r.success);
+
+    if (failedResults.length > 0) {
+      // Partial success - some paths failed
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "archive.partial",
+        data: {
+          codonId,
+          archivedPaths: successfulPaths,
+          failedPaths: failedResults.map((r) => ({
+            path: r.path,
+            error: r.error || "Unknown error",
+          })),
+        },
+      });
+    } else if (successfulPaths.length > 0) {
+      // Full success
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "archive.completed",
+        data: {
+          codonId,
+          archivedPaths: successfulPaths,
+        },
+      });
+    }
+  }
+
+  /**
+   * Restore archived files back to agentRoot/ during rollback.
+   * Called after git reset has restored the workspace to checkpoint state.
+   *
+   * @param entries - Archive entries to restore (from getEntriesAfterCheckpoint)
+   * @param targetCheckpointSha - The checkpoint we're rolling back to
+   */
+  private async restoreArchiveEntries(
+    entries: import("./archive-manifest.js").ArchiveEntry[],
+    targetCheckpointSha: string,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+
+    this.logger.log(
+      `Restoring ${entries.length} archived files during rollback to ${targetCheckpointSha}`,
+    );
+
+    const results: { path: string; success: boolean; error?: string }[] = [];
+
+    for (const entry of entries) {
+      const archiveFullPath = path.join(this.config.executionPath, entry.archivePath);
+      const sourceFullPath = path.join(this.config.agentRootPath, entry.sourcePath);
+
+      try {
+        // Check if archive exists
+        if (!fs.existsSync(archiveFullPath)) {
+          this.logger.log(`Archive file not found (skipping): ${entry.archivePath}`, "error");
+          results.push({
+            path: entry.sourcePath,
+            success: false,
+            error: "Archive not found",
+          });
+          continue;
+        }
+
+        // Create parent directory for restoration
+        await fs.promises.mkdir(path.dirname(sourceFullPath), {
+          recursive: true,
+        });
+
+        // Remove existing file if present (shouldn't be, but defensive)
+        if (fs.existsSync(sourceFullPath)) {
+          await fs.promises.rm(sourceFullPath, {
+            recursive: true,
+            force: true,
+          });
+        }
+
+        // Move files from archive back to source
+        await fs.promises.cp(archiveFullPath, sourceFullPath, {
+          recursive: true,
+        });
+        await fs.promises.rm(archiveFullPath, { recursive: true, force: true });
+
+        this.logger.log(`Restored: ${entry.archivePath} → ${entry.sourcePath}`, "info");
+        results.push({ path: entry.sourcePath, success: true });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.logger.log(`Failed to restore ${entry.sourcePath}: ${errorMsg}`, "error");
+        results.push({
+          path: entry.sourcePath,
+          success: false,
+          error: errorMsg,
+        });
+      }
+    }
+
+    // Emit rollback archive restore event
+    const successfulPaths = results.filter((r) => r.success).map((r) => r.path);
+    const failedResults = results.filter((r) => !r.success);
+
+    let status: "completed" | "partial" | "failed";
+    if (failedResults.length === 0) {
+      status = "completed";
+    } else if (successfulPaths.length > 0) {
+      status = "partial";
+    } else {
+      status = "failed";
+    }
+
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "rollback.archiveRestore",
+      data: {
+        codonId: targetCheckpointSha, // Use checkpoint SHA as identifier
+        restoredPaths: successfulPaths,
+        failedPaths:
+          failedResults.length > 0
+            ? failedResults.map((r) => ({
+                path: r.path,
+                error: r.error || "Unknown error",
+              }))
+            : undefined,
+        status,
+      },
+    });
+
+    // Clean up empty archive directories after restoration
+    // Collect unique archive parent directories (e.g., rigArchive/archive-loop-1/process-iteration-1)
+    const archiveDirs = new Set<string>();
+    for (const entry of entries) {
+      const archiveFullPath = path.join(this.config.executionPath, entry.archivePath);
+      // Get the directory containing the archived file
+      let currentDir = path.dirname(archiveFullPath);
+      // Walk up until we reach rigArchivePath, collecting directories
+      while (
+        currentDir !== this.config.rigArchivePath &&
+        currentDir.startsWith(this.config.rigArchivePath)
+      ) {
+        archiveDirs.add(currentDir);
+        currentDir = path.dirname(currentDir);
+      }
+    }
+
+    // Remove empty directories (deepest first)
+    const sortedDirs = Array.from(archiveDirs).sort((a, b) => b.length - a.length);
+    for (const dir of sortedDirs) {
+      try {
+        if (fs.existsSync(dir)) {
+          const contents = await fs.promises.readdir(dir);
+          if (contents.length === 0) {
+            await fs.promises.rmdir(dir);
+            this.logger.log(
+              `Cleaned up empty archive directory: ${path.relative(this.config.executionPath, dir)}`,
+              "info",
+            );
+          }
+        }
+      } catch (error) {
+        // Ignore errors (directory might not be empty or already removed)
+        this.logger.log(`Could not clean up archive directory ${dir}: ${error}`, "debug");
+      }
+    }
+  }
+
+  /**
    * Clean up rig directories created by a codon
    */
   private async cleanupCodonRigDirectories(codon: CodonExecution): Promise<void> {
@@ -4445,7 +5293,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     const failedCleanups: { directory: string; error: string }[] = [];
 
     for (const dir of directories) {
-      const fullPath = path.join(this.config.executionPath, dir);
+      const fullPath = path.join(this.config.agentRootPath, dir);
       try {
         if (fs.existsSync(fullPath)) {
           await fs.promises.rm(fullPath, { recursive: true, force: true });
@@ -4591,25 +5439,32 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // SentinelManager internally unloads previous codon's sentinels
-      await this.sentinelManager.loadSentinelsForCodon(configs, runtimeCodonId, {
-        configDirectory: configDirs[0],
-        runStartTime: new Date(),
-        executionPath: this.config.executionPath,
-        outputPathsMap: outputPathsMap.size > 0 ? outputPathsMap : undefined,
-        // Note: llmCallOverride and llmObjectCallOverride are only used in tests
-        // In production, SentinelManager uses its own provider registry
-      });
+      const { loadedIds } = await this.sentinelManager.loadSentinelsForCodon(
+        configs,
+        runtimeCodonId,
+        {
+          configDirectory: configDirs[0],
+          runStartTime: new Date(),
+          executionPath: this.config.executionPath,
+          outputPathsMap: outputPathsMap.size > 0 ? outputPathsMap : undefined,
+          // Note: llmCallOverride and llmObjectCallOverride are only used in tests
+          // In production, SentinelManager uses its own provider registry
+        },
+      );
 
       // Track loaded sentinel IDs
       this.currentCodonSentinels.clear();
-      for (const config of configs) {
-        this.currentCodonSentinels.add(config.id);
+      for (const id of loadedIds) {
+        this.currentCodonSentinels.add(id);
       }
 
-      this.logger.log(`Successfully loaded ${configs.length} sentinel instance(s)`, "info");
+      this.logger.log(`Successfully loaded ${loadedIds.length} sentinel instance(s)`, "info");
 
       // Codon 2: Emit sentinel.loaded events
-      for (const loadedConfig of loadResult.configs) {
+      const loadedConfigEntries = loadResult.configs.filter((lc) =>
+        loadedIds.includes(lc.config.id),
+      );
+      for (const loadedConfig of loadedConfigEntries) {
         const config = loadedConfig.config;
         this.emit("event", {
           id: EventId(generateId()),
@@ -4629,7 +5484,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       // Codon 2: Capture initial sentinel states in codon state
-      if (this.currentRunId && configs.length > 0) {
+      if (this.currentRunId && loadedIds.length > 0) {
         const sentinelStates = this.sentinelManager.getSentinelStates();
         const totalCost = sentinelStates.reduce((sum, state) => sum + state.totalCost, 0);
 
@@ -4647,7 +5502,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
 
       return {
-        loaded: loadResult.configs.map((c) => c.config.id),
+        loaded: loadedIds,
         errors: loadResult.errors,
       };
     } catch (error) {
@@ -4746,12 +5601,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       if (lastCopiedPath) {
         workingDir = lastCopiedPath;
       } else {
-        // Fallback to executionPath if lastCopiedPath not provided
-        workingDir = this.config.executionPath;
+        // Fallback to agentRootPath if lastCopiedPath not provided
+        workingDir = this.config.agentRootPath;
       }
     } else {
-      // Default to executionPath for "project"
-      workingDir = this.config.executionPath;
+      // Default to agentRootPath for "agentRoot" (formerly "project")
+      workingDir = this.config.agentRootPath;
     }
 
     // Diagnostic logging: log working directory and its contents
@@ -4855,11 +5710,22 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Initialize checkpoint git
-    this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
+    this.checkpointGit = new CheckpointGit(
+      this.config.executionPath,
+      this.config.agentRootPath,
+      this.logger,
+    );
     await this.checkpointGit.initialize();
 
     // Provide checkpoint git to state manager for git operations
     this.stateManager.setCheckpointGit(this.checkpointGit);
+
+    // Initialize archive manifest (for archiveOnSuccess feature)
+    // Note: The manifest is NOT checkpointed because it lives outside the git work tree
+    // (at .hankweave/archive-manifest.json, sibling to agentRoot/). Instead, its state
+    // is managed programmatically during rollback via removeEntriesAfterCheckpoint().
+    this.archiveManifest = new ArchiveManifestManager(this.config.executionPath, this.logger);
+    await this.archiveManifest.load();
 
     this.logger.log("Checkpoint system initialized");
   }
@@ -4886,7 +5752,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Initialize repository on first tracked patterns
     if (!this.checkpointGit) {
-      this.checkpointGit = new CheckpointGit(this.config.executionPath, this.logger);
+      this.checkpointGit = new CheckpointGit(
+        this.config.executionPath,
+        this.config.agentRootPath,
+        this.logger,
+      );
       await this.checkpointGit.initialize();
     }
 
