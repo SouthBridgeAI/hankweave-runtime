@@ -159,6 +159,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private isShuttingDown = false;
   private isSkippingCodon = false;
 
+  /**
+   * Tracks whether the initial autostart has been triggered.
+   * This is a defense-in-depth guard against the race condition where both
+   * headless startup and client handshake try to trigger autostart before
+   * hasRunningCodon becomes true.
+   *
+   * NOTE: This does NOT prevent subsequent autoStartNextCodon() calls after
+   * codons complete. Those are guarded by the existing hasRunningCodon check.
+   */
+  private initialAutostartTriggered = false;
+
   // Checkpoint-related properties
   private checkpointGit: CheckpointGit | null = null;
   private checkpointingEnabled = true;
@@ -397,30 +408,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    *
    * @throws Error if server is already running
    */
-  async start(): Promise<void> {
+  async start(): Promise<number> {
     this.logger.log(
       `Starting Hankweave Runtime v${this.config.version} in ${this.config.executionPath}`,
     );
     this.logger.log(`[DEBUG] Platform: ${process.platform}, Arch: ${process.arch}`);
     this.logger.log(`[DEBUG] Node version: ${process.version}`);
 
-    // Start proxy server first (if not disabled)
-    if (!this.config.withoutProxy) {
-      const proxyPort = this.config.port + 1;
-      this.logger.log(`Starting proxy server on port ${proxyPort}`);
-
-      this.proxyRunner = new ProxyRunner(
-        "passthrough",
-        proxyPort,
-        this.config.anthropicBaseUrl || "https://api.anthropic.com",
-        this.logger,
-      );
-      this.logger.log(`[DEBUG] About to start proxy runner...`);
-      this.proxyRunner.start();
-      this.logger.log(`[DEBUG] Proxy runner started`);
-    } else {
-      this.logger.log("Proxy server disabled");
-    }
+    // NOTE: Proxy startup moved AFTER WebSocket server to support dynamic ports
 
     // Initialize checkpoint system (checks for existing .hankweave)
     this.logger.log(`[DEBUG] Initializing checkpoints...`);
@@ -597,11 +592,33 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // Start WebSocket server
+    // Start WebSocket server FIRST (to get dynamic port before proxy starts)
     this.logger.log(`[DEBUG] About to start WebSocket server on port ${this.config.port}...`);
     try {
       this.server = serve<ClientData>({
-        port: this.config.port,
+        port: this.config.port, // If 0, Bun assigns a free port
+        fetch: (request: Request) => {
+          // HTTP requests are not supported - this is a WebSocket-only server
+          // Return helpful error instead of crashing
+          const url = new URL(request.url);
+          this.logger.log(`HTTP request to ${url.pathname} rejected (WebSocket-only server)`);
+
+          return new Response(
+            JSON.stringify({
+              error: "HTTP API not available",
+              message: "This server only accepts WebSocket connections",
+              websocket: `ws://${url.host}/ws`,
+              help: "Connect to the WebSocket endpoint to interact with Hankweave",
+            }),
+            {
+              status: 426,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+              },
+            },
+          );
+        },
         websocket: {
           upgrade: () => {
             // Initialize connection data before WebSocket opens
@@ -619,6 +636,15 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         },
       });
       this.logger.log(`[DEBUG] serve() call completed successfully`);
+
+      // IMPORTANT: If port was 0, update config with actual assigned port
+      const actualPort = this.server.port;
+      if (this.config.port === 0) {
+        this.logger.log(`Dynamic port assigned: ${actualPort}`);
+        this.config.port = actualPort; // Update config for consistency
+      }
+
+      this.logger.log(`WebSocket server listening on port ${actualPort}`);
     } catch (error) {
       this.logger.log(`[ERROR] Failed to start WebSocket server: ${error}`, "error");
       if (error instanceof Error && error.stack) {
@@ -627,7 +653,64 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       throw error;
     }
 
-    this.logger.log(`WebSocket server listening on port ${this.config.port}`);
+    // NOW start proxy server AFTER we know the actual WebSocket port
+    let actualProxyPort: number | undefined;
+    if (!this.config.withoutProxy) {
+      const preferredProxyPort = this.config.port + 1;
+      this.logger.log(`Attempting to start proxy on port ${preferredProxyPort}`);
+
+      try {
+        this.proxyRunner = new ProxyRunner(
+          "passthrough",
+          preferredProxyPort,
+          this.config.anthropicBaseUrl || "https://api.anthropic.com",
+          this.logger,
+        );
+        this.proxyRunner.start();
+        actualProxyPort = this.proxyRunner.getActualPort() ?? preferredProxyPort;
+        this.logger.log(`Proxy server started on port ${actualProxyPort}`);
+      } catch (error) {
+        // If preferred port fails, try dynamic allocation
+        // Check for EADDRINUSE via code property or error message
+        const isPortError =
+          error instanceof Error &&
+          (("code" in error && (error as NodeJS.ErrnoException).code === "EADDRINUSE") ||
+            error.message.toLowerCase().includes("address") ||
+            error.message.toLowerCase().includes("port") ||
+            error.message.toLowerCase().includes("eaddrinuse"));
+
+        if (isPortError) {
+          this.logger.log(`Port ${preferredProxyPort} unavailable, using dynamic port for proxy`);
+          this.proxyRunner = new ProxyRunner(
+            "passthrough",
+            0, // Let OS assign
+            this.config.anthropicBaseUrl || "https://api.anthropic.com",
+            this.logger,
+          );
+          this.proxyRunner.start();
+          actualProxyPort = this.proxyRunner.getActualPort() ?? 0;
+          this.logger.log(`Proxy server started on dynamic port ${actualProxyPort}`);
+        } else {
+          // Log unexpected error for debugging, then re-throw
+          this.logger.log(`Unexpected proxy startup error: ${error}`, "error");
+          throw error;
+        }
+      }
+    } else {
+      this.logger.log("Proxy server disabled");
+    }
+
+    // Update lock file with actual ports
+    this.updateLockFileWithPort(this.config.port, actualProxyPort);
+
+    // Prominent port display
+    console.log(`\n${"═".repeat(50)}`);
+    console.log(`  Hankweave Server Started`);
+    console.log(`  WebSocket: ws://localhost:${this.config.port}`);
+    if (actualProxyPort !== undefined) {
+      console.log(`  Proxy:     http://localhost:${actualProxyPort}`);
+    }
+    console.log(`${"═".repeat(50)}\n`);
 
     // Handle process termination
     process.on("SIGINT", () => this.shutdown("SIGINT"));
@@ -658,6 +741,31 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
       this.shutdown("unhandledRejection");
     });
+
+    // Return actual port for callers
+    return this.config.port;
+  }
+
+  /**
+   * Update the lock file with the actual server port.
+   * Called after WebSocket server binds when using dynamic ports.
+   */
+  private updateLockFileWithPort(actualPort: number, proxyPort?: number): void {
+    try {
+      if (fs.existsSync(this.config.lockFile)) {
+        const lockData = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8"));
+        lockData.port = actualPort;
+        if (proxyPort !== undefined) {
+          lockData.proxyPort = proxyPort;
+        }
+        fs.writeFileSync(this.config.lockFile, JSON.stringify(lockData));
+        this.logger.log(
+          `Lock file updated with port ${actualPort}${proxyPort !== undefined ? `, proxy ${proxyPort}` : ""}`,
+        );
+      }
+    } catch (error) {
+      this.logger.log(`Failed to update lock file with port: ${error}`, "error");
+    }
   }
 
   // -------------
@@ -742,6 +850,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         executionPath: this.config.executionPath,
         agentRootPath: this.config.agentRootPath,
         dataPath: this.config.dataPathInExecutionDir,
+        port: this.config.port,
+        proxyPort: this.proxyRunner?.getActualPort() ?? undefined,
       },
     };
 
@@ -750,9 +860,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     this.logger.log(`[handleHandshake] config.autostart = ${this.config.autostart}`);
     if (this.config.autostart) {
-      this.logger.log("[handleHandshake] Calling autoStartNextCodon()");
-      this.autoStartNextCodon().catch((err) => {
-        this.logger.log(`[handleHandshake] autoStartNextCodon error: ${err}`, "error");
+      this.logger.log("[handleHandshake] Calling requestAutostart()");
+      this.requestAutostart().catch((err) => {
+        this.logger.log(`[handleHandshake] requestAutostart error: ${err}`, "error");
       });
     } else {
       const serverIdleEvent = {
@@ -1301,7 +1411,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       runId,
       startTime: new Date().toISOString(),
       lastHeartbeat: new Date().toISOString(),
-      port: this.config.port ?? 7777, // NOTE: Use ?? not || (port 0 is valid but falsy)
+      port: this.config.port, // NOTE: May be 0 initially if using dynamic port; updated after server binds
     };
 
     const lockDir = path.dirname(this.config.lockFile);
@@ -3218,12 +3328,40 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
           beforeCopySuccess = true;
 
-          await copyFiles(
+          const { conflicts } = await copyFiles(
             this.config.executionPath,
             outItem.copy,
             path.join(this.config.cwd, this.config.outputDirectory),
             this.logger,
           );
+
+          // Emit info events for any file conflicts
+          if (conflicts.length > 0) {
+            this.logger.log(
+              `Output file conflicts resolved: ${conflicts.length} file(s) renamed`,
+              "info",
+            );
+
+            this.emit("event", {
+              id: EventId(generateId()),
+              timestamp: new Date().toISOString(),
+              type: "info",
+              data: {
+                message: `Output file conflicts: ${conflicts.length} file(s) were renamed to avoid overwriting.`,
+                details: conflicts.map((c) => ({
+                  original: path.basename(c.original),
+                  resolved: path.basename(c.resolved),
+                })),
+              },
+            } as import("./types/types.js").InfoEvent);
+
+            // Conflict summary display
+            console.log(`\nOutput files copied to ${this.config.outputDirectory}`);
+            console.log(`  Conflicts resolved:`);
+            for (const c of conflicts) {
+              console.log(`    - ${path.basename(c.original)} → ${path.basename(c.resolved)}`);
+            }
+          }
         } catch (error) {
           await this.handleError(
             new Error(`Copy group ${groupIndex} failed with: ${String(error)}`),
@@ -3718,6 +3856,31 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   // -------------
   // Codon Status & Control
   // -------------
+
+  /**
+   * Request the initial autostart of codons. Idempotent - multiple calls are safe.
+   * Called automatically in headless mode on startup, and on client handshake.
+   *
+   * This guards against triggering autostart TWICE (from both headless and handshake).
+   * It does NOT prevent autoStartNextCodon() from running subsequent codons.
+   */
+  public async requestAutostart(): Promise<void> {
+    if (this.initialAutostartTriggered) {
+      this.logger.log(`[requestAutostart] Initial autostart already triggered, ignoring`);
+      return;
+    }
+
+    if (!this.config.autostart) {
+      this.logger.log(`[requestAutostart] Autostart disabled`);
+      return;
+    }
+
+    // Set flag IMMEDIATELY (synchronously) to prevent race condition
+    this.initialAutostartTriggered = true;
+    this.logger.log(`[requestAutostart] Triggering initial autostart`);
+
+    await this.autoStartNextCodon();
+  }
 
   /**
    * Automatically start the next available codon if none is running.
@@ -5446,6 +5609,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           configDirectory: configDirs[0],
           runStartTime: new Date(),
           executionPath: this.config.executionPath,
+          agentRootPath: this.config.agentRootPath, // For sentinel output path resolution
           outputPathsMap: outputPathsMap.size > 0 ? outputPathsMap : undefined,
           // Note: llmCallOverride and llmObjectCallOverride are only used in tests
           // In production, SentinelManager uses its own provider registry
@@ -5869,9 +6033,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * 2. Kill Claude process if running
    * 3. Wait for pending transitions
    * 4. Create final checkpoint if needed
-   * 5. Exit process
+   * 5. Exit process with appropriate code
+   *
+   * @param reason - Reason for shutdown (for logging)
+   * @param exitProcess - Whether to call process.exit() (default: true, false for tests)
+   * @param exitCode - Optional exit code override. If undefined, determined from run status
    */
-  async shutdown(reason: string, exitProcess = true): Promise<void> {
+  async shutdown(reason: string, exitProcess = true, exitCode?: number): Promise<void> {
     if (this.isShuttingDown) {
       this.logger.log(`Shutdown already in progress, ignoring: ${reason}`);
       return;
@@ -5985,9 +6153,29 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // In production, we want to exit the process after shutdown
     // In tests, we don't want to exit to allow other tests to run
     if (exitProcess && reason !== "running integration test") {
+      // Determine exit code based on reason and state manager
+      let finalExitCode = exitCode;
+      if (finalExitCode === undefined) {
+        if (reason === "all codons completed") {
+          // Query state manager for run status (source of truth)
+          const currentRun = this.stateManager.getCurrentRun();
+          finalExitCode =
+            currentRun?.status === "failed" || currentRun?.status === "crashed" ? 1 : 0;
+        } else if (reason === "codon failure") {
+          finalExitCode = 1;
+        } else {
+          // Default to error exit code for unexpected/crash shutdown reasons
+          // Only user-initiated shutdowns are non-failures
+          const gracefulReasons = ["SIGINT", "SIGTERM", "client request"];
+          finalExitCode = gracefulReasons.includes(reason) ? 0 : 1;
+        }
+      }
+
+      this.logger.log(`Shutdown: ${reason} (exit code: ${finalExitCode})`);
+
       // Small delay to ensure log is written before process exits
       setTimeout(() => {
-        process.exit(0);
+        process.exit(finalExitCode);
       }, TIMEOUTS.CODON_CLEANUP_DELAY_MS);
     }
   }

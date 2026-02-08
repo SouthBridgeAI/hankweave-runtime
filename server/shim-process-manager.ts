@@ -97,9 +97,9 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     if (codon.model.providerId.toLowerCase() === "openai") {
       try {
         this.logger.log("Ensuring codex binary is available for OpenAI model...");
-        const codexPath = await ensureCodexAvailable();
-        env.CODEX_PATH_OVERRIDE = codexPath;
-        this.logger.log(`Set CODEX_PATH_OVERRIDE to: ${codexPath}`);
+        const codexInfo = await ensureCodexAvailable();
+        env.CODEX_PATH_OVERRIDE = codexInfo.path;
+        this.logger.log(`Set CODEX_PATH_OVERRIDE to: ${codexInfo.path}`);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.log(`Failed to ensure codex binary: ${errorMsg}`, "error");
@@ -401,9 +401,9 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     // For OpenAI models, ensure codex binary is available
     if (providerId?.toLowerCase() === "openai") {
       try {
-        const codexPath = await ensureCodexAvailable();
-        env.CODEX_PATH_OVERRIDE = codexPath;
-        this.logger.log(`Set CODEX_PATH_OVERRIDE for self-test: ${codexPath}`);
+        const codexInfo = await ensureCodexAvailable();
+        env.CODEX_PATH_OVERRIDE = codexInfo.path;
+        this.logger.log(`Set CODEX_PATH_OVERRIDE for self-test: ${codexInfo.path}`);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.log(`Failed to ensure codex binary for self-test: ${errorMsg}`, "error");

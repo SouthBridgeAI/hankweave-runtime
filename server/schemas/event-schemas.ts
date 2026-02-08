@@ -121,6 +121,8 @@ export const serverReadyEventDataSchema = z.object({
   executionPath: z.string(),
   agentRootPath: z.string(), // Agent workspace directory (where agents work)
   dataPath: z.string(),
+  port: z.number(),
+  proxyPort: z.number().optional(),
 });
 
 export const stateSnapshotEventDataSchema = z.object({

@@ -9,7 +9,11 @@ import { captureEnv, restoreEnv } from "../utils/env-test-helpers";
  * pipeline with all 5 layers working together.
  */
 
-const TEST_DIR = path.resolve("tests", "test-area", "config-resolution-integration");
+const TEST_DIR = path.resolve(
+  "tests",
+  "test-area",
+  "config-resolution-integration",
+);
 
 describe("resolveSettings - Integration Tests", () => {
   let originalEnv: Record<string, string | undefined>;
@@ -44,7 +48,7 @@ describe("resolveSettings - Integration Tests", () => {
     const result = resolveSettings();
 
     // Should have default values
-    expect(result.port).toBe(7777);
+    expect(result.port).toBe(0); // Default is dynamic port allocation;
     expect(result.autostart).toBe(true);
     expect(result.withoutProxy).toBe(true); // Proxy is off by default
   });
@@ -57,7 +61,7 @@ describe("resolveSettings - Integration Tests", () => {
         port: 8080,
         model: "opus",
         autostart: false,
-      })
+      }),
     );
 
     const result = resolveSettings({ runtimeConfigPath });
@@ -88,7 +92,7 @@ describe("resolveSettings - Integration Tests", () => {
             promptText: "test",
           },
         ],
-      })
+      }),
     );
 
     const result = resolveSettings({ hankPath });
@@ -157,7 +161,7 @@ describe("resolveSettings - Integration Tests", () => {
             promptText: "test",
           },
         ],
-      })
+      }),
     );
 
     process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
@@ -175,7 +179,7 @@ describe("resolveSettings - Integration Tests", () => {
       JSON.stringify({
         port: 8080,
         model: "sonnet",
-      })
+      }),
     );
 
     const hankPath = path.join(TEST_DIR, "hank.json");
@@ -194,7 +198,7 @@ describe("resolveSettings - Integration Tests", () => {
             promptText: "test",
           },
         ],
-      })
+      }),
     );
 
     const result = resolveSettings({ runtimeConfigPath, hankPath });
@@ -210,7 +214,7 @@ describe("resolveSettings - Integration Tests", () => {
       JSON.stringify({
         port: 8080,
         autostart: false,
-      })
+      }),
     );
 
     const result = resolveSettings({ runtimeConfigPath });
@@ -230,7 +234,7 @@ describe("resolveSettings - Integration Tests", () => {
         model: "sonnet",
         autostart: false,
         logParsingInterval: 2000,
-      })
+      }),
     );
 
     // Layer 3: Hank overrides
@@ -251,7 +255,7 @@ describe("resolveSettings - Integration Tests", () => {
             promptText: "test",
           },
         ],
-      })
+      }),
     );
 
     // Layer 4: Environment variables
@@ -288,7 +292,7 @@ describe("resolveSettings - Integration Tests", () => {
           enablePersistence: true,
           healthCheckGracePeriodMs: 1000,
         },
-      })
+      }),
     );
 
     // Layer 3: Hank overrides
@@ -311,11 +315,12 @@ describe("resolveSettings - Integration Tests", () => {
             promptText: "test",
           },
         ],
-      })
+      }),
     );
 
     // Layer 4: Environment
-    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS =
+      "3000";
 
     const result = resolveSettings({ runtimeConfigPath, hankPath });
 
@@ -331,7 +336,7 @@ describe("resolveSettings - Integration Tests", () => {
     });
 
     // Should still work with defaults
-    expect(result.port).toBe(7777);
+    expect(result.port).toBe(0); // Default is dynamic port allocation;
   });
 
   test("handles missing hank file gracefully", () => {
@@ -340,7 +345,7 @@ describe("resolveSettings - Integration Tests", () => {
     });
 
     // Should still work with defaults
-    expect(result.port).toBe(7777);
+    expect(result.port).toBe(0); // Default is dynamic port allocation;
   });
 
   test("handles hank file without overrides", () => {
@@ -358,13 +363,13 @@ describe("resolveSettings - Integration Tests", () => {
             promptText: "test",
           },
         ],
-      })
+      }),
     );
 
     const result = resolveSettings({ hankPath });
 
     // Should still work with defaults
-    expect(result.port).toBe(7777);
+    expect(result.port).toBe(0); // Default is dynamic port allocation;
   });
 
   test("handles empty runtime config file", () => {
@@ -374,7 +379,7 @@ describe("resolveSettings - Integration Tests", () => {
     const result = resolveSettings({ runtimeConfigPath });
 
     // Should use defaults
-    expect(result.port).toBe(7777);
+    expect(result.port).toBe(0); // Default is dynamic port allocation;
   });
 
   test("handles empty overrides in hank file", () => {
@@ -392,13 +397,13 @@ describe("resolveSettings - Integration Tests", () => {
             promptText: "test",
           },
         ],
-      })
+      }),
     );
 
     const result = resolveSettings({ hankPath });
 
     // Should use defaults
-    expect(result.port).toBe(7777);
+    expect(result.port).toBe(0); // Default is dynamic port allocation;
   });
 
   test("merges complex nested configurations correctly", () => {
@@ -410,11 +415,12 @@ describe("resolveSettings - Integration Tests", () => {
         sentinel: {
           enablePersistence: true,
         },
-      })
+      }),
     );
 
     process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
-    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
+    process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS =
+      "5000";
 
     const result = resolveSettings({
       runtimeConfigPath,

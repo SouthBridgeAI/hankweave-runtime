@@ -57,6 +57,7 @@ describe("WebSocket Logging", () => {
           executionPath: "/path/to/execution",
           agentRootPath: "/path/to/execution/agentRoot",
           dataPath: "/path/to/execution/agentRoot/read_only_data_source",
+          port: 7777,
         },
       };
 

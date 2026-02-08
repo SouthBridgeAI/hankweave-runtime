@@ -157,6 +157,7 @@ describe("LlmProviderRegistry", () => {
   describe("cost calculation", () => {
     beforeEach(() => {
       process.env.ANTHROPIC_API_KEY = "test-key";
+      process.env.OPENAI_API_KEY = "test-key";
       registry = new LlmProviderRegistry({ logger: mockLogger });
     });
 
@@ -196,6 +197,116 @@ describe("LlmProviderRegistry", () => {
 
       // Zero cost
       expect(registry.formatCost(0)).toBe("$0.0000");
+    });
+
+    describe("provider-specific cache token semantics", () => {
+      it("should use additive semantics for Anthropic (inputTokens + cacheReadTokens)", () => {
+        // Anthropic: inputTokens is fresh only, cacheReadTokens is additive
+        // claude-3-5-sonnet-20241022 pricing:
+        //   input: $3.00/M, output: $15.00/M, cache_read: $0.30/M
+        const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+          inputTokens: 1000, // 1K fresh input tokens
+          outputTokens: 500, // 500 output tokens
+          cacheReadTokens: 2000, // 2K cached tokens (additive)
+        });
+
+        // Expected: (1000/1M * 3.00) + (500/1M * 15.00) + (2000/1M * 0.30)
+        // = 0.003 + 0.0075 + 0.0006 = 0.0111
+        expect(cost).toBeCloseTo(0.0111, 6);
+      });
+
+      it("should use inclusive semantics for OpenAI (inputTokens includes cacheReadTokens)", () => {
+        // OpenAI: inputTokens INCLUDES cached tokens, cacheReadTokens is a subset
+        // gpt-4o-2024-08-06 pricing (has cache_read):
+        //   input: $2.50/M, output: $10.00/M, cache_read: $1.25/M
+        const cost = registry.calculateCost("gpt-4o-2024-08-06", {
+          inputTokens: 3000, // 3K total input (includes 2K cached)
+          outputTokens: 500,
+          cacheReadTokens: 2000, // 2K cached tokens (subset of inputTokens)
+        });
+
+        // OpenAI fix: freshInputTokens = 3000 - 2000 = 1000
+        // Expected: (1000/1M * 2.50) + (500/1M * 10.00) + (2000/1M * 1.25)
+        // = 0.0025 + 0.005 + 0.0025 = 0.01
+        expect(cost).toBeCloseTo(0.01, 6);
+      });
+
+      it("should NOT double-count cached tokens for OpenAI (bug fix verification)", () => {
+        // This test verifies the bug fix: before the fix, OpenAI costs were inflated
+        // because inputTokens (which includes cached) was being charged at full price,
+        // AND cacheReadTokens was charged again at cache_read price.
+
+        // gpt-4o-2024-08-06 pricing (has cache_read):
+        //   input: $2.50/M, output: $10.00/M, cache_read: $1.25/M
+        const cost = registry.calculateCost("gpt-4o-2024-08-06", {
+          inputTokens: 89958860, // Total (includes cached) - from bug report
+          outputTokens: 103588,
+          cacheReadTokens: 88836864, // Cached tokens (subset)
+        });
+
+        // CORRECT calculation (after fix):
+        // freshInputTokens = 89958860 - 88836864 = 1121996
+        // inputCost = (1121996/1M * 2.50) = 2.804990
+        // outputCost = (103588/1M * 10.00) = 1.03588
+        // cacheReadCost = (88836864/1M * 1.25) = 111.04608
+        // Total = 2.804990 + 1.03588 + 111.04608 = 114.88695
+        const expectedCorrect = 114.88695;
+
+        // WRONG calculation (before fix - double counting):
+        // inputCost = (89958860/1M * 2.50) = 224.897150
+        // outputCost = (103588/1M * 10.00) = 1.03588
+        // cacheReadCost = (88836864/1M * 1.25) = 111.04608
+        // Total = 224.897150 + 1.03588 + 111.04608 = 336.97911
+        const wrongDoubleCount = 336.97911;
+
+        expect(cost).toBeCloseTo(expectedCorrect, 2);
+        expect(cost).not.toBeCloseTo(wrongDoubleCount, 2);
+      });
+
+      it("should handle OpenAI with no cache tokens (no change in behavior)", () => {
+        // When there are no cache tokens, behavior should be the same
+        // gpt-4o-2024-08-06 pricing: input: $2.50/M, output: $10.00/M
+        const cost = registry.calculateCost("gpt-4o-2024-08-06", {
+          inputTokens: 1000,
+          outputTokens: 500,
+          cacheReadTokens: 0,
+        });
+
+        // Expected: (1000/1M * 2.50) + (500/1M * 10.00) + 0
+        // = 0.0025 + 0.005 = 0.0075
+        expect(cost).toBeCloseTo(0.0075, 6);
+      });
+
+      it("should handle edge case where cacheReadTokens exceeds inputTokens for OpenAI", () => {
+        // This shouldn't happen in practice, but the code should handle it gracefully
+        // gpt-4o-2024-08-06 pricing: input: $2.50/M, output: $10.00/M, cache_read: $1.25/M
+        const cost = registry.calculateCost("gpt-4o-2024-08-06", {
+          inputTokens: 1000,
+          outputTokens: 500,
+          cacheReadTokens: 2000, // More than inputTokens (shouldn't happen)
+        });
+
+        // freshInputTokens = max(0, 1000 - 2000) = 0
+        // Expected: (0/1M * 2.50) + (500/1M * 10.00) + (2000/1M * 1.25)
+        // = 0 + 0.005 + 0.0025 = 0.0075
+        expect(cost).toBeCloseTo(0.0075, 6);
+      });
+
+      it("should handle Anthropic with cache tokens correctly", () => {
+        // Verify Anthropic still works correctly with cache tokens
+        const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+          inputTokens: 10000, // Fresh input only
+          outputTokens: 2000,
+          cacheReadTokens: 50000, // Additive cached tokens
+          cacheCreationTokens: 1000,
+        });
+
+        // claude-3-5-sonnet-20241022 pricing:
+        //   input: $3.00/M, output: $15.00/M, cache_read: $0.30/M, cache_write: $3.75/M
+        // Expected: (10000/1M * 3.00) + (2000/1M * 15.00) + (50000/1M * 0.30) + (1000/1M * 3.75)
+        // = 0.03 + 0.03 + 0.015 + 0.00375 = 0.07875
+        expect(cost).toBeCloseTo(0.07875, 6);
+      });
     });
   });
 

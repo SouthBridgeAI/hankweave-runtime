@@ -53,7 +53,10 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
         extractClaudeSdkFiles: async () => "/fake/path",
       }));
 
-      expect(await ClaudeAgentSDKManager.ensureSdkAvailable()).toBeNull();
+      const result = await ClaudeAgentSDKManager.ensureSdkAvailable();
+      expect(result.path).toBeNull();
+      expect(result.version).toBe("node_modules");
+      expect(result.cached).toBe(true);
     });
 
     test("should not set CLAUDE_PATH_TO_CLAUDE_EXECUTABLE env var", async () => {
@@ -97,7 +100,8 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
 
       const result = await ClaudeAgentSDKManager.ensureSdkAvailable();
 
-      expect(result).toBe(cliPath);
+      expect(result.path).toBe(cliPath);
+      expect(result.cached).toBe(true);
     });
 
     test("should set CLAUDE_PATH_TO_CLAUDE_EXECUTABLE env var", async () => {
@@ -149,7 +153,8 @@ describe("ClaudeAgentSDKManager.ensureSdkAvailable", () => {
       const result = await ClaudeAgentSDKManager.ensureSdkAvailable();
 
       expect(extractCalled).toBe(true);
-      expect(result).toBe(cliPath);
+      expect(result.path).toBe(cliPath);
+      expect(result.cached).toBe(false);
     });
 
     test("should set env var after extraction", async () => {

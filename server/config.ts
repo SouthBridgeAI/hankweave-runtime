@@ -1144,7 +1144,7 @@ export const DEFAULT_CONFIG: Omit<
   | "codons"
   | "outputDirectory" // Now optional - outputs stay in execution dir by default
 > = {
-  port: 7777,
+  port: 0, // 0 = OS-assigned dynamic port (avoids collisions on multi-instance runs)
   version: PACKAGE_VERSION,
   // Note: outputDirectory is now undefined by default
   // Outputs stay in {executionPath}/outputs/ unless explicitly configured

@@ -15,7 +15,7 @@ let configPath: string | undefined;
 
 const runTests = async (
   config: TestServerConfig,
-  tests: (executionDir?: string) => Promise<void>
+  tests: (executionDir?: string, proxyPort?: number) => Promise<void>
 ) => {
   const tempDir = path.dirname(configPath!);
   let serverProcess: ChildProcess | null = null;
@@ -35,9 +35,15 @@ const runTests = async (
     await client.connect(config.port);
 
     // Wait for server.ready event to confirm it's fully started
-    await client.waitForEvent("server.ready", 10000);
+    const readyEvent = await client.waitForEvent("server.ready", 10000);
 
     console.log("✓ Server started successfully and is ready");
+
+    // Extract proxyPort from server.ready event data
+    let proxyPort: number | undefined;
+    if (readyEvent.type === "server.ready") {
+      proxyPort = readyEvent.data.proxyPort;
+    }
 
     // Parse server.log to extract execution directory
     const serverLogPath = path.join(tempDir, "server.log");
@@ -57,7 +63,7 @@ const runTests = async (
       );
     }
 
-    await tests(executionDir);
+    await tests(executionDir, proxyPort);
   } finally {
     // Clean up
     await cleanupTest({
@@ -121,7 +127,7 @@ describe("LLM proxy", () => {
     );
   });
 
-  test("runs on server port + 1 when enabled", async (done) => {
+  test("health check responds when proxy enabled", async (done) => {
     expect(configPath).toBeDefined();
 
     const tempDir = path.dirname(configPath!);
@@ -136,12 +142,13 @@ describe("LLM proxy", () => {
         cwd: tempDir,
         proxy: true, // Proxy is off by default, enable it for this test
       },
-      async (executionDir) => {
+      async (executionDir, proxyPort) => {
         expect(executionDir).toBeDefined();
+        expect(proxyPort).toBeDefined();
 
-        // Check that proxy is running on (server port + 1)
+        // Check that proxy is running on the reported port
         const healthResponse = await fetch(
-          `http://localhost:${port + 1}/health`
+          `http://localhost:${proxyPort}/health`
         );
         expect(healthResponse.ok).toBe(true);
         expect(await healthResponse.text()).toBe("Hankweave Proxy OK");
@@ -177,7 +184,10 @@ describe("LLM proxy", () => {
         cwd: tempDir,
         withoutProxy: true,
       },
-      async () => {
+      async (_executionDir, proxyPort) => {
+        // Verify proxy port is not reported when proxy is disabled
+        expect(proxyPort).toBeUndefined();
+
         // Check that proxy is NOT running on (server port + 1)
         try {
           await fetch(`http://localhost:${port + 1}/health`);

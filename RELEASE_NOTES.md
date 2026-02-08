@@ -1,41 +1,69 @@
-- 2026-02-03
+- 2026-02-08
 
 ### Added
 
-- **Execution Isolation (Hidden Execution Area)**
-  - New directory structure separates agent workspace from system files
-  - `agentRoot/` - Agent's workspace where all work happens (Git work tree)
-  - `rigArchive/` - Archive storage for `archiveOnSuccess` feature
-  - `.hankweave/` - System files (checkpoints, logs, manifest) hidden from agent
-  - Template variables (`<%AGENT_ROOT%>`, `<%PROJECT_DIR%>`, `<%EXECUTION_DIR%>`) all resolve to `agentRoot/`
-  - `server.ready` event now includes `agentRootPath` in addition to `executionPath`
+- **HTML Comment Stripping in Prompts** (ENG-158)
+  - HTML comments (`<!-- ... -->`) are now automatically stripped from all prompts before sending to LLM
+  - Applies to system prompts, user prompts, and template variable processing
+  - Trailing newlines are also consumed to prevent blank line accumulation
+  - Useful for adding internal notes and documentation that shouldn't reach the model
 
-- **Rig Archiving (`archiveOnSuccess` field)**
-  - New `archiveOnSuccess` field on codons and loops to archive files after successful completion
-  - Files are moved from `agentRoot/` to `rigArchive/<codonId>/` preserving directory structure
-  - Loop-level archives create iteration-specific directories: `rigArchive/<loopId>-<iteration>/`
-  - Archive manifest tracks all archived files at `.hankweave/archive-manifest.json`
-  - Supports glob patterns for specifying files to archive
-  - New events: `archive.completed`, `archive.partial` for tracking archive operations
+- **Output File Conflict Resolution** (ENG-115)
+  - Automatic handling of filename collisions when copying output files
+  - Conflicting files are renamed with format: `file_<counter>_<timestamp>.ext` (e.g., `report_1_1738678800.pdf`)
+  - Preflight warnings shown when output directory is non-empty
+  - New `resolveFileConflict()` utility with safety limit (max 100 conflicts)
+  - Server emits info events with conflict details for client awareness
+  - Updated `copyFiles()` returns conflict information for post-copy processing
 
-- **Rollback Archive Restoration**
-  - When rolling back, archived files are automatically restored from `rigArchive/` to `agentRoot/`
-  - Archive manifest is updated to remove entries for rolled-back checkpoints
-  - Empty archive directories are cleaned up after restoration
-  - New `rollback.archiveRestore` event emitted with details of restored files
+- **Headless Autostart Control** (ENG-180)
+  - New `requestAutostart()` method for idempotent codon execution triggering
+  - Headless mode now automatically starts execution without waiting for client connection
+  - Prevents race condition where both headless startup and client handshake trigger autostart
+  - Smart exit codes: 0 for success/user shutdown, 1 for codon failure (based on run status)
 
 ### Changed
 
-- Renamed checkpoint git directory from `.git` to `.hankweavecheckpoints` to prevent Git submodule detection when committing execution environments (ENG-178)
-  - Existing execution environments are automatically migrated on startup
-  - Backup directories (from `--start-new --force`) are also migrated when main checkpoint needs migration
-  - File resolver updated to exclude the new directory name from checkpoints
-- `beforeCopy` commands in `outputFiles` now only run when `outputDirectory` is configured
-  - Previously, `beforeCopy` would run even if there was no output directory to copy to
-  - This prevents unnecessary command execution and potential errors
-- Process managers now use `agentRootPath` as working directory (previously `executionPath`)
-- `PromptBuilder` simplified to only require `agentRootPath` (removed unused `executionPath` parameter)
+- **Dynamic Port Allocation by Default** (ENG-179)
+  - Default WebSocket server port changed from 7777 to 0 (OS-assigned ephemeral port)
+  - Prevents port conflicts when running multiple Hankweave instances
+  - Startup sequence reordered: WebSocket server binds first, then proxy on `actualPort + 1`
+  - Lock file now updated with actual ports after binding
+  - `start()` method now returns actual port for callers
+  - CLI help text updated to reflect auto-selection behavior
+  - Proxy falls back to dynamic port if preferred port unavailable
+
+- **`shutdown()` signature enhanced** (ENG-180)
+  - New optional parameter: `shutdown(reason, exitProcess = true, exitCode?)`
+  - Exit code can now be explicitly set or auto-determined from run status
+  - Fully backward compatible with existing `shutdown(reason)` and `shutdown(reason, exitProcess)` calls
+
+- **Cleaner Startup Logs**
+  - Removed noisy `[MODULE]` debug output from startup
+  - Version and platform info now displayed in a clean rounded box matching codon display style
+  - Execution info grouped together: status, source, path, and SDK versions
+  - Paths shortened with `~` for home directory
+  - Suppressed verbose "Calculating data signature..." message
+  - SDK managers now return structured info instead of printing directly
 
 ### Fixed
 
--
+- **Critical: Dynamic Port Display Bug**
+  - Fixed banner showing `ws://localhost:0` instead of actual assigned port
+  - TUI was attempting to connect to port 0, causing immediate connection failure
+  - Now correctly reads actual port from crossws Bun adapter via `.bun.server.port`
+  - Affects all dynamic port allocations (default behavior)
+
+- **Critical: HTTP Request Crash in Headless Mode**
+  - Fixed crash when server receives HTTP requests (curl, browser, health checks)
+  - Previously crashed with "fetchHandler is not a function" error
+  - Now returns helpful JSON error message directing users to WebSocket endpoint
+  - Particularly important for CI/CD environments where stray HTTP probes could kill entire runs
+  - Added CORS headers for better browser compatibility
+
+- **Sentinel Output Path Resolution**
+  - Sentinel output paths with `/` (including `./`) now correctly resolve relative to `agentRootPath`
+  - Previously, all explicit paths resolved relative to `executionPath` (outer directory)
+  - Filename-only paths continue to use managed directory: `.hankweave/sentinels/outputs/{id}/`
+  - Allows sentinels to write outputs directly to agent workspace (e.g., `./analysis.log`)
+  - Path safety validation updated to allow paths within both `executionPath` and `agentRootPath`

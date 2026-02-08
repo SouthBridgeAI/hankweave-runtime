@@ -104,6 +104,7 @@ const createMockEvent = (
           executionPath: "/test",
           agentRootPath: "/test/agentRoot",
           dataPath: "/test/agentRoot/read_only_data_source",
+          port: 7777,
         },
       };
     case "error":
@@ -520,6 +521,7 @@ describe("Wildcard Event Trigger Tests", () => {
           executionPath: "/test",
           agentRootPath: "/test/agentRoot",
           dataPath: "/test/agentRoot/read_only_data_source",
+          port: 7777,
         },
       };
 

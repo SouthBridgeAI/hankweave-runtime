@@ -120,6 +120,7 @@ export class Sentinel {
       options: HankweaveGenerateObjectOptions,
     ) => Promise<HankweaveGenerateObjectResult<unknown>>, // Optional - for structured output
     private executionPath?: string, // For path resolution
+    private agentRootPath?: string, // For sentinel output path resolution with explicit paths
     outputPaths?: SentinelOutputPaths, // From codon config (optional - will auto-generate)
     private sendEventToServer?: (
       event: import("../schemas/event-schemas.js").SentinelEvent,
@@ -822,8 +823,14 @@ export class Sentinel {
 
       const options: HankweaveGenerateObjectOptions =
         context.output === "enum"
-          ? ({ ...baseOptions, enum: context.enumValues } as HankweaveGenerateObjectOptions)
-          : ({ ...baseOptions, schema: context.zodSchema } as HankweaveGenerateObjectOptions);
+          ? ({
+              ...baseOptions,
+              enum: context.enumValues,
+            } as HankweaveGenerateObjectOptions)
+          : ({
+              ...baseOptions,
+              schema: context.zodSchema,
+            } as HankweaveGenerateObjectOptions);
 
       try {
         const response = await this.llmObjectCall(this.config.id, options);
@@ -1507,34 +1514,51 @@ export class Sentinel {
   }
 
   /**
-   * Resolve output path according to path convention.
+   * Resolve output path based on format:
    * - Filename only (no '/'): .hankweave/sentinels/outputs/{id}/{filename}
-   * - Path with '/': execution-dir relative
+   * - Path with '/' (including './'): relative to agentRootPath (where agents work)
+   *
+   * This allows users to write sentinel outputs to the agent's working directory
+   * using explicit paths like './output.log' or 'subdir/output.log'.
    */
   private resolveOutputPath(userPath: string, executionPath: string): string {
     if (userPath.includes("/")) {
-      // Path with directory - use relative to execution dir
-      return path.join(executionPath, userPath);
+      // Explicit path - use agentRootPath if available, fallback to executionPath
+      // This makes paths like './output.log' resolve correctly to agent workspace
+      const basePath = this.agentRootPath || executionPath;
+      return path.join(basePath, userPath);
     }
-    // Filename only - goes to .hankweave/sentinels/outputs/{id}/
+    // Filename only - stays in managed sentinel outputs directory
     return path.join(executionPath, ".hankweave", "sentinels", "outputs", this.config.id, userPath);
   }
 
   /**
-   * Validate that resolved path stays within execution directory.
+   * Validate that resolved path stays within allowed directories.
+   * Paths must be within either executionPath or agentRootPath.
    */
   private validatePathSafety(filePath: string, executionPath: string): void {
     const resolved = path.resolve(filePath);
     const execResolved = path.resolve(executionPath);
 
-    if (!resolved.startsWith(execResolved)) {
-      throw new SentinelFatalError(
-        this.config.id,
-        `Output path escapes execution directory: ${filePath}`,
-        "configuration",
-        true,
-      );
+    // Allow paths within executionPath
+    if (resolved.startsWith(execResolved)) {
+      return;
     }
+
+    // Also allow paths within agentRootPath if available
+    if (this.agentRootPath) {
+      const agentResolved = path.resolve(this.agentRootPath);
+      if (resolved.startsWith(agentResolved)) {
+        return;
+      }
+    }
+
+    throw new SentinelFatalError(
+      this.config.id,
+      `Output path escapes allowed directories: ${filePath}`,
+      "configuration",
+      true,
+    );
   }
 
   /**

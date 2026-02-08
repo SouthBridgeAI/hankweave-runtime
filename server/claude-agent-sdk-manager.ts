@@ -5,6 +5,7 @@ import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import {
+  CLAUDE_SDK_VERSION,
   extractClaudeSdkFiles,
   getExtractedCliPath,
   needsExtraction,
@@ -108,21 +109,25 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    * @returns Path to cli.js if compiled (and sets env var), or null if running from source
    * @throws Error if extraction fails or extracted file doesn't exist
    */
-  static async ensureSdkAvailable(): Promise<string | null> {
+  static async ensureSdkAvailable(): Promise<{
+    path: string | null;
+    version: string;
+    cached: boolean;
+  }> {
     try {
       const isCompiled = isCompiledExecutable();
 
-      // If we're not compiled, return null to use normal detection
+      // If we're not compiled, return null to use normal detection (node_modules)
       if (!isCompiled) {
-        console.log("📦 Running from source, using node_modules SDK");
-        return null;
+        return { path: null, version: "node_modules", cached: true };
       }
 
       // Check if we already have extracted files
       let cliPath: string;
+      let cached = false;
       if (!needsExtraction()) {
         cliPath = getExtractedCliPath();
-        console.log(`📦 Using cached Claude SDK: ${cliPath}`);
+        cached = true;
       } else {
         // Need to extract
         cliPath = await extractClaudeSdkFiles();
@@ -138,7 +143,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       // Set environment variable so SDK knows where to find the CLI
       process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE = cliPath;
 
-      return cliPath;
+      return { path: cliPath, version: CLAUDE_SDK_VERSION, cached };
     } catch (error) {
       console.error(`❌ Claude SDK extraction failed: ${(error as Error).message}`);
       if ((error as Error).stack) {

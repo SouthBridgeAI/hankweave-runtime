@@ -68,6 +68,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -100,6 +101,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -125,6 +127,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -184,6 +187,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -291,6 +295,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -334,6 +339,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -376,6 +382,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -418,6 +425,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -472,6 +480,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -530,6 +539,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -578,6 +588,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -631,6 +642,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -690,6 +702,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 
@@ -738,6 +751,7 @@ describe("Sentinel Output Files - Unit Tests", () => {
         undefined,
         undefined,
         executionPath,
+        undefined, // agentRootPath
         outputPaths,
       );
 

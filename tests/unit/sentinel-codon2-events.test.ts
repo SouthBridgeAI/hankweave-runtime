@@ -65,7 +65,8 @@ describe("Sentinel Event Emission", () => {
         { input: 0.25, output: 0.25 },
         undefined,
         testDir,
-        undefined,
+        undefined, // agentRootPath
+        undefined, // outputPaths
         (event) => capturedEvents.push(event),
       );
 
@@ -120,7 +121,8 @@ describe("Sentinel Event Emission", () => {
         { input: 0.25, output: 0.25 },
         undefined,
         testDir,
-        undefined,
+        undefined, // agentRootPath
+        undefined, // outputPaths
         (event) => capturedEvents.push(event),
       );
 
@@ -166,7 +168,8 @@ describe("Sentinel Event Emission", () => {
         undefined,
         undefined,
         testDir,
-        undefined,
+        undefined, // agentRootPath
+        undefined, // outputPaths
         (event) => capturedEvents.push(event),
       );
 
@@ -216,7 +219,8 @@ describe("Sentinel Event Emission", () => {
         undefined,
         undefined,
         testDir,
-        undefined,
+        undefined, // agentRootPath
+        undefined, // outputPaths
         (event) => capturedEvents.push(event),
       );
 
@@ -272,7 +276,8 @@ describe("Sentinel Event Emission", () => {
         undefined,
         undefined,
         testDir,
-        undefined,
+        undefined, // agentRootPath
+        undefined, // outputPaths
         (event) => capturedEvents.push(event),
       );
 

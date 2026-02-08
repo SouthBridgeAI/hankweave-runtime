@@ -144,10 +144,8 @@ export async function setupExecutionEnvironment(options: {
     throw new Error(`Data source is not a file or directory: ${readOnlySourceDataPath}`);
   }
 
-  // Calculate data hash
-  console.log("Calculating data signature...");
+  // Calculate data hash (silent - the hash is displayed elsewhere)
   const dataHash = await hashDataSource(readOnlySourceDataPath, dataHashTimeLimit);
-  console.log(`Data signature: ${dataHash}`);
 
   let finalExecutionPath: string;
   let isNewExecution = false;

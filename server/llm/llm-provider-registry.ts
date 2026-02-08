@@ -515,7 +515,11 @@ export class LlmProviderRegistry {
     ignoreBlockList: boolean,
     providerId?: string,
   ): ModelInfo | null {
-    const matches: Array<{ model: ModelInfo; score: number; hasExactWordMatch: boolean }> = [];
+    const matches: Array<{
+      model: ModelInfo;
+      score: number;
+      hasExactWordMatch: boolean;
+    }> = [];
     const preferredProvider = providerId || this.getPreferredProvider(modelName);
 
     // Search through all unique models
@@ -1014,6 +1018,10 @@ export class LlmProviderRegistry {
   /**
    * Calculate cost for a given token usage with full cache support.
    *
+   * Handles provider-specific token semantics:
+   * - OpenAI: inputTokens INCLUDES cached tokens (cache_read is a subset)
+   * - Anthropic: inputTokens is fresh only (cache_read is additive)
+   *
    * @param modelName - Model identifier (will be resolved via registry)
    * @param usage - Token usage breakdown
    * @returns Cost in USD, or null if model not found or no pricing data available
@@ -1033,17 +1041,31 @@ export class LlmProviderRegistry {
       return null;
     }
 
-    const cost = result.info.cost;
+    const { cost, providerId } = result.info;
     if (!cost) {
       this.logger?.log(`Cannot calculate cost: no pricing data for ${modelName}`, "debug");
       return null;
     }
 
-    // Calculate each component
-    // Note: ModelInfo uses cache_read and cache_write naming
-    const inputCost = (usage.inputTokens / 1_000_000) * (cost.input || 0);
+    const cacheReadTokens = usage.cacheReadTokens || 0;
+
+    // Handle provider-specific token semantics for cache reads
+    // OpenAI: inputTokens includes cached tokens (cache_read is a subset)
+    // Anthropic and others: inputTokens is fresh only (cache_read is additive)
+    const isOpenAI = providerId === "openai";
+    let inputCost: number;
+
+    if (isOpenAI && cacheReadTokens > 0) {
+      // OpenAI: Subtract cached from total to get fresh input tokens
+      const freshInputTokens = Math.max(0, usage.inputTokens - cacheReadTokens);
+      inputCost = (freshInputTokens / 1_000_000) * (cost.input || 0);
+    } else {
+      // Anthropic-style: inputTokens is already fresh only
+      inputCost = (usage.inputTokens / 1_000_000) * (cost.input || 0);
+    }
+
     const outputCost = (usage.outputTokens / 1_000_000) * (cost.output || 0);
-    const cacheReadCost = ((usage.cacheReadTokens || 0) / 1_000_000) * (cost.cache_read || 0);
+    const cacheReadCost = (cacheReadTokens / 1_000_000) * (cost.cache_read || 0);
     const cacheWriteCost = ((usage.cacheCreationTokens || 0) / 1_000_000) * (cost.cache_write || 0);
 
     return inputCost + outputCost + cacheReadCost + cacheWriteCost;

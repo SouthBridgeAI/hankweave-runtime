@@ -266,6 +266,7 @@ export class SentinelManager {
       configDirectory?: string;
       runStartTime?: Date;
       executionPath?: string;
+      agentRootPath?: string; // For sentinel output path resolution
       outputPathsMap?: Map<string, { logFile?: string; lastValueFile?: string }>;
       llmCallOverride?: (
         sentinelId: string,
@@ -283,6 +284,7 @@ export class SentinelManager {
       configDirectory,
       runStartTime,
       executionPath,
+      agentRootPath,
       outputPathsMap,
       llmCallOverride: mockOrFallbackLlmCall,
       llmObjectCallOverride: mockOrFallbackLlmObjectCall,
@@ -557,6 +559,7 @@ export class SentinelManager {
           modelCost, // Pass cost per million tokens
           llmObjectCallFn,
           executionPath, // For path resolution
+          agentRootPath, // For sentinel output path resolution
           sentinelOutputPaths, // outputPaths from codon config (if provided)
           this.eventCallback, // Sentinel 2: Pass event callback for event emission
         );

@@ -29,7 +29,7 @@ import {
 } from "./runtime-extractor-base.js";
 
 // SDK version for directory naming
-const SDK_VERSION = "0.1.70";
+export const CLAUDE_SDK_VERSION = "0.1.70";
 
 // Path prefix for embedded SDK files (must match paths used during build)
 const EMBEDDED_SDK_PATH = "node_modules/@anthropic-ai/claude-agent-sdk";
@@ -56,7 +56,7 @@ function getPlatformKey(): string {
  * Uses ~/.hankweave/claude-sdk/<version>/ by default.
  */
 export function getExtractionDir(): string {
-  return getComponentExtractionDir("claude-sdk", SDK_VERSION);
+  return getComponentExtractionDir("claude-sdk", CLAUDE_SDK_VERSION);
 }
 
 /**
@@ -85,7 +85,7 @@ export async function hasEmbeddedFiles(): Promise<boolean> {
  */
 export function needsExtraction(): boolean {
   const extractionDir = getExtractionDir();
-  return baseNeedsExtraction(extractionDir, SDK_VERSION, ".extraction-complete", ["cli.js"]);
+  return baseNeedsExtraction(extractionDir, CLAUDE_SDK_VERSION, ".extraction-complete", ["cli.js"]);
 }
 
 /**
@@ -114,8 +114,16 @@ export async function extractClaudeSdkFiles(): Promise<string> {
   const filesToExtract: FileToExtract[] = [
     { embeddedPath: "cli.bundle", outputPath: "cli.js", required: true },
     { embeddedPath: "resvg.wasm", outputPath: "resvg.wasm", required: false },
-    { embeddedPath: "tree-sitter.wasm", outputPath: "tree-sitter.wasm", required: false },
-    { embeddedPath: "tree-sitter-bash.wasm", outputPath: "tree-sitter-bash.wasm", required: false },
+    {
+      embeddedPath: "tree-sitter.wasm",
+      outputPath: "tree-sitter.wasm",
+      required: false,
+    },
+    {
+      embeddedPath: "tree-sitter-bash.wasm",
+      outputPath: "tree-sitter-bash.wasm",
+      required: false,
+    },
     {
       embeddedPath: `vendor/ripgrep/${platformKey}/${rgBinaryName}`,
       outputPath: `vendor/ripgrep/${platformKey}/${rgBinaryName}`,
@@ -132,7 +140,7 @@ export async function extractClaudeSdkFiles(): Promise<string> {
   // Use base extraction engine
   await extractFiles({
     componentName: "claude-sdk",
-    version: SDK_VERSION,
+    version: CLAUDE_SDK_VERSION,
     embeddedBasePath: EMBEDDED_SDK_PATH,
     filesToExtract,
     markerFileName: ".extraction-complete",
@@ -147,10 +155,14 @@ export async function extractClaudeSdkFiles(): Promise<string> {
  * @deprecated Use ClaudeAgentSDKManager.ensureSdkAvailable() instead.
  * This function is kept for backward compatibility.
  *
- * @returns Path to cli.js if compiled (and sets env var), or null if running from source
+ * @returns SDK info object with path, version, and cached status
  * @throws Error if extraction fails or extracted file doesn't exist
  */
-export async function ensureClaudeSdkAvailable(): Promise<string | null> {
+export async function ensureClaudeSdkAvailable(): Promise<{
+  path: string | null;
+  version: string;
+  cached: boolean;
+}> {
   // Import to avoid circular dependency
   const { ClaudeAgentSDKManager } = await import("./claude-agent-sdk-manager.js");
   return ClaudeAgentSDKManager.ensureSdkAvailable();

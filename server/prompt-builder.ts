@@ -50,7 +50,19 @@ export class PromptBuilder {
 
     // Join and apply template variable replacements
     const content = parts.join("\n\n");
-    return this.applyTemplateReplacements(content);
+    const processedContent = this.applyTemplateReplacements(content);
+
+    // Strip HTML comments
+    const cleanContent = this.stripHtmlComments(processedContent);
+
+    if (cleanContent.length !== processedContent.length) {
+      this.logger.log(
+        `Stripped HTML comments from system prompt (${processedContent.length} -> ${cleanContent.length} chars)`,
+        "debug",
+      );
+    }
+
+    return cleanContent;
   }
 
   /**
@@ -89,6 +101,16 @@ export class PromptBuilder {
 
     const processedContent = this.applyTemplateReplacements(promptContent);
 
+    // Strip HTML comments
+    const cleanContent = this.stripHtmlComments(processedContent);
+
+    if (cleanContent.length !== processedContent.length) {
+      this.logger.log(
+        `Stripped HTML comments from prompt (${processedContent.length} -> ${cleanContent.length} chars)`,
+        "debug",
+      );
+    }
+
     // Store frontmatter for later retrieval
     if (firstFileFrontmatter) {
       this.lastFrontmatter = firstFileFrontmatter;
@@ -97,7 +119,7 @@ export class PromptBuilder {
       this.lastFrontmatter = undefined;
     }
 
-    return { content: processedContent, frontmatter: firstFileFrontmatter };
+    return { content: cleanContent, frontmatter: firstFileFrontmatter };
   }
 
   /**
@@ -111,12 +133,14 @@ export class PromptBuilder {
   /**
    * Process prompt variables in a string (for exhaustion/extension prompts).
    * Replaces template variables: <%PROJECT_DIR%>, <%EXECUTION_DIR%>, <%DATA_DIR%>
+   * Also strips HTML comments.
    *
    * @param prompt - Raw prompt text with template variables
-   * @returns Prompt with variables substituted
+   * @returns Prompt with variables substituted and comments stripped
    */
   public processPromptVariables(prompt: string): string {
-    return this.applyTemplateReplacements(prompt);
+    const processed = this.applyTemplateReplacements(prompt);
+    return this.stripHtmlComments(processed);
   }
 
   /**
@@ -156,5 +180,18 @@ export class PromptBuilder {
       .replace(/<%PROJECT_DIR%>/g, this.agentRootPath) // Silent alias
       .replace(/<%EXECUTION_DIR%>/g, this.agentRootPath) // Silent alias
       .replace(/<%DATA_DIR%>/g, path.join(this.agentRootPath, "read_only_data_source"));
+  }
+
+  /**
+   * Strip HTML comments from content.
+   * HTML comments (<!-- ... -->) are removed before sending to the LLM.
+   * Also consumes a trailing newline to avoid blank lines accumulating.
+   *
+   * @param content - Content with potential HTML comments
+   * @returns Content with comments stripped
+   */
+  private stripHtmlComments(content: string): string {
+    // Match HTML comments, including multiline, plus optional trailing newline
+    return content.replace(/<!--[\s\S]*?-->\r?\n?/g, "");
   }
 }

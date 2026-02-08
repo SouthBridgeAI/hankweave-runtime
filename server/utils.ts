@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Message, Peer } from "crossws";
@@ -387,7 +388,9 @@ export function getMetadata(): AppMetadata {
     if (fs.existsSync(packageJsonPath)) {
       const content = fs.readFileSync(packageJsonPath, "utf-8");
       const pkg = JSON.parse(content);
-      cachedMetadata = AppMetadata.create({ version: pkg.version || FALLBACK_VERSION });
+      cachedMetadata = AppMetadata.create({
+        version: pkg.version || FALLBACK_VERSION,
+      });
     } else {
       // Ultimate fallback
       cachedMetadata = AppMetadata.create({ version: FALLBACK_VERSION });
@@ -397,6 +400,91 @@ export function getMetadata(): AppMetadata {
   }
 
   return cachedMetadata as AppMetadata;
+}
+
+// ANSI color codes for terminal output
+const STARTUP_COLORS = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+};
+
+/**
+ * Render the startup banner box with version and platform info.
+ * Matches the style of the codon structure boxes.
+ */
+export function renderStartupBanner(): void {
+  const version = getMetadata().version;
+  const platform = process.platform;
+  const arch = process.arch;
+  const runtime = process.versions.bun ? `bun ${process.versions.bun}` : `node ${process.version}`;
+
+  const useColor = process.stdout.isTTY !== false;
+  const terminalWidth = process.stdout.columns || 80;
+  const boxWidth = Math.min(terminalWidth - 2, 70);
+  const innerWidth = boxWidth - 4;
+
+  const c = useColor ? STARTUP_COLORS : { reset: "", bold: "", dim: "", cyan: "" };
+
+  const titleLine = `Hankweave v${version}`;
+  const platformLine = `${platform} ${arch} • ${runtime}`;
+
+  console.log();
+  console.log(`${c.cyan}╭${"─".repeat(boxWidth - 2)}╮${c.reset}`);
+  console.log(
+    `${c.cyan}│${c.reset}  ${c.bold}${c.cyan}${titleLine.padEnd(innerWidth)}${c.reset}${c.cyan}│${c.reset}`,
+  );
+  console.log(
+    `${c.cyan}│${c.reset}  ${c.dim}${platformLine.padEnd(innerWidth)}${c.reset}${c.cyan}│${c.reset}`,
+  );
+  console.log(`${c.cyan}╰${"─".repeat(boxWidth - 2)}╯${c.reset}`);
+  console.log();
+}
+
+/**
+ * Shorten a path by replacing the home directory with ~
+ */
+export function shortenPath(fullPath: string): string {
+  const home = os.homedir();
+  if (fullPath.startsWith(home)) {
+    return `~${fullPath.slice(home.length)}`;
+  }
+  return fullPath;
+}
+
+export interface StartupInfo {
+  executionId: string;
+  isResuming: boolean;
+  sourcePath: string;
+  executionPath: string;
+  linkType: string;
+  sdks: Array<{ name: string; version: string; cached: boolean }>;
+}
+
+/**
+ * Render the execution info section after the startup banner.
+ */
+export function renderStartupInfo(info: StartupInfo): void {
+  const useColor = process.stdout.isTTY !== false;
+  const c = useColor ? STARTUP_COLORS : { reset: "", bold: "", dim: "", cyan: "" };
+
+  const status = info.isResuming ? "Resuming" : "New execution";
+  const sourceBasename = path.basename(info.sourcePath);
+  const shortExecPath = shortenPath(info.executionPath);
+
+  // Format SDKs line
+  const sdkParts = info.sdks.map((sdk) => {
+    const status = sdk.cached ? "✓" : "↓";
+    return `${sdk.name} ${sdk.version} ${status}`;
+  });
+  const sdksLine = sdkParts.join("  ");
+
+  console.log(`${c.dim}${status}:${c.reset} ${info.executionId}`);
+  console.log(`  Source ${c.dim}→${c.reset} ${sourceBasename}`);
+  console.log(`  Exec   ${c.dim}→${c.reset} ${shortExecPath}`);
+  console.log(`  SDKs   ${c.dim}→${c.reset} ${sdksLine}`);
+  console.log();
 }
 
 /**
@@ -567,6 +655,57 @@ export function formatSize(bytes: number): string {
   return `${(bytes / k ** i).toFixed(1)} ${units[i]}`;
 }
 
+// Maximum number of conflict copies before throwing an error
+const MAX_CONFLICT_COPIES = 100;
+
+/**
+ * Generate a non-conflicting filename by adding a numbered suffix with timestamp.
+ * Format: file_<counter>_<timestamp>.txt (e.g., report_1_1738678800.txt)
+ *
+ * @param destPath - The desired destination path
+ * @returns Object with resolved path and conflict info
+ * @throws Error if more than MAX_CONFLICT_COPIES exist (prevents runaway loops)
+ */
+export async function resolveFileConflict(destPath: string): Promise<{
+  resolvedPath: string;
+  hadConflict: boolean;
+  conflictNumber?: number;
+  timestamp?: number;
+}> {
+  // If path doesn't exist, no conflict
+  if (!fs.existsSync(destPath)) {
+    return { resolvedPath: destPath, hadConflict: false };
+  }
+
+  const dir = path.dirname(destPath);
+  const ext = path.extname(destPath);
+  const baseName = path.basename(destPath, ext);
+  const timestamp = Math.floor(Date.now() / 1000); // Unix timestamp in seconds
+
+  let counter = 1;
+  let candidatePath: string;
+
+  do {
+    candidatePath = path.join(dir, `${baseName}_${counter}_${timestamp}${ext}`);
+    counter++;
+
+    // Safety limit to prevent infinite loops in unusual situations
+    if (counter > MAX_CONFLICT_COPIES) {
+      throw new Error(
+        `Too many conflicting copies of '${path.basename(destPath)}' (>${MAX_CONFLICT_COPIES}). ` +
+          `Consider cleaning the output directory or using a unique output path.`,
+      );
+    }
+  } while (fs.existsSync(candidatePath));
+
+  return {
+    resolvedPath: candidatePath,
+    hadConflict: true,
+    conflictNumber: counter - 1,
+    timestamp,
+  };
+}
+
 /**
  * Copy files from a source directory to a destination directory using glob patterns.
  *
@@ -577,15 +716,16 @@ export function formatSize(bytes: number): string {
  * @param filesToCopy - Array of glob patterns to match files for copying (e.g., `["*.txt"]`)
  * @param destinationDirectory - The destination directory path where files will be copied
  * @param logger - Logger instance for debug and info messages
- * @returns Promise that resolves when all files have been copied
- *
+ * @returns Promise with conflicts array listing any files that were renamed
  */
 export async function copyFiles(
   sourceDirectory: string,
   filesToCopy: string[],
   destinationDirectory: string,
   logger: Logger,
-): Promise<void> {
+): Promise<{ conflicts: Array<{ original: string; resolved: string }> }> {
+  const conflicts: Array<{ original: string; resolved: string }> = [];
+
   // Log the copy operation with source, destination, and glob patterns
   logger.log(
     `Copying files from ${sourceDirectory} to ${destinationDirectory} using globs ${filesToCopy.join(
@@ -608,7 +748,7 @@ export async function copyFiles(
   // Early return if no files match the provided glob patterns
   if (files.length === 0) {
     logger.log("No files matched the copy globs.", "debug");
-    return;
+    return { conflicts };
   }
 
   // Log all resolved files for debugging purposes
@@ -618,7 +758,7 @@ export async function copyFiles(
   for (const file of files) {
     // Build absolute paths for source and destination
     const sourcePath = path.join(sourceDirectory, file);
-    const destPath = path.join(destinationDirectory, file);
+    let destPath = path.join(destinationDirectory, file);
 
     logger.log(`Copying ${sourcePath} to ${destPath}`, "debug");
 
@@ -626,6 +766,18 @@ export async function copyFiles(
     if (!fs.existsSync(sourcePath)) {
       logger.log(`Source file ${sourcePath} does not exist`, "info");
       continue;
+    }
+
+    // Check for conflicts and resolve
+    const { resolvedPath, hadConflict } = await resolveFileConflict(destPath);
+
+    if (hadConflict) {
+      logger.log(
+        `Output file conflict: '${path.basename(destPath)}' already exists, saving as '${path.basename(resolvedPath)}'`,
+        "info",
+      );
+      conflicts.push({ original: destPath, resolved: resolvedPath });
+      destPath = resolvedPath;
     }
 
     // Create parent directories in destination if they don't exist
@@ -637,8 +789,13 @@ export async function copyFiles(
     // verbatimSymlinks: preserves symlinks as symlinks rather than dereferencing them.
     // This prevents EINVAL errors when copying node_modules/.bin/ which contains
     // symlinks pointing to parent directories.
-    await fs.promises.cp(sourcePath, destPath, { recursive: true, verbatimSymlinks: true });
+    await fs.promises.cp(sourcePath, destPath, {
+      recursive: true,
+      verbatimSymlinks: true,
+    });
   }
+
+  return { conflicts };
 }
 
 // -------------
@@ -892,6 +1049,8 @@ export function rmSyncWithRetry(
 export interface HankweaveServer {
   /** Stop the server and clean up resources */
   stop(): void;
+  /** The actual port the server is listening on (may differ from configured port if 0 was specified) */
+  readonly port: number;
 }
 
 /**
@@ -1064,6 +1223,58 @@ export function serve<T = unknown>(options: ServeOptions<T>): HankweaveServer {
       if (server && typeof server.close === "function") {
         server.close();
       }
+    },
+    get port(): number {
+      // biome-ignore lint/suspicious/noExplicitAny: Different server types have different APIs
+      const s = server as any;
+
+      // 1. crossws Bun adapter: actual Bun server is in .bun.server
+      if (s.bun?.server?.port) {
+        return s.bun.server.port;
+      }
+
+      // 2. crossws Bun adapter alternative: .bun.port
+      if (s.bun?.port) {
+        return s.bun.port;
+      }
+
+      // 3. Direct Bun server (has .port property directly)
+      if (s.port) {
+        return s.port;
+      }
+
+      // 4. Node.js HTTP server (try various property names used by different adapters)
+      // srvx NodeServer stores the http.Server at .node.server (not .node directly)
+      const possibleHttpServers = [
+        s.node?.server,
+        s.server,
+        s._server,
+        s.node,
+        s.httpServer,
+      ].filter(Boolean);
+      for (const httpServer of possibleHttpServers) {
+        if (typeof httpServer.address === "function") {
+          const addr = httpServer.address();
+          if (addr && typeof addr === "object" && "port" in addr) {
+            return addr.port;
+          }
+        }
+      }
+
+      // 5. Universal: srvx servers expose a .url getter after listening (works for Deno, Node, Bun)
+      if (typeof s.url === "string") {
+        try {
+          const parsed = new URL(s.url);
+          if (parsed.port) {
+            return Number.parseInt(parsed.port, 10);
+          }
+        } catch {
+          // URL parse failed, fall through
+        }
+      }
+
+      // 6. Fallback to configured port
+      return options.port ?? 0;
     },
   };
 }

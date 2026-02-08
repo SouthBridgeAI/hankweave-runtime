@@ -377,7 +377,7 @@ describe("Codex Runtime Extractor", () => {
 
       // Should find the real codex from module location, not from cwd
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result).toContain("codex-sdk");
+      expect(result.path).toContain("codex-sdk");
     });
 
     test("should find binary from module location even when cwd has no node_modules", async () => {
@@ -389,7 +389,7 @@ describe("Codex Runtime Extractor", () => {
 
       // After the fix, this should find the binary from module location
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result).toContain("codex-sdk");
+      expect(result.path).toContain("codex-sdk");
     });
   });
 
@@ -408,7 +408,7 @@ describe("Codex Runtime Extractor", () => {
       createDummyCodexBinary(codexPath);
 
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result).toBe(codexPath);
+      expect(result.path).toBe(codexPath);
     });
   });
 
@@ -428,7 +428,7 @@ describe("Codex Runtime Extractor", () => {
       fs.writeFileSync(path.join(extractDir, ".extraction-complete"), "0.87.0");
 
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result).toBe(codexPath);
+      expect(result.path).toBe(codexPath);
       expect(fs.existsSync(codexPath)).toBe(true);
 
       // Verify marker file exists
@@ -450,7 +450,7 @@ describe("Codex Runtime Extractor", () => {
 
       // After the fix, this should find the binary from module location
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result).toContain("codex-sdk");
+      expect(result.path).toContain("codex-sdk");
     });
 
     test("validateCodexBinary should return false for non-existent files", () => {

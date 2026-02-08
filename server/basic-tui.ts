@@ -96,7 +96,7 @@ export class BasicTUI {
       // Normal mode - connect to provided runtime
       this.attachMode = false;
       this.server = serverOrPort;
-      this.port = this.server.config?.port || 7777;
+      this.port = this.server.config?.port ?? 7777; // Use ?? not || (port 0 is valid but falsy)
       const version = this.server.config?.version || "unknown";
       console.log(`${COLORS.bold}${COLORS.cyan}Hankweave v${version}${COLORS.reset}\n`);
     }

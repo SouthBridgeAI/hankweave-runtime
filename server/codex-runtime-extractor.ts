@@ -26,7 +26,7 @@ import {
 import { isCompiledExecutable } from "./utils.js";
 
 // Codex SDK version for directory naming
-const CODEX_SDK_VERSION = "0.87.0";
+export const CODEX_SDK_VERSION = "0.87.0";
 
 // Path prefix for embedded codex files (must match paths used during build)
 const EMBEDDED_CODEX_PATH = "node_modules/@openai/codex-sdk/vendor";
@@ -218,14 +218,16 @@ export async function extractCodexBinary(): Promise<string> {
  * @returns Path to codex binary
  * @throws Error if binary cannot be found or extracted
  */
-export async function ensureCodexAvailable(): Promise<string> {
+export async function ensureCodexAvailable(): Promise<{
+  path: string;
+  version: string;
+  cached: boolean;
+}> {
   // If running from source or npm/npx, try to find in node_modules first
   if (!isCompiledExecutable()) {
-    console.log("📦 Running from source/npm, looking for codex in node_modules");
     const nodeModulesPath = locateCodexInNodeModules();
     if (nodeModulesPath) {
-      console.log(`✓ Found codex binary: ${nodeModulesPath}`);
-      return nodeModulesPath;
+      return { path: nodeModulesPath, version: "node_modules", cached: true };
     }
 
     // Not found in node_modules - this is an error in source/npm mode
@@ -235,16 +237,14 @@ export async function ensureCodexAvailable(): Promise<string> {
   }
 
   // Running from compiled executable - extract if needed
-  console.log("📦 Running from compiled executable");
-
   if (!needsCodexExtraction()) {
     const cachedPath = getExtractedCodexPath();
-    console.log(`✓ Using cached codex binary: ${cachedPath}`);
-    return cachedPath;
+    return { path: cachedPath, version: CODEX_SDK_VERSION, cached: true };
   }
 
   // Need to extract
-  return await extractCodexBinary();
+  const extractedPath = await extractCodexBinary();
+  return { path: extractedPath, version: CODEX_SDK_VERSION, cached: false };
 }
 
 /**

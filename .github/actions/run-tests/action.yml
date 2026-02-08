@@ -1,0 +1,30 @@
+name: 'Run Tests'
+description: 'Run unit, integration, and cross-runtime tests'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run unit tests
+      shell: bash
+      run: bun test tests/unit
+
+    - name: Run integration tests
+      shell: bash
+      run: bun test tests/integration
+
+    - name: Setup Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
+
+    - name: Run cross-runtime tests (Bun)
+      shell: bash
+      run: bun run test:cross-runtime:bun
+
+    - name: Run cross-runtime tests (Node)
+      shell: bash
+      run: bun run test:cross-runtime:node
+
+    - name: Run cross-runtime tests (Deno)
+      shell: bash
+      run: bun run test:cross-runtime:deno

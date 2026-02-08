@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-console.log("[MODULE] Loading server/index.ts...");
-
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -21,7 +19,13 @@ import {
   isRemoteHankUrl,
   resolveRemoteHank,
 } from "./remote-hank.js";
-import { getMetadata, Logger } from "./utils.js";
+import {
+  getMetadata,
+  Logger,
+  renderStartupBanner,
+  renderStartupInfo,
+  type StartupInfo,
+} from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
 import { runValidation } from "./validate-command.js";
 
@@ -96,8 +100,8 @@ async function main() {
   // Show deprecation warnings for old flags (before any other output)
   showDeprecationWarnings(cliArgs);
 
-  // Print version banner
-  console.log(`\nHankweave v${getMetadata().version}\n`);
+  // Print startup banner
+  renderStartupBanner();
 
   // Extract values with defaults
   // Note: configPath is resolved later with directory-aware logic
@@ -147,7 +151,7 @@ Configuration:
   -m, --model <model>       Model override (sonnet|opus|gemini-flash|etc)
 
 Server:
-  -p, --port <port>         WebSocket server port (default: 7777)
+  -p, --port <port>         WebSocket server port (default: auto-select free port)
   --headless                Run without TUI (for CI/CD and scripts)
   --no-autostart            Don't automatically start codons
   --proxy                   Enable the LLM proxy server (disabled by default)
@@ -228,13 +232,14 @@ Use --output to copy them elsewhere.
   }
 
   // Ensure Claude SDK is available (unless we're in cleanup or validate mode)
-  // this is a basic check for when we are running using en executable
+  // this is a basic check for when we are running using an executable
   // more thorough checks happen during selftests
+  let claudeSdkInfo: { version: string; cached: boolean } | null = null;
   if (!cleanupMode && !validateMode) {
     try {
-      await ClaudeAgentSDKManager.ensureSdkAvailable();
+      const sdkResult = await ClaudeAgentSDKManager.ensureSdkAvailable();
+      claudeSdkInfo = { version: sdkResult.version, cached: sdkResult.cached };
     } catch (error) {
-      console.error("[ERROR] ClaudeAgentSDKManager.ensureSdkAvailable() threw an error!");
       console.error(`\n❌ ${(error as Error).message}\n`);
       if (error instanceof Error && error.stack) {
         console.error(`Stack: ${error.stack}`);
@@ -414,14 +419,25 @@ Use --output to copy them elsewhere.
     process.exit(1);
   }
 
-  // Log input source type if not a regular path
-  if (inputSourceType !== "path") {
-    console.log(`📥 Input type: ${inputSourceType}`);
+  // Display grouped startup info
+  const executionId = path.basename(executionSetup.executionPath);
+  const sdks: StartupInfo["sdks"] = [];
+  if (claudeSdkInfo) {
+    sdks.push({
+      name: "Claude",
+      version: claudeSdkInfo.version,
+      cached: claudeSdkInfo.cached,
+    });
   }
 
-  console.log(`📁 Data source: ${executionSetup.readOnlySourceDataPath}`);
-  console.log(`🏃 Execution: ${executionSetup.executionPath}`);
-  console.log(`🔗 Link type: ${executionSetup.linkType}`);
+  renderStartupInfo({
+    executionId,
+    isResuming: executionSetup.isResuming,
+    sourcePath: executionSetup.readOnlySourceDataPath,
+    executionPath: executionSetup.executionPath,
+    linkType: executionSetup.linkType,
+    sdks,
+  });
 
   // Change to execution directory for server operation
   process.chdir(executionSetup.executionPath);
@@ -531,11 +547,41 @@ Use --output to copy them elsewhere.
       globalSystemPrompt,
     };
 
-    const server = new HankweaveRuntime(serverConfig);
-    await server.start();
+    // Preflight warning for potential output file conflicts
+    if (serverConfig.outputDirectory) {
+      const fullOutputPath = path.join(originalCwd, serverConfig.outputDirectory);
+      try {
+        if (fs.existsSync(fullOutputPath)) {
+          const contents = fs.readdirSync(fullOutputPath);
+          if (contents.length > 0) {
+            console.log(
+              `⚠️  Output directory '${serverConfig.outputDirectory}' is not empty. ` +
+                `Conflicting files will be renamed (e.g., file.txt -> file_1_<timestamp>.txt).`,
+            );
+          }
+        }
+      } catch (_error) {
+        // Directory doesn't exist yet or can't be read - no warning needed
+        // The directory will be created during copy
+      }
+    }
 
-    // TUI is now the default. Use --headless to disable.
-    if (!headlessMode) {
+    const server = new HankweaveRuntime(serverConfig);
+    const actualPort = await server.start();
+
+    // In headless mode, trigger autostart without waiting for client
+    if (headlessMode) {
+      console.log(`Running in headless mode on port ${actualPort}`);
+      if (serverConfig.autostart !== false) {
+        server.requestAutostart().catch((err) => {
+          console.error(`[FATAL] Headless autostart failed: ${err}`);
+          process.exit(1);
+        });
+      } else {
+        console.log("Autostart disabled, waiting for WebSocket commands...");
+      }
+    } else {
+      // TUI is the default. Use --headless to disable.
       // Give server a moment to start before connecting
       setTimeout(() => {
         new BasicTUI(server);
@@ -557,17 +603,9 @@ Use --output to copy them elsewhere.
 
 // Run main if this is the main module
 if (import.meta.main) {
-  console.log("[MODULE] server/index.ts is being executed as main module");
-  console.log(`[MODULE] Platform: ${process.platform}, Arch: ${process.arch}`);
-  console.log(
-    `[MODULE] Bun version: ${process.versions.bun || "N/A"}, Node version: ${process.version}`,
-  );
-  console.log("[MODULE] About to call main()...");
-
   try {
     await main();
   } catch (error) {
-    console.error("[MODULE] Unhandled error in main()!");
     console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
     if (error instanceof Error && error.stack) {
       console.error(`Stack:\n${error.stack}`);

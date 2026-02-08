@@ -485,7 +485,17 @@ export class ProxyRunner {
    * @returns The URL where the proxy server is running
    */
   get proxyUrl(): string {
-    return `http://localhost:${this.port}`;
+    // Use actual port if server is running, otherwise configured port
+    const actualPort = this.server?.port ?? this.port;
+    return `http://localhost:${actualPort}`;
+  }
+
+  /**
+   * Get the actual port the proxy server is listening on.
+   * Returns null if server hasn't been started.
+   */
+  getActualPort(): number | null {
+    return this.server?.port ?? null;
   }
 
   /**
@@ -522,9 +532,11 @@ export class ProxyRunner {
       },
     });
 
-    const proxyUrl = `http://localhost:${this.port}`;
+    // Use actual port (may differ from configured if port 0 was used)
+    const actualPort = this.server.port;
+    const proxyUrl = `http://localhost:${actualPort}`;
 
-    console.log(`ProxyRunner: LLM Proxy server started on port ${this.port}`);
+    console.log(`ProxyRunner: LLM Proxy server started on port ${actualPort}`);
     console.log(`   Health check: ${proxyUrl}/health`);
 
     return proxyUrl;
