@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 
 
+## [0.2.2] - 2026-02-09
+
+### Added
+- 
+
+### Changed
+- 
+
+### Fixed
+- **Codon env variables not available in rig setup and beforeCopy commands** (PR #103)
+  - Codon `env` variables were only passed to the Claude/shim process, not to `rigSetup` or `beforeCopy` commands
+  - Shell expansions like `${MY_VAR}` in rig commands now correctly resolve instead of expanding to empty strings
+  - `runCommand()` now accepts and forwards codon env variables to `spawn()`
+
 ## [0.2.1] - 2026-02-08
 
 ### Added

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "id": "env-rig-test",
+      "name": "Env in rigSetup test",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "promptText": "Say OK. Nothing else.",
+      "env": {
+        "MY_VAR": "hello-world"
+      },
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p env_test && echo \"MY_VAR=${MY_VAR}\" > env_test/result.txt",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "checkpointedFiles": ["env_test/*"]
+    }
+  ]
+}

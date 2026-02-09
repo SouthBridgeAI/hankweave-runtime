@@ -1634,7 +1634,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             lastCopiedPath = targetPath;
             this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
           } else if (item.type === "command" && item.command) {
-            await this.runCommand(item, lastCopiedPath || undefined);
+            await this.runCommand(item, lastCopiedPath || undefined, codon.env);
             const resolvedWorkingDir =
               item.command.workingDirectory === "lastCopied" && lastCopiedPath
                 ? lastCopiedPath
@@ -3316,7 +3316,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
                   outItem.beforeCopy.length
                 }: ${command.command.run}`,
               );
-              await this.runCommand(command);
+              await this.runCommand(command, undefined, this.currentCodon?.codon.env);
             }
 
             this.logger.log(
@@ -5749,6 +5749,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private async runCommand(
     shellCommand: ShellCommand | RigShellCommand | string,
     lastCopiedPath?: string,
+    env?: Record<string, string>,
   ): Promise<void> {
     // Handle working directory resolution
     let workingDir: string;
@@ -5787,6 +5788,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       const proc = spawn(cmd.command.run, {
         shell: true,
         cwd: workingDir,
+        env: env ? { ...process.env, ...env } : undefined,
       });
 
       // Capture stdout and stderr for diagnostic purposes

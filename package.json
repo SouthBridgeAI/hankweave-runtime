@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
