@@ -299,7 +299,9 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
   }
 
   /**
-   * Kill the shim process.
+   * Kill the shim process gracefully.
+   * Sends SIGTERM and waits up to PROCESS_KILL_GRACE_MS for the process to exit.
+   * If the process doesn't exit in time, escalates to SIGKILL.
    */
   async kill(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
     if (!this.process || this.killed) return;
@@ -316,10 +318,17 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     this.process.kill(signal);
 
-    // Give it 5 seconds to die gracefully
+    // Wait for the process to actually exit, with SIGKILL escalation.
+    //
+    // Important: we check `!this.process` (cleared by cleanup() when the 'exit'
+    // event fires) rather than `this.process.killed`. The `.killed` property only
+    // indicates that a signal was SENT, not that the process actually DIED — it
+    // becomes true immediately after our .kill() call above, which would cause
+    // the interval to resolve on the first tick regardless of whether the child
+    // actually exited.
     await new Promise<void>((resolve) => {
       const checkInterval = setInterval(() => {
-        if (!this.process || this.process.killed) {
+        if (!this.process) {
           clearInterval(checkInterval);
           resolve();
         }
@@ -327,13 +336,38 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
 
       setTimeout(() => {
         clearInterval(checkInterval);
-        if (this.process && !this.process.killed) {
+        if (this.process) {
           this.logger.log("Force killing shim process with SIGKILL");
-          this.process.kill("SIGKILL");
+          try {
+            this.process.kill("SIGKILL");
+          } catch {
+            // Process may have already exited between our check and kill
+          }
         }
-        resolve();
+        // Brief delay for SIGKILL to take effect before resolving
+        setTimeout(resolve, 200);
       }, TIMEOUTS.PROCESS_KILL_GRACE_MS);
     });
+  }
+
+  /**
+   * Force-kill the shim process immediately with SIGKILL.
+   * Used by forceShutdown() when the user presses q/Ctrl+C a second time.
+   */
+  async forceKill(): Promise<void> {
+    if (!this.process) return;
+
+    this.killed = true;
+    this.logger.log("Force killing shim process with SIGKILL");
+    try {
+      this.process.kill("SIGKILL");
+    } catch {
+      // Process may have already exited
+    }
+
+    // Brief wait for SIGKILL to take effect
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    this.cleanup();
   }
 
   /**

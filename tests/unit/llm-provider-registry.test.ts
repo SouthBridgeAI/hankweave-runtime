@@ -612,7 +612,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should get the most recent opus variant
-          expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+          expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
           expect(result.modelInfo.providerId).toBe("anthropic");
           expect(result.matchType).toBe("fuzzy");
           expect(result.modelInfo.last_updated).toBeDefined();
@@ -628,7 +628,7 @@ describe("LlmProviderRegistry", () => {
         if (result.success) {
           // Should prefer anthropic for claude models
           expect(result.modelInfo.providerId).toBe("anthropic");
-          expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+          expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
         }
       });
 
@@ -980,8 +980,8 @@ describe("LlmProviderRegistry", () => {
           expect(result.success).toBe(true);
           if (result.success) {
             expect(result.modelInfo.providerId).toBe("openai");
-            // Should match base gpt-5.2-codex (most recent: 2026-01-14)
-            expect(result.modelInfo.modelId).toBe("gpt-5.2-codex");
+            // Should match gpt-5.3-codex (most recent: 2026-02-05) via fuzzy
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex");
             expect(result.matchType).toBe("fuzzy");
           }
         });
@@ -1043,6 +1043,119 @@ describe("LlmProviderRegistry", () => {
           expect(result.success).toBe(true);
           if (result.success) {
             expect(result.modelInfo.modelId).toBe("gpt-5.2-codex-xhigh");
+          }
+        });
+      });
+    });
+
+    describe("GPT 5.3 models (manually injected)", () => {
+      beforeEach(() => {
+        registry = new LlmProviderRegistry({ logger: mockLogger });
+      });
+
+      describe("exact matching", () => {
+        it("should resolve gpt-5.3-codex-high by exact model ID", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.3-codex-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-high");
+            expect(result.matchType).toBe("exact-with-inferred-provider");
+          }
+        });
+
+        it("should resolve gpt-5.3-codex-xhigh by exact model ID", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.3-codex-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-xhigh");
+            expect(result.matchType).toBe("exact-with-inferred-provider");
+          }
+        });
+
+        it("should resolve gpt-5.3-codex-xhigh with explicit provider", () => {
+          const result = registry.resolveModel({
+            providerId: "openai",
+            model: "gpt-5.3-codex-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-xhigh");
+            expect(result.matchType).toBe("exact");
+          }
+        });
+
+        it("should resolve with full model ID openai/gpt-5.3-codex-high", () => {
+          const result = registry.resolveModel({
+            model: "openai/gpt-5.3-codex-high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-high");
+          }
+        });
+      });
+
+      describe("fuzzy matching", () => {
+        it("should fuzzy match 'gpt-5.3 codex high' to codex-high variant", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.3 codex high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-high");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt-5.3 codex xhigh' to codex-xhigh variant", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.3 codex xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-xhigh");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should fuzzy match 'gpt 5.3 codex high' with spaces", () => {
+          const result = registry.resolveModel({
+            model: "gpt 5.3 codex high",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-high");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should match 'GPT-5.3-Codex-XHigh' (mixed case)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.3-Codex-XHigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.3-codex-xhigh");
           }
         });
       });
@@ -1610,7 +1723,7 @@ describe("LlmProviderRegistry", () => {
         {
           input: "opus",
           expectedProvider: "anthropic",
-          expectedModelId: "claude-opus-4-5",
+          expectedModelId: "claude-opus-4-6",
         },
         {
           input: "sonnet",
@@ -1640,7 +1753,7 @@ describe("LlmProviderRegistry", () => {
       registry = LlmProviderRegistry.getInstance({ logger: mockLogger });
     });
 
-    it("should resolve 'opus' to claude-opus-4-5", () => {
+    it("should resolve 'opus' to claude-opus-4-6", () => {
       const result = registry.resolveModel({
         model: "opus", // Short name that gets expanded to "claude-opus"
       });
@@ -1648,7 +1761,7 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
         // Should be fuzzy match since shortcuts expand to patterns, not exact IDs
         expect(result.matchType).toBe("fuzzy");
       }
@@ -1668,7 +1781,7 @@ describe("LlmProviderRegistry", () => {
       }
     });
 
-    it("should resolve 'opus' with anthropic provider to claude-opus-4-5", () => {
+    it("should resolve 'opus' with anthropic provider to claude-opus-4-6", () => {
       const result = registry.resolveModel({
         providerId: "anthropic",
         model: "opus", // Shortcut + explicit provider
@@ -1677,7 +1790,7 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
         expect(result.matchType).toBe("fuzzy");
       }
     });
@@ -1690,23 +1803,23 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
       }
     });
 
-    it("should resolve opus to most recent model (claude-opus-4-5)", () => {
+    it("should resolve opus to most recent model (claude-opus-4-6)", () => {
       const result = registry.resolveModel({
         model: "opus",
       });
 
       expect(result.success).toBe(true);
       if (result.success) {
-        // Should resolve to claude-opus-4-5 (most recent)
+        // Should resolve to claude-opus-4-6 (most recent)
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-5");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
         expect(result.modelInfo.last_updated).toBeDefined();
-        // Verify it's the 2025 version
-        expect(result.modelInfo.last_updated).toContain("2025");
+        // Verify it's the 2026 version
+        expect(result.modelInfo.last_updated).toContain("2026");
       }
     });
 

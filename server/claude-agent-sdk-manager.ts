@@ -10,6 +10,7 @@ import {
   getExtractedCliPath,
   needsExtraction,
 } from "./claude-runtime-extractor.js";
+import { TIMEOUTS } from "./config.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
@@ -77,6 +78,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
   private killed = false;
   private sessionId: string | undefined;
   private syntheticPid: number | undefined;
+  private queryPromise: Promise<void> | undefined;
   private promptBuilder: PromptBuilder;
 
   constructor(
@@ -203,6 +205,13 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     // Build prompt content
     const promptContent = this.promptBuilder.buildPromptForExecution(codon, exhaustionPrompt);
 
+    // Create abort controller BEFORE building SDK options so the SDK receives
+    // our controller instance. Previously this was created after buildSDKOptions(),
+    // meaning the SDK got undefined and created its own internal controller that
+    // our kill() → abort() could never reach.
+    this.abortController = new AbortController();
+    this.killed = false;
+
     // Build Claude Agent SDK options
     // In exhaustion mode with sessionToResume, always resume
     // Otherwise, respect codon.continuationMode (normal case)
@@ -219,22 +228,18 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     this.logger.log(`Session to resume: ${sessionToResume || "none"}`);
     this.logger.log(`Prompt content (${promptContent.length} chars):\n${promptContent}`);
 
-    // Create abort controller
-    this.abortController = new AbortController();
-    this.killed = false;
-
     // Generate synthetic PID for compatibility with ClaudeProcessManager API
     // Use a high range (900000+) to avoid conflicts with real PIDs
     this.syntheticPid = 900000 + Math.floor(Math.random() * 99999);
     this.logger.log(`Generated synthetic PID: ${this.syntheticPid} for SDK session`);
 
-    // Start the query in the background
+    // Start the query in the background, storing the promise so kill() can await it
     this.logger.log(`[SPAWN-DEBUG] About to call runQuery`, "debug");
 
-    const queryPromise = this.runQuery(promptContent, sdkOptions, codon.id);
+    this.queryPromise = this.runQuery(promptContent, sdkOptions, codon.id);
     this.logger.log(`[SPAWN-DEBUG] runQuery called, promise returned`, "debug");
 
-    queryPromise.catch((error) => {
+    this.queryPromise.catch((error) => {
       this.logger.log(`Query error: ${error.message}`, "error");
       this.cleanup();
       this.emit("error", error);
@@ -571,7 +576,9 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
   }
 
   /**
-   * Kill the Claude Agent SDK session.
+   * Kill the Claude Agent SDK session gracefully.
+   * Aborts the query (which triggers SIGTERM on the child via the SDK's abort handler),
+   * then waits up to PROCESS_KILL_GRACE_MS for the query to actually complete.
    */
   async kill(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
     if (!this.abortController || this.killed) return;
@@ -582,11 +589,43 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     // Force an immediate parse of the log file to capture any final messages
     this.logParser.parseNow();
 
-    // Abort the query
+    // Abort the query — this triggers the SDK's abort handler which sends
+    // SIGTERM to the Claude Code child process
     this.abortController.abort();
 
-    // Give it a moment to clean up
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for the query to actually complete (child process to terminate).
+    // The SDK's abort handler sends SIGTERM, and the for-await loop in runQuery()
+    // should break when the generator finishes. We wait up to PROCESS_KILL_GRACE_MS
+    // for this to happen.
+    if (this.queryPromise) {
+      try {
+        await Promise.race([
+          this.queryPromise,
+          new Promise<void>((resolve) => setTimeout(resolve, TIMEOUTS.PROCESS_KILL_GRACE_MS)),
+        ]);
+      } catch {
+        // Query rejection on abort is expected — the important thing is we waited
+        // for the child process to have time to exit
+      }
+    }
+  }
+
+  /**
+   * Force-kill the Claude Agent SDK session immediately.
+   * Sends abort (SIGTERM via SDK) without waiting for the child to exit.
+   * Used by forceShutdown() when the user presses q/Ctrl+C a second time.
+   *
+   * Note: We cannot send SIGKILL to the SDK's child process because the SDK
+   * does not expose the child PID. The abort sends SIGTERM; when our process
+   * exits immediately after, the SDK's process.on("exit") handler fires another
+   * SIGTERM as a belt-and-suspenders measure.
+   */
+  async forceKill(): Promise<void> {
+    this.killed = true;
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    this.cleanup();
   }
 
   /**
@@ -605,6 +644,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       this.abortController = undefined;
     }
 
+    this.queryPromise = undefined;
     this.syntheticPid = undefined;
   }
 

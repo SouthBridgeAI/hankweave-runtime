@@ -20,6 +20,13 @@ import {
   resolveRemoteHank,
 } from "./remote-hank.js";
 import {
+  getOrCreateClientId,
+  resolveTelemetryConfig,
+  showFirstRunNotice,
+  TelemetryCollector,
+  type TelemetryEventName,
+} from "./telemetry/index.js";
+import {
   getMetadata,
   Logger,
   renderStartupBanner,
@@ -28,10 +35,47 @@ import {
 } from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
 import { runValidation } from "./validate-command.js";
+import { runWelcomeWizard } from "./wizard/welcome-wizard.js";
 
 // -------------
 // Helper Functions
 // -------------
+
+/**
+ * Fire-and-forget CLI telemetry event.
+ * Used in early-exit paths (--init, --validate, --cleanup, --help)
+ * where the full telemetry system isn't initialized.
+ *
+ * Reads hankweave.json from cwd to respect file-level telemetry opt-out,
+ * matching the behavior of the full runtime path.
+ */
+async function sendCliTelemetry(
+  event: TelemetryEventName,
+  properties: Record<string, unknown>,
+): Promise<void> {
+  try {
+    // Read telemetry config from hankweave.json if present (same as full runtime path)
+    let fileTelemetryConfig: Parameters<typeof resolveTelemetryConfig>[0];
+    try {
+      const runtimeConfigPath = path.join(process.cwd(), "hankweave.json");
+      if (fs.existsSync(runtimeConfigPath)) {
+        const raw = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf-8"));
+        fileTelemetryConfig = raw?.telemetry;
+      }
+    } catch {
+      // Silent fail - config is optional
+    }
+
+    const telemetryConfig = resolveTelemetryConfig(fileTelemetryConfig);
+    if (!telemetryConfig.enabled) return;
+    const clientId = await getOrCreateClientId();
+    const collector = new TelemetryCollector(telemetryConfig, clientId, false);
+    await collector.trackCliEvent(event, properties);
+    await collector.shutdown();
+  } catch {
+    // Silent fail - CLI telemetry should never block
+  }
+}
 
 /**
  * Read content from stdin.
@@ -99,6 +143,35 @@ async function main() {
 
   // Show deprecation warnings for old flags (before any other output)
   showDeprecationWarnings(cliArgs);
+
+  // ========== WELCOME WIZARD ==========
+  // Detect "bare bones" invocation: no args, no flags.
+  // This is the "I just heard about this and want to try it" entry point.
+  const isBareBones =
+    !cliArgs.hankPath &&
+    !cliArgs.configPath &&
+    !cliArgs.dataPath &&
+    !cliArgs.dataFlag &&
+    !cliArgs.executionPath &&
+    !cliArgs.inputText &&
+    !cliArgs.init &&
+    !cliArgs.help &&
+    !cliArgs.showVersion &&
+    !cliArgs.validate &&
+    !cliArgs.cleanup &&
+    !cliArgs.attach &&
+    !cliArgs.headless;
+
+  if (isBareBones) {
+    try {
+      await runWelcomeWizard();
+      await sendCliTelemetry("cli_init", { source: "wizard" });
+    } catch (error) {
+      // If the wizard fails for any reason, don't crash - fall through to normal help
+      console.error(`\nWizard error: ${(error as Error).message}\n`);
+    }
+    process.exit(0);
+  }
 
   // Print startup banner
   renderStartupBanner();
@@ -185,6 +258,7 @@ Examples:
 Outputs are stored in ~/.hankweave-executions/{id}/outputs/ by default.
 Use --output to copy them elsewhere.
 `);
+    await sendCliTelemetry("cli_help", {});
     process.exit(0);
   }
 
@@ -192,8 +266,10 @@ Use --output to copy them elsewhere.
   if (initMode) {
     try {
       await initProject(process.cwd());
+      await sendCliTelemetry("cli_init", { success: true });
       process.exit(0);
     } catch (error) {
+      await sendCliTelemetry("cli_init", { success: false });
       console.error(`\n❌ Init failed: ${(error as Error).message}\n`);
       process.exit(1);
     }
@@ -370,8 +446,17 @@ Use --output to copy them elsewhere.
         startNew,
         modelOverride: resolvedConfig.model, // Pass resolved model override (from all config layers)
       });
+      await sendCliTelemetry("cli_validate", {
+        success: true,
+        error_count: 0,
+        warning_count: 0,
+      });
       process.exit(0);
     } catch (error) {
+      await sendCliTelemetry("cli_validate", {
+        success: false,
+        error_count: 1,
+      });
       // Format validation errors with breathing room
       const errorMessage = (error as Error).message;
       const errorLines = errorMessage.split("\n");
@@ -452,8 +537,10 @@ Use --output to copy them elsewhere.
       });
 
       const result = await cleanup.execute();
+      await sendCliTelemetry("cli_cleanup", { success: result.success });
       process.exit(result.success ? 0 : 1);
     } catch (error) {
+      await sendCliTelemetry("cli_cleanup", { success: false });
       console.error(`\n❌ Cleanup failed: ${(error as Error).message}`);
       process.exit(1);
     }
@@ -566,7 +653,50 @@ Use --output to copy them elsewhere.
       }
     }
 
+    // Initialize telemetry
+    // Note: telemetry config is loaded directly from hankweave.json (not through resolveSettings,
+    // which strips it since HankweaveConfig omits the telemetry field)
+    let fileTelemetryConfig: import("./telemetry/telemetry-types.js").TelemetryConfig | undefined;
+    try {
+      const runtimeConfigPath = path.join(originalCwd, "hankweave.json");
+      if (fs.existsSync(runtimeConfigPath)) {
+        const raw = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf-8"));
+        fileTelemetryConfig = raw?.telemetry;
+      }
+    } catch {
+      // Silent fail - telemetry config is optional
+    }
+    const telemetryConfig = resolveTelemetryConfig(fileTelemetryConfig);
+
+    // Show first-run notice (one-time, even if telemetry is disabled)
+    await showFirstRunNotice(telemetryConfig);
+
+    // Create telemetry collector
+    const clientId = await getOrCreateClientId();
+    const isCompiled = !import.meta.main; // Rough heuristic: compiled binaries don't have import.meta.main
+    const telemetryCollector = new TelemetryCollector(telemetryConfig, clientId, isCompiled);
+    telemetryCollector.setHankConfig(codons);
+    telemetryCollector.setProviders(validationResult.shimSelfTests);
+
+    // cli_run event (spec: fires when normal execution invoked, before run starts)
+    await telemetryCollector.trackCliEvent("cli_run", {
+      flags: {
+        headless: headlessMode,
+        start_new: startNew,
+        force: forceMode,
+        attach: false,
+        ignore_rig_failures: cliArgs.ignoreRigFailures || false,
+      },
+      config_source: cliArgs.configPath ? "flag" : cliArgs.hankPath ? "positional" : "default",
+      has_data_path: !!dataSourcePath,
+      data_from_stdin: inputSourceType === "stdin",
+    });
+
     const server = new HankweaveRuntime(serverConfig);
+
+    // Wire telemetry into the runtime
+    server.setTelemetryCollector(telemetryCollector);
+
     const actualPort = await server.start();
 
     // In headless mode, trigger autostart without waiting for client
@@ -597,9 +727,42 @@ Use --output to copy them elsewhere.
     if (error instanceof Error && "cause" in error && error.cause) {
       console.error(`Cause: ${error.cause}`);
     }
+
+    // Capture startup failure in telemetry (covers the cli_run → run_started gap)
+    try {
+      const { captureError, flushErrorTracking } = await import("./telemetry/error-tracking.js");
+      const err = error instanceof Error ? error : new Error(String(error));
+      err.name = err.name || "StartupFailure";
+      captureError(err, { runStatus: "startup_failed", failureType: "startup_error" });
+      await flushErrorTracking(2000);
+    } catch {
+      // Silent fail
+    }
+
     process.exit(1);
   }
 }
+
+// Global unhandled error capture for telemetry
+process.on("uncaughtException", (error) => {
+  try {
+    const { captureError } = require("./telemetry/error-tracking.js");
+    captureError(error, { runStatus: "crashed", failureType: "uncaught_exception" });
+  } catch {
+    // Silent fail
+  }
+});
+
+process.on("unhandledRejection", (reason) => {
+  try {
+    const { captureError } = require("./telemetry/error-tracking.js");
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    err.name = err.name || "UnhandledRejection";
+    captureError(err, { runStatus: "crashed", failureType: "unhandled_rejection" });
+  } catch {
+    // Silent fail
+  }
+});
 
 // Run main if this is the main module
 if (import.meta.main) {

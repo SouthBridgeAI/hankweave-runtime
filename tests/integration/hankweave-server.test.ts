@@ -666,6 +666,84 @@ describe("HankweaveRuntime", () => {
     server = null as any;
   });
 
+  it("shuts down when force_shutdown command is sent", async () => {
+    // Connect a client
+    const { client } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READANDWRITE,
+    });
+
+    expect(client.readyState).toBe(WebSocket.OPEN);
+
+    // Send force_shutdown command
+    client.send(
+      JSON.stringify({
+        id: "test-force-shutdown",
+        type: "server.force_shutdown",
+        data: {
+          reason: "running integration test",
+        },
+      }),
+    );
+
+    // Wait for server to shut down
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Try to connect a new client - this should fail since server is down
+    let connectionFailed = false;
+    try {
+      await connectHankweaveClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+        timeout: 2000,
+      });
+    } catch (error) {
+      connectionFailed = true;
+    }
+
+    expect(connectionFailed).toBe(true);
+
+    // Mark server as null so afterEach doesn't try to shut it down again
+    server = null as any;
+  });
+
+  it("graceful shutdown escalates to force on second call", async () => {
+    // Connect a client and collect events
+    const { client } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READANDWRITE,
+    });
+
+    expect(client.readyState).toBe(WebSocket.OPEN);
+
+    // Collect events received by client
+    const receivedEvents: ServerEvent[] = [];
+    client.onmessage = (event) => {
+      try {
+        const parsed = parseServerEvent(event.data as string);
+        receivedEvents.push(parsed);
+      } catch {
+        // Ignore unparseable messages
+      }
+    };
+
+    // Call shutdown directly (first call — graceful)
+    // Use exitProcess: false so we don't exit the test runner
+    const shutdownPromise = server.shutdown("test graceful", false);
+
+    // Wait a moment for the shutdown to start and events to propagate
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Check that an info event was emitted about waiting for agent exit
+    const infoEvents = receivedEvents.filter(
+      (e) => e.type === "info" && (e.data as { message?: string })?.message?.includes("Shutting down"),
+    );
+    expect(infoEvents.length).toBeGreaterThanOrEqual(1);
+
+    // Wait for shutdown to complete
+    await shutdownPromise;
+
+    // Mark server as null so afterEach doesn't try to shut it down again
+    server = null as any;
+  });
+
   describe("History Sync", () => {
     async function generatePingEvents(count: number): Promise<void> {
       const { client } = await connectAndRegisterClient(serverUrl, {

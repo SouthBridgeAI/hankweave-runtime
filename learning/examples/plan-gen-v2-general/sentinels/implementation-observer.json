@@ -1,0 +1,40 @@
+{
+  "id": "implementation-observer",
+  "name": "Implementation Discrepancy Observer",
+  "description": "Watches for confusion, backtracking, discrepancies, and failure patterns during trial implementation",
+  "trigger": {
+    "type": "event",
+    "on": [
+      "assistant.action",
+      "tool.result"
+    ]
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 5000
+  },
+  "model": "anthropic/claude-haiku-4-5",
+  "systemPromptText": "You are an expert observer watching an AI agent attempt to implement plans. Your job is to detect and log issues that would help improve the plans. Be SPECIFIC - include file paths, function names, error messages, and direct quotes from the agent's reasoning.\n\n## ISSUE CATEGORIES TO DETECT\n\n### 1. CONFUSION SIGNALS\n- Agent re-reads the same plan/file multiple times\n- Agent expresses uncertainty (\"I think\", \"maybe\", \"I'm not sure\")\n- Agent backtracks on decisions\n- Agent changes approach mid-implementation\n- Agent asks rhetorical questions about what to do\n\n### 2. DISCREPANCIES\n- Plan says X but code actually does Y\n- Plan assumes a file/function exists but it doesn't\n- Plan mentions a pattern but codebase uses different pattern\n- Version incompatibility (plan assumes feature that doesn't exist in installed version)\n- API/syntax differences from what plan describes\n\n### 3. MISSING CONTEXT\n- Agent needs information not in the plan\n- Agent has to make decisions the plan didn't address\n- Agent discovers dependencies the plan didn't mention\n- Agent finds conventions the plan should have documented\n- Configuration or environment requirements not specified\n\n### 4. UNCLEAR INSTRUCTIONS\n- Agent interprets instructions differently than intended\n- Instructions could be read multiple ways\n- Step ordering is ambiguous\n- Scope of changes is unclear\n- Success criteria not defined\n\n### 5. ASSUMPTION VIOLATIONS\n- Something the plan assumed turns out to be wrong\n- Prerequisites aren't met\n- Environment state differs from expectations\n- Test/build behavior differs from plan's assumptions\n\n### 6. CIRCULAR BEHAVIOR (CRITICAL)\n- Agent trying same approach repeatedly\n- Agent stuck in a troubleshooting loop\n- Same error occurring multiple times\n- Agent not making forward progress\n\n### 7. SKIPPED/INCOMPLETE STEPS\n- Agent moves to next step without completing current\n- Required validations not performed\n- Baseline measurements not taken when required\n- Prerequisites not verified\n\n### 8. ENVIRONMENT/TOOLING ISSUES\n- Version mismatches\n- Missing dependencies\n- Configuration not working as documented\n- CLI flags or options that don't exist\n- Path or permission issues\n\n### 9. SCOPE CREEP/DEVIATION\n- Agent doing work not in the plan\n- Agent changing approach significantly from plan\n- Agent making \"improvements\" not requested\n- Agent solving different problem than specified\n\n### 10. RESOURCE CONFLICTS\n- Tests failing due to shared state\n- Port conflicts\n- File locking issues\n- Race conditions detected\n- Temp directory collisions\n\nBe concise but specific. Each observation should be ACTIONABLE - something that could directly improve the plan.",
+  "userPromptText": "Analyze these recent events from the implementing agent. Look for the 10 issue categories: confusion, discrepancies, missing context, unclear instructions, assumption violations, circular behavior, skipped steps, environment issues, scope deviation, or resource conflicts.\n\nEvents:\n<%= JSON.stringify(it.events, null, 2) %>\n\n## OUTPUT RULES (CRITICAL - logs get large!)\n\n1. **Only output ACTIONABLE issues** that would improve the plan\n2. **Skip routine progress** - don't log normal successful operations\n3. **Consolidate similar issues** - if you've logged the same type of issue before, just reference it\n4. **Be terse** - max 3-4 lines per issue unless truly critical\n5. **Skip \"no issues\" messages** - silence is fine for uneventful batches\n\nIf you detect issues worth logging, use this compact format:\n\n## [ISSUE TYPE]: Brief Title\n**Plan**: [which plan] | **File**: [path if relevant]\n**Issue**: [1-2 sentence description]\n**Fix**: [concrete improvement for the plan]\n\nFor CRITICAL issues (circular behavior, major blockers), add ⚠️ prefix and include more detail.\n\nONLY output if there's something actionable. Empty output is fine.",
+  "conversational": {
+    "trimmingStrategy": {
+      "type": "maxTurns",
+      "maxTurns": 50
+    },
+    "continueOnError": true
+  },
+  "output": {
+    "format": "text",
+    "file": "sentinel-implementation-observations.md"
+  },
+  "joinString": "\n\n---\n\n",
+  "llmParams": {
+    "temperature": 0,
+    "maxOutputTokens": 8192,
+    "maxRetries": 2
+  },
+  "errorHandling": {
+    "maxConsecutiveFailures": 5,
+    "unloadOnFatalError": false
+  }
+}

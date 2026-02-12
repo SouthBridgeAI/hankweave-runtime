@@ -362,7 +362,22 @@ async function fetchRemoteHank(parsed: RemoteHankRef, cacheDir: string): Promise
     // Fetch and checkout the specific ref
     const repoGit = simpleGit.simpleGit(cacheDir);
     await repoGit.fetch(["--all", "--prune"]);
-    await repoGit.checkout(parsed.ref, ["--force"]);
+
+    try {
+      await repoGit.checkout(parsed.ref, ["--force"]);
+    } catch (checkoutError) {
+      // If the default "main" doesn't exist, try "master" (same fallback as clone path)
+      if (parsed.isBranch && parsed.ref === "main") {
+        try {
+          await repoGit.checkout("master", ["--force"]);
+          parsed.ref = "master";
+        } catch {
+          throw checkoutError;
+        }
+      } else {
+        throw checkoutError;
+      }
+    }
 
     if (parsed.isBranch) {
       // For branches, pull latest
@@ -370,13 +385,40 @@ async function fetchRemoteHank(parsed: RemoteHankRef, cacheDir: string): Promise
     }
   } else {
     // Clone fresh
-    await git.clone(parsed.cloneUrl, cacheDir, [
-      "--branch",
-      parsed.ref,
-      "--single-branch",
-      "--depth",
-      "1",
-    ]);
+    try {
+      await git.clone(parsed.cloneUrl, cacheDir, [
+        "--branch",
+        parsed.ref,
+        "--single-branch",
+        "--depth",
+        "1",
+      ]);
+    } catch (cloneError) {
+      // If the default branch ("main") doesn't exist, try "master"
+      if (parsed.isBranch && parsed.ref === "main") {
+        // Clean up failed clone attempt
+        if (fs.existsSync(cacheDir)) {
+          fs.rmSync(cacheDir, { recursive: true, force: true });
+          fs.mkdirSync(cacheDir, { recursive: true });
+        }
+        try {
+          await git.clone(parsed.cloneUrl, cacheDir, [
+            "--branch",
+            "master",
+            "--single-branch",
+            "--depth",
+            "1",
+          ]);
+          // Update the ref so cache metadata is correct
+          parsed.ref = "master";
+        } catch {
+          // Both failed - throw the original error
+          throw cloneError;
+        }
+      } else {
+        throw cloneError;
+      }
+    }
   }
 
   // Write cache metadata

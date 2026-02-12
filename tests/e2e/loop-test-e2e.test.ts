@@ -13,6 +13,44 @@ import { CodonId } from "../../server/types/branded-types.js";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 import { getFreePort } from "../utils/test-helpers.js";
 
+interface TelemetryDebugEvent {
+  event: string;
+  properties: Record<string, unknown>;
+}
+
+function readTelemetryJsonl(jsonlPath: string): TelemetryDebugEvent[] {
+  if (!fs.existsSync(jsonlPath)) {
+    return [];
+  }
+
+  const content = fs.readFileSync(jsonlPath, "utf-8");
+  return content
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as TelemetryDebugEvent);
+}
+
+async function waitForTelemetryEvents(
+  jsonlPath: string,
+  eventName: string,
+  minCount: number,
+  timeoutMs = 10_000,
+): Promise<TelemetryDebugEvent[]> {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const matchingEvents = readTelemetryJsonl(jsonlPath).filter(
+      (event) => event.event === eventName,
+    );
+    if (matchingEvents.length >= minCount) {
+      return matchingEvents;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  return readTelemetryJsonl(jsonlPath).filter((event) => event.event === eventName);
+}
+
 describe("Loop E2E Test", () => {
   it("should execute codons in correct order with loop expansion", async () => {
     const configPath = "tests/config/test-codons-with-loop.config.json";
@@ -506,6 +544,72 @@ describe("Loop E2E Test", () => {
       }
     }
   }, 120_000);
+
+  it("should emit loop_iteration_completed telemetry events with expected schema", async () => {
+    const configPath = "tests/config/test-codons-with-loop.config.json";
+    const port = await getFreePort();
+    const telemetryCacheDir = path.resolve(
+      "tests",
+      "test-results",
+      `loop-telemetry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    fs.mkdirSync(telemetryCacheDir, { recursive: true });
+    const telemetryJsonlPath = path.join(telemetryCacheDir, "telemetry-debug.jsonl");
+
+    const hankweave = await launchHankweave({
+      configPath,
+      port,
+      logPrefix: "[loop-telemetry-test]",
+      env: {
+        HANKWEAVE_TELEMETRY_DEBUG: "1",
+        HANKWEAVE_CACHE_DIR: telemetryCacheDir,
+        DO_NOT_TRACK: "",
+        HANKWEAVE_TELEMETRY: "",
+      },
+    });
+
+    try {
+      await hankweave.waitForEvent("server.ready");
+      await hankweave.waitForRunToComplete(300_000);
+      await hankweave.waitForConnectionClose(10_000);
+
+      const loopIterations = await waitForTelemetryEvents(
+        telemetryJsonlPath,
+        "loop_iteration_completed",
+        2,
+        10_000,
+      );
+
+      expect(loopIterations.length).toBe(2);
+
+      const iterationValues: number[] = [];
+      let finalIterationCount = 0;
+
+      for (const evt of loopIterations) {
+        expect(evt.properties.run_id_hash).toBeDefined();
+        expect(evt.properties.loop_id_hash).toBeDefined();
+        expect(typeof evt.properties.iteration).toBe("number");
+        expect(typeof evt.properties.duration_ms).toBe("number");
+        expect(typeof evt.properties.cost_usd).toBe("number");
+        expect(typeof evt.properties.tokens_used).toBe("number");
+        expect(typeof evt.properties.is_final).toBe("boolean");
+
+        if (typeof evt.properties.iteration === "number") {
+          iterationValues.push(evt.properties.iteration);
+        }
+        if (evt.properties.is_final === true) {
+          finalIterationCount += 1;
+        }
+      }
+
+      expect(iterationValues.sort((a, b) => a - b)).toEqual([0, 1]);
+      expect(finalIterationCount).toBe(1);
+    } finally {
+      if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {
+        await hankweave.stop();
+      }
+    }
+  }, 600_000);
 
   it("should handle rollback from interrupted codon inside loop iteration", async () => {
     const configPath = "tests/config/test-codons-with-loop-error.config.json";

@@ -1,0 +1,26 @@
+{
+  "name": "shim-eval-suite",
+  "version": "1.0.0",
+  "description": "Evaluation suite for shim implementations",
+  "type": "module",
+  "bin": {
+    "shim-eval": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "bun run src/cli.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.0"
+  }
+}
+

@@ -6,6 +6,7 @@ import { validateModel } from "./config-validation/model-validator.js";
 import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
+import { type TelemetryConfig, telemetryConfigSchema } from "./telemetry/telemetry-types.js";
 import { CodonId } from "./types/branded-types.js";
 import type { ModelName, ShimSelfTestResult } from "./types/types.js";
 import { deepMerge, getMetadata, type Logger, rmSyncWithRetry } from "./utils.js";
@@ -1002,6 +1003,9 @@ export const runtimeConfigSchema = z
 
     // Sentinel System
     sentinel: sentinelSettingsSchema.optional().describe("Sentinel system configuration"),
+
+    // Telemetry
+    telemetry: telemetryConfigSchema.optional().describe("Telemetry configuration"),
   })
   .strict()
   .refine(
@@ -1044,7 +1048,7 @@ export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 export interface HankweaveConfig
   extends Omit<
     Required<RuntimeConfig>,
-    "model" | "anthropicBaseUrl" | "ignoreRigFailures" | "outputDirectory"
+    "model" | "anthropicBaseUrl" | "ignoreRigFailures" | "outputDirectory" | "telemetry"
   > {
   // Fields from RuntimeConfig that remain optional
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
@@ -1066,6 +1070,9 @@ export interface HankweaveConfig
    * If set, outputs are copied to this path after each codon completes.
    */
   outputDirectory?: string;
+
+  /** Telemetry configuration from hankweave.json */
+  telemetry?: TelemetryConfig;
 
   // Additional internal properties (not in RuntimeConfig)
   /** Server version for client compatibility checks */

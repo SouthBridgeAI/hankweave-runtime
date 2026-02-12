@@ -59,6 +59,7 @@ import { runServerStateTests } from "./test-groups/server-state-tests.js";
 import { runSessionContinuityTests } from "./test-groups/session-continuity-tests.js";
 import { runStateConsistencyTests } from "./test-groups/state-consistency-tests.js";
 import { runStateSnapshotTests } from "./test-groups/state-snapshot-tests.js";
+import { runTelemetryVerificationTests } from "./test-groups/telemetry-verification-tests.js";
 import { runTemplateVariableTests } from "./test-groups/template-variable-tests.js";
 import { runTokenUsageTests } from "./test-groups/token-usage-tests.js";
 import { runToolResultTests } from "./test-groups/tool-result-tests.js";
@@ -145,6 +146,7 @@ interface TestState {
   errorEvents: ErrorEvent[];
   testStartTime: number;
   cleanupResult?: CleanupIntegrationResult;
+  telemetryJsonlPath?: string; // Path to telemetry debug JSONL
   executionPath?: string; // New: track where server is executing
   agentRootPath?: string; // New: track where agent works (inside executionPath)
   dataPath?: string; // New: track where data is accessible
@@ -216,18 +218,6 @@ async function setupAndRunCodons(): Promise<void> {
   CODONS_CONFIG = path.join(TEST_CWD, "tests/config/test-codons.config.json");
   TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `run-${TEST_TIMESTAMP}`);
 
-  // Initialize server config with determined paths
-  serverConfig = {
-    testRunDir: TEST_RUN_DIR,
-    configFile: CODONS_CONFIG,
-    port: 0, // Will be set dynamically
-    testMode: "e2e-happy-path",
-    dataSourceDir: DATA_SOURCE_FILE,
-    cwd: TEST_CWD,
-    useDataFlag: true,
-    startNew: true,
-  };
-
   // CONDITIONALLY setup Verdaccio if needed
   if (needsVerdaccio()) {
     verdaccioSetup = await setupVerdaccio(projectRoot);
@@ -240,6 +230,18 @@ async function setupAndRunCodons(): Promise<void> {
   if (!fs.existsSync(TEST_RUN_DIR)) {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
   }
+
+  // Initialize server config with determined paths
+  serverConfig = {
+    testRunDir: TEST_RUN_DIR,
+    configFile: CODONS_CONFIG,
+    port: 0, // Will be set dynamically
+    testMode: "e2e-happy-path",
+    dataSourceDir: DATA_SOURCE_FILE,
+    cwd: TEST_CWD,
+    useDataFlag: true,
+    startNew: true,
+  };
 
   // Get a free port for this test run
   serverConfig.port = await getFreePort();
@@ -267,6 +269,18 @@ async function setupAndRunCodons(): Promise<void> {
       npm_config_registry: verdaccioSetup.registry.registryURL,
     };
   }
+
+  // Enable telemetry debug mode so events are written to JSONL for verification
+  const telemetryCacheDir = path.join(TEST_RUN_DIR, "telemetry-cache");
+  fs.mkdirSync(telemetryCacheDir, { recursive: true });
+  testState.telemetryJsonlPath = path.join(telemetryCacheDir, "telemetry-debug.jsonl");
+  serverConfig.env = {
+    ...serverConfig.env,
+    HANKWEAVE_TELEMETRY_DEBUG: "1",
+    HANKWEAVE_CACHE_DIR: telemetryCacheDir,
+    DO_NOT_TRACK: "",
+    HANKWEAVE_TELEMETRY: "",
+  };
 
   // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
@@ -1018,6 +1032,10 @@ describe("Hankweave E2E Test", () => {
 
   describe("Sentinel Integration", () => {
     runSentinelIntegrationTests(testState);
+  });
+
+  describe("Telemetry Verification", () => {
+    runTelemetryVerificationTests(testState);
   });
 
   // Cleanup after all tests - Updated for execution isolation

@@ -92,18 +92,38 @@ Your analysis should include:
 
 This hank was initialized with \`hankweave init\`.
 
-- \`hank.json\` - Main workflow configuration
-- \`prompts/analyze.md\` - Prompt template for analysis
-- \`.gitignore\` - Ignore patterns for version control
+## Structure
+
+- \`hank.json\` — Workflow definition (codons, models, file tracking)
+- \`prompts/\` — Prompt files for each codon (one per harness)
+- \`data/\` — Sample data files to analyze
+- \`.gitignore\` — Ignore patterns for execution artifacts
 
 ## Customization
 
 Edit \`hank.json\` to customize your workflow:
 - Add more codons to the \`hank\` array
-- Change the \`model\` (sonnet or opus)
-- Add \`rigSetup\` to prepare your environment
-- Configure \`checkpointedFiles\` to track files in checkpoints
-- Use \`overrides\` to suggest runtime settings`,
+- Change the \`model\` (haiku, sonnet, opus, gemini-2.5-flash, gpt-5.1-codex-max, etc.)
+- Add \`rigSetup\` to prepare your environment before a codon runs
+- Configure \`checkpointedFiles\` to track files in git checkpoints
+- Use \`overrides\` to suggest runtime settings (model, port, etc.)
+
+## Running
+
+\`\`\`sh
+cd <this-directory>
+npx hankweave
+\`\`\`
+
+## Learn More
+
+- [Docs](https://hankweave.southbridge.ai)
+- [Hank Basics](https://hankweave.southbridge.ai/guides/building-a-hank)
+- [GitHub](https://github.com/SouthBridgeAI/hankweave-runtime)`,
+
+  ".gitignore": `.hankweave/
+*.log
+node_modules/`,
 
   "data/sample1.txt": `# Project Overview
 
@@ -198,4 +218,5 @@ export async function initProject(targetDir: string): Promise<void> {
   console.log("  - data/sample2.txt");
   console.log("  - data/notes.txt");
   console.log("  - README.md");
+  console.log("  - .gitignore");
 }

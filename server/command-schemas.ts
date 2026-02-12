@@ -33,6 +33,15 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       })
       .optional(),
   }),
+  z.object({
+    id: z.string(),
+    type: z.literal("server.force_shutdown"),
+    data: z
+      .object({
+        reason: z.string().optional(),
+      })
+      .optional(),
+  }),
 
   // Query checkpoints
   z.object({

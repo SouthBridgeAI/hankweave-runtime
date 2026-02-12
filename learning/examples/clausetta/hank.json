@@ -1,0 +1,134 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "meta": {
+    "name": "Clausetta - Shim Builder",
+    "version": "1.0.0",
+    "description": "Builds and evaluates polymorphic shims for agent harnesses"
+  },
+  "hank": [
+    {
+      "id": "build-pre-loop",
+      "name": "Build PreLoop: Research, build and fix",
+      "promptFile": [
+        "./codons/1-loop-build-shim.md"
+      ],
+      "appendSystemPromptFile": [
+        "./shim-spec.md"
+      ],
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p shim",
+            "workingDirectory": "project"
+          }
+        },
+        {
+          "type": "copy",
+          "copy": {
+            "from": "./eval-suite",
+            "to": "eval-suite"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "bun install",
+            "workingDirectory": "lastCopied"
+          }
+        }
+      ],
+      "description": "Select and prepare a post or group of posts",
+      "checkpointedFiles": [
+        "shim",
+        "research.md",
+        "thoughts_questions_and_issues.md"
+      ],
+      "outputFiles": []
+    },
+    {
+      "type": "loop",
+      "id": "build-loop",
+      "name": "Build loop",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 1
+      },
+      "codons": [
+        {
+          "id": "build-loop-codon",
+          "name": "Build Loop: Research, build and fix",
+          "promptFile": [
+            "./codons/1-loop-build-shim.md"
+          ],
+          "appendSystemPromptFile": [
+            "./shim-spec.md"
+          ],
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "rigSetup": [],
+          "description": "Select and prepare a post or group of posts",
+          "checkpointedFiles": [
+            "shim",
+            "research.md",
+            "thoughts_questions_and_issues.md"
+          ],
+          "outputFiles": []
+        }
+      ]
+    },
+    {
+      "type": "loop",
+      "id": "eval-loop",
+      "name": "Evaluation Loop",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 2
+      },
+      "codons": [
+        {
+          "id": "eval-loop-codon",
+          "name": "Eval Loop: Test and document",
+          "promptFile": [
+            "./codons/2-eval-shim.md"
+          ],
+          "appendSystemPromptFile": [
+            "./shim-spec.md"
+          ],
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "rigSetup": [],
+          "description": "Test and document the shim",
+          "checkpointedFiles": [
+            "shim",
+            "research.md",
+            "thoughts_questions_and_issues.md"
+          ],
+          "outputFiles": []
+        }
+      ]
+    },
+    {
+      "id": "document",
+      "name": "Clean up and Document the shim",
+      "promptFile": [
+        "./codons/3-test-and-document.md"
+      ],
+      "appendSystemPromptFile": [
+        "./shim-spec.md"
+      ],
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "rigSetup": [],
+      "description": "Document the shim",
+      "checkpointedFiles": [
+        "shim",
+        "research.md",
+        "thoughts_questions_and_issues.md"
+      ],
+      "outputFiles": []
+    }
+  ]
+}

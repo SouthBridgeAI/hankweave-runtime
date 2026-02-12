@@ -1,0 +1,301 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "meta": {
+    "name": "Linear-to-Plan Pipeline",
+    "version": "2.0.0",
+    "description": "Transforms Linear tickets (or any task list) into comprehensive, implementation-ready plans through a 13-step agentic pipeline. Includes trial implementation, test phases with sentinel observers, human-readable engineering briefings, and automatic post-back to Linear tickets.",
+    "author": "Southbridge AI"
+  },
+  "hank": [
+    {
+      "id": "step-1-main",
+      "name": "Step 1: Prep",
+      "description": "Expand information from linear tickets, prep and ready code and docs and seed initial plan",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptFile": [
+        "./codons/codon-1-fetch/0-fetch-and-enrich.md"
+      ],
+      "appendSystemPromptFile": [
+        "./codons/system-prompt-broad.md"
+      ],
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p tools && mkdir -p source",
+            "workingDirectory": "project"
+          }
+        },
+        {
+          "type": "copy",
+          "copy": {
+            "from": "./codons/codon-1-fetch/rigs/linear-pull",
+            "to": "tools/linear-pull"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "bun install",
+            "workingDirectory": "lastCopied"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "cd source && git clone --depth 1 https://github.com/SouthbridgeAI/hankweave-runtime.git hankweave",
+            "workingDirectory": "project"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "cd source && bunx mandark -a -p --no-line-numbers hankweave/README.md hankweave/server/**/*.ts hankweave/package.json hankweave/biome.json hankweave/tsconfig.json && mv compiled-code.txt compiled-server-code.txt"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "cd source && bunx mandark -a -p --no-line-numbers hankweave/README.md hankweave/tests/config/**/*.json hankweave/tests/e2e hankweave/tests/integration hankweave/tests/long-running hankweave/tests/types hankweave/tests/unit hankweave/tests/utils && mv compiled-code.txt compiled-tests-source.txt"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p plan/background",
+            "workingDirectory": "project"
+          }
+        },
+        {
+          "type": "copy",
+          "copy": {
+            "from": "./codons/codon-1-fetch/rigs/task-seed.md",
+            "to": "plan/task.md"
+          }
+        }
+      ],
+      "checkpointedFiles": [
+        "plan/**/*"
+      ],
+      "sentinels": []
+    },
+    {
+      "id": "step-2-plan",
+      "name": "Step 2: Gemini Plan and CC",
+      "description": "Generate parallel plans with Gemini and Opus",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-2-plan-cc/1-cc-prompt.md",
+      "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md",
+      "rigSetup": [
+        {
+          "type": "copy",
+          "copy": {
+            "from": "./codons/codon-2-plan-cc/rigs/gemini-things",
+            "to": "tools/gemini-things"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p plan/rough-workspace/gemini && mkdir -p plan/rough-workspace/opus"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "bun run tools/gemini-things/gemini-2.5-pro-plan.ts ./source/compiled-server-code.txt ./plan/task.md -o ./plan/rough-workspace/gemini/code-plan.md"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "bun run tools/gemini-things/gemini-2.5-pro-plan-addendum.ts ./source/compiled-tests-source.txt ./plan/task.md ./plan/rough-workspace/gemini/code-plan.md -o ./plan/rough-workspace/gemini/tests-addendum.md"
+          }
+        },
+      ],
+      "checkpointedFiles": []
+    },
+    {
+      "id": "step-3-codex",
+      "name": "Step 3: Plan with Codex",
+      "description": "Generate plans with Codex",
+      "model": "gpt-5.2",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-2-plan-cc/1-codex-prompt.md",
+      "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p plan/rough-workspace/codex"
+          }
+        }
+      ],
+      "checkpointedFiles": []
+    },
+    {
+      "id": "step-4-merge",
+      "name": "Step 4: Review and merge plans",
+      "description": "Review plans from three different models, and begin the process of merging.",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-4-merge/0-merge.md",
+      "appendSystemPromptFile": [
+        "./codons/system-prompt-broad.md"
+      ],
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p plan/merged"
+          }
+        }
+      ]
+    },
+    {
+      "type": "loop",
+      "id": "blind-reviews",
+      "name": "Repeatedly improve the plan through blind iteration",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 3
+      },
+      "codons": [
+        {
+          "id": "step-5-blind-review",
+          "name": "Step 5: Review the merged plan with fresh eyes",
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-5-review/0-review.md",
+          "appendSystemPromptFile": [
+            "./codons/system-prompt-broad.md"
+          ],
+          "rigSetup": [
+            {
+              "type": "command",
+              "command": {
+                "run": "mkdir -p plan/reviews/old"
+              }
+            },
+            {
+              "type": "command",
+              "command": {
+                "run": "mv plan/reviews/current plan/reviews/old/$(date +%Y%m%d-%H%M%S)"
+              },
+              "allowFailure": true
+            },
+            {
+              "type": "command",
+              "command": {
+                "run": "mkdir -p plan/reviews/current"
+              }
+            }
+          ]
+        },
+        {
+          "id": "step-6-update",
+          "name": "Step 6: Update the plan based on the review",
+          "model": "opus",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-6-update/0-update.md",
+          "appendSystemPromptFile": [
+            "./codons/system-prompt-broad.md"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "loop",
+      "id": "implementation-review-loop",
+      "name": "Repeatedly implement and improve the plan",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 3
+      },
+      "codons": [
+        {
+          "id": "implement-loop-step-1-implement",
+          "name": "Implement-Review Loop: Implementing core functionality",
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-7-implement-review-loop/0-implement.md",
+          "appendSystemPromptFile": [
+            "./codons/system-prompt-broad.md"
+          ],
+          "sentinels": [
+            {
+              "sentinelConfig": "./sentinels/implementation-observer.json",
+              "settings": {
+                "failCodonIfNotLoaded": false,
+                "outputPaths": {
+                  "logFile": "./plan/implementations/current/sentinel-implementation-observations.md"
+                }
+              }
+            }
+          ],
+          "rigSetup": [
+            {
+              "type": "command",
+              "command": {
+                "run": "cd source/hankweave && bun install"
+              },
+              "workingDirectory": "project"
+            },
+            {
+              "type": "command",
+              "command": {
+                "run": "mkdir -p plan/implementations/old"
+              },
+              "workingDirectory": "project"
+            },
+            {
+              "type": "command",
+              "command": {
+                "run": "mv plan/implementations/current plan/implementations/old/$(date +%Y%m%d-%H%M%S)"
+              },
+              "allowFailure": true,
+              "workingDirectory": "project"
+            },
+            {
+              "type": "command",
+              "command": {
+                "run": "mkdir -p plan/implementations/current"
+              },
+              "workingDirectory": "project"
+            },
+            {
+              "type": "command",
+              "command": {
+                "run": "cd source/hankweave && timeout 900000 bun test > ../../plan/implementations/current/test-output-$(date +%Y%m%d-%H%M%S).txt 2>&1"
+              },
+              "allowFailure": true,
+              "workingDirectory": "project"
+            }
+          ]
+        },
+        {
+          "id": "implement-loop-step-2-update",
+          "name": "Implement-review loop: Update the plan based on the implementation results",
+          "model": "opus",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-7-implement-review-loop/1-update.md",
+          "appendSystemPromptFile": [
+            "./codons/system-prompt-broad.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "final-step-compress",
+      "name": "Final Step: Tie everything into a clean bow",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-8-compress/0-compress.md",
+      "appendSystemPromptFile": [
+        "./codons/system-prompt-broad.md"
+      ]
+    }
+  ]
+}

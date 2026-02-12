@@ -690,7 +690,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
-   * Kill the running process
+   * Kill the running process gracefully (SIGTERM with wait and SIGKILL escalation).
    */
   async kill(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
     if (!this.isCleanedUp && this.processManager) {
@@ -699,6 +699,20 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         "info",
       );
       await this.processManager.kill(signal);
+    }
+  }
+
+  /**
+   * Force-kill the running process immediately (SIGKILL for shims, abort for SDK).
+   * Used by forceShutdown() when the user presses q/Ctrl+C a second time.
+   */
+  async forceKill(): Promise<void> {
+    if (!this.isCleanedUp && this.processManager) {
+      this.config.logger.log(
+        `CodonRunner: Force killing process for codon ${this.config.codonId}`,
+        "info",
+      );
+      await this.processManager.forceKill();
     }
   }
 

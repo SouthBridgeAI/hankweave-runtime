@@ -10,6 +10,14 @@
       "rigSetup": [
         {
           "type": "command",
+          "allowFailure": true,
+          "command": {
+            "run": "bun -e \"process.exit(1)\"",
+            "workingDirectory": "project"
+          }
+        },
+        {
+          "type": "command",
           "command": {
             "run": "mkdir -p notes",
             "workingDirectory": "project"
@@ -85,6 +93,14 @@
       "promptText": "Can you convert the poems in the notes folder into typescript code in the <%PROJECT_DIR%>/typescript_code/src folder? Call them poem1.ts and poem2.ts. DON'T USE TODOs.",
       "model": "gemini-3-pro-preview",
       "rigSetup": [
+        {
+          "type": "command",
+          "allowFailure": true,
+          "command": {
+            "run": "bun -e \"process.exit(1)\"",
+            "workingDirectory": "project"
+          }
+        },
         {
           "type": "copy",
           "copy": {

@@ -180,6 +180,34 @@ export const codonExtendedEventDataSchema = z.object({
   cumulativeCost: z.number(),
 });
 
+export const rigSetupCompletedEventDataSchema = z.object({
+  codonId: z.string(),
+  rigType: z.enum(["command", "commands"]),
+  commandCount: z.number().int().nonnegative(),
+  durationMs: z.number(),
+  createdCheckpoint: z.boolean(),
+});
+
+export const rigSetupFailedEventDataSchema = z.object({
+  codonId: z.string(),
+  failureType: z.enum(["command_failed", "timeout", "other"]),
+  exitCode: z.number().optional(),
+  commandIndex: z.number().int().nonnegative().optional(),
+  ignored: z.boolean(),
+});
+
+export const loopIterationCompletedEventDataSchema = z.object({
+  loopId: z.string(),
+  iteration: z.number().int().nonnegative(),
+  durationMs: z.number(),
+  costUsd: z.number(),
+  tokensUsed: z.number(),
+  isFinal: z.boolean(),
+  terminationReason: z
+    .enum(["iteration_limit", "context_exceeded", "sentinel_skip", "failure"])
+    .optional(),
+});
+
 export const assistantActionEventDataSchema = z.object({
   codonId: z.string(),
   action: z.enum(["thinking", "message", "tool_use"]),
@@ -502,6 +530,21 @@ export const fileTreeUpdatedEventSchema = baseEventSchema.extend({
   data: fileTreeUpdatedEventDataSchema,
 });
 
+export const rigSetupCompletedEventSchema = baseEventSchema.extend({
+  type: z.literal("rig.setup.completed"),
+  data: rigSetupCompletedEventDataSchema,
+});
+
+export const rigSetupFailedEventSchema = baseEventSchema.extend({
+  type: z.literal("rig.setup.failed"),
+  data: rigSetupFailedEventDataSchema,
+});
+
+export const loopIterationCompletedEventSchema = baseEventSchema.extend({
+  type: z.literal("loop.iteration.completed"),
+  data: loopIterationCompletedEventDataSchema,
+});
+
 export const errorEventSchema = baseEventSchema.extend({
   type: z.literal("error"),
   data: errorEventDataSchema,
@@ -737,6 +780,9 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   toolResultEventSchema,
   fileUpdatedEventSchema,
   fileTreeUpdatedEventSchema,
+  rigSetupCompletedEventSchema,
+  rigSetupFailedEventSchema,
+  loopIterationCompletedEventSchema,
   errorEventSchema,
   incompleteCodonEventSchema,
   infoEventSchema,
@@ -777,6 +823,9 @@ export type TokenUsageEvent = z.infer<typeof tokenUsageEventSchema>;
 export type ToolResultEvent = z.infer<typeof toolResultEventSchema>;
 export type FileUpdatedEvent = z.infer<typeof fileUpdatedEventSchema>;
 export type FileTreeUpdatedEvent = z.infer<typeof fileTreeUpdatedEventSchema>;
+export type RigSetupCompletedEvent = z.infer<typeof rigSetupCompletedEventSchema>;
+export type RigSetupFailedEvent = z.infer<typeof rigSetupFailedEventSchema>;
+export type LoopIterationCompletedEvent = z.infer<typeof loopIterationCompletedEventSchema>;
 export type ErrorEvent = z.infer<typeof errorEventSchema>;
 export type IncompleteCodonEvent = z.infer<typeof incompleteCodonEventSchema>;
 export type InfoEvent = z.infer<typeof infoEventSchema>;
@@ -847,6 +896,7 @@ const SERVER_STATE_EVENT_TYPES_ARRAY = [
   "rollback.rigCleanup",
   "rollback.archiveRestore",
   "state.transition",
+  "loop.iteration.completed",
   "archive.completed",
   "archive.partial",
 ] as const;
@@ -859,6 +909,8 @@ const AGENTIC_BACKBONE_EVENT_TYPES_ARRAY = [
   "tool.result",
   "file.updated",
   "filetree.updated",
+  "rig.setup.completed",
+  "rig.setup.failed",
 ] as const;
 
 /**
@@ -929,6 +981,7 @@ export type ServerStateEvent =
   | RollbackRigCleanupEvent
   | RollbackArchiveRestoreEvent
   | StateTransitionEvent
+  | LoopIterationCompletedEvent
   | ArchiveCompletedEvent
   | ArchivePartialEvent;
 
@@ -940,7 +993,9 @@ export type AgenticBackboneEvent =
   | AssistantActionEvent
   | ToolResultEvent
   | FileUpdatedEvent
-  | FileTreeUpdatedEvent;
+  | FileTreeUpdatedEvent
+  | RigSetupCompletedEvent
+  | RigSetupFailedEvent;
 
 /**
  * Union type representing all sentinel events.
@@ -1103,6 +1158,9 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "tool.result": toolResultEventDataSchema,
   "file.updated": fileUpdatedEventDataSchema,
   "filetree.updated": fileTreeUpdatedEventDataSchema,
+  "rig.setup.completed": rigSetupCompletedEventDataSchema,
+  "rig.setup.failed": rigSetupFailedEventDataSchema,
+  "loop.iteration.completed": loopIterationCompletedEventDataSchema,
   error: errorEventDataSchema,
   "incomplete.codon": incompleteCodonEventDataSchema,
   info: infoEventDataSchema,

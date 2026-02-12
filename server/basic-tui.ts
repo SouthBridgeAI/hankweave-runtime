@@ -72,6 +72,7 @@ export class BasicTUI {
   private ws: WebSocket | null = null;
   private isConnected = false;
   private handshakeComplete = false;
+  private isShuttingDown = false;
   private checkpoints: CheckpointListEvent["data"]["checkpoints"] = [];
   private waitingForCheckpoints = false;
   private attachMode: boolean;
@@ -186,32 +187,67 @@ export class BasicTUI {
   }
 
   private drawBox(title: string, content: string[], color: string = COLORS.white): void {
-    const maxLength = Math.max(title.length, ...content.map((line) => this.stripAnsi(line).length));
-    const boxWidth = maxLength + 4;
+    // Cap box width at terminal width (or 100 if not available)
+    const termWidth = process.stdout.columns || 100;
+    const maxBoxWidth = Math.min(termWidth, 120);
+
+    const contentWidth = Math.max(
+      title.length,
+      ...content.map((line) => this.stripAnsi(line).length),
+    );
+    const boxWidth = Math.min(contentWidth + 4, maxBoxWidth);
+    const innerWidth = boxWidth - 2; // space inside the │ borders
+
+    // Word-wrap a single line to fit within the inner width (accounting for 1 char left padding)
+    const wrapLine = (line: string): string[] => {
+      const stripped = this.stripAnsi(line);
+      if (stripped.length <= innerWidth - 1) return [line];
+
+      // For lines with ANSI codes, wrap on the stripped text then re-apply
+      // Simple approach: wrap the visible text, splitting on word boundaries
+      const words = stripped.split(/(\s+)/);
+      const lines: string[] = [];
+      let current = "";
+      for (const word of words) {
+        if (current.length + word.length > innerWidth - 2 && current.length > 0) {
+          lines.push(current);
+          current = word.trimStart();
+        } else {
+          current += word;
+        }
+      }
+      if (current.length > 0) lines.push(current);
+      return lines;
+    };
 
     // Top border
-    console.log(`${color}┌${"─".repeat(boxWidth - 2)}┐${COLORS.reset}`);
+    console.log(`${color}┌${"─".repeat(innerWidth)}┐${COLORS.reset}`);
 
-    // Title
-    const titlePadding = Math.floor((boxWidth - 2 - title.length) / 2);
+    // Title (truncate if needed)
+    const displayTitle =
+      title.length > innerWidth - 2 ? `${title.slice(0, innerWidth - 5)}...` : title;
+    const titlePadding = Math.floor((innerWidth - displayTitle.length) / 2);
     console.log(
-      `${color}│${" ".repeat(titlePadding)}${COLORS.bold}${title}${
+      `${color}│${" ".repeat(titlePadding)}${COLORS.bold}${displayTitle}${
         COLORS.reset
-      }${color}${" ".repeat(boxWidth - 2 - titlePadding - title.length)}│${COLORS.reset}`,
+      }${color}${" ".repeat(innerWidth - titlePadding - displayTitle.length)}│${COLORS.reset}`,
     );
 
     // Separator
-    console.log(`${color}├${"─".repeat(boxWidth - 2)}┤${COLORS.reset}`);
+    console.log(`${color}├${"─".repeat(innerWidth)}┤${COLORS.reset}`);
 
-    // Content
+    // Content (with wrapping)
     for (const line of content) {
-      const strippedLength = this.stripAnsi(line).length;
-      const padding = boxWidth - 2 - strippedLength;
-      console.log(`${color}│ ${line}${" ".repeat(padding - 1)}${color}│${COLORS.reset}`);
+      const wrapped = wrapLine(line);
+      for (const wl of wrapped) {
+        const strippedLength = this.stripAnsi(wl).length;
+        const padding = Math.max(0, innerWidth - 1 - strippedLength);
+        console.log(`${color}│${COLORS.reset} ${wl}${" ".repeat(padding)}${color}│${COLORS.reset}`);
+      }
     }
 
     // Bottom border
-    console.log(`${color}└${"─".repeat(boxWidth - 2)}┘${COLORS.reset}`);
+    console.log(`${color}└${"─".repeat(innerWidth)}┘${COLORS.reset}`);
   }
 
   private stripAnsi(str: string): string {
@@ -852,9 +888,16 @@ export class BasicTUI {
                 this.ws.close();
               }
               process.exit(0);
+            } else if (this.isShuttingDown) {
+              // Already shutting down — force quit immediately
+              console.log(`\n${COLORS.red}${SYMBOLS.arrow} Force quitting...${COLORS.reset}`);
+              this.server?.forceShutdown("user force request");
             } else {
-              // Normal mode: shut down server
-              console.log(`\n${COLORS.dim}${SYMBOLS.arrow} Shutting down...${COLORS.reset}`);
+              // Normal mode: initiate graceful shutdown
+              this.isShuttingDown = true;
+              console.log(
+                `\n${COLORS.dim}${SYMBOLS.arrow} Shutting down... (press q again to force quit)${COLORS.reset}`,
+              );
               if (this.ws) {
                 this.ws.close();
               }

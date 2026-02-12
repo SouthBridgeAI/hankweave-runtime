@@ -23,7 +23,10 @@ import type {
   FileUpdatedEvent,
   HistoryBatchEvent,
   InfoEvent,
+  LoopIterationCompletedEvent,
   PongEvent,
+  RigSetupCompletedEvent,
+  RigSetupFailedEvent,
   ServerEvent,
   ServerReadyEvent,
   StateSnapshotEvent,
@@ -55,6 +58,8 @@ import { APITimeoutError, CommandError, ErrorSeverity } from "./types/error-type
 import {
   type CodonExecution,
   type CodonStatus,
+  getCodonCost,
+  getCodonTokens,
   isTerminalCodonStatus,
 } from "./types/state-types.js";
 import type { ToolInputMap, ToolName } from "./types/tool-types.js";
@@ -195,6 +200,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private readonly READ_ONLY_COMMANDS = new Set([
     "checkpoint.list",
     "server.shutdown", // Special case - always allowed
+    "server.force_shutdown", // Special case - always allowed (escalated shutdown)
     "ping",
     "history.sync", // Read-only history pagination
   ]);
@@ -206,6 +212,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
   // LLM registry for cost calculations
   private llmRegistry: LlmProviderRegistry;
+
+  // Telemetry collector (optional - may be disabled)
+  private telemetryCollector:
+    | import("./telemetry/telemetry-collector.js").TelemetryCollector
+    | null = null;
 
   constructor(
     config: Omit<HankweaveConfig, keyof typeof DEFAULT_CONFIG> &
@@ -257,6 +268,23 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
+  }
+
+  /**
+   * Set the telemetry collector for this runtime.
+   * Called from index.ts after config resolution.
+   */
+  setTelemetryCollector(
+    collector: import("./telemetry/telemetry-collector.js").TelemetryCollector,
+  ): void {
+    this.telemetryCollector = collector;
+
+    // Subscribe to events for telemetry collection
+    if (collector.isEnabled()) {
+      this.on("event", (event) => {
+        collector.handleEvent(event);
+      });
+    }
   }
 
   private setupStateManagerListeners(): void {
@@ -611,7 +639,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
               help: "Connect to the WebSocket endpoint to interact with Hankweave",
             }),
             {
-              status: 426,
+              status: 400,
               headers: {
                 "Content-Type": "application/json",
                 "Access-Control-Allow-Origin": "*",
@@ -712,9 +740,21 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
     console.log(`${"═".repeat(50)}\n`);
 
-    // Handle process termination
-    process.on("SIGINT", () => this.shutdown("SIGINT"));
-    process.on("SIGTERM", () => this.shutdown("SIGTERM"));
+    // Handle process termination — second signal escalates to force shutdown
+    process.on("SIGINT", () => {
+      if (this.isShuttingDown) {
+        this.forceShutdown("second SIGINT");
+      } else {
+        this.shutdown("SIGINT");
+      }
+    });
+    process.on("SIGTERM", () => {
+      if (this.isShuttingDown) {
+        this.forceShutdown("second SIGTERM");
+      } else {
+        this.shutdown("SIGTERM");
+      }
+    });
     process.on("uncaughtException", (error) => {
       this.logger.log(`Uncaught exception: ${error.message}`, "error");
       if (error.stack) {
@@ -1081,6 +1121,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         await this.shutdown(command.data?.reason || "client request");
         break;
 
+      case "server.force_shutdown":
+        await this.forceShutdown(command.data?.reason || "client force request");
+        break;
+
       case "checkpoint.list":
         await this.listCheckpoints(command.data?.runId);
         break;
@@ -1397,6 +1441,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     this.currentRunId = runId;
 
+    // Set run ID on telemetry collector for LLM analytics trace correlation
+    if (this.telemetryCollector) {
+      this.telemetryCollector.setRunId(runId);
+    }
+
     // Update lock file with runId and heartbeat
     interface LockFile {
       pid: number;
@@ -1568,6 +1617,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
+    let rigSetupTelemetry:
+      | {
+          commandCount: number;
+          durationMs: number;
+        }
+      | undefined;
+
     // Run rig setup operations if configured and we don't ask for explicit skip
     // and there is no existing rig setup checkpoint for this codon
     if (!skipPreCommands && !rigSetupCheckpoint && codon.rigSetup && codon.rigSetup.length > 0) {
@@ -1665,6 +1721,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           // Check if this operation allows failure (either per-operation or global flag)
           // NOTE: Use nullish coalescing since ignoreRigFailures is optional in the type
           const ignoreFailure = item.allowFailure || (this.config.ignoreRigFailures ?? false);
+          this.emit("event", {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "rig.setup.failed",
+            data: {
+              codonId: codonId,
+              failureType: this.classifyRigSetupFailureType(error, item.type),
+              exitCode: isCommandError ? exitCode : undefined,
+              commandIndex: index,
+              ignored: ignoreFailure,
+            },
+          } as RigSetupFailedEvent);
           if (ignoreFailure) {
             const reason = item.allowFailure ? "allowFailure=true" : "--ignore-rig-failures";
             // Log warning but continue execution
@@ -1844,7 +1912,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           message: `Rig setup completed for codon '${codon.name}' (${rigSetupDuration}ms, ${rigSetupCompletedCount} succeeded${rigSetupFailedCount > 0 ? `, ${rigSetupFailedCount} failed` : ""})`,
         },
       } as InfoEvent);
+
+      rigSetupTelemetry = {
+        commandCount: rigSetupCount,
+        durationMs: rigSetupDuration,
+      };
     }
+
+    let rigSetupCheckpointCreated = false;
 
     // Transition to starting after preparing (regardless of rig setup)
     this.stateManager.transition({
@@ -1993,14 +2068,30 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
       // Create checkpoint after rig setup if we have rig setup
       if (!skipPreCommands && codon.rigSetup && this.checkpointingEnabled) {
-        await this.createCheckpoint({
+        const checkpointHash = await this.createCheckpoint({
           status: "rig-setup",
           codonId: codonId,
           codonName: codon.name,
           runId: this.currentRunId || RunId("unknown"),
           timestamp: new Date().toISOString(),
         });
+        rigSetupCheckpointCreated = !!checkpointHash;
       }
+    }
+
+    if (rigSetupTelemetry) {
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "rig.setup.completed",
+        data: {
+          codonId: codonId,
+          rigType: rigSetupTelemetry.commandCount === 1 ? "command" : "commands",
+          commandCount: rigSetupTelemetry.commandCount,
+          durationMs: rigSetupTelemetry.durationMs,
+          createdCheckpoint: rigSetupCheckpointCreated,
+        },
+      } as RigSetupCompletedEvent);
     }
 
     // Get previous session ID if needed
@@ -3406,6 +3497,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           true, // This IS a loop-level archive
         );
       }
+
+      this.emitLoopIterationCompletedEvent({
+        codonId: CodonId(codonId),
+        isContextExceeded,
+      });
     }
 
     // Clean up - now happens after state is persisted
@@ -3469,6 +3565,24 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         } as import("./types/types.js").ServerIdleEvent);
       }
     } else if (finalStatus === "failed" && !this.isShuttingDown) {
+      // Capture error for PostHog error tracking
+      try {
+        const { captureError } = await import("./telemetry/error-tracking.js");
+        const failureType = this.codonFailureReason?.type || "unknown";
+        const failureMsg = this.codonFailureReason?.message || `Codon ${codonId} failed`;
+        const err = new Error(failureMsg);
+        err.name = `CodonFailure:${failureType}`;
+        captureError(err, {
+          codonStatus: "failed",
+          runStatus: "failed",
+          failureType,
+          exitCode,
+          errorCode: failureType,
+        });
+      } catch {
+        // Silent fail - error tracking should never impact runtime
+      }
+
       const action = this.resolveFailurePolicy(
         CodonId(codonId),
         codonConfig,
@@ -3559,6 +3673,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           await this.stateManager.expandNextIterationForCodon({
             codonId: CodonId(codonId),
             contextExceeded: false, // Failed codon, not context exceeded
+          });
+          this.emitLoopIterationCompletedEvent({
+            codonId: CodonId(codonId),
+            isContextExceeded: false,
           });
 
           // Check if there's a next codon to run
@@ -5746,6 +5864,111 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.pendingToolUses.clear();
   }
 
+  private classifyRigSetupFailureType(
+    error: unknown,
+    operationType: "copy" | "command",
+  ): "command_failed" | "timeout" | "other" {
+    const errorText = toError(error).message.toLowerCase();
+    const stderrText =
+      error instanceof CommandError && typeof error.stderr === "string"
+        ? error.stderr.toLowerCase()
+        : "";
+
+    // Timeout-like failures should be categorized separately even for command operations.
+    if (
+      errorText.includes("timed out") ||
+      errorText.includes("timeout") ||
+      errorText.includes("etimedout") ||
+      stderrText.includes("timed out") ||
+      stderrText.includes("timeout") ||
+      stderrText.includes("etimedout")
+    ) {
+      return "timeout";
+    }
+
+    if (error instanceof CommandError || operationType === "command") {
+      return "command_failed";
+    }
+
+    return "other";
+  }
+
+  private emitLoopIterationCompletedEvent(params: {
+    codonId: CodonId;
+    isContextExceeded: boolean;
+  }): void {
+    const codon = this.stateManager.getCodonInCurrentRun(params.codonId);
+    if (!codon?.loopContext) return;
+
+    const { loopId, iteration, codonIndexInLoop } = codon.loopContext;
+    const loopConfig = this.config.codons.find(
+      (item): item is Extract<CodonConfig, { type: "loop" }> =>
+        item.type === "loop" && item.id === loopId,
+    );
+    if (!loopConfig) return;
+
+    const isLastCodonInIteration = codonIndexInLoop === loopConfig.codons.length - 1;
+    const contextExceededTermination =
+      params.isContextExceeded && loopConfig.terminateOn.type === "contextExceeded";
+    const isIterationCompleted = contextExceededTermination || isLastCodonInIteration;
+    if (!isIterationCompleted) return;
+
+    let isFinal = false;
+    let terminationReason:
+      | "iteration_limit"
+      | "context_exceeded"
+      | "sentinel_skip"
+      | "failure"
+      | undefined;
+
+    if (contextExceededTermination) {
+      isFinal = true;
+      terminationReason = "context_exceeded";
+    } else if (
+      loopConfig.terminateOn.type === "iterationLimit" &&
+      iteration >= loopConfig.terminateOn.limit - 1
+    ) {
+      isFinal = true;
+      terminationReason = "iteration_limit";
+    }
+
+    const currentRun = this.currentRunId ? this.stateManager.getRunById(this.currentRunId) : null;
+    if (!currentRun) return;
+
+    const iterationCodons = currentRun.codons.filter(
+      (entry) =>
+        entry.loopContext?.loopId === loopId &&
+        entry.loopContext?.iteration === iteration &&
+        isTerminalCodonStatus(entry.status),
+    );
+
+    const durationMs = iterationCodons.reduce((sum, entry) => {
+      const startMs = new Date(entry.startTime).getTime();
+      const endMs = "endTime" in entry ? new Date(entry.endTime).getTime() : startMs;
+      return sum + Math.max(0, endMs - startMs);
+    }, 0);
+    const costUsd = iterationCodons.reduce((sum, entry) => sum + getCodonCost(entry), 0);
+    const tokensUsed = iterationCodons.reduce((sum, entry) => {
+      const tokens = getCodonTokens(entry);
+      return sum + tokens.inputTokens + tokens.outputTokens;
+    }, 0);
+
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "loop.iteration.completed",
+      data: {
+        loopId,
+        iteration,
+        durationMs,
+        costUsd,
+        tokensUsed,
+        isFinal,
+        terminationReason,
+      },
+    } as LoopIterationCompletedEvent);
+  }
+
   private async runCommand(
     shellCommand: ShellCommand | RigShellCommand | string,
     lastCopiedPath?: string,
@@ -6042,13 +6265,28 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * @param exitCode - Optional exit code override. If undefined, determined from run status
    */
   async shutdown(reason: string, exitProcess = true, exitCode?: number): Promise<void> {
+    // Second call during shutdown escalates to force shutdown
     if (this.isShuttingDown) {
-      this.logger.log(`Shutdown already in progress, ignoring: ${reason}`);
+      this.logger.log(`Shutdown already in progress, escalating to force shutdown: ${reason}`);
+      await this.forceShutdown(reason, exitProcess);
       return;
     }
     this.logger.log(`Shutting down server: ${reason}`);
+    this.isShuttingDown = true;
 
-    // Kill any running process immediately before setting shutdown flag
+    // Notify clients that we're shutting down and waiting for the agent process
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "info",
+      data: {
+        message:
+          "Shutting down: waiting for agent process to exit. Send server.force_shutdown to force quit.",
+      },
+    } as InfoEvent);
+
+    // Kill any running process — this now properly waits for the child to die
+    // (up to PROCESS_KILL_GRACE_MS with SIGKILL escalation for shims)
     if (this.currentCodon) {
       const runner = this.codonRunners.get(this.currentCodon.codonId);
       if (runner) {
@@ -6056,8 +6294,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         await runner.kill("SIGTERM");
       }
     }
-
-    this.isShuttingDown = true;
 
     // Create exit checkpoint if not shutting down normally (all codons completed)
     if (reason !== "all codons completed" && this.checkpointingEnabled && this.currentCodon) {
@@ -6095,6 +6331,25 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Wait for any pending state transitions
     await this.stateManager.waitForPendingTransitions();
+
+    // Send telemetry and flush Sentry before closing connections
+    if (this.telemetryCollector) {
+      try {
+        const currentRun = this.stateManager.getCurrentRun();
+        await this.telemetryCollector.sendRunTelemetry(currentRun);
+        await this.telemetryCollector.shutdown();
+      } catch {
+        // Silent fail - telemetry should never block shutdown
+      }
+    }
+
+    // Flush PostHog error tracking
+    try {
+      const { flushErrorTracking } = await import("./telemetry/error-tracking.js");
+      await flushErrorTracking(2000);
+    } catch {
+      // Silent fail
+    }
 
     // Clear heartbeat interval
     if (this.heartbeatInterval) {
@@ -6178,6 +6433,72 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       // Small delay to ensure log is written before process exits
       setTimeout(() => {
         process.exit(finalExitCode);
+      }, TIMEOUTS.CODON_CLEANUP_DELAY_MS);
+    }
+  }
+
+  /**
+   * Force shutdown the Hankweave server immediately.
+   * Called when the user presses q/Ctrl+C a second time during graceful shutdown,
+   * or when a client sends the server.force_shutdown command.
+   *
+   * This sends SIGKILL to shim processes (or abort to SDK sessions),
+   * performs minimal cleanup, and exits immediately.
+   *
+   * @param reason - Reason for force shutdown (for logging)
+   * @param exitProcess - Whether to call process.exit() (default: true, false for tests)
+   */
+  async forceShutdown(reason: string, exitProcess = true): Promise<void> {
+    this.logger.log(`Force shutting down server: ${reason}`);
+
+    // Force kill any running process immediately
+    if (this.currentCodon) {
+      const runner = this.codonRunners.get(this.currentCodon.codonId);
+      if (runner) {
+        this.logger.log("Force killing current codon runner");
+        await runner.forceKill();
+      }
+    }
+
+    // Minimal cleanup — skip checkpoints, telemetry, state transitions
+    this.cleanupCurrentCodon();
+
+    // Close all connected clients
+    for (const [clientId, client] of this.clients) {
+      try {
+        client.close();
+      } catch (error) {
+        this.logger.log(`Error closing client ${clientId}: ${error}`, "error");
+      }
+    }
+    this.clients.clear();
+
+    if (this.server) {
+      this.server.stop();
+      this.server = null;
+    }
+
+    // Stop proxy server
+    if (this.proxyRunner) {
+      this.proxyRunner.stop();
+      this.proxyRunner = null;
+    }
+
+    // Remove lock file
+    if (fs.existsSync(this.config.lockFile)) {
+      try {
+        fs.unlinkSync(this.config.lockFile);
+      } catch {
+        // Best effort
+      }
+    }
+
+    this.logger.log("Force shutdown complete");
+
+    if (exitProcess && reason !== "running integration test") {
+      // Force exit immediately
+      setTimeout(() => {
+        process.exit(1);
       }, TIMEOUTS.CODON_CLEANUP_DELAY_MS);
     }
   }

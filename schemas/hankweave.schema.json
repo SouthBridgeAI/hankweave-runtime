@@ -79,6 +79,26 @@
           "additionalProperties": false,
           "description": "Sentinel system configuration"
         },
+        "telemetry": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable or disable telemetry"
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri",
+              "description": "Custom telemetry endpoint URL"
+            },
+            "debug": {
+              "type": "boolean",
+              "description": "Print payloads to console instead of sending"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Telemetry configuration"
+        },
         "$schema": {
           "type": "string",
           "description": "JSON Schema URL for editor support"

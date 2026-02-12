@@ -145,7 +145,7 @@ async function runSelfTest() {
 import * as fs4 from "fs";
 import * as path4 from "path";
 
-// ../../node_modules/.bun/@openai+codex-sdk@0.81.0/node_modules/@openai/codex-sdk/dist/index.js
+// ../../node_modules/.bun/@openai+codex-sdk@0.98.0/node_modules/@openai/codex-sdk/dist/index.js
 import { promises as fs2 } from "fs";
 import os2 from "os";
 import path2 from "path";
@@ -218,6 +218,7 @@ var Thread = class {
       modelReasoningEffort: options?.modelReasoningEffort,
       signal: turnOptions.signal,
       networkAccessEnabled: options?.networkAccessEnabled,
+      webSearchMode: options?.webSearchMode,
       webSearchEnabled: options?.webSearchEnabled,
       approvalPolicy: options?.approvalPolicy,
       additionalDirectories: options?.additionalDirectories
@@ -285,12 +286,19 @@ var TYPESCRIPT_SDK_ORIGINATOR = "codex_sdk_ts";
 var CodexExec = class {
   executablePath;
   envOverride;
-  constructor(executablePath = null, env) {
+  configOverrides;
+  constructor(executablePath = null, env, configOverrides) {
     this.executablePath = executablePath || findCodexPath();
     this.envOverride = env;
+    this.configOverrides = configOverrides;
   }
   async *run(args) {
     const commandArgs = ["exec", "--experimental-json"];
+    if (this.configOverrides) {
+      for (const override of serializeConfigOverrides(this.configOverrides)) {
+        commandArgs.push("--config", override);
+      }
+    }
     if (args.model) {
       commandArgs.push("--model", args.model);
     }
@@ -320,19 +328,23 @@ var CodexExec = class {
         `sandbox_workspace_write.network_access=${args.networkAccessEnabled}`
       );
     }
-    if (args.webSearchEnabled !== void 0) {
-      commandArgs.push("--config", `features.web_search_request=${args.webSearchEnabled}`);
+    if (args.webSearchMode) {
+      commandArgs.push("--config", `web_search="${args.webSearchMode}"`);
+    } else if (args.webSearchEnabled === true) {
+      commandArgs.push("--config", `web_search="live"`);
+    } else if (args.webSearchEnabled === false) {
+      commandArgs.push("--config", `web_search="disabled"`);
     }
     if (args.approvalPolicy) {
       commandArgs.push("--config", `approval_policy="${args.approvalPolicy}"`);
+    }
+    if (args.threadId) {
+      commandArgs.push("resume", args.threadId);
     }
     if (args.images?.length) {
       for (const image of args.images) {
         commandArgs.push("--image", image);
       }
-    }
-    if (args.threadId) {
-      commandArgs.push("resume", args.threadId);
     }
     const env = {};
     if (this.envOverride) {
@@ -407,6 +419,82 @@ var CodexExec = class {
     }
   }
 };
+function serializeConfigOverrides(configOverrides) {
+  const overrides = [];
+  flattenConfigOverrides(configOverrides, "", overrides);
+  return overrides;
+}
+function flattenConfigOverrides(value, prefix, overrides) {
+  if (!isPlainObject(value)) {
+    if (prefix) {
+      overrides.push(`${prefix}=${toTomlValue(value, prefix)}`);
+      return;
+    } else {
+      throw new Error("Codex config overrides must be a plain object");
+    }
+  }
+  const entries = Object.entries(value);
+  if (!prefix && entries.length === 0) {
+    return;
+  }
+  if (prefix && entries.length === 0) {
+    overrides.push(`${prefix}={}`);
+    return;
+  }
+  for (const [key, child] of entries) {
+    if (!key) {
+      throw new Error("Codex config override keys must be non-empty strings");
+    }
+    if (child === void 0) {
+      continue;
+    }
+    const path32 = prefix ? `${prefix}.${key}` : key;
+    if (isPlainObject(child)) {
+      flattenConfigOverrides(child, path32, overrides);
+    } else {
+      overrides.push(`${path32}=${toTomlValue(child, path32)}`);
+    }
+  }
+}
+function toTomlValue(value, path32) {
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  } else if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Codex config override at ${path32} must be a finite number`);
+    }
+    return `${value}`;
+  } else if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  } else if (Array.isArray(value)) {
+    const rendered = value.map((item, index) => toTomlValue(item, `${path32}[${index}]`));
+    return `[${rendered.join(", ")}]`;
+  } else if (isPlainObject(value)) {
+    const parts = [];
+    for (const [key, child] of Object.entries(value)) {
+      if (!key) {
+        throw new Error("Codex config override keys must be non-empty strings");
+      }
+      if (child === void 0) {
+        continue;
+      }
+      parts.push(`${formatTomlKey(key)} = ${toTomlValue(child, `${path32}.${key}`)}`);
+    }
+    return `{${parts.join(", ")}}`;
+  } else if (value === null) {
+    throw new Error(`Codex config override at ${path32} cannot be null`);
+  } else {
+    const typeName = typeof value;
+    throw new Error(`Unsupported Codex config override value at ${path32}: ${typeName}`);
+  }
+}
+var TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
+function formatTomlKey(key) {
+  return TOML_BARE_KEY.test(key) ? key : JSON.stringify(key);
+}
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 var scriptFileName = fileURLToPath(import.meta.url);
 var scriptDirName = path22.dirname(scriptFileName);
 function findCodexPath() {
@@ -466,7 +554,8 @@ var Codex = class {
   exec;
   options;
   constructor(options = {}) {
-    this.exec = new CodexExec(options.codexPathOverride, options.env);
+    const { codexPathOverride, env, config } = options;
+    this.exec = new CodexExec(codexPathOverride, env, config);
     this.options = options;
   }
   /**
@@ -632,6 +721,27 @@ function getCodexModelId(spec) {
   return spec.modelID;
 }
 
+// Model resolution assertions - verify reasoning effort parsing at load time
+{
+  const testCases = [
+    { input: "gpt-5.3-codex-high", expectedModelID: "gpt-5.3-codex", expectedEffort: "high" },
+    { input: "gpt-5.3-codex-xhigh", expectedModelID: "gpt-5.3-codex", expectedEffort: "xhigh" },
+    { input: "gpt-5.2-codex-high", expectedModelID: "gpt-5.2-codex", expectedEffort: "high" },
+    { input: "gpt-5.2-xhigh", expectedModelID: "gpt-5.2", expectedEffort: "xhigh" },
+    { input: "gpt-5.3-codex", expectedModelID: "gpt-5.3-codex", expectedEffort: undefined },
+  ];
+  for (const tc of testCases) {
+    const result = resolveModel(tc.input);
+    if (result.modelID !== tc.expectedModelID || result.reasoningEffort !== tc.expectedEffort) {
+      throw new Error(
+        `Model resolution assertion failed for "${tc.input}": ` +
+        `expected modelID="${tc.expectedModelID}" effort="${tc.expectedEffort}", ` +
+        `got modelID="${result.modelID}" effort="${result.reasoningEffort}"`
+      );
+    }
+  }
+}
+
 // src/utils/output.ts
 function emit(message) {
   console.log(JSON.stringify(message));
@@ -793,6 +903,8 @@ var CodexShim = class {
       },
       workStarted: false,
       hasReceivedDeltas: false,
+      lastEmittedAssistantText: "",
+      lastEmittedReasoningByItemId: /* @__PURE__ */ new Map(),
       emittedToolIds: /* @__PURE__ */ new Set(),
       toolIdMapping: /* @__PURE__ */ new Map()
     };
@@ -864,7 +976,7 @@ ${this.args.appendSystemPrompt}`;
     this.apiStartTime = state.apiStartTime;
     const { events } = await state.thread.runStreamed(finalPrompt);
     const currentMessageContent = [];
-    const currentMessageId = generateMessageId();
+    let currentMessageId = generateMessageId();
     const pendingToolResults = /* @__PURE__ */ new Map();
     let systemInitEmitted = false;
     for await (const event of events) {
@@ -908,10 +1020,11 @@ ${this.args.appendSystemPrompt}`;
             currentMessageContent,
             pendingToolResults,
             model,
+            currentMessageId,
             event.type === "item.completed"
           );
           break;
-        case "turn.completed":
+        case "turn.completed": {
           if (event.usage) {
             state.totalUsage.input_tokens += event.usage.input_tokens;
             state.totalUsage.output_tokens += event.usage.output_tokens;
@@ -920,11 +1033,12 @@ ${this.args.appendSystemPrompt}`;
             }
           }
           verboseLog(this.args.verbose, "Turn completed", event.usage);
-          if (currentMessageContent.length > 0) {
+          const completionContent = state.hasReceivedDeltas ? [] : currentMessageContent;
+          if (completionContent.length > 0 || event.usage) {
             this.emitAssistantMessage(
               currentMessageId,
               model,
-              currentMessageContent,
+              completionContent,
               event.usage,
               "end_turn"
             );
@@ -933,7 +1047,13 @@ ${this.args.appendSystemPrompt}`;
             this.emitToolResult(result);
           }
           pendingToolResults.clear();
+          currentMessageContent.length = 0;
+          state.hasReceivedDeltas = false;
+          state.lastEmittedAssistantText = "";
+          state.lastEmittedReasoningByItemId.clear();
+          currentMessageId = generateMessageId();
           break;
+        }
         case "turn.failed":
           verboseLog(this.args.verbose, "Turn failed:", event.error);
           if (this.args.debugDir) {
@@ -958,10 +1078,23 @@ ${this.args.appendSystemPrompt}`;
       this.createRawLogFile(state.sessionId);
     }
   }
-  handleItemEvent(item, state, currentMessageContent, pendingToolResults, _model, _isCompleted = false) {
+  handleItemEvent(item, state, currentMessageContent, pendingToolResults, model, currentMessageId, _isCompleted = false) {
     switch (item.type) {
       case "agent_message":
-        if (item.text && !state.hasReceivedDeltas) {
+        if (item.text) {
+          const previousText = state.lastEmittedAssistantText || "";
+          const deltaText = item.text.startsWith(previousText) ? item.text.slice(previousText.length) : item.text;
+          if (deltaText) {
+            this.emitAssistantMessage(
+              currentMessageId,
+              model,
+              [{ type: "text", text: deltaText }],
+              void 0,
+              null
+            );
+            state.hasReceivedDeltas = true;
+          }
+          state.lastEmittedAssistantText = item.text;
           const existing = currentMessageContent.find((c) => c.type === "text");
           if (existing && existing.type === "text") {
             existing.text = item.text;
@@ -972,31 +1105,69 @@ ${this.args.appendSystemPrompt}`;
         break;
       case "reasoning":
         if (item.text) {
+          const reasoningItemId = item.id || "reasoning";
+          const previousReasoning = state.lastEmittedReasoningByItemId.get(reasoningItemId) || "";
+          const deltaThinking = item.text.startsWith(previousReasoning) ? item.text.slice(previousReasoning.length) : item.text;
+          if (deltaThinking) {
+            this.emitAssistantMessage(
+              currentMessageId,
+              model,
+              [{ type: "thinking", thinking: deltaThinking }],
+              void 0,
+              null
+            );
+            state.hasReceivedDeltas = true;
+          }
+          state.lastEmittedReasoningByItemId.set(reasoningItemId, item.text);
           currentMessageContent.push({ type: "thinking", thinking: item.text });
         }
         break;
       case "command_execution":
-        this.handleCommandExecution(item, state, currentMessageContent, pendingToolResults);
+        this.handleCommandExecution(
+          item,
+          state,
+          currentMessageContent,
+          pendingToolResults,
+          model,
+          currentMessageId
+        );
         break;
       case "mcp_tool_call":
-        this.handleMcpToolCall(item, state, currentMessageContent, pendingToolResults);
+        this.handleMcpToolCall(
+          item,
+          state,
+          currentMessageContent,
+          pendingToolResults,
+          model,
+          currentMessageId
+        );
         break;
       case "file_change":
-        this.handleFileChange(item, state, currentMessageContent, pendingToolResults);
+        this.handleFileChange(
+          item,
+          state,
+          currentMessageContent,
+          pendingToolResults,
+          model,
+          currentMessageId
+        );
         break;
     }
   }
-  handleCommandExecution(item, state, currentMessageContent, pendingToolResults) {
+  handleCommandExecution(item, state, currentMessageContent, pendingToolResults, model, currentMessageId) {
     if (!state.emittedToolIds.has(item.id)) {
       const toolUseId2 = generateToolUseId();
       state.emittedToolIds.add(item.id);
       state.toolIdMapping.set(item.id, toolUseId2);
-      currentMessageContent.push({
+      const toolUse = {
         type: "tool_use",
         id: toolUseId2,
         name: "Bash",
         input: { command: item.command }
-      });
+      };
+      currentMessageContent.push(toolUse);
+      this.emitAssistantMessage(currentMessageId, model, [toolUse], void 0, null);
+      state.hasReceivedDeltas = true;
     }
     const toolUseId = state.toolIdMapping.get(item.id);
     if (!toolUseId) return;
@@ -1012,18 +1183,21 @@ ${this.args.appendSystemPrompt}`;
       content: item.status === "failed" ? { is_error: true, error: content } : content
     });
   }
-  handleMcpToolCall(item, state, currentMessageContent, pendingToolResults) {
+  handleMcpToolCall(item, state, currentMessageContent, pendingToolResults, model, currentMessageId) {
     if (!state.emittedToolIds.has(item.id)) {
       const toolUseId2 = generateToolUseId();
       state.emittedToolIds.add(item.id);
       state.toolIdMapping.set(item.id, toolUseId2);
       const toolName = normalizeToolName(item.tool);
-      currentMessageContent.push({
+      const toolUse = {
         type: "tool_use",
         id: toolUseId2,
         name: toolName,
         input: normalizeToolInput(item.arguments || {})
-      });
+      };
+      currentMessageContent.push(toolUse);
+      this.emitAssistantMessage(currentMessageId, model, [toolUse], void 0, null);
+      state.hasReceivedDeltas = true;
     }
     const toolUseId = state.toolIdMapping.get(item.id);
     if (!toolUseId) return;
@@ -1040,19 +1214,22 @@ ${this.args.appendSystemPrompt}`;
       content: item.status === "failed" ? { is_error: true, error: item.error?.message || "Failed" } : content
     });
   }
-  handleFileChange(item, state, currentMessageContent, pendingToolResults) {
+  handleFileChange(item, state, currentMessageContent, pendingToolResults, model, currentMessageId) {
     if (!state.emittedToolIds.has(item.id)) {
       const toolUseId2 = generateToolUseId();
       state.emittedToolIds.add(item.id);
       state.toolIdMapping.set(item.id, toolUseId2);
       const change2 = item.changes[0];
       const toolName = change2.kind === "add" ? "Write" : "Edit";
-      currentMessageContent.push({
+      const toolUse = {
         type: "tool_use",
         id: toolUseId2,
         name: toolName,
         input: { file_path: change2.path }
-      });
+      };
+      currentMessageContent.push(toolUse);
+      this.emitAssistantMessage(currentMessageId, model, [toolUse], void 0, null);
+      state.hasReceivedDeltas = true;
     }
     const toolUseId = state.toolIdMapping.get(item.id);
     if (!toolUseId) return;

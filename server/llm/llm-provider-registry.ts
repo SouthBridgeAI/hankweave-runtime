@@ -144,8 +144,8 @@ export class LlmProviderRegistry {
       // Combine models from both sources
       const allProviders = [...validatedData.providers, ...customModels.providers];
 
-      // Manually inject GPT 5.2 models (released December 2025)
-      const gpt52Models: ModelInfo[] = [
+      // Manually inject GPT 5.2/5.3 models with reasoning effort specifiers
+      const manuallyInjectedModels: ModelInfo[] = [
         {
           providerId: "openai",
           modelId: "gpt-5.2-high",
@@ -246,6 +246,58 @@ export class LlmProviderRegistry {
           release_date: "2025-12-10",
           last_updated: "2025-12-10",
         },
+        // GPT 5.3 Codex models (released February 2026)
+        // Note: There is no pure GPT 5.3 model; only Codex variants exist
+        {
+          providerId: "openai",
+          modelId: "gpt-5.3-codex-high",
+          name: "GPT-5.3 Codex High",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 1.75,
+            output: 14,
+            cache_read: 0.175,
+          },
+          limit: {
+            context: 400000,
+            output: 128000,
+          },
+          modalities: {
+            input: ["text", "image", "pdf"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2026-02-05",
+          last_updated: "2026-02-05",
+        },
+        {
+          providerId: "openai",
+          modelId: "gpt-5.3-codex-xhigh",
+          name: "GPT-5.3 Codex XHigh",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 3.5,
+            output: 28,
+            cache_read: 0.35,
+          },
+          limit: {
+            context: 400000,
+            output: 128000,
+          },
+          modalities: {
+            input: ["text", "image", "pdf"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2026-02-05",
+          last_updated: "2026-02-05",
+        },
       ];
 
       // Process each provider's models
@@ -268,8 +320,8 @@ export class LlmProviderRegistry {
         }
       }
 
-      // Register GPT 5.2 models
-      for (const model of gpt52Models) {
+      // Register manually injected models
+      for (const model of manuallyInjectedModels) {
         const fullModelId = `${model.providerId}/${model.modelId}`;
         this.uniqueModels.add(fullModelId.toLowerCase());
         this.models.set(fullModelId.toLowerCase(), model);

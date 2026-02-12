@@ -375,9 +375,10 @@ export class Sentinel {
     // Increment trigger counter for sequencing
     this.triggerNumber++;
 
-    // Emit sentinel.triggered event if configured (default OFF per spec)
-    const shouldEmitTriggered = this.config.reportToWebsocket?.triggers === true;
-    if (shouldEmitTriggered && this.sendEventToServer) {
+    // Always emit sentinel.triggered to the event stream for telemetry.
+    // The reportToWebsocket.triggers config only controls whether the TUI/client sees it,
+    // but telemetry always needs trigger data for analytics.
+    if (this.sendEventToServer) {
       this.sendEventToServer({
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),

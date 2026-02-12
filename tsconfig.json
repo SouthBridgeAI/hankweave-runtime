@@ -14,5 +14,10 @@
     "types": ["bun-types"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", ".logs/**/*", "intermediates/**/*"]
+  "exclude": [
+    "node_modules",
+    ".logs/**/*",
+    "intermediates/**/*",
+    "learning/**/*"
+  ]
 }
