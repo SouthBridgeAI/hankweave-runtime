@@ -32,7 +32,7 @@ function getQueuedEvents(
 }
 
 describe("TelemetryCollector lifecycle telemetry mapping", () => {
-  test("rig.setup.completed is silently ignored (removed in telemetry simplification)", () => {
+  test("rig.setup.completed is captured as rig_setup_completed telemetry event", () => {
     const collector = createCollector();
     const event: ServerEvent = {
       id: "evt-1",
@@ -50,10 +50,15 @@ describe("TelemetryCollector lifecycle telemetry mapping", () => {
     collector.handleEvent(event);
 
     const queued = getQueuedEvents(collector);
-    expect(queued.length).toBe(0);
+    expect(queued.length).toBe(1);
+    expect(queued[0].event).toBe("rig_setup_completed");
+    expect(queued[0].properties.rig_type).toBe("commands");
+    expect(queued[0].properties.command_count).toBe(3);
+    expect(queued[0].properties.duration_ms).toBe(1250);
+    expect(queued[0].properties.created_checkpoint).toBe(true);
   });
 
-  test("rig.setup.failed is silently ignored (removed in telemetry simplification)", () => {
+  test("rig.setup.failed is captured as rig_setup_failed telemetry event", () => {
     const collector = createCollector();
     const event: ServerEvent = {
       id: "evt-2",
@@ -71,7 +76,12 @@ describe("TelemetryCollector lifecycle telemetry mapping", () => {
     collector.handleEvent(event);
 
     const queued = getQueuedEvents(collector);
-    expect(queued.length).toBe(0);
+    expect(queued.length).toBe(1);
+    expect(queued[0].event).toBe("rig_setup_failed");
+    expect(queued[0].properties.failure_type).toBe("command_failed");
+    expect(queued[0].properties.exit_code).toBe(127);
+    expect(queued[0].properties.command_index).toBe(1);
+    expect(queued[0].properties.ignored).toBe(false);
   });
 
   test("loop.iteration.completed is silently ignored (removed in telemetry simplification)", () => {

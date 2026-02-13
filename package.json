@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.3.3",
+  "version": "0.4.1",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -35,9 +35,6 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "release:patch": "bun scripts/release.ts patch",
-    "release:minor": "bun scripts/release.ts minor",
-    "release:major": "bun scripts/release.ts major",
     "fetch-models": "bun scripts/fetch-models-dev.ts",
     "server": "bun server/index.ts",
     "server:headless": "bun server/index.ts --headless",

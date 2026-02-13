@@ -131,7 +131,7 @@ async function main() {
   try {
     cliArgs = parseCliArgs(args);
   } catch (error) {
-    console.error(`❌ Error: ${(error as Error).message}`);
+    console.error(`Error: ${(error as Error).message}`);
     process.exit(1);
   }
 
@@ -270,7 +270,7 @@ Use --output to copy them elsewhere.
       process.exit(0);
     } catch (error) {
       await sendCliTelemetry("cli_init", { success: false });
-      console.error(`\n❌ Init failed: ${(error as Error).message}\n`);
+      console.error(`\nInit failed: ${(error as Error).message}\n`);
       process.exit(1);
     }
   }
@@ -290,9 +290,9 @@ Use --output to copy them elsewhere.
         const lockData = JSON.parse(lockContent);
         // NOTE: Use !== undefined for port (port 0 is valid but falsy)
         port = lockData.port !== undefined ? lockData.port : 7777;
-        console.log(`📁 Read port ${port} from lock file: ${lockPath}`);
+        console.log(`> Read port ${port} from lock file: ${lockPath}`);
       } catch {
-        console.error(`❌ Could not read lock file: ${lockPath}`);
+        console.error(`Error: Could not read lock file: ${lockPath}`);
         console.error("   Use --port to specify the server port directly.");
         process.exit(1);
       }
@@ -316,7 +316,7 @@ Use --output to copy them elsewhere.
       const sdkResult = await ClaudeAgentSDKManager.ensureSdkAvailable();
       claudeSdkInfo = { version: sdkResult.version, cached: sdkResult.cached };
     } catch (error) {
-      console.error(`\n❌ ${(error as Error).message}\n`);
+      console.error(`\nError: ${(error as Error).message}\n`);
       if (error instanceof Error && error.stack) {
         console.error(`Stack: ${error.stack}`);
       }
@@ -336,7 +336,7 @@ Use --output to copy them elsewhere.
     // Use stable content-based path for consistent data hashing across runs
     resolvedDataPath = await getStableInputPath(inlineInput, "input");
     inputSourceType = "inline-text";
-    console.log(`📝 Using inline text input (${inlineInput.length} chars)`);
+    console.log(`> Using inline text input (${inlineInput.length} chars)`);
   } else if (dataSourcePath === "-") {
     // stdin input
     try {
@@ -344,9 +344,9 @@ Use --output to copy them elsewhere.
       // Use stable content-based path for consistent data hashing across runs
       resolvedDataPath = await getStableInputPath(stdinContent, "stdin");
       inputSourceType = "stdin";
-      console.log(`📝 Using stdin input (${stdinContent.length} chars)`);
+      console.log(`> Using stdin input (${stdinContent.length} chars)`);
     } catch (error) {
-      console.error(`❌ ${(error as Error).message}`);
+      console.error(`Error: ${(error as Error).message}`);
       process.exit(1);
     }
   } else {
@@ -370,7 +370,7 @@ Use --output to copy them elsewhere.
       const stats = await fs.promises.stat(absolutePath);
       if (stats.isDirectory()) {
         resolvedConfigPath = path.join(absolutePath, "hank.json");
-        console.log(`📁 Using hank.json from directory: ${resolvedConfigPath}`);
+        console.log(`> Using hank.json from directory: ${resolvedConfigPath}`);
       }
     } catch {
       // Path doesn't exist yet, let it fail later with proper error message
@@ -385,7 +385,7 @@ Use --output to copy them elsewhere.
         const potentialConfig = path.join(resolvedDataPath, "hank.json");
         if (fs.existsSync(potentialConfig)) {
           resolvedConfigPath = potentialConfig;
-          console.log(`📁 Found hank.json in data directory: ${resolvedConfigPath}`);
+          console.log(`> Found hank.json in data directory: ${resolvedConfigPath}`);
         }
       }
     } catch {
@@ -401,16 +401,16 @@ Use --output to copy them elsewhere.
   let absoluteConfigPath: string;
 
   if (isRemoteHankUrl(configPath)) {
-    console.log(`\n🌐 Fetching remote hank: ${configPath}`);
+    console.log(`\n> Fetching remote hank: ${configPath}`);
 
     try {
       const cached = await resolveRemoteHank(configPath);
       absoluteConfigPath = cached.hankPath;
 
       if (cached.wasFresh) {
-        console.log(`  📦 Using cached version (fetched ${cached.cachedAt.toLocaleString()})`);
+        console.log(`  > Using cached version (fetched ${cached.cachedAt.toLocaleString()})`);
       } else {
-        console.log(`  ✅ Cloned to cache`);
+        console.log(`  ✓ Cloned to cache`);
       }
 
       // Show hank summary (no confirmation needed - "power user" model)
@@ -418,7 +418,7 @@ Use --output to copy them elsewhere.
       const summary = getHankSummary(absoluteConfigPath, configPath, parsed.ref);
       displayHankSummary(summary);
     } catch (error) {
-      console.error(`\n❌ Failed to fetch remote hank: ${(error as Error).message}`);
+      console.error(`\nError: Failed to fetch remote hank: ${(error as Error).message}`);
       process.exit(1);
     }
   } else {
@@ -445,6 +445,7 @@ Use --output to copy them elsewhere.
         executionPath: executionPath ? path.resolve(executionPath) : undefined,
         startNew,
         modelOverride: resolvedConfig.model, // Pass resolved model override (from all config layers)
+        originalUrl: isRemoteHankUrl(configPath) ? configPath : undefined,
       });
       await sendCliTelemetry("cli_validate", {
         success: true,
@@ -463,7 +464,7 @@ Use --output to copy them elsewhere.
 
       if (errorLines.length > 1) {
         // Multi-line error - add spacing and formatting
-        console.error(`\n❌ Validation failed:\n`);
+        console.error(`\nValidation failed:\n`);
         console.error(`   ${errorLines[0]}\n`); // Header line
 
         // Add indentation and spacing for each error
@@ -475,7 +476,7 @@ Use --output to copy them elsewhere.
         }
       } else {
         // Single-line error
-        console.error(`\n❌ Validation failed: ${errorMessage}\n`);
+        console.error(`\nValidation failed: ${errorMessage}\n`);
       }
       process.exit(1);
     }
@@ -500,7 +501,7 @@ Use --output to copy them elsewhere.
     });
   } catch (error) {
     console.error("[ERROR] Execution setup failed!");
-    console.error(`❌ Execution setup failed: ${(error as Error).message}`);
+    console.error(`Error: Execution setup failed: ${(error as Error).message}`);
     process.exit(1);
   }
 
@@ -541,7 +542,7 @@ Use --output to copy them elsewhere.
       process.exit(result.success ? 0 : 1);
     } catch (error) {
       await sendCliTelemetry("cli_cleanup", { success: false });
-      console.error(`\n❌ Cleanup failed: ${(error as Error).message}`);
+      console.error(`\nError: Cleanup failed: ${(error as Error).message}`);
       process.exit(1);
     }
   }
@@ -552,7 +553,7 @@ Use --output to copy them elsewhere.
 
   // Display model override message if model is set from any config layer
   if (resolvedConfig.model) {
-    console.log(`⚙️  Using global model override: ${resolvedConfig.model} (applies to all codons)`);
+    console.log(`> Using global model override: ${resolvedConfig.model} (applies to all codons)`);
   }
 
   // Initialize LLM Provider Registry singleton before ANY config parsing/validation
@@ -566,7 +567,7 @@ Use --output to copy them elsewhere.
   // Auto-add $schema for editor support if missing
   const schemaAdded = ensureSchemaUrl(absoluteConfigPath);
   if (schemaAdded) {
-    console.log(`✨ Added $schema to ${path.basename(absoluteConfigPath)} for editor support`);
+    console.log(`+ Added $schema to ${path.basename(absoluteConfigPath)} for editor support`);
   }
 
   try {
@@ -597,7 +598,7 @@ Use --output to copy them elsewhere.
 
     // Log any non-fatal warnings
     if (warnings.length > 0) {
-      console.log("⚠️  Configuration warnings:");
+      console.log("!  Configuration warnings:");
       for (const warning of warnings) {
         console.log(`  - ${warning}`);
       }
@@ -625,7 +626,13 @@ Use --output to copy them elsewhere.
 
       // Output directory: CLI flag takes precedence, then resolved config
       // If neither is set, outputDirectory remains undefined (outputs stay in execution dir)
-      outputDirectory: outputPath || resolvedConfig.outputDirectory,
+      // IMPORTANT: Resolve to absolute path here so downstream code can use it directly
+      // without path.join(cwd, ...) — path.join treats absolute paths as relative segments.
+      outputDirectory: outputPath
+        ? path.resolve(originalCwd, outputPath)
+        : resolvedConfig.outputDirectory
+          ? path.resolve(originalCwd, resolvedConfig.outputDirectory)
+          : undefined,
 
       // Required: codons from validation
       codons,
@@ -636,13 +643,13 @@ Use --output to copy them elsewhere.
 
     // Preflight warning for potential output file conflicts
     if (serverConfig.outputDirectory) {
-      const fullOutputPath = path.join(originalCwd, serverConfig.outputDirectory);
+      const fullOutputPath = serverConfig.outputDirectory; // Already resolved to absolute
       try {
         if (fs.existsSync(fullOutputPath)) {
           const contents = fs.readdirSync(fullOutputPath);
           if (contents.length > 0) {
             console.log(
-              `⚠️  Output directory '${serverConfig.outputDirectory}' is not empty. ` +
+              `!  Output directory '${serverConfig.outputDirectory}' is not empty. ` +
                 `Conflicting files will be renamed (e.g., file.txt -> file_1_<timestamp>.txt).`,
             );
           }
@@ -716,7 +723,7 @@ Use --output to copy them elsewhere.
       setTimeout(() => {
         new BasicTUI(server);
       }, 100);
-      console.log("🎮 Running in TUI mode (use --headless to disable)");
+      console.log("> Running in TUI mode (use --headless to disable)");
     }
   } catch (error) {
     console.error("[ERROR] Server startup failed!");

@@ -389,11 +389,10 @@ async function handleDemo(_env: EnvironmentResult): Promise<void> {
 
   // Output directory: copy results to cwd so the user can find them easily
   const outputDir = path.resolve("hankweave-demo-output");
-  const outputDisplay = "./hankweave-demo-output";
 
-  // Build the command — show the user-friendly version, run the resolved version
+  // Build the command — show full resolved path so it's Cmd/Ctrl-clickable in terminals
   const runner = detectRunner();
-  const displayCommand = `${runner} hankweave ${DEMO_HANK_REPO} ${dataFolder} -o ${outputDisplay}`;
+  const displayCommand = `${runner} hankweave ${DEMO_HANK_REPO} ${dataFolder} -o ${outputDir}`;
 
   p.note(
     [
@@ -401,7 +400,7 @@ async function handleDemo(_env: EnvironmentResult): Promise<void> {
       "",
       slate("The TUI will show you progress in real-time."),
       slate("When it finishes, outputs will be copied to:"),
-      `  ${whiteBold(`${outputDisplay}/`)}`,
+      `  ${whiteBold(`${outputDir}/`)}`,
     ].join("\n"),
     amber("We'll run this"),
   );

@@ -171,7 +171,18 @@ function formatZodErrors(error: z.ZodError, rawConfig: unknown): string {
         const validFields = isLoop ? VALID_LOOP_FIELDS.join(", ") : VALID_CODON_FIELDS.join(", ");
         errorMsg = `  - ${itemType} "${codonName}" (${codonId}) has unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos. Valid fields are: ${validFields}.`;
       } else {
-        errorMsg = `  - Unrecognized field(s): ${keys}. Fix: Remove these fields or check for typos.`;
+        // Root-level unrecognized key — check if it's a codon field that was misplaced
+        const unrecognizedKeys = (issue as z.ZodIssue & { keys?: string[] }).keys || [];
+        const codonFieldHints = unrecognizedKeys.filter((k) =>
+          VALID_CODON_FIELDS.includes(k as (typeof VALID_CODON_FIELDS)[number]),
+        );
+        if (codonFieldHints.length > 0) {
+          errorMsg = `  - Unrecognized field(s) at hank root: ${keys}. "${codonFieldHints.join('", "')}" is a per-codon field — move it inside a codon in the "hank" array.`;
+        } else {
+          const validRootFields =
+            "$schema, meta, overrides, requirements, globalSystemPromptFile, globalSystemPromptText, hank";
+          errorMsg = `  - Unrecognized field(s) at hank root: ${keys}. Valid root fields are: ${validRootFields}.`;
+        }
       }
     } else {
       // Generic error
@@ -852,6 +863,7 @@ export const hankRequirementsSchema = z.object({
  */
 export const hankFileSchema = z
   .object({
+    $schema: z.string().optional().describe("JSON Schema URL for editor autocomplete support"),
     meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
     overrides: hankOverridesSchema
       .optional()
@@ -871,6 +883,7 @@ export const hankFileSchema = z
       "The immutable logic sequence (required)",
     ),
   })
+  .strict()
   .refine((data) => !(data.globalSystemPromptFile && data.globalSystemPromptText), {
     message: "Cannot specify both globalSystemPromptFile and globalSystemPromptText",
   });
@@ -925,19 +938,21 @@ export const codonConfigAuthoringSchema = z.union([
  * Authoring schema for hank files - used for JSON Schema generation.
  * Explicitly allows $schema for editor support.
  *
- * STRICTNESS: NOT strict - matches hankFileSchema (config.ts line 712) which allows
- * unknown keys at root level. This is intentional: $schema and other unknown keys
- * should be allowed at the root for extensibility.
+ * STRICTNESS: Strict - matches hankFileSchema which now uses .strict() to catch
+ * misplaced fields (e.g., codon-level fields at hank root). $schema is explicitly
+ * allowed as an optional field for editor autocomplete support.
  */
-export const hankFileAuthoringSchema = z.object({
-  $schema: z.string().optional().describe("JSON Schema URL for editor support"),
-  meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
-  overrides: hankOverridesSchema.optional().describe("Architect's overrides (optional)"),
-  hank: z
-    .array(codonConfigAuthoringSchema)
-    .min(1)
-    .describe("The immutable logic sequence (required)"),
-}); // NOT .strict() - intentionally allows unknown root keys like $schema
+export const hankFileAuthoringSchema = z
+  .object({
+    $schema: z.string().optional().describe("JSON Schema URL for editor support"),
+    meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
+    overrides: hankOverridesSchema.optional().describe("Architect's overrides (optional)"),
+    hank: z
+      .array(codonConfigAuthoringSchema)
+      .min(1)
+      .describe("The immutable logic sequence (required)"),
+  })
+  .strict();
 
 /**
  * Schema for runtime configuration (hankweave.json)

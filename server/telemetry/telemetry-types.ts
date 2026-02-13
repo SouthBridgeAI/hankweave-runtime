@@ -273,6 +273,7 @@ export interface TelemetryIdentity {
   clientId: string;
   createdAt: string;
   noticeShownAt?: string;
+  firstSuccessAt?: string; // Tracks first successful hank run (for star nudge)
 }
 
 // =============================================================================

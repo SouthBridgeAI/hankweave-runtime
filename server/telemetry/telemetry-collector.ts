@@ -454,6 +454,37 @@ export class TelemetryCollector {
         break;
       }
 
+      // ===== Rig setup lifecycle =====
+      case "rig.setup.completed": {
+        this.accumulated.queuedEvents.push({
+          event: "rig_setup_completed",
+          properties: {
+            run_id_hash: runIdHash,
+            codon_id_hash: event.data.codonId ? sha256(event.data.codonId) : "unknown",
+            rig_type: event.data.rigType,
+            command_count: event.data.commandCount,
+            duration_ms: event.data.durationMs,
+            created_checkpoint: event.data.createdCheckpoint,
+          },
+        });
+        break;
+      }
+
+      case "rig.setup.failed": {
+        this.accumulated.queuedEvents.push({
+          event: "rig_setup_failed",
+          properties: {
+            run_id_hash: runIdHash,
+            codon_id_hash: event.data.codonId ? sha256(event.data.codonId) : "unknown",
+            failure_type: event.data.failureType,
+            exit_code: event.data.exitCode,
+            command_index: event.data.commandIndex,
+            ignored: event.data.ignored,
+          },
+        });
+        break;
+      }
+
       // ===== Category G: Sentinel triggered =====
       case "sentinel.triggered": {
         this.accumulated.queuedEvents.push({

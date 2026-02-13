@@ -1,4 +1,6 @@
+import path from "node:path";
 import type { HankweaveRuntime } from "./hankweave-runtime.js";
+import { isFirstSuccess, markFirstSuccess } from "./telemetry/telemetry-identity.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
@@ -79,6 +81,26 @@ export class BasicTUI {
   private port: number;
   private server: HankweaveRuntime | null;
 
+  // Run stats accumulated from events (for shutdown summary)
+  private executionPath: string | null = null;
+  private agentRootPath: string | null = null;
+  private outputDirectory: string | null = null;
+  private runStartTime: number = Date.now();
+  private codonsStarted: number = 0;
+  private codonsCompleted: number = 0;
+  private codonsFailed: number = 0;
+  private totalCost: number = 0;
+  private lastCodonId: string | null = null;
+  private lastCodonFailed: boolean = false;
+  private lastFailureReason: string | null = null;
+  private summaryShown: boolean = false;
+
+  // Activity heartbeat — shows "working..." when TUI goes quiet
+  private lastOutputTime: number = Date.now();
+  private activityTimer: Timer | null = null;
+  private activitySeconds: number = 0;
+  private isShowingActivity: boolean = false;
+
   /**
    * Create TUI.
    * @param serverOrPort - HankweaveRuntime instance OR { port: number } for attach mode
@@ -155,6 +177,20 @@ export class BasicTUI {
     this.ws.onclose = () => {
       this.isConnected = false;
       this.handshakeComplete = false;
+      this.stopActivityTimer();
+
+      // Show shutdown summary on disconnect — this ensures it's always the last
+      // substantial output, even after sentinel shutdown messages.
+      if (!this.summaryShown && this.codonsStarted > 0) {
+        if (this.codonsFailed > 0) {
+          this.showShutdownSummary("failure");
+        } else if (this.isShuttingDown) {
+          this.showShutdownSummary("interrupted");
+        } else if (this.codonsCompleted > 0) {
+          this.showShutdownSummary("success");
+        }
+      }
+
       console.log(`${COLORS.dim}${SYMBOLS.pipe} Disconnected from server${COLORS.reset}`);
       // Server shutdown will handle process exit
     };
@@ -256,11 +292,189 @@ export class BasicTUI {
     return str.replace(/\u001b\[[0-9;]*m/g, "");
   }
 
+  /**
+   * Format a duration in milliseconds as a human-readable string.
+   */
+  private formatDuration(ms: number): string {
+    const totalSeconds = Math.floor(ms / 1000);
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes < 60) return `${minutes}m ${seconds}s`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return `${hours}h ${remainingMinutes}m`;
+  }
+
+  /**
+   * Show a shutdown summary box with run stats, paths, and next steps.
+   */
+  private showShutdownSummary(outcome: "success" | "failure" | "interrupted"): void {
+    if (this.summaryShown) return;
+    this.summaryShown = true;
+    this.stopActivityTimer();
+
+    const elapsed = this.formatDuration(Date.now() - this.runStartTime);
+    const totalCodons = this.codonsStarted;
+    const lines: string[] = [];
+
+    if (outcome === "success") {
+      // Happy path
+      lines.push(
+        `All ${this.codonsCompleted} codon${this.codonsCompleted === 1 ? "" : "s"} completed successfully in ${elapsed}.`,
+      );
+      lines.push("");
+      lines.push(`Total cost:  ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      if (this.agentRootPath) {
+        lines.push(`Workspace:   ${this.agentRootPath}`);
+      }
+
+      // Output path — always show where to look
+      lines.push("");
+      lines.push(`${COLORS.bold}Look here for output files:${COLORS.reset}`);
+      if (this.outputDirectory) {
+        lines.push(this.outputDirectory);
+      } else if (this.executionPath) {
+        lines.push(path.join(this.executionPath, "outputs"));
+      }
+
+      // First success star nudge
+      if (isFirstSuccess()) {
+        markFirstSuccess();
+        lines.push("");
+        lines.push(`${COLORS.dim}${"─ ".repeat(35)}${COLORS.reset}`);
+        lines.push(
+          `If Hankweave is useful, drop a star: ${COLORS.cyan}https://github.com/SouthBridgeAI/hankweave-runtime${COLORS.reset}`,
+        );
+      }
+    } else if (outcome === "failure") {
+      // Codon failure
+      lines.push(
+        `Codon ${this.codonsCompleted + 1} of ${totalCodons} failed: "${this.lastCodonId}" (after ${elapsed})`,
+      );
+      if (this.lastFailureReason) {
+        lines.push(`Reason: ${COLORS.red}${this.lastFailureReason}${COLORS.reset}`);
+      }
+      lines.push("");
+      lines.push(
+        `Completed:   ${this.codonsCompleted} of ${totalCodons} codon${totalCodons === 1 ? "" : "s"}`,
+      );
+      lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      if (this.agentRootPath) {
+        lines.push(`Workspace:   ${this.agentRootPath}`);
+      }
+      if (this.executionPath) {
+        lines.push("");
+        lines.push(
+          `Resume:      ${COLORS.dim}hankweave --execution ${this.executionPath}${COLORS.reset}`,
+        );
+      }
+    } else {
+      // User interrupted
+      lines.push(
+        `Stopped by user after ${this.codonsCompleted} of ${totalCodons} codon${totalCodons === 1 ? "" : "s"} (${elapsed} elapsed).`,
+      );
+      lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      if (this.agentRootPath) {
+        lines.push(`Workspace:   ${this.agentRootPath}`);
+      }
+      if (this.executionPath) {
+        lines.push("");
+        lines.push(
+          `Resume:      ${COLORS.dim}hankweave --execution ${this.executionPath}${COLORS.reset}`,
+        );
+      }
+    }
+
+    // Determine box style
+    const titleMap = {
+      success: `${SYMBOLS.check} Run Complete`,
+      failure: `${SYMBOLS.cross} Run Failed`,
+      interrupted: `${SYMBOLS.dot} Run Interrupted`,
+    };
+    const colorMap = {
+      success: COLORS.green,
+      failure: COLORS.red,
+      interrupted: COLORS.yellow,
+    };
+
+    console.log(""); // blank line before summary
+    this.drawBox(titleMap[outcome], lines, colorMap[outcome]);
+  }
+
+  /**
+   * Start the activity heartbeat timer.
+   * After 10s of no TUI output, shows a "working..." counter that updates every second.
+   */
+  private startActivityTimer(): void {
+    this.stopActivityTimer();
+    this.lastOutputTime = Date.now();
+    this.activitySeconds = 0;
+    this.isShowingActivity = false;
+
+    this.activityTimer = setInterval(() => {
+      const silentMs = Date.now() - this.lastOutputTime;
+      const silentSec = Math.floor(silentMs / 1000);
+
+      if (silentSec >= 10) {
+        // Print a newline before the first "Working..." to separate from previous output
+        if (!this.isShowingActivity) {
+          process.stdout.write("\n");
+        }
+        this.activitySeconds = silentSec;
+        this.isShowingActivity = true;
+        // \r overwrites the current line — no newline, so it stays compact
+        process.stdout.write(
+          `\r${COLORS.dim}${SYMBOLS.dot} Working... ${this.activitySeconds}s${COLORS.reset}  `,
+        );
+      }
+    }, 1000);
+  }
+
+  /**
+   * Reset the activity timer — called whenever the TUI prints something.
+   */
+  private resetActivityTimer(): void {
+    if (this.isShowingActivity) {
+      // Clear the "working..." line before printing new content
+      process.stdout.write("\r\x1b[K"); // \r + clear line
+      this.isShowingActivity = false;
+    }
+    this.lastOutputTime = Date.now();
+    this.activitySeconds = 0;
+  }
+
+  /**
+   * Stop the activity timer entirely.
+   */
+  private stopActivityTimer(): void {
+    if (this.activityTimer) {
+      clearInterval(this.activityTimer);
+      this.activityTimer = null;
+    }
+    if (this.isShowingActivity) {
+      process.stdout.write("\r\x1b[K");
+      this.isShowingActivity = false;
+    }
+  }
+
   private async handleServerEvent(event: ServerEvent): Promise<void> {
+    // Reset the activity timer on every event that produces output
+    this.resetActivityTimer();
+
     const timestamp = this.formatTimestamp(event.timestamp);
 
     switch (event.type) {
       case "server.ready":
+        // Store paths for shutdown summary
+        this.executionPath = event.data.executionPath;
+        this.agentRootPath = event.data.agentRootPath;
+        this.outputDirectory = event.data.outputDirectory ?? null;
+        this.runStartTime = Date.now();
+
+        // Start activity heartbeat now that the server is running
+        this.startActivityTimer();
+
         console.log(`\n${timestamp} ${COLORS.green}${COLORS.bold}Server Ready${COLORS.reset}`);
         console.log(
           `${COLORS.dim}  ${SYMBOLS.arrow} Version: ${event.data.serverVersion}${COLORS.reset}`,
@@ -286,6 +500,8 @@ export class BasicTUI {
       }
 
       case "codon.started": {
+        this.codonsStarted++;
+        this.lastCodonId = event.data.codonId;
         console.log(`\n${timestamp} ${COLORS.cyan}${COLORS.bold}Codon Started${COLORS.reset}`);
 
         // Build info lines for the box
@@ -328,6 +544,17 @@ export class BasicTUI {
       }
 
       case "codon.completed": {
+        // Track run stats
+        if (event.data.success || event.data.failureIgnored) {
+          this.codonsCompleted++;
+        } else {
+          this.codonsFailed++;
+          this.lastCodonFailed = true;
+          this.lastFailureReason = event.data.failureReason?.type ?? null;
+        }
+        this.totalCost += event.data.cost;
+        this.lastCodonId = event.data.codonId;
+
         const failureIgnored = event.data.failureIgnored;
 
         // Determine status color and symbol based on success/failure/ignored
@@ -522,7 +749,14 @@ export class BasicTUI {
         const message = event.data.message;
         // Highlight rig setup events with specific styling
         // MESSAGE FORMAT CONTRACT: Uses string matching on specific phrases
-        if (message.includes("Rig setup started")) {
+        if (message.includes("All codons completed successfully")) {
+          // Show a brief one-liner now; the full summary box prints on disconnect
+          // (after sentinel shutdown output finishes, so it's always the last thing)
+          const elapsed = this.formatDuration(Date.now() - this.runStartTime);
+          console.log(
+            `\n${timestamp} ${COLORS.green}${COLORS.bold}${SYMBOLS.check} All ${this.codonsCompleted} codon${this.codonsCompleted === 1 ? "" : "s"} completed${COLORS.reset} ${COLORS.dim}($${this.totalCost.toFixed(4)}, ${elapsed})${COLORS.reset}`,
+          );
+        } else if (message.includes("Rig setup started")) {
           console.log(`\n${timestamp} ${COLORS.yellow}${SYMBOLS.arrow} ${message}${COLORS.reset}`);
         } else if (message.includes("Rig setup completed")) {
           const isSuccess = !message.includes("failed");
@@ -538,9 +772,33 @@ export class BasicTUI {
       }
 
       case "server.idle": {
-        console.log(`\n${timestamp} ${COLORS.dim}Server Idle${COLORS.reset}`);
-        console.log(`  ${SYMBOLS.arrow} Reason: ${event.data.reason}`);
-        console.log(`  ${SYMBOLS.arrow} ${event.data.message}`);
+        const reason = event.data.reason as string;
+
+        // Build contextual command hints based on why we're idle
+        const hints: string[] = [];
+        if (reason === "rollback-completed" || reason === "codon-completed") {
+          hints.push(`${COLORS.cyan}[n]${COLORS.reset} start next codon`);
+          hints.push(`${COLORS.cyan}[r]${COLORS.reset} rollback`);
+          hints.push(`${COLORS.cyan}[q]${COLORS.reset} quit`);
+        } else if (reason === "all-codons-completed") {
+          hints.push(`${COLORS.cyan}[r]${COLORS.reset} rollback to re-run`);
+          hints.push(`${COLORS.cyan}[q]${COLORS.reset} quit`);
+        } else {
+          // startup or unknown
+          hints.push(`${COLORS.cyan}[n]${COLORS.reset} start next codon`);
+          hints.push(`${COLORS.cyan}[l]${COLORS.reset} list checkpoints`);
+          hints.push(`${COLORS.cyan}[q]${COLORS.reset} quit`);
+        }
+
+        this.drawBox(
+          "Waiting for Input",
+          [
+            event.data.message,
+            "",
+            `${COLORS.bold}Available commands:${COLORS.reset}  ${hints.join("  ")}`,
+          ],
+          COLORS.yellow,
+        );
         break;
       }
 
@@ -685,10 +943,12 @@ export class BasicTUI {
       }
 
       case "sentinel.output": {
+        // Split text content on newlines so each line gets proper box borders.
+        // Without this, embedded \n in LLM responses breaks the │ ... │ structure.
         const outputContent =
           event.data.outputType === "structured"
             ? JSON.stringify(event.data.content, null, 2).split("\n")
-            : [event.data.content as string];
+            : (event.data.content as string).split("\n");
 
         this.drawBox(
           `Sentinel Output: ${event.data.sentinelId}`,
@@ -719,6 +979,25 @@ export class BasicTUI {
       }
 
       // Silent handlers for internal/protocol events
+      case "rig.setup.completed": {
+        const durationSec = (event.data.durationMs / 1000).toFixed(1);
+        console.log(
+          `${timestamp} ${COLORS.green}${SYMBOLS.check} Rig setup completed${COLORS.reset} ${COLORS.dim}(${event.data.commandCount} command${event.data.commandCount === 1 ? "" : "s"}, ${durationSec}s)${COLORS.reset}`,
+        );
+        break;
+      }
+
+      case "rig.setup.failed": {
+        const ignored = event.data.ignored;
+        const color = ignored ? COLORS.yellow : COLORS.red;
+        const symbol = ignored ? SYMBOLS.dot : SYMBOLS.cross;
+        const suffix = ignored ? " (ignored)" : "";
+        console.log(
+          `${timestamp} ${color}${symbol} Rig setup failed: ${event.data.failureType}${suffix}${COLORS.reset}`,
+        );
+        break;
+      }
+
       case "state.transition":
         // Internal state event, too noisy for TUI
         break;
@@ -898,6 +1177,11 @@ export class BasicTUI {
               console.log(
                 `\n${COLORS.dim}${SYMBOLS.arrow} Shutting down... (press q again to force quit)${COLORS.reset}`,
               );
+              if (this.executionPath) {
+                console.log(
+                  `${COLORS.dim}${SYMBOLS.arrow} Resume with: hankweave --execution ${this.executionPath}${COLORS.reset}`,
+                );
+              }
               if (this.ws) {
                 this.ws.close();
               }
@@ -931,7 +1215,7 @@ export class BasicTUI {
           this.sendCommand({
             id: generateId(),
             type: "rollback.toLastSuccess",
-            data: { autoRestart: false },
+            data: { autoRestart: true },
           } as ClientCommand);
         });
         break;
@@ -1078,7 +1362,7 @@ export class BasicTUI {
           type: "rollback.toCheckpoint",
           data: {
             checkpointSha: selectedCheckpoint.sha,
-            autoRestart: false,
+            autoRestart: true,
           },
         } as ClientCommand);
       });

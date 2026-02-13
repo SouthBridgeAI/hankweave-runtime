@@ -109,3 +109,35 @@ export async function markNoticeShown(): Promise<void> {
     // Silent fail
   }
 }
+
+/**
+ * Check if this is the first successful hank run.
+ * Returns true if no firstSuccessAt has been recorded yet.
+ */
+export function isFirstSuccess(): boolean {
+  const filePath = getTelemetryFilePath();
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    const identity: TelemetryIdentity = JSON.parse(content);
+    return !identity.firstSuccessAt;
+  } catch {
+    return true; // No file = definitely first success
+  }
+}
+
+/**
+ * Mark that the first successful hank run has occurred.
+ */
+export function markFirstSuccess(): void {
+  const filePath = getTelemetryFilePath();
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    const identity: TelemetryIdentity = JSON.parse(content);
+    if (!identity.firstSuccessAt) {
+      identity.firstSuccessAt = new Date().toISOString();
+      fs.writeFileSync(filePath, JSON.stringify(identity, null, 2));
+    }
+  } catch {
+    // Silent fail
+  }
+}

@@ -43,7 +43,7 @@ const templates: Record<string, string> = {
     {
       "id": "analyze-codex",
       "name": "Analyze Project (Codex)",
-      "model": "gpt-5.1-codex-max",
+      "model": "gpt-5.1-codex-mini",
       "continuationMode": "fresh",
       "promptFile": "./prompts/analyze-codex.md",
       "checkpointedFiles": ["analysis-codex.md"],

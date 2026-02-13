@@ -113,7 +113,7 @@
           "command": {
             "run": "bun run tools/gemini-things/gemini-2.5-pro-plan-addendum.ts ./source/compiled-tests-source.txt ./plan/task.md ./plan/rough-workspace/gemini/code-plan.md -o ./plan/rough-workspace/gemini/tests-addendum.md"
           }
-        },
+        }
       ],
       "checkpointedFiles": []
     },

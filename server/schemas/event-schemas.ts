@@ -123,6 +123,7 @@ export const serverReadyEventDataSchema = z.object({
   dataPath: z.string(),
   port: z.number(),
   proxyPort: z.number().optional(),
+  outputDirectory: z.string().optional(), // Where outputs are copied (if configured)
 });
 
 export const stateSnapshotEventDataSchema = z.object({
@@ -280,7 +281,7 @@ export const infoEventDataSchema = z.object({
 });
 
 export const serverIdleEventDataSchema = z.object({
-  reason: z.enum(["startup", "codon-completed", "all-codons-completed"]),
+  reason: z.enum(["startup", "codon-completed", "all-codons-completed", "rollback-completed"]),
   message: z.string(),
 });
 

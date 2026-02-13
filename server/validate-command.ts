@@ -70,6 +70,7 @@ interface ValidationDisplayOptions {
   dataPath: string;
   executionPath: string;
   result: ValidationResult;
+  originalUrl?: string; // Original remote hank URL (if remote)
 }
 
 function displayValidationResult(options: ValidationDisplayOptions): void {
@@ -112,11 +113,23 @@ function displayValidationResult(options: ValidationDisplayOptions): void {
   const innerWidth = boxWidth - 4;
 
   // Render the summary box
+  // Top border: ╭─ GOOD TO RUN! ───...╮
+  // "─ GOOD TO RUN! " = 16 visible chars between ╭ and the trailing dashes + ╮
+  const titleChars = "─ GOOD TO RUN! ".length; // 16
+  const topDashes = Math.max(0, innerWidth + 2 - titleChars);
   console.log(
-    `${cyan}╭─ ${green}${bold}GOOD TO RUN!${reset}${cyan} ${"─".repeat(Math.max(0, innerWidth - 12))}╮${reset}`,
+    `${cyan}╭─ ${green}${bold}GOOD TO RUN!${reset}${cyan} ${"─".repeat(topDashes)}╮${reset}`,
   );
   console.log(`${cyan}│${reset}  ${dim}${stats.padEnd(innerWidth)}${reset}${cyan}│${reset}`);
   console.log(`${cyan}╰${"─".repeat(innerWidth + 2)}╯${reset}`);
+
+  // Show run command hint
+  // For remote hanks (cached in /tmp), the configPath is the cache path — not useful.
+  // Use the original URL if available (passed as originalUrl), otherwise make relative to CWD.
+  const hankArg = options.originalUrl
+    ? options.originalUrl
+    : path.relative(process.cwd(), options.configPath) || options.configPath;
+  console.log(`\n${dim}Run it:  hankweave ${hankArg} <data_path>${reset}`);
 
   // Display environment variables
   const hasSystemVars = Object.keys(options.result.environmentVariables.fromSystem).length > 0;
@@ -166,6 +179,8 @@ export interface ValidateOptions {
   startNew: boolean;
   /** Optional model override from CLI --model flag */
   modelOverride?: string;
+  /** Original URL if this is a remote hank (for display in run hint) */
+  originalUrl?: string;
 }
 
 /**
@@ -215,13 +230,13 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
   // 6. Auto-add $schema for editor support if missing
   const schemaAdded = ensureSchemaUrl(configPath);
   if (schemaAdded) {
-    console.log(`✨ Added $schema to ${path.basename(configPath)} for editor support`);
+    console.log(`+ Added $schema to ${path.basename(configPath)} for editor support`);
   }
 
   // 7. Print validation header
-  console.log(`\n🔍 Validating configuration: ${configPath}\n`);
-  console.log(`📁 Data source: ${dataPath}`);
-  console.log(`🏃 Would execute in: ${paths.executionPath}`);
+  console.log(`\n> Validating configuration: ${configPath}\n`);
+  console.log(`  Data source:    ${dataPath}`);
+  console.log(`  Execution path: ${paths.executionPath}`);
 
   // 8. Run validation
   const validationResult = await validateHank({
@@ -237,5 +252,6 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
     dataPath,
     executionPath: paths.executionPath,
     result: validationResult,
+    originalUrl: options.originalUrl,
   });
 }

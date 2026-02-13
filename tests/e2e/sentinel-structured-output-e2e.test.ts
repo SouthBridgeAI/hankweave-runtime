@@ -740,16 +740,20 @@ describe("Structured Output E2E (Real Providers)", () => {
       // Wait for health checks to complete
       await realRegistry.performHealthChecks();
 
-      // Find any available model
+      // Find a fast, cheap model for testing (prefer haiku, fall back to any available)
       let testModel: string | null = null;
-      for (const def of PROVIDER_DEFINITIONS) {
-        if (process.env[def.apiKeyEnvVar]) {
-          const models = realRegistry
-            .getAvailableModels()
-            .filter((m) => m.startsWith(`${def.id}/`));
-          if (models.length > 0) {
-            testModel = models[0];
-            break;
+      const availableModels = realRegistry.getAvailableModels();
+      const preferredModel = availableModels.find((m) => m.includes("haiku"));
+      if (preferredModel) {
+        testModel = preferredModel;
+      } else {
+        for (const def of PROVIDER_DEFINITIONS) {
+          if (process.env[def.apiKeyEnvVar]) {
+            const models = availableModels.filter((m) => m.startsWith(`${def.id}/`));
+            if (models.length > 0) {
+              testModel = models[0];
+              break;
+            }
           }
         }
       }
@@ -862,16 +866,20 @@ describe("Structured Output E2E (Real Providers)", () => {
       // Wait for health checks to complete
       await realRegistry.performHealthChecks();
 
-      // Find any available model
+      // Find a fast, cheap model for testing (prefer haiku, fall back to any available)
       let testModel: string | null = null;
-      for (const def of PROVIDER_DEFINITIONS) {
-        if (process.env[def.apiKeyEnvVar]) {
-          const models = realRegistry
-            .getAvailableModels()
-            .filter((m) => m.startsWith(`${def.id}/`));
-          if (models.length > 0) {
-            testModel = models[0];
-            break;
+      const availableModels = realRegistry.getAvailableModels();
+      const preferredModel = availableModels.find((m) => m.includes("haiku"));
+      if (preferredModel) {
+        testModel = preferredModel;
+      } else {
+        for (const def of PROVIDER_DEFINITIONS) {
+          if (process.env[def.apiKeyEnvVar]) {
+            const models = availableModels.filter((m) => m.startsWith(`${def.id}/`));
+            if (models.length > 0) {
+              testModel = models[0];
+              break;
+            }
           }
         }
       }

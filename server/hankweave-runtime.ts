@@ -892,6 +892,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         dataPath: this.config.dataPathInExecutionDir,
         port: this.config.port,
         proxyPort: this.proxyRunner?.getActualPort() ?? undefined,
+        outputDirectory: this.config.outputDirectory,
       },
     };
 
@@ -3381,6 +3382,40 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as CodonCompletedEvent);
 
+    // DRAIN 2: Process any sentinel work triggered by codon.completed
+    // The codon.completed event above is routed to sentinels via fire-and-forget
+    // (setupSentinelEventRouting). Without this second drain, sentinels watching
+    // codon.completed would have their triggers queued but never processed —
+    // they'd be silently dropped when the sentinel is destroyed for the next codon.
+    //
+    // Safe from infinite loops: sentinel events (sentinel.output, etc.) are NOT
+    // routed back to sentinels, and codon.completed fires exactly once.
+    if (this.sentinelManager && sentinelCount > 0) {
+      await this.sentinelManager.completeAllWork();
+
+      // Re-capture sentinel states after post-completion work.
+      // This updates costs to include any LLM work triggered by codon.completed.
+      if (this.currentRunId) {
+        const postCompletionStates = this.sentinelManager.getSentinelStates();
+        const postCompletionCost = postCompletionStates.reduce(
+          (sum, state) => sum + state.totalCost,
+          0,
+        );
+
+        this.stateManager.transition({
+          type: "SentinelStatesUpdated",
+          data: {
+            runId: this.currentRunId,
+            codonId,
+            sentinelStates: postCompletionStates,
+            totalCost: postCompletionCost,
+          },
+        });
+
+        await this.stateManager.waitForPendingTransitions();
+      }
+    }
+
     // Send state snapshot
     await this.sendStateSnapshot();
 
@@ -3420,9 +3455,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           beforeCopySuccess = true;
 
           const { conflicts } = await copyFiles(
-            this.config.executionPath,
+            this.config.agentRootPath, // Agent workspace — where output files actually live
             outItem.copy,
-            path.join(this.config.cwd, this.config.outputDirectory),
+            this.config.outputDirectory, // Already resolved to absolute path in index.ts
             this.logger,
           );
 
@@ -4706,6 +4741,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       if (autoRestart && newRun) {
         this.logger.log("Auto-starting next codon after rollback");
         await this.autoStartNextCodon();
+      } else {
+        // Not auto-restarting — tell the user we're waiting
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "server.idle",
+          data: {
+            reason: "rollback-completed",
+            message: `Rollback completed. Use 'codon.next' to continue.`,
+          },
+        } as import("./types/types.js").ServerIdleEvent);
       }
     } finally {
       this.isRollingBack = false;
@@ -5227,13 +5273,33 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     await this.sendStateSnapshot();
 
     // 12. Auto-restart if requested
-    // TODO: figure out if this needs to be cleaned up
-    // if we pass explicit autoRestart: true, should we ignore config.autostart?
     if (autoRestart && this.config.autostart) {
       const nextCodon = await this.stateManager.getNextCodonToExecute();
       if (nextCodon) {
         await this.startCodon(nextCodon, checkpointType === "rig-setup");
+      } else {
+        // Rollback succeeded but no next codon found
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "server.idle",
+          data: {
+            reason: "rollback-completed",
+            message: "Rollback completed. No next codon to run.",
+          },
+        } as import("./types/types.js").ServerIdleEvent);
       }
+    } else {
+      // Not auto-restarting — tell the user we're waiting
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "server.idle",
+        data: {
+          reason: "rollback-completed",
+          message: `Rollback completed. Use 'codon.next' to continue.`,
+        },
+      } as import("./types/types.js").ServerIdleEvent);
     }
   }
 
@@ -6315,6 +6381,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.logger.log("Sentinel manager shutdown complete", "info");
     }
 
+    // Capture the current run BEFORE transitioning to completed/failed,
+    // because RunCompleted/RunFailed clears currentRunId in state, which
+    // would make getCurrentRun() return null when telemetry needs it.
+    const runForTelemetry = this.stateManager.getCurrentRun();
+
     // Mark run as completed or failed based on reason
     if (this.currentRunId && reason === "all codons completed") {
       this.stateManager.transition({
@@ -6335,8 +6406,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Send telemetry and flush Sentry before closing connections
     if (this.telemetryCollector) {
       try {
-        const currentRun = this.stateManager.getCurrentRun();
-        await this.telemetryCollector.sendRunTelemetry(currentRun);
+        // Use the run snapshot captured before the RunCompleted/RunFailed transition.
+        // After those transitions, getCurrentRun() returns null (currentRunId is cleared).
+        // We need the run data to generate run_started, run_completed, and $ai_trace events.
+        //
+        // Re-fetch from state to get the final status (completed/failed) and endTime,
+        // falling back to the pre-transition snapshot if not found.
+        const finalRun = runForTelemetry
+          ? (this.stateManager.getState().runs.find((r) => r.runId === runForTelemetry.runId) ??
+            runForTelemetry)
+          : null;
+        await this.telemetryCollector.sendRunTelemetry(finalRun);
         await this.telemetryCollector.shutdown();
       } catch {
         // Silent fail - telemetry should never block shutdown

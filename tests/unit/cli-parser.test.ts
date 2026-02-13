@@ -199,7 +199,21 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBe("-");
   });
 
-  test("hankweave https://github.com/user/repo ./data (remote URL)", () => {
+  test("hankweave https://github.com/user/repo (single remote URL treated as hankPath)", () => {
+    const args = ["https://github.com/user/repo"];
+    const result = parseCliArgs(args);
+    expect(result.hankPath).toBe("https://github.com/user/repo");
+    expect(result.dataPath).toBeUndefined();
+  });
+
+  test("hankweave git@github.com:user/repo (single SSH URL treated as hankPath)", () => {
+    const args = ["git@github.com:user/repo"];
+    const result = parseCliArgs(args);
+    expect(result.hankPath).toBe("git@github.com:user/repo");
+    expect(result.dataPath).toBeUndefined();
+  });
+
+  test("hankweave https://github.com/user/repo ./data (remote URL with data)", () => {
     const args = ["https://github.com/user/repo", "./data"];
     const result = parseCliArgs(args);
     expect(result.hankPath).toBe("https://github.com/user/repo");

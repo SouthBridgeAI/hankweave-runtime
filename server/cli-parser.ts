@@ -196,10 +196,14 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   // Set positional args with smart logic:
   // If only 1 arg:
   //   - If it ends with .json, treat it as hankPath (hank config file)
+  //   - If it looks like a remote URL (https:// or git@), treat it as hankPath
   //   - Otherwise, treat it as dataPath (hank defaults to "hank.json")
   // If 2+ args, first is hankPath, second is dataPath
+  const looksLikeRemoteUrl = (s: string) =>
+    s.startsWith("https://") || s.startsWith("http://") || s.startsWith("git@");
+
   if (positional.length === 1) {
-    if (positional[0].endsWith(".json")) {
+    if (positional[0].endsWith(".json") || looksLikeRemoteUrl(positional[0])) {
       result.hankPath = positional[0];
     } else {
       result.dataPath = positional[0];

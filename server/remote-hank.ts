@@ -17,8 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { loadHankFile } from "./config.js";
 
-// Cache TTL for branch references (1 hour in milliseconds)
-const BRANCH_CACHE_TTL_MS = 60 * 60 * 1000;
+// Cache TTL removed — replaced with git ls-remote hash comparison for branches.
 
 /**
  * Parsed components of a remote hank URL
@@ -239,9 +238,17 @@ function getCacheMetaPath(cacheDir: string): string {
 }
 
 /**
- * Check if cache is valid (exists and not expired for branches).
+ * Check if cache is valid.
+ * - Tags/commits: valid if cache exists (immutable refs)
+ * - Branches: valid if the cached commit hash matches the remote tip
+ *   (checked via git ls-remote, a single lightweight network roundtrip)
  */
-function isCacheValid(cacheDir: string, isBranch: boolean): boolean {
+async function isCacheValid(
+  cacheDir: string,
+  isBranch: boolean,
+  cloneUrl: string,
+  ref: string,
+): Promise<boolean> {
   const metaPath = getCacheMetaPath(cacheDir);
 
   if (!fs.existsSync(metaPath)) {
@@ -251,24 +258,62 @@ function isCacheValid(cacheDir: string, isBranch: boolean): boolean {
   try {
     const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
 
-    // Tags/commits never expire
+    // Tags/commits never expire (immutable refs)
     if (!isBranch) {
       return true;
     }
 
-    // Branches expire after TTL
-    const cachedAt = new Date(meta.cachedAt);
-    const age = Date.now() - cachedAt.getTime();
-    return age < BRANCH_CACHE_TTL_MS;
+    // For branches, check if the remote tip has advanced past our cached hash
+    if (!meta.commitHash) {
+      return false; // Old cache format without hash — force refresh
+    }
+
+    try {
+      const remoteHash = await getRemoteTipHash(cloneUrl, ref);
+      if (!remoteHash) {
+        // Network error or branch not found — use cache as fallback
+        return true;
+      }
+      return remoteHash === meta.commitHash;
+    } catch {
+      // ls-remote failed (offline?) — use cache as fallback
+      return true;
+    }
   } catch {
     return false;
   }
 }
 
 /**
+ * Get the commit hash at the tip of a remote branch.
+ * Uses git ls-remote — a single lightweight network roundtrip (no data transfer).
+ */
+async function getRemoteTipHash(cloneUrl: string, ref: string): Promise<string | null> {
+  try {
+    const simpleGit = await import("simple-git");
+    const git = simpleGit.simpleGit();
+    const result = await git.listRemote(["--heads", cloneUrl, ref]);
+
+    // Output format: "<hash>\trefs/heads/<branch>"
+    const line = result.trim().split("\n")[0];
+    if (line) {
+      return line.split("\t")[0] || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Write cache metadata.
  */
-function writeCacheMeta(cacheDir: string, ref: string, isBranch: boolean): void {
+function writeCacheMeta(
+  cacheDir: string,
+  ref: string,
+  isBranch: boolean,
+  commitHash?: string,
+): void {
   const metaPath = getCacheMetaPath(cacheDir);
   fs.writeFileSync(
     metaPath,
@@ -277,6 +322,7 @@ function writeCacheMeta(cacheDir: string, ref: string, isBranch: boolean): void 
         cachedAt: new Date().toISOString(),
         ref,
         isBranch,
+        commitHash,
       },
       null,
       2,
@@ -300,8 +346,8 @@ export async function resolveRemoteHank(url: string): Promise<CachedHank> {
   const parsed = parseRemoteHankUrl(url);
   const cacheDir = getCacheDir(parsed.cloneUrl);
 
-  // Check if we have a valid cache
-  if (isCacheValid(cacheDir, parsed.isBranch)) {
+  // Check if we have a valid cache (uses git ls-remote for branches)
+  if (await isCacheValid(cacheDir, parsed.isBranch, parsed.cloneUrl, parsed.ref)) {
     const hankPath = path.join(cacheDir, parsed.hankPath);
 
     if (fs.existsSync(hankPath)) {
@@ -325,6 +371,19 @@ export async function resolveRemoteHank(url: string): Promise<CachedHank> {
       `Hank file not found in repository: ${parsed.hankPath}\nRepository: ${parsed.cloneUrl}`,
     );
   }
+
+  // Store the commit hash for future cache validation
+  let commitHash: string | undefined;
+  try {
+    const simpleGit = await import("simple-git");
+    const repoGit = simpleGit.simpleGit(cacheDir);
+    const log = await repoGit.log({ maxCount: 1 });
+    commitHash = log.latest?.hash;
+  } catch {
+    // Non-critical — cache will still work, just won't have hash for comparison
+  }
+
+  writeCacheMeta(cacheDir, parsed.ref, parsed.isBranch, commitHash);
 
   return {
     repoPath: cacheDir,
