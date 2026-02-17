@@ -5,6 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { DEFAULT_CONFIG } from "./config.js";
 import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
+import { detectRuntime, getMetadata, getRuntimeVersion, isCompiledExecutable } from "./utils.js";
 
 /**
  * Check if we're in a non-interactive environment (CI, tests, pipes, etc.)
@@ -108,6 +109,14 @@ export interface ExecutionSetup {
     version: string;
     hankHash?: string;
     hankPath?: string;
+    hankweaveVersion: string;
+    environment: {
+      invocationMethod: string;
+      platform: string;
+      arch: string;
+      osRelease: string;
+      runtime: string;
+    };
   };
 }
 
@@ -442,8 +451,10 @@ export async function setupExecutionEnvironment(options: {
     ? JSON.parse(await fs.promises.readFile(existingMetaPath, "utf-8"))
     : null;
 
+  const invocationMethod = isCompiledExecutable() ? "binary" : detectRuntime();
+
   const meta = {
-    version: "1.0.0",
+    version: "1.1.0",
     readOnlySourceDataPath,
     readOnlySourceResolvedDataPath: await fs.promises.realpath(readOnlySourceDataPath),
     dataHash,
@@ -454,6 +465,14 @@ export async function setupExecutionEnvironment(options: {
       ? new Date().toISOString()
       : (existingMeta?.createdAt ?? new Date().toISOString()),
     lastUsed: new Date().toISOString(),
+    hankweaveVersion: getMetadata().version,
+    environment: {
+      invocationMethod,
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: os.release(),
+      runtime: getRuntimeVersion(),
+    },
   };
 
   await fs.promises.writeFile(existingMetaPath, JSON.stringify(meta, null, 2));

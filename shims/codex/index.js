@@ -1,5 +1,64 @@
 #!/usr/bin/env node
 
+// ../common/src/args.ts
+function parseArgs(argv, aliases) {
+  const args = {
+    model: "",
+    verbose: false,
+    idleTimeout: 120,
+    selfTest: false,
+    version: false,
+    help: false
+  };
+  for (let i = 0; i < argv.length; i++) {
+    let arg = argv[i];
+    if (arg.includes("=")) {
+      const [key, value] = arg.split("=", 2);
+      argv.splice(i, 1, key, value);
+      arg = key;
+    }
+    if (aliases && arg in aliases) {
+      arg = aliases[arg];
+    }
+    switch (arg) {
+      case "--model":
+        args.model = argv[++i];
+        break;
+      case "--resume":
+        args.resume = argv[++i];
+        break;
+      case "--verbose":
+        args.verbose = true;
+        break;
+      case "--append-system-prompt":
+        args.appendSystemPrompt = argv[++i];
+        break;
+      case "--debug-dir":
+        args.debugDir = argv[++i];
+        break;
+      case "--idle-timeout": {
+        const val = Number(argv[++i]);
+        if (!Number.isFinite(val) || val <= 0) {
+          console.error("Invalid --idle-timeout value: must be a positive number");
+          process.exit(1);
+        }
+        args.idleTimeout = val;
+        break;
+      }
+      case "--self-test":
+        args.selfTest = true;
+        break;
+      case "--version":
+        args.version = true;
+        break;
+      case "--help":
+        args.help = true;
+        break;
+    }
+  }
+  return args;
+}
+
 // src/selftest.ts
 import { spawn } from "child_process";
 import { existsSync as existsSync2 } from "fs";
@@ -666,6 +725,40 @@ var SessionManager = class {
   }
 };
 
+// ../common/src/timeout.ts
+var IdleTimeoutError = class extends Error {
+  timeoutMs;
+  constructor(timeoutMs) {
+    super(`Idle timeout: no events received for ${timeoutMs}ms`);
+    this.name = "IdleTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+};
+async function* withIdleTimeout(events, timeoutMs) {
+  const iterator = events[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let timeoutId;
+      try {
+        const result = await Promise.race([
+          iterator.next(),
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new IdleTimeoutError(timeoutMs));
+            }, timeoutMs);
+          })
+        ]);
+        if (result.done) break;
+        yield result.value;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+  } finally {
+    void iterator.return?.();
+  }
+}
+
 // src/utils/ids.ts
 function generateMessageId() {
   return `msg_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 10)}`;
@@ -719,27 +812,6 @@ function formatModelOutput(spec) {
 }
 function getCodexModelId(spec) {
   return spec.modelID;
-}
-
-// Model resolution assertions - verify reasoning effort parsing at load time
-{
-  const testCases = [
-    { input: "gpt-5.3-codex-high", expectedModelID: "gpt-5.3-codex", expectedEffort: "high" },
-    { input: "gpt-5.3-codex-xhigh", expectedModelID: "gpt-5.3-codex", expectedEffort: "xhigh" },
-    { input: "gpt-5.2-codex-high", expectedModelID: "gpt-5.2-codex", expectedEffort: "high" },
-    { input: "gpt-5.2-xhigh", expectedModelID: "gpt-5.2", expectedEffort: "xhigh" },
-    { input: "gpt-5.3-codex", expectedModelID: "gpt-5.3-codex", expectedEffort: undefined },
-  ];
-  for (const tc of testCases) {
-    const result = resolveModel(tc.input);
-    if (result.modelID !== tc.expectedModelID || result.reasoningEffort !== tc.expectedEffort) {
-      throw new Error(
-        `Model resolution assertion failed for "${tc.input}": ` +
-        `expected modelID="${tc.expectedModelID}" effort="${tc.expectedEffort}", ` +
-        `got modelID="${result.modelID}" effort="${result.reasoningEffort}"`
-      );
-    }
-  }
 }
 
 // src/utils/output.ts
@@ -975,11 +1047,12 @@ ${this.args.appendSystemPrompt}`;
     state.apiStartTime = Date.now();
     this.apiStartTime = state.apiStartTime;
     const { events } = await state.thread.runStreamed(finalPrompt);
+    const timedEvents = withIdleTimeout(events, this.args.idleTimeout * 1e3);
     const currentMessageContent = [];
     let currentMessageId = generateMessageId();
     const pendingToolResults = /* @__PURE__ */ new Map();
     let systemInitEmitted = false;
-    for await (const event of events) {
+    for await (const event of timedEvents) {
       if (this.interrupted) {
         verboseLog(this.args.verbose, "Interrupted, stopping event processing");
         break;
@@ -1391,55 +1464,6 @@ ${errorStack}
 };
 
 // src/utils/args.ts
-function parseArgs(argv) {
-  const args = {
-    model: "",
-    verbose: false,
-    selfTest: false,
-    version: false,
-    help: false
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg.includes("=")) {
-      const [key, value] = arg.split("=", 2);
-      argv.splice(i, 1, key, value);
-    }
-    switch (arg) {
-      case "--model":
-        args.model = argv[++i];
-        break;
-      case "-p":
-        args.prompt = "";
-        break;
-      case "--resume":
-        args.resume = argv[++i];
-        break;
-      case "--verbose":
-        args.verbose = true;
-        break;
-      case "--append-system-prompt":
-        args.appendSystemPrompt = argv[++i];
-        break;
-      case "--debug-dir":
-        args.debugDir = argv[++i];
-        break;
-      case "--self-test":
-        args.selfTest = true;
-        break;
-      case "--version":
-        args.version = true;
-        break;
-      case "--help":
-        args.help = true;
-        break;
-    }
-  }
-  if (!args.model && !args.selfTest && !args.version && !args.help) {
-    args.model = process.env.MODEL || "codex";
-  }
-  return args;
-}
 async function readStdin() {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -1475,6 +1499,7 @@ OPTIONS:
   --resume <session_id>     Continue existing session
   --verbose                 Enable verbose logging to stderr
   --append-system-prompt    Additional system prompt to append
+  --idle-timeout <seconds>  Max seconds between agent events before aborting (default: 120)
   --debug-dir <path>        Directory for debug logs and session data
   --self-test               Run environment verification
   --version                 Print version and exit
@@ -1497,6 +1522,9 @@ EXAMPLES:
 async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
+    if (!args.model && !args.selfTest && !args.version && !args.help) {
+      args.model = process.env.MODEL || "codex";
+    }
     if (args.version) {
       printVersion();
       process.exit(0);

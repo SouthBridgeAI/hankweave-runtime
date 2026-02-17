@@ -30,9 +30,33 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
   });
 
   afterAll(async () => {
-    // Cleanup
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
-    console.log(`\n🧹 Cleaned up test directory: ${tempDir}`);
+    // Keep cleanup bounded so it cannot exceed Bun's default hook timeout.
+    // Windows may transiently lock files after idle-timeout process termination.
+    const deadlineMs = 3500;
+    const start = Date.now();
+    let delayMs = 100;
+
+    while (Date.now() - start < deadlineMs) {
+      try {
+        await fs.promises.rm(tempDir, { recursive: true, force: true });
+        console.log(`\n🧹 Cleaned up test directory: ${tempDir}`);
+        return;
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code !== "EBUSY" && code !== "EPERM") {
+          console.error(
+            `\n⚠️ Could not clean up test directory: ${(err as Error)?.message}`,
+          );
+          return;
+        }
+
+        await new Promise((r) => setTimeout(r, delayMs));
+        delayMs = Math.min(delayMs * 2, 500);
+      }
+    }
+
+    // Don't fail the suite on best-effort test directory cleanup.
+    console.error(`\n⚠️ Could not clean up test directory before timeout: ${tempDir}`);
   });
 
   test("continuation session returns same session ID", async () => {
@@ -374,5 +398,59 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     logParser.stop();
 
     console.log("\n✅ Test passed: SDK self-test via ClaudeAgentSDKManager\n");
+  }, 30000); // 30 second timeout
+
+  test("idle timeout emits exit with code 1", async () => {
+    const sessionLogPath = path.join(tempDir, "timeout-session.jsonl");
+    const logParser = new ClaudeLogParser({
+      logPath: sessionLogPath,
+      codonId: "timeout-test-codon",
+      parsingInterval: 100,
+    });
+
+    // Create manager with a very short idle timeout (1 second)
+    const manager = new ClaudeAgentSDKManager(
+      executionPath,
+      executionPath,
+      logger,
+      logParser,
+      undefined, // no anthropicBaseUrl
+      null, // no globalSystemPrompt
+      1, // 1 second idle timeout
+    );
+
+    const codon = createTestCodon({
+      id: "timeout-test",
+      name: "Timeout Test",
+      // Give Claude a task that will take longer than 1 second
+      promptText:
+        "Write a detailed 500-word essay about the history of computing.",
+      model: "sonnet",
+      continuationMode: "fresh",
+    });
+
+    await manager.spawn(codon, null);
+
+    // Idle timeout should emit "exit" with code 1 (matching shim behavior),
+    // not "error" — so it flows through the normal codon failure path.
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        logParser.stop();
+        reject(new Error("Test timed out after 30 seconds"));
+      }, 30000);
+
+      manager.on("exit", (code) => {
+        clearTimeout(timeout);
+        expect(code).toBe(1);
+        logParser.stop();
+        resolve();
+      });
+
+      manager.on("error", (error) => {
+        clearTimeout(timeout);
+        logParser.stop();
+        reject(new Error(`Unexpected error event: ${error.message}`));
+      });
+    });
   }, 30000); // 30 second timeout
 });

@@ -28,11 +28,8 @@ const runTests = async (
     // Create a WebSocket client to test connection
     client = new TestWSClient();
 
-    // Give server a moment to start
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-
-    // Try to connect - this will throw if server isn't running
-    await client.connect(config.port);
+    // Connect with retry - server may take a while to start on Windows
+    await client.connectWithRetry(config.port);
 
     // Wait for server.ready event to confirm it's fully started
     const readyEvent = await client.waitForEvent("server.ready", 10000);

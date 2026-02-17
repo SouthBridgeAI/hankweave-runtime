@@ -8,6 +8,7 @@
 // Error tracking (via PostHog)
 export {
   captureError,
+  type ErrorCaptureContext,
   flushErrorTracking,
   initErrorTracking,
 } from "./error-tracking.js";

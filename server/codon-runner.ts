@@ -138,6 +138,7 @@ interface BaseCodonRunnerConfig {
   anthropicBaseUrl?: string;
   logPath: string;
   globalSystemPrompt?: string | null;
+  shimIdleTimeout?: number;
 }
 
 /**
@@ -457,6 +458,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         this.logParser,
         this.config.anthropicBaseUrl,
         this.config.globalSystemPrompt ?? null,
+        this.config.shimIdleTimeout,
       );
     } else {
       // Use Shim for non-Anthropic models (e.g., Gemini)
@@ -472,6 +474,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         this.logParser,
         this.config.anthropicBaseUrl,
         this.config.globalSystemPrompt ?? null,
+        this.config.shimIdleTimeout,
       );
     }
 

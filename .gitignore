@@ -200,6 +200,9 @@ dist
 # Finder (MacOS) folder config
 .DS_Store
 
+# Deno
+deno.lock
+
 # Verdaccio local registry testing
 verdaccio-storage/
 verdaccio.pid

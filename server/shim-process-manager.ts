@@ -27,6 +27,7 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
     private globalSystemPrompt?: string | null,
+    private defaultShimIdleTimeout?: number,
   ) {
     super();
     this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
@@ -243,6 +244,13 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     const shimDebugDir = path.join(this.executionPath, ".hankweave/logs/shim-debug");
     args.push("--debug-dir", shimDebugDir);
     this.logger.log(`Using shim debug directory: ${shimDebugDir}`);
+
+    // Pass resolved shim idle timeout as CLI arg (primary mechanism)
+    const shimIdleTimeout = codon.shimIdleTimeout ?? this.defaultShimIdleTimeout;
+    if (shimIdleTimeout !== undefined) {
+      args.push("--idle-timeout", String(shimIdleTimeout));
+      this.logger.log(`Using shim idle timeout: ${shimIdleTimeout}s`);
+    }
 
     return args;
   }

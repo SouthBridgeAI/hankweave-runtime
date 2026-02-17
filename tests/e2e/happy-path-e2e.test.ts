@@ -164,6 +164,8 @@ interface TestState {
     sessionId: string;
   }>;
   totalCost: number;
+  /** Model used by each codon (keyed by codon ID), read from hank config */
+  codonModels: Record<string, string>;
 }
 
 const testState: TestState = {
@@ -185,6 +187,7 @@ const testState: TestState = {
   testStartTime: 0,
   completedCodons: [],
   totalCost: 0,
+  codonModels: {},
 };
 
 // -------------
@@ -229,6 +232,21 @@ async function setupAndRunCodons(): Promise<void> {
   }
   if (!fs.existsSync(TEST_RUN_DIR)) {
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
+  }
+
+  // Read codon models from hank config (for model-aware test assertions)
+  try {
+    const hankConfig = JSON.parse(fs.readFileSync(CODONS_CONFIG, "utf-8"));
+    for (const item of hankConfig.hank || []) {
+      if (item.id && item.model) {
+        testState.codonModels[item.id] =
+          typeof item.model === "string"
+            ? item.model
+            : item.model.name || item.model.modelId || "unknown";
+      }
+    }
+  } catch {
+    // Silent fail - model info is optional for test assertions
   }
 
   // Initialize server config with determined paths
@@ -898,7 +916,10 @@ describe("Hankweave E2E Test", () => {
   });
 
   describe("File Content", () => {
-    runFileContentTests(testState.agentRootPath || path.dirname(DATA_SOURCE_FILE));
+    runFileContentTests(
+      testState.agentRootPath || path.dirname(DATA_SOURCE_FILE),
+      testState.codonModels,
+    );
   });
 
   describe("File Watching", () => {
@@ -963,7 +984,7 @@ describe("Hankweave E2E Test", () => {
   describe("Checkpoint Exclusion", () => {
     const execPath = testState.executionPath || path.dirname(DATA_SOURCE_FILE);
     const agentPath = testState.agentRootPath || execPath;
-    runCheckpointExclusionTests(execPath, agentPath);
+    runCheckpointExclusionTests(execPath, agentPath, testState.codonModels);
   });
 
   describe("File Watching - Negative Cases", () => {

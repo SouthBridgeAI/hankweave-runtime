@@ -72,6 +72,12 @@
               },
               "additionalProperties": false,
               "description": "Override sentinel system settings"
+            },
+            "shimIdleTimeout": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 600,
+              "description": "Default shim idle timeout for all codons in this hank (seconds)"
             }
           },
           "additionalProperties": false,
@@ -1086,6 +1092,12 @@
                     "exclusiveMinimum": 0,
                     "default": 100,
                     "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
+                  },
+                  "shimIdleTimeout": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 600,
+                    "description": "Max seconds between agent events before the shim aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s)."
                   }
                 },
                 "required": [
@@ -2161,6 +2173,12 @@
                           "exclusiveMinimum": 0,
                           "default": 100,
                           "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
+                        },
+                        "shimIdleTimeout": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 600,
+                          "description": "Max seconds between agent events before the shim aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s)."
                         }
                       },
                       "required": [

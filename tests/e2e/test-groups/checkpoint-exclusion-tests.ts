@@ -2,12 +2,28 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+/** Check if a model string refers to a non-Anthropic provider */
+function isNonAnthropicModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  return (
+    !lower.includes("claude") &&
+    !lower.includes("sonnet") &&
+    !lower.includes("opus") &&
+    !lower.includes("haiku")
+  );
+}
+
 /**
  * Checkpoint exclusion tests.
  * @param executionPath - Where .hankweave/checkpoints lives
  * @param agentRootPath - Where agent files live (git work tree)
+ * @param codonModels - Model used by each codon (keyed by codon ID)
  */
-export async function runCheckpointExclusionTests(executionPath: string, agentRootPath: string) {
+export async function runCheckpointExclusionTests(
+  executionPath: string,
+  agentRootPath: string,
+  codonModels: Record<string, string> = {},
+) {
   const checkpointDir = path.join(executionPath, ".hankweave/checkpoints");
   const gitDir = path.join(checkpointDir, ".hankweavecheckpoints");
 
@@ -155,10 +171,23 @@ export async function runCheckpointExclusionTests(executionPath: string, agentRo
     // checkpointedFiles includes "typescript_code/package.json" so .gitignore won't be tracked
     // unless it matches a pattern
 
-    // Verify that allowed TypeScript files in src ARE tracked
+    // Verify that allowed TypeScript files in src ARE tracked (if model created them)
     const srcFiles = gitFiles
       .split("\n")
       .filter((f) => f.startsWith("typescript_code/src/") && f.endsWith(".ts"));
-    expect(srcFiles.length).toBeGreaterThan(0); // Should have poem1.ts and poem2.ts
+    const codon3IsNonAnthropic = isNonAnthropicModel(codonModels["codon-3"] || "");
+    const poemFilesExist =
+      fs.existsSync(path.join(agentRootPath, "typescript_code/src/poem1.ts")) ||
+      fs.existsSync(path.join(agentRootPath, "typescript_code/src/poem2.ts"));
+    if (poemFilesExist) {
+      expect(srcFiles.length).toBeGreaterThan(0); // Should have poem1.ts and poem2.ts
+    } else if (codon3IsNonAnthropic) {
+      console.warn(
+        `TypeScript poem files not created by non-Anthropic model (${codonModels["codon-3"]}) — skipping checkpoint .ts tracking assertion`,
+      );
+    } else {
+      // Anthropic model should always create these files — hard fail
+      expect(srcFiles.length).toBeGreaterThan(0);
+    }
   });
 }

@@ -26,6 +26,10 @@ export const TIMEOUTS = {
   SELF_TEST_TIMEOUT_MS: process.platform === "win32" ? 60000 : 30000, // 60s on Windows, 30s elsewhere
 } as const;
 
+/** Maximum allowed shimIdleTimeout in seconds */
+export const SHIM_IDLE_TIMEOUT_MAX_SECONDS = 600;
+const SHIM_IDLE_TIMEOUT_MAX_MINUTES = SHIM_IDLE_TIMEOUT_MAX_SECONDS / 60;
+
 /**
  * Platform-specific retry configuration for directory cleanup.
  * Windows requires more retries and longer delays due to file locking after process termination.
@@ -482,6 +486,19 @@ export const codonObjectSchema = z.object({
     .describe(
       "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops.",
     ),
+  shimIdleTimeout: z
+    .number()
+    .int()
+    .positive()
+    .max(
+      SHIM_IDLE_TIMEOUT_MAX_SECONDS,
+      `shimIdleTimeout must be at most ${SHIM_IDLE_TIMEOUT_MAX_SECONDS} (${SHIM_IDLE_TIMEOUT_MAX_MINUTES} minutes)`,
+    )
+    .optional()
+    .describe(
+      "Max seconds between agent events before the shim aborts (idle timeout). " +
+        "Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s).",
+    ),
 });
 
 /**
@@ -829,6 +846,16 @@ export const hankOverridesSchema = z
       .optional()
       .describe("Override time limit for data hashing in milliseconds"),
     sentinel: sentinelSettingsSchema.optional().describe("Override sentinel system settings"),
+    shimIdleTimeout: z
+      .number()
+      .int()
+      .positive()
+      .max(
+        SHIM_IDLE_TIMEOUT_MAX_SECONDS,
+        `shimIdleTimeout must be at most ${SHIM_IDLE_TIMEOUT_MAX_SECONDS} (${SHIM_IDLE_TIMEOUT_MAX_MINUTES} minutes)`,
+      )
+      .optional()
+      .describe("Default shim idle timeout for all codons in this hank (seconds)"),
   })
   .strict()
   .refine(
@@ -1007,6 +1034,19 @@ export const runtimeConfigSchema = z
       .describe(
         "Idle timeout for WebSocket and proxy servers in seconds (0-255). This is the maximum amount of time a connection is allowed to be idle before the server closes it. A connection is idling if there is no data sent or received.",
       ),
+    shimIdleTimeout: z
+      .number()
+      .int()
+      .positive()
+      .max(
+        SHIM_IDLE_TIMEOUT_MAX_SECONDS,
+        `shimIdleTimeout must be at most ${SHIM_IDLE_TIMEOUT_MAX_SECONDS} (${SHIM_IDLE_TIMEOUT_MAX_MINUTES} minutes)`,
+      )
+      .optional()
+      .describe(
+        "Default shim idle timeout in seconds. Max time between agent events before the shim aborts. " +
+          "Per-codon and hank override settings take precedence.",
+      ),
 
     // Rig Setup Behavior
     // NOTE: Use .optional() WITHOUT .default() to keep TypeScript type optional.
@@ -1063,11 +1103,19 @@ export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 export interface HankweaveConfig
   extends Omit<
     Required<RuntimeConfig>,
-    "model" | "anthropicBaseUrl" | "ignoreRigFailures" | "outputDirectory" | "telemetry"
+    | "model"
+    | "anthropicBaseUrl"
+    | "ignoreRigFailures"
+    | "outputDirectory"
+    | "telemetry"
+    | "shimIdleTimeout"
   > {
   // Fields from RuntimeConfig that remain optional
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
   anthropicBaseUrl?: string;
+
+  /** Default shim idle timeout in seconds (optional) */
+  shimIdleTimeout?: number;
 
   /** If true, ignore all rig setup failures (useful for resume workflows) */
   ignoreRigFailures?: boolean;

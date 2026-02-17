@@ -3,6 +3,7 @@
  *
  * Detects installed agent harnesses (Claude Code, Codex, Gemini CLI)
  * and API keys needed to run hanks.
+ * Also provides credit validation via lightweight API calls.
  */
 
 import { execSync } from "node:child_process";
@@ -212,4 +213,170 @@ export function checkEnvironment(): EnvironmentResult {
     summary,
     bestHarness,
   };
+}
+
+// ── Model Fallback for Demo Hank ──────────────────────────────
+
+/**
+ * Fallback model configuration for running the demo hank.
+ * The demo hank uses "haiku" (Anthropic). When the user doesn't have
+ * Anthropic credentials, we override with -m to use an available provider.
+ *
+ * Fallback order: Anthropic (haiku) > OpenAI (gpt-5.1-codex-mini) > Google (gemini-2.5-flash)
+ */
+export interface DemoModelChoice {
+  /** Provider name for display */
+  providerName: string;
+  /** Model name to pass via -m flag (undefined = use hank default / haiku) */
+  modelOverride: string | undefined;
+  /** The provider being used */
+  provider: "anthropic" | "openai" | "google";
+}
+
+/**
+ * Determine the best model for running the demo hank based on
+ * what credentials and harnesses the user has available.
+ *
+ * @returns DemoModelChoice, or null if no provider is available
+ */
+export function getDemoModelChoice(env: EnvironmentResult): DemoModelChoice | null {
+  const canClaude = env.harnesses[0]?.found && env.apiKeys[0]?.found;
+  const canCodex = env.harnesses[1]?.found && env.apiKeys[1]?.found;
+  const canGemini = env.harnesses[2]?.found && env.apiKeys[2]?.found;
+
+  if (canClaude) {
+    return {
+      providerName: "Claude",
+      modelOverride: undefined, // Demo hank already uses haiku
+      provider: "anthropic",
+    };
+  }
+  if (canCodex) {
+    return {
+      providerName: "Codex",
+      modelOverride: "gpt-5.1-codex-mini",
+      provider: "openai",
+    };
+  }
+  if (canGemini) {
+    return {
+      providerName: "Gemini",
+      modelOverride: "gemini-2.5-flash",
+      provider: "google",
+    };
+  }
+  return null;
+}
+
+// ── API Credit Validation ─────────────────────────────────────
+
+/**
+ * Result of a credit validation check.
+ */
+export interface CreditValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * Known error messages that indicate insufficient credits or billing issues.
+ * These are checked case-insensitively against API error messages.
+ */
+const CREDIT_ERROR_PATTERNS = [
+  "credit balance is too low",
+  "insufficient credits",
+  "insufficient_quota",
+  "billing",
+  "exceeded your current quota",
+  "you have exceeded",
+  "payment required",
+  "billing_not_active",
+  "billing hard limit has been reached",
+];
+
+/**
+ * Validate that an API key has working credits by making a minimal API call.
+ *
+ * Uses the Vercel AI SDK (@ai-sdk/*) to make a single-token generation request.
+ * This catches:
+ * - Invalid API keys (auth errors)
+ * - Keys with no credits (billing errors)
+ * - Network issues
+ *
+ * Known Anthropic behavior: returns HTTP 400 invalid_request_error with message
+ * "Your credit balance is too low to access the Anthropic API."
+ *
+ * @param provider - Which provider to test ("anthropic" | "openai" | "google")
+ * @returns CreditValidationResult
+ */
+export async function validateApiCredits(
+  provider: "anthropic" | "openai" | "google",
+): Promise<CreditValidationResult> {
+  try {
+    const { generateText } = await import("ai");
+
+    if (provider === "anthropic") {
+      const { createAnthropic } = await import("@ai-sdk/anthropic");
+      const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      await generateText({
+        model: anthropic("claude-3-5-haiku-20241022"),
+        maxOutputTokens: 1,
+        prompt: "Hi",
+      });
+    } else if (provider === "openai") {
+      const { createOpenAI } = await import("@ai-sdk/openai");
+      const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      await generateText({
+        model: openai("gpt-4o-mini"),
+        maxOutputTokens: 1,
+        prompt: "Hi",
+      });
+    } else if (provider === "google") {
+      const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
+      const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_API_KEY });
+      await generateText({
+        model: google("gemini-2.0-flash"),
+        maxOutputTokens: 1,
+        prompt: "Hi",
+      });
+    } else {
+      return { valid: false, error: `Unknown provider: ${provider}` };
+    }
+
+    // If generateText completed without throwing, credits are good
+    return { valid: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const messageLower = message.toLowerCase();
+
+    // Check for known credit/billing errors
+    for (const pattern of CREDIT_ERROR_PATTERNS) {
+      if (messageLower.includes(pattern)) {
+        return {
+          valid: false,
+          error: `Insufficient credits: ${message}`,
+        };
+      }
+    }
+
+    // Check for auth errors
+    if (
+      messageLower.includes("authentication") ||
+      messageLower.includes("unauthorized") ||
+      messageLower.includes("invalid api key") ||
+      messageLower.includes("invalid x-goog-api-key") ||
+      messageLower.includes("api key not valid")
+    ) {
+      return {
+        valid: false,
+        error: `Authentication failed: ${message}`,
+      };
+    }
+
+    // Unknown error — still a failure
+    return {
+      valid: false,
+      error: `API call failed: ${message}`,
+    };
+  }
 }

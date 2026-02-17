@@ -44,16 +44,33 @@ function scrubString(input: string): string {
 }
 
 /**
- * Scrub an Error object's message (returns a new Error with scrubbed message).
- * Preserves the stack trace structure but scrubs paths from it.
+ * Scrub an Error object in place. Mutates .message and .stack
+ * to remove sensitive data while preserving the error's identity,
+ * prototype chain, and internal state (important for PostHog's
+ * ErrorCoercer and stack frame parser).
  */
 function scrubError(error: Error): Error {
-  const scrubbed = new Error(scrubString(error.message));
-  scrubbed.name = error.name; // Keep error type (e.g. "APITimeoutError")
-  if (error.stack) {
-    scrubbed.stack = scrubString(error.stack);
+  // Scrub message by overwriting the property
+  // (Error.message is a writable data property)
+  try {
+    error.message = scrubString(error.message);
+  } catch {
+    // In rare cases message might not be writable (frozen objects);
+    // fall back to creating a new Error if needed
+    const fallback = new Error(scrubString(error.message));
+    fallback.name = error.name;
+    if (error.stack) {
+      fallback.stack = scrubString(error.stack);
+    }
+    return fallback;
   }
-  return scrubbed;
+
+  // Scrub stack trace in place
+  if (error.stack) {
+    error.stack = scrubString(error.stack);
+  }
+
+  return error;
 }
 
 // =============================================================================
@@ -77,21 +94,38 @@ export function initErrorTracking(client: PostHog, distinctId: string): void {
 }
 
 /**
+ * Context for error captures, providing correlation data and
+ * failure metadata for PostHog's Error Tracking dashboard.
+ */
+export interface ErrorCaptureContext {
+  // Failure metadata
+  codonStatus?: string;
+  runStatus?: string;
+  errorCode?: string;
+  exitCode?: number;
+  failureType?: string;
+
+  // Correlation properties (for cross-referencing with telemetry events)
+  runIdHash?: string;
+  codonIdHash?: string;
+  codonPosition?: number;
+  model?: string;
+  hankweaveVersion?: string;
+}
+
+/**
  * Capture an error with optional context.
  * Scrubs sensitive data before sending to PostHog.
  *
  * Uses PostHog's $exception event format for the Error Tracking dashboard.
+ *
+ * @param error - The error to capture. Pass the ORIGINAL caught error when
+ *   possible — its stack trace points to where the failure actually happened.
+ *   Avoid creating `new Error(message)` at the capture site, as that produces
+ *   a useless stack trace pointing to the capturer, not the cause.
+ * @param context - Optional metadata for filtering and correlation in PostHog.
  */
-export function captureError(
-  error: Error,
-  context?: {
-    codonStatus?: string;
-    runStatus?: string;
-    errorCode?: string;
-    exitCode?: number;
-    failureType?: string;
-  },
-): void {
+export function captureError(error: Error, context?: ErrorCaptureContext): void {
   if (!posthogClient || !clientId) return;
 
   try {
@@ -102,11 +136,19 @@ export function captureError(
 
     // Add safe context as tags
     if (context) {
+      // Failure metadata
       if (context.codonStatus) properties.codon_status = context.codonStatus;
       if (context.runStatus) properties.run_status = context.runStatus;
       if (context.errorCode) properties.error_code = context.errorCode;
       if (context.exitCode !== undefined) properties.exit_code = context.exitCode;
       if (context.failureType) properties.failure_type = context.failureType;
+
+      // Correlation properties
+      if (context.runIdHash) properties.run_id_hash = context.runIdHash;
+      if (context.codonIdHash) properties.codon_id_hash = context.codonIdHash;
+      if (context.codonPosition !== undefined) properties.codon_position = context.codonPosition;
+      if (context.model) properties.model = context.model;
+      if (context.hankweaveVersion) properties.hankweave_version = context.hankweaveVersion;
     }
 
     posthogClient.captureException(scrubbedError, clientId, properties);

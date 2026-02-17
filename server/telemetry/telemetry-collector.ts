@@ -371,6 +371,24 @@ export class TelemetryCollector {
         break;
       }
 
+      // ===== Category D: Loop Lifecycle =====
+      case "loop.iteration.completed": {
+        this.accumulated.queuedEvents.push({
+          event: "loop_iteration_completed",
+          properties: {
+            run_id_hash: runIdHash,
+            loop_id_hash: sha256(event.data.loopId),
+            iteration: event.data.iteration,
+            duration_ms: event.data.durationMs,
+            cost_usd: event.data.costUsd,
+            tokens_used: event.data.tokensUsed,
+            is_final: event.data.isFinal,
+            termination_reason: event.data.terminationReason,
+          },
+        });
+        break;
+      }
+
       // ===== State transitions: catch codon_failed, codon_skipped, checkpoint, rig, loop =====
       case "state.transition": {
         const transData = event.data.transition?.data as Record<string, unknown> | undefined;

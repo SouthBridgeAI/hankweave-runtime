@@ -1891,7 +1891,7 @@ describe("validateHank", () => {
       expect(test.result.overall).toBeDefined();
       expect(typeof test.result.overall.passed).toBe("boolean");
     }
-  }, 30_000); // 30 second timeout for self-tests (slower on Windows CI)
+  }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
 
   test("collects unique models from loops", async () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
@@ -1951,7 +1951,7 @@ describe("validateHank", () => {
     const modelIds = result.shimSelfTests.map((test) => test.modelId);
     const uniqueModelIds = new Set(modelIds);
     expect(modelIds.length).toBe(uniqueModelIds.size);
-  }, 10_000); // 10 second timeout for self-tests
+  }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
 
   test("adds warnings when self-tests fail", async () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
@@ -1987,7 +1987,7 @@ describe("validateHank", () => {
       expect(result.warnings.length).toBeGreaterThan(0);
       expect(result.warnings.some((w) => w.includes("Self-test failed"))).toBe(true);
     }
-  }, 10_000); // 10 second timeout for self-tests
+  }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
 });
 
 describe("loadHankFile", () => {

@@ -128,6 +128,16 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.anthropicBaseUrl).toBe("https://custom.api.com");
   });
 
+  test("shimIdleTimeout flows through CLI args to resolved config", () => {
+    const result = resolveSettings({
+      cliArgs: {
+        shimIdleTimeout: 30,
+      },
+    });
+
+    expect(result.shimIdleTimeout).toBe(30);
+  });
+
   test("CLI args override environment variables", () => {
     process.env.HANKWEAVE_RUNTIME_PORT = "8000";
     process.env.HANKWEAVE_RUNTIME_MODEL = "sonnet";

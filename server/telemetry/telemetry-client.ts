@@ -58,6 +58,10 @@ export class TelemetryClient {
           host: config.endpoint,
           flushAt: 1, // Send immediately (we batch ourselves)
           flushInterval: 0, // Don't auto-flush
+          // Auto-capture uncaught exceptions and unhandled rejections with real
+          // stack traces. This supplements manual captureException() calls and
+          // catches errors that bypass our custom error handling.
+          enableExceptionAutocapture: true,
         });
       } catch {
         // Silent fail - PostHog client creation failed

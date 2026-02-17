@@ -59,6 +59,7 @@ export function createTestCodon(codonData: {
   sentinels?: unknown[];
   exhaustWithPrompt?: string;
   maxExtensions?: number;
+  shimIdleTimeout?: number;
 }): Codon {
   ensureRegistryInitialized();
 

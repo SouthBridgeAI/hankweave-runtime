@@ -237,6 +237,23 @@ export function detectRuntime(): Runtime {
 }
 
 /**
+ * Get the current runtime name and version as a string.
+ * e.g. "bun 1.2.0", "node 22.0.0", "deno 2.1.0"
+ */
+export function getRuntimeVersion(): string {
+  const runtime = detectRuntime();
+  switch (runtime) {
+    case "bun":
+      return `bun ${process.versions.bun}`;
+    case "deno":
+      // biome-ignore lint/suspicious/noExplicitAny: Deno global is not typed in non-Deno environments
+      return `deno ${(globalThis as any).Deno?.version?.deno ?? "unknown"}`;
+    case "node":
+      return `node ${process.version}`;
+  }
+}
+
+/**
  * Detects if we're running from a compiled Bun executable.
  *
  * When compiled, Bun puts files in a virtual filesystem at:
@@ -418,7 +435,7 @@ export function renderStartupBanner(): void {
   const version = getMetadata().version;
   const platform = process.platform;
   const arch = process.arch;
-  const runtime = process.versions.bun ? `bun ${process.versions.bun}` : `node ${process.version}`;
+  const runtime = getRuntimeVersion();
 
   const useColor = process.stdout.isTTY !== false;
   const terminalWidth = process.stdout.columns || 80;
@@ -595,6 +612,63 @@ export type AssertEqual<T, U> = (<G>() => G extends T ? 1 : 2) extends <G>() => 
  */
 export function assertNever(x: never): never {
   throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
+}
+
+// -------------
+// Idle Timeout
+// -------------
+
+export class IdleTimeoutError extends Error {
+  public readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`Idle timeout: no events received for ${timeoutMs}ms`);
+    this.name = "IdleTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Wraps an async iterable with an idle timeout. If no event is received
+ * within `timeoutMs` milliseconds, throws an `IdleTimeoutError`.
+ *
+ * The timer resets on each received event, so long-running operations
+ * that produce regular events will not be interrupted.
+ */
+export async function* withIdleTimeout<T>(
+  events: AsyncIterable<T>,
+  timeoutMs: number,
+): AsyncGenerator<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError(
+      `withIdleTimeout: timeoutMs must be a positive finite number, got ${timeoutMs}`,
+    );
+  }
+  const iterator = events[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          iterator.next(),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new IdleTimeoutError(timeoutMs));
+            }, timeoutMs);
+          }),
+        ]);
+        if (result.done) break;
+        yield result.value;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+  } finally {
+    // Fire-and-forget: don't await because the iterator may be stuck
+    // on a hung promise (which is exactly why we're timing out).
+    // In the normal completion case, return() on a finished iterator is a no-op.
+    void iterator.return?.();
+  }
 }
 
 // -------------

@@ -184,8 +184,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
   // Failure tracking
   private codonFailureReason?: FailureReason;
+  /** The original Error object that caused a codon failure (when available).
+   *  Stored separately from codonFailureReason because Error objects aren't
+   *  JSON-serializable. Used by error tracking to send real stack traces. */
+  private codonFailureError?: Error;
   private isForceStopping = false;
   private resultMessageReceived = false;
+  private resultMessageSuccess = false; // True only when subtype === "success"
 
   // Retry tracking for onFailure: "retry" policy
   // NOTE: These counters are in-memory only. If the server restarts mid-retry,
@@ -1777,6 +1782,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             retriable: true,
             message: `Rig setup failed at ${item.type} operation: ${errorMessage}`,
           };
+          this.codonFailureError = errorObj;
 
           // Transition codon to failed state
           if (this.currentRunId) {
@@ -1946,6 +1952,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       const errorMsg = `Required sentinels failed to load (failCodonIfNotLoaded=true): ${failedSentinels}`;
 
       // Use specific failure reason type
+      this.codonFailureError = new Error(errorMsg);
       this.codonFailureReason = {
         type: "sentinel-load-failure",
         retriable: false,
@@ -2132,6 +2139,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         this.logger.log(errorMessage, "error");
 
         // Set failure reason
+        this.codonFailureError = new Error(errorMessage);
         this.codonFailureReason = {
           type: "unknown",
           retriable: false,
@@ -2360,6 +2368,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         anthropicBaseUrl: this.proxyRunner?.proxyUrl,
         logPath,
         globalSystemPrompt: this.config.globalSystemPrompt,
+        // Wiring: CLI --shim-idle-timeout → resolveSettings → serverConfig → here → CodonRunner → ShimProcessManager / ClaudeAgentSDKManager
+        shimIdleTimeout: this.config.shimIdleTimeout,
       };
 
       // Extension config is only provided when exhaustWithPrompt is set
@@ -2641,6 +2651,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       });
 
       // Set failure reason
+      this.codonFailureError = timeoutError;
       this.codonFailureReason = {
         type: "timeout",
         retriable: true,
@@ -2766,6 +2777,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           });
 
           // Set failure reason
+          this.codonFailureError = timeoutError;
           this.codonFailureReason = {
             type: "timeout",
             retriable: true,
@@ -2860,6 +2872,48 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
+  /**
+   * Classify an API error from a result message and set codonFailureReason.
+   * Handles both explicit error subtypes and the Claude SDK's disguised errors
+   * (subtype="success" with is_error=true, e.g., insufficient credits).
+   */
+  private setApiErrorFailureReason(msg: ResultMessage, codonId: string): void {
+    const errorText = msg.result || msg.error || "Unknown API error";
+    const errorLower = (typeof errorText === "string" ? errorText : "").toLowerCase();
+
+    const isRateLimit = errorLower.includes("rate") || errorLower.includes("429");
+    const isBilling =
+      errorLower.includes("credit") ||
+      errorLower.includes("billing") ||
+      errorLower.includes("insufficient") ||
+      errorLower.includes("quota");
+
+    this.codonFailureReason = {
+      type: isRateLimit ? "rate-limit" : "api-error",
+      retriable: isRateLimit, // Rate limits are retriable, billing/other errors are not
+      message: isBilling
+        ? `API billing/credit error: ${errorText}`
+        : `API error in result: ${errorText}`,
+    };
+
+    this.logger.log(
+      `Error result message for codon ${codonId}: ${this.codonFailureReason.message}`,
+      "error",
+    );
+
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "error",
+      data: {
+        message: this.codonFailureReason.message,
+        codon: codonId,
+        fatal: false,
+        severity: ErrorSeverity.CODON,
+      },
+    } as ErrorEvent);
+  }
+
   private handleResultMessage(msg: ResultMessage, codonId: string): void {
     this.logger.log(`Codon ${codonId} result message received: ${msg.subtype}`);
 
@@ -2879,6 +2933,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       });
 
       // Set failure reason
+      this.codonFailureError = timeoutError;
       this.codonFailureReason = {
         type: "timeout",
         retriable: true,
@@ -2898,11 +2953,37 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           context: JSON.stringify(timeoutError.context),
         },
       } as ErrorEvent);
+    } else if (msg.subtype === "error" && !this.codonFailureReason) {
+      // Non-timeout error result — set a failure reason so this codon won't be marked as "completed".
+      // Common causes: insufficient credits, billing errors, API errors.
+      // The Claude SDK may swallow the real error message (anthropics/claude-agent-sdk-python#437),
+      // so we capture what we can from the result.
+      this.setApiErrorFailureReason(msg, codonId);
     }
 
-    if (msg.subtype === "success") {
+    // The Claude SDK has a known behavior where it returns subtype="success" with is_error=true
+    // for API-level failures like insufficient credits. The result text contains the error message
+    // (e.g., "Credit balance is too low") but the subtype is misleadingly "success".
+    // We MUST check is_error to distinguish real success from these disguised failures.
+    if (msg.subtype === "success" && !msg.is_error) {
+      this.resultMessageSuccess = true;
       this.logger.log(`Codon ${codonId} completed successfully`);
+    } else if (msg.subtype === "success" && msg.is_error) {
+      // Disguised error: subtype="success" but is_error=true.
+      // Known case: Claude SDK returns this for credit/billing failures.
+      this.logger.log(
+        `Codon ${codonId} received result subtype="success" with is_error=true — treating as failure. Result: ${msg.result || "(empty)"}`,
+        "error",
+      );
+      if (!this.codonFailureReason) {
+        this.setApiErrorFailureReason(msg, codonId);
+      }
+    }
 
+    // Always update cost/token tracking for subtype="success" results, even when is_error=true.
+    // Tokens are still spent on timeouts, rate-limit hits, and other API errors —
+    // we need accurate cost tracking regardless of whether the codon succeeded.
+    if (msg.subtype === "success") {
       // Update final token usage and cost from result message
       if (msg.usage && this.currentRunId) {
         const finalUsage: TokenUsage = {
@@ -3237,13 +3318,22 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Determine final status based on the actual codon outcome
-    // Priority order: force stop > result message > context exceeded (conditional) > skip request > exit code
+    // Priority order: force stop > success result > error result > context exceeded (conditional) > skip request > exit code
     let finalStatus: CodonStatus;
 
     if (this.isForceStopping) {
       finalStatus = "failed";
-    } else if (exitCode === 0 && this.resultMessageReceived) {
-      finalStatus = "completed"; // Result message with exit 0 = completed
+    } else if (exitCode === 0 && this.resultMessageSuccess) {
+      finalStatus = "completed"; // Success result message with exit 0 = completed
+    } else if (exitCode === 0 && this.resultMessageReceived && !this.resultMessageSuccess) {
+      // Got a result message but it wasn't "success" (e.g., error subtype).
+      // This catches API errors like insufficient credits that the SDK reports
+      // as exit code 0 with an error result.
+      finalStatus = "failed";
+      this.logger.log(
+        `Codon ${codonId} received error result message with exit code 0 — marking as failed`,
+        "error",
+      );
     } else if (isContextExceeded && this.stateManager.isContextExceededAcceptable(codonId)) {
       // Context exceeded in a loop that terminates on context exceeded = completed
       finalStatus = "completed";
@@ -3293,6 +3383,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         if (finalStatus === "completed") {
           // For completed codons, checkpoint failure is critical
           finalStatus = "failed";
+          this.codonFailureError = toError(error);
           this.codonFailureReason = {
             type: "unknown",
             retriable: false,
@@ -3603,16 +3694,36 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       // Capture error for PostHog error tracking
       try {
         const { captureError } = await import("./telemetry/error-tracking.js");
+        const { sha256 } = await import("./telemetry/privacy-maps.js");
+        const { getMetadata } = await import("./utils.js");
         const failureType = this.codonFailureReason?.type || "unknown";
         const failureMsg = this.codonFailureReason?.message || `Codon ${codonId} failed`;
-        const err = new Error(failureMsg);
+
+        // Use the original error when available — its stack trace points to where
+        // the failure actually happened. Fall back to a synthetic error if we
+        // don't have the original (e.g., failures detected from log analysis).
+        const err = this.codonFailureError || new Error(failureMsg);
         err.name = `CodonFailure:${failureType}`;
+
+        // Look up codon position from execution plan for correlation
+        const executionPlan = this.stateManager.getState().executionPlan;
+        const codonPosition = executionPlan.findIndex((e) => e.codonId === codonId);
+
         captureError(err, {
           codonStatus: "failed",
           runStatus: "failed",
           failureType,
           exitCode,
           errorCode: failureType,
+          // Correlation context for cross-referencing with telemetry events
+          runIdHash: this.currentRunId ? sha256(this.currentRunId) : undefined,
+          codonIdHash: sha256(codonId),
+          codonPosition: codonPosition >= 0 ? codonPosition : undefined,
+          model:
+            typeof codonConfig.model === "string"
+              ? codonConfig.model
+              : codonConfig.model?.name || codonConfig.model?.modelId,
+          hankweaveVersion: getMetadata().version,
         });
       } catch {
         // Silent fail - error tracking should never impact runtime
@@ -4292,6 +4403,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.isForceStopping = true;
 
     // Set failure reason
+    this.codonFailureError = new Error(`Force stopped: ${reason || "user request"}`);
     this.codonFailureReason = {
       type: "unknown",
       retriable: true,
@@ -5922,9 +6034,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.recentFileAccess = undefined;
     this.currentCodon = undefined;
     this.codonFailureReason = undefined;
+    this.codonFailureError = undefined;
     this.isForceStopping = false;
     this.isSkippingCodon = false; // Reset skip flag after codon completion
     this.resultMessageReceived = false; // Reset result message flag
+    this.resultMessageSuccess = false; // Reset success flag
 
     // Clear any pending tool uses
     this.pendingToolUses.clear();

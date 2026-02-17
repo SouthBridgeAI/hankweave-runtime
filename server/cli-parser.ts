@@ -1,3 +1,4 @@
+import { SHIM_IDLE_TIMEOUT_MAX_SECONDS } from "./config.js";
 import type { HankweaveConfig } from "./types/types.js";
 
 /**
@@ -25,6 +26,7 @@ const VALUE_FLAGS = new Set([
   "--model",
   "-m",
   "--idle-timeout",
+  "--shim-idle-timeout",
   "--input",
   "-i",
   "--output",
@@ -253,7 +255,25 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   // Parse idleTimeout
   const idleTimeoutArg = getFlagValue(args, "--idle-timeout");
   if (idleTimeoutArg) {
-    result.idleTimeout = parseInt(idleTimeoutArg, 10);
+    const parsed = parseInt(idleTimeoutArg, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 255) {
+      throw new Error(
+        `Invalid --idle-timeout value: "${idleTimeoutArg}" (must be a positive integer, max 255)`,
+      );
+    }
+    result.idleTimeout = parsed;
+  }
+
+  // Parse shimIdleTimeout
+  const shimIdleTimeoutArg = getFlagValue(args, "--shim-idle-timeout");
+  if (shimIdleTimeoutArg) {
+    const parsed = parseInt(shimIdleTimeoutArg, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > SHIM_IDLE_TIMEOUT_MAX_SECONDS) {
+      throw new Error(
+        `Invalid --shim-idle-timeout value: "${shimIdleTimeoutArg}" (must be a positive integer, max ${SHIM_IDLE_TIMEOUT_MAX_SECONDS})`,
+      );
+    }
+    result.shimIdleTimeout = parsed;
   }
 
   // Parse value flags (non-config)

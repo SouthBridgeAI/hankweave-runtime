@@ -35,7 +35,12 @@ import {
   white,
   whiteBold,
 } from "./colors.js";
-import { checkEnvironment, type EnvironmentResult } from "./environment-check.js";
+import {
+  checkEnvironment,
+  type EnvironmentResult,
+  getDemoModelChoice,
+  validateApiCredits,
+} from "./environment-check.js";
 import { showTesseractSplash } from "./tesseract-splash.js";
 
 // ── URL opener ────────────────────────────────────────────────
@@ -345,25 +350,40 @@ function shortenPath(fullPath: string): string {
 
 // ── Demo Hank Handler ─────────────────────────────────────────
 
-async function handleDemo(_env: EnvironmentResult): Promise<void> {
+async function handleDemo(env: EnvironmentResult): Promise<void> {
+  // Determine which model/provider to use based on available credentials
+  const modelChoice = getDemoModelChoice(env);
+
+  if (!modelChoice) {
+    // This shouldn't happen (canRunHanks should be false), but handle gracefully
+    p.log.error("No configured provider available to run the demo.");
+    return;
+  }
+
   const defaultFolder = getDefaultDataFolder();
   const defaultDisplay = shortenPath(defaultFolder);
 
-  // Describe what the demo does
+  // Describe what the demo does — adapt messaging to the provider
+  const modelDisplay = modelChoice.modelOverride
+    ? tealBold(modelChoice.modelOverride)
+    : tealBold("Claude Haiku");
+  const providerDisplay = tealBold(modelChoice.providerName);
+
   p.log.message(
     [
       `${white("The demo hank is a fun, multi-codon workflow that analyzes a folder")}`,
       `${white("of your choosing and builds an interactive HTML page from what it finds.")}`,
       "",
-      `${white("It runs on")} ${tealBold("Claude Haiku")} ${white("— the fastest, cheapest model — and")}`,
+      `${white("It runs on")} ${modelDisplay} ${white("via")} ${providerDisplay} ${white("— and")}`,
       `${white("is meant as a lighthearted way to see Hankweave in action.")}`,
     ].join("\n"),
   );
 
   // Time and cost expectations
+  const apiName = modelChoice.providerName;
   p.log.warn(
     [
-      `${warmYellow("Heads up:")} ${slate("this is a real agentic run that calls the Anthropic API.")}`,
+      `${warmYellow("Heads up:")} ${slate(`this is a real agentic run that calls the ${apiName} API.`)}`,
       "",
       `  ${slate("Typical time:")}  ${whiteBold("5–10 minutes")}`,
       `  ${slate("Typical cost:")}  ${whiteBold("~$0.50–1.00")}`,
@@ -372,6 +392,29 @@ async function handleDemo(_env: EnvironmentResult): Promise<void> {
       `  ${sky(DEMO_HANK_REPO)}`,
     ].join("\n"),
   );
+
+  // Credit validation — make a lightweight API call to catch bad keys / no credits early
+  const creditSpinner = p.spinner();
+  creditSpinner.start(`Verifying ${apiName} API credentials`);
+
+  const creditResult = await validateApiCredits(modelChoice.provider);
+
+  if (!creditResult.valid) {
+    creditSpinner.stop(amber(`${apiName} API check failed`));
+    p.log.error(
+      [
+        `${warmYellow("Your API key didn't work.")}`,
+        "",
+        slate(creditResult.error || "Unknown error"),
+        "",
+        slate("Please check your API key and billing settings, then try again."),
+        `  ${sky(API_KEYS_HELP_URL)}`,
+      ].join("\n"),
+    );
+    return;
+  }
+
+  creditSpinner.stop(emerald(`${apiName} credentials verified`));
 
   const dataFolder = await p.text({
     message: "Data folder to analyze?",
@@ -387,12 +430,50 @@ async function handleDemo(_env: EnvironmentResult): Promise<void> {
   // Resolve the path: expand ~ and make absolute
   const resolvedFolder = path.resolve(expandTilde(dataFolder));
 
+  // Check for prior completed runs — if the user already ran the demo with this data
+  // folder, the execution system will try to resume the completed run and immediately exit.
+  // Detect this and offer to start fresh with -n.
+  let startNew = false;
+  try {
+    const { hashDataSource, findExecutionDirs } = await import("../data-hasher.js");
+    if (fs.existsSync(resolvedFolder)) {
+      const dataHash = await hashDataSource(resolvedFolder);
+      const existingDirs = await findExecutionDirs(dataHash);
+
+      if (existingDirs.length > 0) {
+        const statePath = path.join(existingDirs[0], ".hankweave", "state.json");
+        if (fs.existsSync(statePath)) {
+          const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+          const latestRun = state.runs?.[0];
+
+          if (latestRun?.status === "completed") {
+            const freshStart = await p.confirm({
+              message: "You've run this demo before with this folder. Start fresh?",
+              initialValue: true,
+            });
+
+            if (p.isCancel(freshStart)) {
+              p.cancel("See you next time!");
+              return;
+            }
+            startNew = freshStart === true;
+          }
+        }
+      }
+    }
+  } catch {
+    // If anything fails (missing files, permissions, etc.), just proceed normally.
+    // The execution system will handle it.
+  }
+
   // Output directory: copy results to cwd so the user can find them easily
   const outputDir = path.resolve("hankweave-demo-output");
 
-  // Build the command — show full resolved path so it's Cmd/Ctrl-clickable in terminals
+  // Build the command — include -m flag if using a non-Claude provider, -n if starting fresh
   const runner = detectRunner();
-  const displayCommand = `${runner} hankweave ${DEMO_HANK_REPO} ${dataFolder} -o ${outputDir}`;
+  const newFlag = startNew ? " -n" : "";
+  const modelFlag = modelChoice.modelOverride ? ` -m ${modelChoice.modelOverride}` : "";
+  const displayCommand = `${runner} hankweave ${DEMO_HANK_REPO} ${dataFolder}${newFlag}${modelFlag} -o ${outputDir}`;
 
   p.note(
     [
@@ -418,16 +499,22 @@ async function handleDemo(_env: EnvironmentResult): Promise<void> {
 
   showSignoff();
 
-  // Re-invoke ourselves with the demo hank args + output flag
+  // Build spawn args — include -m flag if using a non-Claude provider
+  const spawnArgs = [process.argv[1], DEMO_HANK_REPO, resolvedFolder];
+  if (startNew) {
+    spawnArgs.push("-n"); // Start new execution instead of resuming completed run
+  }
+  if (modelChoice.modelOverride) {
+    spawnArgs.push("-m", modelChoice.modelOverride);
+  }
+  spawnArgs.push("-o", outputDir);
+
+  // Re-invoke ourselves with the demo hank args + output flag + model override
   // Use process.argv[0] (runtime) and process.argv[1] (script) to stay portable
-  const child = spawn(
-    process.argv[0],
-    [process.argv[1], DEMO_HANK_REPO, resolvedFolder, "-o", outputDir],
-    {
-      stdio: "inherit",
-      env: process.env,
-    },
-  );
+  const child = spawn(process.argv[0], spawnArgs, {
+    stdio: "inherit",
+    env: process.env,
+  });
 
   await waitForChild(child);
 }

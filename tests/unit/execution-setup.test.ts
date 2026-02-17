@@ -271,12 +271,19 @@ describe("Execution Setup - startNew flag", () => {
       const metaPath = path.join(EXECUTION_DIR, ".hankweave", "execution-meta.json");
       const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
 
-      expect(meta.version).toBe("1.0.0");
+      expect(meta.version).toBe("1.1.0");
       expect(meta.readOnlySourceDataPath).toBe(DATA_SOURCE_DIR);
       expect(meta.dataHash).toBeTruthy();
       expect(meta.linkType).toBeOneOf(["symlink", "copy"]);
       expect(meta.createdAt).toBeTruthy();
       expect(meta.lastUsed).toBeTruthy();
+      expect(meta.hankweaveVersion).toBeTruthy();
+      expect(meta.environment).toBeDefined();
+      expect(meta.environment.invocationMethod).toBeOneOf(["binary", "bun", "node", "deno"]);
+      expect(meta.environment.platform).toBeTruthy();
+      expect(meta.environment.arch).toBeTruthy();
+      expect(meta.environment.osRelease).toBeTruthy();
+      expect(meta.environment.runtime).toMatch(/^(bun|node|deno) /);
     });
 
     it("should create data link/copy in new execution", async () => {

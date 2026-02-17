@@ -439,8 +439,13 @@ async function fetchRemoteHank(parsed: RemoteHankRef, cacheDir: string): Promise
     }
 
     if (parsed.isBranch) {
-      // For branches, pull latest
-      await repoGit.pull("origin", parsed.ref, ["--force"]);
+      // For branches, fetch and hard-reset to remote HEAD.
+      // We use reset --hard instead of pull because this is a cache directory
+      // where we never make local edits. pull fails when the remote history
+      // was rewritten (e.g., orphan branch + force push) since git can't
+      // reconcile divergent branches. reset --hard always works.
+      await repoGit.fetch("origin", parsed.ref);
+      await repoGit.reset(["--hard", `origin/${parsed.ref}`]);
     }
   } else {
     // Clone fresh

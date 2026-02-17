@@ -15,7 +15,7 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
-import { isCompiledExecutable, toError } from "./utils.js";
+import { IdleTimeoutError, isCompiledExecutable, toError, withIdleTimeout } from "./utils.js";
 
 /**
  * Error thrown when Claude executable cannot be found.
@@ -88,6 +88,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     private logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
     private globalSystemPrompt?: string | null,
+    private defaultShimIdleTimeout?: number,
   ) {
     super();
     this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
@@ -236,7 +237,9 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
     // Start the query in the background, storing the promise so kill() can await it
     this.logger.log(`[SPAWN-DEBUG] About to call runQuery`, "debug");
 
-    this.queryPromise = this.runQuery(promptContent, sdkOptions, codon.id);
+    // Resolve idle timeout: per-codon overrides runtime/hank default
+    const shimIdleTimeout = codon.shimIdleTimeout ?? this.defaultShimIdleTimeout;
+    this.queryPromise = this.runQuery(promptContent, sdkOptions, codon.id, shimIdleTimeout);
     this.logger.log(`[SPAWN-DEBUG] runQuery called, promise returned`, "debug");
 
     this.queryPromise.catch((error) => {
@@ -369,7 +372,12 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
   /**
    * Run the query and process messages.
    */
-  private async runQuery(promptContent: string, options: Options, codonId: string): Promise<void> {
+  private async runQuery(
+    promptContent: string,
+    options: Options,
+    codonId: string,
+    shimIdleTimeout?: number,
+  ): Promise<void> {
     this.logger.log(
       `[SDK-runQuery] ======= ENTERED runQuery function for codon ${codonId} =======`,
       "info",
@@ -390,8 +398,16 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       this.logger.log(`[SDK-runQuery] query() returned, generator created`, "info");
       this.logger.log(`[SDK-runQuery] Query generator created, entering message loop`, "debug");
 
+      // Wrap with idle timeout if configured
+      const events = shimIdleTimeout
+        ? withIdleTimeout(queryGenerator, shimIdleTimeout * 1000)
+        : queryGenerator;
+      if (shimIdleTimeout) {
+        this.logger.log(`[SDK-runQuery] Idle timeout enabled: ${shimIdleTimeout}s`, "info");
+      }
+
       let messageCount = 0;
-      for await (const message of queryGenerator) {
+      for await (const message of events) {
         messageCount++;
         this.logger.log(
           `[SDK-runQuery] Received message ${messageCount}: type=${message.type}`,
@@ -449,6 +465,19 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
       this.emit("exit", 0, contextExceeded);
       this.logger.log(`[SDK-runQuery] Exit event emitted`, "info");
     } catch (error) {
+      // Idle timeout: emit "exit" with code 1 to match shim behavior.
+      // Shims handle timeout internally and exit with code 1, which flows through
+      // the normal exit path (CodonRunner.handleProcessExit → handleCodonComplete).
+      // Without this, IdleTimeoutError would re-throw → "error" event → FATAL shutdown.
+      if (error instanceof IdleTimeoutError) {
+        this.logger.log(`[SDK-runQuery] ${error.message}`, "error");
+        // Ensure the underlying SDK query is explicitly aborted so any child process
+        // does not linger after idle timeout.
+        this.abortController?.abort();
+        this.cleanup();
+        this.emit("exit", 1, false);
+        return;
+      }
       this.logger.log(`[SDK-runQuery] CAUGHT ERROR: ${toError(error).message}`, "error");
       this.logger.log(`[SDK-runQuery] Error stack: ${toError(error).stack}`, "error");
       const errorDetails = this.extractErrorDetails(error as Error, codonId);

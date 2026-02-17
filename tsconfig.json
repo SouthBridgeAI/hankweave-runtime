@@ -18,6 +18,7 @@
     "node_modules",
     ".logs/**/*",
     "intermediates/**/*",
-    "learning/**/*"
+    "learning/**/*",
+    "tests/test-area/**/*"
   ]
 }

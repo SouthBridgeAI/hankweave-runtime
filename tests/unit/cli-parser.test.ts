@@ -363,15 +363,54 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --idle-timeout invalid", () => {
+  test("hankweave --idle-timeout invalid throws", () => {
     const args = ["--idle-timeout", "invalid"];
-    const result = parseCliArgs(args);
-    expect(Number.isNaN(result.idleTimeout)).toBe(true);
-    expect(result.hankPath).toBeUndefined();
-    expect(result.dataPath).toBeUndefined();
+    expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
   });
 
-  test("hankweave --port 9090 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120", () => {
+  test("hankweave --idle-timeout 0 throws", () => {
+    const args = ["--idle-timeout", "0"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
+  });
+
+  test("hankweave --idle-timeout 256 throws (exceeds max)", () => {
+    const args = ["--idle-timeout", "256"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
+  });
+
+  test("hankweave --idle-timeout -5 throws (treated as missing value)", () => {
+    const args = ["--idle-timeout", "-5"];
+    expect(() => parseCliArgs(args)).toThrow("requires a value");
+  });
+
+  test("hankweave --shim-idle-timeout 30", () => {
+    const args = ["--shim-idle-timeout", "30"];
+    const result = parseCliArgs(args);
+    expect(result.shimIdleTimeout).toBe(30);
+    expect(typeof result.shimIdleTimeout).toBe("number");
+  });
+
+  test("hankweave --shim-idle-timeout invalid throws", () => {
+    const args = ["--shim-idle-timeout", "invalid"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --shim-idle-timeout value");
+  });
+
+  test("hankweave --shim-idle-timeout 0 throws", () => {
+    const args = ["--shim-idle-timeout", "0"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --shim-idle-timeout value");
+  });
+
+  test("hankweave --shim-idle-timeout 601 throws (exceeds max)", () => {
+    const args = ["--shim-idle-timeout", "601"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --shim-idle-timeout value");
+  });
+
+  test("hankweave --shim-idle-timeout -5 throws (treated as missing value)", () => {
+    const args = ["--shim-idle-timeout", "-5"];
+    expect(() => parseCliArgs(args)).toThrow("requires a value");
+  });
+
+  test("hankweave --port 9090 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120 --shim-idle-timeout 45", () => {
     const args = [
       "--port",
       "9090",
@@ -383,6 +422,8 @@ describe("parseCliArgs", () => {
       "--proxy",
       "--idle-timeout",
       "120",
+      "--shim-idle-timeout",
+      "45",
     ];
     const result = parseCliArgs(args);
 
@@ -392,6 +433,7 @@ describe("parseCliArgs", () => {
     expect(result.autostart).toBe(false);
     expect(result.withoutProxy).toBe(false);
     expect(result.idleTimeout).toBe(120);
+    expect(result.shimIdleTimeout).toBe(45);
     expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });

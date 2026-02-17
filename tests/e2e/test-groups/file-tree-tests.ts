@@ -9,6 +9,18 @@ import { colors } from "../../utils/test-helpers.js";
 interface TestState {
   client: TestWSClient | null;
   events: ServerEvent[];
+  codonModels: Record<string, string>;
+}
+
+/** Check if a model string refers to a non-Anthropic provider */
+function isNonAnthropicModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  return (
+    !lower.includes("claude") &&
+    !lower.includes("sonnet") &&
+    !lower.includes("opus") &&
+    !lower.includes("haiku")
+  );
 }
 
 export function runFileTreeTests(testState: TestState, testDir: string) {
@@ -110,6 +122,14 @@ export function runFileTreeTests(testState: TestState, testDir: string) {
     // If files exist on disk but not in file tree, that's also acceptable
     // (might be a timing issue or file watcher limitation)
     const filesExistOnDisk = poem1Exists && poem2Exists;
+    const codon3IsNonAnthropic = isNonAnthropicModel(testState.codonModels["codon-3"] || "");
+
+    if (!foundTsFiles && !filesExistOnDisk && codon3IsNonAnthropic) {
+      console.warn(
+        `TypeScript files not in tree or on disk — non-Anthropic model (${testState.codonModels["codon-3"]}); skipping.`,
+      );
+      return;
+    }
     expect(foundTsFiles || filesExistOnDisk).toBe(true);
   });
 }

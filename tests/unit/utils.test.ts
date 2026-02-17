@@ -9,10 +9,12 @@ import {
   copyFiles,
   escapeShellArg,
   getMetadata,
+  IdleTimeoutError,
   Logger,
   renameWithRetry,
   serve,
   WebSocket,
+  withIdleTimeout,
 } from "../../server/utils";
 import { getFreePort } from "../utils/test-helpers.js";
 
@@ -1225,5 +1227,129 @@ describe("getMetadata", () => {
 
     // Should be either semver format (x.y.z) or fallback "1.0.0"
     expect(version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+// Helper: create an async iterable from an array with optional delays
+async function* asyncFromArray<T>(items: T[], delayMs = 0): AsyncGenerator<T> {
+  for (const item of items) {
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+    yield item;
+  }
+}
+
+// Helper: create an async iterable that hangs forever after yielding initial items
+async function* asyncHangAfter<T>(items: T[]): AsyncGenerator<T> {
+  for (const item of items) {
+    yield item;
+  }
+  // Hang forever
+  await new Promise<T>(() => {});
+}
+
+describe("withIdleTimeout", () => {
+  test("yields all items from a fast source", async () => {
+    const source = asyncFromArray([1, 2, 3]);
+    const results: number[] = [];
+
+    for await (const item of withIdleTimeout(source, 1000)) {
+      results.push(item);
+    }
+
+    expect(results).toEqual([1, 2, 3]);
+  });
+
+  test("yields items when each arrives before timeout", async () => {
+    const source = asyncFromArray(["a", "b", "c"], 10);
+    const results: string[] = [];
+
+    for await (const item of withIdleTimeout(source, 200)) {
+      results.push(item);
+    }
+
+    expect(results).toEqual(["a", "b", "c"]);
+  });
+
+  test("throws IdleTimeoutError when source hangs", async () => {
+    const source = asyncHangAfter<number>([]);
+
+    try {
+      for await (const _item of withIdleTimeout(source, 50)) {
+        // Should not yield anything
+        expect(true).toBe(false);
+      }
+      expect(true).toBe(false); // Should not complete normally
+    } catch (error) {
+      expect(error).toBeInstanceOf(IdleTimeoutError);
+      expect((error as IdleTimeoutError).timeoutMs).toBe(50);
+    }
+  });
+
+  test("throws IdleTimeoutError when source hangs after yielding items", async () => {
+    const source = asyncHangAfter([1, 2]);
+    const results: number[] = [];
+
+    try {
+      for await (const item of withIdleTimeout(source, 50)) {
+        results.push(item);
+      }
+      expect(true).toBe(false); // Should not complete normally
+    } catch (error) {
+      expect(error).toBeInstanceOf(IdleTimeoutError);
+    }
+
+    // Should have received the items before hanging
+    expect(results).toEqual([1, 2]);
+  });
+
+  test("timer resets on each event", async () => {
+    // Each item arrives at 30ms intervals, timeout is 50ms
+    // Without timer reset this would timeout; with reset it completes fine
+    const source = asyncFromArray([1, 2, 3, 4, 5], 30);
+    const results: number[] = [];
+
+    for await (const item of withIdleTimeout(source, 50)) {
+      results.push(item);
+    }
+
+    expect(results).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test("handles empty async iterable", async () => {
+    const source = asyncFromArray<number>([]);
+    const results: number[] = [];
+
+    for await (const item of withIdleTimeout(source, 1000)) {
+      results.push(item);
+    }
+
+    expect(results).toEqual([]);
+  });
+
+  test("calls return on iterator when timeout fires", async () => {
+    let returnCalled = false;
+    const source: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<number>>(() => {}), // hang forever
+          return: () => {
+            returnCalled = true;
+            return Promise.resolve({ done: true as const, value: undefined });
+          },
+        };
+      },
+    };
+
+    try {
+      for await (const _item of withIdleTimeout(source, 50)) {
+        // never reached
+      }
+    } catch {
+      // expected
+    }
+
+    // Give the fire-and-forget return() a tick to execute
+    await new Promise((r) => setTimeout(r, 10));
+    expect(returnCalled).toBe(true);
   });
 });

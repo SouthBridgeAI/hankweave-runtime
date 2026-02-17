@@ -230,6 +230,7 @@ Server:
   --proxy                   Enable the LLM proxy server (disabled by default)
   --anthropic-base-url <url> Custom Anthropic API base URL
   --idle-timeout <seconds>  Idle timeout for WebSocket and proxy servers (0-255, default: 0)
+  --shim-idle-timeout <seconds>   Shim idle timeout in seconds (default: 120, per-shim)
 
 Other:
   --init                    Initialize a new hank in current directory
@@ -740,7 +741,10 @@ Use --output to copy them elsewhere.
       const { captureError, flushErrorTracking } = await import("./telemetry/error-tracking.js");
       const err = error instanceof Error ? error : new Error(String(error));
       err.name = err.name || "StartupFailure";
-      captureError(err, { runStatus: "startup_failed", failureType: "startup_error" });
+      captureError(err, {
+        runStatus: "startup_failed",
+        failureType: "startup_error",
+      });
       await flushErrorTracking(2000);
     } catch {
       // Silent fail
@@ -750,11 +754,18 @@ Use --output to copy them elsewhere.
   }
 }
 
-// Global unhandled error capture for telemetry
+// Global unhandled error capture for telemetry.
+// NOTE: PostHog's enableExceptionAutocapture (set in telemetry-client.ts) also
+// captures these with full stack traces. These handlers serve as a fallback for
+// the window before PostHog is initialized (startup errors) and add hankweave-
+// specific context (runStatus, failureType) that autocapture doesn't include.
 process.on("uncaughtException", (error) => {
   try {
     const { captureError } = require("./telemetry/error-tracking.js");
-    captureError(error, { runStatus: "crashed", failureType: "uncaught_exception" });
+    captureError(error, {
+      runStatus: "crashed",
+      failureType: "uncaught_exception",
+    });
   } catch {
     // Silent fail
   }
@@ -765,7 +776,10 @@ process.on("unhandledRejection", (reason) => {
     const { captureError } = require("./telemetry/error-tracking.js");
     const err = reason instanceof Error ? reason : new Error(String(reason));
     err.name = err.name || "UnhandledRejection";
-    captureError(err, { runStatus: "crashed", failureType: "unhandled_rejection" });
+    captureError(err, {
+      runStatus: "crashed",
+      failureType: "unhandled_rejection",
+    });
   } catch {
     // Silent fail
   }

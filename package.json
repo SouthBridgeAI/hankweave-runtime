@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -54,9 +54,9 @@
     "cleanup": "echo 'Error: --cleanup requires --config' && exit 1",
     "cleanup:example": "bun server/index.ts --cleanup --config=hank.json",
     "cleanup:force": "bun server/index.ts --cleanup --config=hank.json -y",
-    "test:cross-runtime:bun": "bun tests/cross-runtime/dynamic-port.test.ts",
-    "test:cross-runtime:node": "npx tsx tests/cross-runtime/dynamic-port.test.ts",
-    "test:cross-runtime:deno": "deno run -A --node-modules-dir --sloppy-imports tests/cross-runtime/dynamic-port.test.ts",
+    "test:cross-runtime:bun": "bun scripts/run-cross-runtime-tests.ts bun",
+    "test:cross-runtime:node": "bun scripts/run-cross-runtime-tests.ts node",
+    "test:cross-runtime:deno": "bun scripts/run-cross-runtime-tests.ts deno",
     "test:cross-runtime:all": "bun run test:cross-runtime:bun && bun run test:cross-runtime:node && bun run test:cross-runtime:deno"
   },
   "devDependencies": {
