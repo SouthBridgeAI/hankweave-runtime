@@ -16,33 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 
 
+## [0.5.4] - 2026-02-20
+
+### Added
+- 
+
+### Changed
+- 
+
+### Fixed
+- **Release CI: all 5 platform builds now succeed** — `darwin-x64` and `linux-arm64` builds were failing because `bun install` only fetches the codex binary for the host architecture. Cross-compilation targets now fetch the correct binary via `npm pack` before building. Also survived the retirement of `macos-13` (Intel) runners along the way.
+
 ## [0.5.3] - 2026-02-20
 
-### Added
-- 
-
-### Changed
-- 
-
-### Fixed
-- **Release CI: darwin-x64 build** — `macos-13` (Intel) runners were retired by GitHub. Switched to cross-compilation on `macos-latest` (ARM) using the same `npm pack` fetch approach as `linux-arm64`.
-
-## [0.5.2] - 2026-02-20
-
-### Added
-- 
-
-### Changed
-- 
-
-### Fixed
-- **Release CI: cross-platform codex binary builds** — `darwin-x64` and `linux-arm64` executable builds now succeed. `darwin-x64` uses `macos-13` (Intel) runner; `linux-arm64` fetches the target platform's codex binary via `npm pack` before building.
-
-## [0.5.1] - 2026-02-20
-
-### Added
-
--
+_Patch releases 0.5.1–0.5.3 were a hat-trick of CI fixes, each one revealing the next. All three are consolidated here._
 
 ### Changed
 
@@ -51,7 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Remote hanks with slashed branch names** — URLs like `.../tree/release/alpha/path/to/hank` now work correctly. The URL parser couldn't tell where the branch name ended and the file path began for branches containing `/`. Now uses `git ls-remote` to resolve the actual ref before cloning.
-- \*\*Release script: The dry-run feasibility check also catches `DU`/`UD` conflict markers it previously missed.
+- **Release script: modify/delete conflicts on stripped files** — The merge from `develop → release/alpha` now auto-resolves modify/delete conflicts when the conflicting files are in the internal strip list. The dry-run feasibility check also catches `DU`/`UD` conflict markers it previously missed.
+- **Release CI: cross-platform codex binary builds** — `darwin-x64` and `linux-arm64` executable builds fixed via cross-compilation using `npm pack`. Also switched `darwin-x64` off the retired `macos-13` runner.
 
 ## [0.5.0] - 2026-02-17
 
