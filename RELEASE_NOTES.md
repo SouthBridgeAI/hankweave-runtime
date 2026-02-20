@@ -1,22 +1,36 @@
-## [0.5.0] - 2026-02-17
+## [0.5.3] - 2026-02-20
+
+### Added
+- 
+
+### Changed
+- 
+
+### Fixed
+- **Release CI: darwin-x64 build** — `macos-13` (Intel) runners were retired by GitHub. Switched to cross-compilation on `macos-latest` (ARM) using the same `npm pack` fetch approach as `linux-arm64`.
+
+## [0.5.2] - 2026-02-20
+
+### Added
+- 
+
+### Changed
+- 
+
+### Fixed
+- **Release CI: cross-platform codex binary builds** — `darwin-x64` and `linux-arm64` executable builds now succeed. `darwin-x64` uses `macos-13` (Intel) runner; `linux-arm64` fetches the target platform's codex binary via `npm pack` before building.
+
+## [0.5.1] - 2026-02-20
 
 ### Added
 
-- **Shim idle timeout** — Configurable timeout that aborts agent harnesses when no events are received within a deadline. Prevents runs from hanging indefinitely on stalled agents. Configurable per-codon (`shimIdleTimeout`), per-hank (in `overrides`), or runtime-wide (`--shim-idle-timeout` CLI flag / `hankweave.json`). Shims default to 120s.
-- **Environment metadata in `execution-meta.json`** — Execution metadata now records hankweave version, invocation method (binary/bun/node/deno), platform, arch, OS release, and runtime version. Schema version bumped to 1.1.0.
-- **Wizard credit validation** — The welcome wizard now makes a lightweight API call to verify credentials have working credits before launching the demo, catching dead keys and exhausted balances up front.
-- **Wizard model fallback** — The demo wizard now adapts to whatever provider the user has available (Anthropic → OpenAI → Google) instead of failing when the user lacks Anthropic credentials.
-- **Wizard completed-run detection** — If the user already ran the demo with the same data folder, the wizard detects the prior completed run and offers to start fresh.
+-
 
 ### Changed
 
-- **Idle timeout validation** — `--idle-timeout` and `--shim-idle-timeout` CLI values are now validated (must be positive finite integers within bounds). Previously, invalid values like NaN could cause instant aborts.
-- **Error tracking enrichment** — Original `Error` objects are now preserved at all failure sites instead of creating synthetic errors at the capture point. Correlation context (`runIdHash`, `codonIdHash`, `codonPosition`, `model`, `hankweaveVersion`) added for debugging.
-- **Windows CI timeout budgets** — Increased timeout budgets for unit, integration, and E2E tests on Windows to accommodate PowerShell overhead and file locking delays.
+- **Dynamic model selection for credit validation** — `validateApiCredits()` now uses the model registry to find the cheapest recent model per provider instead of hardcoding model names that rot when providers deprecate old models. `findCheapestModel()` prefers models updated in the last 6 months, falls back to 1 year, then all candidates.
 
 ### Fixed
 
-- **False "completed" status on billing errors** — The Claude SDK returns billing failures as `subtype: "success"` with `is_error: true`. The runtime now distinguishes real success from disguised API errors, correctly marking codons as "failed" instead of "completed".
-- **Idle timeout timer leak** — Fixed a timer leak in `withIdleTimeout` when `iterator.next()` rejects before the timeout fires.
-- **NPX init E2E flakiness** — Resolved cache corruption and timeout issues causing intermittent init test failures.
-- **Deno version missing from startup banner** — `getRuntimeVersion()` now correctly reports the Deno version instead of falling through to Node.js detection.
+- **Remote hanks with slashed branch names** — URLs like `.../tree/release/alpha/path/to/hank` now work correctly. The URL parser couldn't tell where the branch name ended and the file path began for branches containing `/`. Now uses `git ls-remote` to resolve the actual ref before cloning.
+- \*\*Release script: The dry-run feasibility check also catches `DU`/`UD` conflict markers it previously missed.

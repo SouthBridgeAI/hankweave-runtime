@@ -26,10 +26,15 @@ import {
 import { isCompiledExecutable } from "./utils.js";
 
 // Codex SDK version for directory naming
-export const CODEX_SDK_VERSION = "0.87.0";
+export const CODEX_SDK_VERSION = "0.104.0";
 
 // Path prefix for embedded codex files (must match paths used during build)
-const EMBEDDED_CODEX_PATH = "node_modules/@openai/codex-sdk/vendor";
+// In codex-sdk v0.101.0+, binaries are in platform-specific packages (@openai/codex-<platform>-<arch>)
+function getEmbeddedCodexBasePath(): string {
+  const platform = os.platform() === "win32" ? "win32" : os.platform();
+  const arch = os.arch() === "arm64" ? "arm64" : "x64";
+  return `node_modules/@openai/codex-${platform}-${arch}/vendor`;
+}
 
 /**
  * Platform identifier matching @openai/codex-sdk vendor directory structure
@@ -104,32 +109,211 @@ export function getExtractedCodexPath(): string {
 }
 
 /**
+ * Ensure a binary file has execute permissions on Unix.
+ * No-op on Windows. Deno's npm cache may not preserve +x bits.
+ */
+export function ensureExecutable(binaryPath: string): void {
+  if (os.platform() === "win32") return;
+  try {
+    const stat = fs.statSync(binaryPath);
+    if ((stat.mode & 0o100) === 0) {
+      fs.chmodSync(binaryPath, stat.mode | 0o755);
+    }
+  } catch {
+    // Ignore — permission errors will surface later when spawning
+  }
+}
+
+/**
+ * Get the platform-specific package name for @openai/codex (v0.101.0+).
+ * Maps os.platform()/os.arch() to the npm optional dependency package name.
+ */
+function getCodexPlatformPackageName(): string {
+  const platform = os.platform() === "win32" ? "win32" : os.platform();
+  const arch = os.arch() === "arm64" ? "arm64" : "x64";
+  return `codex-${platform}-${arch}`;
+}
+
+/**
+ * Locate codex binary using import.meta.resolve.
+ *
+ * This is a universal fallback that works across all runtimes (Deno, Node.js 20.6+, Bun).
+ * It asks the runtime's own module resolver where @openai/codex-sdk (or the platform-specific
+ * package) lives, then navigates from the resolved entry point to the vendor binary.
+ *
+ * This is critical for Deno, which stores npm packages in a global cache rather than
+ * in a project-local node_modules/ directory.
+ *
+ * @returns Path to codex binary, or null if not found
+ */
+export function locateCodexViaImportResolve(): string | null {
+  const codexPlatform = getCodexPlatform();
+  const binaryName = getCodexBinaryName();
+  const platformPkgName = getCodexPlatformPackageName();
+
+  // Strategy 1: Resolve platform-specific package directly via package.json subpath.
+  // Works under Bun and Node.js where subpath resolution is lenient.
+  const resolveTargets = [
+    `@openai/${platformPkgName}/package.json`,
+    "@openai/codex-sdk/package.json",
+  ];
+
+  for (const target of resolveTargets) {
+    try {
+      const resolved = import.meta.resolve(target);
+      if (!resolved.startsWith("file://")) continue;
+
+      const packageDir = path.dirname(fileURLToPath(resolved));
+      const candidate = path.join(packageDir, "vendor", codexPlatform, "codex", binaryName);
+
+      if (fs.existsSync(candidate)) {
+        ensureExecutable(candidate);
+        return candidate;
+      }
+    } catch {
+      // Subpath not exported or package not resolvable — try next target
+    }
+  }
+
+  // Strategy 2: Resolve @openai/codex-sdk (main entry) and navigate to
+  // the @openai scope directory to find sibling platform packages.
+  // This handles Deno's global npm cache where packages are stored as
+  // siblings under registry.npmjs.org/@openai/.
+  try {
+    const sdkUrl = import.meta.resolve("@openai/codex-sdk");
+    if (sdkUrl.startsWith("file://")) {
+      const sdkPath = fileURLToPath(sdkUrl);
+      const sep = path.sep;
+      const openaiSegment = `${sep}@openai${sep}`;
+      const idx = sdkPath.lastIndexOf(openaiSegment);
+
+      if (idx !== -1) {
+        const scopeDir = sdkPath.substring(0, idx + openaiSegment.length);
+        const result = searchForBinaryInScopeDir(
+          scopeDir,
+          platformPkgName,
+          codexPlatform,
+          binaryName,
+        );
+        if (result) return result;
+
+        // Under Deno --node-modules-dir, the resolved path goes through
+        // .deno/ internal directory where sibling packages aren't present.
+        // Fall back to the top-level node_modules/@openai/ directory.
+        const nmSegment = `${sep}node_modules${sep}`;
+        const nmIdx = sdkPath.indexOf(nmSegment);
+        if (nmIdx !== -1) {
+          const topScopeDir = `${sdkPath.substring(0, nmIdx)}${nmSegment}@openai${sep}`;
+          if (topScopeDir !== scopeDir && fs.existsSync(topScopeDir)) {
+            const fallback = searchForBinaryInScopeDir(
+              topScopeDir,
+              platformPkgName,
+              codexPlatform,
+              binaryName,
+            );
+            if (fallback) return fallback;
+          }
+        }
+      }
+    }
+  } catch {
+    // import.meta.resolve not available or failed
+  }
+
+  return null;
+}
+
+/**
+ * Search for the codex binary within an @openai scope directory.
+ * Handles both flat layouts (node_modules) and versioned layouts (Deno global cache).
+ */
+function searchForBinaryInScopeDir(
+  scopeDir: string,
+  platformPkgName: string,
+  codexPlatform: string,
+  binaryName: string,
+): string | null {
+  // Check platform-specific package (v0.101.0+) and legacy codex-sdk
+  const packageNames = [platformPkgName, "codex-sdk"];
+
+  for (const pkgName of packageNames) {
+    const pkgDir = path.join(scopeDir, pkgName);
+    if (!fs.existsSync(pkgDir)) continue;
+
+    // Direct layout: vendor/ at the package root (node_modules)
+    const directCandidate = path.join(pkgDir, "vendor", codexPlatform, "codex", binaryName);
+    if (fs.existsSync(directCandidate)) {
+      ensureExecutable(directCandidate);
+      return directCandidate;
+    }
+
+    // Versioned layout: version subdirectories (Deno global cache)
+    // e.g., codex-darwin-arm64/0.104.0-darwin-arm64/vendor/...
+    try {
+      for (const entry of fs.readdirSync(pkgDir)) {
+        const candidate = path.join(pkgDir, entry, "vendor", codexPlatform, "codex", binaryName);
+        if (fs.existsSync(candidate)) {
+          ensureExecutable(candidate);
+          return candidate;
+        }
+      }
+    } catch {
+      // Directory not readable
+    }
+  }
+
+  return null;
+}
+
+/**
  * Search for codex binary starting from a given directory and walking up.
+ *
+ * Searches for both:
+ * - New structure (v0.101.0+): node_modules/@openai/codex-<platform>-<arch>/vendor/<platform>/codex/<binary>
+ * - Legacy structure (<v0.101.0): node_modules/@openai/codex-sdk/vendor/<platform>/codex/<binary>
  *
  * @param startDir - Directory to start searching from
  * @returns Path to codex binary, or null if not found
  */
 function searchForCodexFromDirectory(startDir: string): string | null {
-  const platform = getCodexPlatform();
+  const codexPlatform = getCodexPlatform();
   const binaryName = getCodexBinaryName();
+  const platformPkgName = getCodexPlatformPackageName();
 
   let currentDir = startDir;
 
   // Search up to 10 levels (should be more than enough)
   for (let i = 0; i < 10; i++) {
-    const codexPath = path.join(
+    // New structure (v0.101.0+): @openai/codex-<platform>-<arch>/vendor/<platform>/codex/<binary>
+    const newPath = path.join(
+      currentDir,
+      "node_modules",
+      "@openai",
+      platformPkgName,
+      "vendor",
+      codexPlatform,
+      "codex",
+      binaryName,
+    );
+
+    if (fs.existsSync(newPath)) {
+      return newPath;
+    }
+
+    // Legacy structure: @openai/codex-sdk/vendor/<platform>/codex/<binary>
+    const legacyPath = path.join(
       currentDir,
       "node_modules",
       "@openai",
       "codex-sdk",
       "vendor",
-      platform,
+      codexPlatform,
       "codex",
       binaryName,
     );
 
-    if (fs.existsSync(codexPath)) {
-      return codexPath;
+    if (fs.existsSync(legacyPath)) {
+      return legacyPath;
     }
 
     // Move up one directory
@@ -201,7 +385,7 @@ export async function extractCodexBinary(): Promise<string> {
   await extractFiles({
     componentName: "codex-sdk",
     version: CODEX_SDK_VERSION,
-    embeddedBasePath: EMBEDDED_CODEX_PATH,
+    embeddedBasePath: getEmbeddedCodexBasePath(),
     filesToExtract,
     markerFileName: ".extraction-complete",
   });
@@ -230,7 +414,13 @@ export async function ensureCodexAvailable(): Promise<{
       return { path: nodeModulesPath, version: "node_modules", cached: true };
     }
 
-    // Not found in node_modules - this is an error in source/npm mode
+    // Fallback: use import.meta.resolve (works for Deno and as universal fallback)
+    const resolvedPath = locateCodexViaImportResolve();
+    if (resolvedPath) {
+      return { path: resolvedPath, version: "resolved", cached: true };
+    }
+
+    // Not found by any locator - this is an error in source/npm mode
     throw new Error(
       "Codex binary not found in node_modules. Ensure @openai/codex-sdk is installed.",
     );

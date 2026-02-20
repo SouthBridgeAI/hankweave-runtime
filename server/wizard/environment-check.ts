@@ -11,6 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { detectClaudeExecutable } from "../claude-agent-sdk-manager.js";
+import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -315,27 +316,39 @@ export async function validateApiCredits(
   try {
     const { generateText } = await import("ai");
 
+    // Use the model registry to find the cheapest available model for each
+    // provider, so we don't hardcode model names that rot as providers
+    // deprecate old models. Hardcoded fallbacks are last-resort only.
+    const registry = LlmProviderRegistry.getInstance({ performHealthCheckOnInit: false });
+
     if (provider === "anthropic") {
+      const modelId = registry.findCheapestModel("anthropic") ?? "claude-haiku-4-5";
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const anthropic = createAnthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY,
+      });
       await generateText({
-        model: anthropic("claude-3-5-haiku-20241022"),
+        model: anthropic(modelId),
         maxOutputTokens: 1,
         prompt: "Hi",
       });
     } else if (provider === "openai") {
+      const modelId = registry.findCheapestModel("openai") ?? "gpt-4o-mini";
       const { createOpenAI } = await import("@ai-sdk/openai");
       const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
       await generateText({
-        model: openai("gpt-4o-mini"),
+        model: openai(modelId),
         maxOutputTokens: 1,
         prompt: "Hi",
       });
     } else if (provider === "google") {
+      const modelId = registry.findCheapestModel("google") ?? "gemini-2.5-flash";
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_API_KEY });
+      const google = createGoogleGenerativeAI({
+        apiKey: process.env.GOOGLE_API_KEY,
+      });
       await generateText({
-        model: google("gemini-2.0-flash"),
+        model: google(modelId),
         maxOutputTokens: 1,
         prompt: "Hi",
       });

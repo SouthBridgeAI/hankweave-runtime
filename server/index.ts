@@ -415,8 +415,11 @@ Use --output to copy them elsewhere.
       }
 
       // Show hank summary (no confirmation needed - "power user" model)
-      const parsed = await import("./remote-hank.js").then((m) => m.parseRemoteHankUrl(configPath));
-      const summary = getHankSummary(absoluteConfigPath, configPath, parsed.ref);
+      // Use resolvedRef from the cache result (handles slashed branch names correctly)
+      const displayRef =
+        cached.resolvedRef ??
+        (await import("./remote-hank.js").then((m) => m.parseRemoteHankUrl(configPath))).ref;
+      const summary = getHankSummary(absoluteConfigPath, configPath, displayRef);
       displayHankSummary(summary);
     } catch (error) {
       console.error(`\nError: Failed to fetch remote hank: ${(error as Error).message}`);

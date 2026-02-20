@@ -47,6 +47,8 @@ export interface CachedHank {
   wasFresh: boolean;
   /** Timestamp of when the cache was last updated */
   cachedAt: Date;
+  /** Resolved git ref (may differ from naive URL parse for slashed branches) */
+  resolvedRef?: string;
 }
 
 /**
@@ -193,6 +195,97 @@ export function parseRemoteHankUrl(url: string): RemoteHankRef {
     isBranch,
     hankPath,
   };
+}
+
+/**
+ * Extract the full path after /tree/ (or /blob/) or after # from a remote URL.
+ * Returns null when there's no ambiguity (no extra path segments beyond the ref).
+ *
+ * Example: ".../tree/release/alpha/learning/examples/clausetta"
+ *   → "release/alpha/learning/examples/clausetta"
+ */
+function extractFullRefPath(url: string): string | null {
+  if (url.startsWith("git@")) {
+    const hashIndex = url.indexOf("#");
+    if (hashIndex !== -1) {
+      const fragment = url.substring(hashIndex + 1);
+      return fragment.includes("/") ? fragment : null;
+    }
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const pathParts = parsed.pathname.split("/").filter((p) => p);
+
+    // For #fragment syntax: always use fragment if it contains slashes
+    if (parsed.hash) {
+      const fragment = parsed.hash.substring(1);
+      return fragment.includes("/") ? fragment : null;
+    }
+
+    // For /tree/ syntax: need at least 2 segments after "tree" for ambiguity
+    // (pathParts[0]=user, [1]=repo, [2]=tree, [3]=ref, [4+]=path)
+    if (pathParts.length > 4 && (pathParts[2] === "tree" || pathParts[2] === "blob")) {
+      return pathParts.slice(3).join("/");
+    }
+  } catch {
+    // Invalid URL — no disambiguation possible
+  }
+
+  return null;
+}
+
+/**
+ * Resolve an ambiguous ref path by checking the repo's actual branches and tags.
+ * Given "release/alpha/learning/examples/clausetta", queries git ls-remote to find
+ * that "release/alpha" is a real branch, and the rest is the file path.
+ *
+ * @returns Resolved ref, hankPath, and isBranch — or null if disambiguation failed
+ */
+async function resolveAmbiguousRef(
+  cloneUrl: string,
+  fullRefPath: string,
+): Promise<{ ref: string; hankPath: string; isBranch: boolean } | null> {
+  try {
+    const simpleGit = await import("simple-git");
+    const git = simpleGit.simpleGit();
+
+    const headsOutput = await git.listRemote(["--heads", cloneUrl]);
+    const tagsOutput = await git.listRemote(["--tags", cloneUrl]);
+
+    // Parse ref names from "hash\trefs/heads/branch-name" lines
+    const branchRefs = new Set<string>();
+    const tagRefs = new Set<string>();
+
+    for (const line of headsOutput.split("\n")) {
+      const match = line.match(/refs\/heads\/(.+)$/);
+      if (match) branchRefs.add(match[1]);
+    }
+    for (const line of tagsOutput.split("\n")) {
+      const match = line.match(/refs\/tags\/(.+)$/);
+      if (match) tagRefs.add(match[1].replace(/\^{}$/, ""));
+    }
+
+    // Combine and sort by length descending (longest match first)
+    const allRefs = [...branchRefs, ...tagRefs];
+    allRefs.sort((a, b) => b.length - a.length);
+
+    for (const ref of allRefs) {
+      if (fullRefPath === ref || fullRefPath.startsWith(`${ref}/`)) {
+        const remaining = fullRefPath.slice(ref.length).replace(/^\//, "");
+        let hankPath = remaining || "hank.json";
+        if (hankPath && !hankPath.endsWith(".json")) {
+          hankPath = path.join(hankPath, "hank.json");
+        }
+        return { ref, hankPath, isBranch: branchRefs.has(ref) };
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -344,6 +437,20 @@ function writeCacheMeta(
  */
 export async function resolveRemoteHank(url: string): Promise<CachedHank> {
   const parsed = parseRemoteHankUrl(url);
+
+  // Disambiguate refs that contain slashes (e.g. "release/alpha").
+  // The sync parser can't tell where the branch name ends and the path begins,
+  // so we check the repo's actual refs via git ls-remote.
+  const fullRefPath = extractFullRefPath(url);
+  if (fullRefPath) {
+    const resolved = await resolveAmbiguousRef(parsed.cloneUrl, fullRefPath);
+    if (resolved) {
+      parsed.ref = resolved.ref;
+      parsed.hankPath = resolved.hankPath;
+      parsed.isBranch = resolved.isBranch;
+    }
+  }
+
   const cacheDir = getCacheDir(parsed.cloneUrl);
 
   // Check if we have a valid cache (uses git ls-remote for branches)
@@ -357,6 +464,7 @@ export async function resolveRemoteHank(url: string): Promise<CachedHank> {
         hankPath,
         wasFresh: true,
         cachedAt: new Date(meta.cachedAt),
+        resolvedRef: parsed.ref,
       };
     }
   }
@@ -390,6 +498,7 @@ export async function resolveRemoteHank(url: string): Promise<CachedHank> {
     hankPath,
     wasFresh: false,
     cachedAt: new Date(),
+    resolvedRef: parsed.ref,
   };
 }
 

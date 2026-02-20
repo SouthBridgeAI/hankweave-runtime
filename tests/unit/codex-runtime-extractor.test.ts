@@ -146,7 +146,9 @@ describe("Codex Runtime Extractor", () => {
     test("should use default cache directory", () => {
       const result = extractorModule.getCodexExtractionDir();
       const homeDir = os.homedir();
-      expect(result).toBe(path.join(homeDir, ".hankweave", "codex-sdk", "0.87.0"));
+      expect(result).toBe(
+        path.join(homeDir, ".hankweave", "codex-sdk", extractorModule.CODEX_SDK_VERSION),
+      );
     });
 
     test("should respect HANKWEAVE_CACHE_DIR env var", () => {
@@ -154,7 +156,7 @@ describe("Codex Runtime Extractor", () => {
       process.env.HANKWEAVE_CACHE_DIR = customCache;
 
       const result = extractorModule.getCodexExtractionDir();
-      expect(result).toBe(path.join(customCache, "codex-sdk", "0.87.0"));
+      expect(result).toBe(path.join(customCache, "codex-sdk", extractorModule.CODEX_SDK_VERSION));
     });
   });
 
@@ -184,7 +186,7 @@ describe("Codex Runtime Extractor", () => {
       const result = extractorModule.locateCodexInNodeModules();
 
       expect(result).not.toBeNull();
-      expect(result).toContain("codex-sdk");
+      expect(result).toMatch(/@openai[/\\]codex/);
     });
 
     test("should find codex from module location regardless of cwd", () => {
@@ -195,7 +197,7 @@ describe("Codex Runtime Extractor", () => {
       const result = extractorModule.locateCodexInNodeModules();
       expect(result).not.toBeNull();
       if (result) {
-        expect(result).toContain("codex-sdk");
+        expect(result).toMatch(/@openai[/\\]codex/);
       }
     });
 
@@ -206,7 +208,7 @@ describe("Codex Runtime Extractor", () => {
       const result = extractorModule.locateCodexInNodeModules();
       // After the fix, finds codex from module location even when cwd has none
       expect(result).not.toBeNull();
-      expect(result).toContain("codex-sdk");
+      expect(result).toMatch(/@openai[/\\]codex/);
     });
 
     test("should find codex from module location even when cwd has different packages", () => {
@@ -219,7 +221,64 @@ describe("Codex Runtime Extractor", () => {
       const result = extractorModule.locateCodexInNodeModules();
       // After the fix, finds codex from module location
       expect(result).not.toBeNull();
-      expect(result).toContain("codex-sdk");
+      expect(result).toMatch(/@openai[/\\]codex/);
+    });
+  });
+
+  describe("ensureExecutable", () => {
+    test("should add execute permission to a file without it", () => {
+      if (os.platform() === "win32") return;
+
+      const filePath = path.join(tempDir, "test-binary");
+      fs.writeFileSync(filePath, "#!/bin/bash\necho hello");
+      fs.chmodSync(filePath, 0o644); // no execute bit
+
+      extractorModule.ensureExecutable(filePath);
+
+      const stat = fs.statSync(filePath);
+      expect(stat.mode & 0o100).not.toBe(0);
+    });
+
+    test("should not change permissions on an already-executable file", () => {
+      if (os.platform() === "win32") return;
+
+      const filePath = path.join(tempDir, "test-binary-exec");
+      fs.writeFileSync(filePath, "#!/bin/bash\necho hello");
+      fs.chmodSync(filePath, 0o755);
+
+      const beforeMode = fs.statSync(filePath).mode;
+      extractorModule.ensureExecutable(filePath);
+      const afterMode = fs.statSync(filePath).mode;
+
+      expect(afterMode).toBe(beforeMode);
+    });
+
+    test("should not throw for non-existent file", () => {
+      expect(() => {
+        extractorModule.ensureExecutable(path.join(tempDir, "does-not-exist"));
+      }).not.toThrow();
+    });
+  });
+
+  describe("locateCodexViaImportResolve", () => {
+    test("should find codex binary via import.meta.resolve", () => {
+      const result = extractorModule.locateCodexViaImportResolve();
+      expect(result).not.toBeNull();
+      if (result) {
+        expect(result).toMatch(/@openai[/\\]codex/);
+        expect(fs.existsSync(result)).toBe(true);
+      }
+    });
+
+    test("should return an executable file", () => {
+      if (os.platform() === "win32") return;
+
+      const result = extractorModule.locateCodexViaImportResolve();
+      expect(result).not.toBeNull();
+      if (result) {
+        const stat = fs.statSync(result);
+        expect(stat.mode & 0o100).not.toBe(0);
+      }
     });
   });
 
@@ -239,7 +298,10 @@ describe("Codex Runtime Extractor", () => {
       // Create marker file but not binary
       const extractDir = extractorModule.getCodexExtractionDir();
       fs.mkdirSync(extractDir, { recursive: true });
-      fs.writeFileSync(path.join(extractDir, ".extraction-complete"), "0.87.0");
+      fs.writeFileSync(
+        path.join(extractDir, ".extraction-complete"),
+        extractorModule.CODEX_SDK_VERSION,
+      );
 
       const result = extractorModule.needsCodexExtraction();
       expect(result).toBe(true);
@@ -270,7 +332,10 @@ describe("Codex Runtime Extractor", () => {
       const codexPath = extractorModule.getExtractedCodexPath();
 
       fs.mkdirSync(extractDir, { recursive: true });
-      fs.writeFileSync(path.join(extractDir, ".extraction-complete"), "0.87.0");
+      fs.writeFileSync(
+        path.join(extractDir, ".extraction-complete"),
+        extractorModule.CODEX_SDK_VERSION,
+      );
       createDummyCodexBinary(codexPath);
 
       const result = extractorModule.needsCodexExtraction();
@@ -286,7 +351,7 @@ describe("Codex Runtime Extractor", () => {
       const markerPath = path.join(extractDir, ".extraction-complete");
 
       fs.mkdirSync(extractDir, { recursive: true });
-      fs.writeFileSync(markerPath, "0.87.0");
+      fs.writeFileSync(markerPath, extractorModule.CODEX_SDK_VERSION);
 
       // Make marker file unreadable (Unix only)
       if (os.platform() !== "win32") {
@@ -377,7 +442,7 @@ describe("Codex Runtime Extractor", () => {
 
       // Should find the real codex from module location, not from cwd
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result.path).toContain("codex-sdk");
+      expect(result.path).toMatch(/@openai[/\\]codex/);
     });
 
     test("should find binary from module location even when cwd has no node_modules", async () => {
@@ -389,7 +454,7 @@ describe("Codex Runtime Extractor", () => {
 
       // After the fix, this should find the binary from module location
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result.path).toContain("codex-sdk");
+      expect(result.path).toMatch(/@openai[/\\]codex/);
     });
   });
 
@@ -404,7 +469,10 @@ describe("Codex Runtime Extractor", () => {
       const codexPath = extractorModule.getExtractedCodexPath();
 
       fs.mkdirSync(extractDir, { recursive: true });
-      fs.writeFileSync(path.join(extractDir, ".extraction-complete"), "0.87.0");
+      fs.writeFileSync(
+        path.join(extractDir, ".extraction-complete"),
+        extractorModule.CODEX_SDK_VERSION,
+      );
       createDummyCodexBinary(codexPath);
 
       const result = await extractorModule.ensureCodexAvailable();
@@ -425,7 +493,10 @@ describe("Codex Runtime Extractor", () => {
 
       // Manually create the binary (simulating extraction)
       createDummyCodexBinary(codexPath);
-      fs.writeFileSync(path.join(extractDir, ".extraction-complete"), "0.87.0");
+      fs.writeFileSync(
+        path.join(extractDir, ".extraction-complete"),
+        extractorModule.CODEX_SDK_VERSION,
+      );
 
       const result = await extractorModule.ensureCodexAvailable();
       expect(result.path).toBe(codexPath);
@@ -434,7 +505,7 @@ describe("Codex Runtime Extractor", () => {
       // Verify marker file exists
       const markerPath = path.join(extractDir, ".extraction-complete");
       expect(fs.existsSync(markerPath)).toBe(true);
-      expect(fs.readFileSync(markerPath, "utf-8").trim()).toBe("0.87.0");
+      expect(fs.readFileSync(markerPath, "utf-8").trim()).toBe(extractorModule.CODEX_SDK_VERSION);
     });
   });
 
@@ -450,7 +521,7 @@ describe("Codex Runtime Extractor", () => {
 
       // After the fix, this should find the binary from module location
       const result = await extractorModule.ensureCodexAvailable();
-      expect(result.path).toContain("codex-sdk");
+      expect(result.path).toMatch(/@openai[/\\]codex/);
     });
 
     test("validateCodexBinary should return false for non-existent files", () => {

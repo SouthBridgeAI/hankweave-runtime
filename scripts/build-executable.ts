@@ -27,7 +27,6 @@ import { getCodexPlatform } from "../server/codex-runtime-extractor.js";
 
 // Configuration
 const SDK_PATH = "node_modules/@anthropic-ai/claude-agent-sdk";
-const CODEX_SDK_PATH = "node_modules/@openai/codex-sdk";
 const ENTRY_POINT = "server/index.ts";
 const OUTPUT_DIR = "releases";
 
@@ -61,6 +60,24 @@ function getRipgrepPlatform(target?: string): string {
     return "x64-win32";
   }
   throw new Error(`Unsupported platform: ${platform}-${arch}`);
+}
+
+// Get the platform-specific codex package directory name
+// In codex-sdk v0.101.0+, binaries are in @openai/codex-<platform>-<arch>/vendor/
+function getCodexPackageDir(target?: string): string {
+  let platform: string;
+  let arch: string;
+
+  if (target) {
+    [platform, arch] = target.split("-");
+    // Map 'windows' to 'win32' to match npm package naming
+    if (platform === "windows") platform = "win32";
+  } else {
+    platform = os.platform() === "win32" ? "win32" : os.platform();
+    arch = os.arch() === "arm64" ? "arm64" : "x64";
+  }
+
+  return `node_modules/@openai/codex-${platform}-${arch}`;
 }
 
 // Get Bun target string
@@ -124,9 +141,10 @@ async function main() {
       process.exit(1);
     }
 
-    if (!fs.existsSync(CODEX_SDK_PATH)) {
-      console.error(`❌ Codex SDK not found at ${CODEX_SDK_PATH}`);
-      console.error("   Run 'bun install' first.");
+    const codexPackageDir = getCodexPackageDir(target);
+    if (!fs.existsSync(codexPackageDir)) {
+      console.error(`❌ Codex platform package not found at ${codexPackageDir}`);
+      console.error("   Run 'bun install' first. For cross-compilation, ensure the target platform package is available.");
       process.exit(1);
     }
 
@@ -155,8 +173,8 @@ async function main() {
       path.join(SDK_PATH, "tree-sitter-bash.wasm"),
       path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, ripgrepPlatform === "x64-win32" ? "rg.exe" : "rg"),
       path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, "ripgrep.node"),
-      // Codex SDK binary (platform-specific)
-      path.join(CODEX_SDK_PATH, "vendor", codexPlatform, "codex", codexBinaryName),
+      // Codex SDK binary (platform-specific, v0.101.0+ uses separate @openai/codex-<platform>-<arch> packages)
+      path.join(codexPackageDir, "vendor", codexPlatform, "codex", codexBinaryName),
       // Shim files (use .js extension for embedding compatibility)
       path.join("shims", "gemini", "index.js"),
       path.join("shims", "codex", "index.js"),

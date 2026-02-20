@@ -487,7 +487,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("anthropic");
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
           expect(result.matchType).toBe("fuzzy");
         }
       });
@@ -571,7 +571,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match the most recent claude sonnet from anthropic
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
           expect(result.modelInfo.providerId).toBe("anthropic");
           expect(result.matchType).toBe("fuzzy");
         }
@@ -599,7 +599,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match based on display name
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
           expect(result.matchType).toBe("fuzzy");
         }
       });
@@ -1503,7 +1503,7 @@ describe("LlmProviderRegistry", () => {
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
         }
       });
     });
@@ -1728,7 +1728,7 @@ describe("LlmProviderRegistry", () => {
         {
           input: "sonnet",
           expectedProvider: "anthropic",
-          expectedModelId: "claude-sonnet-4-5",
+          expectedModelId: "claude-sonnet-4-6",
         },
         {
           input: "haiku",
@@ -1767,7 +1767,7 @@ describe("LlmProviderRegistry", () => {
       }
     });
 
-    it("should resolve 'sonnet' to claude-sonnet-4-5", () => {
+    it("should resolve 'sonnet' to claude-sonnet-4-6", () => {
       const result = registry.resolveModel({
         model: "sonnet", // Short name that gets expanded to "claude-sonnet"
       });
@@ -1775,7 +1775,7 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5");
+        expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
         // Should be fuzzy match
         expect(result.matchType).toBe("fuzzy");
       }

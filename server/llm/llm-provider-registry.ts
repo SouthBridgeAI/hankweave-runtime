@@ -298,6 +298,57 @@ export class LlmProviderRegistry {
           release_date: "2026-02-05",
           last_updated: "2026-02-05",
         },
+        // GPT 5.3 Codex Spark reasoning effort variants
+        {
+          providerId: "openai",
+          modelId: "gpt-5.3-codex-spark-high",
+          name: "GPT-5.3 Codex Spark High",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 1.75,
+            output: 14,
+            cache_read: 0.175,
+          },
+          limit: {
+            context: 128000,
+            output: 32000,
+          },
+          modalities: {
+            input: ["text", "image", "pdf"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2026-02-05",
+          last_updated: "2026-02-05",
+        },
+        {
+          providerId: "openai",
+          modelId: "gpt-5.3-codex-spark-xhigh",
+          name: "GPT-5.3 Codex Spark XHigh",
+          attachment: true,
+          reasoning: true,
+          tool_call: true,
+          temperature: false,
+          cost: {
+            input: 3.5,
+            output: 28,
+            cache_read: 0.35,
+          },
+          limit: {
+            context: 128000,
+            output: 32000,
+          },
+          modalities: {
+            input: ["text", "image", "pdf"],
+            output: ["text"],
+          },
+          knowledge: "2025-08-31",
+          release_date: "2026-02-05",
+          last_updated: "2026-02-05",
+        },
       ];
 
       // Process each provider's models
@@ -336,28 +387,24 @@ export class LlmProviderRegistry {
   }
 
   /**
-   * Find the cheapest model for a provider for health checks
-   * Uses input cost since health checks send minimal input and expect minimal output
+   * Find the cheapest model for a provider.
+   * Used for health checks and credit validation where we want the
+   * lowest-cost model that still works as a chat model.
+   *
    * Filters to:
    * - Chat models only (not embeddings)
-   * - Models updated within last year
    * - Models that support both text input and text output
+   *
+   * Prefers models updated in the last 6 months (more likely to still be
+   * active on the provider's API). Falls back to 1 year if nothing recent
+   * enough is found, then drops the date filter entirely as a last resort.
    */
-  private findCheapestModel(providerId: string): string | undefined {
-    let cheapestModel: ModelInfo | undefined;
-    let lowestInputCost = Number.POSITIVE_INFINITY;
-
-    // Calculate cutoff date (1 year ago)
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    const cutoffDate = oneYearAgo.toISOString().substring(0, 7); // YYYY-MM format
-
+  public findCheapestModel(providerId: string): string | undefined {
+    // Build a filtered list of candidate chat models for this provider
+    const candidates: ModelInfo[] = [];
     for (const model of this.models.values()) {
-      // Skip if not the right provider or if we've already seen this model
-      // Compare case-insensitively since provider IDs are normalized
       if (model.providerId.toLowerCase() !== providerId.toLowerCase()) continue;
 
-      // Skip embedding models - must support text input AND text output for chat
       const isEmbeddingModel =
         !model.modalities.output.includes("text") ||
         !model.modalities.input.includes("text") ||
@@ -371,30 +418,53 @@ export class LlmProviderRegistry {
         continue;
       }
 
-      // Skip models not updated in last year
-      if (model.last_updated < cutoffDate) {
-        this.logger?.log(
-          `Skipping ${model.modelId} for health check (last updated: ${model.last_updated})`,
-          "debug",
-        );
-        continue;
-      }
+      if (!model.cost?.input || model.cost.input <= 0) continue;
 
-      const cost = model.cost?.input;
-      if (cost !== undefined && cost > 0 && cost < lowestInputCost) {
-        lowestInputCost = cost;
-        cheapestModel = model;
-      }
+      candidates.push(model);
     }
 
-    if (cheapestModel) {
+    if (candidates.length === 0) return undefined;
+
+    // Tiered date filtering: prefer recent models, widen if needed
+    const now = new Date();
+    const sixMonthsAgo = new Date(now);
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const oneYearAgo = new Date(now);
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+    // Pad YYYY-MM to YYYY-MM-01 for consistent comparison
+    const padDate = (d: string) => (d.length === 7 ? `${d}-01` : d);
+    const sixMoCutoff = sixMonthsAgo.toISOString().substring(0, 10);
+    const oneYrCutoff = oneYearAgo.toISOString().substring(0, 10);
+
+    const recentCandidates = candidates.filter((m) => padDate(m.last_updated) >= sixMoCutoff);
+    const yearCandidates = candidates.filter((m) => padDate(m.last_updated) >= oneYrCutoff);
+
+    const pickCheapest = (models: ModelInfo[]): ModelInfo | undefined => {
+      let best: ModelInfo | undefined;
+      let lowestCost = Number.POSITIVE_INFINITY;
+      for (const m of models) {
+        const cost = m.cost?.input ?? Number.POSITIVE_INFINITY;
+        if (cost < lowestCost) {
+          lowestCost = cost;
+          best = m;
+        }
+      }
+      return best;
+    };
+
+    // Try 6-month window first, then 1-year, then all candidates
+    const chosen =
+      pickCheapest(recentCandidates) ?? pickCheapest(yearCandidates) ?? pickCheapest(candidates);
+
+    if (chosen) {
       this.logger?.log(
-        `Selected ${cheapestModel.modelId} as cheapest for ${providerId} (input cost: $${cheapestModel.cost?.input}/M tokens, updated: ${cheapestModel.last_updated})`,
+        `Selected ${chosen.modelId} as cheapest for ${providerId} (input cost: $${chosen.cost?.input}/M tokens, updated: ${chosen.last_updated})`,
         "debug",
       );
     }
 
-    return cheapestModel?.modelId;
+    return chosen?.modelId;
   }
 
   private initializeProviders(): void {
