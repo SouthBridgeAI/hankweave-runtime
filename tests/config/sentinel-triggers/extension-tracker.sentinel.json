@@ -13,7 +13,7 @@
     "strategy": "immediate"
   },
   "output": {
-    "format": "json",
+    "format": "jsonl",
     "file": "extension-tracking.jsonl"
   },
   "userPromptText": "A codon extension just occurred:\n\nCodon: {{codonName}} ({{codonId}})\nExtension Number: {{extensionNumber}}\nCumulative Cost: ${{cumulativeCost}}\n\nProvide a brief JSON summary with fields: extensionNumber, codonId, observedAt (current timestamp)"

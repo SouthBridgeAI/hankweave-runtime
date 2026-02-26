@@ -12,9 +12,21 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CodonRunner } from "../../server/codon-runner.js";
-import { type CodonId, SessionId } from "../../server/types/branded-types.js";
+import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
+import type { StateManager } from "../../server/state-manager.js";
+import { type CodonId, type RunId, SessionId } from "../../server/types/branded-types.js";
 import { Logger } from "../../server/utils.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
+
+const mockLlmRegistry = {
+  calculateCost: () => null,
+} as unknown as LlmProviderRegistry;
+
+const mockStateManager = {
+  transition: () => {},
+} as unknown as StateManager;
+
+const mockRunId = "test-run-id" as unknown as RunId;
 
 // Path to test log file that reproduces the SDK bug sequence
 // This contains real data extracted from run 1769144204725-v8vnh
@@ -66,6 +78,9 @@ describe("CodonRunner post-success SDK error handling", () => {
         executionPath: tempDir,
         agentRootPath: tempDir, // Use same path for tests
         logger,
+        llmRegistry: mockLlmRegistry,
+        runId: mockRunId,
+        stateManager: mockStateManager,
         logPath: testLogPath,
         logParsingInterval: 50, // Fast parsing for test
       });
@@ -140,6 +155,9 @@ describe("CodonRunner post-success SDK error handling", () => {
         executionPath: tempDir,
         agentRootPath: tempDir, // Use same path for tests
         logger,
+        llmRegistry: mockLlmRegistry,
+        runId: mockRunId,
+        stateManager: mockStateManager,
         logPath: emptyLogPath,
       });
 
@@ -221,6 +239,9 @@ describe("CodonRunner post-success SDK error handling", () => {
         executionPath: tempDir,
         agentRootPath: tempDir, // Use same path for tests
         logger,
+        llmRegistry: mockLlmRegistry,
+        runId: mockRunId,
+        stateManager: mockStateManager,
         logPath: failedLogPath,
         logParsingInterval: 50,
       });
@@ -284,6 +305,9 @@ describe("CodonRunner post-success SDK error handling", () => {
         executionPath: tempDir,
         agentRootPath: tempDir, // Use same path for tests
         logger,
+        llmRegistry: mockLlmRegistry,
+        runId: mockRunId,
+        stateManager: mockStateManager,
         logPath: emptyLogPath,
       });
 
@@ -333,6 +357,9 @@ describe("CodonRunner post-success SDK error handling", () => {
         executionPath: tempDir,
         agentRootPath: tempDir, // Use same path for tests
         logger,
+        llmRegistry: mockLlmRegistry,
+        runId: mockRunId,
+        stateManager: mockStateManager,
         logPath: successLogPath,
         logParsingInterval: 50,
       });
@@ -403,6 +430,9 @@ describe("CodonRunner post-success SDK error handling", () => {
         executionPath: tempDir,
         agentRootPath: tempDir, // Use tempDir for both in tests
         logger,
+        llmRegistry: mockLlmRegistry,
+        runId: mockRunId,
+        stateManager: mockStateManager,
         logPath: successLogPath,
         logParsingInterval: 50,
         extensionConfig: {

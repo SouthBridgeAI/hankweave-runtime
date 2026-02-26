@@ -740,10 +740,13 @@ describe("Structured Output E2E (Real Providers)", () => {
       // Wait for health checks to complete
       await realRegistry.performHealthChecks();
 
-      // Find a fast, cheap model for testing (prefer haiku, fall back to any available)
+      // Find a fast, cheap model for testing
+      // Prefer claude-haiku-4-5 (current), avoid deprecated claude-3-5-haiku-latest
       let testModel: string | null = null;
       const availableModels = realRegistry.getAvailableModels();
-      const preferredModel = availableModels.find((m) => m.includes("haiku"));
+      const preferredModel =
+        availableModels.find((m) => m === "anthropic/claude-haiku-4-5") ||
+        availableModels.find((m) => m.includes("haiku") && !m.includes("3-5-haiku"));
       if (preferredModel) {
         testModel = preferredModel;
       } else {
@@ -866,10 +869,13 @@ describe("Structured Output E2E (Real Providers)", () => {
       // Wait for health checks to complete
       await realRegistry.performHealthChecks();
 
-      // Find a fast, cheap model for testing (prefer haiku, fall back to any available)
+      // Find a fast, cheap model for testing
+      // Prefer claude-haiku-4-5 (current), avoid deprecated claude-3-5-haiku-latest
       let testModel: string | null = null;
       const availableModels = realRegistry.getAvailableModels();
-      const preferredModel = availableModels.find((m) => m.includes("haiku"));
+      const preferredModel =
+        availableModels.find((m) => m === "anthropic/claude-haiku-4-5") ||
+        availableModels.find((m) => m.includes("haiku") && !m.includes("3-5-haiku"));
       if (preferredModel) {
         testModel = preferredModel;
       } else {

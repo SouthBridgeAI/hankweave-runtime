@@ -75,7 +75,6 @@ import type {
   HankweaveConfig,
   RigShellCommand,
   ShellCommand,
-  TokenUsage,
 } from "./types/types.js";
 // Import remaining types from old file
 import { ClientMode, isSyntheticTimeout } from "./types/types.js";
@@ -147,8 +146,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         previousSessionId?: SessionId;
         sessionId?: SessionId;
         startTime: Date;
-        codonCost: number;
-        codonTokens: TokenUsage;
       }
     | undefined;
   private recentFileAccess:
@@ -2247,13 +2244,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       codon,
       previousSessionId: previousSessionId ? SessionId(previousSessionId) : undefined, // Store for codon.started event
       startTime: new Date(),
-      codonCost: 0,
-      codonTokens: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
     };
 
     // Store watch patterns for tool-based tracking
@@ -2358,12 +2348,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
       // Create runner for this codon and store in map (single source of truth)
       // Build config with proper discriminated union structure
+      if (!this.currentRunId) {
+        throw new Error("No active run while creating CodonRunner");
+      }
+      const runId = this.currentRunId;
+
       const baseConfig = {
         codon,
         codonId,
+        runId,
+        stateManager: this.stateManager,
         executionPath: this.config.executionPath,
         agentRootPath: this.config.agentRootPath,
         logger: this.logger,
+        llmRegistry: this.llmRegistry,
         logParsingInterval: this.config.logParsingInterval,
         anthropicBaseUrl: this.proxyRunner?.proxyUrl,
         logPath,
@@ -2541,6 +2539,37 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     runner.on("resultMessage", (msg: ResultMessage) => {
       this.handleResultMessage(msg, codonId);
     });
+
+    // Cost events — CodonRunner handles state transitions and logging internally.
+    // Runtime just forwards to server event channel for client broadcasting.
+    runner.on("costIncremented", (data) => {
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "token.usage",
+        data: {
+          codonId: data.codonId,
+          ...data.tokens,
+          totalCost: data.totalCost,
+          modelId: data.modelId,
+        },
+      } as TokenUsageEvent);
+    });
+
+    runner.on("finalCostSet", (data) => {
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "token.usage",
+        data: {
+          codonId: data.codonId,
+          ...data.tokens,
+          totalCost: data.totalCost,
+          ...(data.modelUsage ? { modelUsage: data.modelUsage } : {}),
+          ...(!data.modelUsage ? { modelId: data.modelId } : {}),
+        },
+      } as TokenUsageEvent);
+    });
   }
 
   private handleSystemMessage(msg: SystemMessage, codonId: string): void {
@@ -2592,13 +2621,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         sessionId: SessionId(msg.session_id),
         previousSessionId: this.currentCodon.previousSessionId,
         startTime: this.currentCodon.startTime,
-        codonCost: 0,
-        codonTokens: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheCreationTokens: 0,
-          cacheReadTokens: 0,
-        },
       };
 
       // Log the session ID update
@@ -2683,79 +2705,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       return; // Stop processing
     }
 
-    if (msg.message.usage) {
-      const usageDelta: TokenUsage = {
-        inputTokens: msg.message.usage.input_tokens || 0,
-        outputTokens: msg.message.usage.output_tokens || 0,
-        cacheCreationTokens: msg.message.usage.cache_creation_input_tokens || 0,
-        cacheReadTokens: msg.message.usage.cache_read_input_tokens || 0,
-      };
-
-      // Calculate cost delta using LLM registry
-      let costDelta = 0;
-      const modelId = this.currentCodon?.codon.model.modelId;
-
-      if (modelId) {
-        const calculatedCost = this.llmRegistry.calculateCost(modelId, {
-          inputTokens: usageDelta.inputTokens,
-          outputTokens: usageDelta.outputTokens,
-          cacheReadTokens: usageDelta.cacheReadTokens,
-          cacheCreationTokens: usageDelta.cacheCreationTokens,
-        });
-
-        if (calculatedCost !== null) {
-          costDelta = calculatedCost;
-        } else {
-          this.logger.log(`Cannot calculate incremental cost for model: ${modelId}`, "debug");
-        }
-      } else {
-        this.logger.log("Cannot calculate incremental cost: no model ID in current codon", "debug");
-      }
-
-      // This part is fine, it updates the transient in-memory state for now
-      if (this.currentCodon && this.currentCodon.status === "running") {
-        this.currentCodon.codonCost += costDelta;
-        this.currentCodon.codonTokens.inputTokens += usageDelta.inputTokens;
-        this.currentCodon.codonTokens.outputTokens += usageDelta.outputTokens;
-        this.currentCodon.codonTokens.cacheCreationTokens += usageDelta.cacheCreationTokens;
-        this.currentCodon.codonTokens.cacheReadTokens += usageDelta.cacheReadTokens;
-      }
-
-      // Fire cost INCREMENT transition (fire-and-forget)
-      if (this.currentRunId) {
-        // Instead of calculating a new total from state, we just send the delta.
-        this.stateManager.transition({
-          type: "CostsIncremented", // Use the new incremental type
-          data: {
-            runId: this.currentRunId,
-            codonId: CodonId(codonId),
-            costDelta: costDelta, // Send the delta
-            tokensDelta: usageDelta, // Send the delta
-          },
-        });
-      }
-
-      this.logger.log(
-        `Codon ${codonId} token update - Call cost: $${costDelta.toFixed(
-          4,
-        )}, Running total: $${this.currentCodon?.codonCost.toFixed(4) || 0} ` +
-          `(${usageDelta.inputTokens} in, ${usageDelta.outputTokens} out, ` +
-          `${usageDelta.cacheCreationTokens} cache create, ${usageDelta.cacheReadTokens} cache read)`,
-      );
-
-      // Send token.usage event with the delta cost
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "token.usage",
-        data: {
-          codonId,
-          ...usageDelta,
-          totalCost: costDelta, // This event should report the delta cost
-          modelId: this.currentCodon?.codon.model.modelId, // For single-model scenarios
-        },
-      } as TokenUsageEvent);
-    }
+    // Cost tracking is handled by CostTracker (via setupCodonRunnerEventHandlers subscriptions)
 
     const content = msg.message.content;
     const contentArray = Array.isArray(content)
@@ -2980,95 +2930,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // Always update cost/token tracking for subtype="success" results, even when is_error=true.
-    // Tokens are still spent on timeouts, rate-limit hits, and other API errors —
-    // we need accurate cost tracking regardless of whether the codon succeeded.
-    if (msg.subtype === "success") {
-      // Update final token usage and cost from result message
-      if (msg.usage && this.currentRunId) {
-        const finalUsage: TokenUsage = {
-          inputTokens: msg.usage.input_tokens || 0,
-          outputTokens: msg.usage.output_tokens || 0,
-          cacheCreationTokens: msg.usage.cache_creation_input_tokens || 0,
-          cacheReadTokens: msg.usage.cache_read_input_tokens || 0,
-        };
-
-        // Get final cost: prefer CLI-provided, fallback to registry calculation, then accumulated cost
-        let finalCost = msg.total_cost_usd;
-
-        if (finalCost === undefined) {
-          const modelId = this.currentCodon?.codon.model.modelId;
-
-          if (modelId) {
-            const calculatedCost = this.llmRegistry.calculateCost(modelId, {
-              inputTokens: finalUsage.inputTokens,
-              outputTokens: finalUsage.outputTokens,
-              cacheReadTokens: finalUsage.cacheReadTokens,
-              cacheCreationTokens: finalUsage.cacheCreationTokens,
-            });
-
-            if (calculatedCost !== null) {
-              finalCost = calculatedCost;
-            } else {
-              // Fall back to accumulated cost if registry lookup fails
-              const accumulatedCost = this.currentCodon?.codonCost || 0;
-              this.logger.log(
-                `Cannot calculate final cost for model: ${modelId}, using accumulated cost: $${accumulatedCost.toFixed(
-                  4,
-                )}`,
-                "debug",
-              );
-              finalCost = accumulatedCost;
-            }
-          } else {
-            // Fall back to accumulated cost if no model ID
-            const accumulatedCost = this.currentCodon?.codonCost || 0;
-            this.logger.log(
-              `Cannot calculate final cost: no model ID, using accumulated cost: $${accumulatedCost.toFixed(
-                4,
-              )}`,
-              "debug",
-            );
-            finalCost = accumulatedCost;
-          }
-        }
-
-        const accumulatedCost = this.currentCodon?.codonCost || 0; // Still useful for logging
-        if (Math.abs(accumulatedCost - finalCost) > 0.0001) {
-          this.logger.log(
-            `Codon ${codonId} cost discrepancy - Accumulated: $${accumulatedCost.toFixed(4)}, ` +
-              `Final: $${finalCost.toFixed(4)} (using final from result message)`,
-          );
-        }
-
-        // Fire a state transition with the authoritative final cost.
-        this.stateManager.transition({
-          type: "CodonFinalCostSet",
-          data: {
-            runId: this.currentRunId,
-            codonId: CodonId(codonId),
-            finalCost: finalCost,
-            finalTokens: finalUsage,
-          },
-        });
-
-        // Send a final token usage event with the correct values
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "token.usage",
-          data: {
-            codonId,
-            ...finalUsage,
-            totalCost: finalCost,
-            // Include per-model usage if available (for multi-model scenarios)
-            ...(msg.modelUsage ? { modelUsage: msg.modelUsage } : {}),
-            // Include modelId for single-model scenarios (when modelUsage is not present)
-            ...(!msg.modelUsage ? { modelId: this.currentCodon?.codon.model.modelId } : {}),
-          },
-        } as TokenUsageEvent);
-      }
-    }
+    // Cost tracking for success results is handled by CostTracker (via setupCodonRunnerEventHandlers subscriptions)
   }
 
   private handleUserMessage(msg: UserMessage, _codonId: string): void {
@@ -3550,6 +3412,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             outItem.copy,
             this.config.outputDirectory, // Already resolved to absolute path in index.ts
             this.logger,
+            { overwrite: this.config.overwriteOutput },
           );
 
           // Emit info events for any file conflicts

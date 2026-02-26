@@ -59,6 +59,7 @@ const BOOLEAN_FLAGS = new Set([
   "--ignore-rig-failures",
   "--attach",
   "--ignore-data-mismatch", // Deprecated: use --force instead
+  "--overwrite-output",
 ]);
 
 /**
@@ -122,6 +123,7 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   ignoreRigFailures?: boolean; // --ignore-rig-failures
   attach?: boolean; // --attach
   ignoreDataMismatch?: boolean; // --ignore-data-mismatch (deprecated, use --force)
+  overwriteOutput?: boolean; // --overwrite-output
 }
 
 /**
@@ -296,6 +298,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.copy = args.includes("--copy");
   result.attach = args.includes("--attach");
   result.ignoreDataMismatch = args.includes("--ignore-data-mismatch");
+  result.overwriteOutput = args.includes("--overwrite-output");
 
   return result;
 }

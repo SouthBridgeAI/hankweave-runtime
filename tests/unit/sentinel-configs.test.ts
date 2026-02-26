@@ -153,7 +153,7 @@ describe("Sentinel Configuration Files", () => {
 
           // Check valid formats
           if (hasFormat) {
-            expect(["text", "json", "jsonl"]).toContain(config.content.output.format);
+            expect(["text", "jsonl"]).toContain(config.content.output.format);
           }
         }
       }

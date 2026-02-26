@@ -429,8 +429,9 @@ export const sentinelConfigSchema = z
 
     output: z
       .object({
-        format: z.enum(["text", "json", "jsonl"]).optional(),
+        format: z.enum(["text", "jsonl"]).optional(),
         file: z.string().optional(),
+        lastValueFile: z.string().optional(),
       })
       .optional(),
   })
@@ -465,6 +466,20 @@ export const sentinelConfigSchema = z
     {
       message: "joinString is only valid for text output, not structured output",
       path: ["joinString"],
+    },
+  )
+  .refine(
+    (data) => {
+      if (data.structuredOutput && data.output?.format) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        "output.format is ignored when structuredOutput is configured. " +
+        "Structured output format is determined by the schema.",
+      path: ["output", "format"],
     },
   );
 

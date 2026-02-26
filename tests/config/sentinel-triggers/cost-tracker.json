@@ -20,7 +20,7 @@
   },
   "model": "anthropic/claude-haiku-4-5",
   "output": {
-    "format": "json",
+    "format": "jsonl",
     "file": "cost-alerts.jsonl"
   },
   "userPromptText": "High cost detected in codon {{codonId}}:\n\nToken usage: {{inputTokens}} input, {{outputTokens}} output\nCache: {{cacheReadTokens}} read, {{cacheCreationTokens}} created\nTotal cost: ${{totalCost}}\n\nAnalyze if this cost is justified based on the codon's complexity."

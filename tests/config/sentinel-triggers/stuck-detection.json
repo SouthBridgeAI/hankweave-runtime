@@ -61,7 +61,7 @@
   },
   "model": "anthropic/claude-haiku-4-5",
   "output": {
-    "format": "json",
+    "format": "jsonl",
     "file": "stuck-detection.jsonl"
   },
   "userPromptText": "The agent appears to be stuck - it has made multiple failed attempts with similar errors:\n\n{{events}}\n\nAnalyze:\n1. What is the agent trying to do?\n2. Why are the attempts failing?\n3. Is this a pattern that suggests the agent is stuck?\n4. Suggested intervention or fix\n5. Should the codon be terminated?"

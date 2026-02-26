@@ -25,7 +25,7 @@
   },
   "model": "anthropic/claude-haiku-4-5",
   "output": {
-    "format": "json",
+    "format": "jsonl",
     "file": "bash-commands.jsonl"
   },
   "userPromptText": "Bash tool usage detected: <%= JSON.stringify(it.events, null, 2) %>"

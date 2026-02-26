@@ -624,4 +624,72 @@ describe("Sentinel Configuration Validation", () => {
       expect(invalidResult.success).toBe(false);
     });
   });
+
+  describe("structuredOutput + output.format conflict", () => {
+    it("should reject config with both structuredOutput and output.format", () => {
+      const config = {
+        id: "conflict-test",
+        name: "Conflict Test",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "test",
+        model: "test-model",
+        structuredOutput: {
+          output: "enum",
+          enumValues: ["a", "b"],
+        },
+        output: {
+          format: "jsonl",
+        },
+      };
+
+      const result = sentinelConfigSchema.safeParse(config);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const messages = result.error.errors.map((e) => e.message);
+        expect(
+          messages.some((m) => m.includes("output.format is ignored when structuredOutput")),
+        ).toBe(true);
+      }
+    });
+
+    it("should accept config with structuredOutput and output.file (no format)", () => {
+      const config = {
+        id: "no-conflict",
+        name: "No Conflict",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "test",
+        model: "test-model",
+        structuredOutput: {
+          output: "enum",
+          enumValues: ["a", "b"],
+        },
+        output: {
+          file: "output.ndjson",
+        },
+      };
+
+      const result = sentinelConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept config with output.format and no structuredOutput", () => {
+      const config = {
+        id: "format-only",
+        name: "Format Only",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "test",
+        model: "test-model",
+        output: {
+          format: "jsonl",
+          file: "output.jsonl",
+        },
+      };
+
+      const result = sentinelConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+  });
 });

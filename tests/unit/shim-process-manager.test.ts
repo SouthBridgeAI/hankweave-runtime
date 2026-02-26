@@ -313,3 +313,166 @@ describe("ShimProcessManager extension behavior", () => {
     spawnSpy.mockRestore();
   });
 });
+
+describe("ShimProcessManager HANKWEAVE_* env passthrough", () => {
+  let tempDir: string;
+  let logger: Logger;
+  let mockLogParser: ClaudeLogParser;
+  const envKeysToClean: string[] = [];
+
+  beforeEach(async () => {
+    tempDir = path.resolve("tests", "test-area", `temp-test-shim-env-${Date.now()}`);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+    await fs.promises.mkdir(path.join(tempDir, ".hankweave", "logs"), {
+      recursive: true,
+    });
+    await fs.promises.mkdir(path.join(tempDir, ".hankweave", "logs", "shim-debug"), {
+      recursive: true,
+    });
+
+    const logPath = path.join(tempDir, "test.log");
+    logger = new Logger(logPath);
+    mockLogParser = new ClaudeLogParser({
+      logPath: path.join(tempDir, "mock.log"),
+      codonId: "test-codon",
+      parsingInterval: 100,
+    });
+  });
+
+  afterEach(async () => {
+    for (const key of envKeysToClean) {
+      delete process.env[key];
+    }
+    envKeysToClean.length = 0;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function setEnv(key: string, value: string) {
+    process.env[key] = value;
+    envKeysToClean.push(key);
+  }
+
+  function createSpawnSpy() {
+    const spawnSpy = spyOn(child_process, "spawn");
+    const mockProcess: Partial<ChildProcess> = {
+      pid: 12345,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock
+      stdin: { write: mock(() => {}), end: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock
+      stdout: { pipe: mock(() => {}), on: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock
+      stderr: { on: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock
+      on: mock(() => mockProcess as ChildProcess) as any,
+      killed: false,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock
+      kill: mock(() => true) as any,
+      removeAllListeners: mock(() => mockProcess as ChildProcess),
+    };
+    spawnSpy.mockReturnValue(mockProcess as ChildProcess);
+    return spawnSpy;
+  }
+
+  test("HANKWEAVE_FOO=bar passes FOO=bar to child", async () => {
+    setEnv("HANKWEAVE_FOO", "bar");
+
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+    const spawnSpy = createSpawnSpy();
+
+    const codon = createTestCodon({
+      id: "test-codon",
+      name: "Test",
+      model: "gemini-2.0-flash-exp",
+      continuationMode: "fresh",
+      promptText: "Test",
+      description: "Test",
+      checkpointedFiles: [],
+    });
+
+    await manager.spawn(["node", "shim.js"], codon, null);
+
+    const spawnCall = spawnSpy.mock.calls[0];
+    const spawnOptions = spawnCall[2] as { env: NodeJS.ProcessEnv };
+    expect(spawnOptions.env.FOO).toBe("bar");
+
+    spawnSpy.mockRestore();
+  });
+
+  test("HANKWEAVE_FOO=unset removes FOO from child env", async () => {
+    setEnv("FOO", "should-be-removed");
+    setEnv("HANKWEAVE_FOO", "unset");
+
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+    const spawnSpy = createSpawnSpy();
+
+    const codon = createTestCodon({
+      id: "test-codon",
+      name: "Test",
+      model: "gemini-2.0-flash-exp",
+      continuationMode: "fresh",
+      promptText: "Test",
+      description: "Test",
+      checkpointedFiles: [],
+    });
+
+    await manager.spawn(["node", "shim.js"], codon, null);
+
+    const spawnCall = spawnSpy.mock.calls[0];
+    const spawnOptions = spawnCall[2] as { env: NodeJS.ProcessEnv };
+    expect(spawnOptions.env.FOO).toBeUndefined();
+
+    spawnSpy.mockRestore();
+  });
+
+  test("HANKWEAVE_ANTHROPIC_BASE_URL=unset removes inherited ANTHROPIC_BASE_URL", async () => {
+    setEnv("ANTHROPIC_BASE_URL", "https://proxy.example.com");
+    setEnv("HANKWEAVE_ANTHROPIC_BASE_URL", "unset");
+
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+    const spawnSpy = createSpawnSpy();
+
+    const codon = createTestCodon({
+      id: "test-codon",
+      name: "Test",
+      model: "gemini-2.0-flash-exp",
+      continuationMode: "fresh",
+      promptText: "Test",
+      description: "Test",
+      checkpointedFiles: [],
+    });
+
+    await manager.spawn(["node", "shim.js"], codon, null);
+
+    const spawnCall = spawnSpy.mock.calls[0];
+    const spawnOptions = spawnCall[2] as { env: NodeJS.ProcessEnv };
+    expect(spawnOptions.env.ANTHROPIC_BASE_URL).toBeUndefined();
+
+    spawnSpy.mockRestore();
+  });
+
+  test("HANKWEAVE_ANTHROPIC_BASE_URL=https://other overrides inherited value", async () => {
+    setEnv("ANTHROPIC_BASE_URL", "https://proxy.example.com");
+    setEnv("HANKWEAVE_ANTHROPIC_BASE_URL", "https://other.api.com");
+
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+    const spawnSpy = createSpawnSpy();
+
+    const codon = createTestCodon({
+      id: "test-codon",
+      name: "Test",
+      model: "gemini-2.0-flash-exp",
+      continuationMode: "fresh",
+      promptText: "Test",
+      description: "Test",
+      checkpointedFiles: [],
+    });
+
+    await manager.spawn(["node", "shim.js"], codon, null);
+
+    const spawnCall = spawnSpy.mock.calls[0];
+    const spawnOptions = spawnCall[2] as { env: NodeJS.ProcessEnv };
+    expect(spawnOptions.env.ANTHROPIC_BASE_URL).toBe("https://other.api.com");
+
+    spawnSpy.mockRestore();
+  });
+});

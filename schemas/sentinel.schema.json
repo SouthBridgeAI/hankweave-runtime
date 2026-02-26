@@ -645,11 +645,13 @@
               "type": "string",
               "enum": [
                 "text",
-                "json",
                 "jsonl"
               ]
             },
             "file": {
+              "type": "string"
+            },
+            "lastValueFile": {
               "type": "string"
             }
           },

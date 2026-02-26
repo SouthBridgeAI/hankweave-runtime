@@ -21,7 +21,7 @@
   },
   "model": "anthropic/claude-haiku-4-5",
   "output": {
-    "format": "json",
+    "format": "jsonl",
     "file": "thinking-analysis.jsonl"
   },
   "userPromptText": "Analyze the agent's thinking patterns from the last 30 seconds:\n\n{{events}}\n\nIdentify:\n1. Is the agent making progress or stuck in a loop?\n2. Are there signs of confusion or uncertainty?\n3. Is the thinking focused and goal-oriented?\n4. Suggestions for helping the agent if it's struggling"

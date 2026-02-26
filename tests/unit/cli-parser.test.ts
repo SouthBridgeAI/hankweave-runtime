@@ -1062,6 +1062,27 @@ describe("parseCliArgs", () => {
     });
   });
 
+  describe("--overwrite-output flag", () => {
+    test("should parse --overwrite-output flag", () => {
+      const args = ["--overwrite-output", "hank.json"];
+      const result = parseCliArgs(args);
+      expect(result.overwriteOutput).toBe(true);
+    });
+
+    test("should default overwriteOutput to false/undefined", () => {
+      const args = ["hank.json", "./data"];
+      const result = parseCliArgs(args);
+      expect(result.overwriteOutput).toBeFalsy();
+    });
+
+    test("should work with --output flag", () => {
+      const args = ["--output", "./results", "--overwrite-output", "hank.json"];
+      const result = parseCliArgs(args);
+      expect(result.outputPath).toBe("./results");
+      expect(result.overwriteOutput).toBe(true);
+    });
+  });
+
   describe("--output flag", () => {
     test("should parse --output flag with path", () => {
       const args = ["--output", "./results", "hank.json"];

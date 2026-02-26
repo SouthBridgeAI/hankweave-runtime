@@ -424,6 +424,98 @@ describeSymlinks("copyFiles with symlinks (ENG-125)", () => {
   });
 });
 
+describe("copyFiles with overwrite option", () => {
+  let tempDir: string;
+  let destDir: string;
+  let mockLogger: MockLogger;
+
+  beforeEach(async () => {
+    const timestamp = Date.now();
+    tempDir = path.resolve("tests", "test-area", `temp-test-overwrite-src-${timestamp}`);
+    destDir = path.resolve("tests", "test-area", `temp-test-overwrite-dest-${timestamp}`);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+    await fs.promises.mkdir(destDir, { recursive: true });
+    mockLogger = new MockLogger("/dev/null");
+  });
+
+  afterEach(async () => {
+    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(destDir, { recursive: true, force: true });
+  });
+
+  test("default behavior renames on conflict", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "report.txt"), "new content");
+    await fs.promises.writeFile(path.join(destDir, "report.txt"), "old content");
+
+    const { conflicts } = await copyFiles(tempDir, ["report.txt"], destDir, mockLogger);
+
+    expect(conflicts.length).toBe(1);
+    // Original file should be untouched
+    expect(await fs.promises.readFile(path.join(destDir, "report.txt"), "utf-8")).toBe(
+      "old content",
+    );
+    // New file should be renamed
+    const renamedFile = conflicts[0].resolved;
+    expect(await fs.promises.readFile(renamedFile, "utf-8")).toBe("new content");
+  });
+
+  test("overwrite: true replaces existing file", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "report.txt"), "new content");
+    await fs.promises.writeFile(path.join(destDir, "report.txt"), "old content");
+
+    const { conflicts } = await copyFiles(tempDir, ["report.txt"], destDir, mockLogger, {
+      overwrite: true,
+    });
+
+    expect(conflicts.length).toBe(0);
+    expect(await fs.promises.readFile(path.join(destDir, "report.txt"), "utf-8")).toBe(
+      "new content",
+    );
+  });
+
+  test("overwrite: true works when destination does not exist", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "new-file.txt"), "fresh content");
+
+    const { conflicts } = await copyFiles(tempDir, ["new-file.txt"], destDir, mockLogger, {
+      overwrite: true,
+    });
+
+    expect(conflicts.length).toBe(0);
+    expect(await fs.promises.readFile(path.join(destDir, "new-file.txt"), "utf-8")).toBe(
+      "fresh content",
+    );
+  });
+
+  test("overwrite: true replaces multiple files", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "a.txt"), "new-a");
+    await fs.promises.writeFile(path.join(tempDir, "b.txt"), "new-b");
+    await fs.promises.writeFile(path.join(destDir, "a.txt"), "old-a");
+    await fs.promises.writeFile(path.join(destDir, "b.txt"), "old-b");
+
+    const { conflicts } = await copyFiles(tempDir, ["*.txt"], destDir, mockLogger, {
+      overwrite: true,
+    });
+
+    expect(conflicts.length).toBe(0);
+    expect(await fs.promises.readFile(path.join(destDir, "a.txt"), "utf-8")).toBe("new-a");
+    expect(await fs.promises.readFile(path.join(destDir, "b.txt"), "utf-8")).toBe("new-b");
+  });
+
+  test("overwrite: false behaves like default (rename)", async () => {
+    await fs.promises.writeFile(path.join(tempDir, "report.txt"), "new content");
+    await fs.promises.writeFile(path.join(destDir, "report.txt"), "old content");
+
+    const { conflicts } = await copyFiles(tempDir, ["report.txt"], destDir, mockLogger, {
+      overwrite: false,
+    });
+
+    expect(conflicts.length).toBe(1);
+    expect(await fs.promises.readFile(path.join(destDir, "report.txt"), "utf-8")).toBe(
+      "old content",
+    );
+  });
+});
+
 describe("serve", () => {
   test("creates HTTP server that responds to requests", async () => {
     const testPort = await getFreePort();

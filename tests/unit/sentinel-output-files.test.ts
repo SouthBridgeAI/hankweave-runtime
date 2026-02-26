@@ -824,4 +824,412 @@ describe("Sentinel Output Files - Unit Tests", () => {
       expect(fs.existsSync(path.join(executionPath, ".hankweave"))).toBe(false);
     });
   });
+
+  describe("config.output.file as sentinel-level default", () => {
+    test("uses output.file when no outputPaths provided", () => {
+      const config = createBaseConfig({
+        output: { file: "my-output.md" },
+      });
+
+      new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      const expectedPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "my-output.md",
+      );
+      expect(fs.existsSync(expectedPath)).toBe(true);
+    });
+
+    test("output.file with slash resolves to agentRoot", () => {
+      const agentRootPath = path.join(testDir, "agent-root");
+      fs.mkdirSync(agentRootPath, { recursive: true });
+
+      const config = createBaseConfig({
+        output: { file: "./sentinel-notes/out.md" },
+      });
+
+      new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        agentRootPath,
+      );
+
+      const expectedPath = path.join(agentRootPath, "sentinel-notes", "out.md");
+      expect(fs.existsSync(expectedPath)).toBe(true);
+    });
+
+    test("settings.outputPaths.logFile overrides output.file", () => {
+      const config = createBaseConfig({
+        output: { file: "sentinel-default.md" },
+      });
+      const outputPaths: SentinelOutputPaths = {
+        logFile: "override.md",
+      };
+
+      new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+        outputPaths,
+      );
+
+      const overridePath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "override.md",
+      );
+      const defaultPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "sentinel-default.md",
+      );
+      expect(fs.existsSync(overridePath)).toBe(true);
+      expect(fs.existsSync(defaultPath)).toBe(false);
+    });
+
+    test("output.file writes content correctly", async () => {
+      const config = createBaseConfig({
+        output: { file: "my-log.md" },
+      });
+
+      const sentinel = new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall("Hello from sentinel"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      await sentinel.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await sentinel.completeAllWork();
+
+      const logPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "my-log.md",
+      );
+      const content = fs.readFileSync(logPath, "utf-8");
+      expect(content).toContain("Hello from sentinel");
+    });
+  });
+
+  describe("output.format controls auto-generated extension", () => {
+    test("format jsonl produces .jsonl extension", () => {
+      const config = createBaseConfig({
+        output: { format: "jsonl" },
+      });
+
+      new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+      );
+      const files = fs.readdirSync(autoDir);
+      expect(files.length).toBe(1);
+      expect(files[0]).toEndWith(".jsonl");
+    });
+
+    test("format text produces .md extension (default)", () => {
+      const config = createBaseConfig({
+        output: { format: "text" },
+      });
+
+      new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+      );
+      const files = fs.readdirSync(autoDir);
+      expect(files.length).toBe(1);
+      expect(files[0]).toEndWith(".md");
+    });
+
+    test("no output config produces .md extension (unchanged)", () => {
+      const config = createBaseConfig();
+
+      new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+      );
+      const files = fs.readdirSync(autoDir);
+      expect(files.length).toBe(1);
+      expect(files[0]).toEndWith(".md");
+    });
+
+    test("output.file takes precedence over format for extension", () => {
+      const config = createBaseConfig({
+        output: { format: "jsonl", file: "my-output.md" },
+      });
+
+      new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      const expectedPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "my-output.md",
+      );
+      expect(fs.existsSync(expectedPath)).toBe(true);
+    });
+  });
+
+  describe("output.format controls write behavior", () => {
+    test("jsonl format wraps text as JSON lines", async () => {
+      const config = createBaseConfig({
+        output: { format: "jsonl", file: "output.jsonl" },
+      });
+
+      const sentinel = new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall("Analysis result"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      await sentinel.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await sentinel.completeAllWork();
+
+      const logPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "output.jsonl",
+      );
+      const content = fs.readFileSync(logPath, "utf-8").trim();
+      const parsed = JSON.parse(content);
+      expect(parsed.text).toBe("Analysis result");
+      expect(parsed.sentinelId).toBe("test-sentinel");
+      expect(parsed.timestamp).toBeDefined();
+    });
+
+    test("text format uses joinString (default behavior)", async () => {
+      const config = createBaseConfig({
+        output: { format: "text", file: "output.md" },
+        joinString: "\\n---\\n",
+      });
+
+      const sentinel = new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall("Plain text"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+      );
+
+      await sentinel.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await sentinel.completeAllWork();
+
+      const logPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "output.md",
+      );
+      const content = fs.readFileSync(logPath, "utf-8");
+      expect(content).toBe("\n---\nPlain text\n");
+    });
+
+    test("jsonl format writes to lastValueFile as pretty JSON", async () => {
+      const config = createBaseConfig({
+        output: { format: "jsonl", file: "log.jsonl" },
+      });
+      const outputPaths: SentinelOutputPaths = {
+        lastValueFile: "latest.json",
+      };
+
+      const sentinel = new Sentinel(
+        config,
+        CodonId("test-codon"),
+        createMockLlmCall("Latest value"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        executionPath,
+        undefined,
+        outputPaths,
+      );
+
+      await sentinel.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await sentinel.completeAllWork();
+
+      const lastValuePath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+        "latest.json",
+      );
+      const content = fs.readFileSync(lastValuePath, "utf-8");
+      const parsed = JSON.parse(content);
+      expect(parsed.text).toBe("Latest value");
+      expect(parsed.sentinelId).toBe("test-sentinel");
+      expect(content).toContain("\n"); // Pretty-printed
+    });
+  });
 });

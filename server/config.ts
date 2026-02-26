@@ -1134,6 +1134,12 @@ export interface HankweaveConfig
    */
   outputDirectory?: string;
 
+  /**
+   * When true, overwrite existing files in the output directory instead of
+   * renaming with _N_timestamp suffixes. Default: false (rename on conflict).
+   */
+  overwriteOutput?: boolean;
+
   /** Telemetry configuration from hankweave.json */
   telemetry?: TelemetryConfig;
 

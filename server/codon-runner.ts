@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
+import { CostTracker } from "./cost-tracker.js";
+import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { ShimProcessManager } from "./shim-process-manager.js";
 import {
@@ -11,15 +13,16 @@ import {
   getExtractedShimPath,
   needsShimExtraction,
 } from "./shim-runtime-extractor.js";
+import type { StateManager } from "./state-manager.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
-import type { CodonId, SessionId } from "./types/branded-types.js";
+import type { CodonId, RunId, SessionId } from "./types/branded-types.js";
 import type {
   AssistantMessage,
   ResultMessage,
   SystemMessage,
   UserMessage,
 } from "./types/claude-session-schema.js";
-import type { Codon, ShimSelfTestResult } from "./types/types.js";
+import type { Codon, ShimSelfTestResult, TokenUsage } from "./types/types.js";
 import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js";
 
 /**
@@ -110,6 +113,25 @@ export interface CodonRunnerEvents extends Record<string, unknown[]> {
   userMessage: [msg: UserMessage];
   resultMessage: [msg: ResultMessage];
 
+  // Cost events (enriched, ready for server forwarding)
+  costIncremented: [
+    data: {
+      codonId: string;
+      tokens: TokenUsage;
+      totalCost: number;
+      modelId?: string;
+    },
+  ];
+  finalCostSet: [
+    data: {
+      codonId: string;
+      tokens: TokenUsage;
+      totalCost: number;
+      modelUsage?: unknown;
+      modelId?: string;
+    },
+  ];
+
   // Process output
   stdout: [data: string];
   stderr: [data: string];
@@ -131,9 +153,12 @@ export interface ExtensionConfig {
 interface BaseCodonRunnerConfig {
   codon: Codon;
   codonId: CodonId;
+  runId: RunId;
+  stateManager: StateManager;
   executionPath: string;
   agentRootPath: string; // Agent workspace directory (where agents work)
   logger: Logger;
+  llmRegistry: LlmProviderRegistry;
   logParsingInterval?: number;
   anthropicBaseUrl?: string;
   logPath: string;
@@ -242,6 +267,7 @@ export function shouldExtendCodon(params: {
 export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private readonly config: CodonRunnerConfig;
   private readonly logParser: ClaudeLogParser;
+  private readonly costTracker: CostTracker;
   private processManager: ShimProcessManager | ClaudeAgentSDKManager;
   private readonly logPath: string;
   private isCleanedUp = false;
@@ -262,6 +288,61 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
 
     // Use provided log path or calculate default
     this.logPath = config.logPath;
+
+    // Create cost tracker for this codon
+    this.costTracker = new CostTracker(
+      config.codon.model.modelId,
+      config.llmRegistry,
+      config.logger,
+    );
+
+    // Wire cost tracking: CostTracker events → state transitions + enriched runner events
+    this.costTracker.on("costIncremented", (delta) => {
+      this.config.stateManager.transition({
+        type: "CostsIncremented",
+        data: {
+          runId: this.config.runId,
+          codonId: this.config.codonId,
+          costDelta: delta.cost,
+          tokensDelta: delta.tokens,
+        },
+      });
+
+      this.config.logger.log(
+        `Codon ${this.config.codonId} token update - Call cost: $${delta.cost.toFixed(
+          4,
+        )}, Running total: $${this.costTracker.getRunningCost().toFixed(4)} ` +
+          `(${delta.tokens.inputTokens} in, ${delta.tokens.outputTokens} out, ` +
+          `${delta.tokens.cacheCreationTokens} cache create, ${delta.tokens.cacheReadTokens} cache read)`,
+      );
+
+      this.emit("costIncremented", {
+        codonId: this.config.codonId as string,
+        tokens: delta.tokens,
+        totalCost: delta.cost,
+        modelId: this.config.codon.model.modelId,
+      });
+    });
+
+    this.costTracker.on("finalCostSet", (final) => {
+      this.config.stateManager.transition({
+        type: "CodonFinalCostSet",
+        data: {
+          runId: this.config.runId,
+          codonId: this.config.codonId,
+          finalCost: final.cost,
+          finalTokens: final.tokens,
+        },
+      });
+
+      this.emit("finalCostSet", {
+        codonId: this.config.codonId as string,
+        tokens: final.tokens,
+        totalCost: final.cost,
+        modelUsage: final.modelUsage,
+        modelId: final.modelId,
+      });
+    });
 
     // Create log parser with event forwarding
     this.logParser = this.createLogParser();
@@ -401,13 +482,20 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         }
         this.emit("systemMessage", msg);
       },
-      onAssistantMessage: (msg) => this.emit("assistantMessage", msg),
+      onAssistantMessage: (msg) => {
+        if (msg.message.usage) {
+          this.costTracker.handleAssistantUsage(msg.message.usage);
+        }
+        this.emit("assistantMessage", msg);
+      },
       onUserMessage: (msg) => this.emit("userMessage", msg),
       onResultMessage: (msg) => {
         // Track successful completion for post-success SDK error handling
         // Only set on actual success, not on error results
         if (msg.subtype === "success") {
           this.successResultReceived = true;
+          // Process cost tracking for success results (tokens are spent even on is_error=true)
+          this.costTracker.handleResultUsage(msg);
         }
 
         // Track that we received a result message (needed for extension decision)

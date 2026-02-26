@@ -348,8 +348,13 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         !key.startsWith("HANKWEAVE_SENTINEL_")
       ) {
         const newKey = key.substring("HANKWEAVE_".length);
-        options.env[newKey] = process.env[key];
-        this.logger.log(`Passing through env var: ${newKey}`);
+        if (process.env[key] === "unset") {
+          delete options.env[newKey];
+          this.logger.log(`Unsetting env var: ${newKey}`);
+        } else {
+          options.env[newKey] = process.env[key];
+          this.logger.log(`Passing through env var: ${newKey}`);
+        }
       }
     }
 

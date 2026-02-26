@@ -216,6 +216,7 @@ Execution Control:
 
 Output:
   -o, --output <path>       Copy outputs to this path (default: stay in execution dir)
+  --overwrite-output        Overwrite existing output files instead of renaming
 
 Configuration:
   --config <path>           Path to hank.json (alternative to positional arg)
@@ -560,6 +561,26 @@ Use --output to copy them elsewhere.
     console.log(`> Using global model override: ${resolvedConfig.model} (applies to all codons)`);
   }
 
+  // Apply HANKWEAVE_*=unset to process.env BEFORE provider initialization.
+  // This ensures sentinel providers (which use AI SDK in-process) don't inherit
+  // proxy URLs that break health checks. Child process stripping (in
+  // claude-agent-sdk-manager.ts and shim-process-manager.ts) still handles
+  // codon agents separately.
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      key.startsWith("HANKWEAVE_") &&
+      !key.startsWith("HANKWEAVE_RUNTIME_") &&
+      !key.startsWith("HANKWEAVE_SENTINEL_") &&
+      value === "unset"
+    ) {
+      const targetKey = key.substring("HANKWEAVE_".length);
+      if (process.env[targetKey]) {
+        delete process.env[targetKey];
+        console.log(`> Stripped ${targetKey} from process environment (${key}=unset)`);
+      }
+    }
+  }
+
   // Initialize LLM Provider Registry singleton before ANY config parsing/validation
   // This must happen before validateHank() since Zod transforms use it for model validation
   const serverLogger = new Logger(path.join(executionSetup.executionPath, "model-validation.log"));
@@ -638,6 +659,9 @@ Use --output to copy them elsewhere.
           ? path.resolve(originalCwd, resolvedConfig.outputDirectory)
           : undefined,
 
+      // Output overwrite mode: when true, overwrite existing files instead of renaming
+      overwriteOutput: cliArgs.overwriteOutput || false,
+
       // Required: codons from validation
       codons,
 
@@ -652,10 +676,17 @@ Use --output to copy them elsewhere.
         if (fs.existsSync(fullOutputPath)) {
           const contents = fs.readdirSync(fullOutputPath);
           if (contents.length > 0) {
-            console.log(
-              `!  Output directory '${serverConfig.outputDirectory}' is not empty. ` +
-                `Conflicting files will be renamed (e.g., file.txt -> file_1_<timestamp>.txt).`,
-            );
+            if (serverConfig.overwriteOutput) {
+              console.log(
+                `!  Output directory '${serverConfig.outputDirectory}' is not empty. ` +
+                  `Existing files will be overwritten (--overwrite-output).`,
+              );
+            } else {
+              console.log(
+                `!  Output directory '${serverConfig.outputDirectory}' is not empty. ` +
+                  `Conflicting files will be renamed (e.g., file.txt -> file_1_<timestamp>.txt).`,
+              );
+            }
           }
         }
       } catch (_error) {

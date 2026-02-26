@@ -184,8 +184,13 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
         !key.startsWith("HANKWEAVE_SENTINEL_")
       ) {
         const newKey = key.substring("HANKWEAVE_".length);
-        env[newKey] = process.env[key];
-        this.logger.log(`Passing through env var: ${newKey}`);
+        if (process.env[key] === "unset") {
+          delete env[newKey];
+          this.logger.log(`Unsetting env var: ${newKey}`);
+        } else {
+          env[newKey] = process.env[key];
+          this.logger.log(`Passing through env var: ${newKey}`);
+        }
       }
     }
 

@@ -790,6 +790,8 @@ export async function resolveFileConflict(destPath: string): Promise<{
  * @param filesToCopy - Array of glob patterns to match files for copying (e.g., `["*.txt"]`)
  * @param destinationDirectory - The destination directory path where files will be copied
  * @param logger - Logger instance for debug and info messages
+ * @param options - Optional settings
+ * @param options.overwrite - When true, overwrite existing files instead of renaming
  * @returns Promise with conflicts array listing any files that were renamed
  */
 export async function copyFiles(
@@ -797,6 +799,7 @@ export async function copyFiles(
   filesToCopy: string[],
   destinationDirectory: string,
   logger: Logger,
+  options?: { overwrite?: boolean },
 ): Promise<{ conflicts: Array<{ original: string; resolved: string }> }> {
   const conflicts: Array<{ original: string; resolved: string }> = [];
 
@@ -842,16 +845,20 @@ export async function copyFiles(
       continue;
     }
 
-    // Check for conflicts and resolve
-    const { resolvedPath, hadConflict } = await resolveFileConflict(destPath);
+    // Check for conflicts and resolve (skip when overwrite mode is on)
+    if (!options?.overwrite) {
+      const { resolvedPath, hadConflict } = await resolveFileConflict(destPath);
 
-    if (hadConflict) {
-      logger.log(
-        `Output file conflict: '${path.basename(destPath)}' already exists, saving as '${path.basename(resolvedPath)}'`,
-        "info",
-      );
-      conflicts.push({ original: destPath, resolved: resolvedPath });
-      destPath = resolvedPath;
+      if (hadConflict) {
+        logger.log(
+          `Output file conflict: '${path.basename(destPath)}' already exists, saving as '${path.basename(resolvedPath)}'`,
+          "info",
+        );
+        conflicts.push({ original: destPath, resolved: resolvedPath });
+        destPath = resolvedPath;
+      }
+    } else if (fs.existsSync(destPath)) {
+      logger.log(`Overwriting output file: '${path.basename(destPath)}'`, "info");
     }
 
     // Create parent directories in destination if they don't exist
@@ -866,6 +873,7 @@ export async function copyFiles(
     await fs.promises.cp(sourcePath, destPath, {
       recursive: true,
       verbatimSymlinks: true,
+      force: options?.overwrite ?? false,
     });
   }
 

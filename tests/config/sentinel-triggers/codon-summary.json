@@ -14,7 +14,7 @@
   },
   "model": "anthropic/claude-haiku-4-5",
   "output": {
-    "format": "json",
+    "format": "jsonl",
     "file": "codon-summaries.jsonl"
   },
   "userPromptText": "Codon <%= it.events[0]?.data?.codonId || 'unknown' %> has completed with status: <%= it.events[0]?.data?.success || 'unknown' %>\n\nDuration: <%= it.events[0]?.data?.duration || 0 %>ms\nCost: $<%= it.events[0]?.data?.cost || 0 %>\nExit status: <%= JSON.stringify(it.events[0]?.data?.exitStatus) %>\n\nGenerate a comprehensive summary including:\n1. What was accomplished\n2. Key decisions made\n3. Files created or modified\n4. Any issues encountered\n5. Recommendations for next codon"

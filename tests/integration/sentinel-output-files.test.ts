@@ -29,7 +29,10 @@ describe("Sentinel Output Files - Integration Tests", () => {
   });
 
   const createMockLlmCall = (responseText = "Mock response") => {
-    return async (_id: string, _options: HankweaveGenerateTextOptions): Promise<HankweaveGenerateTextResult> => {
+    return async (
+      _id: string,
+      _options: HankweaveGenerateTextOptions,
+    ): Promise<HankweaveGenerateTextResult> => {
       return {
         text: responseText,
         finishReason: "stop",
@@ -39,7 +42,10 @@ describe("Sentinel Output Files - Integration Tests", () => {
   };
 
   const createMockObjectCall = (responseObject: unknown) => {
-    return async (_id: string, _options: HankweaveGenerateObjectOptions): Promise<HankweaveGenerateObjectResult<unknown>> => {
+    return async (
+      _id: string,
+      _options: HankweaveGenerateObjectOptions,
+    ): Promise<HankweaveGenerateObjectResult<unknown>> => {
       return {
         object: responseObject,
         finishReason: "stop",
@@ -64,7 +70,10 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.initialize();
 
       let callCount = 0;
-      const mockLlm = async (id: string, options: HankweaveGenerateTextOptions) => {
+      const mockLlm = async (
+        id: string,
+        options: HankweaveGenerateTextOptions,
+      ) => {
         callCount++;
         return {
           text: `Summary ${callCount}`,
@@ -91,7 +100,13 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Files should be auto-generated in .hankweave/sentinels/outputs/test-sentinel/
-      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "test-sentinel");
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+      );
       expect(fs.existsSync(autoDir)).toBe(true);
 
       const files = fs.readdirSync(autoDir);
@@ -145,14 +160,25 @@ describe("Sentinel Output Files - Integration Tests", () => {
           id: `evt-${i}`,
           timestamp: new Date().toISOString(),
           type: "file.updated",
-          data: { path: "test.ts", filename: "test.ts", content: "", action: "created" },
+          data: {
+            path: "test.ts",
+            filename: "test.ts",
+            content: "",
+            action: "created",
+          },
         });
       }
 
       await manager.completeAllWork();
 
       // Find auto-generated file
-      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "entity-tracker");
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "entity-tracker",
+      );
       expect(fs.existsSync(autoDir)).toBe(true);
 
       const files = fs.readdirSync(autoDir);
@@ -194,18 +220,32 @@ describe("Sentinel Output Files - Integration Tests", () => {
           id: "evt-1",
           timestamp: new Date().toISOString(),
           type: "codon.completed",
-          data: { codonId: "codon-1", success: true, cost: 0.1, duration: 1000, exitStatus: { type: "success" } },
+          data: {
+            codonId: "codon-1",
+            success: true,
+            cost: 0.1,
+            duration: 1000,
+            exitStatus: { type: "success" },
+          },
         });
 
         await manager.shutdown();
 
         // Get the auto-generated file
-        const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "progress-tracker");
+        const autoDir = path.join(
+          executionPath,
+          ".hankweave",
+          "sentinels",
+          "outputs",
+          "progress-tracker",
+        );
         const files = fs.readdirSync(autoDir);
         codon1File = path.join(autoDir, files[0]);
 
         // Verify Codon 1 output
-        expect(fs.readFileSync(codon1File, "utf-8")).toBe("\n---\nCodon 1 completed\n");
+        expect(fs.readFileSync(codon1File, "utf-8")).toBe(
+          "\n---\nCodon 1 completed\n",
+        );
       }
 
       // Simulate Codon 2 with different auto-generated file
@@ -222,23 +262,39 @@ describe("Sentinel Output Files - Integration Tests", () => {
           id: "evt-2",
           timestamp: new Date().toISOString(),
           type: "codon.completed",
-          data: { codonId: "codon-2", success: true, cost: 0.2, duration: 2000, exitStatus: { type: "success" } },
+          data: {
+            codonId: "codon-2",
+            success: true,
+            cost: 0.2,
+            duration: 2000,
+            exitStatus: { type: "success" },
+          },
         });
 
         await manager.shutdown();
 
         // Codon 1 file still exists (persistence)
         expect(fs.existsSync(codon1File)).toBe(true);
-        expect(fs.readFileSync(codon1File, "utf-8")).toBe("\n---\nCodon 1 completed\n");
+        expect(fs.readFileSync(codon1File, "utf-8")).toBe(
+          "\n---\nCodon 1 completed\n",
+        );
 
         // Codon 2 has its own file
-        const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "progress-tracker");
+        const autoDir = path.join(
+          executionPath,
+          ".hankweave",
+          "sentinels",
+          "outputs",
+          "progress-tracker",
+        );
         const files = fs.readdirSync(autoDir);
         expect(files.length).toBe(2); // Both codon files exist
 
-        const codon2File = files.find(f => f.includes("codon-2"));
+        const codon2File = files.find((f) => f.includes("codon-2"));
         expect(codon2File).toBeDefined();
-        expect(fs.readFileSync(path.join(autoDir, codon2File!), "utf-8")).toBe("\n---\nCodon 2 completed\n");
+        expect(fs.readFileSync(path.join(autoDir, codon2File!), "utf-8")).toBe(
+          "\n---\nCodon 2 completed\n",
+        );
       }
     });
   });
@@ -282,7 +338,13 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Find auto-generated file
-      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "formatted-log");
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "formatted-log",
+      );
       const files = fs.readdirSync(autoDir);
       const logPath = path.join(autoDir, files[0]);
 
@@ -346,14 +408,26 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Verify text sentinel output
-      const narratorDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "narrator");
+      const narratorDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "narrator",
+      );
       expect(fs.existsSync(narratorDir)).toBe(true);
       const narratorFiles = fs.readdirSync(narratorDir);
       expect(narratorFiles.length).toBe(1);
       expect(narratorFiles[0]).toEndWith(".md");
 
       // Verify structured sentinel output
-      const metricsDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "metrics");
+      const metricsDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "metrics",
+      );
       expect(fs.existsSync(metricsDir)).toBe(true);
       const metricsFiles = fs.readdirSync(metricsDir);
       expect(metricsFiles.length).toBe(1);
@@ -404,7 +478,13 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Find auto-generated file
-      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "conversational-narrator");
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "conversational-narrator",
+      );
       const files = fs.readdirSync(autoDir);
       const logPath = path.join(autoDir, files[0]);
 
@@ -436,7 +516,13 @@ describe("Sentinel Output Files - Integration Tests", () => {
       });
 
       // Find and make the auto-generated file read-only
-      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "test-sentinel");
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "test-sentinel",
+      );
       const files = fs.readdirSync(autoDir);
       const logPath = path.join(autoDir, files[0]);
       fs.chmodSync(logPath, 0o444); // Read-only
@@ -489,7 +575,13 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.completeAllWork();
 
       // Should have auto-generated file
-      const autoDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "auto-sentinel");
+      const autoDir = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "auto-sentinel",
+      );
       expect(fs.existsSync(autoDir)).toBe(true);
 
       const files = fs.readdirSync(autoDir);
@@ -499,6 +591,204 @@ describe("Sentinel Output Files - Integration Tests", () => {
       // Verify content
       const content = fs.readFileSync(path.join(autoDir, files[0]), "utf-8");
       expect(content).toBe("\n---\nAuto\n");
+    });
+  });
+
+  describe("config.output.file via SentinelManager", () => {
+    test("output.file from sentinel config is used as fallback", async () => {
+      const config: SentinelConfig = {
+        id: "file-fallback",
+        name: "File Fallback Sentinel",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "Summarize: <%= JSON.stringify(it.events) %>",
+        model: "test-model",
+        output: {
+          file: "my-sentinel-log.md",
+        },
+      };
+
+      const manager = new SentinelManager({ enablePersistence: false });
+      await manager.initialize();
+
+      // No outputPathsMap — should fall back to config.output.file
+      await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
+        llmCallOverride: createMockLlmCall("Fallback output"),
+        executionPath,
+      });
+
+      await manager.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await manager.completeAllWork();
+
+      // output.file with no slash → .hankweave/sentinels/outputs/{id}/my-sentinel-log.md
+      const expectedPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "file-fallback",
+        "my-sentinel-log.md",
+      );
+      expect(fs.existsSync(expectedPath)).toBe(true);
+      const content = fs.readFileSync(expectedPath, "utf-8");
+      expect(content).toContain("Fallback output");
+    });
+
+    test("output.file with slash resolves to agentRoot via manager", async () => {
+      const agentRoot = path.join(testDir, "agent-work");
+      fs.mkdirSync(agentRoot, { recursive: true });
+
+      const config: SentinelConfig = {
+        id: "agentroot-test",
+        name: "AgentRoot Sentinel",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "Log it",
+        model: "test-model",
+        output: {
+          file: "./sentinel-notes/analysis.md",
+        },
+      };
+
+      const manager = new SentinelManager({ enablePersistence: false });
+      await manager.initialize();
+
+      await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
+        llmCallOverride: createMockLlmCall("Agent-visible output"),
+        executionPath,
+        agentRootPath: agentRoot,
+      });
+
+      await manager.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await manager.completeAllWork();
+
+      const expectedPath = path.join(
+        agentRoot,
+        "sentinel-notes",
+        "analysis.md",
+      );
+      expect(fs.existsSync(expectedPath)).toBe(true);
+      const content = fs.readFileSync(expectedPath, "utf-8");
+      expect(content).toContain("Agent-visible output");
+    });
+
+    test("outputPathsMap overrides config.output.file", async () => {
+      const config: SentinelConfig = {
+        id: "override-test",
+        name: "Override Test",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "Test",
+        model: "test-model",
+        output: {
+          file: "sentinel-default.md",
+        },
+      };
+
+      const manager = new SentinelManager({ enablePersistence: false });
+      await manager.initialize();
+
+      const outputPathsMap = new Map<
+        string,
+        { logFile?: string; lastValueFile?: string }
+      >();
+      outputPathsMap.set("override-test", { logFile: "codon-override.md" });
+
+      await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
+        llmCallOverride: createMockLlmCall("Override wins"),
+        executionPath,
+        outputPathsMap,
+      });
+
+      await manager.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await manager.completeAllWork();
+
+      // Override path should exist
+      const overridePath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "override-test",
+        "codon-override.md",
+      );
+      expect(fs.existsSync(overridePath)).toBe(true);
+
+      // Sentinel-default path should NOT exist
+      const defaultPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "override-test",
+        "sentinel-default.md",
+      );
+      expect(fs.existsSync(defaultPath)).toBe(false);
+    });
+
+    test("output.format jsonl writes JSON lines via manager", async () => {
+      const config: SentinelConfig = {
+        id: "jsonl-test",
+        name: "JSONL Test",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "Analyze",
+        model: "test-model",
+        output: {
+          format: "jsonl",
+          file: "analysis.jsonl",
+        },
+      };
+
+      const manager = new SentinelManager({ enablePersistence: false });
+      await manager.initialize();
+
+      await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
+        llmCallOverride: createMockLlmCall("JSONL result"),
+        executionPath,
+      });
+
+      await manager.handleEvent({
+        id: "evt-1",
+        timestamp: new Date().toISOString(),
+        type: "assistant.action",
+        data: { codonId: "test", action: "message", content: "test" },
+      });
+
+      await manager.completeAllWork();
+
+      const logPath = path.join(
+        executionPath,
+        ".hankweave",
+        "sentinels",
+        "outputs",
+        "jsonl-test",
+        "analysis.jsonl",
+      );
+      expect(fs.existsSync(logPath)).toBe(true);
+      const content = fs.readFileSync(logPath, "utf-8").trim();
+      const parsed = JSON.parse(content);
+      expect(parsed.text).toBe("JSONL result");
+      expect(parsed.sentinelId).toBe("jsonl-test");
+      expect(parsed.timestamp).toBeDefined();
     });
   });
 });

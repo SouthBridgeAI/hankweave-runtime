@@ -1396,25 +1396,35 @@ export class Sentinel {
       };
     }
 
-    // Determine logFile path (auto-generate if needed)
+    // Determine logFile path with priority chain:
+    // 1. settings.outputPaths.logFile (codon-level override from hank.json)
+    // 2. config.output.file (sentinel-level default from sentinel JSON)
+    // 3. Auto-generated path
     let logFilePath: string;
 
-    if (!outputPaths?.logFile) {
-      // Auto-generate
+    if (outputPaths?.logFile) {
+      logFilePath = this.resolveOutputPath(outputPaths.logFile, executionPath);
+    } else if (this.config.output?.file) {
+      logFilePath = this.resolveOutputPath(this.config.output.file, executionPath);
+      this.logger?.log(
+        `[Sentinel:${this.config.id}] Using output.file from sentinel config: ${path.relative(executionPath, logFilePath)}`,
+        "info",
+      );
+    } else {
       logFilePath = this.generateLogFilePath(executionPath);
       this.logger?.log(
         `[Sentinel:${this.config.id}] Auto-generated logFile: ${path.relative(executionPath, logFilePath)}`,
         "info",
       );
-    } else {
-      // User-provided - apply path convention
-      logFilePath = this.resolveOutputPath(outputPaths.logFile, executionPath);
     }
 
-    // Resolve lastValueFile if provided
+    // Resolve lastValueFile with same priority chain as logFile:
+    // settings.outputPaths.lastValueFile > config.output.lastValueFile > none
     const lastValuePath = outputPaths?.lastValueFile
       ? this.resolveOutputPath(outputPaths.lastValueFile, executionPath)
-      : undefined;
+      : this.config.output?.lastValueFile
+        ? this.resolveOutputPath(this.config.output.lastValueFile, executionPath)
+        : undefined;
 
     // Validate paths stay within execution directory
     this.validatePathSafety(logFilePath, executionPath);
@@ -1508,7 +1518,12 @@ export class Sentinel {
    */
   private generateLogFilePath(executionPath: string): string {
     const timestamp = Date.now();
-    const extension = this.config.structuredOutput ? "ndjson" : "md";
+    const formatExtensionMap: Record<string, string> = {
+      jsonl: "jsonl",
+    };
+    const extension = this.config.structuredOutput
+      ? "ndjson"
+      : (this.config.output?.format && formatExtensionMap[this.config.output.format]) || "md";
     const filename = `${this.config.id}-${this.codonId}-${timestamp}.${extension}`;
 
     return path.join(executionPath, ".hankweave", "sentinels", "outputs", this.config.id, filename);
@@ -1619,22 +1634,47 @@ export class Sentinel {
 
         this.logger?.log(`[Sentinel:${this.config.id}] Wrote structured output`, "debug");
       } else {
-        // Text output
+        // Text output — format depends on output.format config
         const text = output as string;
+        const outputFormat = this.config.output?.format;
 
-        // Append to logFile with processed joinString
-        fs.appendFileSync(
-          this.outputPaths.continuousLog,
-          `${this.outputPaths.joinString + text}\n`,
-        );
+        if (outputFormat === "jsonl") {
+          // JSON-line format: wrap text in a structured envelope
+          const jsonLine = JSON.stringify({
+            text,
+            timestamp: new Date().toISOString(),
+            sentinelId: this.config.id,
+          });
+          fs.appendFileSync(this.outputPaths.continuousLog, `${jsonLine}\n`);
 
-        // Replace lastValueFile if configured (no joinString)
-        if (this.outputPaths.currentValue) {
-          this.writeAtomic(this.outputPaths.currentValue, text);
+          if (this.outputPaths.currentValue) {
+            this.writeAtomic(
+              this.outputPaths.currentValue,
+              JSON.stringify(
+                {
+                  text,
+                  timestamp: new Date().toISOString(),
+                  sentinelId: this.config.id,
+                },
+                null,
+                2,
+              ),
+            );
+          }
+        } else {
+          // Plain text with joinString (default behavior)
+          fs.appendFileSync(
+            this.outputPaths.continuousLog,
+            `${this.outputPaths.joinString + text}\n`,
+          );
+
+          if (this.outputPaths.currentValue) {
+            this.writeAtomic(this.outputPaths.currentValue, text);
+          }
         }
 
         this.logger?.log(
-          `[Sentinel:${this.config.id}] Wrote text output (${text.length} chars)`,
+          `[Sentinel:${this.config.id}] Wrote text output (${text.length} chars, format=${outputFormat || "text"})`,
           "debug",
         );
       }
