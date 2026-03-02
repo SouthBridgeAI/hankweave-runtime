@@ -7,6 +7,7 @@ import { TIMEOUTS } from "./config.js";
 import { CostTracker } from "./cost-tracker.js";
 import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
+import { ReplayProcessManager } from "./replay-process-manager.js";
 import { ShimProcessManager } from "./shim-process-manager.js";
 import {
   extractShimFiles,
@@ -164,6 +165,13 @@ interface BaseCodonRunnerConfig {
   logPath: string;
   globalSystemPrompt?: string | null;
   shimIdleTimeout?: number;
+  /** If provided, use ReplayProcessManager instead of real process managers */
+  replayConfig?: {
+    /** Absolute path to the source JSONL log file to replay */
+    sourceLogPath: string;
+    /** Delay in ms between writing lines (default: 5) */
+    replaySpeed?: number;
+  };
 }
 
 /**
@@ -268,7 +276,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private readonly config: CodonRunnerConfig;
   private readonly logParser: ClaudeLogParser;
   private readonly costTracker: CostTracker;
-  private processManager: ShimProcessManager | ClaudeAgentSDKManager;
+  private processManager: ShimProcessManager | ClaudeAgentSDKManager | ReplayProcessManager;
   private readonly logPath: string;
   private isCleanedUp = false;
 
@@ -522,48 +530,65 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
-   * Create process manager (SDK or Shim) based on model type with event forwarding
+   * Create process manager (SDK, Shim, or Replay) based on model type with event forwarding
    */
-  private createProcessManager(): ShimProcessManager | ClaudeAgentSDKManager {
-    const modelInfo = this.config.codon.model;
+  private createProcessManager():
+    | ShimProcessManager
+    | ClaudeAgentSDKManager
+    | ReplayProcessManager {
+    let processManager: ShimProcessManager | ClaudeAgentSDKManager | ReplayProcessManager;
 
-    // Determine if this is an Anthropic model using providerId
-    const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
-
-    let processManager: ShimProcessManager | ClaudeAgentSDKManager;
-
-    if (isAnthropicModel) {
-      // Use Claude Agent SDK for Anthropic models
+    // Replay mode: use ReplayProcessManager instead of real process managers
+    if (this.config.replayConfig) {
       this.config.logger.log(
-        `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+        `Using ReplayProcessManager for codon ${this.config.codonId} (source: ${this.config.replayConfig.sourceLogPath})`,
         "info",
       );
 
-      processManager = new ClaudeAgentSDKManager(
+      processManager = new ReplayProcessManager(
         this.config.executionPath,
-        this.config.agentRootPath,
         this.config.logger,
         this.logParser,
-        this.config.anthropicBaseUrl,
-        this.config.globalSystemPrompt ?? null,
-        this.config.shimIdleTimeout,
+        this.config.replayConfig.sourceLogPath,
+        this.config.replayConfig.replaySpeed,
       );
     } else {
-      // Use Shim for non-Anthropic models (e.g., Gemini)
-      this.config.logger.log(
-        `Using shim for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
-        "info",
-      );
+      const modelInfo = this.config.codon.model;
+      const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
 
-      processManager = new ShimProcessManager(
-        this.config.executionPath,
-        this.config.agentRootPath,
-        this.config.logger,
-        this.logParser,
-        this.config.anthropicBaseUrl,
-        this.config.globalSystemPrompt ?? null,
-        this.config.shimIdleTimeout,
-      );
+      if (isAnthropicModel) {
+        // Use Claude Agent SDK for Anthropic models
+        this.config.logger.log(
+          `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+          "info",
+        );
+
+        processManager = new ClaudeAgentSDKManager(
+          this.config.executionPath,
+          this.config.agentRootPath,
+          this.config.logger,
+          this.logParser,
+          this.config.anthropicBaseUrl,
+          this.config.globalSystemPrompt ?? null,
+          this.config.shimIdleTimeout,
+        );
+      } else {
+        // Use Shim for non-Anthropic models (e.g., Gemini)
+        this.config.logger.log(
+          `Using shim for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+          "info",
+        );
+
+        processManager = new ShimProcessManager(
+          this.config.executionPath,
+          this.config.agentRootPath,
+          this.config.logger,
+          this.logParser,
+          this.config.anthropicBaseUrl,
+          this.config.globalSystemPrompt ?? null,
+          this.config.shimIdleTimeout,
+        );
+      }
     }
 
     // Forward process manager events to our listeners
@@ -689,28 +714,44 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
+   * Spawn the underlying process manager using a unified adapter.
+   * ShimProcessManager requires a runtime command array; SDK/Replay do not.
+   */
+  private async spawnCodonProcess(
+    sessionToResume: SessionId | null,
+    options: {
+      logPath?: string;
+      exhaustionPrompt?: string;
+    },
+  ): Promise<void> {
+    if (this.processManager instanceof ShimProcessManager) {
+      const __filename = fileURLToPath(import.meta.url);
+      const shimPath = await resolveShimPath(__filename, this.config.codon.model.providerId);
+
+      await this.processManager.spawn(
+        getRuntimeCommand(shimPath),
+        this.config.codon,
+        sessionToResume,
+        options,
+      );
+      return;
+    }
+
+    // ReplayProcessManager and ClaudeAgentSDKManager share this signature
+    await this.processManager.spawn(this.config.codon, sessionToResume, options);
+  }
+
+  /**
    * Internal method to run an extension (resume session with exhaustion prompt).
    *
    * Uses the same spawn() method as initial run, but with exhaustionPrompt option.
    * This activates exhaustion mode: appends to log, forces resume.
    */
   private async runExtension(sessionId: SessionId, exhaustionPrompt: string): Promise<void> {
-    // Spawn using the unified spawn method with exhaustion mode
-    if (this.processManager instanceof ClaudeAgentSDKManager) {
-      await this.processManager.spawn(this.config.codon, sessionId, {
-        logPath: this.logPath,
-        exhaustionPrompt,
-      });
-    } else {
-      // ShimProcessManager
-      const __filename = fileURLToPath(import.meta.url);
-      const shimPath = await resolveShimPath(__filename, this.config.codon.model.providerId);
-
-      await this.processManager.spawn(getRuntimeCommand(shimPath), this.config.codon, sessionId, {
-        logPath: this.logPath,
-        exhaustionPrompt,
-      });
-    }
+    await this.spawnCodonProcess(sessionId, {
+      logPath: this.logPath,
+      exhaustionPrompt,
+    });
 
     const pid = this.processManager.getPid();
     this.config.logger.log(
@@ -741,24 +782,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       "info",
     );
 
-    // Spawn using the unified spawn method
-    if (this.processManager instanceof ClaudeAgentSDKManager) {
-      // Claude Agent SDK doesn't need a command array
-      await this.processManager.spawn(this.config.codon, previousSessionId || null, {
-        logPath: this.logPath,
-      });
-    } else {
-      // ShimProcessManager needs command array
-      const __filename = fileURLToPath(import.meta.url);
-      const shimPath = await resolveShimPath(__filename, this.config.codon.model.providerId);
-
-      await this.processManager.spawn(
-        getRuntimeCommand(shimPath),
-        this.config.codon,
-        previousSessionId || null,
-        { logPath: this.logPath },
-      );
-    }
+    await this.spawnCodonProcess(previousSessionId || null, {
+      logPath: this.logPath,
+    });
 
     const pid = this.processManager.getPid();
     this.config.logger.log(

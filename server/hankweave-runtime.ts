@@ -12,6 +12,7 @@ import { analyzeExecutionThread, findContinuationSessionId } from "./execution-t
 import { fileResolver } from "./file-resolver.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { ProxyRunner } from "./llm-proxy.js";
+import { Replay } from "./replay.js";
 // Import event types from new schema file
 import type {
   AssistantActionEvent,
@@ -116,6 +117,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
   // Proxy server
   private proxyRunner: ProxyRunner | null = null;
+
+  // Replay mode (replays existing JSONL logs instead of making real LLM calls)
+  private replay: Replay;
 
   // State management
   private stateManager: StateManager;
@@ -231,6 +235,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       ...DEFAULT_CONFIG,
       ...config,
     } as HankweaveConfig;
+    this.replay = new Replay(this.config.replayDir);
 
     // Update logger to use execution path
     // Check if serverLogFile is already absolute to avoid path duplication on Windows
@@ -457,6 +462,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     await this.stateManager.initialize();
     this.logger.log(`[DEBUG] State manager initialized`);
 
+    // Initialize replay policy (manifest load).
+    await this.replay.initializeForStartup({
+      executionPath: this.config.executionPath,
+      logger: this.logger,
+    });
+
     // Initialize event journal
     this.logger.log(`[DEBUG] Initializing event journal...`);
     await this.eventJournal.initialize();
@@ -544,13 +555,22 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     const thread = await this.stateManager.getExecutionThread();
 
-    if (thread?.failed) {
+    if (this.replay.shouldForceFreshRunOnStartup()) {
+      // In replay mode, always start a fresh run — we replay all codons from scratch
+      this.logger.log(`[REPLAY] Starting fresh run (replay mode ignores existing state)`);
+      await this.startNewRun();
+    } else if (thread?.failed) {
       // let see if execution thread from state manager has previously failed
       this.logger.log("Execution thread failed, rolling back...", "error");
       await this.rollbackToLastSuccess(this.config.autostart);
     }
 
-    if (!thread?.failed && !this.currentRunId) {
+    if (
+      this.replay.shouldUseNormalStartupRecoveryPath({
+        threadFailed: !!thread?.failed,
+        hasCurrentRun: !!this.currentRunId,
+      })
+    ) {
       // Start a new run if needed
       // Check if there's an existing execution thread with completed codons
       // If so, create a continuation run instead of a fresh run
@@ -1627,9 +1647,22 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         }
       | undefined;
 
-    // Run rig setup operations if configured and we don't ask for explicit skip
-    // and there is no existing rig setup checkpoint for this codon
-    if (!skipPreCommands && !rigSetupCheckpoint && codon.rigSetup && codon.rigSetup.length > 0) {
+    // Run rig setup operations if configured, not explicitly skipped, and no checkpoint exists.
+    //
+    // Rig setup is intentionally skipped in replay mode. In replay, the execution directory
+    // is copied wholesale from the original run (cpSync in index.ts), so it already contains
+    // the post-rig-setup filesystem state. Re-running rig setup would be redundant and fragile —
+    // source paths may have moved, network-dependent commands (e.g. installs) may fail, and
+    // shell commands may behave differently on a different machine or at a different time.
+    // Replay's goal is fast, deterministic reproduction of codon LLM output, not full
+    // behavioral re-execution of the setup pipeline.
+    if (
+      !this.replay.shouldSkipRigSetup() &&
+      !skipPreCommands &&
+      !rigSetupCheckpoint &&
+      codon.rigSetup &&
+      codon.rigSetup.length > 0
+    ) {
       const rigSetupCount = codon.rigSetup.length;
       const rigSetupStartTime = Date.now();
 
@@ -1939,8 +1972,19 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       },
     });
 
-    // Load sentinels for this codon (during "starting" state)
-    const sentinelResult = await this.loadSentinelsForCodon(codon, codonId);
+    // Load sentinels for this codon (during "starting" state).
+    //
+    // Sentinels are intentionally skipped in replay mode for several reasons:
+    // 1. They make real LLM API calls with real cost — replay should be free to run.
+    // 2. Sentinel LLM responses are non-deterministic, so re-running them would produce
+    //    different output than the original run, undermining replay's reproducibility.
+    // 3. Replay's goal is fast, deterministic codon output reproduction — sentinel
+    //    analysis is orthogonal to that goal.
+    // 4. The original sentinel events aren't part of the codon JSONL logs that replay
+    //    reads from, so there's no recorded sentinel behavior to reproduce.
+    const sentinelResult = this.replay.shouldSkipSentinels()
+      ? { loaded: [], errors: [] }
+      : await this.loadSentinelsForCodon(codon, codonId);
 
     // Check for fatal sentinel load failures
     const fatalFailures = sentinelResult.errors.filter((e) => e.fatal);
@@ -2347,7 +2391,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       const logPath = path.join(runFolder, logFileName);
 
       // Create runner for this codon and store in map (single source of truth)
-      // Build config with proper discriminated union structure
+      // Build config with proper discriminated union structure.
+      const replayConfig = this.replay.resolveCodonConfig(codonId, codon.id);
+
       if (!this.currentRunId) {
         throw new Error("No active run while creating CodonRunner");
       }
@@ -2368,6 +2414,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         globalSystemPrompt: this.config.globalSystemPrompt,
         // Wiring: CLI --shim-idle-timeout → resolveSettings → serverConfig → here → CodonRunner → ShimProcessManager / ClaudeAgentSDKManager
         shimIdleTimeout: this.config.shimIdleTimeout,
+        replayConfig,
       };
 
       // Extension config is only provided when exhaustWithPrompt is set
@@ -3373,7 +3420,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     await this.sendStateSnapshot();
 
     // Copy outputs to external directory only if outputDirectory is configured
-    // If outputDirectory is undefined, outputs stay in {executionPath}/outputs/ only
+    // If outputDirectory is undefined, outputs stay in the agent workspace ({executionPath}/agentRoot)
     if (
       finalStatus === "completed" &&
       this.currentCodon.codon.outputFiles &&

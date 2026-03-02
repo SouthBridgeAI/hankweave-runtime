@@ -31,6 +31,7 @@ const VALUE_FLAGS = new Set([
   "-i",
   "--output",
   "-o",
+  "--replay",
 ]);
 
 /**
@@ -124,6 +125,7 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   attach?: boolean; // --attach
   ignoreDataMismatch?: boolean; // --ignore-data-mismatch (deprecated, use --force)
   overwriteOutput?: boolean; // --overwrite-output
+  replayDir?: string; // --replay <path> - replay from an execution directory dump
 }
 
 /**
@@ -284,6 +286,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.executionPath = getFlagValue(args, "--execution") || getFlagValue(args, "-e");
   result.inputText = getFlagValue(args, "--input") || getFlagValue(args, "-i");
   result.outputPath = getFlagValue(args, "--output") || getFlagValue(args, "-o");
+  result.replayDir = getFlagValue(args, "--replay");
 
   // Parse boolean flags (non-config)
   result.headless = args.includes("--headless");

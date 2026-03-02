@@ -1129,7 +1129,7 @@ export interface HankweaveConfig
 
   /**
    * Where to copy outputs (relative to CWD).
-   * If undefined, outputs stay in {executionPath}/outputs/ only.
+   * If undefined, outputs stay in the agent workspace ({executionPath}/agentRoot).
    * If set, outputs are copied to this path after each codon completes.
    */
   outputDirectory?: string;
@@ -1193,6 +1193,9 @@ export interface HankweaveConfig
 
   /** Array of codon configurations to execute */
   codons: CodonConfig[];
+
+  /** Path to a replay source directory (for replaying execution from JSONL logs without real LLM calls) */
+  replayDir?: string;
 }
 
 // -------------
@@ -1223,7 +1226,7 @@ export const DEFAULT_CONFIG: Omit<
   port: 0, // 0 = OS-assigned dynamic port (avoids collisions on multi-instance runs)
   version: PACKAGE_VERSION,
   // Note: outputDirectory is now undefined by default
-  // Outputs stay in {executionPath}/outputs/ unless explicitly configured
+  // Outputs stay in the agent workspace ({executionPath}/agentRoot) unless explicitly configured
   executionBaseDir: path.join(os.homedir(), ".hankweave-executions"),
   lockFile: ".hankweave/runtime.lock",
   socketLogFile: ".hankweave/logs/websocket.log",

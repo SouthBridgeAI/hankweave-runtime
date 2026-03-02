@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 // ../common/src/args.ts
+var VALID_SANDBOX_LEVELS = ["none", "standard", "strict"];
 function parseArgs(argv, aliases) {
   const args = {
     model: "",
     verbose: false,
     idleTimeout: 120,
+    sandbox: "none",
     selfTest: false,
     version: false,
     help: false
@@ -43,6 +45,17 @@ function parseArgs(argv, aliases) {
           process.exit(1);
         }
         args.idleTimeout = val;
+        break;
+      }
+      case "--sandbox": {
+        const level = argv[++i];
+        if (!VALID_SANDBOX_LEVELS.includes(level)) {
+          console.error(
+            `Invalid --sandbox value: must be one of ${VALID_SANDBOX_LEVELS.join(", ")}`
+          );
+          process.exit(1);
+        }
+        args.sandbox = level;
         break;
       }
       case "--self-test":
@@ -204,14 +217,14 @@ async function runSelfTest() {
 import * as fs4 from "fs";
 import * as path4 from "path";
 
-// ../../node_modules/.bun/@openai+codex-sdk@0.101.0/node_modules/@openai/codex-sdk/dist/index.js
+// ../../node_modules/.bun/@openai+codex-sdk@0.98.0/node_modules/@openai/codex-sdk/dist/index.js
 import { promises as fs2 } from "fs";
 import os2 from "os";
 import path2 from "path";
 import { spawn as spawn2 } from "child_process";
 import path22 from "path";
 import readline from "readline";
-import { createRequire } from "module";
+import { fileURLToPath } from "url";
 async function createOutputSchemaFile(schema) {
   if (schema === void 0) {
     return { cleanup: async () => {
@@ -342,16 +355,6 @@ function normalizeInput(input) {
 }
 var INTERNAL_ORIGINATOR_ENV = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
 var TYPESCRIPT_SDK_ORIGINATOR = "codex_sdk_ts";
-var CODEX_NPM_NAME = "@openai/codex";
-var PLATFORM_PACKAGE_BY_TARGET = {
-  "x86_64-unknown-linux-musl": "@openai/codex-linux-x64",
-  "aarch64-unknown-linux-musl": "@openai/codex-linux-arm64",
-  "x86_64-apple-darwin": "@openai/codex-darwin-x64",
-  "aarch64-apple-darwin": "@openai/codex-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@openai/codex-win32-x64",
-  "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64"
-};
-var moduleRequire = createRequire(import.meta.url);
 var CodexExec = class {
   executablePath;
   envOverride;
@@ -564,6 +567,8 @@ function formatTomlKey(key) {
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+var scriptFileName = fileURLToPath(import.meta.url);
+var scriptDirName = path22.dirname(scriptFileName);
 function findCodexPath() {
   const { platform, arch } = process;
   let targetTriple = null;
@@ -611,21 +616,7 @@ function findCodexPath() {
   if (!targetTriple) {
     throw new Error(`Unsupported platform: ${platform} (${arch})`);
   }
-  const platformPackage = PLATFORM_PACKAGE_BY_TARGET[targetTriple];
-  if (!platformPackage) {
-    throw new Error(`Unsupported target triple: ${targetTriple}`);
-  }
-  let vendorRoot;
-  try {
-    const codexPackageJsonPath = moduleRequire.resolve(`${CODEX_NPM_NAME}/package.json`);
-    const codexRequire = createRequire(codexPackageJsonPath);
-    const platformPackageJsonPath = codexRequire.resolve(`${platformPackage}/package.json`);
-    vendorRoot = path22.join(path22.dirname(platformPackageJsonPath), "vendor");
-  } catch {
-    throw new Error(
-      `Unable to locate Codex CLI binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`
-    );
-  }
+  const vendorRoot = path22.join(scriptDirName, "..", "vendor");
   const archRoot = path22.join(vendorRoot, targetTriple);
   const codexBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
   const binaryPath = path22.join(archRoot, "codex", codexBinaryName);
@@ -1020,13 +1011,18 @@ var CodexShim = class {
   }
   getThreadOptions() {
     const modelSpec = resolveModel(this.args.model);
+    const sandboxModeMap = {
+      none: "danger-full-access",
+      standard: "workspace-write",
+      strict: "read-only"
+    };
     const options = {
       workingDirectory: this.cwd,
       skipGitRepoCheck: true,
       model: getCodexModelId(modelSpec),
       // Auto-approve all operations (no user present)
       approvalPolicy: "never",
-      sandboxMode: "workspace-write",
+      sandboxMode: sandboxModeMap[this.args.sandbox],
       networkAccessEnabled: true,
       webSearchEnabled: true,
       ...modelSpec.reasoningEffort && { modelReasoningEffort: modelSpec.reasoningEffort }
@@ -1523,6 +1519,7 @@ OPTIONS:
   --append-system-prompt    Additional system prompt to append
   --idle-timeout <seconds>  Max seconds between agent events before aborting (default: 120)
   --debug-dir <path>        Directory for debug logs and session data
+  --sandbox <level>         Sandbox level: none (default), standard, or strict
   --self-test               Run environment verification
   --version                 Print version and exit
   --help                    Print this help and exit

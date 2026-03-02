@@ -172,14 +172,19 @@ export async function setupExecutionEnvironment(options: {
   if (executionPath) {
     // Explicit execution path provided
 
-    // Tier 1: Hard error for managed execution directory
+    // Tier 1: Managed execution directory safety
     const managedExecBase = path.join(os.homedir(), ".hankweave-executions");
     if (executionPath.startsWith(managedExecBase)) {
-      throw new Error(
-        `❌ Cannot use ~/.hankweave-executions/ as explicit execution directory.\n` +
-          `This location is reserved for auto-managed executions.\n` +
-          `Use a different path for --execution.`,
-      );
+      // Allow resuming existing executions (they have .hankweave/execution-meta.json)
+      const metaPath = path.join(executionPath, ".hankweave", "execution-meta.json");
+      if (!fs.existsSync(metaPath)) {
+        throw new Error(
+          `❌ Cannot create new execution in ~/.hankweave-executions/.\n` +
+            `This location is reserved for auto-managed executions.\n` +
+            `Use a different path for --execution, or omit --execution to auto-create here.`,
+        );
+      }
+      // Existing execution found — allow resume
     }
 
     if (startNew) {

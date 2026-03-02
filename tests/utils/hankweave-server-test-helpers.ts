@@ -10,6 +10,7 @@ import type {
   CodonCompletedEvent,
   CodonStartedEvent,
   ServerEventType,
+  ServerReadyEvent,
 } from "../../server/schemas/event-schemas.js";
 import type { HankweaveState } from "../../server/types/state-types.js";
 import {
@@ -180,6 +181,8 @@ export interface LaunchServerOptions {
     command: string;
     args: string[];
   };
+  /** Replay directory path - replays LLM logs instead of making real API calls */
+  replayDir?: string;
   /** Additional CLI args to append to the server command */
   extraArgs?: string[];
 }
@@ -432,12 +435,12 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
 
   // Prepare an isolated execution directory similar to other E2E helpers.
   const testTimestamp = generateTestTimestamp();
-  const executionDir = options.executionDir
+  let executionDir = options.executionDir
     ? path.resolve(cwd, options.executionDir)
     : path.join(testAreaDir, `execution-${testTimestamp}`);
   const testRunDir = path.join(testResultsDir, `basic-server-${testTimestamp}`);
 
-  if (!options.reuseTestDirectory) {
+  if (!options.reuseTestDirectory && !options.replayDir) {
     await setupTestDirectory({
       testDir: executionDir,
       testResultsDir,
@@ -451,15 +454,16 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
   let needsShell = false;
 
   // Use space-separated syntax (not --flag=value which is deprecated)
+  // Skip --execution when --replay is set (replay mode auto-copies the execution dir)
   const serverArgs = [
     "--config",
     configPath,
     "--data",
     dataSourcePath,
-    "--execution",
-    executionDir,
+    ...(options.replayDir ? [] : ["--execution", executionDir]),
     "--port",
     String(port),
+    ...(options.replayDir ? ["--replay", path.resolve(cwd, options.replayDir)] : []),
     ...(options.extraArgs ?? []),
   ];
 
@@ -593,6 +597,12 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
       // Regular server events
       const serverEvent: ServerEvent = data;
       events.push(serverEvent);
+
+      // Update executionDir from server.ready event (needed for replay mode
+      // where the server copies the execution dir to a temp location)
+      if (serverEvent.type === "server.ready") {
+        executionDir = (serverEvent as ServerReadyEvent).data.executionPath;
+      }
 
       // Resolve any waiting promises for this event type
       const waiters = eventPromises.get(serverEvent.type);
@@ -965,15 +975,18 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     throw new Error(`Timeout waiting for state after ${timeoutMs}ms`);
   }
 
-  const serverLogFilePath = path.join(executionDir, ".hankweave/logs/server.log");
+  function getServerLogFilePath(): string {
+    return path.join(executionDir, ".hankweave/logs/server.log");
+  }
 
   function getServerLogFile(): string {
-    if (!fs.existsSync(serverLogFilePath)) {
-      throw new Error(`Server log file not found: ${serverLogFilePath}`);
+    const logPath = getServerLogFilePath();
+    if (!fs.existsSync(logPath)) {
+      throw new Error(`Server log file not found: ${logPath}`);
     }
 
     try {
-      return fs.readFileSync(serverLogFilePath, "utf-8");
+      return fs.readFileSync(logPath, "utf-8");
     } catch (error) {
       throw new Error(
         `Failed to read server log file: ${error instanceof Error ? error.message : String(error)}`,
@@ -1008,7 +1021,9 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     client,
     clientId,
     events,
-    executionDir,
+    get executionDir() {
+      return executionDir;
+    },
     sendCommand,
     getEvents,
     waitForEvent,
@@ -1024,7 +1039,9 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     hasLockFile,
     getState,
     waitForState,
-    serverLogFilePath,
+    get serverLogFilePath() {
+      return getServerLogFilePath();
+    },
     serverLogFile: getServerLogFile,
   };
 }

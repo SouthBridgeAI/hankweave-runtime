@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { HankweaveRuntime } from "./hankweave-runtime.js";
 import { isFirstSuccess, markFirstSuccess } from "./telemetry/telemetry-identity.js";
 import type {
@@ -334,8 +333,8 @@ export class BasicTUI {
       lines.push(`${COLORS.bold}Look here for output files:${COLORS.reset}`);
       if (this.outputDirectory) {
         lines.push(this.outputDirectory);
-      } else if (this.executionPath) {
-        lines.push(path.join(this.executionPath, "outputs"));
+      } else if (this.agentRootPath) {
+        lines.push(this.agentRootPath);
       }
 
       // First success star nudge

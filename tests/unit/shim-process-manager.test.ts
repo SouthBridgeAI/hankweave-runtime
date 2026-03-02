@@ -4,6 +4,7 @@ import * as child_process from "node:child_process";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
+import { PassThrough } from "node:stream";
 import { ClaudeLogParser } from "../../server/claude-log-parser";
 import { ShimProcessManager } from "../../server/shim-process-manager";
 import type { CodonId } from "../../server/types/branded-types";
@@ -219,10 +220,10 @@ describe("ShimProcessManager extension behavior", () => {
       pid: 12345,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock for Writable stream
       stdin: { write: mock(() => {}), end: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Real PassThrough stream for readline
+      stdout: new PassThrough() as any,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock for Readable stream
-      stdout: { pipe: mock(() => {}), on: mock(() => {}) } as any,
-      // biome-ignore lint/suspicious/noExplicitAny: Test mock for Readable stream
-      stderr: { on: mock(() => {}) } as any,
+      stderr: new PassThrough() as any,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock for EventEmitter
       on: mock(() => mockProcess as ChildProcess) as any,
       killed: false,
@@ -273,10 +274,10 @@ describe("ShimProcessManager extension behavior", () => {
       pid: 12345,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock for Writable stream
       stdin: { write: mock(() => {}), end: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Real PassThrough stream for readline
+      stdout: new PassThrough() as any,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock for Readable stream
-      stdout: { pipe: mock(() => {}), on: mock(() => {}) } as any,
-      // biome-ignore lint/suspicious/noExplicitAny: Test mock for Readable stream
-      stderr: { on: mock(() => {}) } as any,
+      stderr: new PassThrough() as any,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock for EventEmitter
       on: mock(() => mockProcess as ChildProcess) as any,
       killed: false,
@@ -358,10 +359,10 @@ describe("ShimProcessManager HANKWEAVE_* env passthrough", () => {
       pid: 12345,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock
       stdin: { write: mock(() => {}), end: mock(() => {}) } as any,
-      // biome-ignore lint/suspicious/noExplicitAny: Test mock
-      stdout: { pipe: mock(() => {}), on: mock(() => {}) } as any,
-      // biome-ignore lint/suspicious/noExplicitAny: Test mock
-      stderr: { on: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Real PassThrough stream for readline
+      stdout: new PassThrough() as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for Readable stream
+      stderr: new PassThrough() as any,
       // biome-ignore lint/suspicious/noExplicitAny: Test mock
       on: mock(() => mockProcess as ChildProcess) as any,
       killed: false,
@@ -472,6 +473,146 @@ describe("ShimProcessManager HANKWEAVE_* env passthrough", () => {
     const spawnCall = spawnSpy.mock.calls[0];
     const spawnOptions = spawnCall[2] as { env: NodeJS.ProcessEnv };
     expect(spawnOptions.env.ANTHROPIC_BASE_URL).toBe("https://other.api.com");
+
+    spawnSpy.mockRestore();
+  });
+});
+
+describe("ShimProcessManager log timestamps", () => {
+  let tempDir: string;
+  let logger: Logger;
+  let mockLogParser: ClaudeLogParser;
+
+  beforeEach(async () => {
+    tempDir = path.resolve("tests", "test-area", `temp-test-shim-timestamps-${Date.now()}`);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+    await fs.promises.mkdir(path.join(tempDir, ".hankweave", "logs"), {
+      recursive: true,
+    });
+
+    const logPath = path.join(tempDir, "test.log");
+    logger = new Logger(logPath);
+    mockLogParser = new ClaudeLogParser({
+      logPath: path.join(tempDir, "mock.log"),
+      codonId: "test-codon",
+      parsingInterval: 100,
+    });
+  });
+
+  afterEach(async () => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("stdout JSON lines are written to log with timestamp field", async () => {
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+    const spawnSpy = spyOn(child_process, "spawn");
+
+    // Use real PassThrough streams so readline can consume stdout
+    const mockStdout = new PassThrough();
+    const mockProcess: Partial<ChildProcess> = {
+      pid: 12345,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for Writable stream
+      stdin: { write: mock(() => {}), end: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Real PassThrough stream for readline
+      stdout: mockStdout as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for Readable stream
+      stderr: new PassThrough() as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for EventEmitter
+      on: mock(() => mockProcess as ChildProcess) as any,
+      killed: false,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for kill method
+      kill: mock(() => true) as any,
+      removeAllListeners: mock(() => mockProcess as ChildProcess),
+    };
+    spawnSpy.mockReturnValue(mockProcess as ChildProcess);
+
+    const codon = createTestCodon({
+      id: "test-codon",
+      name: "Test",
+      model: "gemini-2.0-flash-exp",
+      continuationMode: "fresh",
+      promptText: "Test",
+      description: "Test",
+      checkpointedFiles: [],
+    });
+
+    const logFilePath = await manager.spawn(["node", "shim.js"], codon, null);
+
+    // Write JSONL lines to mock stdout (simulating shim output)
+    const testMessages = [
+      { type: "system", subtype: "init", session_id: "test-123" },
+      { type: "assistant", message: { id: "msg_abc", role: "assistant" } },
+      { type: "result", subtype: "success", result: "done" },
+    ];
+    for (const msg of testMessages) {
+      mockStdout.write(`${JSON.stringify(msg)}\n`);
+    }
+    mockStdout.end();
+
+    // Wait for readline to process all lines
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Read the log file and verify timestamps
+    const logContent = fs.readFileSync(logFilePath, "utf-8");
+    const lines = logContent.trim().split("\n");
+    expect(lines.length).toBe(3);
+
+    for (let i = 0; i < lines.length; i++) {
+      const parsed = JSON.parse(lines[i]);
+      expect(parsed.timestamp).toBeDefined();
+      // Verify it's a valid ISO 8601 timestamp
+      expect(new Date(parsed.timestamp).toISOString()).toBe(parsed.timestamp);
+      // Verify original data is preserved
+      expect(parsed.type).toBe(testMessages[i].type);
+    }
+
+    spawnSpy.mockRestore();
+  });
+
+  test("non-JSON stdout lines are written as-is without timestamp", async () => {
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+    const spawnSpy = spyOn(child_process, "spawn");
+
+    const mockStdout = new PassThrough();
+    const mockProcess: Partial<ChildProcess> = {
+      pid: 12345,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for Writable stream
+      stdin: { write: mock(() => {}), end: mock(() => {}) } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Real PassThrough stream for readline
+      stdout: mockStdout as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for Readable stream
+      stderr: new PassThrough() as any,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for EventEmitter
+      on: mock(() => mockProcess as ChildProcess) as any,
+      killed: false,
+      // biome-ignore lint/suspicious/noExplicitAny: Test mock for kill method
+      kill: mock(() => true) as any,
+      removeAllListeners: mock(() => mockProcess as ChildProcess),
+    };
+    spawnSpy.mockReturnValue(mockProcess as ChildProcess);
+
+    const codon = createTestCodon({
+      id: "test-codon",
+      name: "Test",
+      model: "gemini-2.0-flash-exp",
+      continuationMode: "fresh",
+      promptText: "Test",
+      description: "Test",
+      checkpointedFiles: [],
+    });
+
+    const logFilePath = await manager.spawn(["node", "shim.js"], codon, null);
+
+    // Write a non-JSON line
+    mockStdout.write("this is not json\n");
+    mockStdout.end();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const logContent = fs.readFileSync(logFilePath, "utf-8");
+    const lines = logContent.trim().split("\n");
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toBe("this is not json");
 
     spawnSpy.mockRestore();
   });

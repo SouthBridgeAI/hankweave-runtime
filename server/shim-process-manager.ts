@@ -1,12 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
+import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { ensureCodexAvailable } from "./codex-runtime-extractor.js";
 import { TIMEOUTS } from "./config.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
-import { type Codon, isContextExceeded, type ShimSelfTestResult } from "./types/types.js";
+import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
 
 /**
@@ -14,22 +15,23 @@ import { escapeShellArg, type Logger } from "./utils.js";
  * Handles log stream creation and process argument building.
  * Works with any shim that supports the standardized argument interface.
  */
-export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
+export class ShimProcessManager extends BaseProcessManager {
   private process: ChildProcess | undefined;
   private logStream: fs.WriteStream | undefined;
+  private stdoutReader: readline.Interface | undefined;
   private killed = false;
   private promptBuilder: PromptBuilder;
 
   constructor(
     private executionPath: string,
     private agentRootPath: string,
-    private logger: Logger,
-    private logParser: ClaudeLogParser,
+    logger: Logger,
+    logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
     private globalSystemPrompt?: string | null,
     private defaultShimIdleTimeout?: number,
   ) {
-    super();
+    super(logger, logParser);
     this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
   }
 
@@ -138,13 +140,32 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
 
     this.killed = false;
 
-    // Pipe stdout to log file with error handling
+    // Process stdout line-by-line to add timestamps before writing to log
     if (this.process.stdout) {
-      this.process.stdout.pipe(this.logStream);
+      this.stdoutReader = readline.createInterface({
+        input: this.process.stdout,
+        crlfDelay: Number.POSITIVE_INFINITY,
+      });
 
-      // Handle pipe errors
-      this.process.stdout.on("error", (error) => {
-        this.logger.log(`Stdout pipe error: ${error.message}`, "error");
+      this.stdoutReader.on("line", (line) => {
+        if (this.logStream && !this.logStream.destroyed) {
+          let timestampedLine: string;
+          try {
+            const parsed = JSON.parse(line);
+            parsed.timestamp = new Date().toISOString();
+            timestampedLine = JSON.stringify(parsed);
+          } catch {
+            // Non-JSON line: write as-is
+            timestampedLine = line;
+          }
+          this.logStream.write(`${timestampedLine}\n`);
+        }
+
+        this.emit("stdout", line);
+      });
+
+      this.stdoutReader.on("error", (error) => {
+        this.logger.log(`Stdout readline error: ${error.message}`, "error");
       });
 
       this.logStream.on("error", (error) => {
@@ -269,29 +290,14 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
     this.process.on("exit", (code, signal) => {
       this.logger.log(`Shim process exited with code: ${code}, signal: ${signal}`);
 
-      // Parse final log entries to ensure we have all messages
-      this.logParser.parseNow();
-
-      // Check all messages for context exceeded indicators
-      const allMessages = this.logParser.getAllMessages();
-      const contextExceeded = allMessages.some((msg) => isContextExceeded(msg));
-
-      if (contextExceeded) {
-        this.logger.log("Context exceeded detected in log messages");
-      }
-
       this.cleanup();
-      this.emit("exit", code || 0, contextExceeded);
+      this.emitExit(code || 0);
     });
 
     this.process.on("error", (error) => {
       this.logger.log(`Shim process error: ${error.message}`, "error");
       this.cleanup();
       this.emit("error", error);
-    });
-
-    this.process.stdout?.on("data", (data) => {
-      this.emit("stdout", data.toString());
     });
 
     this.process.stderr?.on("data", (data) => {
@@ -387,6 +393,11 @@ export class ShimProcessManager extends TypedEventEmitter<ProcessEvents> {
    * Clean up resources.
    */
   private cleanup(): void {
+    if (this.stdoutReader) {
+      this.stdoutReader.close();
+      this.stdoutReader = undefined;
+    }
+
     if (this.logStream && !this.logStream.destroyed) {
       this.logStream.end();
       this.logStream = undefined;

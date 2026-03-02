@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import {
   CLAUDE_SDK_VERSION,
@@ -12,7 +13,6 @@ import {
 } from "./claude-runtime-extractor.js";
 import { TIMEOUTS } from "./config.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { type ProcessEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
 import { IdleTimeoutError, isCompiledExecutable, toError, withIdleTimeout } from "./utils.js";
@@ -72,7 +72,7 @@ export function detectClaudeExecutable(): string | null {
  * Manages Claude Agent SDK lifecycle, mimicking the ClaudeProcessManager API.
  * Handles log stream creation and converts SDK messages to JSONL format.
  */
-export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
+export class ClaudeAgentSDKManager extends BaseProcessManager {
   private abortController: AbortController | undefined;
   private logStream: fs.WriteStream | undefined;
   private killed = false;
@@ -84,13 +84,13 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
   constructor(
     private executionPath: string,
     private agentRootPath: string,
-    private logger: Logger,
-    private logParser: ClaudeLogParser,
+    logger: Logger,
+    logParser: ClaudeLogParser,
     private anthropicBaseUrl?: string,
     private globalSystemPrompt?: string | null,
     private defaultShimIdleTimeout?: number,
   ) {
-    super();
+    super(logger, logParser);
     this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
   }
 
@@ -447,28 +447,9 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         "info",
       );
 
-      // Parse final log entries
-      this.logger.log(`[SDK-runQuery] Parsing final log entries`, "debug");
-      this.logParser.parseNow();
-
-      // Check for context exceeded
-      const allMessages = this.logParser.getAllMessages();
-      this.logger.log(`[SDK-runQuery] Got ${allMessages.length} messages from log parser`, "debug");
-      const contextExceeded = allMessages.some((msg) => {
-        if (msg.type === "result" && msg.subtype === "error") {
-          return msg.result?.includes("context") || false;
-        }
-        return false;
-      });
-
-      this.logger.log(
-        `[SDK-runQuery] Query complete, contextExceeded=${contextExceeded}, calling cleanup and emitting exit`,
-        "info",
-      );
+      this.logger.log(`[SDK-runQuery] Query complete, calling cleanup and emitting exit`, "info");
       this.cleanup();
-      this.logger.log(`[SDK-runQuery] About to emit exit event`, "info");
-      this.emit("exit", 0, contextExceeded);
-      this.logger.log(`[SDK-runQuery] Exit event emitted`, "info");
+      this.emitExit(0);
     } catch (error) {
       // Idle timeout: emit "exit" with code 1 to match shim behavior.
       // Shims handle timeout internally and exit with code 1, which flows through
@@ -480,7 +461,7 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
         // does not linger after idle timeout.
         this.abortController?.abort();
         this.cleanup();
-        this.emit("exit", 1, false);
+        this.emitExit(1);
         return;
       }
       this.logger.log(`[SDK-runQuery] CAUGHT ERROR: ${toError(error).message}`, "error");
@@ -605,7 +586,8 @@ export class ClaudeAgentSDKManager extends TypedEventEmitter<ProcessEvents> {
    */
   private writeToLog(message: Record<string, unknown>): void {
     if (this.logStream && !this.logStream.destroyed) {
-      this.logStream.write(`${JSON.stringify(message)}\n`);
+      const timestamped = { ...message, timestamp: new Date().toISOString() };
+      this.logStream.write(`${JSON.stringify(timestamped)}\n`);
     }
   }
 
