@@ -3,113 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
 import { ShimProcessManager } from "../../server/shim-process-manager.js";
-import type { Codon } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
+import { runSessionToCompletion } from "../utils/shim-session-helpers.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
-
-/**
- * Helper function to run a complete session: creates manager, spawns process,
- * waits for completion, extracts session ID, and cleans up.
- */
-async function runSessionToCompletion(
-  tempDir: string,
-  executionPath: string,
-  logger: Logger,
-  codexShimPath: string,
-  codon: Codon,
-  previousSessionId: string | null,
-  timeoutMs: number = 60000,
-): Promise<{
-  sessionId: string;
-  logPath: string;
-  allMessages: any[];
-}> {
-  console.log(`\n  Setting up session for codon: ${codon.id}...`);
-
-  // Create log path - use the same path for both parser and spawn
-  const sessionLogPath = path.join(tempDir, `session-${codon.id}.jsonl`);
-
-  // Create log parser
-  const logParser = new ClaudeLogParser({
-    logPath: sessionLogPath,
-    codonId: codon.id,
-    parsingInterval: 100,
-  });
-
-  // Create manager (use executionPath for both since this is a simple integration test)
-  const manager = new ShimProcessManager(
-    executionPath,
-    executionPath,
-    logger,
-    logParser,
-  );
-
-  console.log(`  Spawning codex shim for ${codon.id}...`);
-
-  // Spawn process - pass the same logPath so parser and manager use the same file
-  const command = ["bun", "run", codexShimPath];
-  const actualLogPath = await manager.spawn(command, codon, previousSessionId, {
-    logPath: sessionLogPath,
-  });
-  console.log(`    ✓ Spawned codex shim, log: ${actualLogPath}`);
-
-  console.log(`  Waiting for completion...`);
-
-  // Wait for completion
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      manager.kill("SIGTERM").catch(console.error);
-      reject(new Error(`Session ${codon.id} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    manager.on("exit", (code, contextExceeded) => {
-      clearTimeout(timeout);
-      console.log(`    ✓ Session completed (exit code: ${code})`);
-      if (contextExceeded) {
-        console.log("    ⚠️  Context exceeded");
-      }
-      resolve();
-    });
-
-    manager.on("error", (error) => {
-      clearTimeout(timeout);
-      console.error(`    ✗ Session error:`, error);
-      reject(error);
-    });
-  });
-
-  // Extract session ID from log
-  console.log(`  Extracting session ID from log...`);
-  const logContent = await fs.promises.readFile(actualLogPath, "utf-8");
-  const lines = logContent.trim().split("\n");
-
-  let sessionId: string | undefined;
-  for (const line of lines) {
-    const entry = JSON.parse(line);
-    if (entry.type === "system" && entry.session_id) {
-      sessionId = entry.session_id;
-      break;
-    }
-  }
-
-  if (!sessionId) {
-    throw new Error(`No session ID found in log for ${codon.id}`);
-  }
-  console.log(`    ✓ Session ID: ${sessionId}`);
-
-  // Get all messages before stopping parser
-  const allMessages = logParser.getAllMessages();
-  console.log(`    ✓ Log parser found ${allMessages.length} messages`);
-
-  // Stop parser
-  logParser.stop();
-
-  return {
-    sessionId,
-    logPath: actualLogPath,
-    allMessages,
-  };
-}
 
 describe("Codex Shim Integration Test", () => {
   let tempDir: string;
@@ -439,6 +335,114 @@ describe("Codex Shim Integration Test", () => {
 
     console.log("\n✅ Test passed: Codex shim with reasoning effort models\n");
   }, 300000); // 5 minute timeout for all model tests
+
+  test("codex shim with gpt-5.4 model", async () => {
+    console.log("\n📝 Test: Codex shim with gpt-5.4");
+
+    // Check if CODEX_API_KEY or OPENAI_API_KEY is set
+    if (!process.env.CODEX_API_KEY && !process.env.OPENAI_API_KEY) {
+      console.log(
+        "⏭️  Skipping test: No CODEX_API_KEY or OPENAI_API_KEY found",
+      );
+      return;
+    }
+
+    const codon = createTestCodon({
+      id: "codex-test-gpt-5-4",
+      name: "GPT-5.4 Test Session",
+      promptText: "Say 'Hello from GPT-5.4' and nothing else.",
+      model: "gpt-5.4",
+      continuationMode: "fresh",
+    });
+
+    const { logPath: actualLogPath, allMessages } =
+      await runSessionToCompletion(
+        tempDir,
+        executionPath,
+        logger,
+        codexShimPath,
+        codon,
+        null,
+      );
+
+    console.log("\n  Verifying gpt-5.4 response...");
+
+    // Verify log file was created and has content
+    expect(fs.existsSync(actualLogPath)).toBe(true);
+    const logContent = await fs.promises.readFile(actualLogPath, "utf-8");
+    expect(logContent.length).toBeGreaterThan(0);
+    console.log(`    ✓ Log file size: ${logContent.length} bytes`);
+
+    // Verify we have messages
+    expect(allMessages.length).toBeGreaterThan(0);
+    console.log(`    ✓ Log parser found ${allMessages.length} messages`);
+
+    // Check for system message with correct model
+    const systemMessages = allMessages.filter((msg) => msg.type === "system");
+    expect(systemMessages.length).toBeGreaterThan(0);
+    if (systemMessages[0]) {
+      console.log(`    ✓ Model: ${systemMessages[0].model}`);
+      expect(systemMessages[0].model).toBe("openai/gpt-5.4");
+    }
+
+    // Check for assistant messages
+    const assistantMessages = allMessages.filter(
+      (msg) => msg.type === "assistant",
+    );
+    expect(assistantMessages.length).toBeGreaterThan(0);
+    console.log(`    ✓ Found ${assistantMessages.length} assistant message(s)`);
+    if (assistantMessages[0]) {
+      const content = assistantMessages[0].message?.content;
+      if (Array.isArray(content)) {
+        const textContent = content.find((c: any) => c.type === "text");
+        if (textContent && "text" in textContent) {
+          const text = textContent.text || "";
+          console.log(
+            `    ✓ Response: "${text.substring(0, 50)}${text.length > 50 ? "..." : ""}"`,
+          );
+          expect(text).not.toContain("API Error");
+          expect(text).not.toContain("does not exist");
+        }
+      }
+    }
+
+    // Check for result message
+    const resultMessages = allMessages.filter((msg) => msg.type === "result");
+    expect(resultMessages.length).toBeGreaterThan(0);
+    if (resultMessages[0]) {
+      console.log(`    ✓ Result: ${resultMessages[0].result}`);
+      expect(resultMessages[0].is_error).toBe(false);
+    }
+
+    console.log("\n✅ Test passed: Codex shim with gpt-5.4\n");
+  }, 120000); // 2 minute timeout
+
+  describe("codex shim reasoning effort default", () => {
+    // Read the shim source to verify the default is present
+    const shimSource = fs.readFileSync(
+      path.resolve(__dirname, "../../shims/codex/index.js"),
+      "utf-8",
+    );
+
+    test("shim should always pass modelReasoningEffort with a safe default", () => {
+      expect(shimSource).toContain(
+        'modelReasoningEffort: modelSpec.reasoningEffort || "high"',
+      );
+    });
+
+    test("shim should NOT conditionally spread reasoningEffort", () => {
+      expect(shimSource).not.toContain(
+        "...modelSpec.reasoningEffort && { modelReasoningEffort: modelSpec.reasoningEffort }",
+      );
+    });
+
+    test("resolveModel should not extract reasoning effort from non-effort suffixes", () => {
+      const validEfforts = ["minimal", "low", "medium", "high", "xhigh"];
+      expect(validEfforts).not.toContain("mini");
+      expect(validEfforts).not.toContain("max");
+      expect(validEfforts).not.toContain("codex");
+    });
+  });
 
   test("shim self-test via ShimProcessManager", async () => {
     console.log("\n📝 Test: Shim self-test via ShimProcessManager");

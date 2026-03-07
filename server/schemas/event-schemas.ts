@@ -197,6 +197,13 @@ export const rigSetupFailedEventDataSchema = z.object({
   ignored: z.boolean(),
 });
 
+export const rigOutputEventDataSchema = z.object({
+  codonId: z.string(),
+  stream: z.enum(["stdout", "stderr"]),
+  line: z.string(),
+  commandIndex: z.number().int().nonnegative(),
+});
+
 export const loopIterationCompletedEventDataSchema = z.object({
   loopId: z.string(),
   iteration: z.number().int().nonnegative(),
@@ -541,6 +548,11 @@ export const rigSetupFailedEventSchema = baseEventSchema.extend({
   data: rigSetupFailedEventDataSchema,
 });
 
+export const rigOutputEventSchema = baseEventSchema.extend({
+  type: z.literal("rig.output"),
+  data: rigOutputEventDataSchema,
+});
+
 export const loopIterationCompletedEventSchema = baseEventSchema.extend({
   type: z.literal("loop.iteration.completed"),
   data: loopIterationCompletedEventDataSchema,
@@ -783,6 +795,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   fileTreeUpdatedEventSchema,
   rigSetupCompletedEventSchema,
   rigSetupFailedEventSchema,
+  rigOutputEventSchema,
   loopIterationCompletedEventSchema,
   errorEventSchema,
   incompleteCodonEventSchema,
@@ -826,6 +839,7 @@ export type FileUpdatedEvent = z.infer<typeof fileUpdatedEventSchema>;
 export type FileTreeUpdatedEvent = z.infer<typeof fileTreeUpdatedEventSchema>;
 export type RigSetupCompletedEvent = z.infer<typeof rigSetupCompletedEventSchema>;
 export type RigSetupFailedEvent = z.infer<typeof rigSetupFailedEventSchema>;
+export type RigOutputEvent = z.infer<typeof rigOutputEventSchema>;
 export type LoopIterationCompletedEvent = z.infer<typeof loopIterationCompletedEventSchema>;
 export type ErrorEvent = z.infer<typeof errorEventSchema>;
 export type IncompleteCodonEvent = z.infer<typeof incompleteCodonEventSchema>;
@@ -912,6 +926,7 @@ const AGENTIC_BACKBONE_EVENT_TYPES_ARRAY = [
   "filetree.updated",
   "rig.setup.completed",
   "rig.setup.failed",
+  "rig.output",
 ] as const;
 
 /**
@@ -996,7 +1011,8 @@ export type AgenticBackboneEvent =
   | FileUpdatedEvent
   | FileTreeUpdatedEvent
   | RigSetupCompletedEvent
-  | RigSetupFailedEvent;
+  | RigSetupFailedEvent
+  | RigOutputEvent;
 
 /**
  * Union type representing all sentinel events.
@@ -1161,6 +1177,7 @@ export const serverEventDataSchemas: Record<ServerEventType, z.ZodSchema> = {
   "filetree.updated": fileTreeUpdatedEventDataSchema,
   "rig.setup.completed": rigSetupCompletedEventDataSchema,
   "rig.setup.failed": rigSetupFailedEventDataSchema,
+  "rig.output": rigOutputEventDataSchema,
   "loop.iteration.completed": loopIterationCompletedEventDataSchema,
   error: errorEventDataSchema,
   "incomplete.codon": incompleteCodonEventDataSchema,

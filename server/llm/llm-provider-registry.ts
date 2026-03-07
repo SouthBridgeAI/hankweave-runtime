@@ -144,212 +144,43 @@ export class LlmProviderRegistry {
       // Combine models from both sources
       const allProviders = [...validatedData.providers, ...customModels.providers];
 
-      // Manually inject GPT 5.2/5.3 models with reasoning effort specifiers
-      const manuallyInjectedModels: ModelInfo[] = [
-        {
-          providerId: "openai",
-          modelId: "gpt-5.2-high",
-          name: "GPT-5.2 High",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 1.75,
-            output: 14,
-            cache_read: 0.175,
-          },
-          limit: {
-            context: 128000,
-            output: 16384,
-          },
-          modalities: {
-            input: ["text", "image"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2025-12-11",
-          last_updated: "2025-12-11",
-        },
-        {
-          providerId: "openai",
-          modelId: "gpt-5.2-xhigh",
-          name: "GPT-5.2 XHigh",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 3.5,
-            output: 28,
-            cache_read: 0.35,
-          },
-          limit: {
-            context: 128000,
-            output: 16384,
-          },
-          modalities: {
-            input: ["text", "image"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2025-12-12",
-          last_updated: "2025-12-12",
-        },
-        {
-          providerId: "openai",
-          modelId: "gpt-5.2-codex-high",
-          name: "GPT-5.2 Codex High",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 1.75,
-            output: 14,
-            cache_read: 0.175,
-          },
-          limit: {
-            context: 128000,
-            output: 16384,
-          },
-          modalities: {
-            input: ["text", "image"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2025-12-09",
-          last_updated: "2025-12-09",
-        },
-        {
-          providerId: "openai",
-          modelId: "gpt-5.2-codex-xhigh",
-          name: "GPT-5.2 Codex XHigh",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 3.5,
-            output: 28,
-            cache_read: 0.35,
-          },
-          limit: {
-            context: 128000,
-            output: 16384,
-          },
-          modalities: {
-            input: ["text", "image"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2025-12-10",
-          last_updated: "2025-12-10",
-        },
-        // GPT 5.3 Codex models (released February 2026)
-        // Note: There is no pure GPT 5.3 model; only Codex variants exist
-        {
-          providerId: "openai",
-          modelId: "gpt-5.3-codex-high",
-          name: "GPT-5.3 Codex High",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 1.75,
-            output: 14,
-            cache_read: 0.175,
-          },
-          limit: {
-            context: 400000,
-            output: 128000,
-          },
-          modalities: {
-            input: ["text", "image", "pdf"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2026-02-05",
-          last_updated: "2026-02-05",
-        },
-        {
-          providerId: "openai",
-          modelId: "gpt-5.3-codex-xhigh",
-          name: "GPT-5.3 Codex XHigh",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 3.5,
-            output: 28,
-            cache_read: 0.35,
-          },
-          limit: {
-            context: 400000,
-            output: 128000,
-          },
-          modalities: {
-            input: ["text", "image", "pdf"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2026-02-05",
-          last_updated: "2026-02-05",
-        },
-        // GPT 5.3 Codex Spark reasoning effort variants
-        {
-          providerId: "openai",
-          modelId: "gpt-5.3-codex-spark-high",
-          name: "GPT-5.3 Codex Spark High",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 1.75,
-            output: 14,
-            cache_read: 0.175,
-          },
-          limit: {
-            context: 128000,
-            output: 32000,
-          },
-          modalities: {
-            input: ["text", "image", "pdf"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2026-02-05",
-          last_updated: "2026-02-05",
-        },
-        {
-          providerId: "openai",
-          modelId: "gpt-5.3-codex-spark-xhigh",
-          name: "GPT-5.3 Codex Spark XHigh",
-          attachment: true,
-          reasoning: true,
-          tool_call: true,
-          temperature: false,
-          cost: {
-            input: 3.5,
-            output: 28,
-            cache_read: 0.35,
-          },
-          limit: {
-            context: 128000,
-            output: 32000,
-          },
-          modalities: {
-            input: ["text", "image", "pdf"],
-            output: ["text"],
-          },
-          knowledge: "2025-08-31",
-          release_date: "2026-02-05",
-          last_updated: "2026-02-05",
-        },
-      ];
+      // Auto-generate reasoning effort variants for all reasoning-capable OpenAI models.
+      // The codex shim strips the suffix (e.g. "-high") and passes it as model_reasoning_effort.
+      // We register these so the registry can resolve and return cost info for them.
+      const REASONING_EFFORTS = ["high", "xhigh"] as const;
+      const effortCostMultiplier: Record<string, number> = { high: 1, xhigh: 2 };
+      const reasoningEffortModels: ModelInfo[] = [];
+
+      for (const provider of allProviders) {
+        if (provider.id !== "openai") continue;
+        for (const model of provider.models) {
+          if (!model.reasoning) continue;
+          for (const effort of REASONING_EFFORTS) {
+            const multiplier = effortCostMultiplier[effort];
+            reasoningEffortModels.push({
+              ...model,
+              modelId: `${model.modelId}-${effort}`,
+              name: `${model.name} (${effort})`,
+              cost: model.cost
+                ? {
+                    input:
+                      model.cost.input !== undefined ? model.cost.input * multiplier : undefined,
+                    output:
+                      model.cost.output !== undefined ? model.cost.output * multiplier : undefined,
+                    cache_read:
+                      model.cost.cache_read !== undefined
+                        ? model.cost.cache_read * multiplier
+                        : undefined,
+                    cache_write:
+                      model.cost.cache_write !== undefined
+                        ? model.cost.cache_write * multiplier
+                        : undefined,
+                  }
+                : undefined,
+            });
+          }
+        }
+      }
 
       // Process each provider's models
       // Note: We load all models regardless of blocklist, and check blocklist during resolution
@@ -371,8 +202,8 @@ export class LlmProviderRegistry {
         }
       }
 
-      // Register manually injected models
-      for (const model of manuallyInjectedModels) {
+      // Register reasoning effort variant models
+      for (const model of reasoningEffortModels) {
         const fullModelId = `${model.providerId}/${model.modelId}`;
         this.uniqueModels.add(fullModelId.toLowerCase());
         this.models.set(fullModelId.toLowerCase(), model);

@@ -1025,7 +1025,7 @@ var CodexShim = class {
       sandboxMode: sandboxModeMap[this.args.sandbox],
       networkAccessEnabled: true,
       webSearchEnabled: true,
-      ...modelSpec.reasoningEffort && { modelReasoningEffort: modelSpec.reasoningEffort }
+      modelReasoningEffort: modelSpec.reasoningEffort || "high"
     };
     return options;
   }

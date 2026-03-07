@@ -16,6 +16,7 @@ describe("Event Schema Synchronization", () => {
       "filetree.updated",
       "rig.setup.completed",
       "rig.setup.failed",
+      "rig.output",
       "error",
       "incomplete.codon",
       "info",

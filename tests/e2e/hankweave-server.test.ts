@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import { CodonId } from "../../server/types/branded-types.js";
 import type {
   CodonCompletedEvent,
@@ -175,6 +176,69 @@ describe("hankweave server", () => {
       }
     }
   }, 300_000); // 5 minute timeout to accommodate LLM call variability
+
+  it("recovers from KILL during first codon with no checkpoints", async () => {
+    // ENG-196: When the server is killed during the very first codon (before any
+    // checkpoint is created), resuming should start a fresh run instead of hanging.
+    // Previously, the failed thread had no checkpoints to roll back to, and the
+    // !thread?.failed guard prevented starting a new run.
+    const port = await getFreePort();
+    // Use a single-codon haiku-only config to avoid flaky Gemini failures
+    const configPath = path.resolve(__dirname, "../config/test-resume-after-kill.config.json");
+    let hankweave = await launchHankweave({ port, configPath });
+    const codonOne = CodonId("codon-1");
+    const execDir = hankweave.executionDir;
+
+    try {
+      // Wait for hankweave to be ready
+      await hankweave.waitForEvent("server.ready");
+
+      // Wait for codon 1 to START (but NOT complete) — no checkpoint exists yet
+      const codon1Started = (await hankweave.waitForCodonStart(codonOne)) as CodonStartedEvent;
+      expect(codon1Started.data.codonId).toBe(codonOne);
+
+      // Kill immediately during first codon (SIGKILL — simulates crash)
+      await hankweave.kill(5_000);
+
+      // Verify hankweave exited
+      expect(
+        hankweave.process.exitCode !== null || hankweave.process.signalCode !== null,
+      ).toBeTrue();
+
+      // Small delay before reconnecting
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // Lock file should be lingering after crash
+      expect(hankweave.hasLockFile()).toBeTrue();
+
+      // Resume with same execution directory
+      hankweave = await launchHankweave({
+        port,
+        configPath,
+        executionDir: execDir,
+        reuseTestDirectory: true,
+      });
+
+      // Should start a fresh run (no checkpoints to roll back to)
+      await hankweave.waitForEvent("server.ready");
+
+      // Wait for the full run to complete
+      await hankweave.waitForRunToComplete(300_000);
+
+      // Verify state: the resumed run completed successfully
+      const state = hankweave.getState();
+      const completedRuns = state.runs.filter((r: { status: string }) => r.status === "completed");
+      expect(completedRuns.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (
+        hankweave &&
+        hankweave.process.exitCode === null &&
+        hankweave.process.signalCode === null
+      ) {
+        await hankweave.stop();
+      }
+    }
+  }, 300_000); // 5 minute timeout
 
   it("allows a second client to connect and stream event history", async () => {
     // Launch hankweave with ping event generation

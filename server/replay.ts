@@ -80,20 +80,20 @@ function loadReplayManifest(replayDir: string, runId?: string): ReplayManifest {
 }
 
 /**
- * Encapsulates replay-mode decisions and manifest-backed lookups.
+ * Manages replay manifest and codon log resolution for replay mode.
+ *
+ * Only instantiated when replay mode is active (replayDir is provided).
+ * Flow-control decisions (skip rig setup, skip sentinels, etc.) are owned
+ * by HankweaveRuntime via simple `this.replay` truthiness checks.
  */
 export class Replay {
   private manifest?: ReplayManifest;
-
-  constructor(private readonly replayDir?: string) {}
 
   /**
    * Initialize replay startup state.
    * Loads replay manifest and resets runtime state when replay mode is enabled.
    */
   async initializeForStartup(params: { executionPath: string; logger: Logger }): Promise<void> {
-    if (!this.replayDir) return;
-
     params.logger.log(`[REPLAY] Loading replay manifest from ${params.executionPath}`);
     this.manifest = loadReplayManifest(params.executionPath);
     params.logger.log(
@@ -101,31 +101,11 @@ export class Replay {
     );
   }
 
-  isReplayMode(): boolean {
-    return !!this.replayDir;
-  }
-
-  /** Replay mode always starts a fresh run. */
-  shouldForceFreshRunOnStartup(): boolean {
-    return this.isReplayMode();
-  }
-
-  /**
-   * Normal startup recovery path is only active outside replay mode.
-   */
-  shouldUseNormalStartupRecoveryPath(params: {
-    threadFailed: boolean;
-    hasCurrentRun: boolean;
-  }): boolean {
-    return !this.isReplayMode() && !params.threadFailed && !params.hasCurrentRun;
-  }
-
   /**
    * Resolve replay source log for the target runtime codon.
    * Falls back to base codon id for compatibility with older runs.
    */
-  resolveCodonConfig(runtimeCodonId: string, baseCodonId: string): ReplayCodonConfig | undefined {
-    if (!this.isReplayMode()) return undefined;
+  resolveCodonConfig(runtimeCodonId: string, baseCodonId: string): ReplayCodonConfig {
     if (!this.manifest) {
       throw new Error(
         "[REPLAY] Replay is not initialized. Call initializeForStartup() before codon execution.",
@@ -145,15 +125,5 @@ export class Replay {
     }
 
     return { sourceLogPath, replaySpeed: DEFAULT_REPLAY_SPEED };
-  }
-
-  /** Replay mode skips rig setup because replay copies a post-setup execution directory. */
-  shouldSkipRigSetup(): boolean {
-    return this.isReplayMode();
-  }
-
-  /** Replay mode skips sentinel loading to avoid new nondeterministic/costly LLM calls. */
-  shouldSkipSentinels(): boolean {
-    return this.isReplayMode();
   }
 }

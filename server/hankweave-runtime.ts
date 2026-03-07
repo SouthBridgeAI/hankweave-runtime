@@ -26,6 +26,7 @@ import type {
   InfoEvent,
   LoopIterationCompletedEvent,
   PongEvent,
+  RigOutputEvent,
   RigSetupCompletedEvent,
   RigSetupFailedEvent,
   ServerEvent,
@@ -119,7 +120,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private proxyRunner: ProxyRunner | null = null;
 
   // Replay mode (replays existing JSONL logs instead of making real LLM calls)
-  private replay: Replay;
+  private replay: Replay | undefined;
 
   // State management
   private stateManager: StateManager;
@@ -235,7 +236,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       ...DEFAULT_CONFIG,
       ...config,
     } as HankweaveConfig;
-    this.replay = new Replay(this.config.replayDir);
+    this.replay = this.config.replayDir ? new Replay() : undefined;
 
     // Update logger to use execution path
     // Check if serverLogFile is already absolute to avoid path duplication on Windows
@@ -463,7 +464,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(`[DEBUG] State manager initialized`);
 
     // Initialize replay policy (manifest load).
-    await this.replay.initializeForStartup({
+    await this.replay?.initializeForStartup({
       executionPath: this.config.executionPath,
       logger: this.logger,
     });
@@ -555,7 +556,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     const thread = await this.stateManager.getExecutionThread();
 
-    if (this.replay.shouldForceFreshRunOnStartup()) {
+    if (this.replay) {
       // In replay mode, always start a fresh run — we replay all codons from scratch
       this.logger.log(`[REPLAY] Starting fresh run (replay mode ignores existing state)`);
       await this.startNewRun();
@@ -565,13 +566,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       await this.rollbackToLastSuccess(this.config.autostart);
     }
 
-    if (
-      this.replay.shouldUseNormalStartupRecoveryPath({
-        threadFailed: !!thread?.failed,
-        hasCurrentRun: !!this.currentRunId,
-      })
-    ) {
-      // Start a new run if needed
+    if (!this.replay && !this.currentRunId) {
+      // Start a new run if needed (also handles the case where a failed thread
+      // had no checkpoints to roll back to — we start fresh instead of hanging)
       // Check if there's an existing execution thread with completed codons
       // If so, create a continuation run instead of a fresh run
       let lastCompletedCodon = thread?.codons.find((tc) => tc.codon.status === "completed");
@@ -1657,7 +1654,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Replay's goal is fast, deterministic reproduction of codon LLM output, not full
     // behavioral re-execution of the setup pipeline.
     if (
-      !this.replay.shouldSkipRigSetup() &&
+      !this.replay &&
       !skipPreCommands &&
       !rigSetupCheckpoint &&
       codon.rigSetup &&
@@ -1726,7 +1723,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             lastCopiedPath = targetPath;
             this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
           } else if (item.type === "command" && item.command) {
-            await this.runCommand(item, lastCopiedPath || undefined, codon.env);
+            await this.runCommand(item, lastCopiedPath || undefined, codon.env, {
+              codonId: codon.id,
+              commandIndex: index,
+            });
             const resolvedWorkingDir =
               item.command.workingDirectory === "lastCopied" && lastCopiedPath
                 ? lastCopiedPath
@@ -1982,7 +1982,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     //    analysis is orthogonal to that goal.
     // 4. The original sentinel events aren't part of the codon JSONL logs that replay
     //    reads from, so there's no recorded sentinel behavior to reproduce.
-    const sentinelResult = this.replay.shouldSkipSentinels()
+    const sentinelResult = this.replay
       ? { loaded: [], errors: [] }
       : await this.loadSentinelsForCodon(codon, codonId);
 
@@ -2392,7 +2392,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
       // Create runner for this codon and store in map (single source of truth)
       // Build config with proper discriminated union structure.
-      const replayConfig = this.replay.resolveCodonConfig(codonId, codon.id);
+      const replayConfig = this.replay?.resolveCodonConfig(codonId, codon.id);
 
       if (!this.currentRunId) {
         throw new Error("No active run while creating CodonRunner");
@@ -6063,6 +6063,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     shellCommand: ShellCommand | RigShellCommand | string,
     lastCopiedPath?: string,
     env?: Record<string, string>,
+    rigContext?: { codonId: string; commandIndex: number },
   ): Promise<void> {
     // Handle working directory resolution
     let workingDir: string;
@@ -6108,19 +6109,81 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       let stdout = "";
       let stderr = "";
 
+      // Throttle rig.output events: max 1 per second per stream
+      let lastStdoutEmit = 0;
+      let lastStderrEmit = 0;
+      let pendingStdoutLine: string | null = null;
+      let pendingStderrLine: string | null = null;
+
+      const emitRigOutput = (stream: "stdout" | "stderr", line: string) => {
+        if (!rigContext || !line.trim()) return;
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "rig.output",
+          data: {
+            codonId: rigContext.codonId,
+            stream,
+            line: line.trim().slice(0, 500),
+            commandIndex: rigContext.commandIndex,
+          },
+        } as RigOutputEvent);
+      };
+
       proc.stdout?.on("data", (data) => {
         const chunk = data.toString();
         stdout += chunk;
         this.logger.log(`[DEBUG] Command stdout: ${chunk.trim()}`, "info");
+
+        if (rigContext) {
+          const lastLine = chunk.trim().split("\n").pop() ?? "";
+          const now = Date.now();
+          if (now - lastStdoutEmit >= 1000) {
+            emitRigOutput("stdout", lastLine);
+            lastStdoutEmit = now;
+            pendingStdoutLine = null;
+          } else {
+            pendingStdoutLine = lastLine;
+          }
+        }
       });
 
       proc.stderr?.on("data", (data) => {
         const chunk = data.toString();
         stderr += chunk;
         this.logger.log(`[DEBUG] Command stderr: ${chunk.trim()}`, "error");
+
+        if (rigContext) {
+          const lastLine = chunk.trim().split("\n").pop() ?? "";
+          const now = Date.now();
+          if (now - lastStderrEmit >= 1000) {
+            emitRigOutput("stderr", lastLine);
+            lastStderrEmit = now;
+            pendingStderrLine = null;
+          } else {
+            pendingStderrLine = lastLine;
+          }
+        }
       });
 
+      // Flush pending lines every second
+      const flushInterval = rigContext
+        ? setInterval(() => {
+            if (pendingStdoutLine) {
+              emitRigOutput("stdout", pendingStdoutLine);
+              lastStdoutEmit = Date.now();
+              pendingStdoutLine = null;
+            }
+            if (pendingStderrLine) {
+              emitRigOutput("stderr", pendingStderrLine);
+              lastStderrEmit = Date.now();
+              pendingStderrLine = null;
+            }
+          }, 1000)
+        : null;
+
       proc.on("exit", (code) => {
+        if (flushInterval) clearInterval(flushInterval);
         if (code === 0) {
           this.logger.log(`[DEBUG] Command completed successfully`, "info");
           resolve();
@@ -6143,6 +6206,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       });
 
       proc.on("error", (err) => {
+        if (flushInterval) clearInterval(flushInterval);
         this.logger.log(`[DEBUG] Command error: ${err.message}`, "error");
         reject(err);
       });

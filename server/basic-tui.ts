@@ -93,18 +93,23 @@ export class BasicTUI {
   private lastCodonFailed: boolean = false;
   private lastFailureReason: string | null = null;
   private summaryShown: boolean = false;
+  private showCosts: boolean;
 
-  // Activity heartbeat — shows "working..." when TUI goes quiet
+  // Activity heartbeat — shows contextual status when TUI goes quiet
   private lastOutputTime: number = Date.now();
   private activityTimer: Timer | null = null;
   private activitySeconds: number = 0;
   private isShowingActivity: boolean = false;
+  private activityPhase: "idle" | "rig" | "agent" | "sentinels" = "idle";
+  private activityLastHint: string | null = null;
 
   /**
    * Create TUI.
    * @param serverOrPort - HankweaveRuntime instance OR { port: number } for attach mode
    */
   constructor(serverOrPort: HankweaveRuntime | { port: number }) {
+    this.showCosts = !!process.env.HANKWEAVE_RUNTIME_SHOW_COSTS;
+
     if ("port" in serverOrPort) {
       // Attach mode - connect to existing server by port
       this.attachMode = true;
@@ -323,7 +328,9 @@ export class BasicTUI {
         `All ${this.codonsCompleted} codon${this.codonsCompleted === 1 ? "" : "s"} completed successfully in ${elapsed}.`,
       );
       lines.push("");
-      lines.push(`Total cost:  ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      if (this.showCosts) {
+        lines.push(`Total cost:  ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      }
       if (this.agentRootPath) {
         lines.push(`Workspace:   ${this.agentRootPath}`);
       }
@@ -358,7 +365,9 @@ export class BasicTUI {
       lines.push(
         `Completed:   ${this.codonsCompleted} of ${totalCodons} codon${totalCodons === 1 ? "" : "s"}`,
       );
-      lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      if (this.showCosts) {
+        lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      }
       if (this.agentRootPath) {
         lines.push(`Workspace:   ${this.agentRootPath}`);
       }
@@ -373,7 +382,9 @@ export class BasicTUI {
       lines.push(
         `Stopped by user after ${this.codonsCompleted} of ${totalCodons} codon${totalCodons === 1 ? "" : "s"} (${elapsed} elapsed).`,
       );
-      lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      if (this.showCosts) {
+        lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+      }
       if (this.agentRootPath) {
         lines.push(`Workspace:   ${this.agentRootPath}`);
       }
@@ -416,15 +427,42 @@ export class BasicTUI {
       const silentSec = Math.floor(silentMs / 1000);
 
       if (silentSec >= 10) {
-        // Print a newline before the first "Working..." to separate from previous output
+        // Print a newline before the first spinner line to separate from previous output
         if (!this.isShowingActivity) {
           process.stdout.write("\n");
         }
         this.activitySeconds = silentSec;
         this.isShowingActivity = true;
+
+        // Build context-aware spinner text
+        let label: string;
+        let symbol: string;
+        switch (this.activityPhase) {
+          case "rig":
+            symbol = "⚙";
+            label = "Rig running";
+            break;
+          case "sentinels":
+            symbol = "◈";
+            label = "Completing sentinels";
+            break;
+          case "agent":
+            symbol = "◐";
+            label = "Model thinking";
+            break;
+          default:
+            symbol = SYMBOLS.dot;
+            label = "Working";
+            break;
+        }
+
+        const hint = this.activityLastHint
+          ? ` ${COLORS.reset}${COLORS.dim}(${this.activityLastHint})`
+          : "";
+
         // \r overwrites the current line — no newline, so it stays compact
         process.stdout.write(
-          `\r${COLORS.dim}${SYMBOLS.dot} Working... ${this.activitySeconds}s${COLORS.reset}  `,
+          `\r${COLORS.dim}${symbol} ${label}... ${this.activitySeconds}s${hint}${COLORS.reset}  `,
         );
       }
     }, 1000);
@@ -490,17 +528,21 @@ export class BasicTUI {
             `${COLORS.dim}  ${SYMBOLS.arrow} Recent file: ${event.data.recentFileAccess.path}${COLORS.reset}`,
           );
         }
-        console.log(
-          `  ${SYMBOLS.arrow} Total cost: ${
-            COLORS.yellow
-          }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
-        );
+        if (this.showCosts) {
+          console.log(
+            `  ${SYMBOLS.arrow} Total cost: ${
+              COLORS.yellow
+            }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
+          );
+        }
         break;
       }
 
       case "codon.started": {
         this.codonsStarted++;
         this.lastCodonId = event.data.codonId;
+        this.activityPhase = "agent";
+        this.activityLastHint = null;
         console.log(`\n${timestamp} ${COLORS.cyan}${COLORS.bold}Codon Started${COLORS.reset}`);
 
         // Build info lines for the box
@@ -543,6 +585,8 @@ export class BasicTUI {
       }
 
       case "codon.completed": {
+        this.activityPhase = "idle";
+        this.activityLastHint = null;
         // Track run stats
         if (event.data.success || event.data.failureIgnored) {
           this.codonsCompleted++;
@@ -581,7 +625,9 @@ export class BasicTUI {
         );
 
         const details = [
-          `Cost: ${COLORS.yellow}$${event.data.cost.toFixed(4)}${COLORS.reset}`,
+          ...(this.showCosts
+            ? [`Cost: ${COLORS.yellow}$${event.data.cost.toFixed(4)}${COLORS.reset}`]
+            : []),
           `Duration: ${COLORS.dim}${(event.data.duration / 1000).toFixed(1)}s${COLORS.reset}`,
         ];
 
@@ -606,7 +652,11 @@ export class BasicTUI {
         console.log(`\n${timestamp} ${COLORS.yellow}${COLORS.bold}Codon Extended${COLORS.reset}`);
         const infoLines = [
           `Extension #: ${COLORS.bold}${event.data.extensionNumber}${COLORS.reset}`,
-          `Cumulative Cost: ${COLORS.yellow}$${event.data.cumulativeCost.toFixed(4)}${COLORS.reset}`,
+          ...(this.showCosts
+            ? [
+                `Cumulative Cost: ${COLORS.yellow}$${event.data.cumulativeCost.toFixed(4)}${COLORS.reset}`,
+              ]
+            : []),
         ];
         this.drawBox(`Codon ${event.data.codonId}`, infoLines, COLORS.yellow);
         break;
@@ -620,6 +670,7 @@ export class BasicTUI {
           for (const line of lines) {
             console.log(`  ${SYMBOLS.pipe} ${line}`);
           }
+          this.activityLastHint = "writing response";
         } else if (event.data.action === "thinking") {
           console.log(`\n${timestamp} ${COLORS.gray}${COLORS.italic}Thinking${COLORS.reset}`);
           // Split thinking by newlines and indent with gray
@@ -627,6 +678,7 @@ export class BasicTUI {
           for (const line of lines) {
             console.log(`${COLORS.gray}${COLORS.italic}  ${SYMBOLS.pipe} ${line}${COLORS.reset}`);
           }
+          this.activityLastHint = "thinking";
         } else if (event.data.action === "tool_use") {
           const toolColor = this.getToolColor(event.data.toolName || "unknown");
           console.log(`\n${timestamp} ${toolColor}Tool Use: ${event.data.toolName}${COLORS.reset}`);
@@ -639,11 +691,14 @@ export class BasicTUI {
               ).replace(/\n/g, "\n    ")}${COLORS.reset}`,
             );
           }
+          this.activityLastHint = `after ${event.data.toolName}`;
         }
+        this.activityPhase = "agent";
         break;
       }
 
       case "tool.result": {
+        this.activityLastHint = `after ${event.data.toolName}`;
         const toolColor = this.getToolColor(event.data.toolName);
         const statusColor = event.data.isError ? COLORS.red : COLORS.green;
         console.log(
@@ -689,11 +744,13 @@ export class BasicTUI {
         console.log(
           `  ${SYMBOLS.arrow} Input: ${event.data.inputTokens}, Output: ${event.data.outputTokens}`,
         );
-        console.log(
-          `  ${SYMBOLS.arrow} Cost: ${
-            COLORS.yellow
-          }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
-        );
+        if (this.showCosts) {
+          console.log(
+            `  ${SYMBOLS.arrow} Cost: ${
+              COLORS.yellow
+            }$${event.data.totalCost.toFixed(4)}${COLORS.reset}`,
+          );
+        }
         break;
       }
 
@@ -752,10 +809,13 @@ export class BasicTUI {
           // Show a brief one-liner now; the full summary box prints on disconnect
           // (after sentinel shutdown output finishes, so it's always the last thing)
           const elapsed = this.formatDuration(Date.now() - this.runStartTime);
+          const costSuffix = this.showCosts ? `$${this.totalCost.toFixed(4)}, ` : "";
           console.log(
-            `\n${timestamp} ${COLORS.green}${COLORS.bold}${SYMBOLS.check} All ${this.codonsCompleted} codon${this.codonsCompleted === 1 ? "" : "s"} completed${COLORS.reset} ${COLORS.dim}($${this.totalCost.toFixed(4)}, ${elapsed})${COLORS.reset}`,
+            `\n${timestamp} ${COLORS.green}${COLORS.bold}${SYMBOLS.check} All ${this.codonsCompleted} codon${this.codonsCompleted === 1 ? "" : "s"} completed${COLORS.reset} ${COLORS.dim}(${costSuffix}${elapsed})${COLORS.reset}`,
           );
         } else if (message.includes("Rig setup started")) {
+          this.activityPhase = "rig";
+          this.activityLastHint = null;
           console.log(`\n${timestamp} ${COLORS.yellow}${SYMBOLS.arrow} ${message}${COLORS.reset}`);
         } else if (message.includes("Rig setup completed")) {
           const isSuccess = !message.includes("failed");
@@ -764,6 +824,10 @@ export class BasicTUI {
           console.log(`${timestamp} ${color}${symbol} ${message}${COLORS.reset}`);
         } else if (message.includes("Rig operation")) {
           console.log(`${timestamp} ${COLORS.dim}  ${SYMBOLS.pipe} ${message}${COLORS.reset}`);
+        } else if (message.includes("Completing work for") && message.includes("sentinel")) {
+          this.activityPhase = "sentinels";
+          this.activityLastHint = null;
+          console.log(`\n${timestamp} ${COLORS.blue}Info${COLORS.reset}: ${message}`);
         } else {
           console.log(`\n${timestamp} ${COLORS.blue}Info${COLORS.reset}: ${message}`);
         }
@@ -927,9 +991,11 @@ export class BasicTUI {
           `\n${timestamp} ${reasonColor}Sentinel Unloaded${COLORS.reset}: ${COLORS.bold}${event.data.sentinelId}${COLORS.reset}`,
         );
         console.log(`  ${SYMBOLS.arrow} Reason: ${event.data.reason}`);
-        console.log(
-          `  ${SYMBOLS.arrow} Final Cost: ${COLORS.yellow}$${event.data.finalCost.toFixed(6)}${COLORS.reset}`,
-        );
+        if (this.showCosts) {
+          console.log(
+            `  ${SYMBOLS.arrow} Final Cost: ${COLORS.yellow}$${event.data.finalCost.toFixed(6)}${COLORS.reset}`,
+          );
+        }
         console.log(`  ${SYMBOLS.arrow} LLM Calls: ${event.data.llmCallCount}`);
         break;
       }
@@ -953,9 +1019,13 @@ export class BasicTUI {
           `Sentinel Output: ${event.data.sentinelId}`,
           [
             ...outputContent,
-            `${COLORS.dim}${"─".repeat(20)}${COLORS.reset}`,
-            `Cost: ${COLORS.yellow}$${event.data.cost.toFixed(6)}${COLORS.reset}`,
-            `Tokens: ${COLORS.dim}(in: ${event.data.tokens.input}, out: ${event.data.tokens.output})${COLORS.reset}`,
+            ...(this.showCosts
+              ? [
+                  `${COLORS.dim}${"─".repeat(20)}${COLORS.reset}`,
+                  `Cost: ${COLORS.yellow}$${event.data.cost.toFixed(6)}${COLORS.reset}`,
+                  `Tokens: ${COLORS.dim}(in: ${event.data.tokens.input}, out: ${event.data.tokens.output})${COLORS.reset}`,
+                ]
+              : []),
           ],
           COLORS.green,
         );
@@ -983,6 +1053,8 @@ export class BasicTUI {
         console.log(
           `${timestamp} ${COLORS.green}${SYMBOLS.check} Rig setup completed${COLORS.reset} ${COLORS.dim}(${event.data.commandCount} command${event.data.commandCount === 1 ? "" : "s"}, ${durationSec}s)${COLORS.reset}`,
         );
+        this.activityPhase = "agent";
+        this.activityLastHint = null;
         break;
       }
 
@@ -994,6 +1066,14 @@ export class BasicTUI {
         console.log(
           `${timestamp} ${color}${symbol} Rig setup failed: ${event.data.failureType}${suffix}${COLORS.reset}`,
         );
+        break;
+      }
+
+      case "rig.output": {
+        const line = event.data.line;
+        const streamColor = event.data.stream === "stderr" ? COLORS.yellow : COLORS.dim;
+        console.log(`${timestamp} ${streamColor}  ${SYMBOLS.pipe} ${line}${COLORS.reset}`);
+        this.activityLastHint = line.slice(0, 60);
         break;
       }
 

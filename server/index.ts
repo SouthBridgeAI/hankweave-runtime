@@ -357,6 +357,28 @@ Use --output to copy them elsewhere.
     resolvedDataPath = path.resolve(dataSourcePath || originalCwd);
   }
 
+  // When resuming an existing execution without explicit --data,
+  // use the data source path stored in execution metadata.
+  // This prevents hash mismatches when CWD differs from original creation dir.
+  if (executionPath && !dataSourcePath && !inlineInput && inputSourceType === "path") {
+    const execMetaPath = path.join(
+      path.resolve(executionPath),
+      ".hankweave",
+      "execution-meta.json",
+    );
+    if (fs.existsSync(execMetaPath)) {
+      try {
+        const execMeta = JSON.parse(fs.readFileSync(execMetaPath, "utf-8"));
+        if (execMeta.readOnlySourceDataPath && fs.existsSync(execMeta.readOnlySourceDataPath)) {
+          resolvedDataPath = execMeta.readOnlySourceDataPath;
+          console.log(`> Using data source from execution metadata: ${resolvedDataPath}`);
+        }
+      } catch {
+        // Non-fatal — fall through to CWD-based resolution
+      }
+    }
+  }
+
   // Directory-aware config path resolution
   // Priority order:
   // 1. Explicit --hank/--config flag (if directory, append /hank.json)

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "id": "codon-1",
+      "name": "Codon 1: TestCodon1",
+      "promptFile": ["./codon1Prompt1.md", "./codon1Prompt2.md"],
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p notes",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "appendSystemPromptFile": [
+        "./systemPrompt1.md",
+        "./noTodosPrompt.md"
+      ],
+      "description": "Write three pick one",
+      "checkpointedFiles": ["notes/**/*", "*.md"]
+    }
+  ]
+}

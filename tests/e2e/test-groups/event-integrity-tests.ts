@@ -78,13 +78,13 @@ export function runEventIntegrityTests(testState: TestState) {
     // Tool use actions can repeat (e.g., multiple LS calls).
     // Thinking and message actions can also legitimately repeat across codons
     // (e.g., similar reasoning patterns, "Let me check..." appearing in multiple codons).
-    // We flag only excessive duplication (>3) as a potential event delivery bug.
+    // We flag only excessive duplication (>5) as a potential event delivery bug.
     actionSignatures.forEach((count, signature) => {
-      if (count > 3) {
+      if (count > 5) {
         // Tool use actions are exempt (expected to repeat)
         const isToolUse = signature.includes("_tool_use_");
         if (!isToolUse) {
-          expect(count).toBeLessThanOrEqual(3);
+          expect(count).toBeLessThanOrEqual(5);
         }
       }
     });

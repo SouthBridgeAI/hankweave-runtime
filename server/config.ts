@@ -994,6 +994,7 @@ export const runtimeConfigSchema = z
     // Server Behaviors
     port: z.number().int().positive().optional().describe("WebSocket server port"),
     autostart: z.boolean().optional().describe("If true, run immediately on client connect"),
+    showCosts: z.boolean().optional().describe("If true, display cost data in the TUI"),
     withoutProxy: z.boolean().optional().describe("Bypass internal LLM proxy"),
 
     // Model & API
@@ -1233,6 +1234,7 @@ export const DEFAULT_CONFIG: Omit<
   serverLogFile: ".hankweave/logs/server.log",
   logParsingInterval: 1000, // Check for new log entries every second
   autostart: true, // Default to current behavior
+  showCosts: false, // Only show cost data in TUI when HANKWEAVE_RUNTIME_SHOW_COSTS is set
   dataHashTimeLimit: 5000, // 5 seconds for directory hashing
   toolResultTruncateLength: 2500, // Default truncation length for tool results
   withoutProxy: true, // Proxy disabled by default (enable with --proxy)
@@ -1404,6 +1406,7 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
  * - HANKWEAVE_RUNTIME_PORT -> port (number)
  * - HANKWEAVE_RUNTIME_MODEL -> model (enum: "sonnet" | "opus")
  * - HANKWEAVE_RUNTIME_AUTOSTART -> autostart (boolean)
+ * - HANKWEAVE_RUNTIME_SHOW_COSTS -> showCosts (boolean)
  * - HANKWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE -> sentinel.enablePersistence (boolean)
  *
  * Type conversions:
@@ -1428,6 +1431,7 @@ export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
     if (
       key === "autostart" ||
       key === "withoutProxy" ||
+      key === "showCosts" ||
       key === "enablePersistence" ||
       key === "waitForAllHealthChecks" ||
       key === "ignoreRigFailures"

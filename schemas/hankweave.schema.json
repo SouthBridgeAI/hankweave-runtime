@@ -17,6 +17,10 @@
           "type": "boolean",
           "description": "If true, run immediately on client connect"
         },
+        "showCosts": {
+          "type": "boolean",
+          "description": "If true, display cost data in the TUI"
+        },
         "withoutProxy": {
           "type": "boolean",
           "description": "Bypass internal LLM proxy"

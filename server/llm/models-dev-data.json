@@ -1,7 +1,357 @@
 {
   "version": "1.0.0",
-  "lastUpdated": "2026-02-18T10:01:31.955Z",
+  "lastUpdated": "2026-03-06T19:23:46.084Z",
   "providers": [
+    {
+      "id": "evroc",
+      "name": "evroc",
+      "models": [
+        {
+          "providerId": "evroc",
+          "modelId": "nvidia/Llama-3.3-70B-Instruct-FP8",
+          "name": "Llama 3.3 70B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "cost": {
+            "input": 1.18,
+            "output": 1.18
+          },
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2024-12-01",
+          "last_updated": "2024-12-01"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "microsoft/Phi-4-multimodal-instruct",
+          "name": "Phi-4 15B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "cost": {
+            "input": 0.24,
+            "output": 0.47
+          },
+          "limit": {
+            "context": 32000,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text",
+              "image"
+            ]
+          },
+          "release_date": "2025-01-01",
+          "last_updated": "2025-01-01"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "intfloat/multilingual-e5-large-instruct",
+          "name": "E5 Multi-Lingual Large Embeddings 0.6B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": false,
+          "cost": {
+            "input": 0.12,
+            "output": 0.12
+          },
+          "limit": {
+            "context": 512,
+            "output": 512
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2024-06-01",
+          "last_updated": "2024-06-01"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "moonshotai/Kimi-K2.5",
+          "name": "Kimi K2.5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "cost": {
+            "input": 1.47,
+            "output": 5.9
+          },
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-01-27",
+          "last_updated": "2026-01-27"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "KBLab/kb-whisper-large",
+          "name": "KB Whisper",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": false,
+          "cost": {
+            "input": 0.00236,
+            "output": 0.00236
+          },
+          "limit": {
+            "context": 448,
+            "output": 448
+          },
+          "modalities": {
+            "input": [
+              "audio"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2024-10-01",
+          "last_updated": "2024-10-01"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+          "name": "Qwen3 30B 2507",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "cost": {
+            "input": 0.35,
+            "output": 1.42
+          },
+          "limit": {
+            "context": 64000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-07-30",
+          "last_updated": "2025-07-30"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "Qwen/Qwen3-Embedding-8B",
+          "name": "Qwen3 Embedding 8B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": false,
+          "cost": {
+            "input": 0.12,
+            "output": 0.12
+          },
+          "limit": {
+            "context": 40960,
+            "output": 40960
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-07-30",
+          "last_updated": "2025-07-30"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+          "name": "Qwen3 VL 30B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "cost": {
+            "input": 0.24,
+            "output": 0.94
+          },
+          "limit": {
+            "context": 100000,
+            "output": 100000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-07-30",
+          "last_updated": "2025-07-30"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "mistralai/Voxtral-Small-24B-2507",
+          "name": "Voxtral Small 24B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": false,
+          "cost": {
+            "input": 0.00236,
+            "output": 0.00236
+          },
+          "limit": {
+            "context": 32000,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "audio",
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-03-01",
+          "last_updated": "2025-03-01"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "mistralai/devstral-small-2-24b-instruct-2512",
+          "name": "Devstral Small 2 24B Instruct 2512",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "cost": {
+            "input": 0.12,
+            "output": 0.47
+          },
+          "limit": {
+            "context": 32768,
+            "output": 32768
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-12-01",
+          "last_updated": "2025-12-01"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "mistralai/Magistral-Small-2509",
+          "name": "Magistral Small 1.2 24B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "cost": {
+            "input": 0.59,
+            "output": 2.36
+          },
+          "limit": {
+            "context": 131072,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-06-01",
+          "last_updated": "2025-06-01"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "openai/gpt-oss-120b",
+          "name": "GPT OSS 120B",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "cost": {
+            "input": 0.24,
+            "output": 0.94
+          },
+          "limit": {
+            "context": 65536,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-08-05",
+          "last_updated": "2025-08-05"
+        },
+        {
+          "providerId": "evroc",
+          "modelId": "openai/whisper-large-v3",
+          "name": "Whisper 3 Large",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": false,
+          "cost": {
+            "input": 0.00236,
+            "output": 0.00236
+          },
+          "limit": {
+            "context": 448,
+            "output": 4096
+          },
+          "modalities": {
+            "input": [
+              "audio"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2024-10-01",
+          "last_updated": "2024-10-01"
+        }
+      ]
+    },
     {
       "id": "zai",
       "name": "Z.AI",
@@ -572,6 +922,70 @@
         },
         {
           "providerId": "zenmux",
+          "modelId": "volcengine/doubao-seed-2.0-pro",
+          "name": "Doubao-Seed-2.0-pro",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.45,
+            "output": 2.24,
+            "cache_read": 0.09,
+            "cache_write": 0.0024
+          },
+          "limit": {
+            "context": 256000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2026-02-14",
+          "release_date": "2026-02-14",
+          "last_updated": "2026-02-14"
+        },
+        {
+          "providerId": "zenmux",
+          "modelId": "volcengine/doubao-seed-2.0-mini",
+          "name": "Doubao-Seed-2.0-mini",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.03,
+            "output": 0.28,
+            "cache_read": 0.01,
+            "cache_write": 0.0024
+          },
+          "limit": {
+            "context": 256000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2026-02-14",
+          "release_date": "2026-02-14",
+          "last_updated": "2026-02-14"
+        },
+        {
+          "providerId": "zenmux",
           "modelId": "volcengine/doubao-seed-code",
           "name": "Doubao-Seed-Code",
           "attachment": true,
@@ -599,6 +1013,38 @@
           "knowledge": "2025-01-01",
           "release_date": "2025-11-11",
           "last_updated": "2025-11-11"
+        },
+        {
+          "providerId": "zenmux",
+          "modelId": "volcengine/doubao-seed-2.0-lite",
+          "name": "Doubao-Seed-2.0-lite",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.09,
+            "output": 0.51,
+            "cache_read": 0.02,
+            "cache_write": 0.0024
+          },
+          "limit": {
+            "context": 256000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2026-02-14",
+          "release_date": "2026-02-14",
+          "last_updated": "2026-02-14"
         },
         {
           "providerId": "zenmux",
@@ -1961,6 +2407,37 @@
           "knowledge": "2025-01-01",
           "release_date": "2025-08-05",
           "last_updated": "2025-08-05"
+        },
+        {
+          "providerId": "zenmux",
+          "modelId": "anthropic/claude-sonnet-4.6",
+          "name": "Claude Sonnet 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01-01",
+          "release_date": "2026-02-18",
+          "last_updated": "2026-02-18"
         },
         {
           "providerId": "zenmux",
@@ -6520,6 +6997,481 @@
           "knowledge": "2025-03-31",
           "release_date": "2025-06-12",
           "last_updated": "2025-06-12"
+        }
+      ]
+    },
+    {
+      "id": "perplexity-agent",
+      "name": "Perplexity Agent",
+      "models": [
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "google/gemini-2.5-flash",
+          "name": "Gemini 2.5 Flash",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.3,
+            "output": 2.5,
+            "cache_read": 0.03
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2025-03-20",
+          "last_updated": "2025-06-05"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "google/gemini-3-flash-preview",
+          "name": "Gemini 3 Flash Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.5,
+            "output": 3,
+            "cache_read": 0.05
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2025-12-17",
+          "last_updated": "2025-12-17"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "google/gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "google/gemini-3-pro-preview",
+          "name": "Gemini 3 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2025-11-18",
+          "last_updated": "2025-11-18"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "google/gemini-2.5-pro",
+          "name": "Gemini 2.5 Pro",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1.25,
+            "output": 10,
+            "cache_read": 0.125
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2025-03-20",
+          "last_updated": "2025-06-05"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "openai/gpt-5.1",
+          "name": "GPT-5.1",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.25,
+            "output": 10,
+            "cache_read": 0.125
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-09-30",
+          "release_date": "2025-11-13",
+          "last_updated": "2025-11-13"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "openai/gpt-5.2",
+          "name": "GPT-5.2",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "openai/gpt-5-mini",
+          "name": "GPT-5 Mini",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 0.25,
+            "output": 2,
+            "cache_read": 0.025
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-05-30",
+          "release_date": "2025-08-07",
+          "last_updated": "2025-08-07"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "perplexity/sonar",
+          "name": "Sonar",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.25,
+            "output": 2.5,
+            "cache_read": 0.0625
+          },
+          "limit": {
+            "context": 128000,
+            "output": 8192
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-09-01",
+          "release_date": "2024-01-01",
+          "last_updated": "2025-09-01"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "anthropic/claude-opus-4-6",
+          "name": "Claude Opus 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.5
+          },
+          "limit": {
+            "context": 200000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-05",
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "anthropic/claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08",
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-17"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "anthropic/claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "anthropic/claude-opus-4-5",
+          "name": "Claude Opus 4.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.5
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-03-31",
+          "release_date": "2025-11-24",
+          "last_updated": "2025-11-24"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "anthropic/claude-sonnet-4-5",
+          "name": "Claude Sonnet 4.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-07-31",
+          "release_date": "2025-09-29",
+          "last_updated": "2025-09-29"
+        },
+        {
+          "providerId": "perplexity-agent",
+          "modelId": "xai/grok-4-1-fast-non-reasoning",
+          "name": "Grok 4.1 Fast (Non-Reasoning)",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.2,
+            "output": 0.5,
+            "cache_read": 0.05
+          },
+          "limit": {
+            "context": 2000000,
+            "output": 30000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-07",
+          "release_date": "2025-11-19",
+          "last_updated": "2025-11-19"
         }
       ]
     },
@@ -12492,6 +13444,37 @@
         },
         {
           "providerId": "cloudflare-ai-gateway",
+          "modelId": "openai/gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
+        },
+        {
+          "providerId": "cloudflare-ai-gateway",
           "modelId": "openai/gpt-4o-mini",
           "name": "GPT-4o mini",
           "attachment": true,
@@ -12519,6 +13502,37 @@
           "knowledge": "2023-09",
           "release_date": "2024-07-18",
           "last_updated": "2024-07-18"
+        },
+        {
+          "providerId": "cloudflare-ai-gateway",
+          "modelId": "openai/gpt-5.2-codex",
+          "name": "GPT-5.2 Codex",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
         },
         {
           "providerId": "cloudflare-ai-gateway",
@@ -12756,6 +13770,37 @@
           "knowledge": "2024-05",
           "release_date": "2025-04-16",
           "last_updated": "2025-04-16"
+        },
+        {
+          "providerId": "cloudflare-ai-gateway",
+          "modelId": "openai/gpt-5.4",
+          "name": "GPT-5.4",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cache_read": 0.25
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
         },
         {
           "providerId": "cloudflare-ai-gateway",
@@ -16240,6 +17285,37 @@
       "models": [
         {
           "providerId": "opencode",
+          "modelId": "gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-24"
+        },
+        {
+          "providerId": "opencode",
           "modelId": "kimi-k2",
           "name": "Kimi K2",
           "attachment": false,
@@ -16296,6 +17372,39 @@
           "knowledge": "2024-09-30",
           "release_date": "2025-09-15",
           "last_updated": "2025-09-15"
+        },
+        {
+          "providerId": "opencode",
+          "modelId": "gemini-3.1-pro",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
         },
         {
           "providerId": "opencode",
@@ -16668,6 +17777,35 @@
         },
         {
           "providerId": "opencode",
+          "modelId": "gpt-5.3-codex-spark",
+          "name": "GPT-5.3 Codex Spark",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 128000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-12"
+        },
+        {
+          "providerId": "opencode",
           "modelId": "qwen3-coder",
           "name": "Qwen3 Coder",
           "attachment": false,
@@ -16827,7 +17965,7 @@
           },
           "limit": {
             "context": 262144,
-            "output": 262144
+            "output": 65536
           },
           "modalities": {
             "input": [
@@ -16988,6 +18126,68 @@
           "knowledge": "2024-10",
           "release_date": "2025-09-05",
           "last_updated": "2025-09-05"
+        },
+        {
+          "providerId": "opencode",
+          "modelId": "gpt-5.4",
+          "name": "GPT-5.4",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cache_read": 0.25
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
+        },
+        {
+          "providerId": "opencode",
+          "modelId": "gpt-5.4-pro",
+          "name": "GPT-5.4 Pro",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 30,
+            "output": 180,
+            "cache_read": 30
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
         },
         {
           "providerId": "opencode",
@@ -20340,7 +21540,7 @@
             "cache_write": 6.25
           },
           "limit": {
-            "context": 1000000,
+            "context": 200000,
             "output": 128000
           },
           "modalities": {
@@ -20518,7 +21718,7 @@
             "cache_write": 6.25
           },
           "limit": {
-            "context": 1000000,
+            "context": 200000,
             "output": 128000
           },
           "modalities": {
@@ -20578,7 +21778,7 @@
             "cache_write": 6.25
           },
           "limit": {
-            "context": 1000000,
+            "context": 200000,
             "output": 128000
           },
           "modalities": {
@@ -22019,7 +23219,7 @@
             "cache_write": 6.25
           },
           "limit": {
-            "context": 1000000,
+            "context": 200000,
             "output": 128000
           },
           "modalities": {
@@ -22399,6 +23599,196 @@
       "models": [
         {
           "providerId": "azure-cognitive-services",
+          "modelId": "gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-24"
+        },
+        {
+          "providerId": "azure-cognitive-services",
+          "modelId": "claude-opus-4-1",
+          "name": "Claude Opus 4.1",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 15,
+            "output": 75,
+            "cache_read": 1.5,
+            "cache_write": 18.75
+          },
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-03-31",
+          "release_date": "2025-11-18",
+          "last_updated": "2025-11-18"
+        },
+        {
+          "providerId": "azure-cognitive-services",
+          "modelId": "claude-opus-4-6",
+          "name": "Claude Opus 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.5,
+            "cache_write": 6.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-05",
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
+        },
+        {
+          "providerId": "azure-cognitive-services",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-31",
+          "release_date": "2025-11-18",
+          "last_updated": "2025-11-18"
+        },
+        {
+          "providerId": "azure-cognitive-services",
+          "modelId": "claude-opus-4-5",
+          "name": "Claude Opus 4.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.5,
+            "cache_write": 6.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-03-31",
+          "release_date": "2025-11-24",
+          "last_updated": "2025-08-01"
+        },
+        {
+          "providerId": "azure-cognitive-services",
+          "modelId": "claude-sonnet-4-5",
+          "name": "Claude Sonnet 4.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-07-31",
+          "release_date": "2025-11-18",
+          "last_updated": "2025-11-18"
+        },
+        {
+          "providerId": "azure-cognitive-services",
           "modelId": "phi-3-small-8k-instruct",
           "name": "Phi-3-small-instruct (8k)",
           "attachment": false,
@@ -22743,38 +24133,6 @@
         },
         {
           "providerId": "azure-cognitive-services",
-          "modelId": "claude-sonnet-4-5",
-          "name": "Claude Sonnet 4.5",
-          "attachment": true,
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "cost": {
-            "input": 3,
-            "output": 15,
-            "cache_read": 0.3,
-            "cache_write": 3.75
-          },
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "knowledge": "2025-07-31",
-          "release_date": "2025-11-18",
-          "last_updated": "2025-11-18"
-        },
-        {
-          "providerId": "azure-cognitive-services",
           "modelId": "llama-4-maverick-17b-128e-instruct-fp8",
           "name": "Llama 4 Maverick 17B 128E Instruct FP8",
           "attachment": true,
@@ -23001,38 +24359,6 @@
         },
         {
           "providerId": "azure-cognitive-services",
-          "modelId": "claude-opus-4-5",
-          "name": "Claude Opus 4.5",
-          "attachment": true,
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "cost": {
-            "input": 5,
-            "output": 25,
-            "cache_read": 0.5,
-            "cache_write": 6.25
-          },
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "knowledge": "2025-03-31",
-          "release_date": "2025-11-24",
-          "last_updated": "2025-08-01"
-        },
-        {
-          "providerId": "azure-cognitive-services",
           "modelId": "mistral-large-2411",
           "name": "Mistral Large 24.11",
           "attachment": false,
@@ -23091,38 +24417,6 @@
           "knowledge": "2024-09-30",
           "release_date": "2025-11-14",
           "last_updated": "2025-11-14"
-        },
-        {
-          "providerId": "azure-cognitive-services",
-          "modelId": "claude-haiku-4-5",
-          "name": "Claude Haiku 4.5",
-          "attachment": true,
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "cost": {
-            "input": 1,
-            "output": 5,
-            "cache_read": 0.1,
-            "cache_write": 1.25
-          },
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "knowledge": "2025-02-31",
-          "release_date": "2025-11-18",
-          "last_updated": "2025-11-18"
         },
         {
           "providerId": "azure-cognitive-services",
@@ -23724,6 +25018,36 @@
           "knowledge": "2025-01",
           "release_date": "2026-02-06",
           "last_updated": "2026-02-06"
+        },
+        {
+          "providerId": "azure-cognitive-services",
+          "modelId": "gpt-5.2",
+          "name": "GPT-5.2",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.125
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2025-12-11",
+          "last_updated": "2025-12-11"
         },
         {
           "providerId": "azure-cognitive-services",
@@ -24619,38 +25943,6 @@
         },
         {
           "providerId": "azure-cognitive-services",
-          "modelId": "claude-opus-4-6",
-          "name": "Claude Opus 4.6",
-          "attachment": true,
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "cost": {
-            "input": 5,
-            "output": 25,
-            "cache_read": 0.5,
-            "cache_write": 6.25
-          },
-          "limit": {
-            "context": 200000,
-            "output": 128000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "knowledge": "2025-05",
-          "release_date": "2026-02-05",
-          "last_updated": "2026-02-05"
-        },
-        {
-          "providerId": "azure-cognitive-services",
           "modelId": "grok-3",
           "name": "Grok 3",
           "attachment": false,
@@ -24792,38 +26084,6 @@
           "knowledge": "2023-10",
           "release_date": "2024-08-20",
           "last_updated": "2024-08-20"
-        },
-        {
-          "providerId": "azure-cognitive-services",
-          "modelId": "claude-opus-4-1",
-          "name": "Claude Opus 4.1",
-          "attachment": true,
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "cost": {
-            "input": 15,
-            "output": 75,
-            "cache_read": 1.5,
-            "cache_write": 18.75
-          },
-          "limit": {
-            "context": 200000,
-            "output": 32000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "knowledge": "2025-03-31",
-          "release_date": "2025-11-18",
-          "last_updated": "2025-11-18"
         },
         {
           "providerId": "azure-cognitive-services",
@@ -25541,8 +26801,8 @@
             ]
           },
           "knowledge": "2025-04",
-          "release_date": "2026-02",
-          "last_updated": "2026-02"
+          "release_date": "2026-02-16",
+          "last_updated": "2026-02-16"
         },
         {
           "providerId": "alibaba",
@@ -25953,8 +27213,8 @@
             ]
           },
           "knowledge": "2025-04",
-          "release_date": "2026-02",
-          "last_updated": "2026-02"
+          "release_date": "2026-02-16",
+          "last_updated": "2026-02-16"
         },
         {
           "providerId": "alibaba",
@@ -28286,6 +29546,68 @@
         },
         {
           "providerId": "aihubmix",
+          "modelId": "gpt-5.2-codex",
+          "name": "GPT-5.2-Codex",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-01-14",
+          "last_updated": "2026-01-14"
+        },
+        {
+          "providerId": "aihubmix",
+          "modelId": "claude-opus-4-6",
+          "name": "Claude Opus 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 200000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-05",
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
+        },
+        {
+          "providerId": "aihubmix",
           "modelId": "coding-glm-4.7-free",
           "name": "Coding GLM 4.7 Free",
           "attachment": false,
@@ -28343,6 +29665,38 @@
         },
         {
           "providerId": "aihubmix",
+          "modelId": "claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08",
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-17"
+        },
+        {
+          "providerId": "aihubmix",
           "modelId": "gemini-2.5-flash",
           "name": "Gemini 2.5 Flash",
           "attachment": true,
@@ -28372,6 +29726,38 @@
           "knowledge": "2025-04",
           "release_date": "2025-09-15",
           "last_updated": "2025-09-15"
+        },
+        {
+          "providerId": "aihubmix",
+          "modelId": "claude-opus-4-6-think",
+          "name": "Claude Opus 4.6 Think",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 200000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-05",
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
         },
         {
           "providerId": "aihubmix",
@@ -28459,6 +29845,38 @@
           "knowledge": "2024-04",
           "release_date": "2025-04-14",
           "last_updated": "2025-04-14"
+        },
+        {
+          "providerId": "aihubmix",
+          "modelId": "gemini-3-pro-preview-search",
+          "name": "Gemini 3 Pro Preview Search",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.5
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 65000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-11",
+          "release_date": "2025-11-19",
+          "last_updated": "2025-11-19"
         },
         {
           "providerId": "aihubmix",
@@ -29173,6 +30591,38 @@
           "knowledge": "2024-09-30",
           "release_date": "2025-09-15",
           "last_updated": "2025-09-15"
+        },
+        {
+          "providerId": "aihubmix",
+          "modelId": "claude-sonnet-4-6-think",
+          "name": "Claude Sonnet 4.6 Think",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08",
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-17"
         },
         {
           "providerId": "aihubmix",
@@ -32390,6 +33840,38 @@
         },
         {
           "providerId": "gitlab",
+          "modelId": "duo-chat-sonnet-4-6",
+          "name": "Agentic Chat (Claude Sonnet 4.6)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-17"
+        },
+        {
+          "providerId": "gitlab",
           "modelId": "duo-chat-opus-4-5",
           "name": "Agentic Chat (Claude Opus 4.5)",
           "attachment": true,
@@ -34792,6 +36274,34 @@
         },
         {
           "providerId": "togetherai",
+          "modelId": "Qwen/Qwen3.5-397B-A17B",
+          "name": "Qwen3.5 397B A17B",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.6,
+            "output": 3.6
+          },
+          "limit": {
+            "context": 262144,
+            "output": 130000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-16",
+          "last_updated": "2026-02-16"
+        },
+        {
+          "providerId": "togetherai",
           "modelId": "Qwen/Qwen3-Coder-Next-FP8",
           "name": "Qwen3 Coder Next FP8",
           "attachment": false,
@@ -36906,6 +38416,38 @@
         },
         {
           "providerId": "openrouter",
+          "modelId": "google/gemini-3.1-pro-preview-customtools",
+          "name": "Gemini 3.1 Pro Preview Custom Tools",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "openrouter",
           "modelId": "google/gemini-2.5-pro-preview-06-05",
           "name": "Gemini 2.5 Pro Preview 06-05",
           "attachment": true,
@@ -37219,6 +38761,38 @@
           "knowledge": "2025-01",
           "release_date": "2025-06-17",
           "last_updated": "2025-06-17"
+        },
+        {
+          "providerId": "openrouter",
+          "modelId": "google/gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
         },
         {
           "providerId": "openrouter",
@@ -39402,6 +40976,37 @@
         },
         {
           "providerId": "openrouter",
+          "modelId": "openai/gpt-5.3-codex",
+          "name": "GPT-5.3-Codex",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-24"
+        },
+        {
+          "providerId": "openrouter",
           "modelId": "openai/gpt-5-codex",
           "name": "GPT-5 Codex",
           "attachment": true,
@@ -39962,6 +41567,68 @@
         },
         {
           "providerId": "openrouter",
+          "modelId": "openai/gpt-5.4",
+          "name": "GPT-5.4",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cache_read": 0.25
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
+        },
+        {
+          "providerId": "openrouter",
+          "modelId": "openai/gpt-5.4-pro",
+          "name": "GPT-5.4 Pro",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 30,
+            "output": 180,
+            "cache_read": 30
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
+        },
+        {
+          "providerId": "openrouter",
           "modelId": "openai/gpt-oss-safeguard-20b",
           "name": "GPT OSS Safeguard 20B",
           "attachment": false,
@@ -40319,8 +41986,7 @@
               "text"
             ],
             "output": [
-              "image",
-              "text"
+              "image"
             ]
           },
           "knowledge": "2025-06",
@@ -40390,6 +42056,36 @@
           "knowledge": "2025-03-31",
           "release_date": "2025-08-05",
           "last_updated": "2025-08-05"
+        },
+        {
+          "providerId": "openrouter",
+          "modelId": "anthropic/claude-sonnet-4.6",
+          "name": "Claude Sonnet 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-17"
         },
         {
           "providerId": "openrouter",
@@ -40637,8 +42333,7 @@
               "text"
             ],
             "output": [
-              "image",
-              "text"
+              "image"
             ]
           },
           "knowledge": "2025-06",
@@ -40667,8 +42362,7 @@
               "text"
             ],
             "output": [
-              "image",
-              "text"
+              "image"
             ]
           },
           "knowledge": "2025-06",
@@ -40697,8 +42391,7 @@
               "text"
             ],
             "output": [
-              "image",
-              "text"
+              "image"
             ]
           },
           "knowledge": "2025-06",
@@ -40727,8 +42420,7 @@
               "text"
             ],
             "output": [
-              "image",
-              "text"
+              "image"
             ]
           },
           "knowledge": "2025-06",
@@ -44255,6 +45947,35 @@
       "models": [
         {
           "providerId": "github-copilot",
+          "modelId": "gpt-5.3-codex",
+          "name": "GPT-5.3-Codex",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-24"
+        },
+        {
+          "providerId": "github-copilot",
           "modelId": "gpt-5.1-codex-max",
           "name": "GPT-5.1-Codex-max",
           "attachment": true,
@@ -44574,6 +46295,35 @@
         },
         {
           "providerId": "github-copilot",
+          "modelId": "gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 128000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "github-copilot",
           "modelId": "gpt-5",
           "name": "GPT-5",
           "attachment": true,
@@ -44600,6 +46350,35 @@
           "knowledge": "2024-10",
           "release_date": "2025-08-07",
           "last_updated": "2025-08-07"
+        },
+        {
+          "providerId": "github-copilot",
+          "modelId": "gpt-5.4",
+          "name": "GPT-5.4",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
         },
         {
           "providerId": "github-copilot",
@@ -45117,6 +46896,39 @@
         },
         {
           "providerId": "google-vertex",
+          "modelId": "gemini-3.1-pro-preview-customtools",
+          "name": "Gemini 3.1 Pro Preview Custom Tools",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "google-vertex",
           "modelId": "gemini-2.5-pro-preview-06-05",
           "name": "Gemini 2.5 Pro Preview 06-05",
           "attachment": true,
@@ -45380,6 +47192,39 @@
           "knowledge": "2025-01",
           "release_date": "2025-06-17",
           "last_updated": "2025-06-17"
+        },
+        {
+          "providerId": "google-vertex",
+          "modelId": "gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
         },
         {
           "providerId": "google-vertex",
@@ -46023,6 +47868,39 @@
         },
         {
           "providerId": "google",
+          "modelId": "gemini-3.1-pro-preview-customtools",
+          "name": "Gemini 3.1 Pro Preview Custom Tools",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "google",
           "modelId": "gemini-2.5-pro-preview-06-05",
           "name": "Gemini 2.5 Pro Preview 06-05",
           "attachment": true,
@@ -46375,6 +48253,39 @@
           "knowledge": "2025-01",
           "release_date": "2025-05-01",
           "last_updated": "2025-05-01"
+        },
+        {
+          "providerId": "google",
+          "modelId": "gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-19"
         },
         {
           "providerId": "google",
@@ -47423,6 +49334,34 @@
         },
         {
           "providerId": "sap-ai-core",
+          "modelId": "sonar",
+          "name": "sonar",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": false,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 1
+          },
+          "limit": {
+            "context": 128000,
+            "output": 4096
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-09-01",
+          "release_date": "2024-01-01",
+          "last_updated": "2025-09-01"
+        },
+        {
+          "providerId": "sap-ai-core",
           "modelId": "anthropic--claude-3.5-sonnet",
           "name": "anthropic--claude-3.5-sonnet",
           "attachment": true,
@@ -47452,6 +49391,101 @@
           "knowledge": "2024-04-30",
           "release_date": "2024-10-22",
           "last_updated": "2024-10-22"
+        },
+        {
+          "providerId": "sap-ai-core",
+          "modelId": "anthropic--claude-4.6-sonnet",
+          "name": "anthropic--claude-4.6-sonnet",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08",
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-17"
+        },
+        {
+          "providerId": "sap-ai-core",
+          "modelId": "gemini-2.5-flash-lite",
+          "name": "gemini-2.5-flash-lite",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.1,
+            "output": 0.4,
+            "cache_read": 0.025
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2025-06-17",
+          "last_updated": "2025-06-17"
+        },
+        {
+          "providerId": "sap-ai-core",
+          "modelId": "gpt-4.1",
+          "name": "gpt-4.1",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 8,
+            "cache_read": 0.5
+          },
+          "limit": {
+            "context": 1047576,
+            "output": 32768
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-04",
+          "release_date": "2025-04-14",
+          "last_updated": "2025-04-14"
         },
         {
           "providerId": "sap-ai-core",
@@ -47517,6 +49551,36 @@
         },
         {
           "providerId": "sap-ai-core",
+          "modelId": "gpt-4.1-mini",
+          "name": "gpt-4.1-mini",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.4,
+            "output": 1.6,
+            "cache_read": 0.1
+          },
+          "limit": {
+            "context": 1047576,
+            "output": 32768
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-04",
+          "release_date": "2025-04-14",
+          "last_updated": "2025-04-14"
+        },
+        {
+          "providerId": "sap-ai-core",
           "modelId": "anthropic--claude-3-opus",
           "name": "anthropic--claude-3-opus",
           "attachment": true,
@@ -47546,6 +49610,35 @@
           "knowledge": "2023-08-31",
           "release_date": "2024-02-29",
           "last_updated": "2024-02-29"
+        },
+        {
+          "providerId": "sap-ai-core",
+          "modelId": "sonar-pro",
+          "name": "sonar-pro",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": false,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15
+          },
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-09-01",
+          "release_date": "2024-01-01",
+          "last_updated": "2025-09-01"
         },
         {
           "providerId": "sap-ai-core",
@@ -47608,6 +49701,38 @@
           "knowledge": "2023-08-31",
           "release_date": "2024-03-13",
           "last_updated": "2024-03-13"
+        },
+        {
+          "providerId": "sap-ai-core",
+          "modelId": "anthropic--claude-4.6-opus",
+          "name": "anthropic--claude-4.6-opus",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.5,
+            "cache_write": 6.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-05",
+          "release_date": "2026-02-05",
+          "last_updated": "2026-02-05"
         },
         {
           "providerId": "sap-ai-core",
@@ -48244,8 +50369,37 @@
               "text"
             ]
           },
-          "release_date": "2026-01-15",
-          "last_updated": "2026-02-18"
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "venice",
+          "modelId": "openai-gpt-53-codex",
+          "name": "GPT-5.3 Codex",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2.19,
+            "output": 17.5,
+            "cache_read": 0.219
+          },
+          "limit": {
+            "context": 400000,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-25"
         },
         {
           "providerId": "venice",
@@ -48420,7 +50574,7 @@
             ]
           },
           "release_date": "2026-02-12",
-          "last_updated": "2026-02-13"
+          "last_updated": "2026-02-19"
         },
         {
           "providerId": "venice",
@@ -48448,6 +50602,34 @@
           },
           "release_date": "2026-01-29",
           "last_updated": "2026-02-10"
+        },
+        {
+          "providerId": "venice",
+          "modelId": "qwen3-coder-480b-a35b-instruct-turbo",
+          "name": "Qwen 3 Coder 480B Turbo",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.35,
+            "output": 1.5,
+            "cache_read": 0.04
+          },
+          "limit": {
+            "context": 256000,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-01-27",
+          "last_updated": "2026-02-26"
         },
         {
           "providerId": "venice",
@@ -48564,6 +50746,38 @@
           "knowledge": "2025-10",
           "release_date": "2025-12-04",
           "last_updated": "2026-01-28"
+        },
+        {
+          "providerId": "venice",
+          "modelId": "gemini-3-1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cache_read": 0.5,
+            "cache_write": 0.5
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 65000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-24"
         },
         {
           "providerId": "venice",
@@ -48821,6 +51035,33 @@
           "knowledge": "2023-10",
           "release_date": "2025-03-18",
           "last_updated": "2026-01-28"
+        },
+        {
+          "providerId": "venice",
+          "modelId": "nvidia-nemotron-3-nano-30b-a3b",
+          "name": "NVIDIA Nemotron 3 Nano 30B",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.075,
+            "output": 0.3
+          },
+          "limit": {
+            "context": 128000,
+            "output": 12288
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-01-27",
+          "last_updated": "2026-02-26"
         },
         {
           "providerId": "venice",
@@ -49281,6 +51522,101 @@
           "knowledge": "2025-04",
           "release_date": "2025-12-08",
           "last_updated": "2025-12-08"
+        }
+      ]
+    },
+    {
+      "id": "opencode-go",
+      "name": "OpenCode Go",
+      "models": [
+        {
+          "providerId": "opencode-go",
+          "modelId": "glm-5",
+          "name": "GLM-5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 3.2,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-04",
+          "release_date": "2026-02-11",
+          "last_updated": "2026-02-11"
+        },
+        {
+          "providerId": "opencode-go",
+          "modelId": "kimi-k2.5",
+          "name": "Kimi K2.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.6,
+            "output": 3,
+            "cache_read": 0.1
+          },
+          "limit": {
+            "context": 262144,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-10",
+          "release_date": "2026-01-27",
+          "last_updated": "2026-01-27"
+        },
+        {
+          "providerId": "opencode-go",
+          "modelId": "minimax-m2.5",
+          "name": "MiniMax M2.5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.3,
+            "output": 1.2,
+            "cache_read": 0.03
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-01",
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-12"
         }
       ]
     },
@@ -51572,6 +53908,33 @@
         },
         {
           "providerId": "siliconflow-cn",
+          "modelId": "Pro/MiniMaxAI/MiniMax-M2.5",
+          "name": "Pro/MiniMaxAI/MiniMax-M2.5",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.3,
+            "output": 1.22
+          },
+          "limit": {
+            "context": 192000,
+            "output": 131000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-13",
+          "last_updated": "2026-02-13"
+        },
+        {
+          "providerId": "siliconflow-cn",
           "modelId": "Pro/MiniMaxAI/MiniMax-M2.1",
           "name": "Pro/MiniMaxAI/MiniMax-M2.1",
           "attachment": false,
@@ -51789,6 +54152,62 @@
         },
         {
           "providerId": "siliconflow-cn",
+          "modelId": "PaddlePaddle/PaddleOCR-VL-1.5",
+          "name": "PaddlePaddle/PaddleOCR-VL-1.5",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": false,
+          "temperature": true,
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 16384,
+            "output": 16384
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-01-29",
+          "last_updated": "2026-01-29"
+        },
+        {
+          "providerId": "siliconflow-cn",
+          "modelId": "PaddlePaddle/PaddleOCR-VL",
+          "name": "PaddlePaddle/PaddleOCR-VL",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": false,
+          "temperature": true,
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 16384,
+            "output": 16384
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-10-16",
+          "last_updated": "2025-10-16"
+        },
+        {
+          "providerId": "siliconflow-cn",
           "modelId": "Kwaipilot/KAT-Dev",
           "name": "Kwaipilot/KAT-Dev",
           "attachment": false,
@@ -51813,6 +54232,34 @@
           },
           "release_date": "2025-09-27",
           "last_updated": "2026-01-16"
+        },
+        {
+          "providerId": "siliconflow-cn",
+          "modelId": "deepseek-ai/DeepSeek-OCR",
+          "name": "deepseek-ai/DeepSeek-OCR",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": false,
+          "temperature": true,
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 8192,
+            "output": 8192
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-10-20",
+          "last_updated": "2025-10-20"
         },
         {
           "providerId": "siliconflow-cn",
@@ -55981,6 +58428,34 @@
         },
         {
           "providerId": "vercel",
+          "modelId": "zai/glm-5",
+          "name": "GLM-5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 3.2,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 202800,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "vercel",
           "modelId": "zai/glm-4.7-flashx",
           "name": "GLM 4.7 FlashX",
           "attachment": false,
@@ -56912,6 +59387,33 @@
         },
         {
           "providerId": "vercel",
+          "modelId": "alibaba/qwen3-coder-next",
+          "name": "Qwen3 Coder Next",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.5,
+            "output": 1.2
+          },
+          "limit": {
+            "context": 256000,
+            "output": 256000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-07-22",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "vercel",
           "modelId": "alibaba/qwen3-coder",
           "name": "Qwen3 Coder 480B A35B Instruct",
           "attachment": false,
@@ -57082,6 +59584,37 @@
         },
         {
           "providerId": "vercel",
+          "modelId": "alibaba/qwen3.5-flash",
+          "name": "Qwen 3.5 Flash",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.1,
+            "output": 0.4,
+            "cache_read": 0.001,
+            "cache_write": 0.125
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-24"
+        },
+        {
+          "providerId": "vercel",
           "modelId": "alibaba/qwen3-next-80b-a3b-instruct",
           "name": "Qwen3 Next 80B A3B Instruct",
           "attachment": false,
@@ -57107,6 +59640,37 @@
           "knowledge": "2025-04",
           "release_date": "2025-09-12",
           "last_updated": "2025-09-12"
+        },
+        {
+          "providerId": "vercel",
+          "modelId": "alibaba/qwen3.5-plus",
+          "name": "Qwen 3.5 Plus",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.4,
+            "output": 2.4,
+            "cache_read": 0.04,
+            "cache_write": 0.5
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-16",
+          "last_updated": "2026-02-19"
         },
         {
           "providerId": "vercel",
@@ -58356,6 +60920,36 @@
         },
         {
           "providerId": "vercel",
+          "modelId": "google/gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-19",
+          "last_updated": "2026-02-24"
+        },
+        {
+          "providerId": "vercel",
           "modelId": "google/gemini-2.5-flash-image",
           "name": "Nano Banana (Gemini 2.5 Flash Image)",
           "attachment": false,
@@ -59027,6 +61621,36 @@
           },
           "release_date": "2025-05-22",
           "last_updated": "2025-05-22"
+        },
+        {
+          "providerId": "vercel",
+          "modelId": "openai/gpt-5.3-codex",
+          "name": "GPT 5.3 Codex",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-24"
         },
         {
           "providerId": "vercel",
@@ -60332,6 +62956,35 @@
         },
         {
           "providerId": "vercel",
+          "modelId": "minimax/minimax-m2.5",
+          "name": "MiniMax M2.5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.3,
+            "output": 1.2,
+            "cache_read": 0.03,
+            "cache_write": 0.375
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-19"
+        },
+        {
+          "providerId": "vercel",
           "modelId": "perplexity/sonar-reasoning-pro",
           "name": "Sonar Reasoning Pro",
           "attachment": false,
@@ -60443,6 +63096,38 @@
           "knowledge": "2025-09",
           "release_date": "2025-02-19",
           "last_updated": "2025-02-19"
+        },
+        {
+          "providerId": "vercel",
+          "modelId": "anthropic/claude-sonnet-4.6",
+          "name": "Claude Sonnet 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08",
+          "release_date": "2026-02-17",
+          "last_updated": "2026-02-17"
         },
         {
           "providerId": "vercel",
@@ -62077,6 +64762,36 @@
         },
         {
           "providerId": "openai",
+          "modelId": "gpt-5.4",
+          "name": "GPT-5.4",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cache_read": 0.25
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
+        },
+        {
+          "providerId": "openai",
           "modelId": "o1-preview",
           "name": "o1-preview",
           "attachment": false,
@@ -62103,6 +64818,35 @@
           "knowledge": "2023-09",
           "release_date": "2024-09-12",
           "last_updated": "2024-09-12"
+        },
+        {
+          "providerId": "openai",
+          "modelId": "gpt-5.4-pro",
+          "name": "GPT-5.4 Pro",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 30,
+            "output": 180
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-03-05",
+          "last_updated": "2026-03-05"
         },
         {
           "providerId": "openai",
@@ -63316,6 +66060,62 @@
           "knowledge": "2025-04",
           "release_date": "2025-12-22",
           "last_updated": "2025-12-22"
+        },
+        {
+          "providerId": "baseten",
+          "modelId": "zai-org/GLM-5",
+          "name": "GLM-5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.95,
+            "output": 3.15
+          },
+          "limit": {
+            "context": 202752,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2026-01",
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-12"
+        },
+        {
+          "providerId": "baseten",
+          "modelId": "MiniMaxAI/MiniMax-M2.5",
+          "name": "MiniMax-M2.5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.3,
+            "output": 1.2
+          },
+          "limit": {
+            "context": 204000,
+            "output": 204000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2026-01",
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-12"
         },
         {
           "providerId": "baseten",
@@ -65173,6 +67973,538 @@
       ]
     },
     {
+      "id": "meganova",
+      "name": "Meganova",
+      "models": [
+        {
+          "providerId": "meganova",
+          "modelId": "zai-org/GLM-4.6",
+          "name": "GLM-4.6",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.45,
+            "output": 1.9
+          },
+          "limit": {
+            "context": 202752,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-04",
+          "release_date": "2025-09-30",
+          "last_updated": "2025-09-30"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "zai-org/GLM-4.7",
+          "name": "GLM-4.7",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.2,
+            "output": 0.8
+          },
+          "limit": {
+            "context": 202752,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-04",
+          "release_date": "2025-12-22",
+          "last_updated": "2025-12-22"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "zai-org/GLM-5",
+          "name": "GLM-5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.8,
+            "output": 2.56
+          },
+          "limit": {
+            "context": 202752,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-11",
+          "last_updated": "2026-02-11"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "XiaomiMiMo/MiMo-V2-Flash",
+          "name": "MiMo V2 Flash",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.1,
+            "output": 0.3
+          },
+          "limit": {
+            "context": 262144,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-12-01",
+          "release_date": "2025-12-17",
+          "last_updated": "2025-12-17"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "MiniMaxAI/MiniMax-M2.5",
+          "name": "MiniMax M2.5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.3,
+            "output": 1.2
+          },
+          "limit": {
+            "context": 204800,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-12"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "MiniMaxAI/MiniMax-M2.1",
+          "name": "MiniMax M2.1",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.28,
+            "output": 1.2
+          },
+          "limit": {
+            "context": 196608,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-12-23",
+          "last_updated": "2025-12-23"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "deepseek-ai/DeepSeek-V3.2-Exp",
+          "name": "DeepSeek V3.2 Exp",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.27,
+            "output": 0.4
+          },
+          "limit": {
+            "context": 164000,
+            "output": 164000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-10-10",
+          "last_updated": "2025-10-10"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "deepseek-ai/DeepSeek-R1-0528",
+          "name": "DeepSeek R1 0528",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": false,
+          "temperature": true,
+          "cost": {
+            "input": 0.5,
+            "output": 2.15
+          },
+          "limit": {
+            "context": 163840,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-07",
+          "release_date": "2025-05-28",
+          "last_updated": "2025-05-28"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "deepseek-ai/DeepSeek-V3.1",
+          "name": "DeepSeek V3.1",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.27,
+            "output": 1
+          },
+          "limit": {
+            "context": 164000,
+            "output": 164000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-08-25",
+          "last_updated": "2025-08-25"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "deepseek-ai/DeepSeek-V3.2",
+          "name": "DeepSeek V3.2",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.26,
+            "output": 0.38
+          },
+          "limit": {
+            "context": 164000,
+            "output": 164000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-12-03",
+          "last_updated": "2025-12-03"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "deepseek-ai/DeepSeek-V3-0324",
+          "name": "DeepSeek V3 0324",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.25,
+            "output": 0.88
+          },
+          "limit": {
+            "context": 163840,
+            "output": 163840
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-03-24",
+          "last_updated": "2025-03-24"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "moonshotai/Kimi-K2.5",
+          "name": "Kimi K2.5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.45,
+            "output": 2.8
+          },
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2026-01",
+          "release_date": "2026-01-27",
+          "last_updated": "2026-01-27"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "moonshotai/Kimi-K2-Thinking",
+          "name": "Kimi K2 Thinking",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.6,
+            "output": 2.6
+          },
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-08",
+          "release_date": "2025-11-06",
+          "last_updated": "2025-11-06"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "meta-llama/Llama-3.3-70B-Instruct",
+          "name": "Llama 3.3 70B Instruct",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.1,
+            "output": 0.3
+          },
+          "limit": {
+            "context": 131072,
+            "output": 16384
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2024-12-06",
+          "last_updated": "2024-12-06"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "Qwen/Qwen3.5-Plus",
+          "name": "Qwen3.5 Plus",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.4,
+            "output": 2.4
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-04",
+          "release_date": "2026-02",
+          "last_updated": "2026-02"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+          "name": "Qwen3 235B A22B Instruct 2507",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.09,
+            "output": 0.6
+          },
+          "limit": {
+            "context": 262000,
+            "output": 262000
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-07-23",
+          "last_updated": "2025-07-23"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "Qwen/Qwen2.5-VL-32B-Instruct",
+          "name": "Qwen2.5 VL 32B Instruct",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.2,
+            "output": 0.6
+          },
+          "limit": {
+            "context": 16384,
+            "output": 16384
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2025-03-24",
+          "last_updated": "2025-03-24"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "mistralai/Mistral-Nemo-Instruct-2407",
+          "name": "Mistral Nemo Instruct 2407",
+          "attachment": false,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.02,
+            "output": 0.04
+          },
+          "limit": {
+            "context": 131072,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2024-07-18",
+          "last_updated": "2024-07-18"
+        },
+        {
+          "providerId": "meganova",
+          "modelId": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+          "name": "Mistral Small 3.2 24B Instruct",
+          "attachment": true,
+          "reasoning": false,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2024-10",
+          "release_date": "2025-06-20",
+          "last_updated": "2025-06-20"
+        }
+      ]
+    },
+    {
       "id": "perplexity",
       "name": "Perplexity",
       "models": [
@@ -67020,6 +70352,33 @@
         },
         {
           "providerId": "friendli",
+          "modelId": "MiniMaxAI/MiniMax-M2.5",
+          "name": "MiniMax M2.5",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 0.3,
+            "output": 1.2
+          },
+          "limit": {
+            "context": 196608,
+            "output": 196608
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "release_date": "2026-02-12",
+          "last_updated": "2026-02-12"
+        },
+        {
+          "providerId": "friendli",
           "modelId": "MiniMaxAI/MiniMax-M2.1",
           "name": "MiniMax M2.1",
           "attachment": false,
@@ -67125,60 +70484,6 @@
           },
           "release_date": "2025-07-29",
           "last_updated": "2026-01-29"
-        },
-        {
-          "providerId": "friendli",
-          "modelId": "LGAI-EXAONE/EXAONE-4.0.1-32B",
-          "name": "EXAONE 4.0.1 32B",
-          "attachment": false,
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "cost": {
-            "input": 0.6,
-            "output": 1
-          },
-          "limit": {
-            "context": 131072,
-            "output": 131072
-          },
-          "modalities": {
-            "input": [
-              "text"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "release_date": "2025-07-31",
-          "last_updated": "2025-12-23"
-        },
-        {
-          "providerId": "friendli",
-          "modelId": "LGAI-EXAONE/K-EXAONE-236B-A23B",
-          "name": "K EXAONE 236B A23B",
-          "attachment": false,
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "cost": {
-            "input": 0,
-            "output": 0
-          },
-          "limit": {
-            "context": 262144,
-            "output": 262144
-          },
-          "modalities": {
-            "input": [
-              "text"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "release_date": "2025-12-31",
-          "last_updated": "2026-01-08"
         }
       ]
     },
@@ -75607,6 +78912,36 @@
       "models": [
         {
           "providerId": "azure",
+          "modelId": "gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": false,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.175
+          },
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-08-31",
+          "release_date": "2026-02-24",
+          "last_updated": "2026-02-24"
+        },
+        {
+          "providerId": "azure",
           "modelId": "gpt-5-codex",
           "name": "GPT-5-Codex",
           "attachment": false,
@@ -80392,8 +83727,8 @@
             ]
           },
           "knowledge": "2025-04",
-          "release_date": "2026-02",
-          "last_updated": "2026-02"
+          "release_date": "2026-02-16",
+          "last_updated": "2026-02-16"
         },
         {
           "providerId": "alibaba-cn",
@@ -81101,8 +84436,8 @@
             ]
           },
           "knowledge": "2025-04",
-          "release_date": "2026-02",
-          "last_updated": "2026-02"
+          "release_date": "2026-02-16",
+          "last_updated": "2026-02-16"
         },
         {
           "providerId": "alibaba-cn",
