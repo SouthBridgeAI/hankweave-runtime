@@ -1,0 +1,53 @@
+{
+  "name": "pi-shim",
+  "version": "1.0.0",
+  "description": "Shim package for the embedded Pi coding agent SDK",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "pi-shim": "./index.js"
+  },
+  "main": "./index.js",
+  "files": [
+    "README.md",
+    "bun.lock",
+    "tsconfig.json",
+    "index.js",
+    "dist",
+    "src",
+    "common",
+    "docs",
+    "tests",
+    "rebuild.sh",
+    "VERSION",
+    "THIRDPARTY.md"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outfile dist/index.js --target node --bundle && node -e \"const fs=require('fs');const p='dist/index.js';let c=fs.readFileSync(p,'utf8');c=c.replace(/^#!.*\\n/,'');fs.writeFileSync(p,'#!/usr/bin/env node\\n'+c);fs.chmodSync(p,0o755);fs.copyFileSync(p,'index.js');fs.chmodSync('index.js',0o755);\"",
+    "dev": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "bun test",
+    "rebuild": "./rebuild.sh",
+    "self-test": "node index.js --self-test"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.57.1",
+    "@shims/common": "file:./common"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "shim",
+    "pi",
+    "coding-agent",
+    "hankweave"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.1.0"
+  }
+}

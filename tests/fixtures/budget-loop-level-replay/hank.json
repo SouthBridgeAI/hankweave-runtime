@@ -1,0 +1,31 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "overrides": {
+    "budget": { "maxDollars": 1.00 }
+  },
+  "hank": [
+    {
+      "type": "loop",
+      "id": "budget-loop",
+      "name": "Budget Loop Test",
+      "terminateOn": { "type": "iterationLimit", "limit": 50 },
+      "budget": { "maxDollars": 0.01 },
+      "codons": [
+        {
+          "id": "loop-codon",
+          "name": "Loop Codon",
+          "promptText": "Create file iteration.txt with the current date and time. Then read the file back to verify.",
+          "model": "haiku",
+          "continuationMode": "fresh"
+        }
+      ]
+    },
+    {
+      "id": "post-loop-codon",
+      "name": "Post Loop Codon",
+      "promptText": "Say exactly: loop finished",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    }
+  ]
+}

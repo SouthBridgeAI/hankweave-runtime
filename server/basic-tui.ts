@@ -1,5 +1,6 @@
 import type { HankweaveRuntime } from "./hankweave-runtime.js";
 import { isFirstSuccess, markFirstSuccess } from "./telemetry/telemetry-identity.js";
+import type { BudgetSummaryData } from "./types/budget-types.js";
 import type {
   CheckpointListEvent,
   ClientCommand,
@@ -11,10 +12,11 @@ import type {
 } from "./types/types.js";
 import { ClientMode } from "./types/types.js";
 import { generateId, WebSocket } from "./utils.js";
+import { renderBudgetSummaryTable } from "./validate-budget.js";
 
 // ANSI color codes for terminal formatting
 const COLORS = {
-  // Basic colors
+  // Basic colours
   reset: "\x1b[0m",
   bold: "\x1b[1m",
   dim: "\x1b[2m",
@@ -94,6 +96,7 @@ export class BasicTUI {
   private lastFailureReason: string | null = null;
   private summaryShown: boolean = false;
   private showCosts: boolean;
+  private budgetSummaryData: BudgetSummaryData | null = null;
 
   // Activity heartbeat — shows contextual status when TUI goes quiet
   private lastOutputTime: number = Date.now();
@@ -599,14 +602,18 @@ export class BasicTUI {
         this.lastCodonId = event.data.codonId;
 
         const failureIgnored = event.data.failureIgnored;
+        const budgetExceeded = event.data.budgetExceeded;
 
-        // Determine status color and symbol based on success/failure/ignored
+        // Determine status color and symbol based on success/failure/budget/ignored
         let status: string;
         let statusSymbol: string;
         let statusText: string;
 
-        if (failureIgnored) {
-          // Yellow for ignored failures
+        if (budgetExceeded && event.data.success) {
+          status = COLORS.yellow;
+          statusSymbol = "⚠";
+          statusText = "Codon Completed (budget limit)";
+        } else if (failureIgnored) {
           status = COLORS.yellow;
           statusSymbol = "⚠";
           statusText = "Codon Failed (Ignored)";
@@ -617,7 +624,7 @@ export class BasicTUI {
         } else {
           status = COLORS.red;
           statusSymbol = SYMBOLS.cross;
-          statusText = "Codon Failed";
+          statusText = budgetExceeded ? "Codon Failed (budget exceeded)" : "Codon Failed";
         }
 
         console.log(
@@ -631,7 +638,26 @@ export class BasicTUI {
           `Duration: ${COLORS.dim}${(event.data.duration / 1000).toFixed(1)}s${COLORS.reset}`,
         ];
 
-        if (!event.data.success && event.data.failureReason) {
+        if (budgetExceeded) {
+          const currencyLabel =
+            budgetExceeded.currency === "cost"
+              ? "cost"
+              : budgetExceeded.currency === "duration"
+                ? "time"
+                : budgetExceeded.currency === "contextTokens"
+                  ? "context tokens"
+                  : "output tokens";
+          details.push(
+            `Budget: ${COLORS.yellow}${currencyLabel} exceeded (used: ${budgetExceeded.used.toFixed(4)}, limit: ${budgetExceeded.limit.toFixed(4)})${COLORS.reset}`,
+          );
+          if (!event.data.success) {
+            details.push(
+              `${COLORS.dim}Fix: increase budget or set onExceeded: "complete" for partial output${COLORS.reset}`,
+            );
+          }
+        }
+
+        if (!event.data.success && event.data.failureReason && !budgetExceeded) {
           details.push(
             `Failure: ${COLORS.red}${event.data.failureReason.type}${COLORS.reset} (retriable: ${
               event.data.failureReason.retriable ? `${COLORS.green}yes` : `${COLORS.red}no`
@@ -831,6 +857,22 @@ export class BasicTUI {
         } else {
           console.log(`\n${timestamp} ${COLORS.blue}Info${COLORS.reset}: ${message}`);
         }
+        break;
+      }
+
+      case "budget.summary": {
+        this.budgetSummaryData = event.data as BudgetSummaryData;
+        // Render immediately — the shutdown summary in onclose may not fire
+        // if the server stops before the close frame is processed.
+        const useColor = process.stdout.isTTY ?? false;
+        const terminalWidth = process.stdout.columns ?? 80;
+        const table = renderBudgetSummaryTable({
+          summary: this.budgetSummaryData,
+          terminalWidth,
+          useColor,
+          showCosts: this.showCosts,
+        });
+        console.log(table);
         break;
       }
 

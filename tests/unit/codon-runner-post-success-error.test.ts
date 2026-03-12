@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { Budget } from "../../server/budget.js";
 import { CodonRunner } from "../../server/codon-runner.js";
 import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { StateManager } from "../../server/state-manager.js";
@@ -18,12 +19,23 @@ import { type CodonId, type RunId, SessionId } from "../../server/types/branded-
 import { Logger } from "../../server/utils.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
 
+function createTestBudget() {
+  return new Budget({
+    config: {},
+    executionPlan: [],
+    logger: new Logger("/dev/null"),
+  });
+}
+
 const mockLlmRegistry = {
   calculateCost: () => null,
 } as unknown as LlmProviderRegistry;
 
 const mockStateManager = {
   transition: () => {},
+  getState: () => ({ executionPlan: [] }),
+  getCodonInCurrentRun: () => null,
+  getCurrentRun: () => null,
 } as unknown as StateManager;
 
 const mockRunId = "test-run-id" as unknown as RunId;
@@ -81,6 +93,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         llmRegistry: mockLlmRegistry,
         runId: mockRunId,
         stateManager: mockStateManager,
+        budget: createTestBudget(),
         logPath: testLogPath,
         logParsingInterval: 50, // Fast parsing for test
       });
@@ -158,6 +171,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         llmRegistry: mockLlmRegistry,
         runId: mockRunId,
         stateManager: mockStateManager,
+        budget: createTestBudget(),
         logPath: emptyLogPath,
       });
 
@@ -242,6 +256,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         llmRegistry: mockLlmRegistry,
         runId: mockRunId,
         stateManager: mockStateManager,
+        budget: createTestBudget(),
         logPath: failedLogPath,
         logParsingInterval: 50,
       });
@@ -308,6 +323,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         llmRegistry: mockLlmRegistry,
         runId: mockRunId,
         stateManager: mockStateManager,
+        budget: createTestBudget(),
         logPath: emptyLogPath,
       });
 
@@ -360,6 +376,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         llmRegistry: mockLlmRegistry,
         runId: mockRunId,
         stateManager: mockStateManager,
+        budget: createTestBudget(),
         logPath: successLogPath,
         logParsingInterval: 50,
       });
@@ -433,6 +450,7 @@ describe("CodonRunner post-success SDK error handling", () => {
         llmRegistry: mockLlmRegistry,
         runId: mockRunId,
         stateManager: mockStateManager,
+        budget: createTestBudget(),
         logPath: successLogPath,
         logParsingInterval: 50,
         extensionConfig: {

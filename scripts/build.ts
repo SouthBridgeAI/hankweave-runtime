@@ -80,13 +80,32 @@ async function build() {
     // chmod fails on Windows, which is expected
   }
 
-  // Copy shims directory to dist
+  // Copy shims directory to dist (excluding build artifacts)
   console.log("📋 Copying shims directory...");
   const shimsSource = join(import.meta.dir, "..", "shims");
   const shimsTarget = join(distDir, "shims");
 
+  const SHIM_EXCLUDE = new Set([
+    "node_modules",
+    "src",
+    "tests",
+    "docs",
+    "bun.lock",
+    "tsconfig.json",
+    "rebuild.sh",
+  ]);
+
   if (existsSync(shimsSource)) {
-    await cp(shimsSource, shimsTarget, { recursive: true });
+    await cp(shimsSource, shimsTarget, {
+      recursive: true,
+      filter: (source) => {
+        const parts = source
+          .replace(shimsSource, "")
+          .split("/")
+          .filter(Boolean);
+        return !parts.some((part) => SHIM_EXCLUDE.has(part));
+      },
+    });
     console.log(`✅ Copied shims to ${shimsTarget}`);
   } else {
     console.warn("⚠️  Warning: shims directory not found at", shimsSource);

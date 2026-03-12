@@ -199,8 +199,9 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
   async expandNextIterationForCodon(params: {
     codonId: CodonId;
     contextExceeded?: boolean;
+    budgetExceeded?: boolean;
   }): Promise<ExpandIterationResult> {
-    const { codonId, contextExceeded = false } = params;
+    const { codonId, contextExceeded = false, budgetExceeded = false } = params;
     const plan = this.state.executionPlan;
     const entry = plan.find((e) => e.codonId === codonId);
     const loopContext = entry?.loopContext;
@@ -214,6 +215,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
       currentPlan: plan,
       completedCodonId: codonId,
       contextExceeded,
+      budgetExceeded,
     });
 
     let result: ExpandIterationResult = {};
@@ -242,7 +244,9 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
         const completedIterations = loopContext.iteration + 1; // iteration is 0-indexed
 
         let reason: string;
-        if (contextExceeded && terminationType === "contextExceeded") {
+        if (budgetExceeded) {
+          reason = "budget exceeded";
+        } else if (contextExceeded && terminationType === "contextExceeded") {
           reason = "context exceeded";
         } else if (terminationType === "iterationLimit") {
           reason = `reached iteration limit (${loopConfig.terminateOn.limit})`;
@@ -1019,6 +1023,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                     totalCost: sourceCodon.sentinels.totalCost,
                   }
                 : undefined,
+              budgetExceeded: metadata?.budgetExceeded,
             };
             run.codons[codonIndex] = completedCodon;
             break;

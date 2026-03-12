@@ -1,0 +1,5 @@
+# Override root .gitignore to include .hankweave fixture data
+!.hankweave/
+
+# Hankweave archive directory - not checkpointed
+rigArchive/

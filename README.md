@@ -34,7 +34,8 @@ Hankweave takes care of long-running executions, while:
 - **Preflight checks** catch as many problems as possible before the first token is cast - API keys, model availability, file paths, rig configs, sentinel schemas.
 - **Sentinels** monitor the event stream in real time to catch drift, laziness, and convention violations - functioning as error detectors, narrators, and real-time evals while keeping the core agent focused.
 - **Looping** sequences repeat complex tasks, trading compute for reliability using Agentic Dynamic Programming.
-- **Harness abstraction** lets hanks run on Claude Code, Codex, Gemini CLI, or any agent that exposes the right capabilities. Test in your preferred coding agent, then freeze and ship. Swap harnesses seamlessly, or build new ones using [Clausetta](./learning/examples/clausetta/), our hank for auto-generating shims.
+- **Budgets** let hank authors and operators independently express cost, time, and token limits. The runtime resolves competing preferences, distributes budgets across codons and loops, and enforces them in real time — including budget-driven variable loop termination.
+- **Harness abstraction** lets hanks run on Claude Code, Codex, Gemini CLI, Pi, OpenCode, or any agent that exposes the right capabilities. Test in your preferred coding agent, then freeze and ship. Swap harnesses seamlessly, or build new ones using [Clausetta](./learning/examples/clausetta/), our hank for auto-generating shims.
 - **Rigs** provide deterministic code loading and workspace setup, so the same codon runs the same way every time.
 - **Checkpointing and rollbacks** create git snapshots at every codon boundary. When something fails, roll back to any point and try a different approach.
 - **Structured event journal** traces every tool call and decision back to its source, making it possible to pinpoint where a 20-hour run went wrong.
@@ -61,7 +62,7 @@ Today, Hankweave is responsible for executing all reliable AI work at Southbridg
 
 ## How Hankweave Works
 
-The Hankweave runtime is a **server** that orchestrates agent harnesses - Claude Code, Gemini CLI, and others - to execute hanks reliably. Written entirely in Typescript, Hankweave is designed to be a configurable bottom-of-the-stack runtime that can run almost anywhere. Here's the full picture:
+The Hankweave runtime is a **server** that orchestrates agent harnesses - Claude Code, Codex, Gemini CLI, Pi, OpenCode, and others - to execute hanks reliably. Written entirely in Typescript, Hankweave is designed to be a configurable bottom-of-the-stack runtime that can run almost anywhere. Here's the full picture:
 
 ```
         ┌─────────────────────────────────┐
@@ -83,12 +84,12 @@ The Hankweave runtime is a **server** that orchestrates agent harnesses - Claude
    EVENTS (WebSocket)                                                     ORCHESTRATES
           │                                                                       │
           ▼                                                                       ▼
-┌─────────────────────────┐             ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
-│       CONSUMERS         │             │ Claude  │ │ Gemini  │ │  Codex  │ │  Cline  │
-│                         │             │ Code    │ │ CLI     │ │         │ │         │
-│  Basic CLI (included)   │             └────┬────┘ └────┬────┘ └────┬────┘ └─────┬───┘
-│  Data pipelines         │                  │           │           │            │
-│  CI systems             │                  └───────────┴───────────┴────────────┘
+┌─────────────────────────┐             ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────┐
+│       CONSUMERS         │             │ Claude │ │ Gemini │ │ Codex  │ │   Pi   │ │ OpenCode │
+│                         │             │ Code   │ │ CLI    │ │        │ │        │ │          │
+│  Basic CLI (included)   │             └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └────┬─────┘
+│  Data pipelines         │                 │          │          │          │           │
+│  CI systems             │                 └──────────┴──────────┴──────────┴───────────┘
 │  Custom UIs             │                                    │
 │                         │                                    ▼
 └─────────────────────────┘             ┌─────────────────────────────────────────────┐
@@ -250,16 +251,16 @@ Files. One codon writes to the filesystem, the next reads from it. There's no im
 
 It depends on the hank and the models you choose. A complex planning hank might cost $10-15 per run on frontier models. Simpler hanks can cost pennies.
 
-The key insight is that as hanks mature, you can move to faster and cheaper models. Early iteration needs the best model you can get; once the prompts, rigs, and sentinels are dialed in, the structure does the heavy lifting and cheaper models perform well. Try running any hank with `-m haiku` to quickly prototype.
+The key insight is that as hanks mature, you can move to faster and cheaper models. Early iteration needs the best model you can get; once the prompts, rigs, and sentinels are dialed in, the structure does the heavy lifting and cheaper models perform well. Try running any hank with `-m haiku` to quickly prototype, or use `--max-cost 0.50 -m haiku` for a budget-capped pilot run.
 
-Hankweave includes per-codon [cost and token tracking](https://hankweave.southbridge.ai/reference/performance/) so you can see exactly where spend is going and optimize accordingly.
+Hankweave includes per-codon [cost and token tracking](https://hankweave.southbridge.ai/reference/performance/) and a [budget system](https://hankweave.southbridge.ai/concepts/budgets/) that lets authors allocate budgets across codons and loops, and operators cap runs with `--max-cost` and `--max-time`.
 
 </details>
 
 <details>
 <summary><strong>What models and harnesses are supported?</strong></summary>
 
-Claude Agent SDK is packaged in by default. Using the polymorphic connector pattern with shims, we support several other agents (Gemini CLI, etc.). But the real answer is: you can build new ones easily. If an agent exposes the required capabilities, you can run the polymorphic hank, plug in information about the agent you want supported, and Hankweave - using a hank - will build a shim to connect it. Hankweave building its own harness adapters is one of our favorite examples of hanks in action.
+Five agent harnesses ship with Hankweave: **Claude Code** (via the Agents SDK, in-process), **Gemini CLI**, **Codex**, **Pi** (embedded — no external CLI install needed), and **OpenCode** (all via shims). You can mix harnesses in the same hank — use Claude for targeted coding, Gemini for writing, Codex for planning. And you can build new ones: if an agent exposes the required capabilities, you can run the polymorphic hank, plug in information about the agent you want supported, and Hankweave - using a hank - will build a shim to connect it.
 
 </details>
 

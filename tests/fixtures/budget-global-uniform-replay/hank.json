@@ -1,0 +1,29 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "overrides": {
+    "budget": { "maxDollars": 0.04 }
+  },
+  "hank": [
+    {
+      "id": "expensive-codon",
+      "name": "Expensive Codon",
+      "promptText": "Create these 5 files one at a time, doing each as a separate step: 1) a.txt with content 'alpha' 2) b.txt with content 'bravo' 3) c.txt with content 'charlie' 4) d.txt with content 'delta' 5) e.txt with content 'echo'. After all files are created, read each one back to verify the contents.",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    },
+    {
+      "id": "simple-codon-1",
+      "name": "Simple Codon 1",
+      "promptText": "Say exactly: test passed",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    },
+    {
+      "id": "simple-codon-2",
+      "name": "Simple Codon 2",
+      "promptText": "Say exactly: done",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    }
+  ]
+}

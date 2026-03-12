@@ -83,7 +83,7 @@ async function replayAndVerify(scenario: ReplayScenario, logPrefix: string) {
 }
 
 // ──────────────────────────────────────────────────────
-// 1. Replay init-generated hank (3 codons: haiku, gemini, codex)
+// 1. Replay init-generated hank (4 codons: haiku, gemini, codex, pi)
 // ──────────────────────────────────────────────────────
 
 describe("Replay E2E — init-generated hank", () => {
@@ -129,7 +129,7 @@ describe("Replay E2E — init-generated hank", () => {
       const state = server.getState();
       const run = state.runs[0];
       expect(run.status).toBe("completed");
-      expect(run.codons.length).toBe(3);
+      expect(run.codons.length).toBe(4);
       for (const codon of run.codons) {
         expect(codon.status).toBe("completed");
       }
@@ -146,14 +146,14 @@ describe("Replay E2E — init-generated hank", () => {
     }
   });
 
-  test("replays all 3 codons (haiku, gemini, codex) without real LLM calls", async () => {
+  test("replays all 4 codons (haiku, gemini, codex, pi) without real LLM calls", async () => {
     await replayAndVerify(
       {
         execDir: INIT_DIR,
         configPath: path.join(INIT_DIR, "hank.json"),
         dataDir: path.join(INIT_DIR, "data"),
-        expectedCodonCount: 3,
-        codonIds: ["analyze-haiku", "analyze-gemini", "analyze-codex"],
+        expectedCodonCount: 4,
+        codonIds: ["analyze-haiku", "analyze-gemini", "analyze-codex", "analyze-pi"],
       },
       "[Replay-Init]",
     );
@@ -178,8 +178,8 @@ describe("Replay E2E — init-generated hank", () => {
           execDir: INIT_DIR,
           configPath: path.join(INIT_DIR, "hank.json"),
           dataDir: path.join(INIT_DIR, "data"),
-          expectedCodonCount: 3,
-          codonIds: ["analyze-haiku", "analyze-gemini", "analyze-codex"],
+          expectedCodonCount: 4,
+          codonIds: ["analyze-haiku", "analyze-gemini", "analyze-codex", "analyze-pi"],
         },
         "[Replay-Timing]",
       );

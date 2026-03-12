@@ -19,6 +19,7 @@
  * original paths.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import {
   needsExtraction as baseNeedsExtraction,
@@ -35,7 +36,7 @@ const SHIM_VERSION = getMetadata().version;
 const EMBEDDED_SHIM_PATH = "shims";
 
 // Available shims
-const SHIM_NAMES = ["gemini", "codex"] as const;
+const SHIM_NAMES = ["gemini", "codex", "pi", "opencode"] as const;
 type ShimName = (typeof SHIM_NAMES)[number];
 
 /**
@@ -69,12 +70,19 @@ export function needsShimExtraction(shimName: ShimName): boolean {
  * Extract embedded shim files to the cache directory.
  * This should be called when running from a compiled executable.
  *
+ * Shims are embedded as .bundle (not .js) because Bun's --embed flag
+ * rebundles .js files instead of preserving raw bytes, which truncates
+ * large bundles like the Pi shim (10 MB → 28 KB). The .bundle extension
+ * bypasses this behaviour. We write them back out as .js on extraction.
+ *
  * @returns Path to the extracted gemini shim (for backward compatibility)
  */
 export async function extractShimFiles(): Promise<string> {
-  // Build file extraction configuration for all shims
+  // Build file extraction configuration for all shims.
+  // Embedded as <name>.bundle (unique basenames to prevent Bun dedup),
+  // extracted as <name>/index.js — see doc comment above.
   const filesToExtract: FileToExtract[] = SHIM_NAMES.map((shimName) => ({
-    embeddedPath: `${shimName}/index.js`,
+    embeddedPath: `${shimName}.bundle`,
     outputPath: `${shimName}/index.js`,
     required: true,
   }));
@@ -89,6 +97,37 @@ export async function extractShimFiles(): Promise<string> {
     markerFileName: ".version",
   });
 
+  // The Pi shim bundles the @mariozechner/pi-coding-agent SDK which reads
+  // package.json at module load time (for version, app name, config dir).
+  // Without it, the extracted shim crashes with ENOENT before any code runs.
+  writePiPackageJson();
+
   // Return gemini shim path for backward compatibility
   return getExtractedShimPath("gemini");
+}
+
+/**
+ * Write a minimal package.json next to the extracted pi shim.
+ *
+ * The bundled pi-coding-agent SDK does `readFileSync(getPackageJsonPath())`
+ * at module-load time, walking up from __dirname until it finds package.json.
+ * It reads `version`, `piConfig.name`, and `piConfig.configDir` — all of
+ * which have safe defaults in the SDK code, but the file must exist or the
+ * module crashes with ENOENT.
+ */
+function writePiPackageJson(): void {
+  const piDir = path.join(getShimExtractionDir(), "pi");
+  const pkgPath = path.join(piDir, "package.json");
+  if (fs.existsSync(pkgPath)) return;
+
+  try {
+    const minimal = {
+      name: "pi-shim-extracted",
+      version: SHIM_VERSION,
+      piConfig: { name: "pi", configDir: ".pi" },
+    };
+    fs.writeFileSync(pkgPath, JSON.stringify(minimal, null, 2));
+  } catch {
+    // Best-effort — the SDK has fallback defaults for all three fields.
+  }
 }

@@ -3,6 +3,7 @@
 // -------------
 
 import type { CodonId, RunId, SessionId } from "./branded-types.js";
+import type { BudgetExceededData } from "./budget-types.js";
 import type { FailureReason, TokenUsage } from "./types.js";
 
 // Re-export types for use in other modules
@@ -134,6 +135,7 @@ export interface StartingCodon extends BaseCodon {
  *
  * Next states:
  * - running: Got session ID from init message
+ * - completed: Process exited cleanly but init message failed validation
  * - failed: Process crashed before init
  * - skipped: User skipped during init
  */
@@ -378,6 +380,9 @@ export interface CompletedCodon extends BaseCodon {
     executed: SentinelState[];
     totalCost: number;
   };
+
+  /** Present when codon was force-completed due to budget limit. */
+  budgetExceeded?: BudgetExceededData;
 }
 
 /**
@@ -732,7 +737,7 @@ export interface HankweaveState {
 export const CodonTransitions: Record<CodonStatus, CodonStatus[]> = {
   preparing: ["starting", "failed", "skipped"],
   starting: ["initializing", "failed", "skipped"],
-  initializing: ["running", "failed", "skipped"],
+  initializing: ["running", "completed", "failed", "skipped"],
   running: ["completing-sentinels", "completed", "failed", "skipped"],
   "completing-sentinels": ["completed", "failed", "skipped"],
   completed: [], // Terminal - no transitions
@@ -889,6 +894,9 @@ export type StateTransition =
 
           // For extensions
           extensionCount?: number;
+
+          // For budget exceeded (force completion)
+          budgetExceeded?: BudgetExceededData;
         };
       };
     }

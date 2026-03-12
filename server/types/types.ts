@@ -387,6 +387,7 @@ export type ClaudeLogMessage = z.infer<typeof logMessageSchema>;
 
 export type {
   AssistantActionEvent,
+  BudgetSummaryEvent,
   CheckpointListEvent,
   // Data types used in events
   CheckpointQueryInfo,

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "meta": {
+    "name": "Plan-Gen Budget Test: Mixed onExceeded Policies",
+    "version": "2.0.0",
+    "description": "Proportional $20 budget with hank-level onExceeded=complete. step-2-plan overrides to onExceeded=fail. step-1 fits its $3 share, step-2 exceeds its $2 share and fails the run."
+  },
+  "overrides": {
+    "budget": {
+      "maxDollars": 20.0,
+      "allocation": "proportional",
+      "shares": {
+        "step-1-main": 0.15,
+        "step-2-plan": 0.1,
+        "step-3-codex": 0.1,
+        "step-4-merge": 0.1
+      },
+      "onExceeded": "complete"
+    }
+  },
+  "hank": [
+    {
+      "id": "step-1-main",
+      "name": "Step 1: Prep",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptFile": ["./codons/codon-1-fetch/0-fetch-and-enrich.md"],
+      "appendSystemPromptFile": ["./codons/system-prompt-broad.md"],
+      "checkpointedFiles": ["plan/**/*"]
+    },
+    {
+      "id": "step-2-plan",
+      "name": "Step 2: Gemini Plan and CC",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-2-plan-cc/1-cc-prompt.md",
+      "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md",
+      "budget": { "onExceeded": "fail" }
+    },
+    {
+      "id": "step-3-codex",
+      "name": "Step 3: Plan with Codex",
+      "model": "gpt-5.2",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-2-plan-cc/1-codex-prompt.md",
+      "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md"
+    },
+    {
+      "id": "step-4-merge",
+      "name": "Step 4: Review and merge plans",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-4-merge/0-merge.md",
+      "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+    },
+    {
+      "type": "loop",
+      "id": "blind-reviews",
+      "name": "Repeatedly improve the plan through blind iteration",
+      "terminateOn": { "type": "iterationLimit", "limit": 3 },
+      "codons": [
+        {
+          "id": "step-5-blind-review",
+          "name": "Step 5: Review the merged plan with fresh eyes",
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-5-review/0-review.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        },
+        {
+          "id": "step-6-update",
+          "name": "Step 6: Update the plan based on the review",
+          "model": "opus",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-6-update/0-update.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        }
+      ]
+    },
+    {
+      "type": "loop",
+      "id": "implementation-review-loop",
+      "name": "Repeatedly implement and improve the plan",
+      "terminateOn": { "type": "iterationLimit", "limit": 3 },
+      "codons": [
+        {
+          "id": "implement-loop-step-1-implement",
+          "name": "Implement-Review Loop: Implementing core functionality",
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-7-implement-review-loop/0-implement.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        },
+        {
+          "id": "implement-loop-step-2-update",
+          "name": "Implement-review loop: Update the plan based on the implementation results",
+          "model": "opus",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-7-implement-review-loop/1-update.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        }
+      ]
+    },
+    {
+      "id": "final-step-compress",
+      "name": "Final Step: Tie everything into a clean bow",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-8-compress/0-compress.md",
+      "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+    }
+  ]
+}

@@ -248,6 +248,9 @@ export type TelemetryEventName =
   | "continuation_started"
   // Sentinel
   | "sentinel_triggered"
+  // Budget
+  | "budget_set"
+  | "budget_exceeded"
   // PostHog LLM Analytics (special $ prefixed events)
   | "$ai_generation"
   | "$ai_trace"

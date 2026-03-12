@@ -22,6 +22,7 @@ tests/test-results
 
 hankweave-results
 .hankweave
+!tests/fixtures/**/.hankweave
 error
 .sync-test-output
 

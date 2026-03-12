@@ -400,8 +400,8 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(args)).toThrow("Invalid --shim-idle-timeout value");
   });
 
-  test("hankweave --shim-idle-timeout 601 throws (exceeds max)", () => {
-    const args = ["--shim-idle-timeout", "601"];
+  test("hankweave --shim-idle-timeout 1801 throws (exceeds max)", () => {
+    const args = ["--shim-idle-timeout", "1801"];
     expect(() => parseCliArgs(args)).toThrow("Invalid --shim-idle-timeout value");
   });
 
@@ -1158,6 +1158,70 @@ describe("parseCliArgs", () => {
       expect(result.executionPath).toBe("./exec");
       expect(result.model).toBe("opus");
       expect(result.port).toBe(8080);
+    });
+  });
+
+  describe("--max-cost", () => {
+    test("parses --max-cost as budget.maxDollars", () => {
+      const result = parseCliArgs(["--max-cost", "3.00"]);
+      expect(result.budget).toEqual({ maxDollars: 3.0 });
+    });
+
+    test("parses fractional values", () => {
+      const result = parseCliArgs(["--max-cost", "0.50"]);
+      expect(result.budget).toEqual({ maxDollars: 0.5 });
+    });
+
+    test("throws on missing value", () => {
+      expect(() => parseCliArgs(["--max-cost"])).toThrow("requires a value");
+    });
+
+    test("throws on non-numeric value", () => {
+      expect(() => parseCliArgs(["--max-cost", "abc"])).toThrow("Invalid --max-cost value");
+    });
+
+    test("negative value is treated as missing (starts with dash)", () => {
+      expect(() => parseCliArgs(["--max-cost", "-1"])).toThrow("requires a value");
+    });
+
+    test("throws on zero", () => {
+      expect(() => parseCliArgs(["--max-cost", "0"])).toThrow("Invalid --max-cost value");
+    });
+  });
+
+  describe("--max-time", () => {
+    test("parses --max-time as budget.maxTimeSeconds", () => {
+      const result = parseCliArgs(["--max-time", "3600"]);
+      expect(result.budget).toEqual({ maxTimeSeconds: 3600 });
+    });
+
+    test("parses fractional values", () => {
+      const result = parseCliArgs(["--max-time", "30.5"]);
+      expect(result.budget).toEqual({ maxTimeSeconds: 30.5 });
+    });
+
+    test("throws on missing value", () => {
+      expect(() => parseCliArgs(["--max-time"])).toThrow("requires a value");
+    });
+
+    test("throws on non-numeric value", () => {
+      expect(() => parseCliArgs(["--max-time", "abc"])).toThrow("Invalid --max-time value");
+    });
+
+    test("throws on zero", () => {
+      expect(() => parseCliArgs(["--max-time", "0"])).toThrow("Invalid --max-time value");
+    });
+  });
+
+  describe("--max-cost and --max-time together", () => {
+    test("sets both budget fields", () => {
+      const result = parseCliArgs(["--max-cost", "5.00", "--max-time", "60"]);
+      expect(result.budget).toEqual({ maxDollars: 5.0, maxTimeSeconds: 60 });
+    });
+
+    test("order does not matter", () => {
+      const result = parseCliArgs(["--max-time", "120", "--max-cost", "3.00"]);
+      expect(result.budget).toEqual({ maxDollars: 3.0, maxTimeSeconds: 120 });
     });
   });
 });

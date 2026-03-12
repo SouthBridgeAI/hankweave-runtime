@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { CodonId, CodonId as CodonIdConstructor } from "./types/branded-types.js";
+import type { AllocationMode } from "./types/budget-types.js";
 import type { Codon, CodonConfig, Loop } from "./types/types.js";
 
 /**
@@ -21,6 +22,14 @@ export interface ExecutionCodonEntry {
     loopId: CodonId; // ID of the loop this codon belongs to
     iteration: number; // Which iteration (0-indexed: 0 = first, 1 = second, etc.)
     codonIndexInLoop: number; // Position within loop.codons array
+    // Loop's own budget config (if declared), carried for Budget class to use
+    loopBudget?: {
+      maxDollars?: number;
+      maxTimeSeconds?: number;
+      allocation?: AllocationMode;
+      shares?: Record<string, number>;
+      onExceeded?: "complete" | "fail";
+    };
   };
 }
 
@@ -65,8 +74,14 @@ export class ExecutionPlanner {
     currentPlan: ExecutionCodonEntry[];
     completedCodonId: CodonId;
     contextExceeded?: boolean;
+    budgetExceeded?: boolean;
   }): ExecutionCodonEntry[] {
-    const { currentPlan, completedCodonId, contextExceeded = false } = params;
+    const {
+      currentPlan,
+      completedCodonId,
+      contextExceeded = false,
+      budgetExceeded = false,
+    } = params;
 
     // Find the completed codon in the plan
     const completedIndex = currentPlan.findIndex((e) => e.codonId === completedCodonId);
@@ -91,10 +106,12 @@ export class ExecutionPlanner {
     // Termination Logic - Check in priority order
     // ============================================================
 
-    // PRIORITY 1: Context exceeded termination (can happen at any codon)
-    if (contextExceeded && loopConfig.terminateOn.type === "contextExceeded") {
-      // Context exceeded - terminate this loop immediately
-      // Remove all remaining codons in this iteration from the plan
+    // PRIORITY 1: Early termination — context exceeded or budget exceeded (can happen at any codon)
+    const shouldTerminateEarly =
+      (contextExceeded && loopConfig.terminateOn.type === "contextExceeded") || budgetExceeded;
+
+    if (shouldTerminateEarly) {
+      // Terminate this loop immediately: remove remaining codons in this iteration
       const endOfIterationIndex = currentPlan.findIndex((e, idx) => {
         if (idx <= completedIndex) return false;
         if (!e.loopContext) return true; // Found a non-loop codon
@@ -104,10 +121,8 @@ export class ExecutionPlanner {
       });
 
       if (endOfIterationIndex === -1) {
-        // No codons after current iteration - just keep up to completed codon
         return currentPlan.slice(0, completedIndex + 1);
       }
-      // Remove remaining codons in this iteration, keep everything else
       return [
         ...currentPlan.slice(0, completedIndex + 1),
         ...currentPlan.slice(endOfIterationIndex),
@@ -190,6 +205,16 @@ export class ExecutionPlanner {
    * Create execution plan for a specific iteration of a loop.
    */
   private createIterationPlan(config: Loop, iteration: number): ExecutionCodonEntry[] {
+    const loopBudget = config.budget
+      ? {
+          maxDollars: config.budget.maxDollars,
+          maxTimeSeconds: config.budget.maxTimeSeconds,
+          allocation: config.budget.allocation as AllocationMode | undefined,
+          shares: config.budget.shares,
+          onExceeded: config.budget.onExceeded as "complete" | "fail" | undefined,
+        }
+      : undefined;
+
     return config.codons.map((codon, codonIndexInLoop) => ({
       codon,
       codonId: this.generateIterationCodonId(CodonId(codon.id), iteration),
@@ -197,6 +222,7 @@ export class ExecutionPlanner {
         loopId: CodonId(config.id),
         iteration,
         codonIndexInLoop,
+        ...(loopBudget ? { loopBudget } : {}),
       },
     }));
   }

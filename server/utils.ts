@@ -23,7 +23,7 @@ export { WebSocket };
 // -------------
 
 export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11).padEnd(9, "0")}`;
 }
 
 // -------------

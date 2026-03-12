@@ -54,6 +54,15 @@ interface CodonToolUsage {
   toolErrorCounts: Record<string, number>;
 }
 
+/** Per-codon budget limits (accumulated from reportBudgetSet calls) */
+interface CodonBudgetLimitsSnapshot {
+  maxDollars?: number;
+  maxTimeSeconds?: number;
+  maxOutputTokens?: number;
+  maxContextTokens?: number;
+  onExceeded?: string;
+}
+
 // =============================================================================
 // Run-level accumulated data
 // =============================================================================
@@ -68,6 +77,8 @@ interface AccumulatedData {
   codonLLMUsage: Record<string, CodonLLMUsage>;
   /** Per-codon tool usage (keyed by codonId) */
   codonToolUsage: Record<string, CodonToolUsage>;
+  /** Per-codon budget limits (keyed by codonId) */
+  codonBudgetLimits: Record<string, CodonBudgetLimitsSnapshot>;
   /** Current codon being tracked (for tool attribution) */
   currentCodonId?: string;
 
@@ -136,6 +147,7 @@ export class TelemetryCollector {
     return {
       codonLLMUsage: {},
       codonToolUsage: {},
+      codonBudgetLimits: {},
       runToolCounts: {},
       runToolErrorCounts: {},
       runModelCounts: {},
@@ -190,6 +202,66 @@ export class TelemetryCollector {
   setRunId(runId: string): void {
     this.accumulated.runIdHash = sha256(runId);
     this.accumulated.rawRunId = runId;
+  }
+
+  // ===========================================================================
+  // BudgetTelemetryReporter implementation
+  // ===========================================================================
+
+  reportBudgetSet(data: {
+    codonId: string;
+    limits: {
+      maxDollars?: number;
+      maxTimeSeconds?: number;
+      maxOutputTokens?: number;
+      maxContextTokens?: number;
+      onExceeded?: string;
+      costSource?: string;
+    };
+  }): void {
+    if (!this.config.enabled) return;
+    // Store limits for enriching codon_completed later
+    this.accumulated.codonBudgetLimits[data.codonId] = {
+      maxDollars: data.limits.maxDollars,
+      maxTimeSeconds: data.limits.maxTimeSeconds,
+      maxOutputTokens: data.limits.maxOutputTokens,
+      maxContextTokens: data.limits.maxContextTokens,
+      onExceeded: data.limits.onExceeded,
+    };
+    this.accumulated.queuedEvents.push({
+      event: "budget_set",
+      properties: {
+        run_id_hash: this.accumulated.runIdHash || "unknown",
+        codon_id_hash: sha256(data.codonId),
+        has_max_dollars: data.limits.maxDollars !== undefined,
+        max_dollars: data.limits.maxDollars ?? null,
+        has_max_time_seconds: data.limits.maxTimeSeconds !== undefined,
+        max_time_seconds: data.limits.maxTimeSeconds ?? null,
+        has_max_output_tokens: data.limits.maxOutputTokens !== undefined,
+        max_output_tokens: data.limits.maxOutputTokens ?? null,
+        has_max_context_tokens: data.limits.maxContextTokens !== undefined,
+        max_context_tokens: data.limits.maxContextTokens ?? null,
+        on_exceeded: data.limits.onExceeded ?? null,
+        cost_source: data.limits.costSource ?? null,
+      },
+    });
+  }
+
+  reportBudgetExceeded(data: {
+    codonId: string;
+    info: { currency: string; limit: number; used: number; message: string };
+  }): void {
+    if (!this.config.enabled) return;
+    this.accumulated.queuedEvents.push({
+      event: "budget_exceeded",
+      properties: {
+        run_id_hash: this.accumulated.runIdHash || "unknown",
+        codon_id_hash: sha256(data.codonId),
+        currency: data.info.currency,
+        limit: data.info.limit,
+        used: data.info.used,
+      },
+    });
   }
 
   // ===========================================================================
@@ -299,6 +371,7 @@ export class TelemetryCollector {
         const codonIdHash = sha256(event.data.codonId);
         const llmUsage = this.accumulated.codonLLMUsage[event.data.codonId];
         const codonTools = this.accumulated.codonToolUsage[event.data.codonId];
+        const budgetLimits = this.accumulated.codonBudgetLimits[event.data.codonId];
         const durationSec = event.data.duration ? event.data.duration / 1000 : undefined;
 
         // Spec: codon_completed with full properties
@@ -323,6 +396,16 @@ export class TelemetryCollector {
               ? Object.values(codonTools.toolErrorCounts).reduce((a, b) => a + b, 0)
               : 0,
             tools_used: codonTools ? Object.keys(codonTools.toolCounts) : [],
+            // Budget limits (from budget_set)
+            budget_max_dollars: budgetLimits?.maxDollars ?? null,
+            budget_max_time_seconds: budgetLimits?.maxTimeSeconds ?? null,
+            budget_max_output_tokens: budgetLimits?.maxOutputTokens ?? null,
+            budget_on_exceeded: budgetLimits?.onExceeded ?? null,
+            // Budget exceeded info
+            budget_exceeded: !!event.data.budgetExceeded,
+            budget_exceeded_currency: event.data.budgetExceeded?.currency ?? null,
+            budget_exceeded_limit: event.data.budgetExceeded?.limit ?? null,
+            budget_exceeded_used: event.data.budgetExceeded?.used ?? null,
           },
         });
 

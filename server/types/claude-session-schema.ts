@@ -31,15 +31,9 @@ const modelSchema = z.string().min(1, "Model identifier cannot be empty");
 // Permission mode for Claude Code
 const permissionModeSchema = z.enum(["bypassPermissions", "requestPermissions"]);
 
-// API key source - accepts known API key sources for different providers
-const apiKeySourceSchema = z.enum([
-  "ANTHROPIC_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "OPENAI_API_KEY",
-  "env",
-  "none",
-]);
+// API key source — shims may report any string (e.g. "~/.codex/auth.json",
+// "ANTHROPIC_API_KEY", custom paths, etc.), so we accept any non-empty string.
+const apiKeySourceSchema = z.string().min(1);
 
 /**
  * System Message Schema

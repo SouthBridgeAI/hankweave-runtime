@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "overrides": {
+    "budget": { "maxDollars": 0.002 }
+  },
+  "hank": [
+    {
+      "id": "budget-codon",
+      "name": "Budget Codon",
+      "promptText": "Create these 3 files one at a time: 1) a.txt with 'alpha' 2) b.txt with 'bravo' 3) c.txt with 'charlie'. After creating them, read each file to verify.",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    },
+    {
+      "id": "followup-codon",
+      "name": "Followup Codon",
+      "promptText": "Say exactly: hello world",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    }
+  ]
+}

@@ -52,6 +52,32 @@ const templates: Record<string, string> = {
           "copy": ["analysis-codex.md"]
         }
       ]
+    },
+    {
+      "id": "analyze-pi",
+      "name": "Analyze Project (Pi)",
+      "model": "pi/anthropic/claude-haiku-4-5",
+      "continuationMode": "fresh",
+      "promptFile": "./prompts/analyze-pi.md",
+      "checkpointedFiles": ["analysis-pi.md"],
+      "outputFiles": [
+        {
+          "copy": ["analysis-pi.md"]
+        }
+      ]
+    },
+    {
+      "id": "analyze-opencode",
+      "name": "Analyze Project (OpenCode)",
+      "model": "opencode/anthropic/claude-haiku-4-5",
+      "continuationMode": "fresh",
+      "promptFile": "./prompts/analyze-opencode.md",
+      "checkpointedFiles": ["analysis-opencode.md"],
+      "outputFiles": [
+        {
+          "copy": ["analysis-opencode.md"]
+        }
+      ]
     }
   ]
 }`,
@@ -88,6 +114,26 @@ Your analysis should include:
 
 **Important:** Please create your analysis in a file called \`analysis-codex.md\` in the execution directory using the \`Write\` tool. Do NOT use PowerShell commands (like Set-Content) on Windows.`,
 
+  "prompts/analyze-pi.md": `# Project Analysis (Pi)
+
+Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
+
+Your analysis should include:
+
+1. Very brief overview of the files in that directory
+
+Please create your analysis in a file called \`analysis-pi.md\` in the execution directory.`,
+
+  "prompts/analyze-opencode.md": `# Project Analysis (OpenCode)
+
+Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
+
+Your analysis should include:
+
+1. Very brief overview of the files in that directory
+
+Please create your analysis in a file called \`analysis-opencode.md\` in the execution directory.`,
+
   "README.md": `# Hank
 
 This hank was initialized with \`hankweave init\`.
@@ -95,7 +141,7 @@ This hank was initialized with \`hankweave init\`.
 ## Structure
 
 - \`hank.json\` — Workflow definition (codons, models, file tracking)
-- \`prompts/\` — Prompt files for each codon (one per harness)
+- \`prompts/\` — Prompt files for each codon (one per harness: Haiku, Gemini, Codex, Pi, OpenCode)
 - \`data/\` — Sample data files to analyze
 - \`.gitignore\` — Ignore patterns for execution artifacts
 
@@ -214,6 +260,8 @@ export async function initProject(targetDir: string): Promise<void> {
   console.log("  - prompts/analyze-haiku.md");
   console.log("  - prompts/analyze-gemini.md");
   console.log("  - prompts/analyze-codex.md");
+  console.log("  - prompts/analyze-pi.md");
+  console.log("  - prompts/analyze-opencode.md");
   console.log("  - data/sample1.txt");
   console.log("  - data/sample2.txt");
   console.log("  - data/notes.txt");

@@ -169,5 +169,20 @@ describe("shouldExtendCodon", () => {
       };
       expect(shouldExtendCodon(params)).toBe(false);
     });
+
+    test("returns false when budget exceeded", () => {
+      const params = { ...defaultParams(), isBudgetExceeded: true };
+      expect(shouldExtendCodon(params)).toBe(false);
+    });
+
+    test("returns true when budget not exceeded", () => {
+      const params = { ...defaultParams(), isBudgetExceeded: false };
+      expect(shouldExtendCodon(params)).toBe(true);
+    });
+
+    test("returns true when isBudgetExceeded omitted (defaults to falsy)", () => {
+      const params = defaultParams();
+      expect(shouldExtendCodon(params)).toBe(true);
+    });
   });
 });

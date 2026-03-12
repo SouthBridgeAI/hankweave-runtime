@@ -28,11 +28,66 @@ export interface ModelValidationResult {
  * @param providerId - Optional provider ID to narrow the search (e.g., "anthropic", "google")
  * @returns ModelValidationResult with validation outcome
  */
+/**
+ * Providers that use shims and support pass-through model IDs.
+ * These providers wrap other providers, so any model ID is potentially valid.
+ * The shim itself handles model validation at runtime.
+ */
+const PASSTHROUGH_SHIM_PROVIDERS = ["pi", "opencode"];
+
 export function validateModel(
   model: string,
   registry: LlmProviderRegistry,
   providerId?: string,
 ): ModelValidationResult {
+  // Step 0: Check for pass-through shim providers (e.g., "pi/openai/gpt-5.4")
+  // These providers wrap other providers, so the model ID after the prefix
+  // is passed directly to the shim. We construct a ModelInfo without requiring
+  // the model to be pre-registered in the registry.
+  const slashIndex = model.indexOf("/");
+  if (slashIndex > 0) {
+    const prefix = model.substring(0, slashIndex).toLowerCase();
+    if (PASSTHROUGH_SHIM_PROVIDERS.includes(prefix)) {
+      const modelId = model.substring(slashIndex + 1);
+
+      // Try to resolve the underlying model from the registry to get real capabilities
+      const underlying = registry.resolveModel({ model: modelId, ignoreBlockList: true });
+
+      let passthroughModelInfo: ModelInfo;
+      if (underlying.success) {
+        passthroughModelInfo = {
+          ...underlying.modelInfo,
+          providerId: prefix,
+          modelId,
+          name: `${prefix}: ${modelId}`,
+        };
+      } else {
+        // Fallback: model not in registry, use generic defaults
+        passthroughModelInfo = {
+          providerId: prefix,
+          modelId,
+          name: `${prefix}: ${modelId}`,
+          attachment: false,
+          reasoning: true,
+          tool_call: true,
+          cost: undefined,
+          limit: { context: 200000, output: 64000 },
+          modalities: { input: ["text"], output: ["text"] },
+          release_date: "2025-01-01",
+          last_updated: "2025-01-01",
+        };
+      }
+
+      if (CodonRunner.canRun(passthroughModelInfo)) {
+        return {
+          valid: true,
+          modelInfo: passthroughModelInfo,
+          matchType: "exact",
+        };
+      }
+    }
+  }
+
   // Step 1: Resolve the model via registry
   const resolveResult = registry.resolveModel({
     model,
@@ -63,7 +118,7 @@ export function validateModel(
   const canRun = CodonRunner.canRun(resolveResult.modelInfo);
 
   if (!canRun) {
-    const supportedProviders = ["anthropic", "google", "openai"];
+    const supportedProviders = ["anthropic", "google", "openai", "pi", "opencode"];
     const providerName = resolveResult.modelInfo.providerId;
     return {
       valid: false,

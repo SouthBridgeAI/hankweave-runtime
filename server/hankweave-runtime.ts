@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { minimatch } from "minimatch";
 import { ArchiveManifestManager } from "./archive-manifest.js";
+import { Budget } from "./budget.js";
 import { CheckpointGit } from "./checkpoint-git.js";
 import { CodonRunner, type ExtensionInfo } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
@@ -200,7 +201,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   // manually retry via checkpoint restore. This is acceptable for transient
   // failures (the target of auto-retry) which won't persist across restarts.
   private retryAttempts = new Map<string, number>(); // codonId -> attempt count
-  private retryAccumulatedCost = new Map<string, number>(); // codonId -> total cost across retries
+  private budget: Budget | null = null;
 
   // Rollback state
   private isRollingBack = false;
@@ -1461,6 +1462,24 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     this.currentRunId = runId;
 
+    // Create budget facade for this run
+    const state = this.stateManager.getState();
+    this.budget = new Budget({
+      config: {
+        maxDollars: this.config.budget?.maxDollars,
+        maxTimeSeconds: this.config.budget?.maxTimeSeconds,
+        allocationMode: this.config.budget?.allocation,
+        shares: this.config.budget?.shares,
+        onExceeded: this.config.budget?.onExceeded,
+      },
+      executionPlan: state.executionPlan,
+      logger: this.logger,
+      telemetry: this.telemetryCollector ?? undefined,
+      ...(startingConditions?.type === "continuation" && {
+        priorRuns: { runs: state.runs, currentRunId: runId },
+      }),
+    });
+
     // Set run ID on telemetry collector for LLM analytics trace correlation
     if (this.telemetryCollector) {
       this.telemetryCollector.setRunId(runId);
@@ -1883,6 +1902,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             await this.stateManager.expandNextIterationForCodon({
               codonId: CodonId(codonId),
               contextExceeded: false,
+              budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
             });
 
             // Ignored failure - proceed to next codon
@@ -2065,6 +2085,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         await this.stateManager.expandNextIterationForCodon({
           codonId: CodonId(codonId),
           contextExceeded: false,
+          budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
         });
 
         if (this.config.autostart) {
@@ -2255,6 +2276,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           await this.stateManager.expandNextIterationForCodon({
             codonId: CodonId(codonId),
             contextExceeded: false,
+            budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
           });
 
           if (this.config.autostart) {
@@ -2414,6 +2436,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         globalSystemPrompt: this.config.globalSystemPrompt,
         // Wiring: CLI --shim-idle-timeout → resolveSettings → serverConfig → here → CodonRunner → ShimProcessManager / ClaudeAgentSDKManager
         shimIdleTimeout: this.config.shimIdleTimeout,
+        // Budget is always initialized in startNewRun() before any codon execution
+        budget: this.budget as Budget,
         replayConfig,
       };
 
@@ -3108,9 +3132,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       `[handleCodonComplete] ======= ENTERED handleCodonComplete - exitCode=${exitCode}, isContextExceeded=${isContextExceeded}, extensionCount=${extensionCount} =======`,
       "info",
     );
-    const hasRunner = this.currentCodon
-      ? !!this.codonRunners.get(this.currentCodon.codonId)
-      : false;
+    const runner = this.currentCodon ? this.codonRunners.get(this.currentCodon.codonId) : undefined;
+    const hasRunner = !!runner;
     this.logger.log(
       `[handleCodonComplete] currentCodon=${
         this.currentCodon?.codonId || "none"
@@ -3227,11 +3250,35 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Determine final status based on the actual codon outcome
-    // Priority order: force stop > success result > error result > context exceeded (conditional) > skip request > exit code
+    // Priority order: force stop > explicit skip > budget exceeded > success result > error result > context exceeded (conditional) > exit code
     let finalStatus: CodonStatus;
 
     if (this.isForceStopping) {
       finalStatus = "failed";
+    } else if (wasSkipped) {
+      // User explicitly requested skip — honour intent even if the agent
+      // managed to emit a result message before SIGTERM took effect.
+      finalStatus = "skipped";
+    } else if (this.budget?.isExceeded(codonId)) {
+      const onExceeded = this.budget.getEffectiveLimits(codonId).onExceeded ?? "complete";
+      if (onExceeded === "fail") {
+        finalStatus = "failed";
+        this.codonFailureReason = {
+          type: "unknown" as const,
+          retriable: false,
+          message: `Budget exceeded: ${this.budget.getExceededInfo(codonId)?.message || "unknown"}`,
+        };
+      } else {
+        finalStatus = "completed";
+      }
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Codon ${onExceeded === "fail" ? "failed" : "completed"} (budget limit reached: ${this.budget.getExceededInfo(codonId)?.message || "unknown"})`,
+        },
+      } as InfoEvent);
     } else if (exitCode === 0 && this.resultMessageSuccess) {
       finalStatus = "completed"; // Success result message with exit 0 = completed
     } else if (exitCode === 0 && this.resultMessageReceived && !this.resultMessageSuccess) {
@@ -3256,8 +3303,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           message: `Codon completed successfully due to context exceeded (loop termination condition met)`,
         },
       } as InfoEvent);
-    } else if (wasSkipped && !this.resultMessageReceived) {
-      finalStatus = "skipped"; // Skip requested AND no result = skipped
     } else if (exitCode !== 0) {
       finalStatus = "failed"; // Non-zero exit = failed
     } else {
@@ -3306,6 +3351,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     const codonBeforeFinalTransition =
       sentinelCount > 0 ? this.stateManager.getCodonInCurrentRun(CodonId(codonId)) : updatedCodon;
 
+    const budgetInfo = this.budget?.getExceededInfo(codonId);
+
     // Final transition (fire-and-forget)
     if (this.currentRunId && codonBeforeFinalTransition) {
       this.stateManager.transition({
@@ -3321,6 +3368,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             checkpointSha: checkpointSha || "", // Ensure we always have a string
             contextExceeded: isContextExceeded,
             extensionCount,
+            ...(budgetInfo && {
+              budgetExceeded: {
+                currency: budgetInfo.currency,
+                limit: budgetInfo.limit,
+                used: budgetInfo.used,
+              },
+            }),
             ...(finalStatus === "failed" && {
               failedDuring: wasSkipped ? currentStatus : updatedCodon.status,
               failureReason: this.codonFailureReason || {
@@ -3352,9 +3406,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
+    // Update budget tracking with final cost
+    if (finalStatus === "completed") {
+      this.budget?.completeCodon(codonId, finalCost);
+    } else if (finalStatus === "failed") {
+      this.budget?.failCodon(codonId, finalCost);
+    } else if (finalStatus === "skipped") {
+      this.budget?.skipCodon(codonId);
+    }
+
     // The design decision to report 0 for skipped codons is handled here
     // For retried codons, include accumulated cost from failed attempts
-    const accumulatedRetryCost = this.retryAccumulatedCost.get(codonId) || 0;
+    const accumulatedRetryCost = this.budget?.getAndClearRetryCost(codonId) ?? 0;
     const reportedCost = finalStatus === "skipped" ? 0 : finalCost + accumulatedRetryCost;
 
     // Determine if this failure will be ignored (for event reporting)
@@ -3379,6 +3442,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         failureReason: finalStatus === "failed" ? this.codonFailureReason : undefined,
         // Mark if this failure will be ignored due to onFailure config
         failureIgnored: willIgnoreFailure ? true : undefined,
+        budgetExceeded: budgetInfo
+          ? {
+              currency: budgetInfo.currency,
+              limit: budgetInfo.limit,
+              used: budgetInfo.used,
+            }
+          : undefined,
       },
     } as CodonCompletedEvent);
 
@@ -3517,7 +3587,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       const expansionResult = await this.stateManager.expandNextIterationForCodon({
         codonId: CodonId(codonId),
         contextExceeded: isContextExceeded,
+        budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
       });
+
+      // Update budget's execution plan after loop expansion may have added new entries
+      this.budget?.updateExecutionPlan(this.stateManager.getState().executionPlan);
 
       // Handle loop termination archives
       if (expansionResult.loopTerminated?.archiveOnSuccess?.length) {
@@ -3584,7 +3658,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
       // Clear retry counters for this codon (cost was already included in event emission)
       this.retryAttempts.delete(codonId);
-      this.retryAccumulatedCost.delete(codonId);
 
       if (this.config.autostart) {
         await this.autoStartNextCodon();
@@ -3671,8 +3744,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           // Accumulate cost from this failed attempt before retrying
           // Note: this.currentCodon is already cleaned up at this point, use finalCost from state
           const currentCost = finalCost;
-          const accumulatedCost = (this.retryAccumulatedCost.get(codonId) || 0) + currentCost;
-          this.retryAccumulatedCost.set(codonId, accumulatedCost);
+          this.budget?.accumulateRetryCost(codonId, currentCost);
 
           this.retryAttempts.set(codonId, attempts + 1);
 
@@ -3711,7 +3783,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         case "continue": {
           // Clear retry counters for this codon
           this.retryAttempts.delete(codonId);
-          this.retryAccumulatedCost.delete(codonId);
 
           // Emit info event about the ignored failure
           this.emit("event", {
@@ -3729,6 +3800,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           await this.stateManager.expandNextIterationForCodon({
             codonId: CodonId(codonId),
             contextExceeded: false, // Failed codon, not context exceeded
+            budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
           });
           this.emitLoopIterationCompletedEvent({
             codonId: CodonId(codonId),
@@ -5893,7 +5965,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       };
     }
   }
-
   // -------------
   // Utility & Helper Methods
   // -------------
@@ -5981,6 +6052,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     return "other";
+  }
+
+  /**
+   * Check if either the codon's individual budget or its parent loop's budget is exceeded.
+   */
+  private isLoopOrCodonBudgetExceeded(codonId: string): boolean {
+    const codonExceeded = this.budget?.isExceeded(codonId) ?? false;
+    const entry = this.stateManager.getState().executionPlan.find((e) => e.codonId === codonId);
+    const loopExceeded = entry?.loopContext
+      ? (this.budget?.isLoopBudgetExceeded(String(entry.loopContext.loopId)) ?? false)
+      : false;
+    return codonExceeded || loopExceeded;
   }
 
   private emitLoopIterationCompletedEvent(params: {
@@ -6473,6 +6556,21 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // because RunCompleted/RunFailed clears currentRunId in state, which
     // would make getCurrentRun() return null when telemetry needs it.
     const runForTelemetry = this.stateManager.getCurrentRun();
+
+    // Emit budget summary event BEFORE RunCompleted/RunFailed so that
+    // clients watching for RunCompleted as the terminal event will have
+    // already received the budget summary.
+    if (this.budget && runForTelemetry) {
+      const summary = this.budget.getBudgetSummary(runForTelemetry);
+      if (summary) {
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "budget.summary",
+          data: summary,
+        } as import("./types/types.js").BudgetSummaryEvent);
+      }
+    }
 
     // Mark run as completed or failed based on reason
     if (this.currentRunId && reason === "all codons completed") {

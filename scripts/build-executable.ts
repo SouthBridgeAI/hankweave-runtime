@@ -96,7 +96,9 @@ function getBunTarget(target?: string): string | undefined {
 
   const bunTarget = targetMap[target];
   if (!bunTarget) {
-    throw new Error(`Unknown target: ${target}. Valid targets: ${Object.keys(targetMap).join(", ")}`);
+    throw new Error(
+      `Unknown target: ${target}. Valid targets: ${Object.keys(targetMap).join(", ")}`,
+    );
   }
   return bunTarget;
 }
@@ -113,12 +115,27 @@ async function main() {
 
   // Determine output filename (in releases directory)
   const isWindows = target?.startsWith("windows");
-  const outputFileName = isWindows && !outputBase.endsWith(".exe") ? `${outputBase}.exe` : outputBase;
+  const outputFileName =
+    isWindows && !outputBase.endsWith(".exe")
+      ? `${outputBase}.exe`
+      : outputBase;
   const outputFile = path.join(OUTPUT_DIR, outputFileName);
 
-  // Prepare cli.bundle path for cleanup in finally block
+  // Prepare .bundle paths for cleanup in finally block.
+  // Bun's --embed flag treats .js files specially (rebundles them instead of
+  // embedding raw bytes), so we copy them to .bundle before embedding.
   const cliSource = path.join(SDK_PATH, "cli.js");
   const cliBundle = path.join(SDK_PATH, "cli.bundle");
+
+  // Each shim gets a unique bundle filename because Bun deduplicates embedded
+  // files by basename — four "index.bundle" entries would collapse to one.
+  const SHIM_NAMES = ["gemini", "codex", "opencode", "pi"] as const;
+  const shimBundles: Array<{ name: string; source: string; bundle: string }> =
+    SHIM_NAMES.map((name) => ({
+      name,
+      source: path.join("shims", name, "index.js"),
+      bundle: path.join("shims", `${name}.bundle`),
+    }));
 
   try {
     console.log("🔨 Building Hankweave standalone executable\n");
@@ -143,8 +160,12 @@ async function main() {
 
     const codexPackageDir = getCodexPackageDir(target);
     if (!fs.existsSync(codexPackageDir)) {
-      console.error(`❌ Codex platform package not found at ${codexPackageDir}`);
-      console.error("   Run 'bun install' first. For cross-compilation, ensure the target platform package is available.");
+      console.error(
+        `❌ Codex platform package not found at ${codexPackageDir}`,
+      );
+      console.error(
+        "   Run 'bun install' first. For cross-compilation, ensure the target platform package is available.",
+      );
       process.exit(1);
     }
 
@@ -155,11 +176,16 @@ async function main() {
     console.log(`📦 Ripgrep platform: ${ripgrepPlatform}`);
     console.log(`📦 Codex platform: ${codexPlatform}`);
 
-    // Copy cli.js to cli.bundle to avoid Bun treating it as an entry point
-    // Bun has special handling for .js files that prevents them from being embedded properly
-    console.log(`\n📋 Preparing cli.js for embedding...`);
+    // Copy .js files to .bundle to avoid Bun treating them as entry points.
+    // Bun has special handling for .js files that prevents them from being embedded properly —
+    // it rebundles them instead of preserving the raw bytes, which truncates large bundles.
+    console.log(`\n📋 Preparing .js files for embedding as .bundle...`);
     fs.copyFileSync(cliSource, cliBundle);
-    console.log(`   ✓ Created temporary cli.bundle`);
+    console.log(`   ✓ ${cliSource} → ${cliBundle}`);
+    for (const { source, bundle } of shimBundles) {
+      fs.copyFileSync(source, bundle);
+      console.log(`   ✓ ${source} → ${bundle}`);
+    }
 
     // Build the list of files to embed (use relative paths - they work better with embedding)
     const codexBinaryName = isWindows ? "codex.exe" : "codex";
@@ -171,13 +197,23 @@ async function main() {
       path.join(SDK_PATH, "resvg.wasm"),
       path.join(SDK_PATH, "tree-sitter.wasm"),
       path.join(SDK_PATH, "tree-sitter-bash.wasm"),
-      path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, ripgrepPlatform === "x64-win32" ? "rg.exe" : "rg"),
+      path.join(
+        SDK_PATH,
+        "vendor/ripgrep",
+        ripgrepPlatform,
+        ripgrepPlatform === "x64-win32" ? "rg.exe" : "rg",
+      ),
       path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, "ripgrep.node"),
       // Codex SDK binary (platform-specific, v0.101.0+ uses separate @openai/codex-<platform>-<arch> packages)
-      path.join(codexPackageDir, "vendor", codexPlatform, "codex", codexBinaryName),
-      // Shim files (use .js extension for embedding compatibility)
-      path.join("shims", "gemini", "index.js"),
-      path.join("shims", "codex", "index.js"),
+      path.join(
+        codexPackageDir,
+        "vendor",
+        codexPlatform,
+        "codex",
+        codexBinaryName,
+      ),
+      // Shim files — embedded as .bundle to avoid Bun's .js rebundling
+      ...shimBundles.map(({ bundle }) => bundle),
     ];
 
     // Verify all files exist
@@ -247,12 +283,16 @@ async function main() {
 
     // Verify output exists
     if (!fs.existsSync(outputFile)) {
-      throw new Error(`Build appeared to succeed but output file not found: ${outputFile}`);
+      throw new Error(
+        `Build appeared to succeed but output file not found: ${outputFile}`,
+      );
     }
 
     const outputSize = fs.statSync(outputFile).size;
     console.log(`✅ Build complete!`);
-    console.log(`📄 Output: ${outputFile} (${(outputSize / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(
+      `📄 Output: ${outputFile} (${(outputSize / 1024 / 1024).toFixed(2)} MB)`,
+    );
 
     // Make executable on Unix
     if (!isWindows) {
@@ -265,11 +305,16 @@ async function main() {
     console.error(`\n❌ Build failed: ${(error as Error).message}`);
     process.exit(1);
   } finally {
-    // Clean up temporary cli.bundle file
-    if (fs.existsSync(cliBundle)) {
-      fs.unlinkSync(cliBundle);
-      console.log(`\n🧹 Cleaned up temporary cli.bundle`);
+    // Clean up temporary .bundle files
+    const bundleFiles = [cliBundle, ...shimBundles.map(({ bundle }) => bundle)];
+    for (const bundleFile of bundleFiles) {
+      if (fs.existsSync(bundleFile)) {
+        fs.unlinkSync(bundleFile);
+      }
     }
+    console.log(
+      `\n🧹 Cleaned up ${bundleFiles.length} temporary .bundle files`,
+    );
   }
 }
 

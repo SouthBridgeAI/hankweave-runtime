@@ -76,8 +76,51 @@
             "shimIdleTimeout": {
               "type": "integer",
               "exclusiveMinimum": 0,
-              "maximum": 600,
+              "maximum": 1800,
               "description": "Default shim idle timeout for all codons in this hank (seconds)"
+            },
+            "budget": {
+              "type": "object",
+              "properties": {
+                "maxDollars": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Total cost budget in USD."
+                },
+                "maxTimeSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Wall-clock time limit in seconds."
+                },
+                "allocation": {
+                  "type": "string",
+                  "enum": [
+                    "shared",
+                    "proportional",
+                    "proportional-strict"
+                  ],
+                  "default": "shared",
+                  "description": "How the dollar budget is distributed among children. 'shared': first-past-the-post (default). 'proportional': pre-allocate shares, unspent flows back. 'proportional-strict': pre-allocate shares, unspent evaporates."
+                },
+                "shares": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "description": "Map of child codon/loop ID to fraction (0-1) of the budget."
+                },
+                "onExceeded": {
+                  "type": "string",
+                  "enum": [
+                    "complete",
+                    "fail"
+                  ],
+                  "description": "What happens when budget is exceeded. 'complete' = graceful completion (default). 'fail' = codon failure, triggers onFailure policy."
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false,
@@ -1098,8 +1141,42 @@
                   "shimIdleTimeout": {
                     "type": "integer",
                     "exclusiveMinimum": 0,
-                    "maximum": 600,
+                    "maximum": 1800,
                     "description": "Max seconds between agent events before the shim aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s)."
+                  },
+                  "budget": {
+                    "type": "object",
+                    "properties": {
+                      "maxDollars": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Max cost in USD. Execution stopped when exceeded."
+                      },
+                      "maxTimeSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Max wall-clock time in seconds."
+                      },
+                      "maxOutputTokens": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "description": "Max output tokens."
+                      },
+                      "maxContextTokens": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "description": "Max context window tokens (high-water mark of input+output per turn). Useful for capping context growth independent of cost."
+                      },
+                      "onExceeded": {
+                        "type": "string",
+                        "enum": [
+                          "complete",
+                          "fail"
+                        ],
+                        "description": "Override hank-level onExceeded for this codon."
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -2181,8 +2258,42 @@
                         "shimIdleTimeout": {
                           "type": "integer",
                           "exclusiveMinimum": 0,
-                          "maximum": 600,
+                          "maximum": 1800,
                           "description": "Max seconds between agent events before the shim aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s)."
+                        },
+                        "budget": {
+                          "type": "object",
+                          "properties": {
+                            "maxDollars": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Max cost in USD. Execution stopped when exceeded."
+                            },
+                            "maxTimeSeconds": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Max wall-clock time in seconds."
+                            },
+                            "maxOutputTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "description": "Max output tokens."
+                            },
+                            "maxContextTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "description": "Max context window tokens (high-water mark of input+output per turn). Useful for capping context growth independent of cost."
+                            },
+                            "onExceeded": {
+                              "type": "string",
+                              "enum": [
+                                "complete",
+                                "fail"
+                              ],
+                              "description": "Override hank-level onExceeded for this codon."
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -2195,6 +2306,50 @@
                     },
                     "minItems": 1,
                     "description": "Array of codons to execute in each iteration"
+                  },
+                  "budget": {
+                    "type": "object",
+                    "properties": {
+                      "maxDollars": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Total cost budget in USD."
+                      },
+                      "maxTimeSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Wall-clock time limit in seconds."
+                      },
+                      "allocation": {
+                        "type": "string",
+                        "enum": [
+                          "shared",
+                          "proportional",
+                          "proportional-strict"
+                        ],
+                        "default": "shared",
+                        "description": "How the dollar budget is distributed among children. 'shared': first-past-the-post (default). 'proportional': pre-allocate shares, unspent flows back. 'proportional-strict': pre-allocate shares, unspent evaporates."
+                      },
+                      "shares": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1
+                        },
+                        "description": "Map of child codon/loop ID to fraction (0-1) of the budget."
+                      },
+                      "onExceeded": {
+                        "type": "string",
+                        "enum": [
+                          "complete",
+                          "fail"
+                        ],
+                        "description": "What happens when budget is exceeded. 'complete' = graceful completion (default). 'fail' = codon failure, triggers onFailure policy."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Budget scope for this loop."
                   },
                   "archiveOnSuccess": {
                     "type": "array",

@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.5.7",
+  "version": "0.6.1",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -20,7 +20,6 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
-    "shims",
     "schemas"
   ],
   "engines": {
@@ -54,6 +53,7 @@
     "cleanup": "echo 'Error: --cleanup requires --config' && exit 1",
     "cleanup:example": "bun server/index.ts --cleanup --config=hank.json",
     "cleanup:force": "bun server/index.ts --cleanup --config=hank.json -y",
+    "test:shims": "bun scripts/test-shims.ts",
     "test:cross-runtime:bun": "bun scripts/run-cross-runtime-tests.ts bun",
     "test:cross-runtime:node": "bun scripts/run-cross-runtime-tests.ts node",
     "test:cross-runtime:deno": "bun scripts/run-cross-runtime-tests.ts deno",

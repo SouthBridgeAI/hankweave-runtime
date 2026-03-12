@@ -1,4 +1,5 @@
 import type { SessionId } from "./types/branded-types.js";
+import type { BudgetExceededData } from "./types/budget-types.js";
 import type { CodonStatus } from "./types/state-types.js";
 import type { FailureReason } from "./types/types.js";
 
@@ -19,6 +20,7 @@ export interface RunningMetadata {
 export interface CompletedMetadata {
   checkpointSha: string;
   resultMessageReceived?: boolean;
+  budgetExceeded?: BudgetExceededData;
 }
 
 // Metadata for transitioning to failed

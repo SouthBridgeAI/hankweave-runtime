@@ -1,0 +1,46 @@
+{
+  "name": "codex-shim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-contained Hankweave shim for OpenAI Codex via @openai/codex-sdk",
+  "type": "module",
+  "bin": {
+    "codex-shim": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "dist",
+    "src",
+    "tests",
+    "common",
+    "docs",
+    "README.md",
+    "rebuild.sh",
+    "VERSION",
+    "THIRDPARTY.md",
+    "tsconfig.json",
+    "tsup.config.ts",
+    "bun.lock"
+  ],
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.1.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "rebuild": "./rebuild.sh",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('index.js',{force:true});\""
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "^0.112.0",
+    "@shims/common": "file:./common"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.0"
+  }
+}

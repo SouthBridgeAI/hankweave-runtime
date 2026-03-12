@@ -1,0 +1,37 @@
+{
+  "name": "gemini-cli-shim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "gemini-cli-shim": "./index.js"
+  },
+  "files": [
+    "common",
+    "dist",
+    "docs",
+    "src",
+    "tests",
+    "index.js",
+    "README.md",
+    "THIRDPARTY.md",
+    "VERSION",
+    "rebuild.sh",
+    "tsconfig.json"
+  ],
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --banner:js='#!/usr/bin/env node'",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "clean": "node -e \"const fs=require('node:fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('index.js',{force:true});\""
+  },
+  "dependencies": {
+    "@shims/common": "file:./common"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.19.37",
+    "esbuild": "^0.27.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,31 +1,1360 @@
 #!/usr/bin/env node
-import{readFileSync as pe}from"fs";import{dirname as ge,join as fe}from"path";import{fileURLToPath as he}from"url";var Y=["none","standard","strict"];function J(s,e){let t={model:"",verbose:!1,idleTimeout:120,sandbox:"none",selfTest:!1,version:!1,help:!1};for(let r=0;r<s.length;r++){let i=s[r];if(i.includes("=")){let[n,l]=i.split("=",2);s.splice(r,1,n,l),i=n}switch(e&&i in e&&(i=e[i]),i){case"--model":t.model=s[++r];break;case"--resume":t.resume=s[++r];break;case"--verbose":t.verbose=!0;break;case"--append-system-prompt":t.appendSystemPrompt=s[++r];break;case"--debug-dir":t.debugDir=s[++r];break;case"--idle-timeout":{let n=Number(s[++r]);(!Number.isFinite(n)||n<=0)&&(console.error("Invalid --idle-timeout value: must be a positive number"),process.exit(1)),t.idleTimeout=n;break}case"--sandbox":{let n=s[++r];Y.includes(n)||(console.error(`Invalid --sandbox value: must be one of ${Y.join(", ")}`),process.exit(1)),t.sandbox=n;break}case"--self-test":t.selfTest=!0;break;case"--version":t.version=!0;break;case"--help":t.help=!0;break}}return t}import{spawn as A}from"child_process";import{createWriteStream as O}from"fs";import{mkdir as z}from"fs/promises";import{isAbsolute as G,resolve as h}from"path";import{createInterface as le}from"readline";var _=class{constructor(e){this.options=e;this.verbose=e.verbose}process=null;verbose;rawEventStream=null;stderrStream=null;stderrBuffer="";currentSessionId="unknown";static async isInstalled(){return new Promise(e=>{let t=process.platform==="win32",i=A(t?"where":"which",["gemini"],{shell:t}),n="";i.stdout?.on("data",l=>{n+=l.toString()}),i.on("close",l=>{if(l===0&&n.trim()){let c=A("gemini",["--version"],{shell:t}),o="";c.stdout?.on("data",m=>{o+=m.toString()}),c.on("close",()=>{e({found:!0,path:n.trim(),version:o.trim()})})}else e({found:!1})})})}async initializeDebugStreams(e){if(this.options.debugDir)try{let t=G(this.options.debugDir)?this.options.debugDir:h(this.options.cwd,this.options.debugDir);await z(t,{recursive:!0});let r=h(t,`session-${e}.raw.jsonl`);this.rawEventStream=O(r,{flags:"a",encoding:"utf8"});let i=h(t,`session-${e}.raw.log`);this.stderrStream=O(i,{flags:"a",encoding:"utf8"}),this.stderrBuffer&&(this.stderrStream.write(this.stderrBuffer),this.stderrBuffer=""),this.currentSessionId=e}catch(t){throw new Error(`Failed to create debug log files in ${this.options.debugDir}: ${t instanceof Error?t.message:String(t)}`)}}async renameDebugStreams(e){if(!(!this.options.debugDir||this.currentSessionId===e))try{let t=G(this.options.debugDir)?this.options.debugDir:h(this.options.cwd,this.options.debugDir);await this.closeDebugStreams();let{rename:r}=await import("fs/promises"),i=h(t,`session-${this.currentSessionId}.raw.jsonl`),n=h(t,`session-${e}.raw.jsonl`),l=h(t,`session-${this.currentSessionId}.raw.log`),c=h(t,`session-${e}.raw.log`);try{await r(i,n)}catch(o){this.verbose&&console.error(`[gemini-cli-shim] Could not rename ${i}:`,o)}try{await r(l,c)}catch(o){this.verbose&&console.error(`[gemini-cli-shim] Could not rename ${l}:`,o)}await this.initializeDebugStreams(e)}catch(t){throw new Error(`Failed to rename debug log files: ${t instanceof Error?t.message:String(t)}`)}}writeRawEvent(e){this.rawEventStream&&this.rawEventStream.write(`${JSON.stringify(e)}
-`)}writeStderr(e){this.options.debugDir&&(this.stderrStream?this.stderrStream.write(e):this.stderrBuffer+=e)}async closeDebugStreams(){let e=[];if(this.stderrBuffer&&!this.stderrStream&&this.options.debugDir)try{let t=G(this.options.debugDir)?this.options.debugDir:h(this.options.cwd,this.options.debugDir);await z(t,{recursive:!0});let r=h(t,`session-${this.currentSessionId}.raw.log`),i=O(r,{flags:"a",encoding:"utf8"});await new Promise((n,l)=>{i.write(this.stderrBuffer,c=>{c?l(c):i.end(o=>{o?l(o):n()})})}),this.stderrBuffer=""}catch(t){console.error("[gemini-cli-shim] Error flushing buffered stderr:",t)}this.rawEventStream&&(e.push(new Promise((t,r)=>{this.rawEventStream?.end(i=>{i?r(i):t()})})),this.rawEventStream=null),this.stderrStream&&(e.push(new Promise((t,r)=>{this.stderrStream?.end(i=>{i?r(i):t()})})),this.stderrStream=null),await Promise.all(e)}async spawn(e){let t=["--model",this.options.model,"--output-format","stream-json","--yolo"];this.options.sandbox!=="none"&&t.push("--sandbox"),this.options.resume&&t.push("--resume",this.options.resume),this.verbose&&console.error("[gemini-cli-shim] Spawning gemini:",t.join(" "));let r=process.platform==="win32";this.process=A("gemini",t,{cwd:this.options.cwd,stdio:["pipe","pipe","pipe"],env:{...process.env,...this.options.sandbox==="strict"&&{SEATBELT_PROFILE:"strict-open"}},shell:r}),this.options.debugDir&&await this.initializeDebugStreams("unknown");let i=this.options.appendSystemPrompt?`${e}
 
-Additional instructions: ${this.options.appendSystemPrompt}`:e;return this.process.stdin?.write(i),this.process.stdin?.end(),this.createEventStream()}async*createEventStream(){if(!this.process||!this.process.stdout||!this.process.stderr)throw new Error("Process not spawned");let e="",t=!1,r=!1,i="",n=null;this.process.stderr.on("data",c=>{let o=c.toString();e+=o,this.writeStderr(o),!r&&(o.includes("Error resuming session:")||o.includes("Invalid session identifier"))&&(t=!0,r=!0,this.verbose&&console.error("[gemini-cli-shim] Session error detected, killing process"),this.process&&this.process.kill("SIGKILL")),this.verbose&&console.error("[gemini stderr]",o)});let l=le({input:this.process.stdout,crlfDelay:1/0});if(t)throw new Error("Invalid session ID");try{for await(let c of l){let o=c.trim();if(t)throw new Error("Invalid session ID");if(o)try{let m=JSON.parse(o);m.type==="init"&&m.session_id&&(i=m.session_id,this.options.debugDir&&this.currentSessionId==="unknown"&&await this.renameDebugStreams(i)),this.writeRawEvent(m),this.verbose&&console.error("[gemini event]",JSON.stringify(m)),yield m}catch(m){this.verbose&&(console.error("[gemini-cli-shim] Failed to parse line:",o),console.error("[gemini-cli-shim] Error:",m))}}}catch(c){throw t?new Error("Invalid session ID"):c}if(t)throw new Error("Invalid session ID");await new Promise((c,o)=>{if(!this.process){t?o(new Error("Invalid session ID")):c();return}let m=setTimeout(()=>{this.verbose&&console.error("[gemini-cli-shim] Process exit timeout, forcing kill"),this.kill(),o(t?new Error("Invalid session ID"):new Error("Process did not exit within timeout"))},2e3);this.process.on("close",async d=>{clearTimeout(m),n=d;try{await this.closeDebugStreams()}catch(I){console.error("[gemini-cli-shim] Error closing debug streams:",I)}t?o(new Error("Invalid session ID")):d===0||d===null?c():o(new Error(`Gemini CLI exited with code ${d}`))}),this.process.on("error",async d=>{clearTimeout(m);try{await this.closeDebugStreams()}catch(I){console.error("[gemini-cli-shim] Error closing debug streams:",I)}o(t?new Error("Invalid session ID"):d)})})}kill(){this.process&&(this.process.kill("SIGTERM"),this.process=null)}};import{readFileSync as ue}from"fs";import{resolve as de}from"path";import{randomUUID as Le}from"crypto";import Ne from"fs";import Ce from"path";var L=class extends Error{timeoutMs;constructor(e){super(`Idle timeout: no events received for ${e}ms`),this.name="IdleTimeoutError",this.timeoutMs=e}};async function*q(s,e){let t=s[Symbol.asyncIterator]();try{for(;;){let r;try{let i=await Promise.race([t.next(),new Promise((n,l)=>{r=setTimeout(()=>{l(new L(e))},e)})]);if(i.done)break;yield i.value}finally{clearTimeout(r)}}}finally{t.return?.()}}var H=["Read","Write","Edit","Bash","Glob","Grep","LS"];var V={sonnet:"anthropic/claude-sonnet-4-20250514",haiku:"anthropic/claude-3-haiku",opus:"anthropic/claude-opus-4-5-20251101",flash:"google/gemini-2.0-flash",pro:"google/gemini-2.0-pro"};function Z(s){if(!s){let e=process.env.MODEL;e?s=e:s="flash"}if(V[s]){let e=V[s];return e.startsWith("google/")?e.replace("google/",""):e}if(s.includes("/")){let[e,t]=s.split("/",2);return e==="google"?t:s}return s}function E(s){return s.startsWith("anthropic/")?s.replace("anthropic/",""):!s.includes("/")&&(s.startsWith("gemini-")||s==="flash"||s==="pro")?`google/${s}`:s}import{randomBytes as X}from"crypto";function R(){let s=Date.now().toString(36),e=X(5).toString("hex");return`msg_${s}${e}`}function N(){let s=Date.now().toString(36),e=X(6).toString("hex");return`toolu_${s}${e}`}var x="00000000-0000-0000-0000-000000000000";var ce={read_file:"Read",readFile:"Read",file_read:"Read",write_file:"Write",writeFile:"Write",file_write:"Write",edit_file:"Edit",editFile:"Edit",str_replace_editor:"Edit",run_shell_command:"Bash",bash:"Bash",shell:"Bash",execute_bash:"Bash",list_directory:"LS",ls:"LS",list:"LS",list_dir:"LS",glob:"Glob",find_files:"Glob",grep:"Grep",search_files:"Grep",search:"Grep"};function Q(s){return ce[s]||s}function me(s){return s.replace(/[A-Z]/g,e=>`_${e.toLowerCase()}`)}function ee(s){if(!s)return s;let e={};for(let[t,r]of Object.entries(s))e[me(t)]=r;return e}function k(){return[...H]}function y(s){console.log(JSON.stringify(s))}function $(){return process.env.GOOGLE_API_KEY?"GOOGLE_API_KEY":process.env.GEMINI_API_KEY?"GEMINI_API_KEY":"none"}async function se(s,e){let t=Date.now(),r=0,i=0,n="",l=0,c={input_tokens:0,output_tokens:0},o=!1,m="",d=!1;if(e.debugDir)try{let{mkdirSync:p}=await import("fs");p(e.debugDir,{recursive:!0})}catch{}let I="Always repeat the results of your tool calls (like file contents or command output) in your text response. This is critical for verification.",ie=e.appendSystemPrompt?`${I}
-${e.appendSystemPrompt}`:I,oe={...e,appendSystemPrompt:ie},C=new Set,U=new Map,B=new Map,w=[],T=R(),D=!1,b="";try{let P=await new _(oe).spawn(s),K=q(P,e.idleTimeout*1e3);for await(let a of K)switch(a.type){case"init":{n=a.session_id,d=!0;let u={type:"system",subtype:"init",cwd:e.cwd,session_id:n,tools:k(),model:E(e.model),permissionMode:"bypassPermissions",apiKeySource:$(),mcp_servers:[]};y(u),r=Date.now();break}case"message":{if(a.role==="assistant"){if(a.delta)D=!0,b+=a.content,w.push({type:"text",text:a.content});else if(!D)w.push({type:"text",text:a.content}),b=a.content;else if(a.content.length>b.length&&a.content.startsWith(b)){let u=a.content.slice(b.length);u.trim()&&(w.push({type:"text",text:u}),b=a.content)}}break}case"tool_use":{if(!C.has(a.tool_id)){C.add(a.tool_id);let u=N();U.set(a.tool_id,u);let v=Q(a.tool_name),S=ee(a.parameters);B.set(a.tool_id,{name:v,params:a.parameters}),w.push({type:"tool_use",id:u,name:v,input:S});let j={type:"assistant",message:{id:T,type:"message",role:"assistant",model:E(e.model),content:w,stop_reason:"tool_use"}};y(j),w=[],T=R(),D=!1,b="",l++}break}case"tool_result":{let u=U.get(a.tool_id)||N(),v=B.get(a.tool_id),S="";if(a.status==="error")S={is_error:!0,error:a.error||"Unknown error"};else{let F=a;if(S=a.output!==void 0?a.output:F.result||F.content||"",v?.name==="Read"&&S===""){let M=v.params?.file_path||v.params?.filePath||v.params?.path;if(M&&typeof M=="string")try{let W=de(e.cwd,M);S=ue(W,"utf-8")}catch{}}}y({type:"user",message:{role:"user",content:[{type:"tool_result",tool_use_id:u,content:S}]}}),D=!1,b="";break}case"result":{if(i=Date.now(),w.length>0){let u={type:"assistant",message:{id:T,type:"message",role:"assistant",model:E(e.model),content:w,stop_reason:"end_turn"}};y(u),l++}c.input_tokens=(c.input_tokens||0)+(a.stats.input_tokens||0),c.output_tokens=(c.output_tokens||0)+(a.stats.output_tokens||0),o=a.status==="error",m=o?"Error completing request":"Request completed successfully";break}}}catch(p){let P=p instanceof Error?p.message:String(p);if(P.includes("Invalid session ID"))throw p;if(o=!0,m=`Agent Error: ${P}`,!d){let a={type:"system",subtype:"init",cwd:e.cwd,session_id:n||x,tools:k(),model:E(e.model),permissionMode:"bypassPermissions",apiKeySource:$(),mcp_servers:[]};y(a),d=!0}y({type:"assistant",message:{id:x,type:"message",role:"assistant",model:"<synthetic>",content:[{type:"text",text:m}]}})}let ne=Date.now(),ae={type:"result",subtype:o?"error":"success",is_error:o,duration_ms:ne-t,duration_api_ms:i>0?i-r:0,num_turns:l,result:m,session_id:n,usage:c};return y(ae),await new Promise(p=>{process.stdout.write("",()=>p())}),{exitCode:o?1:0,sessionId:n}}async function te(s,e){let t={type:"system",subtype:"init",cwd:process.cwd(),session_id:e||x,tools:k(),model:"<unknown>",permissionMode:"bypassPermissions",apiKeySource:$(),mcp_servers:[]};y(t);let r={type:"assistant",message:{id:x,type:"message",role:"assistant",model:"<synthetic>",content:[{type:"text",text:`API Error: ${s}`}]}};y(r),y({type:"result",subtype:"error",is_error:!0,duration_ms:0,duration_api_ms:0,num_turns:0,result:s,session_id:e}),await new Promise(n=>{process.stdout.write("",()=>n())})}var ye=he(import.meta.url),we=ge(ye);async function be(){let s=[];for await(let e of process.stdin)s.push(Buffer.from(e));return Buffer.concat(s).toString("utf-8").trim()}function re(){console.error(`
-Gemini CLI Shim - Translate Gemini CLI to standardized JSONL output
+// src/index.ts
+import process3 from "node:process";
 
-Usage: gemini-cli-shim [options]
+// src/args.ts
+function parseArgs(argv) {
+  const args = {
+    model: process.env.MODEL || "gemini-2.5-flash",
+    verbose: false,
+    idleTimeout: 120,
+    sandbox: "none",
+    selfTest: false,
+    version: false,
+    help: false
+  };
+  const takeValue = (index, current) => {
+    if (current.includes("=")) {
+      const [, value] = current.split(/=(.*)/s, 2);
+      return [value, index];
+    }
+    return [argv[index + 1], index + 1];
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const raw = argv[i] ?? "";
+    const key = raw.includes("=") ? raw.split("=", 1)[0] : raw;
+    switch (key) {
+      case "-p":
+        break;
+      case "--model": {
+        const [value, nextIndex] = takeValue(i, raw);
+        if (value) {
+          args.model = value;
+          i = nextIndex;
+        }
+        break;
+      }
+      case "--resume": {
+        const [value, nextIndex] = takeValue(i, raw);
+        if (value) {
+          args.resume = value;
+          i = nextIndex;
+        }
+        break;
+      }
+      case "--verbose":
+        args.verbose = true;
+        break;
+      case "--append-system-prompt": {
+        const [value, nextIndex] = takeValue(i, raw);
+        if (value !== void 0) {
+          args.appendSystemPrompt = value;
+          i = nextIndex;
+        }
+        break;
+      }
+      case "--debug-dir": {
+        const [value, nextIndex] = takeValue(i, raw);
+        if (value) {
+          args.debugDir = value;
+          i = nextIndex;
+        }
+        break;
+      }
+      case "--idle-timeout": {
+        const [value, nextIndex] = takeValue(i, raw);
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          throw new Error("Invalid --idle-timeout value: must be a positive number");
+        }
+        args.idleTimeout = parsed;
+        i = nextIndex;
+        break;
+      }
+      case "--sandbox": {
+        const [value, nextIndex] = takeValue(i, raw);
+        if (value === "none" || value === "standard" || value === "strict") {
+          args.sandbox = value;
+          i = nextIndex;
+        } else {
+          throw new Error("Invalid --sandbox value: must be one of none, standard, strict");
+        }
+        break;
+      }
+      case "--self-test":
+        args.selfTest = true;
+        break;
+      case "--version":
+        args.version = true;
+        break;
+      case "--help":
+        args.help = true;
+        break;
+      default:
+        break;
+    }
+  }
+  return args;
+}
+function printHelp() {
+  process.stdout.write(`Gemini CLI shim
 
-Required Arguments:
-  --model <model>              Model identifier (shortname, provider/model, or full ID)
+Usage:
+  gemini-cli-shim --model <model> [options]
 
-Optional Arguments:
-  -p                           Indicates prompt via stdin (optional, stdin always read)
-  --resume <session_id>        Session ID to continue
-  --verbose                    Enable verbose logging to stderr
-  --append-system-prompt <txt> Additional system prompt to append
-  --idle-timeout <seconds>     Max seconds between agent events before aborting (default: 120)
-  --debug-dir <path>           Directory for debug logs and session data
-  --sandbox <level>            Sandbox level: none (default), standard, or strict
-  --self-test                  Run environment verification
-  --version                    Print version and exit
-  --help                       Print this help and exit
+Options:
+  -p                              Prompt via stdin (accepted, optional)
+  --model <model>                 Gemini model or alias (for example: gemini-2.5-flash, google/gemini-2.5-pro, flash, pro)
+  --resume <session_id>           Resume an existing Gemini session UUID
+  --verbose                       Verbose stderr logging
+  --append-system-prompt <text>   Extra system instructions appended to the internal shim prompt
+  --idle-timeout <seconds>        Baseline idle timeout before work starts (default: 120)
+  --debug-dir <path>              Write raw debug logs into this directory
+  --sandbox <level>               none | standard | strict
+  --self-test                     Verify environment and print JSON
+  --version                       Print version
+  --help                          Print help
+`);
+}
+async function readStdinTrimmed() {
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8").trim();
+}
 
-Examples:
-  echo "Hello" | gemini-cli-shim --model flash
-  echo "Continue" | gemini-cli-shim --model pro --resume <session_id>
-  echo "Debug" | gemini-cli-shim --model flash --debug-dir ./debug
-  gemini-cli-shim --self-test
-`)}function ve(){try{let s=fe(we,"..","package.json"),e=JSON.parse(pe(s,"utf-8"));console.error(`gemini-cli-shim v${e.version}`)}catch{console.error("gemini-cli-shim (version unknown)")}}async function Se(){let s=[],e=await _.isInstalled();s.push({name:"gemini_cli_found",passed:e.found,message:e.found?`Gemini CLI found at ${e.path} (${e.version})`:"Gemini CLI not found in PATH"});let t=!!(process.env.GOOGLE_API_KEY||process.env.GEMINI_API_KEY);s.push({name:"api_key",passed:t,message:t?"API key found in environment":"No GOOGLE_API_KEY or GEMINI_API_KEY found"});let r=s.every(n=>n.passed),i={shim:{name:"gemini-cli-shim",version:"1.0.0"},agent:{name:"gemini-cli",version:e.version||"unknown",found:e.found},checks:s,overall:{passed:r,message:r?"All checks passed":"Some checks failed"}};console.log(JSON.stringify(i,null,2)),process.exit(r?0:1)}async function _e(){let s=J(process.argv.slice(2),{"-m":"--model","-r":"--resume","-v":"--verbose","-h":"--help"});if(s.help&&(re(),process.exit(0)),s.version&&(ve(),process.exit(0)),s.selfTest){await Se();return}s.model||(console.error("Error: --model is required"),re(),process.exit(1));let e=await be();e||process.exit(0);let t=Z(s.model);(await _.isInstalled()).found||(console.error("Error: Gemini CLI not found in PATH"),console.error("Please install Gemini CLI: https://geminicli.com/docs/"),process.exit(1)),!process.env.GOOGLE_API_KEY&&!process.env.GEMINI_API_KEY&&(console.error("Error: No API key found"),console.error("Set GOOGLE_API_KEY or GEMINI_API_KEY environment variable"),process.exit(1));let i=!1,n=()=>{i||(i=!0,s.verbose&&console.error("[gemini-cli-shim] Received interrupt signal, exiting gracefully"),process.exit(0))};process.on("SIGINT",n),process.on("SIGTERM",n);try{let l=await se(e,{model:t,resume:s.resume,verbose:s.verbose,cwd:process.cwd(),appendSystemPrompt:s.appendSystemPrompt,debugDir:s.debugDir,idleTimeout:s.idleTimeout,sandbox:s.sandbox});process.exit(l.exitCode)}catch(l){let c=l instanceof Error?l.message:String(l);c.includes("Invalid session ID")&&(console.error(`Error: Session not found: ${s.resume}`),console.error("Use a valid session ID to resume"),process.exit(1)),await te(c),process.exit(1)}}_e().catch(s=>{console.error("Fatal error:",s),process.exit(1)});
+// node_modules/@shims/common/src/tools.ts
+var STANDARD_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "LS"];
+
+// src/constants.ts
+var SHIM_NAME = "gemini-cli-shim";
+var SHIM_VERSION = "0.1.0";
+var KNOWN_TOOLS = [...STANDARD_TOOLS];
+var MAX_SILENT_SUCCESS_RETRIES = 1;
+var MAX_INVALID_JSON_REPAIRS = 2;
+
+// src/shim.ts
+import { spawn } from "node:child_process";
+import path4 from "node:path";
+import process2 from "node:process";
+import { createInterface } from "node:readline";
+
+// node_modules/@shims/common/src/timeout.ts
+var IdleTimeoutError = class extends Error {
+  timeoutMs;
+  constructor(timeoutMs) {
+    super(`Idle timeout: no events received for ${timeoutMs}ms`);
+    this.name = "IdleTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+};
+var BusyStepTimeoutError = class extends Error {
+  timeoutMs;
+  constructor(timeoutMs) {
+    super(`Busy-step stall timeout: no observed activity for ${timeoutMs}ms`);
+    this.name = "BusyStepTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+};
+async function* withAdaptiveTimeout(events, options) {
+  const iterator = events[Symbol.asyncIterator]();
+  let state = "idle";
+  const busyTimeoutMs = Math.max(
+    options.busyTimeoutMs ?? options.idleTimeoutMs,
+    options.idleTimeoutMs
+  );
+  const controller = {
+    markBusy() {
+      state = "busy";
+    },
+    markIdle() {
+      state = "idle";
+    },
+    get state() {
+      return state;
+    }
+  };
+  try {
+    while (true) {
+      const timeoutMs = state === "busy" ? busyTimeoutMs : options.idleTimeoutMs;
+      let timeoutId;
+      try {
+        const result = await Promise.race([
+          iterator.next(),
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(
+                state === "busy" ? new BusyStepTimeoutError(timeoutMs) : new IdleTimeoutError(timeoutMs)
+              );
+            }, timeoutMs);
+          })
+        ]);
+        if (result.done) break;
+        options.onEvent?.(result.value, controller);
+        yield result.value;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+  } finally {
+    void iterator.return?.();
+  }
+}
+
+// src/debug.ts
+import { appendFile as appendFile2, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+// src/filesystem.ts
+import { appendFile, access, mkdir, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+async function pathExists(target) {
+  try {
+    await access(target, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function ensureDir(dir) {
+  await mkdir(dir, { recursive: true });
+}
+async function writeJsonDebugLine(filePath, event) {
+  await appendFile(filePath, JSON.stringify(event) + "\n", "utf8");
+}
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function findInvalidJsonFiles(filePaths) {
+  const invalid = [];
+  for (const filePath of filePaths) {
+    if (!filePath.toLowerCase().endsWith(".json")) {
+      continue;
+    }
+    try {
+      const content = await readFile(filePath, "utf8");
+      JSON.parse(content);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      invalid.push({ filePath, error: message });
+    }
+  }
+  return invalid;
+}
+
+// src/debug.ts
+async function bindDebugSession(debug, sessionId) {
+  if (!debug.debugDir || debug.sessionId) return;
+  debug.sessionId = sessionId;
+  debug.jsonlPath = path.join(debug.debugDir, `session-${sessionId}.raw.jsonl`);
+  debug.logPath = path.join(debug.debugDir, `session-${sessionId}.raw.log`);
+  await ensureDir(debug.debugDir);
+  for (const event of debug.bufferedEvents) {
+    await writeJsonDebugLine(debug.jsonlPath, event);
+  }
+  debug.bufferedEvents = [];
+  if (debug.bufferedStderr.length > 0) {
+    await ensureLogFile(debug.logPath, debug.bufferedStderr.join(""));
+    debug.bufferedStderr = [];
+  } else {
+    await ensureLogFile(debug.logPath, "");
+  }
+}
+async function captureStderr(debug, text) {
+  if (!debug.debugDir) return;
+  if (debug.logPath) {
+    await ensureLogFile(debug.logPath, text, true);
+  } else {
+    debug.bufferedStderr.push(text);
+  }
+}
+async function writeUnknownLog(debug, text) {
+  if (!debug.debugDir) return;
+  const unknownLog = path.join(debug.debugDir, "session-unknown.raw.log");
+  await ensureLogFile(unknownLog, text, true);
+}
+async function ensureLogFile(filePath, text, appendOnly = false) {
+  if (!await pathExists(filePath)) {
+    await ensureDir(path.dirname(filePath));
+    await writeFile(filePath, text, "utf8");
+    return;
+  }
+  if (!appendOnly && text === "") {
+    return;
+  }
+  await appendFile2(filePath, text, "utf8");
+}
+
+// src/ids.ts
+var NIL_UUID = "00000000-0000-0000-0000-000000000000";
+var UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function validateResumeSessionId(value) {
+  if (!UUID_V4_REGEX.test(value)) {
+    throw new Error(`Invalid session ID: ${value}`);
+  }
+}
+function generateMessageId() {
+  return `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+function generateToolUseId() {
+  return `toolu_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+}
+
+// src/models.ts
+function formatGeminiOutputModel(model) {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return "google/gemini-2.5-flash";
+  }
+  return trimmed.includes("/") ? trimmed : `google/${trimmed}`;
+}
+function normalizeModelForGeminiCli(model) {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return {
+      requested: "gemini-2.5-flash",
+      outputModel: "google/gemini-2.5-flash",
+      geminiModel: "gemini-2.5-flash"
+    };
+  }
+  const short = trimmed.toLowerCase();
+  if (short === "flash") {
+    return {
+      requested: trimmed,
+      outputModel: "google/gemini-2.5-flash",
+      geminiModel: "gemini-2.5-flash"
+    };
+  }
+  if (short === "pro") {
+    return {
+      requested: trimmed,
+      outputModel: "google/gemini-2.5-pro",
+      geminiModel: "gemini-2.5-pro"
+    };
+  }
+  if (trimmed.includes("/")) {
+    const [, rest] = trimmed.split(/\/(.*)/s, 2);
+    const geminiModel = rest || trimmed;
+    return {
+      requested: trimmed,
+      outputModel: formatGeminiOutputModel(trimmed),
+      geminiModel
+    };
+  }
+  return {
+    requested: trimmed,
+    outputModel: formatGeminiOutputModel(trimmed),
+    geminiModel: trimmed
+  };
+}
+function getApiKeySource() {
+  if (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" || process.env.GOOGLE_GENAI_USE_GCA === "true") {
+    return "env";
+  }
+  return "none";
+}
+
+// src/output.ts
+function syntheticErrorMessage(prefix, text, model = "<synthetic>") {
+  return {
+    type: "assistant",
+    message: {
+      id: NIL_UUID,
+      type: "message",
+      role: "assistant",
+      model,
+      content: [{ type: "text", text: `${prefix}: ${text}` }],
+      stop_reason: null
+    }
+  };
+}
+function emit(message) {
+  process.stdout.write(JSON.stringify(message) + "\n");
+}
+async function flushStdout() {
+  await new Promise((resolve, reject) => {
+    process.stdout.write("", (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+function summarizeText(text) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "Completed successfully.";
+  }
+  return trimmed.length > 500 ? `${trimmed.slice(0, 497)}...` : trimmed;
+}
+function countNumberedSteps(text) {
+  return text.match(/(?:^|\n)\s*\d+\.\s+/g)?.length ?? 0;
+}
+function shouldRetrySilentSuccessTurn(input) {
+  return !input.isError && !input.sawAssistantText && !input.sawToolUse && !input.sawToolResult;
+}
+
+// src/process-utils.ts
+import { readFile as readFile2 } from "node:fs/promises";
+import os from "node:os";
+import path2 from "node:path";
+function trackChildExit(child) {
+  if (child.exitCode !== null) {
+    return Promise.resolve(child.exitCode);
+  }
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onClose = (code) => {
+      cleanup();
+      resolve(code ?? child.exitCode ?? 1);
+    };
+    const cleanup = () => {
+      child.removeListener("error", onError);
+      child.removeListener("close", onClose);
+    };
+    child.once("error", onError);
+    child.once("close", onClose);
+  });
+}
+async function which(command) {
+  const isWindows = process.platform === "win32";
+  const { spawn: spawn2 } = await import("node:child_process");
+  return await new Promise((resolve) => {
+    const proc = spawn2(isWindows ? "where" : "which", [command], {
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: isWindows
+    });
+    let output = "";
+    proc.stdout.on("data", (chunk) => {
+      output += String(chunk);
+    });
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(output.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+async function loadGeminiSettingsAuthType() {
+  try {
+    const settingsPath = path2.join(os.homedir(), ".gemini", "settings.json");
+    const content = JSON.parse(await readFile2(settingsPath, "utf8"));
+    return content?.security?.auth?.selectedType ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// src/prompts.ts
+function buildGeminiPrompt(prompt, appendSystemPrompt) {
+  const internalInstructions = [
+    "You are running behind a machine-oriented shim.",
+    "Answer directly from the conversation context and tool results whenever possible.",
+    "If the user explicitly asks you to create, update, or maintain a file, do that with tools before ending the turn.",
+    "When the user gives a numbered or ordered task list, complete every requested step in sequence before finishing.",
+    "Do not stop after an intermediate answer if additional requested steps remain.",
+    "If the user asks for ongoing research notes or a progress file, keep that file updated as you work.",
+    "If the user asks for research, use the available search/web/file tools rather than answering from memory alone whenever the request calls for current sources.",
+    "When creating machine-readable files such as JSON, ensure the final file contents are syntactically valid before ending the turn.",
+    "Do not delegate to CLI help, documentation helpers, or other subagents unless the user explicitly asks about Gemini CLI usage or external documentation.",
+    "If the user asks what they told you earlier in this same conversation, answer from the conversation history directly."
+  ].join(" ");
+  if (!appendSystemPrompt?.trim()) {
+    return [
+      "SYSTEM INSTRUCTIONS (highest priority for this run):",
+      internalInstructions,
+      "",
+      "USER PROMPT:",
+      prompt
+    ].join("\n");
+  }
+  return [
+    "SYSTEM INSTRUCTIONS (highest priority for this run):",
+    internalInstructions,
+    "",
+    "ADDITIONAL CALLER SYSTEM INSTRUCTIONS:",
+    appendSystemPrompt.trim(),
+    "",
+    "USER PROMPT:",
+    prompt
+  ].join("\n");
+}
+function buildSilentTurnRecoveryPrompt() {
+  return [
+    "System: Your previous turn produced no assistant-visible text, tool calls, or tool results.",
+    "Continue the pending user request now.",
+    "You must either produce assistant text or use tools to complete the requested work before ending the turn.",
+    "Do not end with an empty response."
+  ].join(" ");
+}
+function buildRemainingStepsPrompt() {
+  return [
+    "System: Re-check the user's original numbered task list.",
+    "If any requested numbered steps are still incomplete, complete them now before you finish.",
+    "If everything is already complete, briefly confirm that all requested steps are done."
+  ].join(" ");
+}
+function buildInvalidJsonRepairPrompt(invalidFiles) {
+  return [
+    "System: Re-check the machine-readable files you created or modified.",
+    `These files are currently invalid JSON: ${invalidFiles.join("; ")}.`,
+    "Use tools to read the current file contents, repair them, and verify the final on-disk files parse as valid JSON before you end the turn.",
+    "If a previous repair introduced extra escaping, remove the extra escaping so the file itself is valid JSON.",
+    "After repairing them, briefly confirm which files were fixed."
+  ].join(" ");
+}
+
+// src/session-files.ts
+import { readFile as readFile3, readdir } from "node:fs/promises";
+import os2 from "node:os";
+import path3 from "node:path";
+var sessionFileCache = /* @__PURE__ */ new Map();
+async function findGeminiSessionFile(sessionId) {
+  const cached = sessionFileCache.get(sessionId);
+  if (cached && await pathExists(cached)) {
+    return cached;
+  }
+  const baseDir = path3.join(os2.homedir(), ".gemini", "tmp");
+  if (!await pathExists(baseDir)) {
+    return void 0;
+  }
+  const prefix = sessionId.slice(0, 8);
+  const firstLevel = await readdir(baseDir, { withFileTypes: true });
+  for (const entry of firstLevel) {
+    if (!entry.isDirectory()) continue;
+    const chatsDir = path3.join(baseDir, entry.name, "chats");
+    if (!await pathExists(chatsDir)) continue;
+    const files = await readdir(chatsDir);
+    for (const file of files) {
+      if (!file.startsWith("session-") || !file.endsWith(".json") || !file.includes(prefix)) continue;
+      const filePath = path3.join(chatsDir, file);
+      try {
+        const content = JSON.parse(await readFile3(filePath, "utf8"));
+        if (content.sessionId === sessionId) {
+          sessionFileCache.set(sessionId, filePath);
+          return filePath;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return void 0;
+}
+async function readSessionFile(sessionId) {
+  const filePath = await findGeminiSessionFile(sessionId);
+  if (!filePath) return void 0;
+  try {
+    return JSON.parse(await readFile3(filePath, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+async function waitForToolRecord(sessionId, toolId, timeoutMs = 2e3) {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    const data = await readSessionFile(sessionId);
+    if (data?.messages.some((message) => message.toolCalls?.some((call) => call.id === toolId))) {
+      return data;
+    }
+    await sleep(100);
+  }
+  return readSessionFile(sessionId);
+}
+function extractMeaningfulToolContent(session, toolId, fallbackOutput) {
+  if (fallbackOutput && fallbackOutput.trim()) {
+    return fallbackOutput;
+  }
+  const toolCall = session?.messages.flatMap((message) => message.toolCalls ?? []).find((call) => call.id === toolId);
+  if (!toolCall) {
+    return fallbackOutput && fallbackOutput.trim() ? fallbackOutput : void 0;
+  }
+  const functionResponseOutput = extractOutputFromResult(toolCall.result);
+  if (functionResponseOutput?.trim()) {
+    return functionResponseOutput;
+  }
+  const resultDisplay = toolCall.resultDisplay;
+  if (typeof resultDisplay === "string" && resultDisplay.trim()) {
+    return resultDisplay;
+  }
+  if (resultDisplay && typeof resultDisplay === "object") {
+    const record = resultDisplay;
+    if (typeof record.fileDiff === "string" && record.fileDiff.trim()) {
+      return record.fileDiff;
+    }
+    if (typeof record.filePath === "string") {
+      return `File updated: ${record.filePath}`;
+    }
+    if (typeof record.fileName === "string") {
+      return `File updated: ${record.fileName}`;
+    }
+  }
+  return fallbackOutput && fallbackOutput.trim() ? fallbackOutput : void 0;
+}
+function extractOutputFromResult(result) {
+  if (!Array.isArray(result)) return void 0;
+  for (const item of result) {
+    if (!item || typeof item !== "object") continue;
+    const functionResponse = item.functionResponse;
+    if (!functionResponse || typeof functionResponse !== "object") continue;
+    const response = functionResponse.response;
+    if (!response || typeof response !== "object") continue;
+    const output = response.output;
+    if (typeof output === "string") {
+      return output;
+    }
+  }
+  return void 0;
+}
+function aggregateInvocationUsage(session, invocationStartIso) {
+  if (!session) return void 0;
+  const startMs = Date.parse(invocationStartIso);
+  const totals = /* @__PURE__ */ new Map();
+  for (const message of session.messages) {
+    if (message.type !== "gemini" || !message.model || !message.tokens) continue;
+    if (Date.parse(message.timestamp) < startMs) continue;
+    const current = totals.get(message.model) ?? {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 0,
+      cost_usd: 0
+    };
+    current.input_tokens += Number(message.tokens.input ?? 0);
+    current.output_tokens += Number(message.tokens.output ?? 0);
+    current.cache_read_input_tokens = (current.cache_read_input_tokens ?? 0) + Number(message.tokens.cached ?? 0);
+    totals.set(message.model, current);
+  }
+  if (totals.size <= 1) return void 0;
+  return Object.fromEntries(
+    [...totals.entries()].map(([model, usage]) => [formatGeminiOutputModel(model), usage])
+  );
+}
+
+// src/tools.ts
+function camelToSnake(value) {
+  return value.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`);
+}
+function topLevelSnakeCase(input) {
+  if (!input) return void 0;
+  const output = {};
+  for (const [key, value] of Object.entries(input)) {
+    output[camelToSnake(key)] = value;
+  }
+  return output;
+}
+var TOOL_NAME_MAP = /* @__PURE__ */ new Map([
+  ["read_file", "Read"],
+  ["readfile", "Read"],
+  ["write_file", "Write"],
+  ["writefile", "Write"],
+  ["replace", "Edit"],
+  ["edit", "Edit"],
+  ["run_shell_command", "Bash"],
+  ["shell", "Bash"],
+  ["bash", "Bash"],
+  ["glob", "Glob"],
+  ["search_file_content", "Grep"],
+  ["grep", "Grep"],
+  ["list_directory", "LS"],
+  ["ls", "LS"]
+]);
+function normalizeToolName(name) {
+  return TOOL_NAME_MAP.get(name.toLowerCase()) ?? name;
+}
+function normalizeToolInput(name, input) {
+  const snake = topLevelSnakeCase(input);
+  if (!snake) return void 0;
+  switch (name) {
+    case "Read": {
+      const filePath = snake.file_path ?? snake.path;
+      const result = {};
+      if (filePath !== void 0) result.file_path = filePath;
+      if (snake.offset !== void 0) result.offset = snake.offset;
+      if (snake.limit !== void 0) result.limit = snake.limit;
+      return result;
+    }
+    case "Write": {
+      const filePath = snake.file_path ?? snake.path;
+      const result = {};
+      if (filePath !== void 0) result.file_path = filePath;
+      if (snake.content !== void 0) result.content = snake.content;
+      return result;
+    }
+    case "Edit":
+      return snake;
+    case "Bash":
+      return {
+        command: snake.command,
+        ...snake.description !== void 0 ? { description: snake.description } : {},
+        ...snake.directory !== void 0 ? { directory: snake.directory } : {}
+      };
+    case "Glob": {
+      const out = {};
+      if (snake.pattern !== void 0) out.pattern = snake.pattern;
+      if (snake.path !== void 0) out.path = snake.path;
+      if (snake.case_sensitive !== void 0) out.case_sensitive = snake.case_sensitive;
+      if (snake.respect_git_ignore !== void 0) out.respect_git_ignore = snake.respect_git_ignore;
+      return out;
+    }
+    case "Grep": {
+      const out = {};
+      if (snake.pattern !== void 0) out.pattern = snake.pattern;
+      if (snake.path !== void 0) out.path = snake.path;
+      if (snake.include !== void 0) out.glob = snake.include;
+      return out;
+    }
+    case "LS": {
+      const out = {};
+      if (snake.path !== void 0) out.path = snake.path;
+      if (snake.ignore !== void 0) out.ignore = snake.ignore;
+      if (snake.respect_git_ignore !== void 0) out.respect_git_ignore = snake.respect_git_ignore;
+      return out;
+    }
+    default:
+      return snake;
+  }
+}
+function extractToolFilePath(input) {
+  const candidate = input?.file_path ?? input?.path;
+  return typeof candidate === "string" ? candidate : void 0;
+}
+
+// src/shim.ts
+async function runShim(args, prompt) {
+  const invocationStart = (/* @__PURE__ */ new Date()).toISOString();
+  const startTime = Date.now();
+  const { outputModel, geminiModel } = normalizeModelForGeminiCli(args.model);
+  const cwd = process2.cwd();
+  const debug = {
+    debugDir: args.debugDir,
+    bufferedEvents: [],
+    bufferedStderr: []
+  };
+  if (debug.debugDir) {
+    await ensureDir(debug.debugDir);
+  }
+  if (args.resume) {
+    try {
+      validateResumeSessionId(args.resume);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await writeUnknownLog(debug, `${message}
+`);
+      throw error;
+    }
+  }
+  const geminiPath = await which("gemini");
+  if (!geminiPath) {
+    process2.stderr.write("Gemini CLI not found in PATH.\n");
+    await writeUnknownLog(debug, "Gemini CLI not found in PATH.\n");
+    return 1;
+  }
+  let interrupted = false;
+  let activeChild;
+  let systemEmitted = false;
+  let resultEmitted = false;
+  let sessionId = args.resume;
+  let actualModel = outputModel;
+  let durationApiMs = 0;
+  let usage;
+  let modelUsage;
+  let finalIsError = false;
+  let numTurns = 0;
+  let remainingSilentSuccessRetries = MAX_SILENT_SUCCESS_RETRIES;
+  let remainingInvalidJsonRepairs = MAX_INVALID_JSON_REPAIRS;
+  let completionCheckIssued = false;
+  let totalToolUseCount = 0;
+  let resumeSessionId = args.resume;
+  let attemptPrompt = buildGeminiPrompt(prompt, args.appendSystemPrompt);
+  const toolIdMap = /* @__PURE__ */ new Map();
+  const emittedToolUses = /* @__PURE__ */ new Set();
+  const emittedToolResults = /* @__PURE__ */ new Set();
+  const pendingToolResults = /* @__PURE__ */ new Map();
+  const assistantTextChunks = [];
+  let pendingAssistantText = "";
+  let currentAssistantStreamHasDelta = false;
+  let lastSyntheticError;
+  const candidateJsonFiles = /* @__PURE__ */ new Set();
+  const numberedStepCount = countNumberedSteps(prompt);
+  const flushAssistantText = () => {
+    if (!pendingAssistantText) return;
+    assistantTextChunks.push(pendingAssistantText);
+    const message = {
+      type: "assistant",
+      message: {
+        id: generateMessageId(),
+        type: "message",
+        role: "assistant",
+        model: actualModel,
+        content: [{ type: "text", text: pendingAssistantText }],
+        stop_reason: null
+      }
+    };
+    emit(message);
+    pendingAssistantText = "";
+    currentAssistantStreamHasDelta = false;
+  };
+  const emitFinalResult = async (isError, resultText) => {
+    const result = {
+      type: "result",
+      subtype: isError ? "error" : "success",
+      is_error: isError,
+      duration_ms: Date.now() - startTime,
+      duration_api_ms: durationApiMs,
+      num_turns: Math.max(1, numTurns),
+      result: resultText,
+      session_id: sessionId,
+      usage,
+      ...modelUsage ? { model_usage: modelUsage } : {}
+    };
+    emit(result);
+    resultEmitted = true;
+    finalIsError = isError;
+    await flushStdout();
+    return isError ? 1 : 0;
+  };
+  const maybeRepairInvalidJsonFiles = async () => {
+    const invalidJsonFiles = await findInvalidJsonFiles(candidateJsonFiles);
+    if (invalidJsonFiles.length === 0) {
+      return void 0;
+    }
+    const invalidFileDescriptions = invalidJsonFiles.map(({ filePath, error }) => {
+      const relativePath = path4.relative(cwd, filePath) || filePath;
+      return `${relativePath} (${error})`;
+    });
+    const errorText = `Gemini left invalid JSON files: ${invalidFileDescriptions.join("; ")}`;
+    if (remainingInvalidJsonRepairs > 0 && sessionId) {
+      remainingInvalidJsonRepairs -= 1;
+      resumeSessionId = sessionId;
+      attemptPrompt = buildInvalidJsonRepairPrompt(invalidFileDescriptions);
+      if (args.verbose) {
+        process2.stderr.write(
+          `[shim] Gemini left invalid JSON files for session ${sessionId}; requesting repair: ${invalidFileDescriptions.join(", ")}
+`
+        );
+      }
+      return "continue";
+    }
+    emit(syntheticErrorMessage("Agent Error", errorText));
+    return await emitFinalResult(true, errorText);
+  };
+  const signalHandler = async () => {
+    if (interrupted) return;
+    interrupted = true;
+    activeChild?.kill("SIGTERM");
+    flushAssistantText();
+    if (systemEmitted && !resultEmitted) {
+      await emitFinalResult(false, summarizeText(assistantTextChunks.join("")));
+    }
+    process2.exit(0);
+  };
+  process2.once("SIGINT", signalHandler);
+  process2.once("SIGTERM", signalHandler);
+  try {
+    while (true) {
+      numTurns += 1;
+      lastSyntheticError = void 0;
+      let syntheticErrorEmitted = false;
+      const child = spawnGemini({
+        args,
+        cwd,
+        geminiModel,
+        geminiPath,
+        resumeSessionId
+      });
+      activeChild = child;
+      const childExitPromise = trackChildExit(child);
+      child.stdin.write(attemptPrompt);
+      child.stdin.end();
+      child.stderr.on("data", async (chunk) => {
+        const text = String(chunk);
+        if (args.verbose) {
+          process2.stderr.write(`[gemini-stderr] ${text}`);
+        }
+        await captureStderr(debug, text);
+      });
+      const eventIterator = readGeminiEvents(child, debug, args.verbose);
+      let attemptSawAssistantText = false;
+      let attemptSawToolUse = false;
+      let attemptSawToolResult = false;
+      let retryDueToSilentSuccess = false;
+      let continueWithFollowUpPrompt = false;
+      const emitToolResultFromEvent = async (event) => {
+        if (emittedToolResults.has(event.tool_id)) {
+          return;
+        }
+        const publicToolId = toolIdMap.get(event.tool_id);
+        if (!publicToolId) {
+          pendingToolResults.set(event.tool_id, event);
+          return;
+        }
+        const sessionData = sessionId ? await waitForToolRecord(sessionId, event.tool_id) : void 0;
+        const contentText = sessionId ? extractMeaningfulToolContent(sessionData, event.tool_id, event.output) : event.output;
+        const userMessage = {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              event.status === "error" ? {
+                type: "tool_result",
+                tool_use_id: publicToolId,
+                content: {
+                  is_error: true,
+                  error: event.error?.message || contentText || "Tool execution failed"
+                }
+              } : {
+                type: "tool_result",
+                tool_use_id: publicToolId,
+                content: contentText || `Tool completed: ${event.tool_id}`
+              }
+            ]
+          }
+        };
+        emit(userMessage);
+        emittedToolResults.add(event.tool_id);
+      };
+      try {
+        attemptLoop: for await (const event of withAdaptiveTimeout(eventIterator, {
+          idleTimeoutMs: args.idleTimeout * 1e3,
+          busyTimeoutMs: Math.max(args.idleTimeout * 1e3, 3e5),
+          onEvent(event2, controller) {
+            if (event2.type === "tool_use" || event2.type === "message" && event2.role === "assistant" && event2.content.length > 0) {
+              controller.markBusy();
+            }
+            if (event2.type === "result") {
+              controller.markIdle();
+            }
+          }
+        })) {
+          switch (event.type) {
+            case "init": {
+              sessionId = event.session_id;
+              actualModel = formatGeminiOutputModel(event.model || geminiModel || outputModel);
+              await bindDebugSession(debug, sessionId);
+              if (!systemEmitted) {
+                const system = {
+                  type: "system",
+                  subtype: "init",
+                  cwd,
+                  session_id: sessionId,
+                  tools: KNOWN_TOOLS,
+                  model: actualModel,
+                  permissionMode: "bypassPermissions",
+                  apiKeySource: getApiKeySource(),
+                  mcp_servers: []
+                };
+                emit(system);
+                systemEmitted = true;
+              }
+              break;
+            }
+            case "message": {
+              if (event.role !== "assistant") {
+                break;
+              }
+              if (!event.content) {
+                break;
+              }
+              if (event.delta) {
+                currentAssistantStreamHasDelta = true;
+                pendingAssistantText += event.content;
+                if (event.content.trim().length > 0) {
+                  attemptSawAssistantText = true;
+                }
+                break;
+              }
+              if (currentAssistantStreamHasDelta) {
+                break;
+              }
+              pendingAssistantText += event.content;
+              if (event.content.trim().length > 0) {
+                attemptSawAssistantText = true;
+              }
+              break;
+            }
+            case "tool_use": {
+              attemptSawToolUse = true;
+              if (emittedToolUses.has(event.tool_id)) {
+                break;
+              }
+              totalToolUseCount += 1;
+              flushAssistantText();
+              const publicToolId = toolIdMap.get(event.tool_id) ?? generateToolUseId();
+              toolIdMap.set(event.tool_id, publicToolId);
+              emittedToolUses.add(event.tool_id);
+              const normalizedName = normalizeToolName(event.tool_name);
+              const normalizedInput = normalizeToolInput(normalizedName, event.parameters);
+              const candidateFilePath = extractToolFilePath(normalizedInput);
+              if (candidateFilePath && (normalizedName === "Write" || normalizedName === "Edit") && candidateFilePath.toLowerCase().endsWith(".json")) {
+                candidateJsonFiles.add(path4.resolve(cwd, candidateFilePath));
+              }
+              const toolUse = {
+                type: "assistant",
+                message: {
+                  id: generateMessageId(),
+                  type: "message",
+                  role: "assistant",
+                  model: actualModel,
+                  content: [
+                    {
+                      type: "tool_use",
+                      id: publicToolId,
+                      name: normalizedName,
+                      input: normalizedInput
+                    }
+                  ],
+                  stop_reason: "tool_use"
+                }
+              };
+              emit(toolUse);
+              const pendingResult = pendingToolResults.get(event.tool_id);
+              if (pendingResult) {
+                pendingToolResults.delete(event.tool_id);
+                await emitToolResultFromEvent(pendingResult);
+              }
+              break;
+            }
+            case "tool_result": {
+              attemptSawToolResult = true;
+              flushAssistantText();
+              await emitToolResultFromEvent(event);
+              break;
+            }
+            case "error": {
+              flushAssistantText();
+              if (event.severity === "error") {
+                lastSyntheticError = event.message;
+                finalIsError = true;
+                if (!syntheticErrorEmitted) {
+                  emit(syntheticErrorMessage("Agent Error", event.message));
+                  syntheticErrorEmitted = true;
+                }
+              }
+              break;
+            }
+            case "result": {
+              flushAssistantText();
+              durationApiMs = Number(event.stats?.duration_ms ?? Date.now() - startTime);
+              usage = {
+                input_tokens: event.stats?.input_tokens,
+                output_tokens: event.stats?.output_tokens,
+                cache_read_input_tokens: event.stats?.cached
+              };
+              const sessionData = sessionId ? await waitForSessionFile(sessionId) : void 0;
+              modelUsage = aggregateInvocationUsage(sessionData, invocationStart);
+              const isError = event.status === "error" || Boolean(lastSyntheticError) || Boolean(event.error?.message);
+              if (isError && !syntheticErrorEmitted) {
+                emit(
+                  syntheticErrorMessage(
+                    "Agent Error",
+                    event.error?.message || lastSyntheticError || "Gemini CLI reported an error"
+                  )
+                );
+                syntheticErrorEmitted = true;
+              }
+              const silentSuccess = shouldRetrySilentSuccessTurn({
+                isError,
+                sawAssistantText: attemptSawAssistantText,
+                sawToolUse: attemptSawToolUse,
+                sawToolResult: attemptSawToolResult
+              });
+              if (silentSuccess) {
+                if (remainingSilentSuccessRetries > 0 && sessionId) {
+                  remainingSilentSuccessRetries -= 1;
+                  retryDueToSilentSuccess = true;
+                  continueWithFollowUpPrompt = true;
+                  resumeSessionId = sessionId;
+                  attemptPrompt = buildSilentTurnRecoveryPrompt();
+                  if (args.verbose) {
+                    process2.stderr.write(
+                      `[shim] Gemini returned a silent success turn for session ${sessionId}; retrying with continuation prompt.
+`
+                    );
+                  }
+                  break attemptLoop;
+                }
+                const message = "Gemini completed with no assistant text or tool activity.";
+                emit(syntheticErrorMessage("Agent Error", message));
+                const emittedCode2 = await emitFinalResult(true, message);
+                await childExitPromise;
+                activeChild = void 0;
+                return emittedCode2;
+              }
+              const needsCompletionCheck = !isError && !completionCheckIssued && sessionId && numberedStepCount >= 2 && totalToolUseCount > 0 && totalToolUseCount < numberedStepCount;
+              if (needsCompletionCheck) {
+                completionCheckIssued = true;
+                continueWithFollowUpPrompt = true;
+                resumeSessionId = sessionId;
+                attemptPrompt = buildRemainingStepsPrompt();
+                if (args.verbose) {
+                  process2.stderr.write(
+                    `[shim] Gemini may have stopped before finishing a numbered task list for session ${sessionId}; requesting completion check.
+`
+                  );
+                }
+                break attemptLoop;
+              }
+              if (!isError) {
+                const jsonRepairOutcome = await maybeRepairInvalidJsonFiles();
+                if (jsonRepairOutcome === "continue") {
+                  continueWithFollowUpPrompt = true;
+                  break attemptLoop;
+                }
+                if (typeof jsonRepairOutcome === "number") {
+                  await childExitPromise;
+                  activeChild = void 0;
+                  return jsonRepairOutcome;
+                }
+              }
+              const resultText = isError ? event.error?.message || lastSyntheticError || "Gemini CLI reported an error" : summarizeText(assistantTextChunks.join(""));
+              const emittedCode = await emitFinalResult(isError, resultText);
+              await childExitPromise;
+              activeChild = void 0;
+              return emittedCode;
+            }
+          }
+        }
+        flushAssistantText();
+        const exitCode = await childExitPromise;
+        activeChild = void 0;
+        if (retryDueToSilentSuccess || continueWithFollowUpPrompt) {
+          continue;
+        }
+        if (!resultEmitted && systemEmitted) {
+          const sessionData = sessionId ? await waitForSessionFile(sessionId) : void 0;
+          modelUsage = aggregateInvocationUsage(sessionData, invocationStart);
+          const success = exitCode === 0 && !lastSyntheticError;
+          const silentSuccess = shouldRetrySilentSuccessTurn({
+            isError: !success,
+            sawAssistantText: attemptSawAssistantText,
+            sawToolUse: attemptSawToolUse,
+            sawToolResult: attemptSawToolResult
+          });
+          if (silentSuccess) {
+            if (remainingSilentSuccessRetries > 0 && sessionId) {
+              remainingSilentSuccessRetries -= 1;
+              resumeSessionId = sessionId;
+              attemptPrompt = buildSilentTurnRecoveryPrompt();
+              if (args.verbose) {
+                process2.stderr.write(
+                  `[shim] Gemini exited after a silent success turn for session ${sessionId}; retrying with continuation prompt.
+`
+                );
+              }
+              continue;
+            }
+            const message = "Gemini completed with no assistant text or tool activity.";
+            emit(syntheticErrorMessage("Agent Error", message));
+            return await emitFinalResult(true, message);
+          }
+          const needsCompletionCheck = success && !completionCheckIssued && sessionId && numberedStepCount >= 2 && totalToolUseCount > 0 && totalToolUseCount < numberedStepCount;
+          if (needsCompletionCheck) {
+            completionCheckIssued = true;
+            resumeSessionId = sessionId;
+            attemptPrompt = buildRemainingStepsPrompt();
+            if (args.verbose) {
+              process2.stderr.write(
+                `[shim] Gemini may have exited before finishing a numbered task list for session ${sessionId}; requesting completion check.
+`
+              );
+            }
+            continue;
+          }
+          if (success) {
+            const jsonRepairOutcome = await maybeRepairInvalidJsonFiles();
+            if (jsonRepairOutcome === "continue") {
+              continue;
+            }
+            if (typeof jsonRepairOutcome === "number") {
+              return jsonRepairOutcome;
+            }
+          } else if (!syntheticErrorEmitted) {
+            emit(syntheticErrorMessage("Agent Error", lastSyntheticError || `Gemini CLI exited with code ${exitCode}`));
+            syntheticErrorEmitted = true;
+          }
+          const resultText = success ? summarizeText(assistantTextChunks.join("")) : lastSyntheticError || `Gemini CLI exited with code ${exitCode}`;
+          return await emitFinalResult(!success, resultText);
+        }
+        await flushStdout();
+        return finalIsError ? 1 : exitCode === 0 ? 0 : 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const _isTimeout = error instanceof IdleTimeoutError || error instanceof BusyStepTimeoutError;
+        if (args.verbose) {
+          process2.stderr.write(`[shim] ${message}
+`);
+        }
+        if (debug.debugDir && !sessionId) {
+          await writeUnknownLog(debug, `${message}
+`);
+        }
+        activeChild?.kill("SIGKILL");
+        activeChild = void 0;
+        flushAssistantText();
+        if (systemEmitted) {
+          emit(syntheticErrorMessage("Agent Error", message));
+          return await emitFinalResult(true, message);
+        }
+        process2.stderr.write(`${message}
+`);
+        await flushStdout();
+        return 1;
+      }
+    }
+  } finally {
+    process2.removeListener("SIGINT", signalHandler);
+    process2.removeListener("SIGTERM", signalHandler);
+  }
+}
+function spawnGemini({
+  args,
+  cwd,
+  geminiModel,
+  geminiPath,
+  resumeSessionId
+}) {
+  const isWindows = process2.platform === "win32";
+  const geminiArgs = ["--model", geminiModel, "--output-format", "stream-json", "--approval-mode", "yolo"];
+  if (resumeSessionId) {
+    geminiArgs.push("--resume", resumeSessionId);
+  }
+  if (args.sandbox === "standard" || args.sandbox === "strict") {
+    geminiArgs.push("--sandbox");
+  }
+  const env = {
+    ...process2.env,
+    FORCE_COLOR: "0",
+    GEMINI_SANDBOX: args.sandbox === "none" ? "false" : process2.env.GEMINI_SANDBOX || "true",
+    BASH_ENV: ""
+  };
+  if (args.sandbox === "strict" && process2.platform === "darwin") {
+    env.SEATBELT_PROFILE = "restrictive-open";
+  }
+  return spawn(geminiPath, geminiArgs, {
+    cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+    env,
+    shell: isWindows
+  });
+}
+async function* readGeminiEvents(child, debug, verbose) {
+  const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      if (verbose) {
+        process2.stderr.write(`[shim] Skipping non-JSON Gemini stdout line: ${line}
+`);
+      }
+      continue;
+    }
+    if (debug.sessionId && debug.jsonlPath) {
+      await writeJsonDebugLine(debug.jsonlPath, parsed);
+    } else {
+      debug.bufferedEvents.push(parsed);
+    }
+    yield parsed;
+  }
+}
+async function waitForSessionFile(sessionId) {
+  const started = Date.now();
+  while (Date.now() - started <= 2e3) {
+    const filePath = await findGeminiSessionFile(sessionId);
+    if (filePath) {
+      return await readSessionFile(sessionId);
+    }
+    await sleep(100);
+  }
+  return await readSessionFile(sessionId);
+}
+async function runSelfTest() {
+  const geminiPath = await which("gemini");
+  const authType = await loadGeminiSettingsAuthType();
+  const checks = [
+    {
+      name: "agent_found",
+      passed: Boolean(geminiPath),
+      message: geminiPath ? `Found Gemini CLI at ${geminiPath}` : "Gemini CLI not found in PATH"
+    },
+    {
+      name: "auth_configured",
+      passed: Boolean(process2.env.GEMINI_API_KEY || process2.env.GOOGLE_API_KEY || authType),
+      message: process2.env.GEMINI_API_KEY || process2.env.GOOGLE_API_KEY || authType ? `Authentication appears configured (${authType || "environment"})` : "No Gemini auth configuration detected"
+    }
+  ];
+  const overallPassed = checks.every((check) => check.passed);
+  const payload = {
+    shim: { name: SHIM_NAME, version: SHIM_VERSION },
+    agent: { name: "gemini", version: await detectGeminiVersion(), found: Boolean(geminiPath) },
+    checks,
+    overall: {
+      passed: overallPassed,
+      message: overallPassed ? "All checks passed" : "One or more checks failed"
+    }
+  };
+  process2.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+  return overallPassed ? 0 : 1;
+}
+async function detectGeminiVersion() {
+  const geminiPath = await which("gemini");
+  if (!geminiPath) return "unknown";
+  return await new Promise((resolve) => {
+    const isWindows = process2.platform === "win32";
+    const child = spawn(geminiPath, ["--version"], {
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: isWindows
+    });
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += String(chunk);
+    });
+    child.on("close", () => resolve(output.trim() || "unknown"));
+    child.on("error", () => resolve("unknown"));
+  });
+}
+
+// src/index.ts
+async function main() {
+  try {
+    const args = parseArgs(process3.argv.slice(2));
+    if (args.help) {
+      printHelp();
+      return 0;
+    }
+    if (args.version) {
+      process3.stdout.write(`${SHIM_VERSION}
+`);
+      return 0;
+    }
+    if (args.selfTest) {
+      return await runSelfTest();
+    }
+    const prompt = await readStdinTrimmed();
+    if (!prompt) {
+      return 0;
+    }
+    return await runShim(args, prompt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process3.stderr.write(`${message}
+`);
+    return 1;
+  }
+}
+main().then((code) => {
+  process3.exit(code);
+}).catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process3.stderr.write(`${message}
+`);
+  process3.exit(1);
+});

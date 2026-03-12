@@ -34,6 +34,7 @@ import {
   type StartupInfo,
 } from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
+import { renderBudgetResolutionTable } from "./validate-budget.js";
 import { runValidation } from "./validate-command.js";
 import { runWelcomeWizard } from "./wizard/welcome-wizard.js";
 
@@ -503,6 +504,7 @@ Use --output to copy them elsewhere.
         startNew,
         modelOverride: resolvedConfig.model, // Pass resolved model override (from all config layers)
         originalUrl: isRemoteHankUrl(configPath) ? configPath : undefined,
+        resolvedBudget: resolvedConfig.budget,
       });
       await sendCliTelemetry("cli_validate", {
         success: true,
@@ -711,6 +713,26 @@ Use --output to copy them elsewhere.
 
     console.log(structure);
     console.log("");
+
+    // Budget resolution table (if any budget config exists)
+    const hasAnyBudget =
+      validationResult.hankBudget ||
+      codons.some((cfg) =>
+        cfg.type === "loop" ? cfg.budget || cfg.codons.some((cc) => cc.budget) : cfg.budget,
+      );
+
+    if (hasAnyBudget) {
+      const useColor = process.stdout.isTTY ?? false;
+      const budgetTable = renderBudgetResolutionTable({
+        hankBudget: validationResult.hankBudget ?? {},
+        codons,
+        terminalWidth,
+        useColor,
+        resolvedCeiling: resolvedConfig.budget,
+      });
+      console.log(budgetTable);
+      console.log("");
+    }
 
     // Log any non-fatal warnings
     if (warnings.length > 0) {

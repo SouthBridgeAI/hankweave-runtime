@@ -1,0 +1,106 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "meta": {
+    "name": "Linear-to-Plan Pipeline (replay fixture)",
+    "version": "2.0.0",
+    "description": "Stripped-down fixture for replay e2e testing. Prompt files are stubs; rigSetup and sentinels removed since replay mode skips them.",
+    "author": "Southbridge AI"
+  },
+  "hank": [
+    {
+      "id": "step-1-main",
+      "name": "Step 1: Prep",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptFile": ["./codons/codon-1-fetch/0-fetch-and-enrich.md"],
+      "appendSystemPromptFile": ["./codons/system-prompt-broad.md"],
+      "checkpointedFiles": ["plan/**/*"]
+    },
+    {
+      "id": "step-2-plan",
+      "name": "Step 2: Gemini Plan and CC",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-2-plan-cc/1-cc-prompt.md",
+      "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md"
+    },
+    {
+      "id": "step-3-codex",
+      "name": "Step 3: Plan with Codex",
+      "model": "gpt-5.2",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-2-plan-cc/1-codex-prompt.md",
+      "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md"
+    },
+    {
+      "id": "step-4-merge",
+      "name": "Step 4: Review and merge plans",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-4-merge/0-merge.md",
+      "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+    },
+    {
+      "type": "loop",
+      "id": "blind-reviews",
+      "name": "Repeatedly improve the plan through blind iteration",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 3
+      },
+      "codons": [
+        {
+          "id": "step-5-blind-review",
+          "name": "Step 5: Review the merged plan with fresh eyes",
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-5-review/0-review.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        },
+        {
+          "id": "step-6-update",
+          "name": "Step 6: Update the plan based on the review",
+          "model": "opus",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-6-update/0-update.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        }
+      ]
+    },
+    {
+      "type": "loop",
+      "id": "implementation-review-loop",
+      "name": "Repeatedly implement and improve the plan",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 3
+      },
+      "codons": [
+        {
+          "id": "implement-loop-step-1-implement",
+          "name": "Implement-Review Loop: Implementing core functionality",
+          "model": "sonnet",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-7-implement-review-loop/0-implement.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        },
+        {
+          "id": "implement-loop-step-2-update",
+          "name": "Implement-review loop: Update the plan based on the implementation results",
+          "model": "opus",
+          "continuationMode": "fresh",
+          "promptFile": "./codons/codon-7-implement-review-loop/1-update.md",
+          "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+        }
+      ]
+    },
+    {
+      "id": "final-step-compress",
+      "name": "Final Step: Tie everything into a clean bow",
+      "model": "opus",
+      "continuationMode": "fresh",
+      "promptFile": "./codons/codon-8-compress/0-compress.md",
+      "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
+    }
+  ]
+}

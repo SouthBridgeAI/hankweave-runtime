@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "id": "budget-codon",
+      "name": "Budget Test Codon",
+      "promptText": "Write a very long detailed essay about the history of computing, covering every decade from the 1940s to the 2020s. Make it at least 5000 words.",
+      "model": "haiku",
+      "budget": { "maxDollars": 0.0001 },
+      "continuationMode": "fresh"
+    },
+    {
+      "id": "followup-codon",
+      "name": "Followup Codon",
+      "promptText": "Say exactly: hello world",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    }
+  ]
+}

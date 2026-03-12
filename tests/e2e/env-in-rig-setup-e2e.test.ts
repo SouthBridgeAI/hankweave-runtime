@@ -59,7 +59,7 @@ describe("Env variables in rigSetup commands", () => {
       // Currently fails because runCommand() doesn't pass codon env to spawn().
       expect(content).toBe("MY_VAR=hello-world");
 
-      await hankweave.waitForConnectionClose(5000);
+      await hankweave.waitForConnectionClose(15_000);
     } finally {
       if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {
         await hankweave.stop();

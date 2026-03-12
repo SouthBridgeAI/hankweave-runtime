@@ -450,4 +450,274 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.sentinel?.healthCheckGracePeriodMs).toBe(5000); // Env
     expect(result.sentinel?.waitForAllHealthChecks).toBe(true); // CLI
   });
+
+  // -------------------------------------------------------------------------
+  // Budget config resolution — min() semantics for maxDollars
+  // -------------------------------------------------------------------------
+
+  describe("budget config resolution", () => {
+    const minimalHank = (overrides: Record<string, unknown>) =>
+      JSON.stringify({
+        overrides,
+        hank: [
+          {
+            id: "test",
+            name: "Test",
+            model: "sonnet",
+            continuationMode: "fresh",
+            promptText: "test",
+          },
+        ],
+      });
+
+    test("uses runtime maxDollars when hank has no budget", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxDollars: 5.0 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({}));
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxDollars).toBe(5.0);
+    });
+
+    test("uses hank maxDollars when runtime has no budget", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(runtimeConfigPath, JSON.stringify({}));
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({ budget: { maxDollars: 10.0 } }));
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxDollars).toBe(10.0);
+    });
+
+    test("uses min when runtime is tighter than hank", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxDollars: 5.0 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({ budget: { maxDollars: 20.0 } }));
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxDollars).toBe(5.0);
+    });
+
+    test("uses min when hank is tighter than runtime", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxDollars: 20.0 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({ budget: { maxDollars: 5.0 } }));
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxDollars).toBe(5.0);
+    });
+
+    test("CLI maxDollars can tighten runtime/hank ceilings", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxDollars: 10.0 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({ budget: { maxDollars: 20.0 } }));
+
+      const result = resolveSettings({
+        runtimeConfigPath,
+        hankPath,
+        cliArgs: { budget: { maxDollars: 3.0 } },
+      });
+      expect(result.budget?.maxDollars).toBe(3.0);
+    });
+
+    test("CLI maxDollars overrides tighter runtime value", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxDollars: 3.0 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({}));
+
+      const result = resolveSettings({
+        runtimeConfigPath,
+        hankPath,
+        cliArgs: { budget: { maxDollars: 10.0 } },
+      });
+      expect(result.budget?.maxDollars).toBe(10.0);
+    });
+
+    test("allocation and shares follow normal merge precedence", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxDollars: 5.0 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(
+        hankPath,
+        minimalHank({
+          budget: {
+            maxDollars: 20.0,
+            allocation: "proportional",
+            shares: { test: 1.0 },
+          },
+        }),
+      );
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxDollars).toBe(5.0); // min()
+      expect(result.budget?.allocation).toBe("proportional"); // normal merge
+      expect(result.budget?.shares).toEqual({ test: 1.0 }); // normal merge
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // maxTimeSeconds resolution — runtime/hank use min(), CLI can override
+  // -------------------------------------------------------------------------
+
+  describe("maxTimeSeconds resolution", () => {
+    const minimalHank = (overrides: Record<string, unknown>) =>
+      JSON.stringify({
+        overrides,
+        hank: [
+          {
+            id: "test",
+            name: "Test",
+            model: "sonnet",
+            continuationMode: "fresh",
+            promptText: "test",
+          },
+        ],
+      });
+
+    test("uses runtime maxTimeSeconds when hank has none", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxTimeSeconds: 3600 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({}));
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxTimeSeconds).toBe(3600);
+    });
+
+    test("uses hank maxTimeSeconds when runtime has none", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(runtimeConfigPath, JSON.stringify({}));
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(
+        hankPath,
+        minimalHank({ budget: { maxTimeSeconds: 1800 } }),
+      );
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxTimeSeconds).toBe(1800);
+    });
+
+    test("uses min when runtime is tighter than hank", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxTimeSeconds: 600 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(
+        hankPath,
+        minimalHank({ budget: { maxTimeSeconds: 3600 } }),
+      );
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxTimeSeconds).toBe(600);
+    });
+
+    test("uses min when hank is tighter than runtime", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxTimeSeconds: 3600 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(
+        hankPath,
+        minimalHank({ budget: { maxTimeSeconds: 600 } }),
+      );
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxTimeSeconds).toBe(600);
+    });
+
+    test("CLI --max-time can tighten runtime/hank ceilings", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxTimeSeconds: 3600 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({}));
+
+      const result = resolveSettings({
+        runtimeConfigPath,
+        hankPath,
+        cliArgs: { budget: { maxTimeSeconds: 300 } },
+      });
+      expect(result.budget?.maxTimeSeconds).toBe(300);
+    });
+
+    test("CLI --max-time overrides tighter runtime value", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxTimeSeconds: 300 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(hankPath, minimalHank({}));
+
+      const result = resolveSettings({
+        runtimeConfigPath,
+        hankPath,
+        cliArgs: { budget: { maxTimeSeconds: 3600 } },
+      });
+      expect(result.budget?.maxTimeSeconds).toBe(3600);
+    });
+
+    test("maxDollars and maxTimeSeconds resolve independently", () => {
+      const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+      fs.writeFileSync(
+        runtimeConfigPath,
+        JSON.stringify({ budget: { maxDollars: 5.0, maxTimeSeconds: 3600 } }),
+      );
+
+      const hankPath = path.join(TEST_DIR, "hank.json");
+      fs.writeFileSync(
+        hankPath,
+        minimalHank({ budget: { maxDollars: 20.0, maxTimeSeconds: 600 } }),
+      );
+
+      const result = resolveSettings({ runtimeConfigPath, hankPath });
+      expect(result.budget?.maxDollars).toBe(5.0); // runtime tighter
+      expect(result.budget?.maxTimeSeconds).toBe(600); // hank tighter
+    });
+  });
 });

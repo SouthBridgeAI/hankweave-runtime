@@ -1,0 +1,19 @@
+{
+  "version": "1.1.0",
+  "readOnlySourceDataPath": "/Users/philip/projects/worktrees/hw-phase-budget/tests/config/poem_guides.txt",
+  "readOnlySourceResolvedDataPath": "/Users/philip/projects/worktrees/hw-phase-budget/tests/config/poem_guides.txt",
+  "dataHash": "e304118c63ee",
+  "hankHash": "03d6ba466dfaa4d0193a6a79c1f09b664f2f7121d28191caf72089e4be357c54",
+  "hankPath": "/Users/philip/projects/worktrees/hw-phase-budget/tests/config/test-budget-on-exceeded-fail.config.json",
+  "linkType": "symlink",
+  "createdAt": "2026-03-05T18:46:55.088Z",
+  "lastUsed": "2026-03-05T18:46:55.088Z",
+  "hankweaveVersion": "0.5.6",
+  "environment": {
+    "invocationMethod": "bun",
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "24.6.0",
+    "runtime": "bun 1.3.6"
+  }
+}

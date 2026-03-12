@@ -19,6 +19,8 @@
     ".logs/**/*",
     "intermediates/**/*",
     "learning/**/*",
-    "tests/test-area/**/*"
+    "tests/test-area/**/*",
+    "shims/**/*",
+    "dist/shims/**/*"
   ]
 }

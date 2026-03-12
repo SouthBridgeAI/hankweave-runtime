@@ -3714,3 +3714,30 @@ describe("loadGlobalSystemPrompt (ENG-122)", () => {
     expect(result).toContain("<%DATA_DIR%>");
   });
 });
+
+// -------------
+// Loop-level budget shares: unknown ID validation
+// -------------
+
+describe("loop-level budget shares validation", () => {
+  test("should reject loop budget shares referencing unknown codon IDs", () => {
+    const config = {
+      hank: [
+        {
+          type: "loop" as const,
+          id: "my-loop",
+          name: "My Loop",
+          terminateOn: { type: "iterationLimit" as const, limit: 2 },
+          codons: [MINIMAL_CODON],
+          budget: {
+            maxDollars: 10,
+            allocation: "proportional",
+            shares: { "nonexistent-id": 1 },
+          },
+        },
+      ],
+    };
+
+    expect(() => hankFileSchema.parse(config)).toThrow(/unknown child IDs.*nonexistent-id/i);
+  });
+});

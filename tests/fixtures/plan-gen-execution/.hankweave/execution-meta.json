@@ -1,0 +1,19 @@
+{
+  "version": "1.1.0",
+  "readOnlySourceDataPath": "/Users/philip/projects/hw-budget-tests/monorepo-task",
+  "readOnlySourceResolvedDataPath": "/Users/philip/projects/hw-budget-tests/monorepo-task",
+  "dataHash": "28ae66a6bcd8",
+  "hankHash": "9a6376730a5214e7d008554fa058109824ca8a7cb4c47bdf0af4ddf9979b985f",
+  "hankPath": "/Users/philip/projects/hankhub/plan-gen-v2/hank.json",
+  "linkType": "symlink",
+  "createdAt": "2026-03-05T12:02:42.589Z",
+  "lastUsed": "2026-03-05T12:02:42.589Z",
+  "hankweaveVersion": "0.5.6",
+  "environment": {
+    "invocationMethod": "node",
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "24.6.0",
+    "runtime": "node v20.12.2"
+  }
+}

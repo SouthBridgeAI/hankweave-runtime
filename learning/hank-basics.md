@@ -81,9 +81,11 @@ A **hank** is a sequence of codons (blocks of agentic work). A **codon** is a si
 ```json
 {
   "id": "build-schema",
+  "name": "Build Zod Schemas",
   "promptFile": "./prompts/schema-builder.md",
   "model": "sonnet",
-  "trackedFiles": ["src/schema/**/*.ts"]
+  "continuationMode": "fresh",
+  "checkpointedFiles": ["src/schema/**/*.ts"]
 }
 ```
 
@@ -272,16 +274,29 @@ Catch mistakes before spending tokens.
 Hankweave validates hanks before the first token is spent:
 
 ```bash
-$ hankweave --validate --config=./hank.json --data=./raw-data/
+$ hankweave --validate ./hank.json ./raw-data/
 
 ✓ Hank configuration valid
 ✓ All referenced files exist
 ✓ Rig setup commands validated
 ✓ Model configurations valid
 ✓ Loop termination conditions valid
+✓ Budget resolution table displayed
 ⚠ Warning: codon "enrich" tracks files not created by previous codons
 
 Ready to execute.
 ```
 
-Missing files, broken references, invalid loop conditions - caught before anything runs. (Fail fast, fail cheap.)
+Missing files, broken references, invalid loop conditions, budget misconfigurations - caught before anything runs. (Fail fast, fail cheap.)
+
+You can also cap your spend from the CLI without editing the hank: `hankweave ./hank.json ./data --max-cost 5.00 --max-time 1800`.
+
+---
+
+## What's Next
+
+This guide covers the core building blocks. Hankweave has more to offer:
+
+- **[Sentinels](https://hankweave.southbridge.ai/concepts/sentinels/)** - parallel observers that watch the event stream and run their own analysis alongside the main agent.
+- **[Budgets](https://hankweave.southbridge.ai/concepts/budgets/)** - cost, time, and token limits that let hank authors and operators express preferences the runtime resolves.
+- **[The full documentation](https://hankweave.southbridge.ai)** - concepts, guides, and the complete configuration reference.

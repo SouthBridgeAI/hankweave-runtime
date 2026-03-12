@@ -1,0 +1,249 @@
+{
+  "runs": [
+    {
+      "runId": "1772736479618-fyniv",
+      "runFolder": "/Users/philip/projects/worktrees/hw-phase-budget/tests/test-area/execution-2026-03-05T18-47-58/.hankweave/runs/1772736479618-fyniv",
+      "gitBranch": "run-1772736479618-fyniv",
+      "startingConditions": {
+        "type": "fresh"
+      },
+      "codons": [
+        {
+          "codonId": "expensive-codon",
+          "startTime": "2026-03-05T18:47:59.767Z",
+          "status": "completed",
+          "claudePid": 998107,
+          "claudeLogPath": ".hankweave/runs/1772736479618-fyniv/expensive-codon-claude.log",
+          "claudeSessionId": "d32bf7c8-9c6b-41d7-ab6a-730c19793724",
+          "currentCost": 0.044235300000000005,
+          "currentTokens": {
+            "inputTokens": 120,
+            "outputTokens": 1208,
+            "cacheCreationTokens": 4770,
+            "cacheReadTokens": 321128
+          },
+          "assistantMessageCount": 10,
+          "extensionCount": 0,
+          "endTime": "2026-03-05T18:48:17.128Z",
+          "exitCode": 0,
+          "finalCost": 0.044235300000000005,
+          "finalTokens": {
+            "inputTokens": 120,
+            "outputTokens": 1208,
+            "cacheCreationTokens": 4770,
+            "cacheReadTokens": 321128
+          },
+          "resultMessageReceived": false,
+          "completionCheckpoint": "d9236db28eeea4cc73423b0375c6f591e4fe9151",
+          "budgetExceeded": {
+            "currency": "cost",
+            "limit": 0.04,
+            "used": 0.040869850000000006
+          }
+        },
+        {
+          "codonId": "simple-codon-1",
+          "startTime": "2026-03-05T18:48:17.244Z",
+          "status": "completed",
+          "claudePid": 984559,
+          "claudeLogPath": ".hankweave/runs/1772736479618-fyniv/simple-codon-1-claude.log",
+          "claudeSessionId": "fb61c925-bda5-4022-a68b-a8d84bd4e502",
+          "currentCost": 0.00195525,
+          "currentTokens": {
+            "inputTokens": 3,
+            "outputTokens": 5,
+            "cacheCreationTokens": 325,
+            "cacheReadTokens": 15210
+          },
+          "assistantMessageCount": 1,
+          "extensionCount": 0,
+          "endTime": "2026-03-05T18:48:22.538Z",
+          "exitCode": 0,
+          "finalCost": 0.00195525,
+          "finalTokens": {
+            "inputTokens": 3,
+            "outputTokens": 5,
+            "cacheCreationTokens": 325,
+            "cacheReadTokens": 15210
+          },
+          "resultMessageReceived": true,
+          "completionCheckpoint": "7ad0ff3ae883bfc77a9bbca8f99f54f2a3c9d3d1",
+          "budgetExceeded": {
+            "currency": "cost",
+            "limit": 0,
+            "used": 0.00195525
+          }
+        },
+        {
+          "codonId": "simple-codon-2",
+          "startTime": "2026-03-05T18:48:22.642Z",
+          "status": "completed",
+          "claudePid": 966172,
+          "claudeLogPath": ".hankweave/runs/1772736479618-fyniv/simple-codon-2-claude.log",
+          "claudeSessionId": "9e280280-e3dc-4aaa-b706-777b69136495",
+          "currentCost": 0.003868,
+          "currentTokens": {
+            "inputTokens": 6,
+            "outputTokens": 2,
+            "cacheCreationTokens": 648,
+            "cacheReadTokens": 30420
+          },
+          "assistantMessageCount": 1,
+          "extensionCount": 0,
+          "endTime": "2026-03-05T18:48:27.112Z",
+          "exitCode": 0,
+          "finalCost": 0.003868,
+          "finalTokens": {
+            "inputTokens": 6,
+            "outputTokens": 2,
+            "cacheCreationTokens": 648,
+            "cacheReadTokens": 30420
+          },
+          "resultMessageReceived": false,
+          "completionCheckpoint": "76ce685fa26bec0942742a9d8bb1ed44d17f60e9",
+          "budgetExceeded": {
+            "currency": "cost",
+            "limit": 0,
+            "used": 0.001934
+          }
+        }
+      ],
+      "status": "completed",
+      "startTime": "2026-03-05T18:47:59.620Z",
+      "serverPid": 26078,
+      "endTime": "2026-03-05T18:48:29.250Z"
+    }
+  ],
+  "currentRunId": null,
+  "executionPlan": [
+    {
+      "codon": {
+        "type": "codon",
+        "id": "expensive-codon",
+        "name": "Expensive Codon",
+        "promptText": "Create these 5 files one at a time, doing each as a separate step: 1) a.txt with content 'alpha' 2) b.txt with content 'bravo' 3) c.txt with content 'charlie' 4) d.txt with content 'delta' 5) e.txt with content 'echo'. After all files are created, read each one back to verify the contents.",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "expensive-codon"
+    },
+    {
+      "codon": {
+        "type": "codon",
+        "id": "simple-codon-1",
+        "name": "Simple Codon 1",
+        "promptText": "Say exactly: test passed",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "simple-codon-1"
+    },
+    {
+      "codon": {
+        "type": "codon",
+        "id": "simple-codon-2",
+        "name": "Simple Codon 2",
+        "promptText": "Say exactly: done",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "simple-codon-2"
+    }
+  ]
+}

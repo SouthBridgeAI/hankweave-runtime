@@ -23,6 +23,26 @@ import { WebSocket } from "../../server/utils.js";
 import { generateTestTimestamp, setupTestDirectory } from "./test-helpers.js";
 
 // -------------
+// Error Types
+// -------------
+
+/**
+ * Thrown when the hankweave server process exits before a WebSocket connection
+ * can be established (e.g. validation errors, config errors).
+ * Carries the process exit code and captured stderr for test assertions.
+ */
+export class ServerLaunchError extends Error {
+  constructor(
+    message: string,
+    public readonly exitCode: number | null,
+    public readonly stderr: string,
+  ) {
+    super(message);
+    this.name = "ServerLaunchError";
+  }
+}
+
+// -------------
 // WebSocket Client Setup Helpers
 // -------------
 
@@ -407,7 +427,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export async function launchHankweave(options: LaunchServerOptions = {}): Promise<LaunchedServer> {
   const cwd = options.cwd ? path.resolve(options.cwd) : DEFAULT_CWD;
-  const env = { ...process.env, ...options.env };
+  // Always show costs in tests to aid debugging when inspecting TUI output
+  const env = { ...process.env, HANKWEAVE_RUNTIME_SHOW_COSTS: "1", ...options.env };
   const logPrefix = options.logPrefix ?? DEFAULT_LOG_PREFIX;
   const port = options.port ?? DEFAULT_PORT;
   const websocketTimeout =
@@ -500,8 +521,10 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
       });
   });
 
+  let stderrBuffer = "";
   child.stderr?.on("data", (data) => {
     const text = data.toString();
+    stderrBuffer += text;
     text
       .split(/\r?\n/)
       .filter(
@@ -528,7 +551,11 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
 
   while (attempt < websocketAttempts) {
     if (serverExited || child.exitCode !== null || child.signalCode !== null) {
-      throw new Error("Server exited before WebSocket connection could be established");
+      throw new ServerLaunchError(
+        "Server exited before WebSocket connection could be established",
+        child.exitCode,
+        stderrBuffer,
+      );
     }
 
     try {

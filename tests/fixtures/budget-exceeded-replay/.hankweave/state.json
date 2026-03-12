@@ -1,0 +1,171 @@
+{
+  "runs": [
+    {
+      "runId": "1772647249176-6cokl",
+      "runFolder": "/Users/philip/projects/worktrees/hw-phase-budget/tests/test-area/execution-2026-03-04T18-00-48/.hankweave/runs/1772647249176-6cokl",
+      "gitBranch": "run-1772647249176-6cokl",
+      "startingConditions": {
+        "type": "fresh"
+      },
+      "codons": [
+        {
+          "codonId": "budget-codon",
+          "startTime": "2026-03-04T18:00:49.335Z",
+          "status": "completed",
+          "claudePid": 936437,
+          "claudeLogPath": ".hankweave/runs/1772647249176-6cokl/budget-codon-claude.log",
+          "claudeSessionId": "11d43ee4-7c23-4be8-8e4a-6d5b054108eb",
+          "currentCost": 0.009271600000000001,
+          "currentTokens": {
+            "inputTokens": 6,
+            "outputTokens": 16,
+            "cacheCreationTokens": 5280,
+            "cacheReadTokens": 25856
+          },
+          "assistantMessageCount": 1,
+          "extensionCount": 0,
+          "endTime": "2026-03-04T18:00:56.687Z",
+          "exitCode": 0,
+          "finalCost": 0.009271600000000001,
+          "finalTokens": {
+            "inputTokens": 6,
+            "outputTokens": 16,
+            "cacheCreationTokens": 5280,
+            "cacheReadTokens": 25856
+          },
+          "resultMessageReceived": false,
+          "completionCheckpoint": "7b8ef32370280affd1c148521d4c0944fdc829f1",
+          "budgetExceeded": {
+            "currency": "cost",
+            "limit": 0.0001,
+            "used": 0.004635800000000001
+          }
+        },
+        {
+          "codonId": "followup-codon",
+          "startTime": "2026-03-04T18:00:56.800Z",
+          "status": "completed",
+          "claudePid": 925838,
+          "claudeLogPath": ".hankweave/runs/1772647249176-6cokl/followup-codon-claude.log",
+          "claudeSessionId": "987437e5-5143-4330-9f2c-438fa44762d2",
+          "currentCost": 0.00444575,
+          "currentTokens": {
+            "inputTokens": 3,
+            "outputTokens": 5,
+            "cacheCreationTokens": 325,
+            "cacheReadTokens": 15210
+          },
+          "assistantMessageCount": 1,
+          "extensionCount": 0,
+          "endTime": "2026-03-04T18:01:02.789Z",
+          "exitCode": 0,
+          "finalCost": 0.00444575,
+          "finalTokens": {
+            "inputTokens": 3,
+            "outputTokens": 5,
+            "cacheCreationTokens": 325,
+            "cacheReadTokens": 15210
+          },
+          "resultMessageReceived": true,
+          "completionCheckpoint": "774c66d2d24f4f5eedc75d034ccc869ee3244722"
+        }
+      ],
+      "status": "completed",
+      "startTime": "2026-03-04T18:00:49.176Z",
+      "serverPid": 877,
+      "endTime": "2026-03-04T18:01:04.906Z"
+    }
+  ],
+  "currentRunId": null,
+  "executionPlan": [
+    {
+      "codon": {
+        "type": "codon",
+        "id": "budget-codon",
+        "name": "Budget Test Codon",
+        "promptText": "Write a very long detailed essay about the history of computing, covering every decade from the 1940s to the 2020s. Make it at least 5000 words.",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100,
+        "budget": {
+          "maxDollars": 0.0001
+        }
+      },
+      "codonId": "budget-codon"
+    },
+    {
+      "codon": {
+        "type": "codon",
+        "id": "followup-codon",
+        "name": "Followup Codon",
+        "promptText": "Say exactly: hello world",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "followup-codon"
+    }
+  ]
+}

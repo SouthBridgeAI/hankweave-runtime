@@ -62,7 +62,7 @@
         "shimIdleTimeout": {
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 600,
+          "maximum": 1800,
           "description": "Default shim idle timeout in seconds. Max time between agent events before the shim aborts. Per-codon and hank override settings take precedence."
         },
         "ignoreRigFailures": {
@@ -108,6 +108,22 @@
           },
           "additionalProperties": false,
           "description": "Telemetry configuration"
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "maxDollars": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Global cost budget in USD. Effective global = min(runtime, hank)."
+            },
+            "maxTimeSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Global wall-clock time limit in seconds. Effective = min(runtime, hank)."
+            }
+          },
+          "additionalProperties": false
         },
         "$schema": {
           "type": "string",

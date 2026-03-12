@@ -1,0 +1,183 @@
+{
+  "runs": [
+    {
+      "runId": "1772736618402-nf8ud",
+      "runFolder": "/Users/philip/projects/worktrees/hw-phase-budget/tests/test-area/execution-2026-03-05T18-50-17/.hankweave/runs/1772736618402-nf8ud",
+      "gitBranch": "run-1772736618402-nf8ud",
+      "startingConditions": {
+        "type": "fresh"
+      },
+      "codons": [
+        {
+          "codonId": "loop-codon#0",
+          "startTime": "2026-03-05T18:50:18.470Z",
+          "status": "completed",
+          "loopContext": {
+            "loopId": "budget-loop",
+            "iteration": 0,
+            "codonIndexInLoop": 0,
+            "loopBudget": {
+              "maxDollars": 0.01
+            }
+          },
+          "claudePid": 993353,
+          "claudeLogPath": ".hankweave/runs/1772736618402-nf8ud/loop-codon-0-claude.log",
+          "claudeSessionId": "cbcff95c-3d33-4c77-9fbb-2592a629b7a0",
+          "currentCost": 0.017606499999999997,
+          "currentTokens": {
+            "inputTokens": 42,
+            "outputTokens": 690,
+            "cacheCreationTokens": 1394,
+            "cacheReadTokens": 123720
+          },
+          "assistantMessageCount": 2,
+          "extensionCount": 0,
+          "endTime": "2026-03-05T18:50:25.899Z",
+          "exitCode": 0,
+          "finalCost": 0.017606499999999997,
+          "finalTokens": {
+            "inputTokens": 42,
+            "outputTokens": 690,
+            "cacheCreationTokens": 1394,
+            "cacheReadTokens": 123720
+          },
+          "resultMessageReceived": false,
+          "completionCheckpoint": "4548ba803f9e1c7b10745e04c42c3a863e4dc688",
+          "budgetExceeded": {
+            "currency": "cost",
+            "limit": 0.01,
+            "used": 0.011002249999999998
+          }
+        },
+        {
+          "codonId": "post-loop-codon",
+          "startTime": "2026-03-05T18:50:26.033Z",
+          "status": "completed",
+          "claudePid": 966707,
+          "claudeLogPath": ".hankweave/runs/1772736618402-nf8ud/post-loop-codon-claude.log",
+          "claudeSessionId": "1a34758c-7d39-4b0c-b725-b8939f173800",
+          "currentCost": 0.0040865,
+          "currentTokens": {
+            "inputTokens": 3,
+            "outputTokens": 5,
+            "cacheCreationTokens": 0,
+            "cacheReadTokens": 15535
+          },
+          "assistantMessageCount": 1,
+          "extensionCount": 0,
+          "endTime": "2026-03-05T18:50:32.362Z",
+          "exitCode": 0,
+          "finalCost": 0.0040865,
+          "finalTokens": {
+            "inputTokens": 3,
+            "outputTokens": 5,
+            "cacheCreationTokens": 0,
+            "cacheReadTokens": 15535
+          },
+          "resultMessageReceived": true,
+          "completionCheckpoint": "179362dec40c4437d1218c3aa6351f16d47c5553"
+        }
+      ],
+      "status": "running",
+      "startTime": "2026-03-05T18:50:18.403Z",
+      "serverPid": 38093
+    }
+  ],
+  "currentRunId": "1772736618402-nf8ud",
+  "executionPlan": [
+    {
+      "codon": {
+        "type": "codon",
+        "id": "loop-codon",
+        "name": "Loop Codon",
+        "promptText": "Create file iteration.txt with the current date and time. Then read the file back to verify.",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "loop-codon#0",
+      "loopContext": {
+        "loopId": "budget-loop",
+        "iteration": 0,
+        "codonIndexInLoop": 0,
+        "loopBudget": {
+          "maxDollars": 0.01
+        }
+      }
+    },
+    {
+      "codon": {
+        "type": "codon",
+        "id": "post-loop-codon",
+        "name": "Post Loop Codon",
+        "promptText": "Say exactly: loop finished",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "post-loop-codon"
+    }
+  ]
+}

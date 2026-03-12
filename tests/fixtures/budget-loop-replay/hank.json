@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "type": "loop",
+      "id": "budget-loop",
+      "name": "Budget Loop Test",
+      "terminateOn": { "type": "iterationLimit", "limit": 5 },
+      "codons": [
+        {
+          "id": "loop-codon",
+          "name": "Loop Codon",
+          "promptText": "Perform each step one at a time: 1) Create file a.txt with content 'alpha'. 2) Create file b.txt with content 'bravo'. 3) Create file c.txt with content 'charlie'. Then read each file to verify its contents.",
+          "model": "haiku",
+          "budget": { "maxDollars": 0.20 },
+          "continuationMode": "fresh"
+        }
+      ]
+    },
+    {
+      "id": "post-loop-codon",
+      "name": "Post Loop Codon",
+      "promptText": "Say exactly: loop finished",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    }
+  ]
+}

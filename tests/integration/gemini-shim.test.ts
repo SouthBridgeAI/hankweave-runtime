@@ -259,7 +259,7 @@ describe("Gemini Shim Integration Test", () => {
     console.log(`    ✓ Shim: ${result.shim.name} v${result.shim.version}`);
 
     expect(result.agent).toBeDefined();
-    expect(result.agent.name).toBe("gemini-cli");
+    expect(result.agent.name).toBe("gemini");
     expect(typeof result.agent.found).toBe("boolean");
     console.log(
       `    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`,

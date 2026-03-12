@@ -1,0 +1,132 @@
+{
+  "runs": [
+    {
+      "runId": "1772736415734-71q22",
+      "runFolder": "/Users/philip/projects/worktrees/hw-phase-budget/tests/test-area/execution-2026-03-05T18-46-54/.hankweave/runs/1772736415734-71q22",
+      "gitBranch": "run-1772736415734-71q22",
+      "startingConditions": {
+        "type": "fresh"
+      },
+      "codons": [
+        {
+          "codonId": "fail-on-budget",
+          "startTime": "2026-03-05T18:46:56.081Z",
+          "status": "failed",
+          "endTime": "2026-03-05T18:47:02.448Z",
+          "failedDuring": "running",
+          "exitCode": 0,
+          "failureReason": {
+            "type": "unknown",
+            "retriable": false,
+            "message": "Budget exceeded: Cost $0.0195 exceeded limit $0.0010"
+          },
+          "partialCost": 0.038961,
+          "partialTokens": {
+            "inputTokens": 6,
+            "outputTokens": 16,
+            "cacheCreationTokens": 31100,
+            "cacheReadTokens": 0
+          },
+          "claudePid": 967103,
+          "claudeSessionId": "c54ef858-5f6a-44a7-a6df-f65bfa674821",
+          "claudeLogPath": ".hankweave/runs/1772736415734-71q22/fail-on-budget-claude.log",
+          "extensionCount": 0,
+          "errorCheckpoint": "aa45c467ad7de5e07be4bce8d2c113ca22a94361"
+        }
+      ],
+      "status": "failed",
+      "startTime": "2026-03-05T18:46:55.734Z",
+      "serverPid": 21337,
+      "endTime": "2026-03-05T18:47:02.514Z"
+    }
+  ],
+  "currentRunId": null,
+  "executionPlan": [
+    {
+      "codon": {
+        "type": "codon",
+        "id": "fail-on-budget",
+        "name": "Should Fail On Budget",
+        "promptText": "Write a detailed essay about the history of computing. Make it at least 2000 words.",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "fail-on-budget"
+    },
+    {
+      "codon": {
+        "type": "codon",
+        "id": "followup-codon",
+        "name": "Followup (should not run)",
+        "promptText": "Say exactly: hello world",
+        "model": {
+          "providerId": "anthropic",
+          "modelId": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5 (latest)",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "knowledge": "2025-02-28",
+          "release_date": "2025-10-15",
+          "last_updated": "2025-10-15"
+        },
+        "continuationMode": "fresh",
+        "maxExtensions": 100
+      },
+      "codonId": "followup-codon"
+    }
+  ]
+}

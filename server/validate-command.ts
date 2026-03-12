@@ -7,6 +7,7 @@ import { hashDataSource } from "./data-hasher.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { Logger } from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
+import { renderBudgetResolutionTable } from "./validate-budget.js";
 
 // -------------
 // Path Determination (for validation mode)
@@ -71,6 +72,7 @@ interface ValidationDisplayOptions {
   executionPath: string;
   result: ValidationResult;
   originalUrl?: string; // Original remote hank URL (if remote)
+  resolvedBudget?: { maxDollars?: number; maxTimeSeconds?: number };
 }
 
 function displayValidationResult(options: ValidationDisplayOptions): void {
@@ -93,6 +95,25 @@ function displayValidationResult(options: ValidationDisplayOptions): void {
 
   // Summary box with rounded corners
   const useColor = process.stdout.isTTY ?? false;
+
+  // Budget resolution table (only if any budget config exists)
+  const hasAnyBudget =
+    options.result.hankBudget ||
+    options.result.codons.some((cfg) =>
+      cfg.type === "loop" ? cfg.budget || cfg.codons.some((cc) => cc.budget) : cfg.budget,
+    );
+
+  if (hasAnyBudget) {
+    const budgetTable = renderBudgetResolutionTable({
+      hankBudget: options.result.hankBudget ?? {},
+      codons: options.result.codons,
+      terminalWidth,
+      useColor,
+      resolvedCeiling: options.resolvedBudget,
+    });
+    console.log(budgetTable);
+    console.log("");
+  }
   const green = useColor ? "\x1b[32m" : "";
   const cyan = useColor ? "\x1b[36m" : "";
   const bold = useColor ? "\x1b[1m" : "";
@@ -181,6 +202,8 @@ export interface ValidateOptions {
   modelOverride?: string;
   /** Original URL if this is a remote hank (for display in run hint) */
   originalUrl?: string;
+  /** Resolved budget from all config layers (runtime, hank, CLI) for accurate ceiling display */
+  resolvedBudget?: { maxDollars?: number; maxTimeSeconds?: number };
 }
 
 /**
@@ -253,5 +276,6 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
     executionPath: paths.executionPath,
     result: validationResult,
     originalUrl: options.originalUrl,
+    resolvedBudget: options.resolvedBudget,
   });
 }

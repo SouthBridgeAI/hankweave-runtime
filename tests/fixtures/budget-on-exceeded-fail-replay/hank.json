@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "overrides": {
+    "budget": { "maxDollars": 0.001, "onExceeded": "fail" }
+  },
+  "hank": [
+    {
+      "id": "fail-on-budget",
+      "name": "Should Fail On Budget",
+      "promptText": "Write a detailed essay about the history of computing. Make it at least 2000 words.",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    },
+    {
+      "id": "followup-codon",
+      "name": "Followup (should not run)",
+      "promptText": "Say exactly: hello world",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    }
+  ]
+}

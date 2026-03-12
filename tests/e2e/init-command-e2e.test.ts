@@ -227,6 +227,8 @@ describe("init command e2e", () => {
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-haiku.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-codex.md"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-pi.md"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-opencode.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample1.txt"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample2.txt"))).toBe(true);
@@ -239,7 +241,7 @@ describe("init command e2e", () => {
       expect(hankConfig).toHaveProperty("meta");
       expect(hankConfig).toHaveProperty("hank");
       expect(Array.isArray(hankConfig.hank)).toBe(true);
-      expect(hankConfig.hank.length).toBe(3);
+      expect(hankConfig.hank.length).toBe(5);
 
       // Verify first codon has required fields
       const firstCodon = hankConfig.hank[0];
@@ -261,6 +263,22 @@ describe("init command e2e", () => {
       expect(thirdCodon).toHaveProperty("name");
       expect(thirdCodon).toHaveProperty("model");
       expect(thirdCodon).toHaveProperty("continuationMode");
+
+      // Verify fourth codon (pi) has required fields
+      const fourthCodon = hankConfig.hank[3];
+      expect(fourthCodon).toHaveProperty("id");
+      expect(fourthCodon).toHaveProperty("name");
+      expect(fourthCodon).toHaveProperty("model");
+      expect(fourthCodon).toHaveProperty("continuationMode");
+      expect(fourthCodon.model).toBe("pi/anthropic/claude-haiku-4-5");
+
+      // Verify fifth codon (opencode) has required fields
+      const fifthCodon = hankConfig.hank[4];
+      expect(fifthCodon).toHaveProperty("id");
+      expect(fifthCodon).toHaveProperty("name");
+      expect(fifthCodon).toHaveProperty("model");
+      expect(fifthCodon).toHaveProperty("continuationMode");
+      expect(fifthCodon.model).toBe("opencode/anthropic/claude-haiku-4-5");
     },
     INIT_CREATE_TIMEOUT_MS,
   );
@@ -347,6 +365,7 @@ describe("init command e2e", () => {
         expect(fs.existsSync(analysisGeminiFile)).toBe(true);
 
         const analysisCodexFile = path.join(agentRootPath, "analysis-codex.md");
+        const analysisPiFile = path.join(agentRootPath, "analysis-pi.md");
 
         // On Windows, PowerShell write commands may be blocked by test policy
         // Verify codon completion instead of file output as a fallback
@@ -362,6 +381,13 @@ describe("init command e2e", () => {
           expect(fs.existsSync(analysisCodexFile)).toBe(true);
         }
 
+        // Pi analysis file (uses SDK-embedded shim, no binary needed)
+        expect(fs.existsSync(analysisPiFile)).toBe(true);
+
+        // OpenCode analysis file
+        const analysisOpencodeFile = path.join(agentRootPath, "analysis-opencode.md");
+        expect(fs.existsSync(analysisOpencodeFile)).toBe(true);
+
         // Verify analysis files have content
         const analysisHaikuContent = fs.readFileSync(analysisHaikuFile, "utf-8");
         expect(analysisHaikuContent.length).toBeGreaterThan(0);
@@ -374,6 +400,14 @@ describe("init command e2e", () => {
           const analysisCodexContent = fs.readFileSync(analysisCodexFile, "utf-8");
           expect(analysisCodexContent.length).toBeGreaterThan(0);
         }
+
+        // Verify pi analysis file has content
+        const analysisPiContent = fs.readFileSync(analysisPiFile, "utf-8");
+        expect(analysisPiContent.length).toBeGreaterThan(0);
+
+        // Verify opencode analysis file has content
+        const analysisOpencodeContent = fs.readFileSync(analysisOpencodeFile, "utf-8");
+        expect(analysisOpencodeContent.length).toBeGreaterThan(0);
 
         // Verify shim debug logs were created in shared directory
         const shimDebugDir = path.join(INIT_TEST_DIR, ".hankweave/logs/shim-debug");

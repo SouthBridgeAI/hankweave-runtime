@@ -859,3 +859,125 @@ describe("ExecutionPlanner - validatePlan", () => {
     expect(() => planner.validatePlan(plan)).not.toThrow();
   });
 });
+
+// ============================================================================
+// Test: expandNextIteration() - Budget Exceeded Handling
+// ============================================================================
+
+describe("ExecutionPlanner - expandNextIteration - budget exceeded", () => {
+  test("budgetExceeded=true stops contextExceeded loop", () => {
+    const loopCodon = createCodon("work", "Work");
+
+    const configs: CodonConfig[] = [
+      createLoop("context-loop", "Context Loop", [loopCodon], {
+        type: "contextExceeded",
+      }),
+    ];
+
+    const planner = new ExecutionPlanner(configs);
+    let plan = planner.buildInitialPlan();
+    expect(plan).toHaveLength(1);
+
+    // Complete work#0 with budgetExceeded=true — should NOT expand
+    plan = planner.expandNextIteration({
+      currentPlan: plan,
+      completedCodonId: CodonId("work#0"),
+      budgetExceeded: true,
+    });
+    expect(plan).toHaveLength(1);
+  });
+
+  test("budgetExceeded=true stops iterationLimit loop", () => {
+    const loopCodon = createCodon("work", "Work");
+
+    const configs: CodonConfig[] = [
+      createLoop("limited-loop", "Limited Loop", [loopCodon], {
+        type: "iterationLimit",
+        limit: 10,
+      }),
+    ];
+
+    const planner = new ExecutionPlanner(configs);
+    let plan = planner.buildInitialPlan();
+    expect(plan).toHaveLength(1);
+
+    // Budget exceeded overrides iteration limit — should NOT expand
+    plan = planner.expandNextIteration({
+      currentPlan: plan,
+      completedCodonId: CodonId("work#0"),
+      budgetExceeded: true,
+    });
+    expect(plan).toHaveLength(1);
+  });
+
+  test("budgetExceeded at non-last codon removes remaining codons in iteration", () => {
+    const loopCodon1 = createCodon("analyze", "Analyze");
+    const loopCodon2 = createCodon("refine", "Refine");
+    const finalCodon = createCodon("finalize", "Finalize");
+
+    const configs: CodonConfig[] = [
+      createLoop("main-loop", "Main Loop", [loopCodon1, loopCodon2], {
+        type: "iterationLimit",
+        limit: 5,
+      }),
+      finalCodon,
+    ];
+
+    const planner = new ExecutionPlanner(configs);
+    let plan = planner.buildInitialPlan();
+    expect(plan).toHaveLength(3); // analyze#0, refine#0, finalize
+
+    // Budget exceeded at analyze#0 — removes refine#0, keeps finalize
+    plan = planner.expandNextIteration({
+      currentPlan: plan,
+      completedCodonId: CodonId("analyze#0"),
+      budgetExceeded: true,
+    });
+
+    expect(plan).toHaveLength(2);
+    expect(plan[0].codonId).toBe(CodonId("analyze#0"));
+    expect(plan[1].codonId).toBe(CodonId("finalize"));
+  });
+
+  test("budgetExceeded=false does not affect loop expansion", () => {
+    const loopCodon = createCodon("work", "Work");
+
+    const configs: CodonConfig[] = [
+      createLoop("context-loop", "Context Loop", [loopCodon], {
+        type: "contextExceeded",
+      }),
+    ];
+
+    const planner = new ExecutionPlanner(configs);
+    let plan = planner.buildInitialPlan();
+
+    // budgetExceeded=false — should expand normally
+    plan = planner.expandNextIteration({
+      currentPlan: plan,
+      completedCodonId: CodonId("work#0"),
+      budgetExceeded: false,
+    });
+    expect(plan).toHaveLength(2);
+    expect(plan[1].codonId).toBe(CodonId("work#1"));
+  });
+
+  test("budgetExceeded defaults to false when omitted", () => {
+    const loopCodon = createCodon("work", "Work");
+
+    const configs: CodonConfig[] = [
+      createLoop("context-loop", "Context Loop", [loopCodon], {
+        type: "contextExceeded",
+      }),
+    ];
+
+    const planner = new ExecutionPlanner(configs);
+    let plan = planner.buildInitialPlan();
+
+    // No budgetExceeded param — should expand
+    plan = planner.expandNextIteration({
+      currentPlan: plan,
+      completedCodonId: CodonId("work#0"),
+    });
+    expect(plan).toHaveLength(2);
+  });
+});

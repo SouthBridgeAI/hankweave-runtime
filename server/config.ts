@@ -8,6 +8,7 @@ import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type TelemetryConfig, telemetryConfigSchema } from "./telemetry/telemetry-types.js";
 import { CodonId } from "./types/branded-types.js";
+import type { AllocationMode, OnExceededPolicy } from "./types/budget-types.js";
 import type { ModelName, ShimSelfTestResult } from "./types/types.js";
 import { deepMerge, getMetadata, type Logger, rmSyncWithRetry } from "./utils.js";
 
@@ -27,7 +28,7 @@ export const TIMEOUTS = {
 } as const;
 
 /** Maximum allowed shimIdleTimeout in seconds */
-export const SHIM_IDLE_TIMEOUT_MAX_SECONDS = 600;
+export const SHIM_IDLE_TIMEOUT_MAX_SECONDS = 1800;
 const SHIM_IDLE_TIMEOUT_MAX_MINUTES = SHIM_IDLE_TIMEOUT_MAX_SECONDS / 60;
 
 /**
@@ -89,6 +90,19 @@ export const FIELD_TYPO_MAP: Record<string, string> = {
   output: "outputFiles",
   continuation: "continuationMode",
   mode: "continuationMode",
+
+  // Budget typos
+  costLimit: "budget.maxDollars",
+  maxBudget: "budget.maxDollars",
+  maxCost: "budget.maxDollars",
+  maxDollars: "budget.maxDollars",
+  maxDuration: "budget.maxTimeSeconds",
+  maxDurationSeconds: "budget.maxTimeSeconds",
+  maxTimeSeconds: "budget.maxTimeSeconds",
+  timeLimit: "budget.maxTimeSeconds",
+  maxTokens: "budget.maxOutputTokens",
+  maxOutputTokens: "budget.maxOutputTokens",
+  tokenLimit: "budget.maxOutputTokens",
 };
 
 // -------------
@@ -331,6 +345,321 @@ function modelValidationError(model: string | undefined) {
 }
 
 // -------------
+// Reusable Budget Schemas
+// -------------
+
+/**
+ * Reusable Zod schemas for container-level budget blocks (used by hank overrides and loops).
+ */
+const allocationModeSchema = z
+  .enum(["shared", "proportional", "proportional-strict"])
+  .default("shared")
+  .optional()
+  .describe(
+    "How the dollar budget is distributed among children. " +
+      "'shared': first-past-the-post (default). " +
+      "'proportional': pre-allocate shares, unspent flows back. " +
+      "'proportional-strict': pre-allocate shares, unspent evaporates.",
+  );
+
+const budgetSharesSchema = z
+  .record(z.string(), z.number().gt(0).lte(1))
+  .optional()
+  .describe("Map of child codon/loop ID to fraction (0-1) of the budget.");
+
+const containerBudgetSchema = z
+  .object({
+    maxDollars: z.number().positive().optional().describe("Total cost budget in USD."),
+    maxTimeSeconds: z.number().positive().optional().describe("Wall-clock time limit in seconds."),
+    allocation: allocationModeSchema,
+    shares: budgetSharesSchema,
+    onExceeded: z
+      .enum(["complete", "fail"])
+      .optional()
+      .describe(
+        "What happens when budget is exceeded. 'complete' = graceful completion (default). 'fail' = codon failure, triggers onFailure policy.",
+      ),
+  })
+  .strict();
+
+/**
+ * Refinement helpers for container-level budget validation.
+ */
+function budgetSharesRequiresProportional(budget?: {
+  shares?: Record<string, number>;
+  allocation?: string;
+}): boolean {
+  if (budget?.shares && (!budget?.allocation || budget.allocation === "shared")) {
+    return false;
+  }
+  return true;
+}
+
+function budgetProportionalRequiresMaxDollars(budget?: {
+  allocation?: string;
+  maxDollars?: number;
+}): boolean {
+  if (budget?.allocation && budget.allocation !== "shared" && !budget?.maxDollars) {
+    return false;
+  }
+  return true;
+}
+
+function budgetSharesSumValid(budget?: { shares?: Record<string, number> }): boolean {
+  if (budget?.shares) {
+    const sum = Object.values(budget.shares).reduce((a, b) => a + b, 0);
+    return sum <= 1.0;
+  }
+  return true;
+}
+
+const BUDGET_SHARES_REQUIRES_PROPORTIONAL_MSG =
+  "budget.shares requires allocation mode 'proportional' or 'proportional-strict'. " +
+  "Fix: Set budget.allocation to 'proportional' or 'proportional-strict'.";
+
+const BUDGET_PROPORTIONAL_REQUIRES_MAX_DOLLARS_MSG =
+  "Proportional allocation requires budget.maxDollars. " +
+  "Fix: Set budget.maxDollars to a positive number.";
+
+const BUDGET_SHARES_SUM_MSG =
+  "budget.shares values must sum to at most 1.0. " +
+  "Fix: Reduce share fractions so their total does not exceed 100%.";
+
+// -------------
+// Budget Preflight Warnings
+// -------------
+
+/**
+ * Compute non-blocking budget warnings for valid-but-suspicious configurations.
+ * These warn about things like codon caps that can never be reached, loop budgets
+ * that exceed their allocation, and unallocated budget fractions.
+ */
+export function computeBudgetWarnings(
+  hankBudget:
+    | {
+        maxDollars?: number;
+        maxTimeSeconds?: number;
+        allocation?: AllocationMode;
+        shares?: Record<string, number>;
+        onExceeded?: OnExceededPolicy;
+      }
+    | undefined,
+  codons: CodonConfig[],
+): string[] {
+  const warnings: string[] = [];
+
+  // W1 & W2: Codon/loop cap exceeds proportional allocation (requires hank budget)
+  if (
+    hankBudget?.maxDollars &&
+    hankBudget?.shares &&
+    (hankBudget.allocation === "proportional" || hankBudget.allocation === "proportional-strict")
+  ) {
+    for (const config of codons) {
+      const share = hankBudget.shares[config.id];
+      if (share === undefined) continue;
+      const allocation = share * hankBudget.maxDollars;
+      const configMaxDollars =
+        config.type === "loop" ? config.budget?.maxDollars : config.budget?.maxDollars;
+      if (configMaxDollars !== undefined && configMaxDollars > allocation) {
+        warnings.push(
+          `Budget: '${config.id}' has maxDollars $${configMaxDollars.toFixed(2)} but its proportional allocation is only $${allocation.toFixed(2)} (${(share * 100).toFixed(0)}% of $${hankBudget.maxDollars.toFixed(2)}). The cap will never be reached.`,
+        );
+      }
+    }
+  }
+
+  // W3: Unallocated budget
+  if (hankBudget?.shares && hankBudget.maxDollars) {
+    const totalShared = Object.values(hankBudget.shares).reduce((a, b) => a + b, 0);
+    if (totalShared < 1.0) {
+      // Count top-level children that have neither a share nor an explicit maxDollars cap.
+      // Must match runtime logic (budget.ts computeHankAllocationForLoop): codons with
+      // explicit maxDollars are excluded from uniform remainder distribution.
+      const unsharedCount = codons.filter((c) => {
+        const hasShare = c.id in (hankBudget.shares ?? {});
+        const hasExplicit = c.type !== "loop" ? c.budget?.maxDollars !== undefined : false;
+        return !hasShare && !hasExplicit;
+      }).length;
+      if (unsharedCount === 0) {
+        const unallocatedPct = ((1.0 - totalShared) * 100).toFixed(0);
+        const unallocatedDollars = ((1.0 - totalShared) * hankBudget.maxDollars).toFixed(2);
+        warnings.push(
+          `Budget: Shares sum to ${(totalShared * 100).toFixed(0)}%, leaving ${unallocatedPct}% ($${unallocatedDollars}) unallocated with no unshared codons to absorb it.`,
+        );
+      }
+    }
+  }
+
+  // W4: Loop-scoped warnings for loops with their own proportional budget
+  for (const config of codons) {
+    if (config.type !== "loop" || !config.budget) continue;
+    const loopBudget = config.budget;
+    if (
+      !loopBudget.maxDollars ||
+      !loopBudget.shares ||
+      (loopBudget.allocation !== "proportional" && loopBudget.allocation !== "proportional-strict")
+    ) {
+      continue;
+    }
+
+    // W4a: Child cap exceeds loop allocation
+    for (const codon of config.codons) {
+      const share = loopBudget.shares[codon.id];
+      if (share === undefined) continue;
+      const allocation = share * loopBudget.maxDollars;
+      if (codon.budget?.maxDollars !== undefined && codon.budget.maxDollars > allocation) {
+        warnings.push(
+          `Budget: '${codon.id}' (in loop '${config.id}') has maxDollars $${codon.budget.maxDollars.toFixed(2)} but its loop allocation is only $${allocation.toFixed(2)} (${(share * 100).toFixed(0)}% of $${loopBudget.maxDollars.toFixed(2)}). The cap will never be reached.`,
+        );
+      }
+    }
+
+    // W4b: Unallocated loop budget
+    const totalShared = Object.values(loopBudget.shares).reduce((a, b) => a + b, 0);
+    if (totalShared < 1.0) {
+      const unsharedCount = config.codons.filter((c) => {
+        const hasShare = c.id in (loopBudget.shares ?? {});
+        const hasExplicit = c.budget?.maxDollars !== undefined;
+        return !hasShare && !hasExplicit;
+      }).length;
+      if (unsharedCount === 0) {
+        const unallocatedPct = ((1.0 - totalShared) * 100).toFixed(0);
+        const unallocatedDollars = ((1.0 - totalShared) * loopBudget.maxDollars).toFixed(2);
+        warnings.push(
+          `Budget: Loop '${config.id}' shares sum to ${(totalShared * 100).toFixed(0)}%, leaving ${unallocatedPct}% ($${unallocatedDollars}) unallocated with no unshared codons to absorb it.`,
+        );
+      }
+    }
+  }
+
+  // W5: exhaustWithPrompt + time budget may cause interruption
+  for (const config of codons) {
+    if (config.type === "loop") {
+      for (const codon of config.codons) {
+        if (codon.exhaustWithPrompt) {
+          const hasTime =
+            codon.budget?.maxTimeSeconds !== undefined ||
+            config.budget?.maxTimeSeconds !== undefined ||
+            hankBudget?.maxTimeSeconds !== undefined;
+          if (hasTime) {
+            warnings.push(
+              `Budget: '${codon.id}' has exhaustWithPrompt but is subject to a time budget. ` +
+                `Time enforcement may interrupt the exhaust prompt before it completes.`,
+            );
+          }
+        }
+      }
+    } else if (config.exhaustWithPrompt) {
+      const hasTime =
+        config.budget?.maxTimeSeconds !== undefined || hankBudget?.maxTimeSeconds !== undefined;
+      if (hasTime) {
+        warnings.push(
+          `Budget: '${config.id}' has exhaustWithPrompt but is subject to a time budget. ` +
+            `Time enforcement may interrupt the exhaust prompt before it completes.`,
+        );
+      }
+    }
+  }
+
+  // W6: Dollar budget set but model lacks pricing data
+  const hasDollarBudget = hankBudget?.maxDollars !== undefined;
+  for (const config of codons) {
+    if (config.type === "loop") {
+      for (const codon of config.codons) {
+        const codonHasDollars =
+          hasDollarBudget ||
+          config.budget?.maxDollars !== undefined ||
+          codon.budget?.maxDollars !== undefined;
+        if (codonHasDollars && (!codon.model.cost || codon.model.cost.input === undefined)) {
+          warnings.push(
+            `Budget: '${codon.id}' is subject to a dollar budget but model '${codon.model.name}' has no pricing data. Cost tracking may be inaccurate.`,
+          );
+        }
+      }
+    } else {
+      const codonHasDollars = hasDollarBudget || config.budget?.maxDollars !== undefined;
+      if (codonHasDollars && (!config.model.cost || config.model.cost.input === undefined)) {
+        warnings.push(
+          `Budget: '${config.id}' is subject to a dollar budget but model '${config.model.name}' has no pricing data. Cost tracking may be inaccurate.`,
+        );
+      }
+    }
+  }
+
+  // W7: Zero effective budget at startup (codon has no share in proportional mode)
+  if (
+    hankBudget?.maxDollars &&
+    hankBudget.shares &&
+    (hankBudget.allocation === "proportional" || hankBudget.allocation === "proportional-strict")
+  ) {
+    const totalShared = Object.values(hankBudget.shares).reduce((a, b) => a + b, 0);
+    for (const config of codons) {
+      if (config.type === "loop") continue;
+      const hasShare = config.id in hankBudget.shares;
+      const hasExplicit = config.budget?.maxDollars !== undefined;
+      if (!hasShare && !hasExplicit && totalShared >= 1.0) {
+        warnings.push(
+          `Budget: '${config.id}' has no share and shares sum to 100%. It will start with $0 budget and immediately exceed.`,
+        );
+      }
+    }
+  }
+
+  // W8: onExceeded: "fail" + onFailure: "retry" can cause costly retry loops
+  for (const config of codons) {
+    if (config.type === "loop") {
+      for (const codon of config.codons) {
+        const exceededPolicy = codon.budget?.onExceeded ?? hankBudget?.onExceeded ?? "complete";
+        if (exceededPolicy === "fail" && codon.onFailure === "retry") {
+          warnings.push(
+            `Budget: '${codon.id}' has onExceeded: "fail" and onFailure: "retry". Budget-exceeded retries will likely fail again with the same budget.`,
+          );
+        }
+      }
+    } else {
+      const exceededPolicy = config.budget?.onExceeded ?? hankBudget?.onExceeded ?? "complete";
+      if (exceededPolicy === "fail" && config.onFailure === "retry") {
+        warnings.push(
+          `Budget: '${config.id}' has onExceeded: "fail" and onFailure: "retry". Budget-exceeded retries will likely fail again with the same budget.`,
+        );
+      }
+    }
+  }
+
+  // W9: Fail-policy codon late in shared pool (earlier codons can starve it)
+  if (hankBudget?.maxDollars && (!hankBudget.allocation || hankBudget.allocation === "shared")) {
+    let seenNonFirst = false;
+    for (const config of codons) {
+      const exceededPolicy =
+        config.type === "loop"
+          ? (config.budget?.onExceeded ?? hankBudget?.onExceeded ?? "complete")
+          : (config.budget?.onExceeded ?? hankBudget?.onExceeded ?? "complete");
+      if (seenNonFirst && exceededPolicy === "fail") {
+        warnings.push(
+          `Budget: '${config.id}' has onExceeded: "fail" but is not first in a shared pool. Earlier codons may exhaust the budget before it runs.`,
+        );
+      }
+      seenNonFirst = true;
+    }
+  }
+
+  // W10: Codon time cap > loop time cap (unreachable)
+  for (const config of codons) {
+    if (config.type !== "loop" || !config.budget?.maxTimeSeconds) continue;
+    const loopTime = config.budget.maxTimeSeconds;
+    for (const codon of config.codons) {
+      if (codon.budget?.maxTimeSeconds !== undefined && codon.budget.maxTimeSeconds > loopTime) {
+        warnings.push(
+          `Budget: '${codon.id}' (in loop '${config.id}') has maxTimeSeconds ${codon.budget.maxTimeSeconds}s but loop limit is ${loopTime}s. The codon cap will never be reached.`,
+        );
+      }
+    }
+  }
+
+  return warnings;
+}
+
+// -------------
 // Codon and Loop Schemas
 // -------------
 
@@ -499,6 +828,31 @@ export const codonObjectSchema = z.object({
       "Max seconds between agent events before the shim aborts (idle timeout). " +
         "Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s).",
     ),
+  budget: z
+    .object({
+      maxDollars: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Max cost in USD. Execution stopped when exceeded."),
+      maxTimeSeconds: z.number().positive().optional().describe("Max wall-clock time in seconds."),
+      maxOutputTokens: z.number().int().positive().optional().describe("Max output tokens."),
+      maxContextTokens: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Max context window tokens (high-water mark of input+output per turn). " +
+            "Useful for capping context growth independent of cost.",
+        ),
+      onExceeded: z
+        .enum(["complete", "fail"])
+        .optional()
+        .describe("Override hank-level onExceeded for this codon."),
+    })
+    .strict()
+    .optional(),
 });
 
 /**
@@ -587,6 +941,7 @@ export const loopSchema = z.object({
     .describe(
       "Array of codons to execute in each iteration. Only Codon objects allowed (no nested loops).",
     ),
+  budget: containerBudgetSchema.optional().describe("Budget scope for this loop."),
   archiveOnSuccess: z
     .array(
       z
@@ -605,13 +960,42 @@ export const loopSchema = z.object({
     ),
 });
 
+const loopSchemaRefined = loopSchema
+  .strict()
+  .refine((loop) => budgetSharesRequiresProportional(loop.budget), {
+    message: BUDGET_SHARES_REQUIRES_PROPORTIONAL_MSG,
+  })
+  .refine((loop) => budgetProportionalRequiresMaxDollars(loop.budget), {
+    message: BUDGET_PROPORTIONAL_REQUIRES_MAX_DOLLARS_MSG,
+  })
+  .refine((loop) => budgetSharesSumValid(loop.budget), {
+    message: BUDGET_SHARES_SUM_MSG,
+  })
+  .refine(
+    (loop) => {
+      const shares = loop.budget?.shares;
+      if (!shares) return true;
+      const childIds = new Set(loop.codons.map((c) => c.id));
+      return Object.keys(shares).every((key) => childIds.has(key));
+    },
+    (loop) => {
+      const shares = loop.budget?.shares;
+      if (!shares) return { message: "" };
+      const childIds = new Set(loop.codons.map((c) => c.id));
+      const invalid = Object.keys(shares).filter((k) => !childIds.has(k));
+      return {
+        message: `budget.shares references unknown child IDs: ${invalid.join(", ")}. Valid IDs: ${[...childIds].join(", ")}`,
+      };
+    },
+  );
+
 /**
  * CodonConfig is a discriminated union of Codon and Loop.
  * Used in hank.json configuration.
  */
 export const codonConfigSchema = z.union([
   codonSchema, // type: "codon" (or omitted, defaults to "codon")
-  loopSchema.strict(), // type: "loop"
+  loopSchemaRefined, // type: "loop"
 ]);
 
 // Note: codonConfigArraySchema is kept for backwards compatibility but
@@ -753,7 +1137,7 @@ const codonConfigArraySchemaWithDetailedErrors = z
       }
 
       // Validate against the appropriate schema
-      const schema = isLoop ? loopSchema.strict() : codonSchema;
+      const schema = isLoop ? loopSchemaRefined : codonSchema;
       const result = schema.safeParse(item);
 
       if (!result.success) {
@@ -778,7 +1162,7 @@ const codonConfigArraySchemaWithDetailedErrors = z
     return items.map((item) => {
       const itemType = (item as Record<string, unknown>)?.type;
       if (itemType === "loop") {
-        return loopSchema.strict().parse(item);
+        return loopSchemaRefined.parse(item);
       }
       return codonSchema.parse(item);
     });
@@ -856,12 +1240,22 @@ export const hankOverridesSchema = z
       )
       .optional()
       .describe("Default shim idle timeout for all codons in this hank (seconds)"),
+    budget: containerBudgetSchema.optional(),
   })
   .strict()
   .refine(
     (overrides) => modelValidationRefinement(overrides.model),
     (overrides) => modelValidationError(overrides.model),
-  );
+  )
+  .refine((o) => budgetSharesRequiresProportional(o.budget), {
+    message: BUDGET_SHARES_REQUIRES_PROPORTIONAL_MSG,
+  })
+  .refine((o) => budgetProportionalRequiresMaxDollars(o.budget), {
+    message: BUDGET_PROPORTIONAL_REQUIRES_MAX_DOLLARS_MSG,
+  })
+  .refine((o) => budgetSharesSumValid(o.budget), {
+    message: BUDGET_SHARES_SUM_MSG,
+  });
 
 /**
  * Schema for hank requirements (things that must be true for hank to run).
@@ -913,7 +1307,24 @@ export const hankFileSchema = z
   .strict()
   .refine((data) => !(data.globalSystemPromptFile && data.globalSystemPromptText), {
     message: "Cannot specify both globalSystemPromptFile and globalSystemPromptText",
-  });
+  })
+  .refine(
+    (data) => {
+      const shares = data.overrides?.budget?.shares;
+      if (!shares) return true;
+      const childIds = new Set(data.hank.map((c) => c.id));
+      return Object.keys(shares).every((key) => childIds.has(key));
+    },
+    (data) => {
+      const shares = data.overrides?.budget?.shares;
+      if (!shares) return { message: "" };
+      const childIds = new Set(data.hank.map((c) => c.id));
+      const invalid = Object.keys(shares).filter((k) => !childIds.has(k));
+      return {
+        message: `budget.shares references unknown child IDs: ${invalid.join(", ")}. Valid IDs: ${[...childIds].join(", ")}`,
+      };
+    },
+  );
 
 // -------------
 // Schemas for JSON Schema Generation (authoring/input types)
@@ -940,6 +1351,7 @@ export const loopAuthoringSchema = z
       .array(codonObjectSchema.strict())
       .min(1)
       .describe("Array of codons to execute in each iteration"),
+    budget: containerBudgetSchema.optional().describe("Budget scope for this loop."),
     archiveOnSuccess: z
       .array(z.string().min(1))
       .optional()
@@ -947,7 +1359,7 @@ export const loopAuthoringSchema = z
         "Paths to archive when the loop terminates. Paths are relative to the agent workspace.",
       ),
   })
-  .strict(); // Matches loopSchema.strict() in codonConfigSchema
+  .strict(); // Matches loopSchemaRefined in codonConfigSchema
 
 /**
  * Authoring schema for codon config - union of codon and loop, both using input types.
@@ -1062,6 +1474,23 @@ export const runtimeConfigSchema = z
 
     // Telemetry
     telemetry: telemetryConfigSchema.optional().describe("Telemetry configuration"),
+
+    // Budget
+    budget: z
+      .object({
+        maxDollars: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Global cost budget in USD. Effective global = min(runtime, hank)."),
+        maxTimeSeconds: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Global wall-clock time limit in seconds. Effective = min(runtime, hank)."),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine(
@@ -1110,6 +1539,7 @@ export interface HankweaveConfig
     | "outputDirectory"
     | "telemetry"
     | "shimIdleTimeout"
+    | "budget"
   > {
   // Fields from RuntimeConfig that remain optional
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
@@ -1143,6 +1573,15 @@ export interface HankweaveConfig
 
   /** Telemetry configuration from hankweave.json */
   telemetry?: TelemetryConfig;
+
+  /** Resolved budget config (merged from runtime and hank overrides) */
+  budget?: {
+    maxDollars?: number;
+    maxTimeSeconds?: number;
+    allocation?: AllocationMode;
+    shares?: Record<string, number>;
+    onExceeded?: OnExceededPolicy;
+  };
 
   // Additional internal properties (not in RuntimeConfig)
   /** Server version for client compatibility checks */
@@ -1517,12 +1956,23 @@ export function resolveSettings(options?: {
 }): Partial<HankweaveConfig> {
   const { cliArgs = {}, hankPath, runtimeConfigPath } = options || {};
 
+  // Collect runtime + hank ceiling values for min() resolution.
+  // CLI ceilings are applied after this as highest-priority overrides.
+  const runtimeHankMaxDollarsValues: number[] = [];
+  const runtimeHankMaxTimeSecondsValues: number[] = [];
+
   // Layer 1 (base): Start with default configuration
   let config: Partial<HankweaveConfig> = { ...DEFAULT_CONFIG };
 
   // Layer 2: Merge runtime config file (hankweave.json)
   try {
     const runtimeConfig = loadRuntimeConfig(runtimeConfigPath);
+    if (runtimeConfig.budget?.maxDollars !== undefined) {
+      runtimeHankMaxDollarsValues.push(runtimeConfig.budget.maxDollars);
+    }
+    if (runtimeConfig.budget?.maxTimeSeconds !== undefined) {
+      runtimeHankMaxTimeSecondsValues.push(runtimeConfig.budget.maxTimeSeconds);
+    }
     config = deepMerge(config, runtimeConfig);
   } catch (_error) {
     // Runtime config is optional, so silently continue if it doesn't exist
@@ -1535,6 +1985,12 @@ export function resolveSettings(options?: {
       const hankFile = loadHankFile({ hankPath });
 
       if (hankFile.overrides) {
+        if (hankFile.overrides.budget?.maxDollars !== undefined) {
+          runtimeHankMaxDollarsValues.push(hankFile.overrides.budget.maxDollars);
+        }
+        if (hankFile.overrides.budget?.maxTimeSeconds !== undefined) {
+          runtimeHankMaxTimeSecondsValues.push(hankFile.overrides.budget.maxTimeSeconds);
+        }
         config = deepMerge(config, hankFile.overrides);
       }
     } catch (_error) {
@@ -1544,11 +2000,36 @@ export function resolveSettings(options?: {
   }
 
   // Layer 4: Merge environment variables (HANKWEAVE_RUNTIME_*)
+  // Note: env vars don't currently support budget settings.
   const envConfig = loadHankweaveRuntimeEnvVars();
   config = deepMerge(config, envConfig);
 
   // Layer 5 (highest priority): Merge CLI arguments
   config = deepMerge(config, cliArgs);
+
+  // Post-merge: enforce runtime/hank min() semantics, then apply CLI override.
+  // Runtime config and hank overrides combine as the tightest shared ceiling.
+  // CLI --max-cost/--max-time are highest priority and can override that ceiling.
+  if (
+    runtimeHankMaxDollarsValues.length > 0 ||
+    runtimeHankMaxTimeSecondsValues.length > 0 ||
+    cliArgs.budget?.maxDollars !== undefined ||
+    cliArgs.budget?.maxTimeSeconds !== undefined
+  ) {
+    if (!config.budget) {
+      config.budget = {};
+    }
+    if (cliArgs.budget?.maxDollars !== undefined) {
+      config.budget.maxDollars = cliArgs.budget.maxDollars;
+    } else if (runtimeHankMaxDollarsValues.length > 0) {
+      config.budget.maxDollars = Math.min(...runtimeHankMaxDollarsValues);
+    }
+    if (cliArgs.budget?.maxTimeSeconds !== undefined) {
+      config.budget.maxTimeSeconds = cliArgs.budget.maxTimeSeconds;
+    } else if (runtimeHankMaxTimeSecondsValues.length > 0) {
+      config.budget.maxTimeSeconds = Math.min(...runtimeHankMaxTimeSecondsValues);
+    }
+  }
 
   return config;
 }
@@ -1902,6 +2383,14 @@ export interface ValidationResult {
     passed: boolean;
     result: ShimSelfTestResult;
   }>;
+  /** Hank-level budget config for display in the budget resolution table */
+  hankBudget?: {
+    maxDollars?: number;
+    maxTimeSeconds?: number;
+    allocation?: AllocationMode;
+    shares?: Record<string, number>;
+    onExceeded?: OnExceededPolicy;
+  };
 }
 
 /**
@@ -1985,6 +2474,7 @@ export async function validateHank(options: {
       fromSystem: {},
       fromCodons: [],
     },
+    hankBudget: hankFile.overrides?.budget,
   };
 
   // Collect HANKWEAVE_ prefixed environment variables from system
@@ -2453,6 +2943,10 @@ export async function validateHank(options: {
       }
     }
   }
+
+  // Budget preflight warnings
+  const budgetWarnings = computeBudgetWarnings(hankFile.overrides?.budget, codons);
+  result.warnings.push(...budgetWarnings);
 
   // Check if any self-tests failed and throw error if so
   if (result.shimSelfTests && result.shimSelfTests.length > 0) {

@@ -7,6 +7,24 @@ tests/
 *.test.ts
 *.test.js
 
+# Shim build artifacts (only index.js is needed at runtime)
+shims/*/node_modules/
+shims/*/tests/
+shims/*/src/
+shims/*/bun.lock
+shims/*/tsconfig.json
+shims/*/rebuild.sh
+shims/*/docs/
+
+# Same exclusions for dist/ copies (build step copies shims into dist/)
+dist/shims/*/node_modules/
+dist/shims/*/tests/
+dist/shims/*/src/
+dist/shims/*/bun.lock
+dist/shims/*/tsconfig.json
+dist/shims/*/rebuild.sh
+dist/shims/*/docs/
+
 # Development files
 .vscode/
 .idea/

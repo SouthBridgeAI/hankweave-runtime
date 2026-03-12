@@ -197,7 +197,12 @@ export class LlmProviderRegistry {
           // Only register by short ID if it doesn't contain a slash
           // (to avoid conflicts where providers have modelIds like "google/gemini-xxx")
           if (!model.modelId.includes("/")) {
-            this.models.set(model.modelId.toLowerCase(), model); // Keep short ID for AI SDK compatibility
+            const shortKey = model.modelId.toLowerCase();
+            const existing = this.models.get(shortKey);
+            // Don't let resellers overwrite the preferred/canonical provider for a model
+            if (!existing || existing.providerId !== this.getPreferredProvider(model.modelId)) {
+              this.models.set(shortKey, model);
+            }
           }
         }
       }
