@@ -9,6 +9,12 @@ export interface ProviderDefinition {
   apiKeyEnvVar: string;
   createProvider: (apiKey: string) => Provider;
   defaultHeaders?: Record<string, string>; // Optional headers for the provider
+  /**
+   * Preferred models for health checks, tried in order before falling back
+   * to findCheapestModel. Use stable, non-preview model IDs that the
+   * provider is unlikely to deprecate.
+   */
+  healthCheckModels?: string[];
 }
 
 /**
@@ -28,6 +34,7 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
         apiKey,
         // Can add baseURL for proxies if needed in the future
       }),
+    healthCheckModels: ["claude-haiku-4-5"],
   },
   {
     id: "openai",
@@ -37,6 +44,7 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
         apiKey,
         // Default OpenAI provider configuration - no additional options needed
       }),
+    healthCheckModels: ["gpt-5.4-mini"],
   },
   {
     id: "groq",
@@ -53,6 +61,7 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
       createGoogleGenerativeAI({
         apiKey,
       }),
+    healthCheckModels: ["gemini-flash-latest"],
   },
   // Note: Mistral is not included as @ai-sdk/mistral is not currently available
   // but the models data includes mistral models for future use

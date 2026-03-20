@@ -538,7 +538,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         // Check for failure reasons that would prevent extension
         if (msg.subtype === "error") {
           // Determine failure reason from error type
-          const errorText = String(msg.error || "").toLowerCase();
+          const errorText = String(msg.result || "").toLowerCase();
           if (errorText.includes("timeout") || errorText.includes("timed out")) {
             this.failureReason = { type: "timeout", retriable: true };
           } else if (errorText.includes("rate") || errorText.includes("429")) {

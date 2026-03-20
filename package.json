@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -18,6 +18,19 @@
     "hankweave": "dist/index.js"
   },
   "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./schemas": {
+      "types": "./dist/exports/schemas.d.ts",
+      "import": "./dist/exports/schemas.js",
+      "default": "./dist/exports/schemas.js"
+    },
+    "./types": {
+      "types": "./dist/exports/types.d.ts",
+      "import": "./dist/exports/types.js",
+      "default": "./dist/exports/types.js"
+    }
+  },
   "files": [
     "dist",
     "schemas"

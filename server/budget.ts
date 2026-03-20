@@ -728,12 +728,25 @@ export class Budget extends TypedEventEmitter<BudgetEvents> {
     const currentIndex = this.executionPlan.findIndex((e) => e.codonId === codonId);
     const entry = currentIndex >= 0 ? this.executionPlan[currentIndex] : undefined;
     const loopCtx = entry?.loopContext;
-    const loopBudget = loopCtx?.loopBudget;
+
+    // When a loop has no explicit budget but the hank's proportional shares include its ID,
+    // synthesize an implicit loopBudget ({}) so downstream logic routes correctly.
+    // resolveAndStoreLoopEffectiveBudget will derive the effective limit from the hank share.
+    const effectiveLoopCtx =
+      loopCtx &&
+      !loopCtx.loopBudget &&
+      (this.budgetConfig.allocationMode === "proportional" ||
+        this.budgetConfig.allocationMode === "proportional-strict") &&
+      this.budgetConfig.shares?.[String(loopCtx.loopId)] !== undefined
+        ? { ...loopCtx, loopBudget: {} as NonNullable<typeof loopCtx.loopBudget> }
+        : loopCtx;
+
+    const loopBudget = effectiveLoopCtx?.loopBudget;
 
     let limits: BudgetLimits;
 
-    if (loopBudget && loopCtx) {
-      limits = this.resolveLoopScopedLimits(codonId, codon, currentIndex, loopCtx);
+    if (loopBudget && effectiveLoopCtx) {
+      limits = this.resolveLoopScopedLimits(codonId, codon, currentIndex, effectiveLoopCtx);
     } else {
       limits = this.resolveHankScopedLimits(codonId, codon, currentIndex);
     }

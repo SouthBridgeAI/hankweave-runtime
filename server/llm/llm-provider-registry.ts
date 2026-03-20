@@ -148,7 +148,10 @@ export class LlmProviderRegistry {
       // The codex shim strips the suffix (e.g. "-high") and passes it as model_reasoning_effort.
       // We register these so the registry can resolve and return cost info for them.
       const REASONING_EFFORTS = ["high", "xhigh"] as const;
-      const effortCostMultiplier: Record<string, number> = { high: 1, xhigh: 2 };
+      const effortCostMultiplier: Record<string, number> = {
+        high: 1,
+        xhigh: 2,
+      };
       const reasoningEffortModels: ModelInfo[] = [];
 
       for (const provider of allProviders) {
@@ -276,6 +279,11 @@ export class LlmProviderRegistry {
     const recentCandidates = candidates.filter((m) => padDate(m.last_updated) >= sixMoCutoff);
     const yearCandidates = candidates.filter((m) => padDate(m.last_updated) >= oneYrCutoff);
 
+    // Dated preview models (e.g. "gemini-2.5-flash-lite-preview-09-2025") are
+    // ephemeral and get deprecated without notice. Prefer stable model IDs
+    // when costs are equal.
+    const isDatedPreview = (id: string) => /preview-\d{2}/.test(id);
+
     const pickCheapest = (models: ModelInfo[]): ModelInfo | undefined => {
       let best: ModelInfo | undefined;
       let lowestCost = Number.POSITIVE_INFINITY;
@@ -283,6 +291,13 @@ export class LlmProviderRegistry {
         const cost = m.cost?.input ?? Number.POSITIVE_INFINITY;
         if (cost < lowestCost) {
           lowestCost = cost;
+          best = m;
+        } else if (
+          cost === lowestCost &&
+          best &&
+          isDatedPreview(best.modelId) &&
+          !isDatedPreview(m.modelId)
+        ) {
           best = m;
         }
       }
@@ -301,6 +316,33 @@ export class LlmProviderRegistry {
     }
 
     return chosen?.modelId;
+  }
+
+  /**
+   * Get the best model for a health check.
+   * Tries provider-configured preferred models first (stable, non-preview IDs),
+   * then falls back to findCheapestModel.
+   */
+  public getHealthCheckModel(providerId: string): string | undefined {
+    const def = PROVIDER_DEFINITIONS.find((d) => d.id.toLowerCase() === providerId.toLowerCase());
+
+    if (def?.healthCheckModels) {
+      for (const modelId of def.healthCheckModels) {
+        if (this.models.has(modelId.toLowerCase())) {
+          this.logger?.log(
+            `Using preferred health check model ${modelId} for ${providerId}`,
+            "debug",
+          );
+          return modelId;
+        }
+      }
+      this.logger?.log(
+        `No preferred health check models found for ${providerId}, falling back to cheapest`,
+        "debug",
+      );
+    }
+
+    return this.findCheapestModel(providerId);
   }
 
   private initializeProviders(): void {
@@ -650,11 +692,9 @@ export class LlmProviderRegistry {
         return;
       }
 
-      // Find cheapest model for this provider programmatically
-      const testModel = this.findCheapestModel(id);
+      const testModel = this.getHealthCheckModel(id);
 
       if (!testModel) {
-        // No models available for this provider
         this.logger?.log(`No models found for provider ${id}, marking as unhealthy`, "error");
         const updatedStatus: ProviderStatus = {
           ...status,
@@ -666,7 +706,7 @@ export class LlmProviderRegistry {
         return;
       }
 
-      this.logger?.log(`Using ${testModel} for ${id} health check (cheapest model)`, "debug");
+      this.logger?.log(`Using ${testModel} for ${id} health check`, "debug");
 
       try {
         // Create a timeout promise

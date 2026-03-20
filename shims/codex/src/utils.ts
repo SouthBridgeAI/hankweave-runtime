@@ -1,6 +1,4 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { ModelReasoningEffort } from "@openai/codex-sdk";
 import type { SandboxLevel } from "@shims/common/args";
@@ -76,27 +74,6 @@ export function mapSandbox(level: SandboxLevel): "danger-full-access" | "workspa
     default:
       return "danger-full-access";
   }
-}
-
-export function detectApiKeySource(): string {
-  if (process.env.OPENAI_API_KEY) {
-    return "OPENAI_API_KEY";
-  }
-
-  if (process.env.CODEX_API_KEY) {
-    return "CODEX_API_KEY";
-  }
-
-  const authPath = path.join(os.homedir(), ".codex", "auth.json");
-  if (fs.existsSync(authPath)) {
-    return "~/.codex/auth.json";
-  }
-
-  return "none";
-}
-
-export function hasAnyAuthConfigured(): boolean {
-  return detectApiKeySource() !== "none";
 }
 
 export function getCodexPathOverride(): string | undefined {

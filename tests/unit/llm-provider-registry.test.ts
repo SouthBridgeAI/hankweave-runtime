@@ -585,7 +585,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match a gemini flash model despite typo, preferring google provider
-          expect(result.modelInfo.modelId).toBe("gemini-3-flash-preview");
+          expect(result.modelInfo.modelId).toBe("gemini-flash-latest");
           expect(result.modelInfo.providerId).toBe("google");
           expect(result.matchType).toBe("fuzzy");
         }

@@ -3,10 +3,10 @@
   "meta": {
     "name": "Plan-Gen Budget Test: Shared Pool Starvation",
     "version": "2.0.0",
-    "description": "Shared $15 pool — step-1 ($1.87) and step-2 ($11.36) consume $13.23, leaving only $1.77. Step-3+ all starve but complete gracefully."
+    "description": "Shared $13.50 pool — step-1 ($1.87) and step-2 ($11.36) consume $13.23, leaving only $0.27. Step-3+ all starve but complete gracefully."
   },
   "overrides": {
-    "budget": { "maxDollars": 15.0, "onExceeded": "complete" }
+    "budget": { "maxDollars": 13.50, "onExceeded": "complete" }
   },
   "hank": [
     {

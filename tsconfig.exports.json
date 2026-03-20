@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./dist",
+    "declarationDir": "./dist",
+    "types": []
+  },
+  "include": [
+    "server/exports/**/*.ts",
+    "server/schemas/**/*.ts",
+    "server/types/**/*.ts",
+    "server/config.ts",
+    "server/execution-planner.ts",
+    "server/utils.ts",
+    "server/build-constants.d.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

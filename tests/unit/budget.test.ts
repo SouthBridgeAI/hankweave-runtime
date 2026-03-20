@@ -1123,14 +1123,13 @@ describe("Budget - design spec: proportional with loop", () => {
     emitCost(ctImpl0, 2.5);
     budget.completeCodon("implement#0" as CodonId, 2.5);
 
-    // test#0: "test" not in shares, shares sum to 1.0 → unallocated pool = 0
-    // In real usage, loop-level budget would handle this. At the hank level,
-    // unshared codons get 0 when shares sum to 1.0.
+    // test#0: inside dev-loop (share=0.70 → $8.40 loop pool).
+    // Loop spent so far = $2.50 (implement#0), so test#0 gets $8.40 - $2.50 = $5.90
+    // (first-past-the-post within the loop, capped by hank remaining $8.70)
     const ctTest0 = createMockCostTracker();
     budget.trackCodon("test#0" as CodonId, cTest, ctTest0);
     const test0Limit = budget.getEffectiveLimits("test#0").maxDollars;
-    expect(test0Limit).toBe(0);
-    // Despite 0 allocation, the codon can still run (budget tracks cost)
+    expect(test0Limit).toBeCloseTo(5.9, 5);
     emitCost(ctTest0, 0.5);
     budget.completeCodon("test#0" as CodonId, 0.5);
 
@@ -1600,6 +1599,69 @@ describe("loop-level budget", () => {
   test("isLoopBudgetExceeded returns false for loop without budget", () => {
     const budget = createBudget({ maxDollars: 10.0 }, []);
     expect(budget.isLoopBudgetExceeded("nonexistent")).toBe(false);
+  });
+
+  test("hank proportional share for loop ID allocates correctly without explicit loopBudget", () => {
+    // Mirrors a hank config like:
+    //   budget: { maxDollars: 5, allocation: "proportional",
+    //             shares: { "step-one": 0.40, "my-loop": 0.60 } }
+    //   hank: [step-one codon, loop "my-loop" with 2 iterations of "loop-step"]
+    // The loop has NO budget field of its own — its allocation comes solely from hank shares.
+    const cStepOne = codon("step-one");
+    const cLoopStep = codon("loop-step");
+
+    const execPlan = plan(
+      { codonId: "step-one", codon: cStepOne },
+      {
+        codonId: "loop-step#0",
+        codon: cLoopStep,
+        loopContext: {
+          loopId: "my-loop" as CodonId,
+          iteration: 0,
+          codonIndexInLoop: 0,
+          // No loopBudget — budget comes from hank shares["my-loop"]
+        },
+      },
+      {
+        codonId: "loop-step#1",
+        codon: cLoopStep,
+        loopContext: {
+          loopId: "my-loop" as CodonId,
+          iteration: 1,
+          codonIndexInLoop: 0,
+          // No loopBudget
+        },
+      },
+    );
+
+    const budget = createBudget(
+      {
+        maxDollars: 5.0,
+        allocationMode: "proportional",
+        shares: { "step-one": 0.4, "my-loop": 0.6 },
+      },
+      execPlan,
+    );
+
+    // step-one gets 40% of $5.00 = $2.00
+    const ctStepOne = createMockCostTracker();
+    budget.trackCodon("step-one" as CodonId, cStepOne, ctStepOne);
+    expect(budget.getEffectiveLimits("step-one").maxDollars).toBe(2.0);
+    emitCost(ctStepOne, 1.5);
+    budget.completeCodon("step-one" as CodonId, 1.5);
+
+    // my-loop gets 60% of $5.00 = $3.00 (shared pool across all iterations)
+    // loop-step#0: first-past-the-post within loop pool → gets full $3.00
+    const ct0 = createMockCostTracker();
+    budget.trackCodon("loop-step#0" as CodonId, cLoopStep, ct0);
+    expect(budget.getEffectiveLimits("loop-step#0").maxDollars).toBe(3.0);
+    emitCost(ct0, 1.5);
+    budget.completeCodon("loop-step#0" as CodonId, 1.5);
+
+    // loop-step#1: remaining loop budget = $3.00 - $1.50 = $1.50
+    const ct1 = createMockCostTracker();
+    budget.trackCodon("loop-step#1" as CodonId, cLoopStep, ct1);
+    expect(budget.getEffectiveLimits("loop-step#1").maxDollars).toBe(1.5);
   });
 
   test("loop with proportional allocation distributes to codons by share", () => {

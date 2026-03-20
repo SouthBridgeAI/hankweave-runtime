@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   Codex,
@@ -32,13 +33,11 @@ import {
 } from "./tools.js";
 import {
   NIL_UUID,
-  detectApiKeySource,
   flushStdout,
   generateMessageId,
   generateSessionId,
   generateToolUseId,
   getCodexPathOverride,
-  hasAnyAuthConfigured,
   isValidSessionId,
   makeAbsoluteCwd,
   mapSandbox,
@@ -89,7 +88,7 @@ function usageToTokenUsage(usage: Usage | undefined): TokenUsage | undefined {
   };
 }
 
-function createSystemMessage(cwd: string, sessionId: string, model: string): SystemMessage {
+function createSystemMessage(cwd: string, sessionId: string, model: string, apiKeySource: string): SystemMessage {
   return {
     type: "system",
     subtype: "init",
@@ -98,7 +97,7 @@ function createSystemMessage(cwd: string, sessionId: string, model: string): Sys
     tools: DEFAULT_TOOLS,
     model,
     permissionMode: "bypassPermissions",
-    apiKeySource: detectApiKeySource(),
+    apiKeySource,
     mcp_servers: [],
   };
 }
@@ -320,50 +319,7 @@ async function resolveAgentVersion(codexPath: string): Promise<string> {
   });
 }
 
-async function runSelfTest(): Promise<number> {
-  const apiKeySource = detectApiKeySource();
-  const override = getCodexPathOverride() || "codex";
-  const resolvedPath = await resolveCodexPath(override);
-  const agentFound = resolvedPath !== null;
-
-  const agentVersion = resolvedPath ? await resolveAgentVersion(resolvedPath) : "unknown";
-  const checks = [
-    {
-      name: "agent_found",
-      passed: agentFound,
-      message: agentFound ? `Found codex at ${resolvedPath}` : `Could not find codex via ${override}`,
-    },
-    {
-      name: "api_key",
-      passed: apiKeySource !== "none",
-      message:
-        apiKeySource !== "none"
-          ? `Authentication source available: ${apiKeySource}`
-          : "No OPENAI_API_KEY, CODEX_API_KEY, or ~/.codex/auth.json found",
-    },
-  ];
-
-  const overallPassed = checks.every((check) => check.passed);
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        shim: { name: "codex-shim", version: shimPackageJson.version },
-        agent: { name: "codex", version: agentVersion, found: agentFound },
-        checks,
-        overall: {
-          passed: overallPassed,
-          message: overallPassed ? "All checks passed" : "One or more checks failed",
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-
-  return overallPassed ? 0 : 1;
-}
-
-class CodexShim {
+export class CodexShim {
   private readonly args: ShimArguments;
   private readonly prompt: string;
   private readonly cwd: string;
@@ -390,18 +346,74 @@ class CodexShim {
     this.sessionId = args.resume || generateSessionId();
   }
 
+  get resolvedApiKey(): string | undefined {
+    return process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || undefined;
+  }
+
+  get apiKeySource(): string {
+    if (process.env.OPENAI_API_KEY) return "OPENAI_API_KEY";
+    if (process.env.CODEX_API_KEY) return "CODEX_API_KEY";
+    if (fs.existsSync(path.join(os.homedir(), ".codex", "auth.json"))) return "~/.codex/auth.json";
+    return "none";
+  }
+
+  get isAuthConfigured(): boolean {
+    return this.apiKeySource !== "none";
+  }
+
+  async runSelfTest(): Promise<number> {
+    const override = getCodexPathOverride() || "codex";
+    const resolvedPath = await resolveCodexPath(override);
+    const agentFound = resolvedPath !== null;
+
+    const agentVersion = resolvedPath ? await resolveAgentVersion(resolvedPath) : "unknown";
+    const checks = [
+      {
+        name: "agent_found",
+        passed: agentFound,
+        message: agentFound ? `Found codex at ${resolvedPath}` : `Could not find codex via ${override}`,
+      },
+      {
+        name: "api_key",
+        passed: this.isAuthConfigured,
+        message: this.isAuthConfigured
+          ? `Authentication source available: ${this.apiKeySource}`
+          : "No OPENAI_API_KEY, CODEX_API_KEY, or ~/.codex/auth.json found",
+      },
+    ];
+
+    const overallPassed = checks.every((check) => check.passed);
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          shim: { name: "codex-shim", version: shimPackageJson.version },
+          agent: { name: "codex", version: agentVersion, found: agentFound },
+          checks,
+          overall: {
+            passed: overallPassed,
+            message: overallPassed ? "All checks passed" : "One or more checks failed",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    return overallPassed ? 0 : 1;
+  }
+
   async run(): Promise<number> {
     const codexPath = await resolveCodexPath(getCodexPathOverride() || "codex");
     if (!codexPath) {
       writeStartupError("Agent not found: could not locate codex via CODEX_PATH_OVERRIDE or PATH", this.args.debugDir);
     }
 
-    if (!hasAnyAuthConfigured()) {
+    if (!this.isAuthConfigured) {
       writeStartupError("Missing API key: set OPENAI_API_KEY, CODEX_API_KEY, or ~/.codex/auth.json", this.args.debugDir);
     }
 
     this.codex = new Codex({
-      apiKey: process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY,
+      apiKey: this.resolvedApiKey,
       codexPathOverride: codexPath,
       env: Object.fromEntries(
         Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
@@ -428,7 +440,7 @@ class CodexShim {
       thread = this.codex.startThread(this.getThreadOptions());
     }
 
-    const systemMessage = createSystemMessage(this.cwd, this.sessionId, this.model.publicModel);
+    const systemMessage = createSystemMessage(this.cwd, this.sessionId, this.model.publicModel, this.apiKeySource);
     emit(systemMessage);
     this.debug.setSession(this.sessionId, { cwd: this.cwd, model: this.model.publicModel });
 
@@ -551,11 +563,18 @@ class CodexShim {
         throw new Error(event.message);
       }
       case "item.started": {
-        await this.emitToolUseIfNeeded(event.item);
+        // web_search items have query: "" at start — the full query arrives in
+        // later chunks. Defer emission to item.completed (handled by
+        // handleCompletedItem) so the transcript records the real query.
+        if (event.item.type !== "web_search") {
+          await this.emitToolUseIfNeeded(event.item);
+        }
         break;
       }
       case "item.updated": {
-        await this.emitToolUseIfNeeded(event.item);
+        if (event.item.type !== "web_search") {
+          await this.emitToolUseIfNeeded(event.item);
+        }
         break;
       }
       case "item.completed": {
@@ -594,7 +613,11 @@ class CodexShim {
     }
 
     if (item.type === "error") {
-      throw new Error(item.message);
+      // ErrorItem is documented by the Codex SDK as non-fatal ("Describes a
+      // non-fatal error surfaced as an item"). Fatal errors arrive via
+      // ThreadErrorEvent / TurnFailedEvent, not as items.
+      this.logVerbose(`Codex non-fatal error item: ${item.message}`);
+      return;
     }
 
     if (shouldTreatAsToolItem(item)) {
@@ -683,7 +706,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   if (args.selfTest) {
-    return await runSelfTest();
+    return await new CodexShim(args, "").runSelfTest();
   }
 
   const prompt = await readStdin();

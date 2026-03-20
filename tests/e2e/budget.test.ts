@@ -761,12 +761,12 @@ describe("Budget Exceeded E2E Test", () => {
   // ──────────────────────────────────────────────────────────────────────
   // Scenario 1: Shared Pool Starvation Mid-Pipeline
   //
-  // Budget: $15 shared pool, onExceeded: "complete"
+  // Budget: $13.50 shared pool, onExceeded: "complete"
   //
-  // The plan-gen pipeline has 17 codons. With a $15 shared pool:
-  //   - step-1-main ($1.87) fits → pool: $13.13
-  //   - step-2-plan ($11.36) fits → pool: $1.77
-  //   - step-3-codex ($4.68) exceeds mid-execution (only $1.77 left)
+  // The plan-gen pipeline with a $13.50 shared pool:
+  //   - step-1-main ($1.87) fits → pool: $11.63
+  //   - step-2-plan ($11.36) fits → pool: $0.27
+  //   - step-3-codex ($0.84) exceeds mid-execution (only $0.27 left)
   //   - step-4 through final-step-compress all exceed immediately ($0 pool)
   //
   // Key behavior tested: shared pool starvation at scale. Early codons

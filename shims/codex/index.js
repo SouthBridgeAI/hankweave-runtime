@@ -2,7 +2,8 @@
 
 // src/shim.ts
 import { spawn as spawn2 } from "child_process";
-import fs5 from "fs";
+import fs4 from "fs";
+import os2 from "os";
 import path6 from "path";
 
 // node_modules/@openai/codex-sdk/dist/index.js
@@ -753,8 +754,6 @@ var DebugRecorder = class {
 
 // src/utils.ts
 import { randomBytes, randomUUID as randomUUID2 } from "crypto";
-import fs4 from "fs";
-import os2 from "os";
 import path5 from "path";
 var NIL_UUID = "00000000-0000-0000-0000-000000000000";
 var SESSION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -803,22 +802,6 @@ function mapSandbox(level) {
     default:
       return "danger-full-access";
   }
-}
-function detectApiKeySource() {
-  if (process.env.OPENAI_API_KEY) {
-    return "OPENAI_API_KEY";
-  }
-  if (process.env.CODEX_API_KEY) {
-    return "CODEX_API_KEY";
-  }
-  const authPath = path5.join(os2.homedir(), ".codex", "auth.json");
-  if (fs4.existsSync(authPath)) {
-    return "~/.codex/auth.json";
-  }
-  return "none";
-}
-function hasAnyAuthConfigured() {
-  return detectApiKeySource() !== "none";
 }
 function getCodexPathOverride() {
   const value = process.env.CODEX_PATH_OVERRIDE?.trim();
@@ -1243,7 +1226,7 @@ function usageToTokenUsage(usage) {
     cache_read_input_tokens: usage.cached_input_tokens
   };
 }
-function createSystemMessage(cwd, sessionId, model) {
+function createSystemMessage(cwd, sessionId, model, apiKeySource) {
   return {
     type: "system",
     subtype: "init",
@@ -1252,7 +1235,7 @@ function createSystemMessage(cwd, sessionId, model) {
     tools: DEFAULT_TOOLS,
     model,
     permissionMode: "bypassPermissions",
-    apiKeySource: detectApiKeySource(),
+    apiKeySource,
     mcp_servers: []
   };
 }
@@ -1346,17 +1329,17 @@ function findVendoredCodexExe(npmPrefix) {
     path6.join(npmPrefix, "node_modules", "@openai", "codex", "node_modules", tail)
   ];
   for (const candidate of candidates) {
-    if (fs5.existsSync(candidate)) return candidate;
+    if (fs4.existsSync(candidate)) return candidate;
   }
   return null;
 }
 async function resolveCodexPath(command) {
   const isWindows = process.platform === "win32";
   if (path6.isAbsolute(command) || command.includes(path6.sep)) {
-    if (fs5.existsSync(command)) return command;
+    if (fs4.existsSync(command)) return command;
     if (isWindows) {
       for (const ext of [".cmd", ".exe"]) {
-        if (fs5.existsSync(command + ext)) return command + ext;
+        if (fs4.existsSync(command + ext)) return command + ext;
       }
     }
     return null;
@@ -1415,43 +1398,6 @@ async function resolveAgentVersion(codexPath) {
     });
   });
 }
-async function runSelfTest() {
-  const apiKeySource = detectApiKeySource();
-  const override = getCodexPathOverride() || "codex";
-  const resolvedPath = await resolveCodexPath(override);
-  const agentFound = resolvedPath !== null;
-  const agentVersion = resolvedPath ? await resolveAgentVersion(resolvedPath) : "unknown";
-  const checks = [
-    {
-      name: "agent_found",
-      passed: agentFound,
-      message: agentFound ? `Found codex at ${resolvedPath}` : `Could not find codex via ${override}`
-    },
-    {
-      name: "api_key",
-      passed: apiKeySource !== "none",
-      message: apiKeySource !== "none" ? `Authentication source available: ${apiKeySource}` : "No OPENAI_API_KEY, CODEX_API_KEY, or ~/.codex/auth.json found"
-    }
-  ];
-  const overallPassed = checks.every((check) => check.passed);
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        shim: { name: "codex-shim", version: package_default.version },
-        agent: { name: "codex", version: agentVersion, found: agentFound },
-        checks,
-        overall: {
-          passed: overallPassed,
-          message: overallPassed ? "All checks passed" : "One or more checks failed"
-        }
-      },
-      null,
-      2
-    )}
-`
-  );
-  return overallPassed ? 0 : 1;
-}
 var CodexShim = class {
   args;
   prompt;
@@ -1477,16 +1423,64 @@ var CodexShim = class {
     this.sessionManager = new SessionManager({ debugDir: args.debugDir });
     this.sessionId = args.resume || generateSessionId();
   }
+  get resolvedApiKey() {
+    return process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || void 0;
+  }
+  get apiKeySource() {
+    if (process.env.OPENAI_API_KEY) return "OPENAI_API_KEY";
+    if (process.env.CODEX_API_KEY) return "CODEX_API_KEY";
+    if (fs4.existsSync(path6.join(os2.homedir(), ".codex", "auth.json"))) return "~/.codex/auth.json";
+    return "none";
+  }
+  get isAuthConfigured() {
+    return this.apiKeySource !== "none";
+  }
+  async runSelfTest() {
+    const override = getCodexPathOverride() || "codex";
+    const resolvedPath = await resolveCodexPath(override);
+    const agentFound = resolvedPath !== null;
+    const agentVersion = resolvedPath ? await resolveAgentVersion(resolvedPath) : "unknown";
+    const checks = [
+      {
+        name: "agent_found",
+        passed: agentFound,
+        message: agentFound ? `Found codex at ${resolvedPath}` : `Could not find codex via ${override}`
+      },
+      {
+        name: "api_key",
+        passed: this.isAuthConfigured,
+        message: this.isAuthConfigured ? `Authentication source available: ${this.apiKeySource}` : "No OPENAI_API_KEY, CODEX_API_KEY, or ~/.codex/auth.json found"
+      }
+    ];
+    const overallPassed = checks.every((check) => check.passed);
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          shim: { name: "codex-shim", version: package_default.version },
+          agent: { name: "codex", version: agentVersion, found: agentFound },
+          checks,
+          overall: {
+            passed: overallPassed,
+            message: overallPassed ? "All checks passed" : "One or more checks failed"
+          }
+        },
+        null,
+        2
+      )}
+`
+    );
+    return overallPassed ? 0 : 1;
+  }
   async run() {
     const codexPath = await resolveCodexPath(getCodexPathOverride() || "codex");
     if (!codexPath) {
       writeStartupError("Agent not found: could not locate codex via CODEX_PATH_OVERRIDE or PATH", this.args.debugDir);
     }
-    if (!hasAnyAuthConfigured()) {
+    if (!this.isAuthConfigured) {
       writeStartupError("Missing API key: set OPENAI_API_KEY, CODEX_API_KEY, or ~/.codex/auth.json", this.args.debugDir);
     }
     this.codex = new Codex({
-      apiKey: process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY,
+      apiKey: this.resolvedApiKey,
       codexPathOverride: codexPath,
       env: Object.fromEntries(
         Object.entries(process.env).filter((entry) => entry[1] !== void 0)
@@ -1509,7 +1503,7 @@ var CodexShim = class {
     } else {
       thread = this.codex.startThread(this.getThreadOptions());
     }
-    const systemMessage = createSystemMessage(this.cwd, this.sessionId, this.model.publicModel);
+    const systemMessage = createSystemMessage(this.cwd, this.sessionId, this.model.publicModel, this.apiKeySource);
     emit(systemMessage);
     this.debug.setSession(this.sessionId, { cwd: this.cwd, model: this.model.publicModel });
     const startedAt = Date.now();
@@ -1624,11 +1618,15 @@ var CodexShim = class {
         throw new Error(event.message);
       }
       case "item.started": {
-        await this.emitToolUseIfNeeded(event.item);
+        if (event.item.type !== "web_search") {
+          await this.emitToolUseIfNeeded(event.item);
+        }
         break;
       }
       case "item.updated": {
-        await this.emitToolUseIfNeeded(event.item);
+        if (event.item.type !== "web_search") {
+          await this.emitToolUseIfNeeded(event.item);
+        }
         break;
       }
       case "item.completed": {
@@ -1664,7 +1662,8 @@ var CodexShim = class {
       return;
     }
     if (item.type === "error") {
-      throw new Error(item.message);
+      this.logVerbose(`Codex non-fatal error item: ${item.message}`);
+      return;
     }
     if (shouldTreatAsToolItem(item)) {
       const toolId = await this.emitToolUseIfNeeded(item);
@@ -1741,7 +1740,7 @@ async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (args.selfTest) {
-    return await runSelfTest();
+    return await new CodexShim(args, "").runSelfTest();
   }
   const prompt = await readStdin();
   if (!prompt) {

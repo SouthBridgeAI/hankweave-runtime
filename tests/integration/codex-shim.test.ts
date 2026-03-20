@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
 import { ShimProcessManager } from "../../server/shim-process-manager.js";
 import { Logger } from "../../server/utils.js";
@@ -511,4 +513,95 @@ describe("Codex Shim Integration Test", () => {
 
     console.log("\n✅ Test passed: Shim self-test via ShimProcessManager\n");
   }, 30000); // 30 second timeout
+
+  test("codex shim uses ~/.codex/auth.json when no API key env vars are set", async () => {
+    console.log("\n📝 Test: Codex shim with auth.json as sole auth source");
+
+    const authJsonPath = path.join(os.homedir(), ".codex", "auth.json");
+    expect(fs.existsSync(authJsonPath)).toBe(true);
+
+    const savedEnv = captureEnv();
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.CODEX_API_KEY;
+
+    try {
+      const codon = createTestCodon({
+        id: "codex-auth-json-test",
+        name: "Auth JSON Test Session",
+        promptText: "Say 'Auth JSON works' and nothing else.",
+        model: "gpt-5.1-codex-mini",
+        continuationMode: "fresh",
+      });
+
+      const { allMessages } = await runSessionToCompletion(
+        tempDir,
+        executionPath,
+        logger,
+        codexShimPath,
+        codon,
+        null,
+      );
+
+      const systemMsg = allMessages.find((m) => m.type === "system") as any;
+      expect(systemMsg).toBeDefined();
+      console.log(`    ✓ apiKeySource: ${systemMsg.apiKeySource}`);
+      expect(systemMsg.apiKeySource).toBe("~/.codex/auth.json");
+
+      const resultMsg = allMessages.find((m) => m.type === "result") as any;
+      expect(resultMsg?.is_error).toBe(false);
+    } finally {
+      restoreEnv(savedEnv);
+    }
+
+    console.log("\n✅ Test passed: codex shim uses ~/.codex/auth.json\n");
+  }, 120000);
+
+  test("codex shim uses OPENAI_API_KEY env var when set", async () => {
+    console.log(
+      "\n📝 Test: Codex shim picks up OPENAI_API_KEY and fails with bogus key",
+    );
+
+    const savedEnv = captureEnv();
+    process.env.OPENAI_API_KEY = "sk-bogus-key-for-testing";
+    delete process.env.CODEX_API_KEY;
+
+    try {
+      const codon = createTestCodon({
+        id: "codex-openai-key-test",
+        name: "OPENAI_API_KEY Test Session",
+        promptText: "Say hello.",
+        model: "gpt-5.1-codex-mini",
+        continuationMode: "fresh",
+      });
+
+      const { allMessages } = await runSessionToCompletion(
+        tempDir,
+        executionPath,
+        logger,
+        codexShimPath,
+        codon,
+        null,
+      );
+
+      // Shim should report OPENAI_API_KEY as the auth source
+      const systemMsg = allMessages.find((m) => m.type === "system") as any;
+      expect(systemMsg).toBeDefined();
+      console.log(`    ✓ apiKeySource: ${systemMsg.apiKeySource}`);
+      expect(systemMsg.apiKeySource).toBe("OPENAI_API_KEY");
+
+      // The API call should fail because the key is bogus
+      const resultMsg = allMessages.find((m) => m.type === "result") as any;
+      expect(resultMsg).toBeDefined();
+      console.log(`    ✓ is_error: ${resultMsg.is_error}`);
+      console.log(`    ✓ result: ${resultMsg.result}`);
+      expect(resultMsg.is_error).toBe(true);
+      expect(resultMsg.result).toContain("401");
+    } finally {
+      restoreEnv(savedEnv);
+    }
+
+    console.log(
+      "\n✅ Test passed: codex shim uses OPENAI_API_KEY and fails with bogus key\n",
+    );
+  }, 120000);
 });
