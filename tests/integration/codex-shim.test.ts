@@ -528,8 +528,12 @@ describe("Codex Shim Integration Test", () => {
       const codon = createTestCodon({
         id: "codex-auth-json-test",
         name: "Auth JSON Test Session",
+        // Use a model that ChatGPT-account auth (auth_mode "chatgpt" in
+        // ~/.codex/auth.json) is allowed to use. Models like gpt-5.2 are
+        // rejected with a 400 "not supported ... with a ChatGPT account",
+        // which would make this auth-source check fail spuriously.
         promptText: "Say 'Auth JSON works' and nothing else.",
-        model: "gpt-5.2",
+        model: "gpt-5.5",
         continuationMode: "fresh",
       });
 

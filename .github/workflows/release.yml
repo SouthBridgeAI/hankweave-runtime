@@ -91,11 +91,11 @@ jobs:
           - target: linux-arm64
             os: ubuntu-latest
             can_test: false
-            cross_codex_tag: "0.104.0-linux-arm64"
+            cross_compile: true
           - target: darwin-x64
             os: macos-latest
             can_test: false
-            cross_codex_tag: "0.104.0-darwin-x64"
+            cross_compile: true
           - target: darwin-arm64
             os: macos-latest
             can_test: true
@@ -115,19 +115,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install cross-platform codex binary
-        if: matrix.cross_codex_tag
-        shell: bash
-        run: |
-          # For cross-compilation: bun install only fetches the host platform's
-          # codex binary. Manually fetch the target platform's package and place
-          # it where the build script expects (node_modules/@openai/codex-<target>).
-          TARGET_DIR="node_modules/@openai/codex-${{ matrix.target }}"
-          mkdir -p "$TARGET_DIR"
-          npm pack "@openai/codex@${{ matrix.cross_codex_tag }}" --pack-destination /tmp
-          tar xzf /tmp/openai-codex-${{ matrix.cross_codex_tag }}.tgz -C "$TARGET_DIR" --strip-components=1
-          echo "✓ Installed cross-platform codex binary at $TARGET_DIR"
-          ls -la "$TARGET_DIR/vendor/" 2>/dev/null || echo "  (no vendor dir — check package structure)"
+      - name: Install cross-platform SDK binaries
+        if: matrix.cross_compile
+        run: bun scripts/install-cross-platform-binaries.ts ${{ matrix.target }}
 
       - name: Build executable
         run: bun scripts/build-executable.ts ${{ matrix.target }}
