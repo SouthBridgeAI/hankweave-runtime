@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -213,6 +214,54 @@ export async function buildFileTree(projectPath: string, pattern: string): Promi
 export function escapeShellArg(arg: string): string {
   // Replace all single quotes with '\''
   return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+// -------------
+// Environment Variable Display / Redaction
+// -------------
+
+/**
+ * Decide whether an environment variable's value should be masked based on its
+ * NAME. Secrets are conventionally named with markers like SECRET/TOKEN/KEY/
+ * PASSWORD, while readable config (URLs, public keys, hosts) is not.
+ *
+ * Default is to show the value; we only mask names that look secret. The
+ * `PUBLIC`/`PUBLISHABLE` markers explicitly override the generic `KEY` rule, so
+ * e.g. `LANGFUSE_PUBLIC_KEY` is shown but `LANGFUSE_SECRET_KEY` is masked.
+ */
+export function isSensitiveEnvKey(key: string): boolean {
+  const k = key.toUpperCase();
+
+  // Explicitly public/publishable values are safe to show — but only if they
+  // aren't also tagged as a secret (e.g. a hypothetical PUBLIC_SECRET stays masked).
+  if (/PUBLIC|PUBLISHABLE/.test(k) && !/SECRET|PRIVATE|TOKEN|PASSWORD|PASSWD/.test(k)) {
+    return false;
+  }
+
+  // Name markers that indicate a secret value.
+  return /SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|PRIVATE|KEY|AUTH|BEARER|SESSION|COOKIE|SIGNING|SIGNATURE|ACCESS|CERT|ENCRYPT|SALT/.test(
+    k,
+  );
+}
+
+/**
+ * Mask an environment-variable value for display in validation output.
+ *
+ * Reveals only the last 4 characters of sufficiently long values (enough to
+ * sanity-check which secret is loaded) and fully masks short ones.
+ */
+export function maskSecretValue(value: string): string {
+  if (value.length === 0) return "(empty)";
+  if (value.length < 12) return `•••••• (${value.length} chars)`;
+  return `••••••${value.slice(-4)} (${value.length} chars)`;
+}
+
+/**
+ * Format an env var for the validation listing: secret-named values are masked,
+ * everything else is shown verbatim.
+ */
+export function formatEnvVarForDisplay(key: string, value: string): string {
+  return isSensitiveEnvKey(key) ? maskSecretValue(value) : value;
 }
 
 // -------------
@@ -505,7 +554,119 @@ export function renderStartupInfo(info: StartupInfo): void {
 }
 
 /**
+ * Minimum Node.js version required to run the pi shim on PATH.
+ *
+ * The pi shim bundles @earendil-works/pi-coding-agent (→ undici), which needs a
+ * modern Node. Keep this in sync with shims/pi/package.json engines.node and the
+ * root package.json engines.node.
+ */
+export const MIN_PI_NODE = "22.19.0";
+
+/**
+ * Thrown when the PATH `node` required by the pi shim is missing or too old.
+ *
+ * Carries the resolved node path/version (when known) so callers can classify
+ * the failure as a launch failure and surface actionable diagnostics rather
+ * than a generic "check your API keys" message.
+ */
+export class PiRuntimeError extends Error {
+  constructor(
+    message: string,
+    readonly diagnostics?: { nodePath?: string; nodeVersion?: string },
+  ) {
+    super(message);
+    this.name = "PiRuntimeError";
+  }
+}
+
+/** Parse a semver-ish string ("v22.19.0", "22.19.0-nightly") to [major, minor, patch]. */
+export function parseNodeVersion(version: string): [number, number, number] | null {
+  const m = /v?(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/** Compare two parsed versions: -1 if a < b, 0 if equal, 1 if a > b. */
+export function compareVersions(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Pure core of the pi Node preflight, separated from process spawning for
+ * testability. Returns a PiRuntimeError to throw, or `null` when the runtime is
+ * acceptable.
+ *
+ * - node not on PATH → missing-node error.
+ * - `node --version` unparseable → `null` (fail open; a parse quirk shouldn't
+ *   block a possibly-fine runtime).
+ * - parsed version < MIN_PI_NODE → too-old error carrying path/version.
+ */
+export function checkPiNodeRuntime(
+  located: { found: boolean; path?: string },
+  rawVersion: string,
+): PiRuntimeError | null {
+  if (!located.found) {
+    return new PiRuntimeError(
+      `The \`pi\` harness requires Node.js ≥ ${MIN_PI_NODE} on your PATH, and cannot run ` +
+        `under Bun. No \`node\` was found. Install Node 22+ (e.g. \`nvm install 22\`).`,
+    );
+  }
+
+  const parsed = parseNodeVersion(rawVersion);
+  if (!parsed) return null; // fail open on unparseable version
+
+  if (compareVersions(parsed, parseNodeVersion(MIN_PI_NODE) as [number, number, number]) < 0) {
+    return new PiRuntimeError(
+      `\`pi\` requires Node ≥ ${MIN_PI_NODE}; found ${rawVersion} at ${located.path}. ` +
+        `Switch with \`nvm use 22\` or install a newer Node.`,
+      { nodePath: located.path, nodeVersion: rawVersion },
+    );
+  }
+
+  return null;
+}
+
+// Memoize the pi-node preflight: the PATH `node` cannot change within a process,
+// so we only resolve and compare once. `true` means "checked, OK". Failures are
+// not cached (they throw).
+let piNodeCheckPassed = false;
+
+/**
+ * Verify that the `node` on PATH satisfies the pi shim's minimum version.
+ *
+ * The pi shim is always spawned via `["node", scriptPath]`, so we must check the
+ * PATH `node` (the binary that will actually run pi) — NOT `process.version`,
+ * since the current runtime is usually Bun. Uses node:child_process spawnSync so
+ * it works under both Bun and plain Node (Bun.spawnSync is absent under Node).
+ *
+ * Hard-fails (throws PiRuntimeError) when node is missing or too old.
+ */
+export function assertPiNodeRuntime(): void {
+  if (piNodeCheckPassed) return;
+
+  // Locate node first, both to detect "missing" and to include the path in the message.
+  const whichCommand = process.platform === "win32" ? "where" : "which";
+  const located = spawnSync(whichCommand, ["node"], { encoding: "utf8" });
+  const found = located.status === 0 && Boolean(located.stdout?.trim());
+  const nodePath = found ? located.stdout.trim().split(/\r?\n/)[0] : undefined;
+
+  const rawVersion = found
+    ? (spawnSync("node", ["--version"], { encoding: "utf8" }).stdout?.trim() ?? "")
+    : "";
+
+  const error = checkPiNodeRuntime({ found, path: nodePath }, rawVersion);
+  if (error) throw error;
+
+  piNodeCheckPassed = true;
+}
+
+/**
  * Get the appropriate command array to run a script in the current runtime.
+ *
  * This ensures shims and other scripts are executed with the correct runtime.
  *
  * For compiled executables, we check if 'bun' is available on PATH and use it
@@ -527,6 +688,24 @@ export function renderStartupInfo(info: StartupInfo): void {
  * ```
  */
 export function getRuntimeCommand(scriptPath: string): string[] {
+  // The pi shim bundles @earendil-works/pi-coding-agent, which transitively
+  // pulls in undici's CacheStorage. Undici uses `webidl.util.markAsUncloneable`,
+  // which Bun 1.3.x does not implement — Bun crashes at module load. Force
+  // Node for this shim regardless of runtime/distribution mode. The shim's
+  // shebang is `#!/usr/bin/env node` so this matches the intended runtime.
+  //
+  // Detect by the immediate parent directory being `pi`, which holds for every
+  // layout: source `shims/pi/index.js`, dist `dist/shims/pi/index.js`, and the
+  // extracted binary layout `~/.hankweave/shims/<version>/pi/index.js`. (A path
+  // regex like `/shims/pi/` misses the binary layout's `/shims/<version>/pi/`.)
+  const isPiShim = path.basename(path.dirname(scriptPath)) === "pi";
+  if (isPiShim) {
+    // Hard-fail early with an actionable message if the PATH node can't run pi,
+    // instead of letting it die downstream with an opaque module-load crash.
+    assertPiNodeRuntime();
+    return ["node", scriptPath];
+  }
+
   // If we're in a compiled executable, prefer bun if available, otherwise use node
   // Rationale:
   // 1. Can't assume 'bun' is on PATH in standalone distributions

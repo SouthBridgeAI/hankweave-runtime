@@ -257,6 +257,18 @@ export interface TokenUsage {
 // -------------
 
 /**
+ * Classification of a failed shim self-test, used to route actionable guidance.
+ *
+ * - `launch`: the harness failed to start (spawn/module-load crash, version
+ *   preflight failure). NOT an auth/config problem.
+ * - `auth`: the harness ran but credentials/API keys are missing or invalid.
+ * - `binary-missing`: the underlying agent binary was not found.
+ * - `check`: the harness ran a check and it failed for some other reason.
+ * - `unknown`: could not be classified.
+ */
+export type SelfTestFailureCategory = "launch" | "auth" | "binary-missing" | "check" | "unknown";
+
+/**
  * Individual check result from a shim's self-test.
  * Each check verifies a specific aspect of the environment setup.
  */

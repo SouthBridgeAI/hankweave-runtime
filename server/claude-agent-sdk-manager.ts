@@ -29,6 +29,22 @@ export class ClaudeExecutableNotFoundError extends Error {
 }
 
 /**
+ * Whether lenient ("legacy") Claude auth is enabled via HW_INTERNAL_CLAUDE_LEGACY_AUTH.
+ *
+ * When enabled, the pre-flight self-test does NOT hard-require ANTHROPIC_API_KEY and instead
+ * trusts the Agent SDK to resolve credentials itself — including the SDK's fallback to a local
+ * Claude Code login (macOS Keychain `Claude Code-credentials` / `~/.claude/.credentials.json`).
+ *
+ * Intended for local/dev use on a machine already logged in via `claude login`. CI and
+ * production should still set ANTHROPIC_API_KEY (the supported, ToS-compliant path).
+ */
+export function isLegacyClaudeAuthEnabled(): boolean {
+  const v = process.env.HW_INTERNAL_CLAUDE_LEGACY_AUTH;
+  if (!v) return false;
+  return !["0", "false", "no", "off"].includes(v.trim().toLowerCase());
+}
+
+/**
  * Detect an installed Claude executable.
  * Checks common installation locations and falls back to `which claude`.
  *
@@ -317,28 +333,18 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
     }
 
     // Pass through critical environment variables that Claude Code SDK needs
-    const hasOAuthToken =
-      !!process.env.CLAUDE_CODE_OAUTH_TOKEN ||
-      !!process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
-
     for (const key in process.env) {
-      // Pass through CLAUDE_CODE_* variables (OAuth authentication, etc.)
+      // Pass through CLAUDE_CODE_* variables (e.g. cloud-provider selectors like
+      // CLAUDE_CODE_USE_BEDROCK / CLAUDE_CODE_USE_VERTEX)
       if (key.startsWith("CLAUDE_CODE_")) {
         options.env[key] = process.env[key];
         this.logger.log(`Passing through Claude Code env var: ${key}`);
       }
-      // Pass through specific ANTHROPIC_* variables that won't conflict with OAuth
-      // Exclude ANTHROPIC_API_KEY to avoid conflicts with CLAUDE_CODE_OAUTH_TOKEN
+      // Pass through ANTHROPIC_* variables (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, etc.).
+      // The Agent SDK authenticates via ANTHROPIC_API_KEY — OAuth tokens are not supported.
       else if (key.startsWith("ANTHROPIC_")) {
-        if (key === "ANTHROPIC_API_KEY") {
-          if (!hasOAuthToken) {
-            options.env[key] = process.env[key];
-            this.logger.log(`Passing through Anthropic env var: ${key}`);
-          }
-        } else {
-          options.env[key] = process.env[key];
-          this.logger.log(`Passing through Anthropic env var: ${key}`);
-        }
+        options.env[key] = process.env[key];
+        this.logger.log(`Passing through Anthropic env var: ${key}`);
       }
       // Pass through HANKWEAVE_* variables (with prefix stripped)
       // Exclude HANKWEAVE_RUNTIME_* (server config) and HANKWEAVE_SENTINEL_* (sentinel API keys)
@@ -717,9 +723,11 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       sdkFound = true;
       // Try to get version from package.json
       try {
+        // The SDK's entry point (`sdk.mjs`) sits at the package root, so its
+        // package.json is a sibling — no upward traversal.
         const sdkPackageJsonPath = path.join(
           path.dirname(require.resolve("@anthropic-ai/claude-agent-sdk")),
-          "../package.json",
+          "package.json",
         );
         const sdkPackageJson = JSON.parse(fs.readFileSync(sdkPackageJsonPath, "utf-8"));
         sdkVersion = sdkPackageJson.version || "unknown";
@@ -774,23 +782,21 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       }
     }
 
-    // Check 3: Verify authentication (API key or OAuth token)
+    // Check 3: Verify authentication. The Agent SDK authenticates via ANTHROPIC_API_KEY
+    // (OAuth tokens are no longer supported by the SDK). When HW_INTERNAL_CLAUDE_LEGACY_AUTH
+    // is set, run in lenient mode: don't hard-require ANTHROPIC_API_KEY and instead trust the
+    // SDK to resolve credentials itself (e.g. a local `claude login` in the OS keychain).
     const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
-    const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    const hasAuth = hasApiKey || hasOAuthToken;
-
-    const authMethod = hasOAuthToken
-      ? "CLAUDE_CODE_OAUTH_TOKEN"
-      : hasApiKey
-        ? "ANTHROPIC_API_KEY"
-        : "none";
+    const legacyAuth = isLegacyClaudeAuthEnabled();
 
     checks.push({
       name: "authentication",
-      passed: hasAuth,
-      message: hasAuth
-        ? `Authentication configured via ${authMethod}`
-        : "No authentication found (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)",
+      passed: hasApiKey || legacyAuth,
+      message: hasApiKey
+        ? "Authentication configured via ANTHROPIC_API_KEY"
+        : legacyAuth
+          ? "ANTHROPIC_API_KEY not set; HW_INTERNAL_CLAUDE_LEGACY_AUTH enabled — trusting local Claude Code login"
+          : "No authentication found (set ANTHROPIC_API_KEY)",
     });
 
     // Check 4: Verify custom base URL if set

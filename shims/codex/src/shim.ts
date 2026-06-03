@@ -236,6 +236,23 @@ function findVendoredCodexExe(npmPrefix: string): string | null {
   return null;
 }
 
+/**
+ * Describe where `resolveCodexPath` looked, for an actionable not-found message.
+ * Mirrors the resolution order in `resolveCodexPath`.
+ */
+function describeCodexSearch(command: string): string {
+  const fromOverride = getCodexPathOverride() ? " (from CODEX_PATH_OVERRIDE)" : "";
+  if (path.isAbsolute(command) || command.includes(path.sep)) {
+    return `path '${command}'${fromOverride}`;
+  }
+  const locator = process.platform === "win32" ? "where" : "which";
+  const parts = [`'${command}'${fromOverride} on PATH (via ${locator})`];
+  if (process.platform === "win32") {
+    parts.push("vendored @openai/codex-win32 package in the npm prefix");
+  }
+  return parts.join(", ");
+}
+
 async function resolveCodexPath(command: string): Promise<string | null> {
   const isWindows = process.platform === "win32";
 
@@ -371,7 +388,9 @@ export class CodexShim {
       {
         name: "agent_found",
         passed: agentFound,
-        message: agentFound ? `Found codex at ${resolvedPath}` : `Could not find codex via ${override}`,
+        message: agentFound
+          ? `Found codex at ${resolvedPath}`
+          : `Could not find codex. Searched: ${describeCodexSearch(override)}`,
       },
       {
         name: "api_key",

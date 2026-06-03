@@ -9,7 +9,7 @@ import type {
   UserMessage,
 } from "../../server/types/claude-session-schema.js";
 import type { Codon } from "../../server/types/types.js";
-import type { Logger } from "../../server/utils.js";
+import { getRuntimeCommand, type Logger } from "../../server/utils.js";
 
 /**
  * Result of running a shim session to completion.
@@ -50,7 +50,10 @@ export async function runSessionToCompletion(
 
   console.log(`  Spawning ${shimName} shim for ${codon.id}...`);
 
-  const command = ["bun", "run", shimPath];
+  // Use the same runtime-selection logic as production (server/codon-runner.ts)
+  // so the pi shim is launched with Node — Bun 1.3.x lacks
+  // worker_threads.markAsUncloneable, which undici's CacheStorage requires.
+  const command = getRuntimeCommand(shimPath);
   const actualLogPath = await manager.spawn(command, codon, previousSessionId, {
     logPath: sessionLogPath,
   });

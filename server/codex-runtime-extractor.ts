@@ -26,7 +26,29 @@ import {
 import { isCompiledExecutable } from "./utils.js";
 
 // Codex SDK version for directory naming
-export const CODEX_SDK_VERSION = "0.104.0";
+export const CODEX_SDK_VERSION = "0.135.0";
+
+/**
+ * Resolve the codex binary within a `vendor/<platform-triple>` directory.
+ *
+ * The vendor layout changed in @openai/codex v0.135.0:
+ * - v0.135.0+: <triple>/bin/<binary>   (alongside a codex-package.json marker)
+ * - <v0.135.0: <triple>/codex/<binary> (legacy)
+ *
+ * @returns Path to the binary if present, or null.
+ */
+function resolveCodexBinaryInTripleDir(tripleDir: string, binaryName: string): string | null {
+  const candidates = [
+    path.join(tripleDir, "bin", binaryName), // v0.135.0+
+    path.join(tripleDir, "codex", binaryName), // legacy
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
 
 // Path prefix for embedded codex files (must match paths used during build)
 // In codex-sdk v0.101.0+, binaries are in platform-specific packages (@openai/codex-<platform>-<arch>)
@@ -164,9 +186,10 @@ export function locateCodexViaImportResolve(): string | null {
       if (!resolved.startsWith("file://")) continue;
 
       const packageDir = path.dirname(fileURLToPath(resolved));
-      const candidate = path.join(packageDir, "vendor", codexPlatform, "codex", binaryName);
+      const tripleDir = path.join(packageDir, "vendor", codexPlatform);
+      const candidate = resolveCodexBinaryInTripleDir(tripleDir, binaryName);
 
-      if (fs.existsSync(candidate)) {
+      if (candidate) {
         ensureExecutable(candidate);
         return candidate;
       }
@@ -241,18 +264,24 @@ function searchForBinaryInScopeDir(
     if (!fs.existsSync(pkgDir)) continue;
 
     // Direct layout: vendor/ at the package root (node_modules)
-    const directCandidate = path.join(pkgDir, "vendor", codexPlatform, "codex", binaryName);
-    if (fs.existsSync(directCandidate)) {
+    const directCandidate = resolveCodexBinaryInTripleDir(
+      path.join(pkgDir, "vendor", codexPlatform),
+      binaryName,
+    );
+    if (directCandidate) {
       ensureExecutable(directCandidate);
       return directCandidate;
     }
 
     // Versioned layout: version subdirectories (Deno global cache)
-    // e.g., codex-darwin-arm64/0.104.0-darwin-arm64/vendor/...
+    // e.g., codex-darwin-arm64/0.135.0-darwin-arm64/vendor/...
     try {
       for (const entry of fs.readdirSync(pkgDir)) {
-        const candidate = path.join(pkgDir, entry, "vendor", codexPlatform, "codex", binaryName);
-        if (fs.existsSync(candidate)) {
+        const candidate = resolveCodexBinaryInTripleDir(
+          path.join(pkgDir, entry, "vendor", codexPlatform),
+          binaryName,
+        );
+        if (candidate) {
           ensureExecutable(candidate);
           return candidate;
         }
@@ -284,35 +313,23 @@ function searchForCodexFromDirectory(startDir: string): string | null {
 
   // Search up to 10 levels (should be more than enough)
   for (let i = 0; i < 10; i++) {
-    // New structure (v0.101.0+): @openai/codex-<platform>-<arch>/vendor/<platform>/codex/<binary>
-    const newPath = path.join(
-      currentDir,
-      "node_modules",
-      "@openai",
-      platformPkgName,
-      "vendor",
-      codexPlatform,
-      "codex",
+    // New structure (v0.101.0+): @openai/codex-<platform>-<arch>/vendor/<platform>/{bin,codex}/<binary>
+    const newPath = resolveCodexBinaryInTripleDir(
+      path.join(currentDir, "node_modules", "@openai", platformPkgName, "vendor", codexPlatform),
       binaryName,
     );
 
-    if (fs.existsSync(newPath)) {
+    if (newPath) {
       return newPath;
     }
 
-    // Legacy structure: @openai/codex-sdk/vendor/<platform>/codex/<binary>
-    const legacyPath = path.join(
-      currentDir,
-      "node_modules",
-      "@openai",
-      "codex-sdk",
-      "vendor",
-      codexPlatform,
-      "codex",
+    // Legacy structure: @openai/codex-sdk/vendor/<platform>/{bin,codex}/<binary>
+    const legacyPath = resolveCodexBinaryInTripleDir(
+      path.join(currentDir, "node_modules", "@openai", "codex-sdk", "vendor", codexPlatform),
       binaryName,
     );
 
-    if (fs.existsSync(legacyPath)) {
+    if (legacyPath) {
       return legacyPath;
     }
 
@@ -374,7 +391,8 @@ export async function extractCodexBinary(): Promise<string> {
   // Build file extraction configuration
   const filesToExtract: FileToExtract[] = [
     {
-      embeddedPath: `${platform}/codex/${binaryName}`,
+      // v0.135.0+ ships the binary under <triple>/bin/; older versions used <triple>/codex/
+      embeddedPath: `${platform}/bin/${binaryName}`,
       outputPath: binaryName,
       required: true,
       makeExecutable: true,

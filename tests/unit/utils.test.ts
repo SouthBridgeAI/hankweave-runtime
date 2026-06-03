@@ -6,11 +6,20 @@ import type { FileNode } from "../../server/types/types";
 import {
   AppMetadata,
   buildFileTree,
+  checkPiNodeRuntime,
+  compareVersions,
   copyFiles,
   escapeShellArg,
+  formatEnvVarForDisplay,
   getMetadata,
+  getRuntimeCommand,
   IdleTimeoutError,
+  isSensitiveEnvKey,
   Logger,
+  MIN_PI_NODE,
+  maskSecretValue,
+  PiRuntimeError,
+  parseNodeVersion,
   renameWithRetry,
   serve,
   WebSocket,
@@ -1443,5 +1452,171 @@ describe("withIdleTimeout", () => {
     // Give the fire-and-forget return() a tick to execute
     await new Promise((r) => setTimeout(r, 10));
     expect(returnCalled).toBe(true);
+  });
+});
+
+describe("getRuntimeCommand pi-shim detection", () => {
+  // The pi shim must always run under Node (its bundled undici is incompatible with Bun).
+  // Detection is by the immediate parent directory being `pi`, which must hold across the
+  // source layout and the extracted binary layout (which inserts a <version> dir).
+  test("forces Node for the pi shim in source layout (shims/pi/index.js)", () => {
+    const p = path.join("shims", "pi", "index.js");
+    expect(getRuntimeCommand(p)).toEqual(["node", p]);
+  });
+
+  test("forces Node for the pi shim in extracted binary layout (shims/<version>/pi/index.js)", () => {
+    const p = path.join("/tmp", ".hankweave", "shims", "0.6.2", "pi", "index.js");
+    expect(getRuntimeCommand(p)).toEqual(["node", p]);
+  });
+
+  test("does not force Node for a non-pi shim in the versioned layout", () => {
+    // `gemini` must NOT be pi-detected; under the Bun test runtime it resolves to bun.
+    const p = path.join("/tmp", ".hankweave", "shims", "0.6.2", "gemini", "index.js");
+    const cmd = getRuntimeCommand(p);
+    expect(cmd[0]).not.toBe("node");
+    expect(cmd[cmd.length - 1]).toBe(p);
+  });
+});
+
+describe("pi Node-version preflight", () => {
+  test("parseNodeVersion handles plain, v-prefixed, and prerelease strings", () => {
+    expect(parseNodeVersion("22.19.0")).toEqual([22, 19, 0]);
+    expect(parseNodeVersion("v22.19.0")).toEqual([22, 19, 0]);
+    expect(parseNodeVersion("v24.3.1-nightly20260101")).toEqual([24, 3, 1]);
+    expect(parseNodeVersion("not-a-version")).toBeNull();
+    expect(parseNodeVersion("")).toBeNull();
+  });
+
+  test("compareVersions orders by major, minor, then patch", () => {
+    expect(compareVersions([22, 18, 0], [22, 19, 0])).toBe(-1);
+    expect(compareVersions([22, 19, 0], [22, 19, 0])).toBe(0);
+    expect(compareVersions([24, 0, 0], [22, 19, 0])).toBe(1);
+    expect(compareVersions([22, 19, 1], [22, 19, 0])).toBe(1);
+  });
+
+  test("MIN_PI_NODE matches the engines floor declared in the shim", () => {
+    expect(MIN_PI_NODE).toBe("22.19.0");
+  });
+
+  test("missing node throws an actionable PiRuntimeError", () => {
+    const err = checkPiNodeRuntime({ found: false }, "");
+    expect(err).toBeInstanceOf(PiRuntimeError);
+    expect(err?.message).toContain("No `node` was found");
+    expect(err?.message).toContain(MIN_PI_NODE);
+  });
+
+  test("too-old node throws with the detected version and path", () => {
+    const err = checkPiNodeRuntime({ found: true, path: "/usr/local/bin/node" }, "v18.20.4");
+    expect(err).toBeInstanceOf(PiRuntimeError);
+    expect(err?.message).toContain("v18.20.4");
+    expect(err?.message).toContain("/usr/local/bin/node");
+    expect(err?.diagnostics).toEqual({
+      nodePath: "/usr/local/bin/node",
+      nodeVersion: "v18.20.4",
+    });
+  });
+
+  test("exact minimum and newer node are accepted", () => {
+    expect(checkPiNodeRuntime({ found: true, path: "/n" }, "v22.19.0")).toBeNull();
+    expect(checkPiNodeRuntime({ found: true, path: "/n" }, "v24.0.0")).toBeNull();
+  });
+
+  test("a minor below the floor is rejected", () => {
+    const err = checkPiNodeRuntime({ found: true, path: "/n" }, "v22.18.0");
+    expect(err).toBeInstanceOf(PiRuntimeError);
+  });
+
+  test("unparseable version fails open (does not block startup)", () => {
+    expect(checkPiNodeRuntime({ found: true, path: "/n" }, "garbage")).toBeNull();
+  });
+});
+
+describe("isSensitiveEnvKey", () => {
+  test("treats the reported Langfuse vars selectively", () => {
+    // The motivating example: URL and public key are readable; secret key is not.
+    expect(isSensitiveEnvKey("TRACE_LANGFUSE_BASE_URL")).toBe(false);
+    expect(isSensitiveEnvKey("TRACE_LANGFUSE_PUBLIC_KEY")).toBe(false);
+    expect(isSensitiveEnvKey("TRACE_LANGFUSE_SECRET_KEY")).toBe(true);
+  });
+
+  test("masks common secret-named variables", () => {
+    expect(isSensitiveEnvKey("CLOUD_TOKEN")).toBe(true);
+    expect(isSensitiveEnvKey("AGENT_SHIM_SPEC_GH_TOKEN")).toBe(true);
+    expect(isSensitiveEnvKey("ANTHROPIC_API_KEY")).toBe(true);
+    expect(isSensitiveEnvKey("DB_PASSWORD")).toBe(true);
+    expect(isSensitiveEnvKey("AWS_ACCESS_KEY_ID")).toBe(true);
+    expect(isSensitiveEnvKey("GOOGLE_PRIVATE_KEY")).toBe(true);
+  });
+
+  test("shows readable config and public values", () => {
+    expect(isSensitiveEnvKey("BASE_URL")).toBe(false);
+    expect(isSensitiveEnvKey("OTEL_ENDPOINT")).toBe(false);
+    expect(isSensitiveEnvKey("LOG_LEVEL")).toBe(false);
+    expect(isSensitiveEnvKey("STRIPE_PUBLISHABLE_KEY")).toBe(false);
+    expect(isSensitiveEnvKey("PROJECT_ID")).toBe(false);
+  });
+
+  test("is case-insensitive", () => {
+    expect(isSensitiveEnvKey("my_secret_token")).toBe(true);
+    expect(isSensitiveEnvKey("public_key")).toBe(false);
+  });
+});
+
+describe("formatEnvVarForDisplay", () => {
+  const secret = "dop_v1_52cd908cb528a720063c445b76f92b80f020b21b9598c84869fee7aef7e57b48";
+
+  test("masks secret-named values", () => {
+    const out = formatEnvVarForDisplay("TRACE_LANGFUSE_SECRET_KEY", secret);
+    expect(out).not.toContain(secret);
+    expect(out).toBe(maskSecretValue(secret));
+  });
+
+  test("shows non-secret values verbatim", () => {
+    const url = "http://observations.ecumene.ai:3000";
+    expect(formatEnvVarForDisplay("TRACE_LANGFUSE_BASE_URL", url)).toBe(url);
+    expect(formatEnvVarForDisplay("TRACE_LANGFUSE_PUBLIC_KEY", "pk-lf-60997fa3-2385")).toBe(
+      "pk-lf-60997fa3-2385",
+    );
+  });
+});
+
+describe("maskSecretValue", () => {
+  test("renders empty values distinctly", () => {
+    expect(maskSecretValue("")).toBe("(empty)");
+  });
+
+  test("fully masks short values (no characters revealed)", () => {
+    const value = "abc123"; // 6 chars
+    const masked = maskSecretValue(value);
+    expect(masked).toBe("•••••• (6 chars)");
+    expect(masked).not.toContain("abc");
+    expect(masked).not.toContain("123");
+  });
+
+  test("masks values just under the reveal threshold", () => {
+    const value = "12345678901"; // 11 chars, below the 12-char threshold
+    const masked = maskSecretValue(value);
+    expect(masked).toBe("•••••• (11 chars)");
+    expect(masked).not.toContain("1234");
+  });
+
+  test("reveals only the last 4 characters of long values", () => {
+    const value = "github_pat_ABCDEFGHIJKLMNOP1234"; // 31 chars
+    const masked = maskSecretValue(value);
+    expect(masked).toBe("••••••1234 (31 chars)");
+    // The bulk of the secret must never appear in the output.
+    expect(masked).toContain("1234");
+    expect(masked).not.toContain("github_pat");
+    expect(masked).not.toContain("ABCDEFGHIJKLMNOP");
+  });
+
+  test("never leaks the full secret for realistic token shapes", () => {
+    const token = "dop_v1_52cd908cb528a720063c445b76f92b80f020b21b9598c84869fee7aef7e57b48";
+    const masked = maskSecretValue(token);
+    expect(masked).not.toContain(token);
+    // Only the trailing 4 chars are exposed.
+    expect(masked).toBe(`••••••${token.slice(-4)} (${token.length} chars)`);
+    // Anything beyond the last 4 chars must be absent.
+    expect(masked).not.toContain(token.slice(0, -4));
   });
 });

@@ -81,7 +81,7 @@ describe("getDemoModelChoice", () => {
   test("falls back to OpenAI when only Codex is available", () => {
     const choice = expectChoice(makeEnv({ codex: true }));
     expect(choice.provider).toBe("openai");
-    expect(choice.modelOverride).toBe("gpt-5.1-codex-mini");
+    expect(choice.modelOverride).toBe("gpt-5.2");
     expect(choice.providerName).toBe("Codex");
   });
 
@@ -246,13 +246,13 @@ describe("wizard demo scenarios (end-to-end logic)", () => {
     expect(spawnArgs).not.toContain("-m");
   });
 
-  test("OpenAI-only user: gets gpt-5.1-codex-mini via -m flag", () => {
+  test("OpenAI-only user: gets gpt-5.2 via -m flag", () => {
     const choice = expectChoice(makeEnv({ codex: true }));
     expect(choice.provider).toBe("openai");
-    expect(choice.modelOverride).toBe("gpt-5.1-codex-mini");
+    expect(choice.modelOverride).toBe("gpt-5.2");
     const spawnArgs = buildSpawnArgs(choice);
     expect(spawnArgs).toContain("-m");
-    expect(spawnArgs).toContain("gpt-5.1-codex-mini");
+    expect(spawnArgs).toContain("gpt-5.2");
   });
 
   test("Gemini-only user: gets gemini-2.5-flash via -m flag", () => {

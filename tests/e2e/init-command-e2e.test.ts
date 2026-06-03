@@ -27,7 +27,9 @@ import {
 
 // Test configuration
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const TEST_TIMESTAMP = generateTestTimestamp();
+const TEST_TIMESTAMP =
+  generateTestTimestamp() +
+  (process.env.HANKWEAVE_E2E_TEST_ID ? `-${process.env.HANKWEAVE_E2E_TEST_ID}` : "");
 
 // Platform detection for conditional assertions
 const isWindows = process.platform === "win32";
@@ -256,6 +258,7 @@ describe("init command e2e", () => {
       expect(secondCodon).toHaveProperty("name");
       expect(secondCodon).toHaveProperty("model");
       expect(secondCodon).toHaveProperty("continuationMode");
+      expect(secondCodon.model).toBe("pi/google/gemini-2.5-flash");
 
       // Verify third codon has required fields
       const thirdCodon = hankConfig.hank[2];

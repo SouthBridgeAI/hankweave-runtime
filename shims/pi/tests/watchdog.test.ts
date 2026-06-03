@@ -16,8 +16,8 @@ type WatchdogEvent = {
     | "agent_end"
     | "auto_retry_start"
     | "auto_retry_end"
-    | "auto_compaction_start"
-    | "auto_compaction_end";
+    | "compaction_start"
+    | "compaction_end";
 };
 
 function delay(ms: number): Promise<void> {
@@ -39,8 +39,8 @@ describe("Pi watchdog activity detection", () => {
       "agent_end",
       "auto_retry_start",
       "auto_retry_end",
-      "auto_compaction_start",
-      "auto_compaction_end",
+      "compaction_start",
+      "compaction_end",
     ];
 
     for (const type of activityEvents) {

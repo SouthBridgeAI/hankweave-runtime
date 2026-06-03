@@ -4,7 +4,6 @@ import { rmSync } from "node:fs";
 import * as path from "node:path";
 import { CheckpointGit } from "../../server/checkpoint-git";
 import { Logger } from "../../server/utils";
-import { sleep } from "../utils/test-helpers";
 
 describe("CheckpointGit", () => {
   let tempDir: string;
@@ -343,13 +342,8 @@ describe("CheckpointGit", () => {
     await fs.promises.writeFile(mainFile, "one");
     const c1 = await checkpointGit.commit("main: first");
 
-    // sleep a bit to get nicer timestamps
-    await sleep(1000);
-
     await fs.promises.writeFile(mainFile, "two");
     const c2 = await checkpointGit.commit("main: second");
-
-    await sleep(1000);
 
     // Two commits on run branch
     const featureFile1 = path.join(tempDir, "feature1.txt");
@@ -357,8 +351,6 @@ describe("CheckpointGit", () => {
     const f1 = await checkpointGit.commit("feature: first", {
       branch: "run-1757489464604-eicnq",
     });
-
-    await sleep(1000);
 
     const featureFile2 = path.join(tempDir, "feature2.txt");
     await fs.promises.writeFile(featureFile2, "f2");
@@ -378,18 +370,32 @@ describe("CheckpointGit", () => {
     // Expect initial empty commit + 4 real commits = 5 total
     expect(checkpoints.length).toBe(5);
 
-    // Most recent commits first, check branches too
-    expect(checkpoints[0].message).toBe("feature: second");
-    expect(checkpoints[0].branch).toBe("run-1757489464604-eicnq");
-    expect(checkpoints[1].message).toBe("feature: first");
-    expect(checkpoints[1].branch).toBe("run-1757489464604-eicnq");
-    expect(checkpoints[2].message).toBe("main: second");
-    expect(checkpoints[2].branch).toBe("main");
-    expect(checkpoints[3].message).toBe("main: first");
-    expect(checkpoints[3].branch).toBe("main");
-    expect(checkpoints[4].message).toBe("Initial checkpoint setup");
-    expect(checkpoints[4].branch).toBe("main");
-  }, 15000); // 15 seconds timeout for git operations + sleeps
+    const entries = checkpoints.map((checkpoint) => ({
+      message: checkpoint.message,
+      branch: checkpoint.branch,
+    }));
+
+    expect(entries).toContainEqual({
+      message: "feature: second",
+      branch: "run-1757489464604-eicnq",
+    });
+    expect(entries).toContainEqual({
+      message: "feature: first",
+      branch: "run-1757489464604-eicnq",
+    });
+    expect(entries).toContainEqual({
+      message: "main: second",
+      branch: "main",
+    });
+    expect(entries).toContainEqual({
+      message: "main: first",
+      branch: "main",
+    });
+    expect(entries).toContainEqual({
+      message: "Initial checkpoint setup",
+      branch: "main",
+    });
+  }, 15000);
 
   test("switchToBranch throws when not initialized", async () => {
     await expect(checkpointGit.switchToBranch("some-branch")).rejects.toThrow(

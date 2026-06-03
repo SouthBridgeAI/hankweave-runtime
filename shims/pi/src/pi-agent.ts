@@ -7,17 +7,11 @@ import {
   type SessionInfo,
   VERSION as PI_VERSION,
   createAgentSession,
-  createBashTool,
-  createEditTool,
-  createFindTool,
-  createGrepTool,
-  createLsTool,
-  createReadTool,
-  createWriteTool,
   DefaultResourceLoader,
+  getAgentDir,
   ModelRegistry,
   SessionManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { type ShimArguments, withAdaptiveTimeout } from "@shims/common";
 import { DebugRecorder } from "./debug-recorder.js";
 import {
@@ -87,12 +81,14 @@ interface ResolvedModelIdentifier {
   modelId: string;
 }
 
-const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Accepts any UUID version/variant the upstream SDK chooses to emit (v4 in
+// older releases, v7 since the @earendil-works rename).
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MODEL_SHORTNAMES: Record<string, string> = {
-  sonnet: "anthropic/claude-sonnet-4-5",
+  sonnet: "anthropic/claude-sonnet-4-6",
   haiku: "anthropic/claude-haiku-4-5",
-  opus: "anthropic/claude-opus-4-5",
+  opus: "anthropic/claude-opus-4-7",
   "gemini-2.5-flash": "google/gemini-2.5-flash",
   "gpt-4o": "openai/gpt-4o",
 };
@@ -104,7 +100,7 @@ function detectBundledPiVersion(): string {
   for (const candidate of candidates) {
     try {
       const raw = fs.readFileSync(candidate, "utf8").trim();
-      const match = raw.match(/@mariozechner\/pi-coding-agent@(.*)$/);
+      const match = raw.match(/@(?:mariozechner|earendil-works)\/pi-coding-agent@(.*)$/);
       return (match?.[1] ?? raw).trim();
     } catch {
       // Try the next candidate.
@@ -226,7 +222,7 @@ export async function preparePiSession(options: {
   const { cwd, args, verbose } = options;
   const sessionDir = getSessionStorageDir(args.debugDir);
   const authStorage = configureAuthStorage();
-  const modelRegistry = new ModelRegistry(authStorage);
+  const modelRegistry = ModelRegistry.create(authStorage);
   const { resolved, provider, modelId } = resolveModelIdentifier(options.model);
 
   if (shouldEnforceProviderCredential(provider) && !getProviderCredentialStatus(provider).available) {
@@ -241,28 +237,22 @@ export async function preparePiSession(options: {
   }
 
   const sessionManager = await createSessionManager(cwd, args.resume, sessionDir);
+  const agentDir = getAgentDir();
   const resourceLoader = new DefaultResourceLoader({
     cwd,
+    agentDir,
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    ...(args.appendSystemPrompt ? { appendSystemPrompt: args.appendSystemPrompt } : {}),
+    ...(args.appendSystemPrompt ? { appendSystemPrompt: [args.appendSystemPrompt] } : {}),
   });
   await resourceLoader.reload();
 
   const { session } = await createAgentSession({
     cwd,
     model: resolvedModel,
-    tools: [
-      createReadTool(cwd),
-      createBashTool(cwd),
-      createEditTool(cwd),
-      createWriteTool(cwd),
-      createGrepTool(cwd),
-      createFindTool(cwd),
-      createLsTool(cwd),
-    ],
+    tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
     sessionManager,
     authStorage,
     modelRegistry,
@@ -270,7 +260,7 @@ export async function preparePiSession(options: {
   });
 
   const sessionId = args.resume ?? session.sessionId;
-  if (!UUID_V4_REGEX.test(sessionId)) {
+  if (!UUID_REGEX.test(sessionId)) {
     throw new StartupError(`Pi returned a non-UUID session id: ${sessionId}`);
   }
 
@@ -521,7 +511,7 @@ export async function runPiPrompt(
 }
 
 export function validateResumeSessionId(sessionId: string): void {
-  if (!UUID_V4_REGEX.test(sessionId)) {
+  if (!UUID_REGEX.test(sessionId)) {
     throw new StartupError(`Invalid session ID format: ${sessionId}. Expected UUID v4.`);
   }
 }
@@ -534,7 +524,7 @@ export async function checkPiAvailability(): Promise<{
 }> {
   try {
     const authStorage = configureAuthStorage();
-    const modelRegistry = new ModelRegistry(authStorage);
+    const modelRegistry = ModelRegistry.create(authStorage);
     const availableModels = modelRegistry
       .getAvailable()
       .slice(0, 10)

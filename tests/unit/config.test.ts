@@ -1,7 +1,11 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as codonRunnerModule from "../../server/codon-runner.js";
 import {
+  buildSelfTestGuidance,
+  classifyInBandSelfTest,
+  formatFailedSelfTest,
   loadCodonSequence,
   loadHankFile,
   loadHankweaveRuntimeEnvVars,
@@ -10,7 +14,7 @@ import {
 } from "../../server/config";
 import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
 import { CodonId } from "../../server/types/branded-types";
-import type { ModelName } from "../../server/types/types";
+import type { ModelName, ShimSelfTestResult } from "../../server/types/types";
 import { Logger } from "../../server/utils";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers";
 
@@ -46,6 +50,32 @@ const writeHankConfig = (filePath: string, codons: unknown[]) => {
   const hankFile = { hank: codons };
   fs.writeFileSync(filePath, JSON.stringify(hankFile, null, 2));
 };
+
+const createSelfTestResult = (
+  passed = true,
+  message = passed ? "Synthetic self-test passed" : "Synthetic self-test failed",
+): ShimSelfTestResult => ({
+  shim: {
+    name: "synthetic-shim",
+    version: "1.0.0-test",
+  },
+  agent: {
+    name: "synthetic-agent",
+    version: "1.0.0-test",
+    found: true,
+  },
+  checks: [
+    {
+      name: "synthetic-check",
+      passed,
+      message,
+    },
+  ],
+  overall: {
+    passed,
+    message,
+  },
+});
 
 // -------------
 // Tests
@@ -654,6 +684,7 @@ describe("validateHank", () => {
   const projectPath = path.join(tempDir, "project");
   let testLogger: Logger;
   let originalEnv: Record<string, string | undefined>;
+  let runSelfTestSpy: ReturnType<typeof spyOn>;
 
   // Set up before each test
   beforeEach(() => {
@@ -673,11 +704,15 @@ describe("validateHank", () => {
       logger: mockLogger,
       performHealthCheckOnInit: false,
     });
+
+    runSelfTestSpy = spyOn(codonRunnerModule.CodonRunner, "runSelfTestForModel");
+    runSelfTestSpy.mockImplementation(async () => createSelfTestResult());
   });
 
   afterEach(() => {
     cleanup(tempDir);
     LlmProviderRegistry.resetInstance();
+    runSelfTestSpy.mockRestore();
     // Restore original environment
     restoreEnv(originalEnv);
   });
@@ -1953,8 +1988,11 @@ describe("validateHank", () => {
     expect(modelIds.length).toBe(uniqueModelIds.size);
   }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
 
-  test("adds warnings when self-tests fail", async () => {
+  test("throws when self-tests fail", async () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+    runSelfTestSpy.mockImplementationOnce(async () =>
+      createSelfTestResult(false, "Synthetic self-test failure"),
+    );
 
     const config = [
       {
@@ -1967,26 +2005,13 @@ describe("validateHank", () => {
     ];
 
     writeHankConfig(configPath, config);
-    const result = await validateHank({
-      configPath,
-      executionPath: projectPath,
-      logger: testLogger,
-    });
-
-    // Check shimSelfTests structure
-    expect(result.shimSelfTests).toBeDefined();
-
-    // Type guard to ensure shimSelfTests exists
-    if (!result.shimSelfTests) {
-      throw new Error("shimSelfTests should be defined");
-    }
-
-    // If any self-test failed, there should be a warning
-    const failedTests = result.shimSelfTests.filter((test) => !test.passed);
-    if (failedTests.length > 0) {
-      expect(result.warnings.length).toBeGreaterThan(0);
-      expect(result.warnings.some((w) => w.includes("Self-test failed"))).toBe(true);
-    }
+    await expect(
+      validateHank({
+        configPath,
+        executionPath: projectPath,
+        logger: testLogger,
+      }),
+    ).rejects.toThrow("Synthetic self-test failure");
   }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
 });
 
@@ -3739,5 +3764,113 @@ describe("loop-level budget shares validation", () => {
     };
 
     expect(() => hankFileSchema.parse(config)).toThrow(/unknown child IDs.*nonexistent-id/i);
+  });
+});
+
+describe("self-test failure classification & guidance", () => {
+  function makeResult(overrides: Partial<ShimSelfTestResult>): ShimSelfTestResult {
+    return {
+      shim: { name: "pi", version: "1.0.0" },
+      agent: { name: "pi", version: "1.0.0", found: true },
+      checks: [],
+      overall: { passed: false, message: "fail" },
+      ...overrides,
+    };
+  }
+
+  test("classifies a missing agent binary as binary-missing", () => {
+    const result = makeResult({ agent: { name: "pi", version: "unknown", found: false } });
+    expect(classifyInBandSelfTest(result)).toBe("binary-missing");
+  });
+
+  test("classifies a failed api_key check as auth", () => {
+    const result = makeResult({
+      checks: [{ name: "api_key", passed: false, message: "no key" }],
+    });
+    expect(classifyInBandSelfTest(result)).toBe("auth");
+  });
+
+  test("classifies other check failures as check", () => {
+    const result = makeResult({
+      checks: [{ name: "model_registry", passed: false, message: "no models" }],
+    });
+    expect(classifyInBandSelfTest(result)).toBe("check");
+  });
+
+  test("launch guidance points at Node/PATH, never at API keys", () => {
+    const guidance = buildSelfTestGuidance(new Set(["launch"]));
+    expect(guidance).toContain("failed to start");
+    expect(guidance).toMatch(/Node\.js/);
+    expect(guidance).not.toMatch(/API key/i);
+  });
+
+  test("auth guidance mentions credentials", () => {
+    const guidance = buildSelfTestGuidance(new Set(["auth"]));
+    expect(guidance).toMatch(/API keys|credentials/i);
+  });
+
+  test("binary-missing guidance defers to the per-model message, not a false PATH claim", () => {
+    const guidance = buildSelfTestGuidance(new Set(["binary-missing"]));
+    expect(guidance).toMatch(/could not be located/i);
+    expect(guidance).toMatch(/see the message above/i);
+    // Must NOT prescribe PATH — most shims don't resolve their agent from PATH.
+    expect(guidance).not.toMatch(/on your PATH/i);
+  });
+
+  test("plain check/unknown failures add no extra guidance", () => {
+    expect(buildSelfTestGuidance(new Set(["check"]))).toBe("");
+    expect(buildSelfTestGuidance(new Set(["unknown"]))).toBe("");
+  });
+});
+
+describe("formatFailedSelfTest", () => {
+  const base = {
+    modelName: "Gemini 3.5 Flash",
+    provider: "google",
+    modelId: "gemini-3.5-flash",
+  };
+
+  test("surfaces each failed check's message under the header", () => {
+    const out = formatFailedSelfTest({
+      ...base,
+      result: {
+        shim: { name: "gemini-shim", version: "1.0.0" },
+        agent: { name: "gemini", version: "unknown", found: false },
+        checks: [
+          {
+            name: "agent_found",
+            passed: false,
+            message: "Gemini CLI ('gemini') not found on PATH (searched via which)",
+          },
+          { name: "auth_configured", passed: true, message: "ok" },
+        ],
+        overall: { passed: false, message: "One or more checks failed" },
+      },
+    });
+    expect(out).toContain("Gemini 3.5 Flash (google/gemini-3.5-flash): One or more checks failed");
+    // The specific, actionable check message is surfaced...
+    expect(out).toContain(
+      "• agent_found: Gemini CLI ('gemini') not found on PATH (searched via which)",
+    );
+    // ...and passing checks are not listed.
+    expect(out).not.toContain("auth_configured");
+  });
+
+  test("launch failures (no checks) show only the header with the actionable overall message", () => {
+    const out = formatFailedSelfTest({
+      ...base,
+      provider: "pi",
+      modelId: "pi/google/gemini-3.5-flash",
+      result: {
+        shim: { name: "unknown", version: "unknown" },
+        agent: { name: "unknown", version: "unknown", found: false },
+        checks: [],
+        overall: { passed: false, message: "`pi` requires Node ≥ 22.19.0; found v20.12.2" },
+      },
+    });
+    expect(out).toBe(
+      "  - Gemini 3.5 Flash (pi/pi/google/gemini-3.5-flash): `pi` requires Node ≥ 22.19.0; found v20.12.2",
+    );
+    expect(out).not.toContain("•");
   });
 });

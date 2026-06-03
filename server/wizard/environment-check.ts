@@ -10,7 +10,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { detectClaudeExecutable } from "../claude-agent-sdk-manager.js";
+import { detectClaudeExecutable, isLegacyClaudeAuthEnabled } from "../claude-agent-sdk-manager.js";
 import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -96,11 +96,9 @@ function detectGeminiCli(): boolean {
 // ── API Key Detection ─────────────────────────────────────────
 
 function hasAnthropicAuth(): boolean {
-  // Direct API key
-  if (process.env.ANTHROPIC_API_KEY) return true;
-  // OAuth token (from Claude Code)
-  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return true;
-  return false;
+  // The Agent SDK authenticates via ANTHROPIC_API_KEY (OAuth tokens are not supported).
+  // In lenient/legacy mode, also accept the SDK's local Claude Code login fallback.
+  return !!process.env.ANTHROPIC_API_KEY || isLegacyClaudeAuthEnabled();
 }
 
 function hasOpenAiAuth(): boolean {
@@ -223,7 +221,7 @@ export function checkEnvironment(): EnvironmentResult {
  * The demo hank uses "haiku" (Anthropic). When the user doesn't have
  * Anthropic credentials, we override with -m to use an available provider.
  *
- * Fallback order: Anthropic (haiku) > OpenAI (gpt-5.1-codex-mini) > Google (gemini-2.5-flash)
+ * Fallback order: Anthropic (haiku) > OpenAI (gpt-5.2) > Google (gemini-2.5-flash)
  */
 export interface DemoModelChoice {
   /** Provider name for display */
@@ -255,7 +253,7 @@ export function getDemoModelChoice(env: EnvironmentResult): DemoModelChoice | nu
   if (canCodex) {
     return {
       providerName: "Codex",
-      modelOverride: "gpt-5.1-codex-mini",
+      modelOverride: "gpt-5.2",
       provider: "openai",
     };
   }

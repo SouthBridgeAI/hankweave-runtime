@@ -30,7 +30,7 @@ const templates: Record<string, string> = {
     {
       "id": "analyze-gemini",
       "name": "Analyze Project (Gemini)",
-      "model": "gemini-2.5-flash",
+      "model": "pi/google/gemini-2.5-flash",
       "continuationMode": "fresh",
       "promptFile": "./prompts/analyze-gemini.md",
       "checkpointedFiles": ["analysis-gemini.md"],
@@ -43,7 +43,7 @@ const templates: Record<string, string> = {
     {
       "id": "analyze-codex",
       "name": "Analyze Project (Codex)",
-      "model": "gpt-5.1-codex-mini",
+      "model": "gpt-5.2",
       "continuationMode": "fresh",
       "promptFile": "./prompts/analyze-codex.md",
       "checkpointedFiles": ["analysis-codex.md"],
@@ -149,7 +149,7 @@ This hank was initialized with \`hankweave init\`.
 
 Edit \`hank.json\` to customize your workflow:
 - Add more codons to the \`hank\` array
-- Change the \`model\` (haiku, sonnet, opus, gemini-2.5-flash, gpt-5.1-codex-max, etc.)
+- Change the \`model\` (haiku, sonnet, opus, pi/google/gemini-2.5-flash, gpt-5.2, etc.)
 - Add \`rigSetup\` to prepare your environment before a codon runs
 - Configure \`checkpointedFiles\` to track files in git checkpoints
 - Use \`overrides\` to suggest runtime settings (model, port, etc.)

@@ -162,7 +162,12 @@ describe("Pi Shim Integration Test", () => {
 
     const manager = new ShimProcessManager(executionPath, executionPath, logger, logParser);
 
-    const command = ["bun", "run", piShimPath];
+    // The pi shim bundle includes undici's CacheStorage, which calls
+    // `webidl.util.markAsUncloneable` — not implemented in Bun 1.3.x. The
+    // shim is shebanged `#!/usr/bin/env node` and the production launcher
+    // (server/utils.ts `getRuntimeCommand`) special-cases it to Node, so
+    // mirror that here.
+    const command = ["node", piShimPath];
     const result = await manager.runSelfTest(command);
 
     console.log(`    ✓ Self-test: ${result.overall.passed ? "PASSED" : "FAILED"}`);

@@ -320,7 +320,10 @@ async function ensureOpencodeAvailable() {
       return resolved;
     }
   }
-  throw new Error("OpenCode CLI not found. Set OPENCODE_BIN or install opencode.");
+  const searched = [
+    ...new Set(candidates.map((candidate) => candidate.includes(path2.sep) || candidate.startsWith(".") ? candidate : `'${candidate}' on PATH`))
+  ].join(", ");
+  throw new Error(`OpenCode CLI not found. Searched: ${searched}. Set OPENCODE_BIN or install opencode.`);
 }
 async function findOnPath(command) {
   const locator = process.platform === "win32" ? "where" : "which";

@@ -13,6 +13,29 @@ import type { ChildProcess } from "node:child_process";
 
 let configPath: string | undefined;
 
+const waitForFileToContain = async (
+  filePath: string,
+  text: string,
+  timeoutMs = 5000,
+  intervalMs = 50,
+) => {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      if (readFileSync(filePath, "utf-8").includes(text)) {
+        return;
+      }
+    } catch {
+      // Ignore transient read errors while the log file is still being created.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(`Timed out waiting for ${filePath} to contain ${text}`);
+};
+
 const runTests = async (
   config: TestServerConfig,
   tests: (executionDir?: string, proxyPort?: number) => Promise<void>
@@ -150,15 +173,13 @@ describe("LLM proxy", () => {
         expect(healthResponse.ok).toBe(true);
         expect(await healthResponse.text()).toBe("Hankweave Proxy OK");
 
-        // sleep a bit to make sure we run smth
-        await new Promise((resolve) => setTimeout(resolve, 15000));
-
         // Check if server log contains the logging middleware message
         const logPath = path.join(
           executionDir!,
           ".hankweave/logs/server.log"
         );
-        expect(readFileSync(logPath, "utf-8")).toContain(
+        await waitForFileToContain(
+          logPath,
           "[LOGGING-MIDDLEWARE] Received request"
         );
 

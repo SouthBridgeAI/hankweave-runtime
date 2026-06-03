@@ -1,4 +1,4 @@
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 export interface ProviderCredentialStatus {
   available: boolean;

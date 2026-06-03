@@ -69,7 +69,21 @@ export async function ensureOpencodeAvailable(): Promise<string> {
     }
   }
 
-  throw new Error("OpenCode CLI not found. Set OPENCODE_BIN or install opencode.");
+  // Report exactly where we looked so the failure is actionable. Bare names were
+  // probed on PATH; everything else was checked as a filesystem path. Dedupe since
+  // the candidate list can repeat the same home path across platforms.
+  const searched = [
+    ...new Set(
+      candidates.map((candidate) =>
+        candidate.includes(path.sep) || candidate.startsWith(".")
+          ? candidate
+          : `'${candidate}' on PATH`,
+      ),
+    ),
+  ].join(", ");
+  throw new Error(
+    `OpenCode CLI not found. Searched: ${searched}. Set OPENCODE_BIN or install opencode.`,
+  );
 }
 
 async function findOnPath(command: string): Promise<string | undefined> {

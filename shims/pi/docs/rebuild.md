@@ -30,12 +30,13 @@ This directory is intended to work in two modes:
 
 For this shim, that is the installed version of:
 
-- `@mariozechner/pi-coding-agent`
+- `@earendil-works/pi-coding-agent` (formerly `@mariozechner/pi-coding-agent`
+  — the package was renamed at upstream v0.74.0)
 
 Example:
 
 ```text
-0.57.1
+0.77.0
 ```
 
 Thin subprocess shims with no primary SDK dependency would instead use:
@@ -64,9 +65,13 @@ shim/
 Typical flow:
 
 ```bash
-bun add @mariozechner/pi-coding-agent@latest
+bun add @earendil-works/pi-coding-agent@latest
 ./rebuild.sh
 ```
+
+If a user-level `~/.pi/agent/models.json` was authored against the pre-0.73
+SDK, migrate any `compat.reasoningEffortMap` entries to the per-model
+`thinkingLevelMap` shape (upstream change in v0.73.0).
 
 After the rebuild:
 

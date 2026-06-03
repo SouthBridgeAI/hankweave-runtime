@@ -243,13 +243,13 @@ describe("Codex Shim Integration Test", () => {
         reasoningEffort: "high",
       },
       {
-        model: "gpt-5.2-codex-xhigh",
-        expectedModel: "openai/gpt-5.2-codex",
+        model: "gpt-5.1-codex-xhigh",
+        expectedModel: "openai/gpt-5.1-codex",
         reasoningEffort: "xhigh",
       },
       {
-        model: "gpt-5.2-codex-high",
-        expectedModel: "openai/gpt-5.2-codex",
+        model: "gpt-5.1-codex-high",
+        expectedModel: "openai/gpt-5.1-codex",
         reasoningEffort: "high",
       },
     ];
@@ -529,7 +529,7 @@ describe("Codex Shim Integration Test", () => {
         id: "codex-auth-json-test",
         name: "Auth JSON Test Session",
         promptText: "Say 'Auth JSON works' and nothing else.",
-        model: "gpt-5.1-codex-mini",
+        model: "gpt-5.2",
         continuationMode: "fresh",
       });
 
@@ -570,7 +570,7 @@ describe("Codex Shim Integration Test", () => {
         id: "codex-openai-key-test",
         name: "OPENAI_API_KEY Test Session",
         promptText: "Say hello.",
-        model: "gpt-5.1-codex-mini",
+        model: "gpt-5.2",
         continuationMode: "fresh",
       });
 

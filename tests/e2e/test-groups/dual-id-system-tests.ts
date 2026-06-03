@@ -51,9 +51,9 @@ export function runDualIdSystemTests(testState: TestState) {
       if (event.type === "codon.started") {
         const sessionId = event.data.sessionId;
         if (sessionId) {
-          // UUID v4 format: 8-4-4-4-12 characters
+          // UUID format: 8-4-4-4-12 (any RFC-4122 version; SDK 0.3.x emits UUIDv7)
           const uuidRegex =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
           expect(sessionId).toMatch(uuidRegex);
 
           // Should NOT match timestamp-random format (e.g., "1234567890123-abc123def")
@@ -75,7 +75,7 @@ export function runDualIdSystemTests(testState: TestState) {
             codon.status === "skipped"
           ) {
             const uuidRegex =
-              /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
             if (codon.status === "completed" && codon.claudeSessionId) {
               expect(codon.claudeSessionId).toMatch(uuidRegex);
             } else if (codon.status === "failed" && codon.claudeSessionId) {
@@ -159,7 +159,8 @@ export function runDualIdSystemTests(testState: TestState) {
       expect(event.data).toHaveProperty("startTime");
 
       // Session ID should be a valid UUID
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       expect(event.data.sessionId).toMatch(uuidRegex);
 
       // Start time should be valid ISO string
@@ -174,7 +175,8 @@ export function runDualIdSystemTests(testState: TestState) {
     if (finalSnapshot?.type === "state.snapshot") {
       // All completed codons should have valid UUID session IDs
       finalSnapshot.data.completedCodons.forEach((codon) => {
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const uuidRegex =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
         if (codon.status === "completed" && codon.claudeSessionId) {
           expect(codon.claudeSessionId).toMatch(uuidRegex);
         } else if (codon.status === "failed" && codon.claudeSessionId) {
@@ -234,7 +236,7 @@ export function runDualIdSystemTests(testState: TestState) {
           snapshot.data.currentCodon.claudeSessionId
         ) {
           const uuidRegex =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
           expect(snapshot.data.currentCodon.claudeSessionId).toMatch(uuidRegex);
         }
       }

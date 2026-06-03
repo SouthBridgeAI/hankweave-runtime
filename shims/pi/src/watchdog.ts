@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 export class SessionEventQueue<T> implements AsyncIterable<T> {
   private readonly queue: T[] = [];
@@ -93,8 +93,8 @@ export function isPiWatchdogActivityEvent(event: PiWatchdogEvent): boolean {
     case "agent_end":
     case "auto_retry_start":
     case "auto_retry_end":
-    case "auto_compaction_start":
-    case "auto_compaction_end":
+    case "compaction_start":
+    case "compaction_end":
       return true;
     default:
       return false;
@@ -118,8 +118,8 @@ export function applyPiWatchdogEvent(
     case "tool_execution_end":
     case "auto_retry_start":
     case "auto_retry_end":
-    case "auto_compaction_start":
-    case "auto_compaction_end":
+    case "compaction_start":
+    case "compaction_end":
       controller.markBusy();
       break;
     case "turn_end":

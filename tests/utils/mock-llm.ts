@@ -17,10 +17,10 @@ import type {
  * @returns A delay in milliseconds.
  */
 function calculateDelay(prompt: string = ""): number {
-  const baseDelay = 200; // Minimum response time
-  const perCharDelay = Math.min(2, 1000 / Math.max(1, prompt.length)); // Limit max delay
-  const randomJitter = Math.random() * 100; // Add some variability
-  const maxDelay = 2000; // Cap at 2 seconds
+  const baseDelay = 10; // Keep tests fast while preserving ordering differences
+  const perCharDelay = Math.min(0.2, 50 / Math.max(1, prompt.length));
+  const randomJitter = Math.floor(Math.random() * 10);
+  const maxDelay = 80;
   return Math.min(maxDelay, baseDelay + prompt.length * perCharDelay + randomJitter);
 }
 
@@ -161,7 +161,7 @@ export function createMockLlm(config: MockLlmConfig = {}) {
 
         if (chunkIndex < chunks.length) {
           // Simulate network delay between chunks
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          await new Promise((resolve) => setTimeout(resolve, 2));
           controller.enqueue(chunks[chunkIndex]);
           chunkIndex++;
         } else {
@@ -178,7 +178,7 @@ export function createMockLlm(config: MockLlmConfig = {}) {
     async function* generateStream(): AsyncIterable<string> {
       for (const chunk of chunks) {
         // Simulate network delay between chunks
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 2));
         yield chunk;
       }
     }

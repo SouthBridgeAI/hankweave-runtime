@@ -271,8 +271,9 @@ describe("Real Claude Logs Validation", () => {
         }
 
         expect(sessionId).toBeTruthy();
+        // Any RFC-4122 UUID version (fixtures are v4; SDK 0.3.x emits v7)
         expect(sessionId).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
         );
       },
     );

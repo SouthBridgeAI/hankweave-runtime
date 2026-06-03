@@ -536,8 +536,15 @@ export class ShimProcessManager extends BaseProcessManager {
           );
           resolve(result);
         } catch (error) {
+          // stdout wasn't parseable JSON — the harness almost certainly failed to
+          // launch (e.g. a module-load crash). Surface the exit code and captured
+          // stderr so the real cause is visible instead of being swallowed.
           const errorMsg = error instanceof Error ? error.message : "Unknown error parsing JSON";
-          reject(new Error(`Failed to parse self-test output: ${errorMsg}\nOutput: ${stdout}`));
+          const detail =
+            stdout.trim().length === 0
+              ? `self-test process exited with code ${code} and produced no parseable output.`
+              : `Failed to parse self-test output (exit code ${code}): ${errorMsg}\nOutput: ${stdout}`;
+          reject(new Error(`${detail}${stderr ? `\nstderr: ${stderr}` : ""}`));
         }
       });
 

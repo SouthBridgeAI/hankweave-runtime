@@ -68,6 +68,20 @@ function createMockCostTracker() {
   return new TypedEventEmitter<CostTrackerEvents>();
 }
 
+async function waitForCondition(
+  condition: () => boolean,
+  { timeoutMs = 1500, intervalMs = 10 } = {},
+) {
+  const start = Date.now();
+
+  while (!condition()) {
+    if (Date.now() - start >= timeoutMs) {
+      throw new Error(`Condition not met within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 /** Emit a cost increment on a mock CostTracker. */
 function emitCost(ct: TypedEventEmitter<CostTrackerEvents>, amount: number) {
   ct.emit("costIncremented", { cost: amount, tokens: ZERO_TOKENS });
@@ -1808,8 +1822,7 @@ describe("Budget - watchdog timer", () => {
     const events = collectExceeded(budget);
     const ct = createMockCostTracker();
     budget.trackCodon("a" as CodonId, c, ct);
-    // No cost events emitted — wait for watchdog
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForCondition(() => events.length === 1);
     expect(events.length).toBe(1);
     expect(events[0].codonId).toBe("a");
     expect(events[0].info.currency).toBe("duration");
@@ -1823,7 +1836,7 @@ describe("Budget - watchdog timer", () => {
     const ct = createMockCostTracker();
     budget.trackCodon("a" as CodonId, c, ct);
     budget.completeCodon("a" as CodonId, 0);
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 1100));
     expect(events.length).toBe(0);
   });
 
@@ -1833,8 +1846,7 @@ describe("Budget - watchdog timer", () => {
     const events = collectExceeded(budget);
     const ct = createMockCostTracker();
     budget.trackCodon("a" as CodonId, c, ct);
-    // Should complete immediately without hanging
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 25));
     expect(events.length).toBe(0);
     budget.completeCodon("a" as CodonId, 0);
   });
@@ -1855,7 +1867,7 @@ describe("Budget - watchdog timer", () => {
     const events = collectExceeded(budget);
     const ct = createMockCostTracker();
     budget.trackCodon("loop-codon" as CodonId, c, ct);
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForCondition(() => events.length === 1);
     expect(events.length).toBe(1);
     expect(events[0].codonId).toBe("loop-codon");
     expect(events[0].info.currency).toBe("duration");

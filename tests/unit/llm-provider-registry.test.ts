@@ -345,7 +345,7 @@ describe("LlmProviderRegistry", () => {
       process.env.ANTHROPIC_API_KEY = "test-key";
       registry = new LlmProviderRegistry({
         logger: mockLogger,
-        healthCheckTimeout: 1000, // Short timeout for tests
+        healthCheckTimeout: 50,
       });
 
       const statuses = await registry.performHealthChecks();
@@ -501,7 +501,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("google");
-          expect(result.modelInfo.modelId).toBe("gemini-flash-latest");
+          expect(result.modelInfo.modelId).toBe("gemini-3.5-flash");
         }
       });
     });
@@ -543,7 +543,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Fuzzy match should prefer google provider for gemini and return most recent
-          expect(result.modelInfo.modelId).toBe("gemini-flash-latest");
+          expect(result.modelInfo.modelId).toBe("gemini-3.5-flash");
           expect(result.modelInfo.providerId).toBe("google");
         }
       });
@@ -585,7 +585,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match a gemini flash model despite typo, preferring google provider
-          expect(result.modelInfo.modelId).toBe("gemini-flash-latest");
+          expect(result.modelInfo.modelId).toBe("gemini-3.5-flash");
           expect(result.modelInfo.providerId).toBe("google");
           expect(result.matchType).toBe("fuzzy");
         }
@@ -612,7 +612,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should get the most recent opus variant
-          expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
+          expect(result.modelInfo.modelId).toBe("claude-opus-4-8");
           expect(result.modelInfo.providerId).toBe("anthropic");
           expect(result.matchType).toBe("fuzzy");
           expect(result.modelInfo.last_updated).toBeDefined();
@@ -628,7 +628,7 @@ describe("LlmProviderRegistry", () => {
         if (result.success) {
           // Should prefer anthropic for claude models
           expect(result.modelInfo.providerId).toBe("anthropic");
-          expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
+          expect(result.modelInfo.modelId).toBe("claude-opus-4-8");
         }
       });
 
@@ -1723,7 +1723,7 @@ describe("LlmProviderRegistry", () => {
         {
           input: "opus",
           expectedProvider: "anthropic",
-          expectedModelId: "claude-opus-4-6",
+          expectedModelId: "claude-opus-4-8",
         },
         {
           input: "sonnet",
@@ -1753,7 +1753,7 @@ describe("LlmProviderRegistry", () => {
       registry = LlmProviderRegistry.getInstance({ logger: mockLogger });
     });
 
-    it("should resolve 'opus' to claude-opus-4-6", () => {
+    it("should resolve 'opus' to claude-opus-4-8", () => {
       const result = registry.resolveModel({
         model: "opus", // Short name that gets expanded to "claude-opus"
       });
@@ -1761,7 +1761,7 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-8");
         // Should be fuzzy match since shortcuts expand to patterns, not exact IDs
         expect(result.matchType).toBe("fuzzy");
       }
@@ -1781,7 +1781,7 @@ describe("LlmProviderRegistry", () => {
       }
     });
 
-    it("should resolve 'opus' with anthropic provider to claude-opus-4-6", () => {
+    it("should resolve 'opus' with anthropic provider to claude-opus-4-8", () => {
       const result = registry.resolveModel({
         providerId: "anthropic",
         model: "opus", // Shortcut + explicit provider
@@ -1790,7 +1790,7 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-8");
         expect(result.matchType).toBe("fuzzy");
       }
     });
@@ -1803,20 +1803,20 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-8");
       }
     });
 
-    it("should resolve opus to most recent model (claude-opus-4-6)", () => {
+    it("should resolve opus to most recent model (claude-opus-4-8)", () => {
       const result = registry.resolveModel({
         model: "opus",
       });
 
       expect(result.success).toBe(true);
       if (result.success) {
-        // Should resolve to claude-opus-4-6 (most recent)
+        // Should resolve to claude-opus-4-8 (most recent)
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-opus-4-6");
+        expect(result.modelInfo.modelId).toBe("claude-opus-4-8");
         expect(result.modelInfo.last_updated).toBeDefined();
         // Verify it's the 2026 version
         expect(result.modelInfo.last_updated).toContain("2026");

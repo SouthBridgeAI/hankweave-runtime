@@ -22,9 +22,18 @@ export function runLogOrderingTests(testDir: string) {
       if (!fs.existsSync(logPath)) return;
 
       const entries = parseJSONL(fs.readFileSync(logPath, "utf-8"));
-      // Ignore hook_response system messages that precede init
+      // This test asserts ordering of SDK *protocol* messages (system → assistant → user →
+      // result). Filter out entries that aren't part of that protocol stream:
+      //   - hook_response system messages that precede init
+      //   - captured out-of-band process output (stderr/stdout). In compiled-binary mode the
+      //     extracted Claude CLI can emit a benign startup line to stderr before the init
+      //     message; it's captured into the log (see the "stderr output is captured" test) but
+      //     is not a protocol message, so it must not count as the "first" entry.
       const filteredEntries = entries.filter(
-        (e) => !(e.type === "system" && e.subtype === "hook_response"),
+        (e) =>
+          !(e.type === "system" && e.subtype === "hook_response") &&
+          e.type !== "stderr" &&
+          e.type !== "stdout",
       );
       if (filteredEntries.length === 0) return;
 

@@ -94,6 +94,10 @@ async function build() {
     "bun.lock",
     "tsconfig.json",
     "rebuild.sh",
+    // The shim's own `dist/index.js` is a build artifact identical to the
+    // top-level `index.js` we actually run; copying it doubles the bundle
+    // size (the pi shim alone is ~11.6MB).
+    "dist",
   ]);
 
   if (existsSync(shimsSource)) {

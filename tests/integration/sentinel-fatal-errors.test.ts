@@ -138,9 +138,7 @@ describe("Sentinel Fatal Error Handling", () => {
       };
 
       await manager.handleEvent(mockEvent);
-
-      // Give time for async unloading (increased for queue processing)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await manager.completeAllWork();
 
       // Sentinel should have been unloaded due to template error
       expect(manager.getSentinelCount()).toBe(0);
@@ -184,7 +182,7 @@ describe("Sentinel Fatal Error Handling", () => {
       };
 
       await manager.handleEvent(mockEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await manager.completeAllWork();
 
       // Should NOT unload because continueOnError: true handles regular LLM errors
       expect(manager.getSentinelCount()).toBe(1);
@@ -227,7 +225,7 @@ describe("Sentinel Fatal Error Handling", () => {
       };
 
       await manager.handleEvent(mockEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await manager.completeAllWork();
 
       // Should unload because continueOnError is false
       expect(manager.getSentinelCount()).toBe(0);
@@ -278,9 +276,6 @@ describe("Sentinel Fatal Error Handling", () => {
         // Expected - sentinel might be unloaded during processing
       }
 
-      // Additional wait for async unloading to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
-
       // Should unload after 3 consecutive failures
       expect(manager.getSentinelCount()).toBe(0);
       expect(logger.hasLog("Unloading non-conversational sentinel failing-sentinel after 3 consecutive failures")).toBe(true);
@@ -324,8 +319,7 @@ describe("Sentinel Fatal Error Handling", () => {
       await manager.handleEvent(mockEvent);
       await manager.handleEvent(mockEvent);
       await manager.handleEvent(mockEvent);
-
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await manager.completeAllWork();
 
       // Should NOT unload because the 3rd call succeeded, resetting the counter
       expect(manager.getSentinelCount()).toBe(1);
@@ -362,7 +356,7 @@ describe("Sentinel Fatal Error Handling", () => {
       };
 
       await manager.handleEvent(mockEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await manager.completeAllWork();
 
       // Should keep sentinel because resource errors are transient
       expect(manager.getSentinelCount()).toBe(1);
@@ -412,7 +406,7 @@ describe("Sentinel Fatal Error Handling", () => {
         };
 
         await manager.handleEvent(mockEvent);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await manager.completeAllWork();
 
         if (testCase.shouldUnload) {
           expect(manager.getSentinelCount()).toBe(0);
@@ -456,7 +450,7 @@ describe("Sentinel Fatal Error Handling", () => {
       };
 
       await manager.handleEvent(mockEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await manager.completeAllWork();
 
       // Should unload despite being a resource error because shouldUnload=true
       expect(manager.getSentinelCount()).toBe(0);
@@ -529,7 +523,7 @@ describe("Sentinel Fatal Error Handling", () => {
       };
 
       await manager.handleEvent(mockEvent);
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await manager.completeAllWork();
 
       // Should have 2 sentinels left (success + resource-error)
       // template-error should be unloaded

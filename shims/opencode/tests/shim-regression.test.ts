@@ -273,3 +273,50 @@ process.exit(0);
     expect(fs.existsSync(path.join(fakeHome, ".shim"))).toBe(false);
   });
 });
+
+describe("self-test agent_found reporting", () => {
+  test("not-found message enumerates the locations searched", async () => {
+    const tempDir = makeTempDir();
+    const fakeHome = path.join(tempDir, "home");
+    fs.mkdirSync(fakeHome, { recursive: true });
+    const missingBin = path.join(tempDir, "does-not-exist", "opencode");
+
+    // Minimal PATH that still provides `which`/`where` but no `opencode`.
+    const systemPath = process.platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin:/bin";
+
+    const result = await new Promise<ShimRunResult>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [path.join(import.meta.dir, "..", "src", "index.ts"), "--self-test"],
+        {
+          env: {
+            PATH: `${path.dirname(process.execPath)}${path.delimiter}${systemPath}`,
+            HOME: fakeHome,
+            USERPROFILE: fakeHome,
+            OPENCODE_BIN: missingBin,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c) => {
+        stdout += c.toString();
+      });
+      child.stderr.on("data", (c) => {
+        stderr += c.toString();
+      });
+      child.on("error", reject);
+      child.on("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
+    });
+
+    const report = JSON.parse(result.stdout) as {
+      checks: Array<{ name: string; passed: boolean; message: string }>;
+    };
+    const agentFound = report.checks.find((c) => c.name === "agent_found");
+    expect(agentFound?.passed).toBe(false);
+    expect(agentFound?.message).toContain("Searched:");
+    expect(agentFound?.message).toContain(missingBin); // the OPENCODE_BIN override we set
+    expect(agentFound?.message).toContain("'opencode' on PATH");
+  });
+});

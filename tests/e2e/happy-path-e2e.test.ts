@@ -204,9 +204,22 @@ async function setupAndRunCodons(): Promise<void> {
     TEST_CWD = binarySetup.testIsolationDir;
     console.log(`${colors.yellow}Using isolated test directory: ${TEST_CWD}${colors.reset}`);
 
-    // Copy test fixtures to isolated directory
+    // Copy test fixtures to isolated directory.
+    // Includes every file/dir referenced by test-codons.config.json (prompt files, system
+    // prompts, sentinel triggers, and the typescript_structure rig source) so codon config
+    // validation passes in the isolated binary-mode working directory.
     copyTestFixtures(
-      ["tests/config/poem_guides.txt", "tests/config/test-codons.config.json"],
+      [
+        "tests/config/poem_guides.txt",
+        "tests/config/test-codons.config.json",
+        "tests/config/codon1Prompt1.md",
+        "tests/config/codon1Prompt2.md",
+        "tests/config/systemPrompt1.md",
+        "tests/config/systemPrompt2.md",
+        "tests/config/noTodosPrompt.md",
+        "tests/config/sentinel-triggers",
+        "tests/config/typescript_structure",
+      ],
       projectRoot,
       TEST_CWD,
     );
@@ -822,6 +835,11 @@ describe("Hankweave E2E Test", () => {
           const tsFiles = files.filter((f) => f.endsWith(".ts"));
 
           if (tsFiles.length > 0) {
+            // codon-3's prompt explicitly instructs the model to add a comment crediting
+            // "William Wordsworth" at the top of each generated .ts file, so the author name
+            // is a deterministic signal here. (The generated poems are original works "in
+            // Wordsworth's style" — their text does not otherwise contain the author surname,
+            // which is why this check was previously flaky without the explicit instruction.)
             let foundWordsworth = false;
             for (const file of tsFiles) {
               const filePath = path.join(tsCodeDir, file);

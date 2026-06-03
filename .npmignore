@@ -7,10 +7,11 @@ tests/
 *.test.ts
 *.test.js
 
-# Shim build artifacts (only index.js is needed at runtime)
+# Shim build artifacts (only the top-level index.js is needed at runtime)
 shims/*/node_modules/
 shims/*/tests/
 shims/*/src/
+shims/*/dist/
 shims/*/bun.lock
 shims/*/tsconfig.json
 shims/*/rebuild.sh
@@ -20,6 +21,7 @@ shims/*/docs/
 dist/shims/*/node_modules/
 dist/shims/*/tests/
 dist/shims/*/src/
+dist/shims/*/dist/
 dist/shims/*/bun.lock
 dist/shims/*/tsconfig.json
 dist/shims/*/rebuild.sh

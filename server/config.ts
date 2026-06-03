@@ -9,8 +9,15 @@ import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { type TelemetryConfig, telemetryConfigSchema } from "./telemetry/telemetry-types.js";
 import { CodonId } from "./types/branded-types.js";
 import type { AllocationMode, OnExceededPolicy } from "./types/budget-types.js";
-import type { ModelName, ShimSelfTestResult } from "./types/types.js";
-import { deepMerge, getMetadata, type Logger, rmSyncWithRetry } from "./utils.js";
+import type { ModelName, SelfTestFailureCategory, ShimSelfTestResult } from "./types/types.js";
+import {
+  deepMerge,
+  getMetadata,
+  type Logger,
+  MIN_PI_NODE,
+  PiRuntimeError,
+  rmSyncWithRetry,
+} from "./utils.js";
 
 // Get version from package metadata
 const PACKAGE_VERSION = getMetadata().version;
@@ -2382,6 +2389,8 @@ export interface ValidationResult {
     provider: string;
     passed: boolean;
     result: ShimSelfTestResult;
+    /** Failure classification, present when `passed` is false. Routes guidance. */
+    category?: SelfTestFailureCategory;
   }>;
   /** Hank-level budget config for display in the budget resolution table */
   hankBudget?: {
@@ -2415,6 +2424,67 @@ export function validateRequiredEnv(requiredEnv: string[] | undefined): {
   });
 
   return { valid: missing.length === 0, missing };
+}
+
+/**
+ * Classify an in-band (harness ran and returned a result) self-test failure so
+ * the final error can route the user to the right fix instead of always blaming
+ * API keys. Launch failures are classified separately at the throw site.
+ */
+export function classifyInBandSelfTest(result: ShimSelfTestResult): SelfTestFailureCategory {
+  if (!result.agent?.found) return "binary-missing";
+  const failedApiKeyCheck = result.checks?.some(
+    (check) => !check.passed && check.name === "api_key",
+  );
+  if (failedApiKeyCheck) return "auth";
+  return "check";
+}
+
+/**
+ * Build the guidance line(s) appended to the self-test failure error, tailored
+ * to the set of failure categories actually present. A launch/runtime crash must
+ * never be reported as an API-key problem.
+ */
+export function buildSelfTestGuidance(categories: Set<SelfTestFailureCategory>): string {
+  const lines: string[] = [];
+  if (categories.has("launch")) {
+    lines.push(
+      "The harness failed to start. See the captured output above; if this is the " +
+        `pi harness, ensure Node.js ≥ ${MIN_PI_NODE} is on your PATH (pi cannot run under Bun).`,
+    );
+  }
+  if (categories.has("binary-missing")) {
+    lines.push(
+      "The agent for one or more models could not be located — see the message above for where it was searched or why it failed to load.",
+    );
+  }
+  if (categories.has("auth")) {
+    lines.push("Ensure the required API keys / credentials are configured correctly.");
+  }
+  // "check" and "unknown" carry their own per-model message; no extra guidance.
+  return lines.join("\n");
+}
+
+/**
+ * Render a failed self-test as a per-model bullet for the aggregate error.
+ *
+ * The header is the model identity + the shim's `overall.message`. For in-band
+ * failures that message is generic ("One or more checks failed"), so we append
+ * each FAILED check's specific message (e.g. the `agent_found` check that names
+ * where the binary was searched). Launch failures carry no checks — their
+ * `overall.message` already holds the actionable detail — so only the header shows.
+ */
+export function formatFailedSelfTest(test: {
+  modelName: string;
+  provider: string;
+  modelId: string;
+  result: ShimSelfTestResult;
+}): string {
+  const header = `  - ${test.modelName} (${test.provider}/${test.modelId}): ${test.result.overall.message}`;
+  const failedChecks = (test.result.checks ?? []).filter((check) => !check.passed);
+  if (failedChecks.length === 0) return header;
+  const detail = failedChecks.map((check) => `      • ${check.name}: ${check.message}`).join("\n");
+  return `${header}\n${detail}`;
 }
 
 /**
@@ -2834,8 +2904,9 @@ export async function validateHank(options: {
     }
   }
 
-  // Collect unique models and run self-tests for shims
-  // Only run self-tests if explicitly requested (e.g., in --validate mode)
+  // Collect unique models and run a self-test preflight for each shim.
+  // Runs on every startup (fail-fast), not just --validate — validateHank is
+  // called unconditionally during normal startup (see server/index.ts).
   const uniqueModels = new Map<string, ModelInfo>();
 
   function collectModelsRecursive(config: CodonConfig): void {
@@ -2887,6 +2958,9 @@ export async function validateHank(options: {
           provider: modelInfo.providerId,
           passed: selfTestResult.overall.passed,
           result: selfTestResult,
+          category: selfTestResult.overall.passed
+            ? undefined
+            : classifyInBandSelfTest(selfTestResult),
         });
 
         // Add warning if self-test failed
@@ -2900,6 +2974,9 @@ export async function validateHank(options: {
           `Self-test ${selfTestResult.overall.passed ? "PASSED" : "FAILED"} for ${modelInfo.name}`,
         );
       } catch (error) {
+        // An exception here means the harness never produced a result — it failed
+        // to LAUNCH (spawn/module-load crash, or the pi Node-version preflight).
+        // The PiRuntimeError message is already actionable; use it verbatim.
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         logger.log(`Self-test error for ${modelInfo.name}: ${errorMessage}`, "error");
@@ -2910,13 +2987,17 @@ export async function validateHank(options: {
           modelName: modelInfo.name,
           provider: modelInfo.providerId,
           passed: false,
+          category: "launch",
           result: {
             shim: { name: "unknown", version: "unknown" },
             agent: { name: "unknown", version: "unknown", found: false },
             checks: [],
             overall: {
               passed: false,
-              message: errorMessage,
+              message:
+                error instanceof PiRuntimeError && error.diagnostics
+                  ? `${errorMessage} (node ${error.diagnostics.nodeVersion ?? "?"} at ${error.diagnostics.nodePath ?? "?"})`
+                  : errorMessage,
             },
           },
         });
@@ -2952,12 +3033,16 @@ export async function validateHank(options: {
   if (result.shimSelfTests && result.shimSelfTests.length > 0) {
     const failedTests = result.shimSelfTests.filter((test) => !test.passed);
     if (failedTests.length > 0) {
-      const errorMessages = failedTests.map(
-        (test) =>
-          `  - ${test.modelName} (${test.provider}/${test.modelId}): ${test.result.overall.message}`,
+      const errorMessages = failedTests.map(formatFailedSelfTest);
+      // Tailor the guidance to the failure categories that actually occurred, so a
+      // launch/runtime crash is never reported as an API-key problem.
+      const categories = new Set<SelfTestFailureCategory>(
+        failedTests.map((test) => test.category ?? "unknown"),
       );
+      const guidance = buildSelfTestGuidance(categories);
       throw new Error(
-        `Self-test failed for ${failedTests.length} model(s):\n${errorMessages.join("\n")}\n\nPlease ensure all required API keys and dependencies are configured correctly.`,
+        `Self-test failed for ${failedTests.length} model(s):\n${errorMessages.join("\n")}` +
+          (guidance ? `\n\n${guidance}` : ""),
       );
     }
   }

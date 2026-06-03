@@ -34,7 +34,7 @@
     "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('index.js',{force:true});\""
   },
   "dependencies": {
-    "@openai/codex-sdk": "^0.112.0",
+    "@openai/codex-sdk": "^0.135.0",
     "@shims/common": "file:./common"
   },
   "devDependencies": {

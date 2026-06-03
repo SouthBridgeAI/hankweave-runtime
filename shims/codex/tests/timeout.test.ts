@@ -35,6 +35,7 @@ describe("adaptive timeout strategy", () => {
           input_tokens: 1,
           cached_input_tokens: 0,
           output_tokens: 1,
+          reasoning_output_tokens: 0,
         },
       } as const;
     }

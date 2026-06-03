@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -36,7 +36,7 @@
     "schemas"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "generate-schemas": "bun scripts/generate-schemas.ts",
@@ -53,7 +53,7 @@
     "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/integration tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts && bun tests/unit/cleanup-after-tests.ts",
     "test:long": "LONG_TESTS=true bun test tests/long-running",
     "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",
-    "test:integration": "bun tests/integration",
+    "test:integration": "bun test tests/integration",
     "test:e2e:check": "bun tests/utils/check-test-ready.ts",
     "test:e2e:init": "bun scripts/e2e/init.ts normal",
     "test:e2e:init:npx": "bun scripts/e2e/init.ts npx",
@@ -90,9 +90,9 @@
     "@ai-sdk/google": "^2.0.7",
     "@ai-sdk/groq": "^2.0.11",
     "@ai-sdk/openai": "^2.0.18",
-    "@anthropic-ai/claude-agent-sdk": "^0.1.70",
+    "@anthropic-ai/claude-agent-sdk": "0.3.156",
     "@clack/prompts": "^1.0.0",
-    "@openai/codex-sdk": "0.104.0",
+    "@openai/codex-sdk": "0.135.0",
     "ai": "^5.0.15",
     "crossws": "^0.4.1",
     "eta": "^3.5.0",

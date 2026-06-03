@@ -11,6 +11,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { spawn } from "child_process";
+import { statSync } from "fs";
 import path2 from "path";
 import readline from "readline";
 import { createRequire } from "module";
@@ -156,10 +157,18 @@ var PLATFORM_PACKAGE_BY_TARGET = {
 var moduleRequire = createRequire(import.meta.url);
 var CodexExec = class {
   executablePath;
+  pathDirs;
   envOverride;
   configOverrides;
   constructor(executablePath = null, env, configOverrides) {
-    this.executablePath = executablePath || findCodexPath();
+    if (executablePath) {
+      this.executablePath = executablePath;
+      this.pathDirs = [];
+    } else {
+      const resolved = findCodexPath();
+      this.executablePath = resolved.executablePath;
+      this.pathDirs = resolved.pathDirs;
+    }
     this.envOverride = env;
     this.configOverrides = configOverrides;
   }
@@ -169,6 +178,12 @@ var CodexExec = class {
       for (const override of serializeConfigOverrides(this.configOverrides)) {
         commandArgs.push("--config", override);
       }
+    }
+    if (args.baseUrl) {
+      commandArgs.push(
+        "--config",
+        `openai_base_url=${toTomlValue(args.baseUrl, "openai_base_url")}`
+      );
     }
     if (args.model) {
       commandArgs.push("--model", args.model);
@@ -230,11 +245,11 @@ var CodexExec = class {
     if (!env[INTERNAL_ORIGINATOR_ENV]) {
       env[INTERNAL_ORIGINATOR_ENV] = TYPESCRIPT_SDK_ORIGINATOR;
     }
-    if (args.baseUrl) {
-      env.OPENAI_BASE_URL = args.baseUrl;
-    }
     if (args.apiKey) {
       env.CODEX_API_KEY = args.apiKey;
+    }
+    if (this.pathDirs.length > 0) {
+      prependPathDirs(env, this.pathDirs);
     }
     const child = spawn(this.executablePath, commandArgs, {
       env,
@@ -428,10 +443,68 @@ function findCodexPath() {
       `Unable to locate Codex CLI binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`
     );
   }
-  const archRoot = path2.join(vendorRoot, targetTriple);
   const codexBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
-  const binaryPath = path2.join(archRoot, "codex", codexBinaryName);
-  return binaryPath;
+  const nativePackage = resolveNativePackage(vendorRoot, targetTriple, codexBinaryName);
+  if (!nativePackage) {
+    throw new Error(
+      `Unable to locate Codex CLI binaries for ${targetTriple}. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`
+    );
+  }
+  return nativePackage;
+}
+function resolveNativePackage(vendorRoot, targetTriple, codexBinaryName) {
+  const packageRoot = path2.join(vendorRoot, targetTriple);
+  const packageBinaryPath = path2.join(packageRoot, "bin", codexBinaryName);
+  if (isFile(packageBinaryPath) && isFile(path2.join(packageRoot, "codex-package.json"))) {
+    return {
+      executablePath: packageBinaryPath,
+      pathDirs: existingDirs(path2.join(packageRoot, "codex-path"))
+    };
+  }
+  const legacyBinaryPath = path2.join(packageRoot, "codex", codexBinaryName);
+  if (isFile(legacyBinaryPath)) {
+    return {
+      executablePath: legacyBinaryPath,
+      pathDirs: existingDirs(path2.join(packageRoot, "path"))
+    };
+  }
+  return null;
+}
+function existingDirs(...dirs) {
+  return dirs.filter(isDirectory);
+}
+function prependPathDirs(env, pathDirs, platform = process.platform) {
+  const pathKey = pathEnvKey(env, platform);
+  if (platform === "win32") {
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === "path" && key !== pathKey) {
+        delete env[key];
+      }
+    }
+  }
+  const existingEntries = (env[pathKey] ?? "").split(path2.delimiter).filter((entry) => entry.length > 0 && !pathDirs.includes(entry));
+  env[pathKey] = [...pathDirs, ...existingEntries].join(path2.delimiter);
+}
+function pathEnvKey(env, platform) {
+  if (platform !== "win32") {
+    return "PATH";
+  }
+  const matchingKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
+  return matchingKeys.includes("Path") ? "Path" : matchingKeys.at(-1) ?? "PATH";
+}
+function isFile(filePath) {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+function isDirectory(filePath) {
+  try {
+    return statSync(filePath).isDirectory();
+  } catch {
+    return false;
+  }
 }
 var Codex = class {
   exec;
@@ -1181,7 +1254,7 @@ var package_default = {
     clean: `node -e "const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('index.js',{force:true});"`
   },
   dependencies: {
-    "@openai/codex-sdk": "^0.112.0",
+    "@openai/codex-sdk": "^0.135.0",
     "@shims/common": "file:./common"
   },
   devDependencies: {
@@ -1333,6 +1406,18 @@ function findVendoredCodexExe(npmPrefix) {
   }
   return null;
 }
+function describeCodexSearch(command) {
+  const fromOverride = getCodexPathOverride() ? " (from CODEX_PATH_OVERRIDE)" : "";
+  if (path6.isAbsolute(command) || command.includes(path6.sep)) {
+    return `path '${command}'${fromOverride}`;
+  }
+  const locator = process.platform === "win32" ? "where" : "which";
+  const parts = [`'${command}'${fromOverride} on PATH (via ${locator})`];
+  if (process.platform === "win32") {
+    parts.push("vendored @openai/codex-win32 package in the npm prefix");
+  }
+  return parts.join(", ");
+}
 async function resolveCodexPath(command) {
   const isWindows = process.platform === "win32";
   if (path6.isAbsolute(command) || command.includes(path6.sep)) {
@@ -1444,7 +1529,7 @@ var CodexShim = class {
       {
         name: "agent_found",
         passed: agentFound,
-        message: agentFound ? `Found codex at ${resolvedPath}` : `Could not find codex via ${override}`
+        message: agentFound ? `Found codex at ${resolvedPath}` : `Could not find codex. Searched: ${describeCodexSearch(override)}`
       },
       {
         name: "api_key",

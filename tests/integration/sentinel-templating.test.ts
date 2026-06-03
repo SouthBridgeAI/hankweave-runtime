@@ -82,10 +82,7 @@ describe("Sentinel Templating Integration", () => {
       };
 
       // Trigger the sentinel
-      sentinel.handleEvent(testEvent);
-
-      // Wait for async execution
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sentinel.handleEvent(testEvent);
 
       // Verify the sentinel successfully loaded the prompt file and executed
       expect(llmCallMade).toBe(true);
@@ -212,10 +209,7 @@ describe("Sentinel Templating Integration", () => {
       };
 
       // Trigger the sentinel
-      sentinel.handleEvent(testEvent);
-
-      // Wait for async execution
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sentinel.handleEvent(testEvent);
 
       // Verify the messages structure
       expect(capturedOptions).toBeDefined();
@@ -286,12 +280,10 @@ describe("Sentinel Templating Integration", () => {
       };
 
       // First trigger - should fail but not crash
-      sentinel.handleEvent(testEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sentinel.handleEvent(testEvent);
 
       // Second trigger - should succeed
-      sentinel.handleEvent(testEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sentinel.handleEvent(testEvent);
 
       expect(callCount).toBe(2);
 
@@ -351,8 +343,7 @@ describe("Sentinel Templating Integration", () => {
       };
 
       // This should not crash but should log the error
-      sentinel.handleEvent(testEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sentinel.handleEvent(testEvent);
 
       // LLM call should not have been made due to template error
       expect(llmCallExecuted).toBe(false);
@@ -406,8 +397,7 @@ describe("Sentinel Templating Integration", () => {
         }
       };
 
-      sentinel.handleEvent(testEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sentinel.handleEvent(testEvent);
 
       expect(llmCallExecuted).toBe(false);
 
@@ -467,7 +457,7 @@ describe("Sentinel Templating Integration", () => {
       };
 
       await manager.handleEvent(testEvent);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await manager.completeAllWork();
 
       expect(callCount).toBe(1);
     });
@@ -602,11 +592,8 @@ No tool usage detected.
 
       // Process the events
       for (const event of complexEvents) {
-        sentinel.handleEvent(event);
-        await new Promise(resolve => setTimeout(resolve, 50)); // Small delay between events
+        await sentinel.handleEvent(event);
       }
-
-      await new Promise(resolve => setTimeout(resolve, 150));
 
       // Should have been called 3 times (once per event due to immediate strategy)
       expect(eventCallCount).toBe(3);
@@ -680,7 +667,6 @@ No tool usage detected.
       // Since the count threshold is 2000 and we only sent 1500 events,
       // we need to flush to force processing of pending events
       await sentinel.completeAllWork();
-      await new Promise(resolve => setTimeout(resolve, 100));
 
       // The template should only see 1000 events due to the limit
       expect(capturedPrompt).toBe("Processing 1000 events");
@@ -775,7 +761,7 @@ Generated at: <%= it.world.currentTime.toISOString() %>`;
         sentinel.handleEvent(event);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await sentinel.completeAllWork();
       processingTime = Date.now() - startTime;
 
       // Should complete reasonably quickly
@@ -901,8 +887,7 @@ const failedTools = toolEvents.filter(t => t.data.isError);
         sentinel.handleEvent(event);
       }
 
-      // Wait for debounce to trigger
-      await new Promise(resolve => setTimeout(resolve, 2500));
+      await sentinel.completeAllWork();
 
       // Verify the sentinel executed (debounce should have triggered)
       expect(llmCallMade).toBe(true);
@@ -978,12 +963,8 @@ const failedTools = toolEvents.filter(t => t.data.isError);
           ...testEvent,
           id: `evt-recovery-${i}`
         };
-        sentinel.handleEvent(event);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await sentinel.handleEvent(event);
       }
-
-      // Wait for all processing to complete
-      await new Promise(resolve => setTimeout(resolve, 200));
 
       expect(callCount).toBe(4);
       expect(successfulCalls).toBe(2); // Only the last 2 should succeed

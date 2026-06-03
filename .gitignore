@@ -210,3 +210,5 @@ verdaccio.pid
 .npmrc.backup
 .npmrc.verdaccio
 
+# Test area for new models pulled from models.dev
+new-models-dev 

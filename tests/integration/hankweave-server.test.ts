@@ -21,10 +21,7 @@ const TEST_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const EXECUTION_DIR = path.join(
-  TEST_ROOT,
-  "tests/test-area/hankweave-server-integration",
-);
+const TEST_AREA_DIR = path.join(TEST_ROOT, "tests/test-area");
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const CODONS_CONFIG = path.join(
@@ -53,6 +50,7 @@ function parseServerEvent(data: string) {
 
 describe("HankweaveRuntime", () => {
   let server: HankweaveRuntime;
+  let executionDir: string;
   // Track all WebSocket clients created during tests for automatic cleanup
   const testClients: WebSocket[] = [];
 
@@ -73,23 +71,20 @@ describe("HankweaveRuntime", () => {
     // Get a free port for this test
     serverPort = await getFreePort();
     serverUrl = `ws://localhost:${serverPort}`;
+    fs.mkdirSync(TEST_AREA_DIR, { recursive: true });
+    executionDir = fs.mkdtempSync(path.join(TEST_AREA_DIR, "hankweave-server-integration-"));
 
     // Clear client registry for new test
     testClients.length = 0;
-    // Clean up and create directories (similar to e2e test setup)
-    if (fs.existsSync(EXECUTION_DIR)) {
-      fs.rmSync(EXECUTION_DIR, { recursive: true, force: true });
-    }
-    fs.mkdirSync(EXECUTION_DIR, { recursive: true });
 
     // Create test results directory for this run
     fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
 
     // Create necessary subdirectories
-    const hankweaveDir = path.join(EXECUTION_DIR, ".hankweave");
+    const hankweaveDir = path.join(executionDir, ".hankweave");
     const logsDir = path.join(hankweaveDir, "logs");
     const checkpointsDir = path.join(hankweaveDir, "checkpoints");
-    const dataDir = path.join(EXECUTION_DIR, "read_only_data_source");
+    const dataDir = path.join(executionDir, "read_only_data_source");
     fs.mkdirSync(logsDir, { recursive: true });
     fs.mkdirSync(checkpointsDir, { recursive: true });
     fs.mkdirSync(dataDir, { recursive: true });
@@ -120,10 +115,10 @@ describe("HankweaveRuntime", () => {
     server = new HankweaveRuntime({
       autostart: false,
       port: serverPort,
-      cwd: EXECUTION_DIR,
-      executionPath: EXECUTION_DIR,
-      agentRootPath: EXECUTION_DIR, // Use same path for tests
-      rigArchivePath: path.join(EXECUTION_DIR, "rigArchive"),
+      cwd: executionDir,
+      executionPath: executionDir,
+      agentRootPath: executionDir, // Use same path for tests
+      rigArchivePath: path.join(executionDir, "rigArchive"),
       dataPathInExecutionDir: dataDir,
       readOnlySourceDataPath: dataDir,
       dataHash: "test-hash-" + TEST_TIMESTAMP,
@@ -133,7 +128,7 @@ describe("HankweaveRuntime", () => {
       codons: codons,
       socketLogFile: path.join(logsDir, "socket.jsonl"),
       serverLogFile: path.join(logsDir, "server.log"),
-      outputDirectory: EXECUTION_DIR,
+      outputDirectory: executionDir,
       sentinel: {
         enablePersistence: true,
         healthCheckGracePeriodMs: 0,
@@ -148,9 +143,6 @@ describe("HankweaveRuntime", () => {
       lockFile: path.join(hankweaveDir, "runtime.lock"),
     });
     await server.start();
-
-    // Wait a bit for server to fully initialize
-    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   afterEach(async () => {
@@ -171,8 +163,6 @@ describe("HankweaveRuntime", () => {
         // Pass exitProcess: false to prevent the server from calling process.exit()
         // This allows the test runner to continue running subsequent tests
         await server.shutdown("test cleanup", false);
-        // Wait a bit for server to fully shut down
-        await new Promise((resolve) => setTimeout(resolve, 500));
       } catch (error) {
         // Server might already be shut down from a test
         console.log(

@@ -317,11 +317,14 @@ export interface LaunchedServer {
    */
   stop: (timeoutMs?: number) => Promise<void>;
   /**
-   * Forcefully kills the server with SIGKILL.
+   * Kills the server with the given signal (default: SIGKILL).
+   * SIGKILL terminates immediately with no cleanup; SIGTERM/SIGINT go through
+   * graceful shutdown and allow exit handlers to run.
    * @param timeoutMs - Timeout in milliseconds (default: 5000)
+   * @param signal - Signal to send (default: "SIGKILL")
    * @throws {Error} If server doesn't exit within timeout
    */
-  kill: (timeoutMs?: number) => Promise<void>;
+  kill: (timeoutMs?: number, signal?: NodeJS.Signals) => Promise<void>;
   /**
    * Checks if the server lock file exists.
    * @returns True if the lock file exists, false otherwise
@@ -928,13 +931,13 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     }
   }
 
-  async function kill(timeoutMs = 5_000): Promise<void> {
+  async function kill(timeoutMs = 5_000, signal: NodeJS.Signals = "SIGKILL"): Promise<void> {
     if (child.exitCode !== null || child.signalCode !== null) {
       await disconnect();
       return;
     }
 
-    const sent = child.kill("SIGKILL");
+    const sent = child.kill(signal);
     if (!sent) {
       await disconnect();
       return;

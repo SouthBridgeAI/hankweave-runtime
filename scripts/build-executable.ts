@@ -23,43 +23,29 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  getClaudeBinaryName,
+  getClaudePackageDir,
+} from "../server/claude-runtime-extractor.js";
 import { getCodexPlatform } from "../server/codex-runtime-extractor.js";
 
 // Configuration
-const SDK_PATH = "node_modules/@anthropic-ai/claude-agent-sdk";
 const ENTRY_POINT = "server/index.ts";
 const OUTPUT_DIR = "releases";
 
-// Get the platform-specific ripgrep directory
-function getRipgrepPlatform(target?: string): string {
-  if (target) {
-    // Parse target like "linux-x64", "darwin-arm64"
-    const [platform, arch] = target.split("-");
-    if (platform === "darwin") {
-      return arch === "arm64" ? "arm64-darwin" : "x64-darwin";
-    }
-    if (platform === "linux") {
-      return arch === "arm64" ? "arm64-linux" : "x64-linux";
-    }
-    if (platform === "windows") {
-      return "x64-win32";
-    }
-  }
-
-  // Default to current platform
-  const arch = os.arch();
-  const platform = os.platform();
-
-  if (platform === "darwin") {
-    return arch === "arm64" ? "arm64-darwin" : "x64-darwin";
-  }
-  if (platform === "linux") {
-    return arch === "arm64" ? "arm64-linux" : "x64-linux";
-  }
-  if (platform === "win32") {
-    return "x64-win32";
-  }
-  throw new Error(`Unsupported platform: ${platform}-${arch}`);
+/**
+ * Resolve the on-disk directory of the Claude Agent SDK native binary package for a target.
+ *
+ * As of SDK 0.3.x the runtime ships as a per-platform native binary in
+ * `@anthropic-ai/claude-agent-sdk-<platform>-<arch>`. On Linux the installed package may be
+ * the glibc (`-x64`) or musl (`-x64-musl`) variant, so fall back to `-musl` when needed.
+ */
+function resolveClaudePackageDir(target?: string): string {
+  const base = getClaudePackageDir(target);
+  if (fs.existsSync(base)) return base;
+  const muslVariant = `${base}-musl`;
+  if (fs.existsSync(muslVariant)) return muslVariant;
+  return base; // primary path; the caller's existence check reports a clear error
 }
 
 // Get the platform-specific codex package directory name
@@ -121,12 +107,6 @@ async function main() {
       : outputBase;
   const outputFile = path.join(OUTPUT_DIR, outputFileName);
 
-  // Prepare .bundle paths for cleanup in finally block.
-  // Bun's --embed flag treats .js files specially (rebundles them instead of
-  // embedding raw bytes), so we copy them to .bundle before embedding.
-  const cliSource = path.join(SDK_PATH, "cli.js");
-  const cliBundle = path.join(SDK_PATH, "cli.bundle");
-
   // Each shim gets a unique bundle filename because Bun deduplicates embedded
   // files by basename — four "index.bundle" entries would collapse to one.
   const SHIM_NAMES = ["gemini", "codex", "opencode", "pi"] as const;
@@ -151,10 +131,17 @@ async function main() {
     console.log(`   Target: ${buildTarget}`);
     console.log(`   Date: ${buildDate}\n`);
 
-    // Verify SDKs exist
-    if (!fs.existsSync(SDK_PATH)) {
-      console.error(`❌ Claude Agent SDK not found at ${SDK_PATH}`);
-      console.error("   Run 'bun install' first.");
+    // Verify SDKs exist.
+    // Claude Agent SDK 0.3.x ships the runtime as a native per-platform binary package.
+    const claudePackageDir = resolveClaudePackageDir(target);
+    const claudeBinaryName = getClaudeBinaryName(target);
+    const claudeBinaryPath = path.join(claudePackageDir, claudeBinaryName);
+    if (!fs.existsSync(claudeBinaryPath)) {
+      console.error(`❌ Claude Agent SDK native binary not found at ${claudeBinaryPath}`);
+      console.error(
+        "   Run 'bun install' first. For cross-compilation, force-install the target's platform package, e.g.\n" +
+          "     npm install @anthropic-ai/claude-agent-sdk-linux-x64 --force",
+      );
       process.exit(1);
     }
 
@@ -169,19 +156,17 @@ async function main() {
       process.exit(1);
     }
 
-    // Determine ripgrep and codex platforms
-    const ripgrepPlatform = getRipgrepPlatform(target);
+    // Determine codex platform
     const codexPlatform = getCodexPlatform(target);
     console.log(`📦 Target: ${target || "current platform"}`);
-    console.log(`📦 Ripgrep platform: ${ripgrepPlatform}`);
+    console.log(`📦 Claude binary: ${claudeBinaryPath}`);
     console.log(`📦 Codex platform: ${codexPlatform}`);
 
-    // Copy .js files to .bundle to avoid Bun treating them as entry points.
+    // Copy shim .js files to .bundle to avoid Bun treating them as entry points.
     // Bun has special handling for .js files that prevents them from being embedded properly —
     // it rebundles them instead of preserving the raw bytes, which truncates large bundles.
-    console.log(`\n📋 Preparing .js files for embedding as .bundle...`);
-    fs.copyFileSync(cliSource, cliBundle);
-    console.log(`   ✓ ${cliSource} → ${cliBundle}`);
+    // (The Claude and Codex native binaries are raw bytes, so they're embedded directly.)
+    console.log(`\n📋 Preparing shim .js files for embedding as .bundle...`);
     for (const { source, bundle } of shimBundles) {
       fs.copyFileSync(source, bundle);
       console.log(`   ✓ ${source} → ${bundle}`);
@@ -190,28 +175,21 @@ async function main() {
     // Build the list of files to embed (use relative paths - they work better with embedding)
     const codexBinaryName = isWindows ? "codex.exe" : "codex";
 
+    // codex-sdk v0.135.0+ ships the binary under <triple>/bin/; older versions used <triple>/codex/.
+    // Mirror codex-runtime-extractor's resolveCodexBinaryInTripleDir() ordering.
+    const codexTripleDir = path.join(codexPackageDir, "vendor", codexPlatform);
+    const codexBinaryPath =
+      [
+        path.join(codexTripleDir, "bin", codexBinaryName), // v0.135.0+
+        path.join(codexTripleDir, "codex", codexBinaryName), // legacy
+      ].find((p) => fs.existsSync(p)) ?? path.join(codexTripleDir, "bin", codexBinaryName);
+
     const filesToEmbed = [
-      // Claude Agent SDK files
-      // Note: We embed cli.bundle instead of cli.js to avoid Bun's special .js handling
-      cliBundle,
-      path.join(SDK_PATH, "resvg.wasm"),
-      path.join(SDK_PATH, "tree-sitter.wasm"),
-      path.join(SDK_PATH, "tree-sitter-bash.wasm"),
-      path.join(
-        SDK_PATH,
-        "vendor/ripgrep",
-        ripgrepPlatform,
-        ripgrepPlatform === "x64-win32" ? "rg.exe" : "rg",
-      ),
-      path.join(SDK_PATH, "vendor/ripgrep", ripgrepPlatform, "ripgrep.node"),
+      // Claude Agent SDK native runtime binary (0.3.x: one binary per platform, self-contained —
+      // ripgrep/wasm are baked into it, so no separate vendor files are needed).
+      claudeBinaryPath,
       // Codex SDK binary (platform-specific, v0.101.0+ uses separate @openai/codex-<platform>-<arch> packages)
-      path.join(
-        codexPackageDir,
-        "vendor",
-        codexPlatform,
-        "codex",
-        codexBinaryName,
-      ),
+      codexBinaryPath,
       // Shim files — embedded as .bundle to avoid Bun's .js rebundling
       ...shimBundles.map(({ bundle }) => bundle),
     ];
@@ -305,8 +283,8 @@ async function main() {
     console.error(`\n❌ Build failed: ${(error as Error).message}`);
     process.exit(1);
   } finally {
-    // Clean up temporary .bundle files
-    const bundleFiles = [cliBundle, ...shimBundles.map(({ bundle }) => bundle)];
+    // Clean up temporary shim .bundle files
+    const bundleFiles = shimBundles.map(({ bundle }) => bundle);
     for (const bundleFile of bundleFiles) {
       if (fs.existsSync(bundleFile)) {
         fs.unlinkSync(bundleFile);

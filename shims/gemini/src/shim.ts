@@ -696,7 +696,9 @@ export async function runSelfTest(): Promise<number> {
     {
       name: "agent_found",
       passed: Boolean(geminiPath),
-      message: geminiPath ? `Found Gemini CLI at ${geminiPath}` : "Gemini CLI not found in PATH",
+      message: geminiPath
+        ? `Found Gemini CLI at ${geminiPath}`
+        : `Gemini CLI ('gemini') not found on PATH (searched via ${process.platform === "win32" ? "where" : "which"})`,
     },
     {
       name: "auth_configured",

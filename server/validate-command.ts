@@ -5,7 +5,7 @@ import type { ValidationResult } from "./config.js";
 import { DEFAULT_CONFIG, ensureSchemaUrl, validateHank } from "./config.js";
 import { hashDataSource } from "./data-hasher.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
-import { Logger } from "./utils.js";
+import { formatEnvVarForDisplay, Logger } from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
 import { renderBudgetResolutionTable } from "./validate-budget.js";
 
@@ -162,7 +162,7 @@ function displayValidationResult(options: ValidationDisplayOptions): void {
     if (hasSystemVars) {
       console.log(`\n  From System (HANKWEAVE_ prefixed):`);
       for (const [key, value] of Object.entries(options.result.environmentVariables.fromSystem)) {
-        console.log(`    - ${key}: ${value}`);
+        console.log(`    - ${key}: ${formatEnvVarForDisplay(key, value)}`);
       }
     }
 
@@ -171,7 +171,7 @@ function displayValidationResult(options: ValidationDisplayOptions): void {
       for (const codonEnv of options.result.environmentVariables.fromCodons) {
         console.log(`    Codon "${codonEnv.codonName}" (${codonEnv.codonId}):`);
         for (const [key, value] of Object.entries(codonEnv.variables)) {
-          console.log(`      - ${key}: ${value}`);
+          console.log(`      - ${key}: ${formatEnvVarForDisplay(key, value)}`);
         }
       }
     }

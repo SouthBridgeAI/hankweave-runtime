@@ -4,12 +4,13 @@ This shim bundles third-party code into `dist/index.js` / `index.js`.
 
 ## Primary SDK dependency
 
-### @mariozechner/pi-coding-agent
+### @earendil-works/pi-coding-agent
 
-- Version: 0.57.1
+- Version: 0.77.0
 - License: MIT
 - Copyright: Mario Zechner
-- Source: https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent
+- Source: https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent
+- Previously published as `@mariozechner/pi-coding-agent` (renamed at upstream v0.74.0).
 
 The full license text is available in the npm package metadata and in the upstream source repository.
 

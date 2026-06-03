@@ -85,6 +85,33 @@ describe("ShimProcessManager", () => {
     await expect(manager.closeLogStream()).resolves.toBeUndefined();
   });
 
+  test("runSelfTest surfaces exit code and stderr when stdout is not parseable JSON", async () => {
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+
+    // A "shim" that crashes the way a module-load failure would: non-JSON on
+    // stdout, a diagnostic on stderr, non-zero exit. (runSelfTest appends
+    // `--self-test`, which this stub ignores.)
+    const scriptPath = path.join(tempDir, "crash-shim.js");
+    fs.writeFileSync(
+      scriptPath,
+      "process.stdout.write('boom not json'); process.stderr.write('ModuleLoadError: markAsUncloneable'); process.exit(3);",
+    );
+
+    await expect(manager.runSelfTest(["node", scriptPath])).rejects.toThrow(
+      /exit code 3[\s\S]*markAsUncloneable/,
+    );
+  });
+
+  test("runSelfTest reports empty output distinctly", async () => {
+    const manager = new ShimProcessManager(tempDir, tempDir, logger, mockLogParser);
+    const scriptPath = path.join(tempDir, "silent-crash-shim.js");
+    fs.writeFileSync(scriptPath, "process.stderr.write('startup failed'); process.exit(1);");
+
+    await expect(manager.runSelfTest(["node", scriptPath])).rejects.toThrow(
+      /no parseable output[\s\S]*startup failed/,
+    );
+  });
+
   test("kill returns when no process is running", async () => {
     const manager = new ShimProcessManager("/project", "/project", logger, mockLogParser);
     // Should not throw when no process is running
@@ -237,7 +264,7 @@ describe("ShimProcessManager extension behavior", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test Codon",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       promptText: "Test prompt",
       continuationMode: "fresh", // KEY: fresh mode
       description: "Test",
@@ -290,7 +317,7 @@ describe("ShimProcessManager extension behavior", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test Codon",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       promptText: "Test prompt",
       continuationMode: "fresh",
       description: "Test",
@@ -383,7 +410,7 @@ describe("ShimProcessManager HANKWEAVE_* env passthrough", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       continuationMode: "fresh",
       promptText: "Test",
       description: "Test",
@@ -409,7 +436,7 @@ describe("ShimProcessManager HANKWEAVE_* env passthrough", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       continuationMode: "fresh",
       promptText: "Test",
       description: "Test",
@@ -435,7 +462,7 @@ describe("ShimProcessManager HANKWEAVE_* env passthrough", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       continuationMode: "fresh",
       promptText: "Test",
       description: "Test",
@@ -461,7 +488,7 @@ describe("ShimProcessManager HANKWEAVE_* env passthrough", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       continuationMode: "fresh",
       promptText: "Test",
       description: "Test",
@@ -529,7 +556,7 @@ describe("ShimProcessManager log timestamps", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       continuationMode: "fresh",
       promptText: "Test",
       description: "Test",
@@ -594,7 +621,7 @@ describe("ShimProcessManager log timestamps", () => {
     const codon = createTestCodon({
       id: "test-codon",
       name: "Test",
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash",
       continuationMode: "fresh",
       promptText: "Test",
       description: "Test",

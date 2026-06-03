@@ -32,7 +32,7 @@
     "self-test": "node index.js --self-test"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.57.1",
+    "@earendil-works/pi-coding-agent": "^0.77.0",
     "@shims/common": "file:./common"
   },
   "devDependencies": {
@@ -47,7 +47,7 @@
     "hankweave"
   ],
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=22.19.0",
     "bun": ">=1.1.0"
   }
 }

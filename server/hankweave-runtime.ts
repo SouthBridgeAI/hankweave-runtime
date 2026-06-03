@@ -45,6 +45,7 @@ import { SentinelConfigLoader } from "./sentinels/sentinel-config-loader.js";
 import { SentinelManager } from "./sentinels/sentinel-manager.js";
 import { StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
+import { isTraceEnabled, registerTraceUpload } from "./trace-watcher.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { CodonId, EventId, RunId, SessionId } from "./types/branded-types.js";
 import type {
@@ -166,6 +167,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private serverStartTime: Date;
   private isShuttingDown = false;
   private isSkippingCodon = false;
+  private uploadTrace?: () => void;
 
   /**
    * Tracks whether the initial autostart has been triggered.
@@ -801,6 +803,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
       this.shutdown("unhandledRejection");
     });
+
+    // Register post-run trace upload if any platform is configured.
+    // Stores the upload function and calls it explicitly in shutdown() so the
+    // upload runs before process.exit() rather than blocking in an exit handler.
+    if (isTraceEnabled()) {
+      this.uploadTrace = registerTraceUpload(this.config.executionPath, this.logger);
+    }
 
     // Return actual port for callers
     return this.config.port;
@@ -6589,6 +6598,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Wait for any pending state transitions
     await this.stateManager.waitForPendingTransitions();
 
+    // Ensure file-backed event journal writes are fully drained before shutdown
+    // returns. Tests may replace or delete the execution directory immediately
+    // after this method resolves.
+    await this.eventJournalAppendQueue;
+
     // Send telemetry and flush Sentry before closing connections
     if (this.telemetryCollector) {
       try {
@@ -6696,6 +6710,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
       this.logger.log(`Shutdown: ${reason} (exit code: ${finalExitCode})`);
 
+      // Upload trace before exiting so the upload completes synchronously
+      // and doesn't block in an exit handler. The uploadDone guard in
+      // uploadTrace() prevents double-upload if called multiple times.
+      this.uploadTrace?.();
+
       // Small delay to ensure log is written before process exits
       setTimeout(() => {
         process.exit(finalExitCode);
@@ -6760,6 +6779,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     this.logger.log("Force shutdown complete");
+
+    // Best-effort trace upload on force shutdown (e.g. second Ctrl+C).
+    // The uploadDone guard prevents double-upload if shutdown() already ran it.
+    this.uploadTrace?.();
 
     if (exitProcess && reason !== "running integration test") {
       // Force exit immediately

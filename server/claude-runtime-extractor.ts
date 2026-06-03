@@ -1,24 +1,23 @@
 /**
  * Claude Runtime Extractor
  *
- * This module handles the extraction of bundled Claude Agent SDK files
- * at runtime for standalone executables. When compiled with Bun, the CLI
- * files are embedded in the executable and need to be extracted to disk
- * before they can be spawned as subprocesses.
+ * Handles locating/extracting the Claude Agent SDK's native CLI binary.
  *
- * The extraction is done to a versioned directory to avoid re-extraction
- * on every run and to handle SDK updates cleanly.
+ * As of @anthropic-ai/claude-agent-sdk 0.3.x, the agent runtime ships as a native,
+ * per-platform compiled binary delivered through optionalDependencies
+ * (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>/claude[.exe]`) — there is no longer a
+ * bundled `cli.js` + wasm + ripgrep vendor tree.
  *
- * Build Process:
- * The build script (scripts/build-executable.ts) embeds the SDK files using:
- *   bun build --compile --embed node_modules/@anthropic-ai/claude-agent-sdk/cli.js ...
+ * Execution contexts:
+ * 1. Source / npm / npx mode: the SDK resolves the native binary itself via the optional
+ *    dependency, so no extraction is needed (ensureSdkAvailable returns null).
+ * 2. Compiled executable (`bun build --compile`): the native binary is embedded at build
+ *    time (scripts/build-executable.ts) and extracted to disk here on first run, because the
+ *    SDK's own `require.resolve` cannot reach into Bun's `$bunfs` virtual filesystem.
  *
- * At runtime, these embedded files are accessible via Bun.file() using their
- * original paths.
+ * Extraction targets a versioned directory to avoid re-extraction and to handle SDK updates.
  */
 
-import { execSync } from "node:child_process";
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -28,160 +27,112 @@ import {
   getComponentExtractionDir,
 } from "./runtime-extractor-base.js";
 
-// SDK version for directory naming
-export const CLAUDE_SDK_VERSION = "0.1.70";
+// SDK version — also used for the extraction cache directory name. Keep in sync with the
+// @anthropic-ai/claude-agent-sdk version pinned in package.json.
+export const CLAUDE_SDK_VERSION = "0.3.156";
 
-// Path prefix for embedded SDK files (must match paths used during build)
-const EMBEDDED_SDK_PATH = "node_modules/@anthropic-ai/claude-agent-sdk";
+/**
+ * Resolve the platform/arch suffix used by the SDK's native binary packages,
+ * e.g. "darwin-arm64", "linux-x64", "win32-x64".
+ *
+ * @param target - Optional build target ("linux-x64", "darwin-arm64", "windows-x64", …).
+ *                 When omitted, uses the current platform.
+ */
+export function getClaudePlatformSuffix(target?: string): string {
+  let platform: string;
+  let arch: string;
 
-// Determine platform for ripgrep binaries
-function getPlatformKey(): string {
-  const arch = os.arch();
-  const platform = os.platform();
+  if (target) {
+    [platform, arch] = target.split("-");
+    // Build targets use "windows"; npm package names use "win32".
+    if (platform === "windows") platform = "win32";
+  } else {
+    platform = os.platform() === "win32" ? "win32" : os.platform();
+    arch = os.arch() === "arm64" ? "arm64" : "x64";
+  }
 
-  if (platform === "darwin") {
-    return arch === "arm64" ? "arm64-darwin" : "x64-darwin";
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
+    throw new Error(`Unsupported platform for Claude Agent SDK: ${platform}-${arch}`);
   }
-  if (platform === "linux") {
-    return arch === "arm64" ? "arm64-linux" : "x64-linux";
-  }
-  if (platform === "win32") {
-    return "x64-win32";
-  }
-  throw new Error(`Unsupported platform: ${platform}-${arch}`);
+  return `${platform}-${arch}`;
 }
 
 /**
- * Get the extraction directory path.
- * Uses ~/.hankweave/claude-sdk/<version>/ by default.
+ * The native CLI binary filename for the given target (or current platform).
  */
-export function getExtractionDir(): string {
+export function getClaudeBinaryName(target?: string): string {
+  const isWindows = target ? target.startsWith("windows") : os.platform() === "win32";
+  return isWindows ? "claude.exe" : "claude";
+}
+
+/**
+ * The node_modules directory of the platform-specific binary package, e.g.
+ * `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64`.
+ *
+ * On Linux the package may be the glibc (`-x64`) or musl (`-x64-musl`) variant; callers that
+ * need the on-disk path (the build script) should fall back to the `-musl` suffix when the
+ * primary directory is absent.
+ */
+export function getClaudePackageDir(target?: string): string {
+  return `node_modules/@anthropic-ai/claude-agent-sdk-${getClaudePlatformSuffix(target)}`;
+}
+
+/** Path prefix for the embedded binary (must match the path embedded during build). */
+function getEmbeddedClaudeBasePath(): string {
+  return getClaudePackageDir();
+}
+
+/**
+ * Get the extraction directory (e.g. ~/.hankweave/claude-sdk/<version>/).
+ */
+export function getClaudeExtractionDir(): string {
   return getComponentExtractionDir("claude-sdk", CLAUDE_SDK_VERSION);
 }
 
 /**
- * Get the path to the extracted cli.js file.
+ * Path to the extracted native CLI binary. Named `getExtractedCliPath` for backward
+ * compatibility with ClaudeAgentSDKManager.ensureSdkAvailable().
  */
 export function getExtractedCliPath(): string {
-  return path.join(getExtractionDir(), "cli.js");
+  return path.join(getClaudeExtractionDir(), getClaudeBinaryName());
 }
 
 /**
- * Check if embedded files are available (async check).
- * This actually tries to access an embedded file to verify.
- */
-export async function hasEmbeddedFiles(): Promise<boolean> {
-  try {
-    const testFile = Bun.file(`${EMBEDDED_SDK_PATH}/cli.js`);
-    return await testFile.exists();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if extraction is needed.
- * Returns true if the files don't exist or are outdated.
+ * Whether the embedded binary still needs to be extracted (missing or outdated cache).
  */
 export function needsExtraction(): boolean {
-  const extractionDir = getExtractionDir();
-  return baseNeedsExtraction(extractionDir, CLAUDE_SDK_VERSION, ".extraction-complete", ["cli.js"]);
+  return baseNeedsExtraction(getClaudeExtractionDir(), CLAUDE_SDK_VERSION, ".extraction-complete", [
+    getClaudeBinaryName(),
+  ]);
 }
 
 /**
- * Extract embedded Claude SDK files to disk.
+ * Extract the embedded native CLI binary to disk.
  *
- * This function reads files that were embedded during compilation using Bun's
- * --embed flag, then extracts them to a versioned directory on first run.
+ * Reads the binary embedded at build time via Bun's --embed flag and writes it to the
+ * versioned extraction directory, marking it executable.
  *
- * The embedded files are accessed using their original paths that were
- * specified during build (e.g., "node_modules/@anthropic-ai/claude-agent-sdk/cli.js").
- *
- * Files extracted:
- * - cli.js - The main Claude Code CLI
- * - resvg.wasm - SVG rendering WASM module
- * - tree-sitter.wasm - Syntax parsing WASM module
- * - tree-sitter-bash.wasm - Bash syntax WASM module
- * - vendor/ripgrep/<platform>/ - Platform-specific ripgrep binaries
+ * @returns Path to the extracted binary.
  */
 export async function extractClaudeSdkFiles(): Promise<string> {
-  const platformKey = getPlatformKey();
-  const rgBinaryName = platformKey === "x64-win32" ? "rg.exe" : "rg";
+  const binaryName = getClaudeBinaryName();
 
-  // Build file extraction configuration
-  // Note: WASM files are optional - they're for syntax highlighting and SVG rendering
-  // Note: cli.js is embedded as cli.bundle to avoid Bun's special .js handling
   const filesToExtract: FileToExtract[] = [
-    { embeddedPath: "cli.bundle", outputPath: "cli.js", required: true },
-    { embeddedPath: "resvg.wasm", outputPath: "resvg.wasm", required: false },
     {
-      embeddedPath: "tree-sitter.wasm",
-      outputPath: "tree-sitter.wasm",
-      required: false,
-    },
-    {
-      embeddedPath: "tree-sitter-bash.wasm",
-      outputPath: "tree-sitter-bash.wasm",
-      required: false,
-    },
-    {
-      embeddedPath: `vendor/ripgrep/${platformKey}/${rgBinaryName}`,
-      outputPath: `vendor/ripgrep/${platformKey}/${rgBinaryName}`,
-      required: false,
+      embeddedPath: binaryName,
+      outputPath: binaryName,
+      required: true,
       makeExecutable: true,
-    },
-    {
-      embeddedPath: `vendor/ripgrep/${platformKey}/ripgrep.node`,
-      outputPath: `vendor/ripgrep/${platformKey}/ripgrep.node`,
-      required: false,
     },
   ];
 
-  // Use base extraction engine
   await extractFiles({
     componentName: "claude-sdk",
     version: CLAUDE_SDK_VERSION,
-    embeddedBasePath: EMBEDDED_SDK_PATH,
+    embeddedBasePath: getEmbeddedClaudeBasePath(),
     filesToExtract,
     markerFileName: ".extraction-complete",
   });
 
   return getExtractedCliPath();
-}
-
-/**
- * Ensure Claude SDK files are available, extracting if necessary.
- *
- * @deprecated Use ClaudeAgentSDKManager.ensureSdkAvailable() instead.
- * This function is kept for backward compatibility.
- *
- * @returns SDK info object with path, version, and cached status
- * @throws Error if extraction fails or extracted file doesn't exist
- */
-export async function ensureClaudeSdkAvailable(): Promise<{
-  path: string | null;
-  version: string;
-  cached: boolean;
-}> {
-  // Import to avoid circular dependency
-  const { ClaudeAgentSDKManager } = await import("./claude-agent-sdk-manager.js");
-  return ClaudeAgentSDKManager.ensureSdkAvailable();
-}
-
-/**
- * Validate the extracted cli.js works by running a simple command.
- */
-export async function validateExtractedCli(cliPath: string): Promise<boolean> {
-  try {
-    // Try to run cli.js --version or similar safe command
-    execSync(`node "${cliPath}" --version`, {
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return true;
-  } catch {
-    // The CLI might not support --version, but if it ran at all, it's valid
-    return fs.existsSync(cliPath);
-  }
 }
