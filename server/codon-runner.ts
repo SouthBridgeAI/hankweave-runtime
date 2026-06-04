@@ -419,7 +419,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     logger: Logger,
     anthropicBaseUrl?: string,
   ): Promise<ShimSelfTestResult> {
-    const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
+    const isClaudeModel = ["anthropic", "amazon-bedrock"].includes(
+      modelInfo.providerId.toLowerCase(),
+    );
 
     // Create temporary log parser (required by managers)
     const tempLogParserPath = path.join(os.tmpdir(), `self-test-parser-${Date.now()}.jsonl`);
@@ -433,8 +435,8 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     try {
       let result: ShimSelfTestResult;
 
-      if (isAnthropicModel) {
-        // Use Claude Agent SDK Manager for Anthropic models
+      if (isClaudeModel) {
+        // Use Claude Agent SDK Manager for Claude models (Anthropic or Bedrock)
         logger.log(
           `Testing Claude Agent SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
           "info",
@@ -449,7 +451,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           anthropicBaseUrl,
         );
 
-        result = await manager.runSelfTest();
+        result = await manager.runSelfTest(modelInfo);
       } else {
         // Use Shim Process Manager for non-Anthropic models
         logger.log(
@@ -580,12 +582,14 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       );
     } else {
       const modelInfo = this.config.codon.model;
-      const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
+      const isClaudeModel = ["anthropic", "amazon-bedrock"].includes(
+        modelInfo.providerId.toLowerCase(),
+      );
 
-      if (isAnthropicModel) {
-        // Use Claude Agent SDK for Anthropic models
+      if (isClaudeModel) {
+        // Use Claude Agent SDK for Claude models (Anthropic or Bedrock)
         this.config.logger.log(
-          `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+          `Using Claude Agent SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
           "info",
         );
 
@@ -599,7 +603,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           this.config.shimIdleTimeout,
         );
       } else {
-        // Use Shim for non-Anthropic models (e.g., Gemini)
+        // Use Shim for non-Claude models (e.g., Gemini, OpenAI)
         this.config.logger.log(
           `Using shim for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
           "info",

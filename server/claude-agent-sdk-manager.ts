@@ -277,6 +277,7 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
   private buildSDKOptions(codon: Codon, previousSessionId: string | null): Options {
     // Model override is already applied in loadCodonSequence(), so just use codon.model
     const modelInfo = codon.model;
+    const isBedrock = modelInfo.providerId.toLowerCase() === "amazon-bedrock";
 
     const options: Options = {
       model: modelInfo.modelId,
@@ -285,6 +286,13 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       abortController: this.abortController,
       settingSources: ["user"],
     };
+
+    // Enable Bedrock mode if using Bedrock model
+    if (isBedrock) {
+      if (!options.env) options.env = {};
+      options.env.CLAUDE_CODE_USE_BEDROCK = "1";
+      this.logger.log("Enabling Bedrock mode for Claude SDK");
+    }
 
     // Use custom Claude Code executable path if provided
     if (process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE) {
@@ -368,6 +376,29 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
     if (this.anthropicBaseUrl) {
       options.env.ANTHROPIC_BASE_URL = this.anthropicBaseUrl;
       this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseUrl}`);
+    }
+
+    // Pass through AWS credentials for Bedrock
+    if (isBedrock) {
+      const awsKeys = [
+        "AWS_PROFILE",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+      ];
+
+      for (const key of awsKeys) {
+        if (process.env[key]) {
+          options.env[key] = process.env[key];
+          this.logger.log(`Passing through AWS credential: ${key}`);
+        }
+      }
     }
 
     // Add codon-specific environment variables from config
@@ -708,9 +739,10 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
    * Run self-test to verify Claude Agent SDK environment setup.
    * Checks for API authentication (API key or OAuth token) and SDK availability.
    *
+   * @param modelInfo - Optional model info to check for Bedrock-specific requirements
    * @returns Promise resolving to self-test results
    */
-  async runSelfTest(): Promise<ShimSelfTestResult> {
+  async runSelfTest(modelInfo?: import("./llm/models-dev-schema.js").ModelInfo): Promise<ShimSelfTestResult> {
     this.logger.log("Running Claude Agent SDK self-test...");
 
     const checks: ShimSelfTestResult["checks"] = [];
@@ -805,6 +837,54 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
         name: "custom_base_url",
         passed: true,
         message: `Using custom Anthropic base URL: ${this.anthropicBaseUrl}`,
+      });
+    }
+
+    // Check 5: Bedrock authentication (if Bedrock model)
+    if (modelInfo?.providerId.toLowerCase() === "amazon-bedrock") {
+      const hasAwsProfile = !!process.env.AWS_PROFILE;
+      const hasAwsKeys = !!(
+        process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+      );
+      const hasAwsBearerToken = !!process.env.AWS_BEARER_TOKEN_BEDROCK;
+      const hasAwsContainer = !!(
+        process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ||
+        process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI
+      );
+      const hasAwsWebIdentity = !!process.env.AWS_WEB_IDENTITY_TOKEN_FILE;
+
+      const hasAwsAuth =
+        hasAwsProfile || hasAwsKeys || hasAwsBearerToken || hasAwsContainer || hasAwsWebIdentity;
+
+      if (!hasAwsAuth) {
+        checks.push({
+          name: "aws_credentials",
+          passed: false,
+          message: "No AWS credentials found (AWS_PROFILE, AWS_ACCESS_KEY_ID, etc.)",
+        });
+      } else {
+        const authMethods = [];
+        if (hasAwsProfile) authMethods.push(`profile: ${process.env.AWS_PROFILE}`);
+        if (hasAwsKeys) authMethods.push("access keys");
+        if (hasAwsBearerToken) authMethods.push("bearer token");
+        if (hasAwsContainer) authMethods.push("container credentials");
+        if (hasAwsWebIdentity) authMethods.push("web identity");
+
+        checks.push({
+          name: "aws_credentials",
+          passed: true,
+          message: `AWS credentials detected (${authMethods.join(", ")})`,
+        });
+      }
+
+      // Check AWS region
+      const hasRegion = !!(process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION);
+      checks.push({
+        name: "aws_region",
+        passed: hasRegion,
+        message: hasRegion
+          ? `Region: ${process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION}`
+          : "No AWS_REGION or AWS_DEFAULT_REGION set",
       });
     }
 
