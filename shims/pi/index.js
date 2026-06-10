@@ -280,7 +280,7 @@ var require_resolveCommand = __commonJS((exports, module) => {
   var which = require_which();
   var getPathKey = require_path_key();
   function resolveCommandAttempt(parsed, withoutPathExt) {
-    const env = parsed.options.env || process.env;
+    const env2 = parsed.options.env || process.env;
     const cwd = process.cwd();
     const hasCustomCwd = parsed.options.cwd != null;
     const shouldSwitchCwd = hasCustomCwd && process.chdir !== undefined && !process.chdir.disabled;
@@ -292,7 +292,7 @@ var require_resolveCommand = __commonJS((exports, module) => {
     let resolved;
     try {
       resolved = which.sync(parsed.command, {
-        path: env[getPathKey({ env })],
+        path: env2[getPathKey({ env: env2 })],
         pathExt: withoutPathExt ? path.delimiter : undefined
       });
     } catch (e) {} finally {
@@ -501,136 +501,6 @@ var require_cross_spawn = __commonJS((exports, module) => {
   module.exports.sync = spawnSync;
   module.exports._parse = parse;
   module.exports._enoent = enoent;
-});
-
-// node_modules/@earendil-works/pi-ai/dist/env-api-keys.js
-function getProcEnv(key) {
-  if (!process.versions?.bun)
-    return;
-  if (typeof process === "undefined")
-    return;
-  if (Object.keys(process.env).length > 0)
-    return;
-  if (_procEnvCache === null) {
-    _procEnvCache = new Map;
-    try {
-      const { readFileSync: readFileSync2 } = __require("node:fs");
-      const data = readFileSync2("/proc/self/environ", "utf-8");
-      for (const entry of data.split("\x00")) {
-        const idx = entry.indexOf("=");
-        if (idx > 0) {
-          _procEnvCache.set(entry.slice(0, idx), entry.slice(idx + 1));
-        }
-      }
-    } catch {}
-  }
-  return _procEnvCache.get(key);
-}
-function hasVertexAdcCredentials() {
-  if (cachedVertexAdcCredentialsExists === null) {
-    if (!_existsSync || !_homedir || !_join) {
-      const isNode = typeof process !== "undefined" && (process.versions?.node || process.versions?.bun);
-      if (!isNode) {
-        cachedVertexAdcCredentialsExists = false;
-      }
-      return false;
-    }
-    const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || getProcEnv("GOOGLE_APPLICATION_CREDENTIALS");
-    if (gacPath) {
-      cachedVertexAdcCredentialsExists = _existsSync(gacPath);
-    } else {
-      cachedVertexAdcCredentialsExists = _existsSync(_join(_homedir(), ".config", "gcloud", "application_default_credentials.json"));
-    }
-  }
-  return cachedVertexAdcCredentialsExists;
-}
-function getApiKeyEnvVars(provider) {
-  if (provider === "github-copilot") {
-    return ["COPILOT_GITHUB_TOKEN"];
-  }
-  if (provider === "anthropic") {
-    return ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
-  }
-  const envMap = {
-    openai: "OPENAI_API_KEY",
-    "azure-openai-responses": "AZURE_OPENAI_API_KEY",
-    deepseek: "DEEPSEEK_API_KEY",
-    google: "GEMINI_API_KEY",
-    "google-vertex": "GOOGLE_CLOUD_API_KEY",
-    groq: "GROQ_API_KEY",
-    cerebras: "CEREBRAS_API_KEY",
-    xai: "XAI_API_KEY",
-    openrouter: "OPENROUTER_API_KEY",
-    "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
-    zai: "ZAI_API_KEY",
-    mistral: "MISTRAL_API_KEY",
-    minimax: "MINIMAX_API_KEY",
-    "minimax-cn": "MINIMAX_CN_API_KEY",
-    moonshotai: "MOONSHOT_API_KEY",
-    "moonshotai-cn": "MOONSHOT_API_KEY",
-    huggingface: "HF_TOKEN",
-    fireworks: "FIREWORKS_API_KEY",
-    together: "TOGETHER_API_KEY",
-    opencode: "OPENCODE_API_KEY",
-    "opencode-go": "OPENCODE_API_KEY",
-    "kimi-coding": "KIMI_API_KEY",
-    "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
-    "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
-    xiaomi: "XIAOMI_API_KEY",
-    "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
-    "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
-    "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY"
-  };
-  const envVar = envMap[provider];
-  return envVar ? [envVar] : undefined;
-}
-function findEnvKeys(provider) {
-  const envVars = getApiKeyEnvVars(provider);
-  if (!envVars)
-    return;
-  const found = envVars.filter((envVar) => !!process.env[envVar] || !!getProcEnv(envVar));
-  return found.length > 0 ? found : undefined;
-}
-function getEnvApiKey(provider) {
-  const envKeys = findEnvKeys(provider);
-  if (envKeys?.[0]) {
-    return process.env[envKeys[0]] || getProcEnv(envKeys[0]);
-  }
-  if (provider === "google-vertex") {
-    const hasCredentials = hasVertexAdcCredentials();
-    const hasProject = !!(process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || getProcEnv("GOOGLE_CLOUD_PROJECT") || getProcEnv("GCLOUD_PROJECT"));
-    const hasLocation = !!(process.env.GOOGLE_CLOUD_LOCATION || getProcEnv("GOOGLE_CLOUD_LOCATION"));
-    if (hasCredentials && hasProject && hasLocation) {
-      return "<authenticated>";
-    }
-  }
-  if (provider === "amazon-bedrock") {
-    if (process.env.AWS_PROFILE || process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY || process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI || process.env.AWS_WEB_IDENTITY_TOKEN_FILE || getProcEnv("AWS_PROFILE") || getProcEnv("AWS_ACCESS_KEY_ID") && getProcEnv("AWS_SECRET_ACCESS_KEY") || getProcEnv("AWS_BEARER_TOKEN_BEDROCK") || getProcEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") || getProcEnv("AWS_CONTAINER_CREDENTIALS_FULL_URI") || getProcEnv("AWS_WEB_IDENTITY_TOKEN_FILE")) {
-      return "<authenticated>";
-    }
-  }
-  return;
-}
-var __rewriteRelativeImportExtension = function(path, preserveJsx) {
-  if (typeof path === "string" && /^\.\.?\//.test(path)) {
-    return path.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m, tsx, d, ext, cm) {
-      return tsx ? preserveJsx ? ".jsx" : ".js" : d && (!ext || !cm) ? m : d + ext + "." + cm.toLowerCase() + "js";
-    });
-  }
-  return path;
-}, _existsSync = null, _homedir = null, _join = null, dynamicImport = (specifier) => import(__rewriteRelativeImportExtension(specifier)), NODE_FS_SPECIFIER = "node:fs", NODE_OS_SPECIFIER = "node:os", NODE_PATH_SPECIFIER = "node:path", _procEnvCache = null, cachedVertexAdcCredentialsExists = null;
-var init_env_api_keys = __esm(() => {
-  if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
-    dynamicImport(NODE_FS_SPECIFIER).then((m) => {
-      _existsSync = m.existsSync;
-    });
-    dynamicImport(NODE_OS_SPECIFIER).then((m) => {
-      _homedir = m.homedir;
-    });
-    dynamicImport(NODE_PATH_SPECIFIER).then((m) => {
-      _join = m.join;
-    });
-  }
 });
 
 // node_modules/openai/internal/tslib.mjs
@@ -2074,8 +1944,8 @@ function supportsFormData(fetchObject) {
 }
 var checkFileSupport = () => {
   if (typeof File === "undefined") {
-    const { process: process2 } = globalThis;
-    const isOldNode = typeof process2?.versions?.node === "string" && parseInt(process2.versions.node.split(".")) < 20;
+    const { process: process3 } = globalThis;
+    const isOldNode = typeof process3?.versions?.node === "string" && parseInt(process3.versions.node.split(".")) < 20;
     throw new Error("`File` is not defined as a global, which is required for file uploads." + (isOldNode ? " Update to Node 20 LTS or newer, or set `globalThis.File` to `import('node:buffer').File`." : ""));
   }
 }, isAsyncIterable = (value2) => value2 != null && typeof value2 === "object" && typeof value2[Symbol.asyncIterator] === "function", maybeMultipartFormRequestOptions = async (opts, fetch2) => {
@@ -4004,12 +3874,12 @@ var init_base64 = __esm(() => {
 });
 
 // node_modules/openai/internal/utils/env.mjs
-var readEnv = (env) => {
+var readEnv = (env2) => {
   if (typeof globalThis.process !== "undefined") {
-    return globalThis.process.env?.[env]?.trim() ?? undefined;
+    return globalThis.process.env?.[env2]?.trim() ?? undefined;
   }
   if (typeof globalThis.Deno !== "undefined") {
-    return globalThis.Deno.env?.get?.(env)?.trim();
+    return globalThis.Deno.env?.get?.(env2)?.trim();
   }
   return;
 };
@@ -7040,9 +6910,9 @@ var generateImagesOpenRouter = async (model, context, options3) => {
     timestamp: Date.now()
   };
   try {
-    const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+    const apiKey = options3?.apiKey;
     if (!apiKey) {
-      throw new Error(`No API key available for provider: ${model.provider}`);
+      throw new Error(`No API key for provider: ${model.provider}`);
     }
     const client = createClient(model, apiKey, options3?.headers);
     let params = buildParams(model, context);
@@ -7091,7 +6961,6 @@ var generateImagesOpenRouter = async (model, context, options3) => {
 };
 var init_openrouter = __esm(() => {
   init_openai();
-  init_env_api_keys();
 });
 
 // node_modules/@earendil-works/pi-ai/dist/models.generated.js
@@ -7105,7 +6974,7 @@ var init_models_generated = __esm(() => {
         api: "bedrock-converse-stream",
         provider: "amazon-bedrock",
         baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-        reasoning: false,
+        reasoning: true,
         input: ["text", "image"],
         cost: {
           input: 0.33,
@@ -7444,6 +7313,24 @@ var init_models_generated = __esm(() => {
         contextWindow: 163840,
         maxTokens: 81920
       },
+      "eu.anthropic.claude-fable-5": {
+        id: "eu.anthropic.claude-fable-5",
+        name: "Claude Fable 5 (EU)",
+        api: "bedrock-converse-stream",
+        provider: "amazon-bedrock",
+        baseUrl: "https://bedrock-runtime.eu-central-1.amazonaws.com",
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 11,
+          output: 55,
+          cacheRead: 1.1,
+          cacheWrite: 13.75
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
+      },
       "eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
         id: "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
         name: "Claude Haiku 4.5 (EU)",
@@ -7488,8 +7375,8 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { xhigh: "max" },
         input: ["text", "image"],
         cost: {
-          input: 5,
-          output: 25,
+          input: 5.5,
+          output: 27.5,
           cacheRead: 0.5,
           cacheWrite: 6.25
         },
@@ -7506,10 +7393,10 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 5,
-          output: 25,
-          cacheRead: 0.5,
-          cacheWrite: 6.25
+          input: 5.5,
+          output: 27.5,
+          cacheRead: 0.55,
+          cacheWrite: 6.875
         },
         contextWindow: 1e6,
         maxTokens: 128000
@@ -7524,10 +7411,10 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 5,
-          output: 25,
-          cacheRead: 0.5,
-          cacheWrite: 6.25
+          input: 5.5,
+          output: 27.5,
+          cacheRead: 0.55,
+          cacheWrite: 6.875
         },
         contextWindow: 1e6,
         maxTokens: 128000
@@ -7541,10 +7428,10 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 3,
-          output: 15,
-          cacheRead: 0.3,
-          cacheWrite: 3.75
+          input: 3.3,
+          output: 16.5,
+          cacheRead: 0.33,
+          cacheWrite: 4.125
         },
         contextWindow: 200000,
         maxTokens: 64000
@@ -7558,13 +7445,31 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 3,
-          output: 15,
-          cacheRead: 0.3,
-          cacheWrite: 3.75
+          input: 3.3,
+          output: 16.5,
+          cacheRead: 0.33,
+          cacheWrite: 4.125
         },
         contextWindow: 1e6,
         maxTokens: 64000
+      },
+      "global.anthropic.claude-fable-5": {
+        id: "global.anthropic.claude-fable-5",
+        name: "Claude Fable 5 (Global)",
+        api: "bedrock-converse-stream",
+        provider: "amazon-bedrock",
+        baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
       },
       "global.anthropic.claude-haiku-4-5-20251001-v1:0": {
         id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -8183,17 +8088,87 @@ var init_models_generated = __esm(() => {
         contextWindow: 262144,
         maxTokens: 131072
       },
+      "openai.gpt-5.4": {
+        id: "openai.gpt-5.4",
+        name: "GPT-5.4",
+        api: "bedrock-converse-stream",
+        provider: "amazon-bedrock",
+        baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 2.75,
+          output: 16.5,
+          cacheRead: 0.275,
+          cacheWrite: 0
+        },
+        contextWindow: 272000,
+        maxTokens: 128000
+      },
+      "openai.gpt-5.5": {
+        id: "openai.gpt-5.5",
+        name: "GPT-5.5",
+        api: "bedrock-converse-stream",
+        provider: "amazon-bedrock",
+        baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 5.5,
+          output: 33,
+          cacheRead: 0.55,
+          cacheWrite: 0
+        },
+        contextWindow: 272000,
+        maxTokens: 128000
+      },
+      "openai.gpt-oss-120b": {
+        id: "openai.gpt-oss-120b",
+        name: "gpt-oss-120b",
+        api: "bedrock-converse-stream",
+        provider: "amazon-bedrock",
+        baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.15,
+          output: 0.6,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 16384
+      },
       "openai.gpt-oss-120b-1:0": {
         id: "openai.gpt-oss-120b-1:0",
         name: "gpt-oss-120b",
         api: "bedrock-converse-stream",
         provider: "amazon-bedrock",
         baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-        reasoning: false,
+        reasoning: true,
         input: ["text"],
         cost: {
           input: 0.15,
           output: 0.6,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 16384
+      },
+      "openai.gpt-oss-20b": {
+        id: "openai.gpt-oss-20b",
+        name: "gpt-oss-20b",
+        api: "bedrock-converse-stream",
+        provider: "amazon-bedrock",
+        baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.07,
+          output: 0.3,
           cacheRead: 0,
           cacheWrite: 0
         },
@@ -8206,7 +8181,7 @@ var init_models_generated = __esm(() => {
         api: "bedrock-converse-stream",
         provider: "amazon-bedrock",
         baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-        reasoning: false,
+        reasoning: true,
         input: ["text"],
         cost: {
           input: 0.07,
@@ -8369,6 +8344,24 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 262000,
         maxTokens: 262000
+      },
+      "us.anthropic.claude-fable-5": {
+        id: "us.anthropic.claude-fable-5",
+        name: "Claude Fable 5 (US)",
+        api: "bedrock-converse-stream",
+        provider: "amazon-bedrock",
+        baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
       },
       "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
         id: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -8646,6 +8639,63 @@ var init_models_generated = __esm(() => {
         maxTokens: 101376
       }
     },
+    "ant-ling": {
+      "Ling-2.6-1T": {
+        id: "Ling-2.6-1T",
+        name: "Ling 2.6 1T",
+        api: "openai-completions",
+        provider: "ant-ling",
+        baseUrl: "https://api.ant-ling.com/v1",
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0.06,
+          output: 0.25,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 65536
+      },
+      "Ling-2.6-flash": {
+        id: "Ling-2.6-flash",
+        name: "Ling 2.6 Flash",
+        api: "openai-completions",
+        provider: "ant-ling",
+        baseUrl: "https://api.ant-ling.com/v1",
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0.01,
+          output: 0.02,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 65536
+      },
+      "Ring-2.6-1T": {
+        id: "Ring-2.6-1T",
+        name: "Ring 2.6 1T",
+        api: "openai-completions",
+        provider: "ant-ling",
+        baseUrl: "https://api.ant-ling.com/v1",
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsLongCacheRetention: false, thinkingFormat: "ant-ling" },
+        reasoning: true,
+        thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: "high", xhigh: "xhigh" },
+        input: ["text"],
+        cost: {
+          input: 0.06,
+          output: 0.25,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 65536
+      }
+    },
     anthropic: {
       "claude-3-5-haiku-20241022": {
         id: "claude-3-5-haiku-20241022",
@@ -8782,6 +8832,25 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 200000,
         maxTokens: 4096
+      },
+      "claude-fable-5": {
+        id: "claude-fable-5",
+        name: "Claude Fable 5",
+        api: "anthropic-messages",
+        provider: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        compat: { forceAdaptiveThinking: true },
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
       },
       "claude-haiku-4-5": {
         id: "claude-haiku-4-5",
@@ -8944,7 +9013,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "anthropic",
         baseUrl: "https://api.anthropic.com",
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
@@ -8963,7 +9032,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "anthropic",
         baseUrl: "https://api.anthropic.com",
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
@@ -9340,7 +9409,7 @@ var init_models_generated = __esm(() => {
           cacheWrite: 0
         },
         contextWindow: 400000,
-        maxTokens: 272000
+        maxTokens: 128000
       },
       "gpt-5.1": {
         id: "gpt-5.1",
@@ -9573,7 +9642,7 @@ var init_models_generated = __esm(() => {
           cacheRead: 0.25,
           cacheWrite: 0
         },
-        contextWindow: 272000,
+        contextWindow: 1050000,
         maxTokens: 128000
       },
       "gpt-5.4-mini": {
@@ -9645,7 +9714,7 @@ var init_models_generated = __esm(() => {
           cacheRead: 0.5,
           cacheWrite: 0
         },
-        contextWindow: 272000,
+        contextWindow: 1050000,
         maxTokens: 128000
       },
       "gpt-5.5-pro": {
@@ -9959,6 +10028,25 @@ var init_models_generated = __esm(() => {
         contextWindow: 200000,
         maxTokens: 8192
       },
+      "claude-fable-5": {
+        id: "claude-fable-5",
+        name: "Claude Fable 5",
+        api: "anthropic-messages",
+        provider: "cloudflare-ai-gateway",
+        baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic",
+        compat: { forceAdaptiveThinking: true },
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
+      },
       "claude-haiku-4-5": {
         id: "claude-haiku-4-5",
         name: "Claude Haiku 4.5 (latest)",
@@ -10052,7 +10140,26 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "cloudflare-ai-gateway",
         baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic",
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 5,
+          output: 25,
+          cacheRead: 0.5,
+          cacheWrite: 6.25
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
+      },
+      "claude-opus-4-8": {
+        id: "claude-opus-4-8",
+        name: "Claude Opus 4.8",
+        api: "anthropic-messages",
+        provider: "cloudflare-ai-gateway",
+        baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic",
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
@@ -10560,24 +10667,6 @@ var init_models_generated = __esm(() => {
         contextWindow: 128000,
         maxTokens: 128000
       },
-      "@cf/moonshotai/kimi-k2.5": {
-        id: "@cf/moonshotai/kimi-k2.5",
-        name: "Kimi K2.5",
-        api: "openai-completions",
-        provider: "cloudflare-workers-ai",
-        baseUrl: "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1",
-        compat: { sendSessionAffinityHeaders: true },
-        reasoning: true,
-        input: ["text", "image"],
-        cost: {
-          input: 0.6,
-          output: 3,
-          cacheRead: 0.1,
-          cacheWrite: 0
-        },
-        contextWindow: 256000,
-        maxTokens: 256000
-      },
       "@cf/moonshotai/kimi-k2.6": {
         id: "@cf/moonshotai/kimi-k2.6",
         name: "Kimi K2.6",
@@ -10905,8 +10994,8 @@ var init_models_generated = __esm(() => {
           cacheRead: 0.1,
           cacheWrite: 0
         },
-        contextWindow: 128000,
-        maxTokens: 8192
+        contextWindow: 262144,
+        maxTokens: 65536
       },
       "accounts/fireworks/routers/glm-5p1-fast": {
         id: "accounts/fireworks/routers/glm-5p1-fast",
@@ -10925,6 +11014,24 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 202800,
         maxTokens: 131072
+      },
+      "accounts/fireworks/routers/kimi-k2p6-fast": {
+        id: "accounts/fireworks/routers/kimi-k2p6-fast",
+        name: "Kimi K2.6 Fast",
+        api: "anthropic-messages",
+        provider: "fireworks",
+        baseUrl: "https://api.fireworks.ai/inference",
+        compat: { sendSessionAffinityHeaders: true, supportsEagerToolInputStreaming: false, supportsCacheControlOnTools: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 2,
+          output: 8,
+          cacheRead: 0.3,
+          cacheWrite: 0
+        },
+        contextWindow: 262000,
+        maxTokens: 262000
       },
       "accounts/fireworks/routers/kimi-k2p6-turbo": {
         id: "accounts/fireworks/routers/kimi-k2p6-turbo",
@@ -10948,7 +11055,7 @@ var init_models_generated = __esm(() => {
     "github-copilot": {
       "claude-haiku-4.5": {
         id: "claude-haiku-4.5",
-        name: "Claude Haiku 4.5",
+        name: "Claude Haiku 4.5 (latest)",
         api: "anthropic-messages",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -10957,17 +11064,17 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
+          input: 1,
+          output: 5,
+          cacheRead: 0.1,
+          cacheWrite: 1.25
         },
-        contextWindow: 144000,
-        maxTokens: 32000
+        contextWindow: 200000,
+        maxTokens: 64000
       },
       "claude-opus-4.5": {
         id: "claude-opus-4.5",
-        name: "Claude Opus 4.5",
+        name: "Claude Opus 4.5 (latest)",
         api: "anthropic-messages",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -10975,12 +11082,12 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
+          input: 5,
+          output: 25,
+          cacheRead: 0.5,
+          cacheWrite: 6.25
         },
-        contextWindow: 160000,
+        contextWindow: 200000,
         maxTokens: 32000
       },
       "claude-opus-4.6": {
@@ -10995,13 +11102,13 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { xhigh: "max" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
+          input: 5,
+          output: 25,
+          cacheRead: 0.5,
+          cacheWrite: 6.25
         },
         contextWindow: 1e6,
-        maxTokens: 64000
+        maxTokens: 32000
       },
       "claude-opus-4.7": {
         id: "claude-opus-4.7",
@@ -11010,22 +11117,42 @@ var init_models_generated = __esm(() => {
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
         headers: { "User-Agent": "GitHubCopilotChat/0.35.0", "Editor-Version": "vscode/1.107.0", "Editor-Plugin-Version": "copilot-chat/0.35.0", "Copilot-Integration-Id": "vscode-chat" },
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
+          input: 5,
+          output: 25,
+          cacheRead: 0.5,
+          cacheWrite: 6.25
         },
-        contextWindow: 144000,
+        contextWindow: 200000,
+        maxTokens: 32000
+      },
+      "claude-opus-4.8": {
+        id: "claude-opus-4.8",
+        name: "Claude Opus 4.8",
+        api: "anthropic-messages",
+        provider: "github-copilot",
+        baseUrl: "https://api.individual.githubcopilot.com",
+        headers: { "User-Agent": "GitHubCopilotChat/0.35.0", "Editor-Version": "vscode/1.107.0", "Editor-Plugin-Version": "copilot-chat/0.35.0", "Copilot-Integration-Id": "vscode-chat" },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 5,
+          output: 25,
+          cacheRead: 0.5,
+          cacheWrite: 6.25
+        },
+        contextWindow: 200000,
         maxTokens: 64000
       },
-      "claude-sonnet-4.5": {
-        id: "claude-sonnet-4.5",
-        name: "Claude Sonnet 4.5",
+      "claude-sonnet-4": {
+        id: "claude-sonnet-4",
+        name: "Claude Sonnet 4 (latest)",
         api: "anthropic-messages",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -11034,12 +11161,31 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
+          input: 3,
+          output: 15,
+          cacheRead: 0.3,
+          cacheWrite: 3.75
         },
-        contextWindow: 144000,
+        contextWindow: 216000,
+        maxTokens: 16000
+      },
+      "claude-sonnet-4.5": {
+        id: "claude-sonnet-4.5",
+        name: "Claude Sonnet 4.5 (latest)",
+        api: "anthropic-messages",
+        provider: "github-copilot",
+        baseUrl: "https://api.individual.githubcopilot.com",
+        headers: { "User-Agent": "GitHubCopilotChat/0.35.0", "Editor-Version": "vscode/1.107.0", "Editor-Plugin-Version": "copilot-chat/0.35.0", "Copilot-Integration-Id": "vscode-chat" },
+        compat: { supportsEagerToolInputStreaming: false },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 3,
+          output: 15,
+          cacheRead: 0.3,
+          cacheWrite: 3.75
+        },
+        contextWindow: 200000,
         maxTokens: 32000
       },
       "claude-sonnet-4.6": {
@@ -11053,10 +11199,10 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
+          input: 3,
+          output: 15,
+          cacheRead: 0.3,
+          cacheWrite: 3.75
         },
         contextWindow: 1e6,
         maxTokens: 32000
@@ -11069,12 +11215,12 @@ var init_models_generated = __esm(() => {
         baseUrl: "https://api.individual.githubcopilot.com",
         headers: { "User-Agent": "GitHubCopilotChat/0.35.0", "Editor-Version": "vscode/1.107.0", "Editor-Plugin-Version": "copilot-chat/0.35.0", "Copilot-Integration-Id": "vscode-chat" },
         compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false },
-        reasoning: false,
+        reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 1.25,
+          output: 10,
+          cacheRead: 0.125,
           cacheWrite: 0
         },
         contextWindow: 128000,
@@ -11082,7 +11228,7 @@ var init_models_generated = __esm(() => {
       },
       "gemini-3-flash-preview": {
         id: "gemini-3-flash-preview",
-        name: "Gemini 3 Flash",
+        name: "Gemini 3 Flash Preview",
         api: "openai-completions",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -11091,9 +11237,9 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 0.5,
+          output: 3,
+          cacheRead: 0.05,
           cacheWrite: 0
         },
         contextWindow: 128000,
@@ -11110,12 +11256,12 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 2,
+          output: 12,
+          cacheRead: 0.2,
           cacheWrite: 0
         },
-        contextWindow: 128000,
+        contextWindow: 200000,
         maxTokens: 64000
       },
       "gemini-3.5-flash": {
@@ -11129,12 +11275,12 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 1.5,
+          output: 9,
+          cacheRead: 0.15,
           cacheWrite: 0
         },
-        contextWindow: 128000,
+        contextWindow: 200000,
         maxTokens: 64000
       },
       "gpt-4.1": {
@@ -11148,36 +11294,17 @@ var init_models_generated = __esm(() => {
         reasoning: false,
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 2,
+          output: 8,
+          cacheRead: 0.5,
           cacheWrite: 0
         },
         contextWindow: 128000,
         maxTokens: 16384
       },
-      "gpt-4o": {
-        id: "gpt-4o",
-        name: "GPT-4o",
-        api: "openai-completions",
-        provider: "github-copilot",
-        baseUrl: "https://api.individual.githubcopilot.com",
-        headers: { "User-Agent": "GitHubCopilotChat/0.35.0", "Editor-Version": "vscode/1.107.0", "Editor-Plugin-Version": "copilot-chat/0.35.0", "Copilot-Integration-Id": "vscode-chat" },
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false },
-        reasoning: false,
-        input: ["text", "image"],
-        cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 128000,
-        maxTokens: 4096
-      },
       "gpt-5-mini": {
         id: "gpt-5-mini",
-        name: "GPT-5-mini",
+        name: "GPT-5 Mini",
         api: "openai-responses",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -11186,9 +11313,9 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { off: null, minimal: "low" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 0.25,
+          output: 2,
+          cacheRead: 0.025,
           cacheWrite: 0
         },
         contextWindow: 264000,
@@ -11205,17 +11332,17 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 1.75,
+          output: 14,
+          cacheRead: 0.175,
           cacheWrite: 0
         },
-        contextWindow: 264000,
-        maxTokens: 64000
+        contextWindow: 400000,
+        maxTokens: 128000
       },
       "gpt-5.2-codex": {
         id: "gpt-5.2-codex",
-        name: "GPT-5.2-Codex",
+        name: "GPT-5.2 Codex",
         api: "openai-responses",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -11224,9 +11351,9 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 1.75,
+          output: 14,
+          cacheRead: 0.175,
           cacheWrite: 0
         },
         contextWindow: 400000,
@@ -11234,7 +11361,7 @@ var init_models_generated = __esm(() => {
       },
       "gpt-5.3-codex": {
         id: "gpt-5.3-codex",
-        name: "GPT-5.3-Codex",
+        name: "GPT-5.3 Codex",
         api: "openai-responses",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -11243,9 +11370,9 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 1.75,
+          output: 14,
+          cacheRead: 0.175,
           cacheWrite: 0
         },
         contextWindow: 400000,
@@ -11262,9 +11389,9 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 2.5,
+          output: 15,
+          cacheRead: 0.25,
           cacheWrite: 0
         },
         contextWindow: 400000,
@@ -11272,7 +11399,7 @@ var init_models_generated = __esm(() => {
       },
       "gpt-5.4-mini": {
         id: "gpt-5.4-mini",
-        name: "GPT-5.4 Mini",
+        name: "GPT-5.4 mini",
         api: "openai-responses",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
@@ -11281,9 +11408,28 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 0.75,
+          output: 4.5,
+          cacheRead: 0.075,
+          cacheWrite: 0
+        },
+        contextWindow: 400000,
+        maxTokens: 128000
+      },
+      "gpt-5.4-nano": {
+        id: "gpt-5.4-nano",
+        name: "GPT-5.4 nano",
+        api: "openai-responses",
+        provider: "github-copilot",
+        baseUrl: "https://api.individual.githubcopilot.com",
+        headers: { "User-Agent": "GitHubCopilotChat/0.35.0", "Editor-Version": "vscode/1.107.0", "Editor-Plugin-Version": "copilot-chat/0.35.0", "Copilot-Integration-Id": "vscode-chat" },
+        reasoning: true,
+        thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 0.2,
+          output: 1.25,
+          cacheRead: 0.02,
           cacheWrite: 0
         },
         contextWindow: 400000,
@@ -11300,32 +11446,32 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh" },
         input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 5,
+          output: 30,
+          cacheRead: 0.5,
           cacheWrite: 0
         },
         contextWindow: 400000,
         maxTokens: 128000
       },
-      "grok-code-fast-1": {
-        id: "grok-code-fast-1",
-        name: "Grok Code Fast 1",
+      "raptor-mini": {
+        id: "raptor-mini",
+        name: "Raptor mini",
         api: "openai-completions",
         provider: "github-copilot",
         baseUrl: "https://api.individual.githubcopilot.com",
         headers: { "User-Agent": "GitHubCopilotChat/0.35.0", "Editor-Version": "vscode/1.107.0", "Editor-Plugin-Version": "copilot-chat/0.35.0", "Copilot-Integration-Id": "vscode-chat" },
         compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false },
         reasoning: true,
-        input: ["text"],
+        input: ["text", "image"],
         cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
+          input: 0.25,
+          output: 2,
+          cacheRead: 0.025,
           cacheWrite: 0
         },
-        contextWindow: 128000,
-        maxTokens: 64000
+        contextWindow: 400000,
+        maxTokens: 128000
       }
     },
     google: {
@@ -12617,6 +12763,23 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 204800,
         maxTokens: 131072
+      },
+      "MiniMax-M3": {
+        id: "MiniMax-M3",
+        name: "MiniMax-M3",
+        api: "anthropic-messages",
+        provider: "minimax",
+        baseUrl: "https://api.minimax.io/anthropic",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.6,
+          output: 2.4,
+          cacheRead: 0.12,
+          cacheWrite: 0
+        },
+        contextWindow: 512000,
+        maxTokens: 128000
       }
     },
     "minimax-cn": {
@@ -12653,6 +12816,23 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 204800,
         maxTokens: 131072
+      },
+      "MiniMax-M3": {
+        id: "MiniMax-M3",
+        name: "MiniMax-M3",
+        api: "anthropic-messages",
+        provider: "minimax-cn",
+        baseUrl: "https://api.minimaxi.com/anthropic",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.6,
+          output: 2.4,
+          cacheRead: 0.12,
+          cacheWrite: 0
+        },
+        contextWindow: 512000,
+        maxTokens: 128000
       }
     },
     mistral: {
@@ -12675,6 +12855,23 @@ var init_models_generated = __esm(() => {
       },
       "devstral-2512": {
         id: "devstral-2512",
+        name: "Devstral 2",
+        api: "mistral-conversations",
+        provider: "mistral",
+        baseUrl: "https://api.mistral.ai",
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0.4,
+          output: 2,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 262144
+      },
+      "devstral-latest": {
+        id: "devstral-latest",
         name: "Devstral 2",
         api: "mistral-conversations",
         provider: "mistral",
@@ -12968,11 +13165,11 @@ var init_models_generated = __esm(() => {
         api: "mistral-conversations",
         provider: "mistral",
         baseUrl: "https://api.mistral.ai",
-        reasoning: true,
+        reasoning: false,
         input: ["text", "image"],
         cost: {
-          input: 1.5,
-          output: 7.5,
+          input: 0.4,
+          output: 2,
           cacheRead: 0,
           cacheWrite: 0
         },
@@ -13064,6 +13261,23 @@ var init_models_generated = __esm(() => {
         contextWindow: 8000,
         maxTokens: 8000
       },
+      "open-mistral-nemo": {
+        id: "open-mistral-nemo",
+        name: "Open Mistral Nemo",
+        api: "mistral-conversations",
+        provider: "mistral",
+        baseUrl: "https://api.mistral.ai",
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0.15,
+          output: 0.15,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 128000
+      },
       "open-mixtral-8x22b": {
         id: "open-mixtral-8x22b",
         name: "Mixtral 8x22B",
@@ -13140,7 +13354,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai",
         baseUrl: "https://api.moonshot.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: false,
         input: ["text"],
         cost: {
@@ -13158,7 +13372,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai",
         baseUrl: "https://api.moonshot.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: false,
         input: ["text"],
         cost: {
@@ -13176,7 +13390,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai",
         baseUrl: "https://api.moonshot.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -13194,7 +13408,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai",
         baseUrl: "https://api.moonshot.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -13212,7 +13426,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai",
         baseUrl: "https://api.moonshot.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: false,
         input: ["text"],
         cost: {
@@ -13230,7 +13444,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai",
         baseUrl: "https://api.moonshot.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -13248,7 +13462,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai",
         baseUrl: "https://api.moonshot.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -13268,7 +13482,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai-cn",
         baseUrl: "https://api.moonshot.cn/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: false,
         input: ["text"],
         cost: {
@@ -13286,7 +13500,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai-cn",
         baseUrl: "https://api.moonshot.cn/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: false,
         input: ["text"],
         cost: {
@@ -13304,7 +13518,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai-cn",
         baseUrl: "https://api.moonshot.cn/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -13322,7 +13536,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai-cn",
         baseUrl: "https://api.moonshot.cn/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -13340,7 +13554,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai-cn",
         baseUrl: "https://api.moonshot.cn/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: false,
         input: ["text"],
         cost: {
@@ -13358,7 +13572,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai-cn",
         baseUrl: "https://api.moonshot.cn/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -13376,7 +13590,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "moonshotai-cn",
         baseUrl: "https://api.moonshot.cn/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, thinkingFormat: "deepseek" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -13387,6 +13601,407 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 262144,
         maxTokens: 262144
+      }
+    },
+    nvidia: {
+      "meta/llama-3.1-70b-instruct": {
+        id: "meta/llama-3.1-70b-instruct",
+        name: "Llama 3.1 70b Instruct",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 4096
+      },
+      "meta/llama-3.1-8b-instruct": {
+        id: "meta/llama-3.1-8b-instruct",
+        name: "Llama 3.1 8B Instruct",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 16000,
+        maxTokens: 4096
+      },
+      "meta/llama-3.2-11b-vision-instruct": {
+        id: "meta/llama-3.2-11b-vision-instruct",
+        name: "Llama 3.2 11b Vision Instruct",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 4096
+      },
+      "meta/llama-3.2-90b-vision-instruct": {
+        id: "meta/llama-3.2-90b-vision-instruct",
+        name: "Llama-3.2-90B-Vision-Instruct",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 8192
+      },
+      "meta/llama-3.3-70b-instruct": {
+        id: "meta/llama-3.3-70b-instruct",
+        name: "Llama 3.3 70b Instruct",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 4096
+      },
+      "mistralai/mistral-large-3-675b-instruct-2512": {
+        id: "mistralai/mistral-large-3-675b-instruct-2512",
+        name: "Mistral Large 3 675B Instruct 2512",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 262144
+      },
+      "mistralai/mistral-small-4-119b-2603": {
+        id: "mistralai/mistral-small-4-119b-2603",
+        name: "mistral-small-4-119b-2603",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 128000,
+        maxTokens: 8192
+      },
+      "moonshotai/kimi-k2.6": {
+        id: "moonshotai/kimi-k2.6",
+        name: "Kimi K2.6",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 262144
+      },
+      "nvidia/llama-3.3-nemotron-super-49b-v1": {
+        id: "nvidia/llama-3.3-nemotron-super-49b-v1",
+        name: "Llama 3.3 Nemotron Super 49B v1",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 131072
+      },
+      "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
+        id: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        name: "Llama 3.3 Nemotron Super 49B v1.5",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 131072
+      },
+      "nvidia/nemotron-3-nano-30b-a3b": {
+        id: "nvidia/nemotron-3-nano-30b-a3b",
+        name: "nemotron-3-nano-30b-a3b",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 131072
+      },
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
+        id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        name: "Nemotron 3 Nano Omni",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 256000,
+        maxTokens: 65536
+      },
+      "nvidia/nemotron-3-super-120b-a12b": {
+        id: "nvidia/nemotron-3-super-120b-a12b",
+        name: "Nemotron 3 Super",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.2,
+          output: 0.8,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 262144
+      },
+      "nvidia/nemotron-3-ultra-550b-a55b": {
+        id: "nvidia/nemotron-3-ultra-550b-a55b",
+        name: "Nemotron 3 Ultra 550B A55B",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.5,
+          output: 2.5,
+          cacheRead: 0.15,
+          cacheWrite: 0
+        },
+        contextWindow: 1e6,
+        maxTokens: 65536
+      },
+      "nvidia/nvidia-nemotron-nano-9b-v2": {
+        id: "nvidia/nvidia-nemotron-nano-9b-v2",
+        name: "nvidia-nemotron-nano-9b-v2",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 131072
+      },
+      "openai/gpt-oss-20b": {
+        id: "openai/gpt-oss-20b",
+        name: "GPT OSS 20B",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 32768
+      },
+      "qwen/qwen3-coder-480b-a35b-instruct": {
+        id: "qwen/qwen3-coder-480b-a35b-instruct",
+        name: "Qwen3 Coder 480B A35B Instruct",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 66536
+      },
+      "qwen/qwen3.5-122b-a10b": {
+        id: "qwen/qwen3.5-122b-a10b",
+        name: "Qwen3.5 122B-A10B",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 65536
+      },
+      "stepfun-ai/step-3.5-flash": {
+        id: "stepfun-ai/step-3.5-flash",
+        name: "Step 3.5 Flash",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 256000,
+        maxTokens: 16384
+      },
+      "stepfun-ai/step-3.7-flash": {
+        id: "stepfun-ai/step-3.7-flash",
+        name: "Step 3.7 Flash",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 256000,
+        maxTokens: 16384
+      },
+      "z-ai/glm-5.1": {
+        id: "z-ai/glm-5.1",
+        name: "GLM-5.1",
+        api: "openai-completions",
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        headers: { "NVCF-POLL-SECONDS": "3600" },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 131072
       }
     },
     openai: {
@@ -13666,7 +14281,7 @@ var init_models_generated = __esm(() => {
           cacheWrite: 0
         },
         contextWindow: 400000,
-        maxTokens: 272000
+        maxTokens: 128000
       },
       "gpt-5.1": {
         id: "gpt-5.1",
@@ -13963,7 +14578,7 @@ var init_models_generated = __esm(() => {
         provider: "openai",
         baseUrl: "https://api.openai.com/v1",
         reasoning: true,
-        thinkingLevelMap: { off: "none", xhigh: "xhigh" },
+        thinkingLevelMap: { off: "none", xhigh: "xhigh", minimal: null },
         input: ["text", "image"],
         cost: {
           input: 5,
@@ -14130,42 +14745,6 @@ var init_models_generated = __esm(() => {
       }
     },
     "openai-codex": {
-      "gpt-5.2": {
-        id: "gpt-5.2",
-        name: "GPT-5.2",
-        api: "openai-codex-responses",
-        provider: "openai-codex",
-        baseUrl: "https://chatgpt.com/backend-api",
-        reasoning: true,
-        thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-        input: ["text", "image"],
-        cost: {
-          input: 1.75,
-          output: 14,
-          cacheRead: 0.175,
-          cacheWrite: 0
-        },
-        contextWindow: 272000,
-        maxTokens: 128000
-      },
-      "gpt-5.3-codex": {
-        id: "gpt-5.3-codex",
-        name: "GPT-5.3 Codex",
-        api: "openai-codex-responses",
-        provider: "openai-codex",
-        baseUrl: "https://chatgpt.com/backend-api",
-        reasoning: true,
-        thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-        input: ["text", "image"],
-        cost: {
-          input: 1.75,
-          output: 14,
-          cacheRead: 0.175,
-          cacheWrite: 0
-        },
-        contextWindow: 272000,
-        maxTokens: 128000
-      },
       "gpt-5.3-codex-spark": {
         id: "gpt-5.3-codex-spark",
         name: "GPT-5.3 Codex Spark",
@@ -14246,6 +14825,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -14256,6 +14836,25 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 200000,
         maxTokens: 32000
+      },
+      "claude-fable-5": {
+        id: "claude-fable-5",
+        name: "Claude Fable 5",
+        api: "anthropic-messages",
+        provider: "opencode",
+        baseUrl: "https://opencode.ai/zen",
+        compat: { forceAdaptiveThinking: true },
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
       },
       "claude-haiku-4-5": {
         id: "claude-haiku-4-5",
@@ -14333,7 +14932,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen",
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
@@ -14352,7 +14951,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen",
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
@@ -14417,13 +15016,32 @@ var init_models_generated = __esm(() => {
         contextWindow: 1e6,
         maxTokens: 64000
       },
+      "deepseek-v4-flash": {
+        id: "deepseek-v4-flash",
+        name: "DeepSeek V4 Flash",
+        api: "openai-completions",
+        provider: "opencode",
+        baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens", requiresReasoningContentOnAssistantMessages: true, thinkingFormat: "deepseek" },
+        reasoning: true,
+        thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" },
+        input: ["text"],
+        cost: {
+          input: 0.14,
+          output: 0.28,
+          cacheRead: 0.03,
+          cacheWrite: 0
+        },
+        contextWindow: 1e6,
+        maxTokens: 384000
+      },
       "deepseek-v4-flash-free": {
         id: "deepseek-v4-flash-free",
         name: "DeepSeek V4 Flash Free",
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
-        compat: { requiresReasoningContentOnAssistantMessages: true, thinkingFormat: "deepseek" },
+        compat: { maxTokensField: "max_tokens", requiresReasoningContentOnAssistantMessages: true, thinkingFormat: "deepseek" },
         reasoning: true,
         thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" },
         input: ["text"],
@@ -14496,6 +15114,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -14513,6 +15132,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -14818,7 +15438,9 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { supportsReasoningEffort: false, maxTokensField: "max_tokens" },
         reasoning: true,
+        thinkingLevelMap: { off: null, minimal: null, low: null, medium: null },
         input: ["text", "image"],
         cost: {
           input: 1,
@@ -14835,6 +15457,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -14852,6 +15475,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { thinkingFormat: "deepseek", supportsReasoningEffort: false, maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -14869,6 +15493,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -14877,8 +15502,8 @@ var init_models_generated = __esm(() => {
           cacheRead: 0,
           cacheWrite: 0
         },
-        contextWindow: 1e6,
-        maxTokens: 128000
+        contextWindow: 200000,
+        maxTokens: 32000
       },
       "minimax-m2.5": {
         id: "minimax-m2.5",
@@ -14886,6 +15511,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -14903,6 +15529,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -14914,12 +15541,13 @@ var init_models_generated = __esm(() => {
         contextWindow: 204800,
         maxTokens: 131072
       },
-      "nemotron-3-super-free": {
-        id: "nemotron-3-super-free",
-        name: "Nemotron 3 Super Free",
+      "nemotron-3-ultra-free": {
+        id: "nemotron-3-ultra-free",
+        name: "Nemotron 3 Ultra Free",
         api: "openai-completions",
         provider: "opencode",
         baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -14928,8 +15556,26 @@ var init_models_generated = __esm(() => {
           cacheRead: 0,
           cacheWrite: 0
         },
-        contextWindow: 204800,
+        contextWindow: 1e6,
         maxTokens: 128000
+      },
+      "north-mini-code-free": {
+        id: "north-mini-code-free",
+        name: "North Mini Code Free",
+        api: "openai-completions",
+        provider: "opencode",
+        baseUrl: "https://opencode.ai/zen/v1",
+        compat: { maxTokensField: "max_tokens" },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 256000,
+        maxTokens: 64000
       },
       "qwen3.5-plus": {
         id: "qwen3.5-plus",
@@ -14973,7 +15619,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
-        compat: { requiresReasoningContentOnAssistantMessages: true, thinkingFormat: "deepseek" },
+        compat: { maxTokensField: "max_tokens", requiresReasoningContentOnAssistantMessages: true, thinkingFormat: "deepseek" },
         reasoning: true,
         thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" },
         input: ["text"],
@@ -14992,7 +15638,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
-        compat: { requiresReasoningContentOnAssistantMessages: true, thinkingFormat: "deepseek" },
+        compat: { maxTokensField: "max_tokens", requiresReasoningContentOnAssistantMessages: true, thinkingFormat: "deepseek" },
         reasoning: true,
         thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" },
         input: ["text"],
@@ -15011,6 +15657,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -15028,6 +15675,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -15045,6 +15693,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -15062,9 +15711,9 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
-        compat: { thinkingFormat: "string-thinking" },
+        compat: { thinkingFormat: "deepseek", supportsReasoningEffort: false, maxTokensField: "max_tokens" },
         reasoning: true,
-        thinkingLevelMap: { off: "none" },
+        thinkingLevelMap: { minimal: null, low: null, medium: null },
         input: ["text", "image"],
         cost: {
           input: 0.95,
@@ -15081,6 +15730,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -15098,6 +15748,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -15132,6 +15783,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
+        compat: { maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text"],
         cost: {
@@ -15143,23 +15795,22 @@ var init_models_generated = __esm(() => {
         contextWindow: 204800,
         maxTokens: 131072
       },
-      "qwen3.5-plus": {
-        id: "qwen3.5-plus",
-        name: "Qwen3.5 Plus",
-        api: "openai-completions",
+      "minimax-m3": {
+        id: "minimax-m3",
+        name: "MiniMax M3",
+        api: "anthropic-messages",
         provider: "opencode-go",
-        baseUrl: "https://opencode.ai/zen/go/v1",
-        compat: { thinkingFormat: "qwen" },
+        baseUrl: "https://opencode.ai/zen/go",
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0.2,
+          input: 0.3,
           output: 1.2,
-          cacheRead: 0.02,
-          cacheWrite: 0.25
+          cacheRead: 0.06,
+          cacheWrite: 0
         },
-        contextWindow: 262144,
-        maxTokens: 65536
+        contextWindow: 512000,
+        maxTokens: 131072
       },
       "qwen3.6-plus": {
         id: "qwen3.6-plus",
@@ -15167,7 +15818,7 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "opencode-go",
         baseUrl: "https://opencode.ai/zen/go/v1",
-        compat: { thinkingFormat: "qwen" },
+        compat: { thinkingFormat: "qwen", maxTokensField: "max_tokens" },
         reasoning: true,
         input: ["text", "image"],
         cost: {
@@ -15176,7 +15827,7 @@ var init_models_generated = __esm(() => {
           cacheRead: 0.05,
           cacheWrite: 0.625
         },
-        contextWindow: 262144,
+        contextWindow: 1e6,
         maxTokens: 65536
       },
       "qwen3.7-max": {
@@ -15192,6 +15843,23 @@ var init_models_generated = __esm(() => {
           output: 7.5,
           cacheRead: 0.5,
           cacheWrite: 3.125
+        },
+        contextWindow: 1e6,
+        maxTokens: 65536
+      },
+      "qwen3.7-plus": {
+        id: "qwen3.7-plus",
+        name: "Qwen3.7 Plus",
+        api: "anthropic-messages",
+        provider: "opencode-go",
+        baseUrl: "https://opencode.ai/zen/go",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.4,
+          output: 1.6,
+          cacheRead: 0.04,
+          cacheWrite: 0.5
         },
         contextWindow: 1e6,
         maxTokens: 65536
@@ -15333,6 +16001,23 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 200000,
         maxTokens: 8192
+      },
+      "anthropic/claude-fable-5": {
+        id: "anthropic/claude-fable-5",
+        name: "Anthropic: Claude Fable 5",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
       },
       "anthropic/claude-haiku-4.5": {
         id: "anthropic/claude-haiku-4.5",
@@ -15629,40 +16314,6 @@ var init_models_generated = __esm(() => {
         contextWindow: 2000000,
         maxTokens: 30000
       },
-      "baidu/ernie-4.5-21b-a3b": {
-        id: "baidu/ernie-4.5-21b-a3b",
-        name: "Baidu: ERNIE 4.5 21B A3B",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 0.07,
-          output: 0.28,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
-        maxTokens: 8000
-      },
-      "baidu/ernie-4.5-vl-28b-a3b": {
-        id: "baidu/ernie-4.5-vl-28b-a3b",
-        name: "Baidu: ERNIE 4.5 VL 28B A3B",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: true,
-        input: ["text", "image"],
-        cost: {
-          input: 0.14,
-          output: 0.56,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
-        maxTokens: 8000
-      },
       "bytedance-seed/seed-1.6": {
         id: "bytedance-seed/seed-1.6",
         name: "ByteDance Seed: Seed 1.6",
@@ -15774,8 +16425,8 @@ var init_models_generated = __esm(() => {
         reasoning: false,
         input: ["text"],
         cost: {
-          input: 0.2288,
-          output: 0.9144,
+          input: 0.20020000000000002,
+          output: 0.8000999999999999,
           cacheRead: 0,
           cacheWrite: 0
         },
@@ -15876,13 +16527,13 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.252,
-          output: 0.378,
-          cacheRead: 0.0252,
+          input: 0.2288,
+          output: 0.3432,
+          cacheRead: 0,
           cacheWrite: 0
         },
         contextWindow: 131072,
-        maxTokens: 65536
+        maxTokens: 64000
       },
       "deepseek/deepseek-v3.2-exp": {
         id: "deepseek/deepseek-v3.2-exp",
@@ -15912,32 +16563,13 @@ var init_models_generated = __esm(() => {
         thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "xhigh" },
         input: ["text"],
         cost: {
-          input: 0.09999999999999999,
-          output: 0.19999999999999998,
-          cacheRead: 0.02,
+          input: 0.0983,
+          output: 0.1966,
+          cacheRead: 0.019700000000000002,
           cacheWrite: 0
         },
         contextWindow: 1048576,
-        maxTokens: 16384
-      },
-      "deepseek/deepseek-v4-flash:free": {
-        id: "deepseek/deepseek-v4-flash:free",
-        name: "DeepSeek: DeepSeek V4 Flash (free)",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        compat: { requiresReasoningContentOnAssistantMessages: true },
-        reasoning: true,
-        thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "xhigh" },
-        input: ["text"],
-        cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 1048576,
-        maxTokens: 384000
+        maxTokens: 131072
       },
       "deepseek/deepseek-v4-pro": {
         id: "deepseek/deepseek-v4-pro",
@@ -15974,40 +16606,6 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 32768,
         maxTokens: 4096
-      },
-      "google/gemini-2.0-flash-001": {
-        id: "google/gemini-2.0-flash-001",
-        name: "Google: Gemini 2.0 Flash",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: {
-          input: 0.09999999999999999,
-          output: 0.39999999999999997,
-          cacheRead: 0.024999999999999998,
-          cacheWrite: 0.08333333333333334
-        },
-        contextWindow: 1e6,
-        maxTokens: 8192
-      },
-      "google/gemini-2.0-flash-lite-001": {
-        id: "google/gemini-2.0-flash-lite-001",
-        name: "Google: Gemini 2.0 Flash Lite",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: {
-          input: 0.075,
-          output: 0.3,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 1048576,
-        maxTokens: 8192
       },
       "google/gemini-2.5-flash": {
         id: "google/gemini-2.5-flash",
@@ -16222,8 +16820,8 @@ var init_models_generated = __esm(() => {
         reasoning: false,
         input: ["text", "image"],
         cost: {
-          input: 0.04,
-          output: 0.13,
+          input: 0.049999999999999996,
+          output: 0.15,
           cacheRead: 0,
           cacheWrite: 0
         },
@@ -16291,12 +16889,12 @@ var init_models_generated = __esm(() => {
         input: ["text", "image"],
         cost: {
           input: 0.12,
-          output: 0.37,
-          cacheRead: 0,
+          output: 0.36,
+          cacheRead: 0.09,
           cacheWrite: 0
         },
         contextWindow: 262144,
-        maxTokens: 16384
+        maxTokens: 8192
       },
       "google/gemma-4-31b-it:free": {
         id: "google/gemma-4-31b-it:free",
@@ -16445,7 +17043,7 @@ var init_models_generated = __esm(() => {
         input: ["text"],
         cost: {
           input: 0.02,
-          output: 0.049999999999999996,
+          output: 0.03,
           cacheRead: 0,
           cacheWrite: 0
         },
@@ -16486,6 +17084,23 @@ var init_models_generated = __esm(() => {
         contextWindow: 131072,
         maxTokens: 4096
       },
+      "meta-llama/llama-4-maverick": {
+        id: "meta-llama/llama-4-maverick",
+        name: "Meta: Llama 4 Maverick",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: false,
+        input: ["text", "image"],
+        cost: {
+          input: 0.15,
+          output: 0.6,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 1048576,
+        maxTokens: 16384
+      },
       "meta-llama/llama-4-scout": {
         id: "meta-llama/llama-4-scout",
         name: "Meta: Llama 4 Scout",
@@ -16495,7 +17110,7 @@ var init_models_generated = __esm(() => {
         reasoning: false,
         input: ["text", "image"],
         cost: {
-          input: 0.08,
+          input: 0.09999999999999999,
           output: 0.3,
           cacheRead: 0,
           cacheWrite: 0
@@ -16564,29 +17179,12 @@ var init_models_generated = __esm(() => {
         input: ["text"],
         cost: {
           input: 0.15,
-          output: 1.15,
-          cacheRead: 0,
+          output: 0.8999999999999999,
+          cacheRead: 0.049999999999999996,
           cacheWrite: 0
         },
         contextWindow: 204800,
         maxTokens: 196608
-      },
-      "minimax/minimax-m2.5:free": {
-        id: "minimax/minimax-m2.5:free",
-        name: "MiniMax: MiniMax M2.5 (free)",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: true,
-        input: ["text"],
-        cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 204800,
-        maxTokens: 8192
       },
       "minimax/minimax-m2.7": {
         id: "minimax/minimax-m2.7",
@@ -16597,13 +17195,30 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.27899999999999997,
-          output: 1.2,
-          cacheRead: 0,
+          input: 0.27,
+          output: 1.08,
+          cacheRead: 0.054,
           cacheWrite: 0
         },
         contextWindow: 204800,
         maxTokens: 131072
+      },
+      "minimax/minimax-m3": {
+        id: "minimax/minimax-m3",
+        name: "MiniMax: MiniMax M3",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.3,
+          output: 1.2,
+          cacheRead: 0.06,
+          cacheWrite: 0
+        },
+        contextWindow: 1048576,
+        maxTokens: 512000
       },
       "mistralai/codestral-2508": {
         id: "mistralai/codestral-2508",
@@ -16637,40 +17252,6 @@ var init_models_generated = __esm(() => {
           cacheWrite: 0
         },
         contextWindow: 262144,
-        maxTokens: 4096
-      },
-      "mistralai/devstral-medium": {
-        id: "mistralai/devstral-medium",
-        name: "Mistral: Devstral Medium",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 0.39999999999999997,
-          output: 2,
-          cacheRead: 0.04,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
-        maxTokens: 4096
-      },
-      "mistralai/devstral-small": {
-        id: "mistralai/devstral-small",
-        name: "Mistral: Devstral Small 1.1",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 0.09999999999999999,
-          output: 0.3,
-          cacheRead: 0.01,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
         maxTokens: 4096
       },
       "mistralai/ministral-14b-2512": {
@@ -16744,23 +17325,6 @@ var init_models_generated = __esm(() => {
       "mistralai/mistral-large-2407": {
         id: "mistralai/mistral-large-2407",
         name: "Mistral Large 2407",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 2,
-          output: 6,
-          cacheRead: 0.19999999999999998,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
-        maxTokens: 4096
-      },
-      "mistralai/mistral-large-2411": {
-        id: "mistralai/mistral-large-2411",
-        name: "Mistral Large 2411",
         api: "openai-completions",
         provider: "openrouter",
         baseUrl: "https://openrouter.ai/api/v1",
@@ -16928,23 +17492,6 @@ var init_models_generated = __esm(() => {
         contextWindow: 65536,
         maxTokens: 4096
       },
-      "mistralai/pixtral-large-2411": {
-        id: "mistralai/pixtral-large-2411",
-        name: "Mistral: Pixtral Large 2411",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: {
-          input: 2,
-          output: 6,
-          cacheRead: 0.19999999999999998,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
-        maxTokens: 4096
-      },
       "mistralai/voxtral-small-24b-2507": {
         id: "mistralai/voxtral-small-24b-2507",
         name: "Mistral: Voxtral Small 24B 2507",
@@ -17036,12 +17583,13 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "openrouter",
         baseUrl: "https://openrouter.ai/api/v1",
+        compat: { supportsDeveloperRole: false, requiresReasoningContentOnAssistantMessages: true },
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0.73,
-          output: 3.49,
-          cacheRead: 0.25,
+          input: 0.6799999999999999,
+          output: 3.41,
+          cacheRead: 0.33999999999999997,
           cacheWrite: 0
         },
         contextWindow: 262144,
@@ -17050,6 +17598,24 @@ var init_models_generated = __esm(() => {
       "moonshotai/kimi-k2.6:free": {
         id: "moonshotai/kimi-k2.6:free",
         name: "MoonshotAI: Kimi K2.6 (free)",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        compat: { supportsDeveloperRole: false, requiresReasoningContentOnAssistantMessages: true },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 262144,
+        maxTokens: 4096
+      },
+      "nex-agi/nex-n2-pro:free": {
+        id: "nex-agi/nex-n2-pro:free",
+        name: "Nex AGI: Nex-N2-Pro (free)",
         api: "openai-completions",
         provider: "openrouter",
         baseUrl: "https://openrouter.ai/api/v1",
@@ -17062,24 +17628,7 @@ var init_models_generated = __esm(() => {
           cacheWrite: 0
         },
         contextWindow: 262144,
-        maxTokens: 4096
-      },
-      "nex-agi/deepseek-v3.1-nex-n1": {
-        id: "nex-agi/deepseek-v3.1-nex-n1",
-        name: "Nex AGI: DeepSeek V3.1 Nex N1",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 0.135,
-          output: 0.5,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
-        maxTokens: 163840
+        maxTokens: 262144
       },
       "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
         id: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
@@ -17090,7 +17639,7 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.09999999999999999,
+          input: 0.39999999999999997,
           output: 0.39999999999999997,
           cacheRead: 0,
           cacheWrite: 0
@@ -17182,6 +17731,40 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 1e6,
         maxTokens: 262144
+      },
+      "nvidia/nemotron-3-ultra-550b-a55b": {
+        id: "nvidia/nemotron-3-ultra-550b-a55b",
+        name: "NVIDIA: Nemotron 3 Ultra",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.5,
+          output: 2.5,
+          cacheRead: 0.15,
+          cacheWrite: 0
+        },
+        contextWindow: 1e6,
+        maxTokens: 16384
+      },
+      "nvidia/nemotron-3-ultra-550b-a55b:free": {
+        id: "nvidia/nemotron-3-ultra-550b-a55b:free",
+        name: "NVIDIA: Nemotron 3 Ultra (free)",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 1e6,
+        maxTokens: 65536
       },
       "nvidia/nemotron-nano-12b-v2-vl:free": {
         id: "nvidia/nemotron-nano-12b-v2-vl:free",
@@ -17300,40 +17883,6 @@ var init_models_generated = __esm(() => {
           cacheWrite: 0
         },
         contextWindow: 8191,
-        maxTokens: 4096
-      },
-      "openai/gpt-4-0314": {
-        id: "openai/gpt-4-0314",
-        name: "OpenAI: GPT-4 (older v0314)",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 30,
-          output: 60,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 8191,
-        maxTokens: 4096
-      },
-      "openai/gpt-4-1106-preview": {
-        id: "openai/gpt-4-1106-preview",
-        name: "OpenAI: GPT-4 Turbo (older v1106)",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 10,
-          output: 30,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 128000,
         maxTokens: 4096
       },
       "openai/gpt-4-turbo": {
@@ -17484,23 +18033,6 @@ var init_models_generated = __esm(() => {
           input: 2.5,
           output: 10,
           cacheRead: 1.25,
-          cacheWrite: 0
-        },
-        contextWindow: 128000,
-        maxTokens: 16384
-      },
-      "openai/gpt-4o-audio-preview": {
-        id: "openai/gpt-4o-audio-preview",
-        name: "OpenAI: GPT-4o Audio",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 2.5,
-          output: 10,
-          cacheRead: 0,
           cacheWrite: 0
         },
         contextWindow: 128000,
@@ -18020,13 +18552,13 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.03,
+          input: 0.029,
           output: 0.14,
           cacheRead: 0,
           cacheWrite: 0
         },
         contextWindow: 131072,
-        maxTokens: 131072
+        maxTokens: 4096
       },
       "openai/gpt-oss-20b:free": {
         id: "openai/gpt-oss-20b:free",
@@ -18334,23 +18866,6 @@ var init_models_generated = __esm(() => {
         contextWindow: 131072,
         maxTokens: 16384
       },
-      "qwen/qwen-2.5-7b-instruct": {
-        id: "qwen/qwen-2.5-7b-instruct",
-        name: "Qwen: Qwen2.5 7B Instruct",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 0.04,
-          output: 0.09999999999999999,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 131072,
-        maxTokens: 32768
-      },
       "qwen/qwen-plus": {
         id: "qwen/qwen-plus",
         name: "Qwen: Qwen-Plus",
@@ -18445,7 +18960,7 @@ var init_models_generated = __esm(() => {
         reasoning: false,
         input: ["text"],
         cost: {
-          input: 0.071,
+          input: 0.09,
           output: 0.09999999999999999,
           cacheRead: 0,
           cacheWrite: 0
@@ -18462,13 +18977,13 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.14950000000000002,
-          output: 1.495,
-          cacheRead: 0,
+          input: 0.09999999999999999,
+          output: 0.09999999999999999,
+          cacheRead: 0.09999999999999999,
           cacheWrite: 0
         },
         contextWindow: 262144,
-        maxTokens: 4096
+        maxTokens: 262144
       },
       "qwen/qwen3-30b-a3b": {
         id: "qwen/qwen3-30b-a3b",
@@ -18479,13 +18994,13 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.09,
-          output: 0.44999999999999996,
+          input: 0.12,
+          output: 0.5,
           cacheRead: 0,
           cacheWrite: 0
         },
         contextWindow: 131072,
-        maxTokens: 20000
+        maxTokens: 16384
       },
       "qwen/qwen3-30b-a3b-instruct-2507": {
         id: "qwen/qwen3-30b-a3b-instruct-2507",
@@ -18496,13 +19011,13 @@ var init_models_generated = __esm(() => {
         reasoning: false,
         input: ["text"],
         cost: {
-          input: 0.09,
-          output: 0.3,
+          input: 0.04815,
+          output: 0.19305,
           cacheRead: 0,
           cacheWrite: 0
         },
-        contextWindow: 262144,
-        maxTokens: 262144
+        contextWindow: 131072,
+        maxTokens: 32000
       },
       "qwen/qwen3-30b-a3b-thinking-2507": {
         id: "qwen/qwen3-30b-a3b-thinking-2507",
@@ -18904,13 +19419,13 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0.13899999999999998,
+          input: 0.14,
           output: 1,
-          cacheRead: 0,
+          cacheRead: 0.049999999999999996,
           cacheWrite: 0
         },
         contextWindow: 262144,
-        maxTokens: 4096
+        maxTokens: 262144
       },
       "qwen/qwen3.5-397b-a17b": {
         id: "qwen/qwen3.5-397b-a17b",
@@ -18938,13 +19453,13 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0.04,
+          input: 0.09999999999999999,
           output: 0.15,
           cacheRead: 0,
           cacheWrite: 0
         },
         contextWindow: 262144,
-        maxTokens: 81920
+        maxTokens: 262144
       },
       "qwen/qwen3.5-flash-02-23": {
         id: "qwen/qwen3.5-flash-02-23",
@@ -19006,13 +19521,13 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0.29,
-          output: 3.1999999999999997,
+          input: 0.28900000000000003,
+          output: 2.4,
           cacheRead: 0,
           cacheWrite: 0
         },
         contextWindow: 262144,
-        maxTokens: 262140
+        maxTokens: 131072
       },
       "qwen/qwen3.6-35b-a3b": {
         id: "qwen/qwen3.6-35b-a3b",
@@ -19099,6 +19614,23 @@ var init_models_generated = __esm(() => {
         contextWindow: 1e6,
         maxTokens: 65536
       },
+      "qwen/qwen3.7-plus": {
+        id: "qwen/qwen3.7-plus",
+        name: "Qwen: Qwen3.7 Plus",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.39999999999999997,
+          output: 1.5999999999999999,
+          cacheRead: 0.08,
+          cacheWrite: 0.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 65536
+      },
       "rekaai/reka-edge": {
         id: "rekaai/reka-edge",
         name: "Reka Edge",
@@ -19133,23 +19665,6 @@ var init_models_generated = __esm(() => {
         contextWindow: 256000,
         maxTokens: 128000
       },
-      "sao10k/l3-euryale-70b": {
-        id: "sao10k/l3-euryale-70b",
-        name: "Sao10k: Llama 3 Euryale 70B v2.1",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: false,
-        input: ["text"],
-        cost: {
-          input: 1.48,
-          output: 1.48,
-          cacheRead: 0,
-          cacheWrite: 0
-        },
-        contextWindow: 8192,
-        maxTokens: 8192
-      },
       "sao10k/l3.1-euryale-70b": {
         id: "sao10k/l3.1-euryale-70b",
         name: "Sao10K: Llama 3.1 Euryale 70B v2.2",
@@ -19183,6 +19698,23 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 262144,
         maxTokens: 16384
+      },
+      "stepfun/step-3.7-flash": {
+        id: "stepfun/step-3.7-flash",
+        name: "StepFun: Step 3.7 Flash",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.19999999999999998,
+          output: 1.15,
+          cacheRead: 0.04,
+          cacheWrite: 0
+        },
+        contextWindow: 256000,
+        maxTokens: 256000
       },
       "tencent/hy3-preview": {
         id: "tencent/hy3-preview",
@@ -19319,40 +19851,6 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 262144,
         maxTokens: 65536
-      },
-      "xiaomi/mimo-v2-omni": {
-        id: "xiaomi/mimo-v2-omni",
-        name: "Xiaomi: MiMo-V2-Omni",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: true,
-        input: ["text", "image"],
-        cost: {
-          input: 0.39999999999999997,
-          output: 2,
-          cacheRead: 0.08,
-          cacheWrite: 0
-        },
-        contextWindow: 262144,
-        maxTokens: 65536
-      },
-      "xiaomi/mimo-v2-pro": {
-        id: "xiaomi/mimo-v2-pro",
-        name: "Xiaomi: MiMo-V2-Pro",
-        api: "openai-completions",
-        provider: "openrouter",
-        baseUrl: "https://openrouter.ai/api/v1",
-        reasoning: true,
-        input: ["text"],
-        cost: {
-          input: 1,
-          output: 3,
-          cacheRead: 0.19999999999999998,
-          cacheWrite: 0
-        },
-        contextWindow: 1048576,
-        maxTokens: 131072
       },
       "xiaomi/mimo-v2.5": {
         id: "xiaomi/mimo-v2.5",
@@ -19609,6 +20107,23 @@ var init_models_generated = __esm(() => {
         contextWindow: 202752,
         maxTokens: 131072
       },
+      "~anthropic/claude-fable-latest": {
+        id: "~anthropic/claude-fable-latest",
+        name: "Anthropic: Claude Fable Latest",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
+      },
       "~anthropic/claude-haiku-latest": {
         id: "~anthropic/claude-haiku-latest",
         name: "Anthropic Claude Haiku Latest",
@@ -19703,9 +20218,9 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0.73,
-          output: 3.49,
-          cacheRead: 0.25,
+          input: 0.6799999999999999,
+          output: 3.41,
+          cacheRead: 0.33999999999999997,
           cacheWrite: 0
         },
         contextWindow: 262144,
@@ -19753,9 +20268,9 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "together",
         baseUrl: "https://api.together.ai/v1",
-        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false },
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false, thinkingFormat: "together" },
         reasoning: true,
-        thinkingLevelMap: { off: null, minimal: null, low: null, medium: null },
+        thinkingLevelMap: { minimal: null, low: null, medium: null },
         input: ["text"],
         cost: {
           input: 0.3,
@@ -19900,7 +20415,7 @@ var init_models_generated = __esm(() => {
       },
       "deepseek-ai/DeepSeek-V3": {
         id: "deepseek-ai/DeepSeek-V3",
-        name: "DeepSeek V3",
+        name: "DeepSeek-V3",
         api: "openai-completions",
         provider: "together",
         baseUrl: "https://api.together.ai/v1",
@@ -20048,6 +20563,25 @@ var init_models_generated = __esm(() => {
         contextWindow: 262144,
         maxTokens: 131000
       },
+      "nvidia/nemotron-3-ultra-550b-a55b": {
+        id: "nvidia/nemotron-3-ultra-550b-a55b",
+        name: "Nemotron 3 Ultra 550B A55B",
+        api: "openai-completions",
+        provider: "together",
+        baseUrl: "https://api.together.ai/v1",
+        compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens", supportsStrictMode: false, supportsLongCacheRetention: false, thinkingFormat: "together" },
+        reasoning: true,
+        thinkingLevelMap: { minimal: null, low: null, medium: null },
+        input: ["text"],
+        cost: {
+          input: 0.6,
+          output: 3.6,
+          cacheRead: 0.2,
+          cacheWrite: 0
+        },
+        contextWindow: 512300,
+        maxTokens: 512300
+      },
       "openai/gpt-oss-120b": {
         id: "openai/gpt-oss-120b",
         name: "GPT OSS 120B",
@@ -20107,20 +20641,20 @@ var init_models_generated = __esm(() => {
       },
       "alibaba/qwen-3-235b": {
         id: "alibaba/qwen-3-235b",
-        name: "Qwen3 235B A22b Instruct 2507",
+        name: "Qwen3 235B A22B",
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
+        reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.6,
-          output: 1.2,
-          cacheRead: 0.6,
+          input: 0.22,
+          output: 0.88,
+          cacheRead: 0,
           cacheWrite: 0
         },
-        contextWindow: 131000,
-        maxTokens: 40000
+        contextWindow: 262144,
+        maxTokens: 16384
       },
       "alibaba/qwen-3-30b": {
         id: "alibaba/qwen-3-30b",
@@ -20131,8 +20665,8 @@ var init_models_generated = __esm(() => {
         reasoning: true,
         input: ["text"],
         cost: {
-          input: 0.08,
-          output: 0.29,
+          input: 0.12,
+          output: 0.5,
           cacheRead: 0,
           cacheWrite: 0
         },
@@ -20163,7 +20697,7 @@ var init_models_generated = __esm(() => {
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
         reasoning: true,
-        input: ["text", "image"],
+        input: ["text"],
         cost: {
           input: 1.3,
           output: 7.8,
@@ -20196,7 +20730,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
+        reasoning: true,
         input: ["text"],
         cost: {
           input: 1.5,
@@ -20230,7 +20764,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
+        reasoning: true,
         input: ["text"],
         cost: {
           input: 0.5,
@@ -20308,6 +20842,40 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 256000,
         maxTokens: 65536
+      },
+      "alibaba/qwen3-next-80b-a3b-instruct": {
+        id: "alibaba/qwen3-next-80b-a3b-instruct",
+        name: "Qwen3 Next 80B A3B Instruct",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0.15,
+          output: 1.2,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 32768
+      },
+      "alibaba/qwen3-next-80b-a3b-thinking": {
+        id: "alibaba/qwen3-next-80b-a3b-thinking",
+        name: "Qwen3 Next 80B A3B Thinking",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.15,
+          output: 1.2,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 32768
       },
       "alibaba/qwen3-vl-thinking": {
         id: "alibaba/qwen3-vl-thinking",
@@ -20401,7 +20969,7 @@ var init_models_generated = __esm(() => {
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
         reasoning: true,
-        input: ["text", "image"],
+        input: ["text"],
         cost: {
           input: 1.25,
           output: 3.75,
@@ -20409,6 +20977,23 @@ var init_models_generated = __esm(() => {
           cacheWrite: 1.5625
         },
         contextWindow: 991000,
+        maxTokens: 64000
+      },
+      "alibaba/qwen3.7-plus": {
+        id: "alibaba/qwen3.7-plus",
+        name: "Qwen 3.7 Plus",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.39999999999999997,
+          output: 1.5999999999999999,
+          cacheRead: 0.08,
+          cacheWrite: 0.5
+        },
+        contextWindow: 1e6,
         maxTokens: 64000
       },
       "anthropic/claude-3-haiku": {
@@ -20444,6 +21029,25 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 200000,
         maxTokens: 8192
+      },
+      "anthropic/claude-fable-5": {
+        id: "anthropic/claude-fable-5",
+        name: "Claude Fable 5",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        compat: { forceAdaptiveThinking: true },
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" },
+        input: ["text", "image"],
+        cost: {
+          input: 10,
+          output: 50,
+          cacheRead: 1,
+          cacheWrite: 12.5
+        },
+        contextWindow: 1e6,
+        maxTokens: 128000
       },
       "anthropic/claude-haiku-4.5": {
         id: "anthropic/claude-haiku-4.5",
@@ -20538,7 +21142,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
@@ -20557,7 +21161,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        compat: { forceAdaptiveThinking: true },
+        compat: { forceAdaptiveThinking: true, supportsTemperature: false },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh" },
         input: ["text", "image"],
@@ -20716,17 +21320,17 @@ var init_models_generated = __esm(() => {
         reasoning: false,
         input: ["text"],
         cost: {
-          input: 0.77,
-          output: 0.77,
-          cacheRead: 0,
+          input: 0.27,
+          output: 1.12,
+          cacheRead: 0.135,
           cacheWrite: 0
         },
         contextWindow: 163840,
-        maxTokens: 16384
+        maxTokens: 163840
       },
       "deepseek/deepseek-v3.1": {
         id: "deepseek/deepseek-v3.1",
-        name: "DeepSeek-V3.1",
+        name: "DeepSeek V3.1",
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
@@ -20764,8 +21368,8 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
-        input: ["text"],
+        reasoning: true,
+        input: ["text", "image"],
         cost: {
           input: 0.28,
           output: 0.42,
@@ -20781,8 +21385,8 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
-        input: ["text"],
+        reasoning: true,
+        input: ["text", "image"],
         cost: {
           input: 0.62,
           output: 1.85,
@@ -20799,7 +21403,7 @@ var init_models_generated = __esm(() => {
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
         reasoning: true,
-        input: ["text"],
+        input: ["text", "image"],
         cost: {
           input: 0.14,
           output: 0.28,
@@ -20825,40 +21429,6 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 1e6,
         maxTokens: 384000
-      },
-      "google/gemini-2.0-flash": {
-        id: "google/gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
-        api: "anthropic-messages",
-        provider: "vercel-ai-gateway",
-        baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: {
-          input: 0.15,
-          output: 0.6,
-          cacheRead: 0.024999999999999998,
-          cacheWrite: 0
-        },
-        contextWindow: 1048576,
-        maxTokens: 8192
-      },
-      "google/gemini-2.0-flash-lite": {
-        id: "google/gemini-2.0-flash-lite",
-        name: "Gemini 2.0 Flash Lite",
-        api: "anthropic-messages",
-        provider: "vercel-ai-gateway",
-        baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: {
-          input: 0.075,
-          output: 0.3,
-          cacheRead: 0.02,
-          cacheWrite: 0
-        },
-        contextWindow: 1048576,
-        maxTokens: 8192
       },
       "google/gemini-2.5-flash": {
         id: "google/gemini-2.5-flash",
@@ -21019,12 +21589,12 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
+        reasoning: true,
         input: ["text", "image"],
         cost: {
-          input: 0.13,
-          output: 0.39999999999999997,
-          cacheRead: 0,
+          input: 0.15,
+          output: 0.6,
+          cacheRead: 0.015,
           cacheWrite: 0
         },
         contextWindow: 262144,
@@ -21326,7 +21896,7 @@ var init_models_generated = __esm(() => {
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
         reasoning: true,
-        input: ["text", "image"],
+        input: ["text"],
         cost: {
           input: 0.3,
           output: 1.2,
@@ -21343,7 +21913,7 @@ var init_models_generated = __esm(() => {
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
         reasoning: true,
-        input: ["text", "image"],
+        input: ["text"],
         cost: {
           input: 0.6,
           output: 2.4,
@@ -21352,6 +21922,23 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 204800,
         maxTokens: 131100
+      },
+      "minimax/minimax-m3": {
+        id: "minimax/minimax-m3",
+        name: "MiniMax M3",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.3,
+          output: 1.2,
+          cacheRead: 0.06,
+          cacheWrite: 0
+        },
+        contextWindow: 1e6,
+        maxTokens: 1e6
       },
       "mistral/codestral": {
         id: "mistral/codestral",
@@ -21488,6 +22075,23 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 256000,
         maxTokens: 256000
+      },
+      "mistral/mistral-nemo": {
+        id: "mistral/mistral-nemo",
+        name: "Mistral Nemo 12B",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0.02,
+          output: 0.04,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 131072
       },
       "mistral/mistral-small": {
         id: "mistral/mistral-small",
@@ -21641,6 +22245,40 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 262000,
         maxTokens: 262000
+      },
+      "nvidia/nemotron-3-super-120b-a12b": {
+        id: "nvidia/nemotron-3-super-120b-a12b",
+        name: "NVIDIA Nemotron 3 Super 120B A12B",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.15,
+          output: 0.65,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 256000,
+        maxTokens: 32000
+      },
+      "nvidia/nemotron-3-ultra-550b-a55b": {
+        id: "nvidia/nemotron-3-ultra-550b-a55b",
+        name: "Nemotron 3 Ultra",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.6,
+          output: 2.4,
+          cacheRead: 0.12,
+          cacheWrite: 0
+        },
+        contextWindow: 1e6,
+        maxTokens: 65000
       },
       "nvidia/nemotron-nano-12b-v2-vl": {
         id: "nvidia/nemotron-nano-12b-v2-vl",
@@ -21819,7 +22457,7 @@ var init_models_generated = __esm(() => {
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
         reasoning: true,
-        input: ["text"],
+        input: ["text", "image"],
         cost: {
           input: 1.25,
           output: 10,
@@ -22181,6 +22819,23 @@ var init_models_generated = __esm(() => {
         contextWindow: 1e6,
         maxTokens: 128000
       },
+      "openai/gpt-oss-120b": {
+        id: "openai/gpt-oss-120b",
+        name: "GPT OSS 120B",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.35,
+          output: 0.75,
+          cacheRead: 0.25,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 131000
+      },
       "openai/gpt-oss-20b": {
         id: "openai/gpt-oss-20b",
         name: "GPT OSS 20B",
@@ -22350,6 +23005,40 @@ var init_models_generated = __esm(() => {
         },
         contextWindow: 200000,
         maxTokens: 8000
+      },
+      "stepfun/step-3.5-flash": {
+        id: "stepfun/step-3.5-flash",
+        name: "StepFun 3.5 Flash",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0.09,
+          output: 0.3,
+          cacheRead: 0,
+          cacheWrite: 0.02
+        },
+        contextWindow: 262114,
+        maxTokens: 262114
+      },
+      "stepfun/step-3.7-flash": {
+        id: "stepfun/step-3.7-flash",
+        name: "Step 3.7 Flash",
+        api: "anthropic-messages",
+        provider: "vercel-ai-gateway",
+        baseUrl: "https://ai-gateway.vercel.sh",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0.19999999999999998,
+          output: 1.15,
+          cacheRead: 0.04,
+          cacheWrite: 0
+        },
+        contextWindow: 256000,
+        maxTokens: 256000
       },
       "xai/grok-4.1-fast-non-reasoning": {
         id: "xai/grok-4.1-fast-non-reasoning",
@@ -22629,7 +23318,7 @@ var init_models_generated = __esm(() => {
         api: "anthropic-messages",
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
-        reasoning: false,
+        reasoning: true,
         input: ["text", "image"],
         cost: {
           input: 0.6,
@@ -22783,7 +23472,7 @@ var init_models_generated = __esm(() => {
         provider: "vercel-ai-gateway",
         baseUrl: "https://ai-gateway.vercel.sh",
         reasoning: true,
-        input: ["text"],
+        input: ["text", "image"],
         cost: {
           input: 1.4,
           output: 4.4,
@@ -22860,7 +23549,7 @@ var init_models_generated = __esm(() => {
           cacheRead: 0.2,
           cacheWrite: 0
         },
-        contextWindow: 2000000,
+        contextWindow: 1e6,
         maxTokens: 30000
       },
       "grok-4.20-0309-reasoning": {
@@ -22877,7 +23566,7 @@ var init_models_generated = __esm(() => {
           cacheRead: 0.2,
           cacheWrite: 0
         },
-        contextWindow: 2000000,
+        contextWindow: 1e6,
         maxTokens: 30000
       },
       "grok-4.3": {
@@ -23325,6 +24014,98 @@ var init_models_generated = __esm(() => {
         api: "openai-completions",
         provider: "zai",
         baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        compat: { supportsDeveloperRole: false, thinkingFormat: "zai", zaiToolStream: true },
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 200000,
+        maxTokens: 131072
+      }
+    },
+    "zai-coding-cn": {
+      "glm-4.5-air": {
+        id: "glm-4.5-air",
+        name: "GLM-4.5-Air",
+        api: "openai-completions",
+        provider: "zai-coding-cn",
+        baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+        compat: { supportsDeveloperRole: false, thinkingFormat: "zai" },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 98304
+      },
+      "glm-4.7": {
+        id: "glm-4.7",
+        name: "GLM-4.7",
+        api: "openai-completions",
+        provider: "zai-coding-cn",
+        baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+        compat: { supportsDeveloperRole: false, thinkingFormat: "zai", zaiToolStream: true },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 204800,
+        maxTokens: 131072
+      },
+      "glm-5-turbo": {
+        id: "glm-5-turbo",
+        name: "GLM-5-Turbo",
+        api: "openai-completions",
+        provider: "zai-coding-cn",
+        baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+        compat: { supportsDeveloperRole: false, thinkingFormat: "zai", zaiToolStream: true },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 200000,
+        maxTokens: 131072
+      },
+      "glm-5.1": {
+        id: "glm-5.1",
+        name: "GLM-5.1",
+        api: "openai-completions",
+        provider: "zai-coding-cn",
+        baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+        compat: { supportsDeveloperRole: false, thinkingFormat: "zai", zaiToolStream: true },
+        reasoning: true,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 200000,
+        maxTokens: 131072
+      },
+      "glm-5v-turbo": {
+        id: "glm-5v-turbo",
+        name: "GLM-5V-Turbo",
+        api: "openai-completions",
+        provider: "zai-coding-cn",
+        baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
         compat: { supportsDeveloperRole: false, thinkingFormat: "zai", zaiToolStream: true },
         reasoning: true,
         input: ["text", "image"],
@@ -24591,8 +25372,8 @@ function supportsFormData2(fetchObject) {
 }
 var checkFileSupport2 = () => {
   if (typeof File === "undefined") {
-    const { process: process2 } = globalThis;
-    const isOldNode = typeof process2?.versions?.node === "string" && parseInt(process2.versions.node.split(".")) < 20;
+    const { process: process3 } = globalThis;
+    const isOldNode = typeof process3?.versions?.node === "string" && parseInt(process3.versions.node.split(".")) < 20;
     throw new Error("`File` is not defined as a global, which is required for file uploads." + (isOldNode ? " Update to Node 20 LTS or newer, or set `globalThis.File` to `import('node:buffer').File`." : ""));
   }
 }, isAsyncIterable2 = (value2) => value2 != null && typeof value2 === "object" && typeof value2[Symbol.asyncIterator] === "function", multipartFormRequestOptions2 = async (opts, fetch2, stripFilenames = true) => {
@@ -28045,12 +28826,12 @@ var init_resources3 = __esm(() => {
 });
 
 // node_modules/@anthropic-ai/sdk/internal/utils/env.mjs
-var readEnv2 = (env2) => {
+var readEnv2 = (env3) => {
   if (typeof globalThis.process !== "undefined") {
-    return globalThis.process.env?.[env2]?.trim() || undefined;
+    return globalThis.process.env?.[env3]?.trim() || undefined;
   }
   if (typeof globalThis.Deno !== "undefined") {
-    return globalThis.Deno.env?.get?.(env2)?.trim() || undefined;
+    return globalThis.Deno.env?.get?.(env3)?.trim() || undefined;
   }
   return;
 };
@@ -29160,6 +29941,7 @@ function getAnthropicCompat(model) {
     supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? !isFireworks,
     sendSessionAffinityHeaders: model.compat?.sendSessionAffinityHeaders ?? !!(isFireworks || isCloudflareAiGatewayAnthropic),
     supportsCacheControlOnTools: model.compat?.supportsCacheControlOnTools ?? !isFireworks,
+    supportsTemperature: model.compat?.supportsTemperature ?? true,
     allowEmptySignature: model.compat?.allowEmptySignature ?? false
   };
 }
@@ -29405,9 +30187,10 @@ function createClient2(model, apiKey, interleavedThinking, useFineGrainedToolStr
 }
 function buildParams2(model, context, isOAuthToken2, options3) {
   const { cacheControl } = getCacheControl(model, options3?.cacheRetention);
+  const compat = getAnthropicCompat(model);
   const params = {
     model: model.id,
-    messages: convertMessages(context.messages, model, isOAuthToken2, cacheControl, getAnthropicCompat(model).allowEmptySignature),
+    messages: convertMessages(context.messages, model, isOAuthToken2, cacheControl, compat.allowEmptySignature),
     max_tokens: options3?.maxTokens ?? model.maxTokens,
     stream: true
   };
@@ -29435,11 +30218,10 @@ function buildParams2(model, context, isOAuthToken2, options3) {
       }
     ];
   }
-  if (options3?.temperature !== undefined && !options3?.thinkingEnabled) {
+  if (options3?.temperature !== undefined && !options3?.thinkingEnabled && compat.supportsTemperature) {
     params.temperature = options3.temperature;
   }
   if (context.tools && context.tools.length > 0) {
-    const compat = getAnthropicCompat(model);
     params.tools = convertTools(context.tools, isOAuthToken2, compat.supportsEagerToolInputStreaming, compat.supportsCacheControlOnTools ? cacheControl : undefined);
   }
   if (model.reasoning) {
@@ -29697,7 +30479,10 @@ var claudeCodeVersion = "2.1.75", claudeCodeTools, ccToolLookup, toClaudeCodeNam
         client = options3.client;
         isOAuth = false;
       } else {
-        const apiKey = options3?.apiKey ?? getEnvApiKey(model.provider) ?? "";
+        const apiKey = options3?.apiKey;
+        if (!apiKey) {
+          throw new Error(`No API key for provider: ${model.provider}`);
+        }
         let copilotDynamicHeaders;
         if (model.provider === "github-copilot") {
           const hasImages = hasCopilotVisionInput(context.messages);
@@ -29892,7 +30677,7 @@ var claudeCodeVersion = "2.1.75", claudeCodeTools, ccToolLookup, toClaudeCodeNam
   })();
   return stream;
 }, streamSimpleAnthropic = (model, context, options3) => {
-  const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+  const apiKey = options3?.apiKey;
   if (!apiKey) {
     throw new Error(`No API key for provider: ${model.provider}`);
   }
@@ -29918,7 +30703,6 @@ var claudeCodeVersion = "2.1.75", claudeCodeTools, ccToolLookup, toClaudeCodeNam
 };
 var init_anthropic = __esm(() => {
   init_sdk();
-  init_env_api_keys();
   init_models2();
   init_event_stream();
   init_json_parse();
@@ -30028,7 +30812,8 @@ function convertResponsesMessages(model, context, allowedToolCallProviders, opti
   const transformedMessages = transformMessages(context.messages, model, normalizeToolCallId2);
   const includeSystemPrompt = options3?.includeSystemPrompt ?? true;
   if (includeSystemPrompt && context.systemPrompt) {
-    const role = model.reasoning ? "developer" : "system";
+    const compat = model.compat;
+    const role = model.reasoning && compat?.supportsDeveloperRole !== false ? "developer" : "system";
     messages2.push({
       role,
       content: sanitizeSurrogates(context.systemPrompt)
@@ -30500,12 +31285,6 @@ function resolveAzureConfig(model, options3) {
   };
 }
 function createClient3(model, apiKey, options3) {
-  if (!apiKey) {
-    if (!process.env.AZURE_OPENAI_API_KEY) {
-      throw new Error("Azure OpenAI API key is required. Set AZURE_OPENAI_API_KEY environment variable or pass it as an argument.");
-    }
-    apiKey = process.env.AZURE_OPENAI_API_KEY;
-  }
   const headers = { ...model.headers };
   if (options3?.headers) {
     Object.assign(headers, options3.headers);
@@ -30525,7 +31304,8 @@ function buildParams3(model, context, options3, deploymentName) {
     model: deploymentName,
     input: messages2,
     stream: true,
-    prompt_cache_key: clampOpenAIPromptCacheKey(options3?.sessionId)
+    prompt_cache_key: clampOpenAIPromptCacheKey(options3?.sessionId),
+    store: false
   };
   if (options3?.maxTokens) {
     params.max_output_tokens = options3?.maxTokens;
@@ -30574,7 +31354,10 @@ var DEFAULT_AZURE_API_VERSION = "v1", AZURE_TOOL_CALL_PROVIDERS, streamAzureOpen
       timestamp: Date.now()
     };
     try {
-      const apiKey = options3?.apiKey || getEnvApiKey(model.provider) || "";
+      const apiKey = options3?.apiKey;
+      if (!apiKey) {
+        throw new Error(`No API key for provider: ${model.provider}`);
+      }
       const client = createClient3(model, apiKey, options3);
       let params = buildParams3(model, context, options3, deploymentName);
       const nextParams = await options3?.onPayload?.(params, model);
@@ -30611,7 +31394,7 @@ var DEFAULT_AZURE_API_VERSION = "v1", AZURE_TOOL_CALL_PROVIDERS, streamAzureOpen
   })();
   return stream;
 }, streamSimpleAzureOpenAIResponses = (model, context, options3) => {
-  const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+  const apiKey = options3?.apiKey;
   if (!apiKey) {
     throw new Error(`No API key for provider: ${model.provider}`);
   }
@@ -30625,7 +31408,6 @@ var DEFAULT_AZURE_API_VERSION = "v1", AZURE_TOOL_CALL_PROVIDERS, streamAzureOpen
 };
 var init_azure_openai_responses = __esm(() => {
   init_openai();
-  init_env_api_keys();
   init_models2();
   init_event_stream();
   init_openai_responses_shared();
@@ -31513,7 +32295,7 @@ var require_ms = __commonJS((exports, module3) => {
 
 // node_modules/debug/src/common.js
 var require_common2 = __commonJS((exports, module3) => {
-  function setup(env2) {
+  function setup(env3) {
     createDebug.debug = createDebug;
     createDebug.default = createDebug;
     createDebug.coerce = coerce;
@@ -31522,8 +32304,8 @@ var require_common2 = __commonJS((exports, module3) => {
     createDebug.enabled = enabled;
     createDebug.humanize = require_ms();
     createDebug.destroy = destroy;
-    Object.keys(env2).forEach((key) => {
-      createDebug[key] = env2[key];
+    Object.keys(env3).forEach((key) => {
+      createDebug[key] = env3[key];
     });
     createDebug.names = [];
     createDebug.skips = [];
@@ -31858,26 +32640,26 @@ var require_has_flag = __commonJS((exports, module3) => {
 
 // node_modules/supports-color/index.js
 var require_supports_color = __commonJS((exports, module3) => {
-  var os = __require("os");
-  var tty = __require("tty");
-  var hasFlag = require_has_flag();
-  var { env: env2 } = process;
+  var os2 = __require("os");
+  var tty2 = __require("tty");
+  var hasFlag2 = require_has_flag();
+  var { env: env3 } = process;
   var forceColor;
-  if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
+  if (hasFlag2("no-color") || hasFlag2("no-colors") || hasFlag2("color=false") || hasFlag2("color=never")) {
     forceColor = 0;
-  } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
+  } else if (hasFlag2("color") || hasFlag2("colors") || hasFlag2("color=true") || hasFlag2("color=always")) {
     forceColor = 1;
   }
-  if ("FORCE_COLOR" in env2) {
-    if (env2.FORCE_COLOR === "true") {
+  if ("FORCE_COLOR" in env3) {
+    if (env3.FORCE_COLOR === "true") {
       forceColor = 1;
-    } else if (env2.FORCE_COLOR === "false") {
+    } else if (env3.FORCE_COLOR === "false") {
       forceColor = 0;
     } else {
-      forceColor = env2.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env2.FORCE_COLOR, 10), 3);
+      forceColor = env3.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env3.FORCE_COLOR, 10), 3);
     }
   }
-  function translateLevel(level) {
+  function translateLevel2(level) {
     if (level === 0) {
       return false;
     }
@@ -31888,76 +32670,76 @@ var require_supports_color = __commonJS((exports, module3) => {
       has16m: level >= 3
     };
   }
-  function supportsColor(haveStream, streamIsTTY) {
+  function supportsColor2(haveStream, streamIsTTY) {
     if (forceColor === 0) {
       return 0;
     }
-    if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
+    if (hasFlag2("color=16m") || hasFlag2("color=full") || hasFlag2("color=truecolor")) {
       return 3;
     }
-    if (hasFlag("color=256")) {
+    if (hasFlag2("color=256")) {
       return 2;
     }
     if (haveStream && !streamIsTTY && forceColor === undefined) {
       return 0;
     }
     const min = forceColor || 0;
-    if (env2.TERM === "dumb") {
+    if (env3.TERM === "dumb") {
       return min;
     }
     if (process.platform === "win32") {
-      const osRelease = os.release().split(".");
+      const osRelease = os2.release().split(".");
       if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
         return Number(osRelease[2]) >= 14931 ? 3 : 2;
       }
       return 1;
     }
-    if ("CI" in env2) {
-      if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => (sign in env2)) || env2.CI_NAME === "codeship") {
+    if ("CI" in env3) {
+      if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => (sign in env3)) || env3.CI_NAME === "codeship") {
         return 1;
       }
       return min;
     }
-    if ("TEAMCITY_VERSION" in env2) {
-      return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env2.TEAMCITY_VERSION) ? 1 : 0;
+    if ("TEAMCITY_VERSION" in env3) {
+      return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env3.TEAMCITY_VERSION) ? 1 : 0;
     }
-    if (env2.COLORTERM === "truecolor") {
+    if (env3.COLORTERM === "truecolor") {
       return 3;
     }
-    if ("TERM_PROGRAM" in env2) {
-      const version = parseInt((env2.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
-      switch (env2.TERM_PROGRAM) {
+    if ("TERM_PROGRAM" in env3) {
+      const version = parseInt((env3.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+      switch (env3.TERM_PROGRAM) {
         case "iTerm.app":
           return version >= 3 ? 3 : 2;
         case "Apple_Terminal":
           return 2;
       }
     }
-    if (/-256(color)?$/i.test(env2.TERM)) {
+    if (/-256(color)?$/i.test(env3.TERM)) {
       return 2;
     }
-    if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env2.TERM)) {
+    if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env3.TERM)) {
       return 1;
     }
-    if ("COLORTERM" in env2) {
+    if ("COLORTERM" in env3) {
       return 1;
     }
     return min;
   }
   function getSupportLevel(stream) {
-    const level = supportsColor(stream, stream && stream.isTTY);
-    return translateLevel(level);
+    const level = supportsColor2(stream, stream && stream.isTTY);
+    return translateLevel2(level);
   }
   module3.exports = {
     supportsColor: getSupportLevel,
-    stdout: translateLevel(supportsColor(true, tty.isatty(1))),
-    stderr: translateLevel(supportsColor(true, tty.isatty(2)))
+    stdout: translateLevel2(supportsColor2(true, tty2.isatty(1))),
+    stderr: translateLevel2(supportsColor2(true, tty2.isatty(2)))
   };
 });
 
 // node_modules/debug/src/node.js
 var require_node = __commonJS((exports, module3) => {
-  var tty = __require("tty");
+  var tty2 = __require("tty");
   var util = __require("util");
   exports.init = init;
   exports.log = log2;
@@ -31968,8 +32750,8 @@ var require_node = __commonJS((exports, module3) => {
   exports.destroy = util.deprecate(() => {}, "Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.");
   exports.colors = [6, 2, 3, 4, 5, 1];
   try {
-    const supportsColor = require_supports_color();
-    if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
+    const supportsColor2 = require_supports_color();
+    if (supportsColor2 && (supportsColor2.stderr || supportsColor2).level >= 2) {
       exports.colors = [
         20,
         21,
@@ -32070,7 +32852,7 @@ var require_node = __commonJS((exports, module3) => {
     return obj;
   }, {});
   function useColors() {
-    return "colors" in exports.inspectOpts ? Boolean(exports.inspectOpts.colors) : tty.isatty(process.stderr.fd);
+    return "colors" in exports.inspectOpts ? Boolean(exports.inspectOpts.colors) : tty2.isatty(process.stderr.fd);
   }
   function formatArgs(args2) {
     const { namespace: name, useColors: useColors2 } = this;
@@ -36712,14 +37494,14 @@ var require_streams = __commonJS(() => {
   var POOL_SIZE = 65536;
   if (!globalThis.ReadableStream) {
     try {
-      const process2 = __require("node:process");
-      const { emitWarning } = process2;
+      const process3 = __require("node:process");
+      const { emitWarning } = process3;
       try {
-        process2.emitWarning = () => {};
+        process3.emitWarning = () => {};
         Object.assign(globalThis, __require("node:stream/web"));
-        process2.emitWarning = emitWarning;
+        process3.emitWarning = emitWarning;
       } catch (error3) {
-        process2.emitWarning = emitWarning;
+        process3.emitWarning = emitWarning;
         throw error3;
       }
     } catch (error3) {
@@ -41059,7 +41841,7 @@ var require_logging_utils = __commonJS((exports) => {
   exports.setBackend = setBackend;
   exports.log = log2;
   var events_1 = __require("events");
-  var process2 = __importStar(__require("process"));
+  var process3 = __importStar(__require("process"));
   var util = __importStar(__require("util"));
   var colours_1 = require_colours();
   var LogSeverity;
@@ -41109,7 +41891,7 @@ var require_logging_utils = __commonJS((exports) => {
       this.cached = new Map;
       this.filters = [];
       this.filtersSet = false;
-      let nodeFlag = (_a4 = process2.env[exports.env.nodeEnables]) !== null && _a4 !== undefined ? _a4 : "*";
+      let nodeFlag = (_a4 = process3.env[exports.env.nodeEnables]) !== null && _a4 !== undefined ? _a4 : "*";
       if (nodeFlag === "all") {
         nodeFlag = "*";
       }
@@ -41149,7 +41931,7 @@ var require_logging_utils = __commonJS((exports) => {
       return (fields, ...args2) => {
         var _a4;
         const nscolour = `${colours_1.Colours.green}${namespace}${colours_1.Colours.reset}`;
-        const pid = `${colours_1.Colours.yellow}${process2.pid}${colours_1.Colours.reset}`;
+        const pid = `${colours_1.Colours.yellow}${process3.pid}${colours_1.Colours.reset}`;
         let level;
         switch (fields.severity) {
           case LogSeverity.ERROR:
@@ -41196,8 +41978,8 @@ var require_logging_utils = __commonJS((exports) => {
     }
     setFilters() {
       var _a4;
-      const existingFilters = (_a4 = process2.env["NODE_DEBUG"]) !== null && _a4 !== undefined ? _a4 : "";
-      process2.env["NODE_DEBUG"] = `${existingFilters}${existingFilters ? "," : ""}${this.filters.join(",")}`;
+      const existingFilters = (_a4 = process3.env["NODE_DEBUG"]) !== null && _a4 !== undefined ? _a4 : "";
+      process3.env["NODE_DEBUG"] = `${existingFilters}${existingFilters ? "," : ""}${this.filters.join(",")}`;
     }
   }
   function getDebugBackend(debugPkg) {
@@ -41247,7 +42029,7 @@ var require_logging_utils = __commonJS((exports) => {
   }
   function log2(namespace, parent) {
     if (!cachedBackend) {
-      const enablesFlag = process2.env[exports.env.nodeEnables];
+      const enablesFlag = process3.env[exports.env.nodeEnables];
       if (!enablesFlag) {
         return exports.placeholder;
       }
@@ -42068,7 +42850,7 @@ var require_util2 = __commonJS((exports) => {
   exports.isValidFile = isValidFile;
   exports.getWellKnownCertificateConfigFileLocation = getWellKnownCertificateConfigFileLocation;
   var fs2 = __require("fs");
-  var os = __require("os");
+  var os2 = __require("os");
   var path3 = __require("path");
   var WELL_KNOWN_CERTIFICATE_CONFIG_FILE = "certificate_config.json";
   var CLOUDSDK_CONFIG_DIRECTORY = "gcloud";
@@ -42141,7 +42923,7 @@ var require_util2 = __commonJS((exports) => {
     return path3.join(configDir, WELL_KNOWN_CERTIFICATE_CONFIG_FILE);
   }
   function _isWindows() {
-    return os.platform().startsWith("win");
+    return os2.platform().startsWith("win");
   }
 });
 
@@ -42423,8 +43205,8 @@ var require_loginticket = __commonJS((exports) => {
   class LoginTicket {
     envelope;
     payload;
-    constructor(env2, pay) {
-      this.envelope = env2;
+    constructor(env3, pay) {
+      this.envelope = env3;
       this.payload = pay;
     }
     getEnvelope() {
@@ -43186,25 +43968,25 @@ var require_envDetect = __commonJS((exports) => {
     return envPromise;
   }
   async function getEnvMemoized() {
-    let env2 = GCPEnv.NONE;
+    let env3 = GCPEnv.NONE;
     if (isAppEngine()) {
-      env2 = GCPEnv.APP_ENGINE;
+      env3 = GCPEnv.APP_ENGINE;
     } else if (isCloudFunction()) {
-      env2 = GCPEnv.CLOUD_FUNCTIONS;
+      env3 = GCPEnv.CLOUD_FUNCTIONS;
     } else if (await isComputeEngine()) {
       if (await isKubernetesEngine()) {
-        env2 = GCPEnv.KUBERNETES_ENGINE;
+        env3 = GCPEnv.KUBERNETES_ENGINE;
       } else if (isCloudRun()) {
-        env2 = GCPEnv.CLOUD_RUN;
+        env3 = GCPEnv.CLOUD_RUN;
       } else if (isCloudRunJob()) {
-        env2 = GCPEnv.CLOUD_RUN_JOBS;
+        env3 = GCPEnv.CLOUD_RUN_JOBS;
       } else {
-        env2 = GCPEnv.COMPUTE_ENGINE;
+        env3 = GCPEnv.COMPUTE_ENGINE;
       }
     } else {
-      env2 = GCPEnv.NONE;
+      env3 = GCPEnv.NONE;
     }
-    return env2;
+    return env3;
   }
   function isAppEngine() {
     return !!(process.env.GAE_SERVICE || process.env.GAE_MODULE_NAME);
@@ -46230,7 +47012,7 @@ var require_googleauth = __commonJS((exports) => {
   var fs2 = __require("fs");
   var gaxios_1 = require_src2();
   var gcpMetadata = require_src4();
-  var os = __require("os");
+  var os2 = __require("os");
   var path3 = __require("path");
   var crypto_1 = require_crypto3();
   var computeclient_1 = require_computeclient();
@@ -46583,7 +47365,7 @@ var require_googleauth = __commonJS((exports) => {
       return new jwtclient_1.JWT({ ...options3, apiKey });
     }
     _isWindows() {
-      const sys = os.platform();
+      const sys = os2.platform();
       if (sys && sys.length >= 3) {
         if (sys.substring(0, 3).toLowerCase() === "win") {
           return true;
@@ -62695,9 +63477,9 @@ class GoogleGenAI {
     this.fileSearchStores = new FileSearchStores(this.apiClient);
   }
 }
-function getEnv(env2) {
+function getEnv(env3) {
   var _a5, _b, _c;
-  return (_c = (_b = (_a5 = process === null || process === undefined ? undefined : process.env) === null || _a5 === undefined ? undefined : _a5[env2]) === null || _b === undefined ? undefined : _b.trim()) !== null && _c !== undefined ? _c : undefined;
+  return (_c = (_b = (_a5 = process === null || process === undefined ? undefined : process.env) === null || _a5 === undefined ? undefined : _a5[env3]) === null || _b === undefined ? undefined : _b.trim()) !== null && _c !== undefined ? _c : undefined;
 }
 function stringToBoolean(str2) {
   if (str2 === undefined) {
@@ -62769,8 +63551,8 @@ var import_p_retry, import_google_auth_library, _defaultBaseGeminiUrl = undefine
 }, VERSION4 = "0.0.1", checkFileSupport3 = () => {
   var _a4;
   if (typeof File === "undefined") {
-    const { process: process2 } = globalThis;
-    const isOldNode = typeof ((_a4 = process2 === null || process2 === undefined ? undefined : process2.versions) === null || _a4 === undefined ? undefined : _a4.node) === "string" && parseInt(process2.versions.node.split(".")) < 20;
+    const { process: process3 } = globalThis;
+    const isOldNode = typeof ((_a4 = process3 === null || process3 === undefined ? undefined : process3.versions) === null || _a4 === undefined ? undefined : _a4.node) === "string" && parseInt(process3.versions.node.split(".")) < 20;
     throw new Error("`File` is not defined as a global, which is required for file uploads." + (isOldNode ? " Update to Node 20 LTS or newer, or set `globalThis.File` to `import('node:buffer').File`." : ""));
   }
 }, isAsyncIterable3 = (value2) => value2 != null && typeof value2 === "object" && typeof value2[Symbol.asyncIterator] === "function", isBlobLike3 = (value2) => value2 != null && typeof value2 === "object" && typeof value2.size === "number" && typeof value2.type === "string" && typeof value2.text === "function" && typeof value2.slice === "function" && typeof value2.arrayBuffer === "function", isFileLike3 = (value2) => value2 != null && typeof value2 === "object" && typeof value2.name === "string" && typeof value2.lastModified === "number" && isBlobLike3(value2), isResponseLike3 = (value2) => value2 != null && typeof value2 === "object" && typeof value2.url === "string" && typeof value2.blob === "function", EMPTY3, createPathTagFunction3 = (pathEncoder = encodeURIPath3) => function path3(statics, ...params) {
@@ -62872,13 +63654,13 @@ ${underline}`);
     }
   }
   return { [brand_privateNullableHeaders3]: true, values: targetHeaders, nulls: nullHeaders };
-}, readEnv3 = (env2) => {
+}, readEnv3 = (env3) => {
   var _a4, _b, _c, _d, _e;
   if (typeof globalThis.process !== "undefined") {
-    return ((_b = (_a4 = globalThis.process.env) === null || _a4 === undefined ? undefined : _a4[env2]) === null || _b === undefined ? undefined : _b.trim()) || undefined;
+    return ((_b = (_a4 = globalThis.process.env) === null || _a4 === undefined ? undefined : _a4[env3]) === null || _b === undefined ? undefined : _b.trim()) || undefined;
   }
   if (typeof globalThis.Deno !== "undefined") {
-    return ((_e = (_d = (_c = globalThis.Deno.env) === null || _c === undefined ? undefined : _c.get) === null || _d === undefined ? undefined : _d.call(_c, env2)) === null || _e === undefined ? undefined : _e.trim()) || undefined;
+    return ((_e = (_d = (_c = globalThis.Deno.env) === null || _c === undefined ? undefined : _c.get) === null || _d === undefined ? undefined : _d.call(_c, env3)) === null || _e === undefined ? undefined : _e.trim()) || undefined;
   }
   return;
 }, _a4, GeminiNextGenAPIClient, GOOGLE_API_KEY_HEADER = "x-goog-api-key", REQUIRED_VERTEX_AI_SCOPE = "https://www.googleapis.com/auth/cloud-platform", Tunings, MAX_CHUNK_SIZE, MAX_RETRY_COUNT = 3, INITIAL_RETRY_DELAY_MS = 1000, DELAY_MULTIPLIER = 2, X_GOOG_UPLOAD_STATUS_HEADER_FIELD = "x-goog-upload-status", NodeFiles, LANGUAGE_LABEL_PREFIX = "gl-node/";
@@ -67064,7 +67846,10 @@ var toolCallCounter = 0, streamGoogle = (model, context, options3) => {
       timestamp: Date.now()
     };
     try {
-      const apiKey = options3?.apiKey || getEnvApiKey(model.provider) || "";
+      const apiKey = options3?.apiKey;
+      if (!apiKey) {
+        throw new Error(`No API key for provider: ${model.provider}`);
+      }
       const client = createClient4(model, apiKey, options3?.headers);
       let params = buildParams4(model, context, options3);
       const nextParams = await options3?.onPayload?.(params, model);
@@ -67235,7 +68020,7 @@ var toolCallCounter = 0, streamGoogle = (model, context, options3) => {
   })();
   return stream;
 }, streamSimpleGoogle = (model, context, options3) => {
-  const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+  const apiKey = options3?.apiKey;
   if (!apiKey) {
     throw new Error(`No API key for provider: ${model.provider}`);
   }
@@ -67265,7 +68050,6 @@ var toolCallCounter = 0, streamGoogle = (model, context, options3) => {
 };
 var init_google = __esm(() => {
   init_node();
-  init_env_api_keys();
   init_models2();
   init_event_stream();
   init_google_shared();
@@ -67325,7 +68109,7 @@ function baseUrlIncludesApiVersion(baseUrl) {
   }
 }
 function resolveApiKey(options3) {
-  const apiKey = options3?.apiKey?.trim() || process.env.GOOGLE_CLOUD_API_KEY?.trim();
+  const apiKey = options3?.apiKey?.trim();
   if (!apiKey || apiKey === GCP_VERTEX_CREDENTIALS_MARKER || isPlaceholderApiKey(apiKey)) {
     return;
   }
@@ -67927,12 +68711,12 @@ function $constructor(name, initializer, params) {
     }
     inst._zod.traits.add(name);
     initializer(inst, def);
-    const proto = _.prototype;
-    const keys2 = Object.keys(proto);
+    const proto2 = _.prototype;
+    const keys2 = Object.keys(proto2);
     for (let i2 = 0;i2 < keys2.length; i2++) {
       const k = keys2[i2];
       if (!(k in inst)) {
-        inst[k] = proto[k].bind(inst);
+        inst[k] = proto2[k].bind(inst);
       }
     }
   }
@@ -78387,7 +79171,7 @@ function initializeContext(params) {
     external: params?.external ?? undefined
   };
 }
-function process2(schema2, ctx, _params = { path: [], schemaPath: [] }) {
+function process3(schema2, ctx, _params = { path: [], schemaPath: [] }) {
   var _a6;
   const def = schema2._zod.def;
   const seen = ctx.seen.get(schema2);
@@ -78424,7 +79208,7 @@ function process2(schema2, ctx, _params = { path: [], schemaPath: [] }) {
     if (parent) {
       if (!result.ref)
         result.ref = parent;
-      process2(parent, ctx, params);
+      process3(parent, ctx, params);
       ctx.seen.get(parent).isParent = true;
     }
   }
@@ -78700,13 +79484,13 @@ function isTransforming(_schema, _ctx) {
 }
 var createToJSONSchemaMethod = (schema2, processors = {}) => (params) => {
   const ctx = initializeContext({ ...params, processors });
-  process2(schema2, ctx);
+  process3(schema2, ctx);
   extractDefs(ctx, schema2);
   return finalize(ctx, schema2);
 }, createStandardJSONSchemaMethod = (schema2, io, processors = {}) => (params) => {
   const { libraryOptions, target: target2 } = params ?? {};
   const ctx = initializeContext({ ...libraryOptions ?? {}, target: target2, io, processors });
-  process2(schema2, ctx);
+  process3(schema2, ctx);
   extractDefs(ctx, schema2);
   return finalize(ctx, schema2);
 };
@@ -78722,7 +79506,7 @@ function toJSONSchema(input, params) {
     const defs = {};
     for (const entry of registry2._idmap.entries()) {
       const [_, schema2] = entry;
-      process2(schema2, ctx2);
+      process3(schema2, ctx2);
     }
     const schemas = {};
     const external = {
@@ -78745,7 +79529,7 @@ function toJSONSchema(input, params) {
     return { schemas };
   }
   const ctx = initializeContext({ ...params, processors: allProcessors });
-  process2(input, ctx);
+  process3(input, ctx);
   extractDefs(ctx, input);
   return finalize(ctx, input);
 }
@@ -78965,7 +79749,7 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
   if (typeof maximum === "number")
     json.maxItems = maximum;
   json.type = "array";
-  json.items = process2(def.element, ctx, { ...params, path: [...params.path, "items"] });
+  json.items = process3(def.element, ctx, { ...params, path: [...params.path, "items"] });
 }, objectProcessor = (schema2, ctx, _json, params) => {
   const json = _json;
   const def = schema2._zod.def;
@@ -78973,7 +79757,7 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
   json.properties = {};
   const shape = def.shape;
   for (const key in shape) {
-    json.properties[key] = process2(shape[key], ctx, {
+    json.properties[key] = process3(shape[key], ctx, {
       ...params,
       path: [...params.path, "properties", key]
     });
@@ -78996,7 +79780,7 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
     if (ctx.io === "output")
       json.additionalProperties = false;
   } else if (def.catchall) {
-    json.additionalProperties = process2(def.catchall, ctx, {
+    json.additionalProperties = process3(def.catchall, ctx, {
       ...params,
       path: [...params.path, "additionalProperties"]
     });
@@ -79004,7 +79788,7 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
 }, unionProcessor = (schema2, ctx, json, params) => {
   const def = schema2._zod.def;
   const isExclusive = def.inclusive === false;
-  const options3 = def.options.map((x2, i2) => process2(x2, ctx, {
+  const options3 = def.options.map((x2, i2) => process3(x2, ctx, {
     ...params,
     path: [...params.path, isExclusive ? "oneOf" : "anyOf", i2]
   }));
@@ -79015,11 +79799,11 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
   }
 }, intersectionProcessor = (schema2, ctx, json, params) => {
   const def = schema2._zod.def;
-  const a = process2(def.left, ctx, {
+  const a = process3(def.left, ctx, {
     ...params,
     path: [...params.path, "allOf", 0]
   });
-  const b = process2(def.right, ctx, {
+  const b = process3(def.right, ctx, {
     ...params,
     path: [...params.path, "allOf", 1]
   });
@@ -79035,11 +79819,11 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
   json.type = "array";
   const prefixPath = ctx.target === "draft-2020-12" ? "prefixItems" : "items";
   const restPath = ctx.target === "draft-2020-12" ? "items" : ctx.target === "openapi-3.0" ? "items" : "additionalItems";
-  const prefixItems = def.items.map((x2, i2) => process2(x2, ctx, {
+  const prefixItems = def.items.map((x2, i2) => process3(x2, ctx, {
     ...params,
     path: [...params.path, prefixPath, i2]
   }));
-  const rest3 = def.rest ? process2(def.rest, ctx, {
+  const rest3 = def.rest ? process3(def.rest, ctx, {
     ...params,
     path: [...params.path, restPath, ...ctx.target === "openapi-3.0" ? [def.items.length] : []]
   }) : null;
@@ -79078,7 +79862,7 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
   const keyBag = keyType._zod.bag;
   const patterns2 = keyBag?.patterns;
   if (def.mode === "loose" && patterns2 && patterns2.size > 0) {
-    const valueSchema = process2(def.valueType, ctx, {
+    const valueSchema = process3(def.valueType, ctx, {
       ...params,
       path: [...params.path, "patternProperties", "*"]
     });
@@ -79088,12 +79872,12 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
     }
   } else {
     if (ctx.target === "draft-07" || ctx.target === "draft-2020-12") {
-      json.propertyNames = process2(def.keyType, ctx, {
+      json.propertyNames = process3(def.keyType, ctx, {
         ...params,
         path: [...params.path, "propertyNames"]
       });
     }
-    json.additionalProperties = process2(def.valueType, ctx, {
+    json.additionalProperties = process3(def.valueType, ctx, {
       ...params,
       path: [...params.path, "additionalProperties"]
     });
@@ -79107,7 +79891,7 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
   }
 }, nullableProcessor = (schema2, ctx, json, params) => {
   const def = schema2._zod.def;
-  const inner = process2(def.innerType, ctx, params);
+  const inner = process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   if (ctx.target === "openapi-3.0") {
     seen.ref = def.innerType;
@@ -79117,25 +79901,25 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
   }
 }, nonoptionalProcessor = (schema2, ctx, _json, params) => {
   const def = schema2._zod.def;
-  process2(def.innerType, ctx, params);
+  process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
 }, defaultProcessor = (schema2, ctx, json, params) => {
   const def = schema2._zod.def;
-  process2(def.innerType, ctx, params);
+  process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
   json.default = JSON.parse(JSON.stringify(def.defaultValue));
 }, prefaultProcessor = (schema2, ctx, json, params) => {
   const def = schema2._zod.def;
-  process2(def.innerType, ctx, params);
+  process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
   if (ctx.io === "input")
     json._prefault = JSON.parse(JSON.stringify(def.defaultValue));
 }, catchProcessor = (schema2, ctx, json, params) => {
   const def = schema2._zod.def;
-  process2(def.innerType, ctx, params);
+  process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
   let catchValue;
@@ -79148,28 +79932,28 @@ var formatMap2, stringProcessor = (schema2, ctx, _json, _params) => {
 }, pipeProcessor = (schema2, ctx, _json, params) => {
   const def = schema2._zod.def;
   const innerType = ctx.io === "input" ? def.in._zod.def.type === "transform" ? def.out : def.in : def.out;
-  process2(innerType, ctx, params);
+  process3(innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = innerType;
 }, readonlyProcessor = (schema2, ctx, json, params) => {
   const def = schema2._zod.def;
-  process2(def.innerType, ctx, params);
+  process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
   json.readOnly = true;
 }, promiseProcessor = (schema2, ctx, _json, params) => {
   const def = schema2._zod.def;
-  process2(def.innerType, ctx, params);
+  process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
 }, optionalProcessor = (schema2, ctx, _json, params) => {
   const def = schema2._zod.def;
-  process2(def.innerType, ctx, params);
+  process3(def.innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
 }, lazyProcessor = (schema2, ctx, _json, params) => {
   const innerType = schema2._zod.innerType;
-  process2(innerType, ctx, params);
+  process3(innerType, ctx, params);
   const seen = ctx.seen.get(schema2);
   seen.ref = innerType;
 }, allProcessors;
@@ -79268,7 +80052,7 @@ class JSONSchemaGenerator {
     });
   }
   process(schema2, _params = { path: [], schemaPath: [] }) {
-    return process2(schema2, this.ctx, _params);
+    return process3(schema2, this.ctx, _params);
   }
   emit(schema2, _params) {
     if (_params) {
@@ -79310,7 +80094,7 @@ __export(exports_core2, {
   safeDecode: () => safeDecode,
   registry: () => registry,
   regexes: () => exports_regexes,
-  process: () => process2,
+  process: () => process3,
   prettifyError: () => prettifyError,
   parseAsync: () => parseAsync,
   parse: () => parse,
@@ -82076,7 +82860,7 @@ function isDeno() {
   }
   return false;
 }
-function env2() {
+function env3() {
   if (envMemo) {
     return envMemo;
   }
@@ -82427,7 +83211,7 @@ class ClientSDK {
     this.#httpClient = client;
     this._options = { ...options3, hooks: this.#hooks };
     this.#logger = this._options.debugLogger;
-    if (!this.#logger && env2().MISTRAL_DEBUG) {
+    if (!this.#logger && env3().MISTRAL_DEBUG) {
       this.#logger = console;
     }
   }
@@ -83059,7 +83843,7 @@ function resolveGlobalSecurity(security, allowedFields) {
       {
         fieldName: "Authorization",
         type: "http:bearer",
-        value: security?.apiKey ?? env2().MISTRAL_API_KEY
+        value: security?.apiKey ?? env3().MISTRAL_API_KEY
       }
     ]
   ];
@@ -118952,7 +119736,7 @@ var MISTRAL_TOOL_CALL_ID_LENGTH = 9, MAX_MISTRAL_ERROR_BODY_CHARS = 4000, stream
   (async () => {
     const output = createOutput(model);
     try {
-      const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+      const apiKey = options3?.apiKey;
       if (!apiKey) {
         throw new Error(`No API key for provider: ${model.provider}`);
       }
@@ -118990,7 +119774,7 @@ var MISTRAL_TOOL_CALL_ID_LENGTH = 9, MAX_MISTRAL_ERROR_BODY_CHARS = 4000, stream
   })();
   return stream2;
 }, streamSimpleMistral = (model, context, options3) => {
-  const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+  const apiKey = options3?.apiKey;
   if (!apiKey) {
     throw new Error(`No API key for provider: ${model.provider}`);
   }
@@ -119006,7 +119790,6 @@ var MISTRAL_TOOL_CALL_ID_LENGTH = 9, MAX_MISTRAL_ERROR_BODY_CHARS = 4000, stream
 };
 var init_mistral = __esm(() => {
   init_esm2();
-  init_env_api_keys();
   init_models2();
   init_event_stream();
   init_json_parse();
@@ -119259,7 +120042,7 @@ function resolveCodexWebSocketUrl(baseUrl) {
   return url2.toString();
 }
 async function processStream(response, output, stream2, model, options3) {
-  await processResponsesStream(mapCodexEvents(parseSSE(response)), output, stream2, model, {
+  await processResponsesStream(mapCodexEvents(parseSSE(response, options3?.signal)), output, stream2, model, {
     serviceTier: options3?.serviceTier,
     resolveServiceTier: resolveCodexServiceTier,
     applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model)
@@ -119301,15 +120084,25 @@ function normalizeCodexStatus(status) {
     return;
   return CODEX_RESPONSE_STATUSES.has(status) ? status : undefined;
 }
-async function* parseSSE(response) {
+async function* parseSSE(response, signal) {
   if (!response.body)
     return;
   const reader = response.body.getReader();
   const decoder = new TextDecoder;
   let buffer = "";
+  const onAbort = () => {
+    reader.cancel().catch(() => {});
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     while (true) {
+      if (signal?.aborted) {
+        throw new Error("Request was aborted");
+      }
       const { done, value: value2 } = await reader.read();
+      if (signal?.aborted) {
+        throw new Error("Request was aborted");
+      }
       if (done)
         break;
       buffer += decoder.decode(value2, { stream: true });
@@ -119341,6 +120134,7 @@ async function* parseSSE(response) {
       }
     }
   } finally {
+    signal?.removeEventListener("abort", onAbort);
     try {
       await reader.cancel();
     } catch {}
@@ -119977,7 +120771,7 @@ var __rewriteRelativeImportExtension2 = function(path4, preserveJsx) {
       timestamp: Date.now()
     };
     try {
-      const apiKey = options3?.apiKey || getEnvApiKey(model.provider) || "";
+      const apiKey = options3?.apiKey;
       if (!apiKey) {
         throw new Error(`No API key for provider: ${model.provider}`);
       }
@@ -120114,7 +120908,7 @@ var __rewriteRelativeImportExtension2 = function(path4, preserveJsx) {
   })();
   return stream2;
 }, streamSimpleOpenAICodexResponses = (model, context, options3) => {
-  const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+  const apiKey = options3?.apiKey;
   if (!apiKey) {
     throw new Error(`No API key for provider: ${model.provider}`);
   }
@@ -120127,7 +120921,6 @@ var __rewriteRelativeImportExtension2 = function(path4, preserveJsx) {
   });
 }, CodexApiError, CodexProtocolError, OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06", SESSION_WEBSOCKET_CACHE_TTL_MS = 300000, websocketSessionCache, websocketDebugStats, websocketSseFallbackSessions, _cachedWebsocket = null, WebSocketCloseError;
 var init_openai_codex_responses = __esm(() => {
-  init_env_api_keys();
   init_models2();
   init_session_resources();
   init_event_stream();
@@ -120226,12 +121019,6 @@ function resolveCacheRetention2(cacheRetention) {
   return "short";
 }
 function createClient6(model, context, apiKey, optionsHeaders, sessionId, compat2 = getCompat(model)) {
-  if (!apiKey) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error("OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it as an argument.");
-    }
-    apiKey = process.env.OPENAI_API_KEY;
-  }
   const headers = { ...model.headers };
   if (model.provider === "github-copilot") {
     const hasImages = hasCopilotVisionInput(context.messages);
@@ -120302,7 +121089,8 @@ function buildParams6(model, context, options3, compat2 = getCompat(model), cach
     params.tool_choice = options3.toolChoice;
   }
   if (compat2.thinkingFormat === "zai" && model.reasoning) {
-    params.enable_thinking = !!options3?.reasoningEffort;
+    const zaiParams = params;
+    zaiParams.thinking = { type: options3?.reasoningEffort ? "enabled" : "disabled" };
   } else if (compat2.thinkingFormat === "qwen" && model.reasoning) {
     params.enable_thinking = !!options3?.reasoningEffort;
   } else if (compat2.thinkingFormat === "qwen-chat-template" && model.reasoning) {
@@ -120312,7 +121100,7 @@ function buildParams6(model, context, options3, compat2 = getCompat(model), cach
     };
   } else if (compat2.thinkingFormat === "deepseek" && model.reasoning) {
     params.thinking = { type: options3?.reasoningEffort ? "enabled" : "disabled" };
-    if (options3?.reasoningEffort) {
+    if (options3?.reasoningEffort && compat2.supportsReasoningEffort) {
       params.reasoning_effort = model.thinkingLevelMap?.[options3.reasoningEffort] ?? options3.reasoningEffort;
     }
   } else if (compat2.thinkingFormat === "openrouter" && model.reasoning) {
@@ -120323,6 +121111,11 @@ function buildParams6(model, context, options3, compat2 = getCompat(model), cach
       };
     } else if (model.thinkingLevelMap?.off !== null) {
       openRouterParams.reasoning = { effort: model.thinkingLevelMap?.off ?? "none" };
+    }
+  } else if (compat2.thinkingFormat === "ant-ling" && model.reasoning && options3?.reasoningEffort) {
+    const effort = model.thinkingLevelMap?.[options3.reasoningEffort];
+    if (typeof effort === "string") {
+      params.reasoning = { effort };
     }
   } else if (compat2.thinkingFormat === "together" && model.reasoning) {
     const togetherParams = params;
@@ -120345,7 +121138,7 @@ function buildParams6(model, context, options3, compat2 = getCompat(model), cach
       params.reasoning_effort = offValue;
     }
   }
-  if (model.baseUrl.includes("openrouter.ai") && model.compat?.openRouterRouting) {
+  if (model.compat?.openRouterRouting) {
     params.provider = model.compat.openRouterRouting;
   }
   if (model.baseUrl.includes("ai-gateway.vercel.sh") && model.compat?.vercelGatewayRouting) {
@@ -120666,34 +121459,38 @@ function mapStopReason4(reason) {
 function detectCompat(model) {
   const provider = model.provider;
   const baseUrl = model.baseUrl;
-  const isZai = provider === "zai" || baseUrl.includes("api.z.ai");
+  const isZai = provider === "zai" || provider === "zai-coding-cn" || baseUrl.includes("api.z.ai") || baseUrl.includes("open.bigmodel.cn");
   const isTogether = provider === "together" || baseUrl.includes("api.together.ai") || baseUrl.includes("api.together.xyz");
   const isMoonshot = provider === "moonshotai" || provider === "moonshotai-cn" || baseUrl.includes("api.moonshot.");
+  const isOpenRouter = provider === "openrouter" || baseUrl.includes("openrouter.ai");
   const isCloudflareWorkersAI = provider === "cloudflare-workers-ai" || baseUrl.includes("api.cloudflare.com");
   const isCloudflareAiGateway = provider === "cloudflare-ai-gateway" || baseUrl.includes("gateway.ai.cloudflare.com");
-  const isNonStandard = provider === "cerebras" || baseUrl.includes("cerebras.ai") || provider === "xai" || baseUrl.includes("api.x.ai") || isTogether || baseUrl.includes("chutes.ai") || baseUrl.includes("deepseek.com") || isZai || isMoonshot || provider === "opencode" || baseUrl.includes("opencode.ai") || isCloudflareWorkersAI || isCloudflareAiGateway;
-  const useMaxTokens = baseUrl.includes("chutes.ai") || isMoonshot || isCloudflareAiGateway || isTogether;
+  const isNvidia = provider === "nvidia" || baseUrl.includes("integrate.api.nvidia.com");
+  const isAntLing = provider === "ant-ling" || baseUrl.includes("api.ant-ling.com");
+  const isNonStandard = isNvidia || provider === "cerebras" || baseUrl.includes("cerebras.ai") || provider === "xai" || baseUrl.includes("api.x.ai") || isTogether || baseUrl.includes("chutes.ai") || baseUrl.includes("deepseek.com") || isZai || isMoonshot || provider === "opencode" || baseUrl.includes("opencode.ai") || isCloudflareWorkersAI || isCloudflareAiGateway || isAntLing;
+  const useMaxTokens = baseUrl.includes("chutes.ai") || isMoonshot || isCloudflareAiGateway || isTogether || isNvidia || isAntLing;
   const isGrok = provider === "xai" || baseUrl.includes("api.x.ai");
   const isDeepSeek = provider === "deepseek" || baseUrl.includes("deepseek.com");
+  const isOpenRouterDeveloperRoleModel = isOpenRouter && (model.id.startsWith("anthropic/") || model.id.startsWith("openai/"));
   const cacheControlFormat = provider === "openrouter" && model.id.startsWith("anthropic/") ? "anthropic" : undefined;
   return {
     supportsStore: !isNonStandard,
-    supportsDeveloperRole: !isNonStandard,
-    supportsReasoningEffort: !isGrok && !isZai && !isMoonshot && !isTogether && !isCloudflareAiGateway,
+    supportsDeveloperRole: isOpenRouterDeveloperRoleModel || !isNonStandard && !isOpenRouter,
+    supportsReasoningEffort: !isGrok && !isZai && !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia && !isAntLing,
     supportsUsageInStreaming: true,
     maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
     requiresToolResultName: false,
     requiresAssistantAfterToolResult: false,
     requiresThinkingAsText: false,
     requiresReasoningContentOnAssistantMessages: isDeepSeek,
-    thinkingFormat: isDeepSeek ? "deepseek" : isZai ? "zai" : isTogether ? "together" : provider === "openrouter" || baseUrl.includes("openrouter.ai") ? "openrouter" : "openai",
+    thinkingFormat: isDeepSeek ? "deepseek" : isZai ? "zai" : isTogether ? "together" : isAntLing ? "ant-ling" : isOpenRouter ? "openrouter" : "openai",
     openRouterRouting: {},
     vercelGatewayRouting: {},
     zaiToolStream: false,
-    supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway,
+    supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia,
     cacheControlFormat,
     sendSessionAffinityHeaders: false,
-    supportsLongCacheRetention: !(isTogether || isCloudflareWorkersAI || isCloudflareAiGateway)
+    supportsLongCacheRetention: !(isTogether || isCloudflareWorkersAI || isCloudflareAiGateway || isNvidia || isAntLing)
   };
 }
 function getCompat(model) {
@@ -120741,7 +121538,10 @@ var streamOpenAICompletions = (model, context, options3) => {
       timestamp: Date.now()
     };
     try {
-      const apiKey = options3?.apiKey || getEnvApiKey(model.provider) || "";
+      const apiKey = options3?.apiKey;
+      if (!apiKey) {
+        throw new Error(`No API key for provider: ${model.provider}`);
+      }
       const compat2 = getCompat(model);
       const cacheRetention = resolveCacheRetention2(options3?.cacheRetention);
       const cacheSessionId = cacheRetention === "none" ? undefined : options3?.sessionId;
@@ -120985,7 +121785,7 @@ ${rawMetadata}`;
   })();
   return stream2;
 }, streamSimpleOpenAICompletions = (model, context, options3) => {
-  const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+  const apiKey = options3?.apiKey;
   if (!apiKey) {
     throw new Error(`No API key for provider: ${model.provider}`);
   }
@@ -121001,7 +121801,6 @@ ${rawMetadata}`;
 };
 var init_openai_completions = __esm(() => {
   init_openai();
-  init_env_api_keys();
   init_models2();
   init_event_stream();
   init_json_parse();
@@ -121024,6 +121823,7 @@ function resolveCacheRetention3(cacheRetention) {
 }
 function getCompat2(model) {
   return {
+    supportsDeveloperRole: model.compat?.supportsDeveloperRole ?? true,
     sendSessionIdHeader: model.compat?.sendSessionIdHeader ?? true,
     supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true
   };
@@ -121047,12 +121847,6 @@ function formatOpenAIResponsesError(error50) {
   }
 }
 function createClient7(model, context, apiKey, optionsHeaders, sessionId) {
-  if (!apiKey) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error("OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it as an argument.");
-    }
-    apiKey = process.env.OPENAI_API_KEY;
-  }
   const compat2 = getCompat2(model);
   const headers = { ...model.headers };
   if (model.provider === "github-copilot") {
@@ -121165,7 +121959,10 @@ var OPENAI_TOOL_CALL_PROVIDERS, streamOpenAIResponses = (model, context, options
       timestamp: Date.now()
     };
     try {
-      const apiKey = options3?.apiKey || getEnvApiKey(model.provider) || "";
+      const apiKey = options3?.apiKey;
+      if (!apiKey) {
+        throw new Error(`No API key for provider: ${model.provider}`);
+      }
       const cacheRetention = resolveCacheRetention3(options3?.cacheRetention);
       const cacheSessionId = cacheRetention === "none" ? undefined : options3?.sessionId;
       const client = createClient7(model, context, apiKey, options3?.headers, cacheSessionId);
@@ -121207,7 +122004,7 @@ var OPENAI_TOOL_CALL_PROVIDERS, streamOpenAIResponses = (model, context, options
   })();
   return stream2;
 }, streamSimpleOpenAIResponses = (model, context, options3) => {
-  const apiKey = options3?.apiKey || getEnvApiKey(model.provider);
+  const apiKey = options3?.apiKey;
   if (!apiKey) {
     throw new Error(`No API key for provider: ${model.provider}`);
   }
@@ -121221,7 +122018,6 @@ var OPENAI_TOOL_CALL_PROVIDERS, streamOpenAIResponses = (model, context, options
 };
 var init_openai_responses = __esm(() => {
   init_openai();
-  init_env_api_keys();
   init_models2();
   init_event_stream();
   init_openai_responses_shared();
@@ -198490,11 +199286,11 @@ GFS4: `);
   function patch2(fs9) {
     polyfills(fs9);
     fs9.gracefulify = patch2;
-    fs9.createReadStream = createReadStream2;
+    fs9.createReadStream = createReadStream3;
     fs9.createWriteStream = createWriteStream5;
     var fs$readFile = fs9.readFile;
-    fs9.readFile = readFile3;
-    function readFile3(path12, options4, cb) {
+    fs9.readFile = readFile2;
+    function readFile2(path12, options4, cb) {
       if (typeof options4 === "function")
         cb = options4, options4 = null;
       return go$readFile(path12, options4, cb);
@@ -198690,7 +199486,7 @@ GFS4: `);
         }
       });
     }
-    function createReadStream2(path12, options4) {
+    function createReadStream3(path12, options4) {
       return new fs9.ReadStream(path12, options4);
     }
     function createWriteStream5(path12, options4) {
@@ -213480,7 +214276,7 @@ var require_snapshot_utils = __commonJS((exports, module3) => {
 
 // node_modules/undici/lib/mock/snapshot-recorder.js
 var require_snapshot_recorder = __commonJS((exports, module3) => {
-  var { writeFile: writeFile2, readFile: readFile3, mkdir } = __require("node:fs/promises");
+  var { writeFile: writeFile2, readFile: readFile2, mkdir } = __require("node:fs/promises");
   var { dirname: dirname15, resolve: resolve9 } = __require("node:path");
   var { setTimeout: setTimeout2, clearTimeout: clearTimeout2 } = __require("node:timers");
   var { InvalidArgumentError, UndiciError } = require_errors2();
@@ -213670,7 +214466,7 @@ var require_snapshot_recorder = __commonJS((exports, module3) => {
         throw new InvalidArgumentError("Snapshot path is required");
       }
       try {
-        const data = await readFile3(resolve9(path13), "utf8");
+        const data = await readFile2(resolve9(path13), "utf8");
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed)) {
           this.#snapshots.clear();
@@ -223424,7 +224220,7 @@ var require_eventsource = __commonJS((exports, module3) => {
 // src/index.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
 import fs14 from "node:fs";
-import path17 from "node:path";
+import path18 from "node:path";
 
 // node_modules/@shims/common/src/args.ts
 var VALID_SANDBOX_LEVELS = ["none", "standard", "strict"];
@@ -223562,7 +224358,7 @@ var SYNTHETIC_ERROR_ID = "00000000-0000-0000-0000-000000000000";
 
 // src/pi-agent.ts
 import fs13 from "node:fs";
-import path16 from "node:path";
+import path17 from "node:path";
 import { fileURLToPath as fileURLToPath7 } from "node:url";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/index.js
@@ -223587,6 +224383,7 @@ __export(exports_dist4, {
   parseSkillBlock: () => parseSkillBlock,
   parseSessionEntries: () => parseSessionEntries,
   parseFrontmatter: () => parseFrontmatter,
+  parseArgs: () => parseArgs2,
   migrateSessionEntries: () => migrateSessionEntries,
   main: () => main,
   loadSkillsFromDir: () => loadSkillsFromDir,
@@ -223604,13 +224401,18 @@ __export(exports_dist4, {
   isBashToolResult: () => isBashToolResult,
   initTheme: () => initTheme,
   highlightCode: () => highlightCode,
+  hasProjectTrustInputs: () => hasProjectTrustInputs,
   getShellConfig: () => getShellConfig,
   getSettingsListTheme: () => getSettingsListTheme,
   getSelectListTheme: () => getSelectListTheme,
+  getReadmePath: () => getReadmePath,
+  getPackageDir: () => getPackageDir,
   getMarkdownTheme: () => getMarkdownTheme,
   getLatestCompactionEntry: () => getLatestCompactionEntry,
   getLastAssistantUsage: () => getLastAssistantUsage2,
   getLanguageFromPath: () => getLanguageFromPath,
+  getExamplesPath: () => getExamplesPath,
+  getDocsPath: () => getDocsPath,
   getAgentDir: () => getAgentDir,
   generateSummary: () => generateSummary2,
   generateBranchSummary: () => generateBranchSummary2,
@@ -223647,6 +224449,7 @@ __export(exports_dist4, {
   createAgentSessionFromServices: () => createAgentSessionFromServices,
   createAgentSession: () => createAgentSession,
   copyToClipboard: () => copyToClipboard,
+  convertToPng: () => convertToPng2,
   convertToLlm: () => convertToLlm,
   compact: () => compact2,
   collectEntriesForBranchSummary: () => collectEntriesForBranchSummary2,
@@ -223667,6 +224470,7 @@ __export(exports_dist4, {
   SessionSelectorComponent: () => SessionSelectorComponent,
   SessionManager: () => SessionManager,
   RpcClient: () => RpcClient,
+  ProjectTrustStore: () => ProjectTrustStore,
   OAuthSelectorComponent: () => OAuthSelectorComponent,
   ModelSelectorComponent: () => ModelSelectorComponent,
   ModelRegistry: () => ModelRegistry,
@@ -223698,6 +224502,495 @@ __export(exports_dist4, {
   AgentSessionRuntime: () => AgentSessionRuntime,
   AgentSession: () => AgentSession
 });
+
+// node_modules/chalk/source/vendor/ansi-styles/index.js
+var ANSI_BACKGROUND_OFFSET = 10;
+var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
+var wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`;
+var wrapAnsi16m = (offset = 0) => (red, green, blue) => `\x1B[${38 + offset};2;${red};${green};${blue}m`;
+var styles = {
+  modifier: {
+    reset: [0, 0],
+    bold: [1, 22],
+    dim: [2, 22],
+    italic: [3, 23],
+    underline: [4, 24],
+    overline: [53, 55],
+    inverse: [7, 27],
+    hidden: [8, 28],
+    strikethrough: [9, 29]
+  },
+  color: {
+    black: [30, 39],
+    red: [31, 39],
+    green: [32, 39],
+    yellow: [33, 39],
+    blue: [34, 39],
+    magenta: [35, 39],
+    cyan: [36, 39],
+    white: [37, 39],
+    blackBright: [90, 39],
+    gray: [90, 39],
+    grey: [90, 39],
+    redBright: [91, 39],
+    greenBright: [92, 39],
+    yellowBright: [93, 39],
+    blueBright: [94, 39],
+    magentaBright: [95, 39],
+    cyanBright: [96, 39],
+    whiteBright: [97, 39]
+  },
+  bgColor: {
+    bgBlack: [40, 49],
+    bgRed: [41, 49],
+    bgGreen: [42, 49],
+    bgYellow: [43, 49],
+    bgBlue: [44, 49],
+    bgMagenta: [45, 49],
+    bgCyan: [46, 49],
+    bgWhite: [47, 49],
+    bgBlackBright: [100, 49],
+    bgGray: [100, 49],
+    bgGrey: [100, 49],
+    bgRedBright: [101, 49],
+    bgGreenBright: [102, 49],
+    bgYellowBright: [103, 49],
+    bgBlueBright: [104, 49],
+    bgMagentaBright: [105, 49],
+    bgCyanBright: [106, 49],
+    bgWhiteBright: [107, 49]
+  }
+};
+var modifierNames = Object.keys(styles.modifier);
+var foregroundColorNames = Object.keys(styles.color);
+var backgroundColorNames = Object.keys(styles.bgColor);
+var colorNames = [...foregroundColorNames, ...backgroundColorNames];
+function assembleStyles() {
+  const codes = new Map;
+  for (const [groupName, group] of Object.entries(styles)) {
+    for (const [styleName, style] of Object.entries(group)) {
+      styles[styleName] = {
+        open: `\x1B[${style[0]}m`,
+        close: `\x1B[${style[1]}m`
+      };
+      group[styleName] = styles[styleName];
+      codes.set(style[0], style[1]);
+    }
+    Object.defineProperty(styles, groupName, {
+      value: group,
+      enumerable: false
+    });
+  }
+  Object.defineProperty(styles, "codes", {
+    value: codes,
+    enumerable: false
+  });
+  styles.color.close = "\x1B[39m";
+  styles.bgColor.close = "\x1B[49m";
+  styles.color.ansi = wrapAnsi16();
+  styles.color.ansi256 = wrapAnsi256();
+  styles.color.ansi16m = wrapAnsi16m();
+  styles.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
+  styles.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
+  styles.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
+  Object.defineProperties(styles, {
+    rgbToAnsi256: {
+      value(red, green, blue) {
+        if (red === green && green === blue) {
+          if (red < 8) {
+            return 16;
+          }
+          if (red > 248) {
+            return 231;
+          }
+          return Math.round((red - 8) / 247 * 24) + 232;
+        }
+        return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
+      },
+      enumerable: false
+    },
+    hexToRgb: {
+      value(hex) {
+        const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
+        if (!matches) {
+          return [0, 0, 0];
+        }
+        let [colorString] = matches;
+        if (colorString.length === 3) {
+          colorString = [...colorString].map((character) => character + character).join("");
+        }
+        const integer = Number.parseInt(colorString, 16);
+        return [
+          integer >> 16 & 255,
+          integer >> 8 & 255,
+          integer & 255
+        ];
+      },
+      enumerable: false
+    },
+    hexToAnsi256: {
+      value: (hex) => styles.rgbToAnsi256(...styles.hexToRgb(hex)),
+      enumerable: false
+    },
+    ansi256ToAnsi: {
+      value(code) {
+        if (code < 8) {
+          return 30 + code;
+        }
+        if (code < 16) {
+          return 90 + (code - 8);
+        }
+        let red;
+        let green;
+        let blue;
+        if (code >= 232) {
+          red = ((code - 232) * 10 + 8) / 255;
+          green = red;
+          blue = red;
+        } else {
+          code -= 16;
+          const remainder = code % 36;
+          red = Math.floor(code / 36) / 5;
+          green = Math.floor(remainder / 6) / 5;
+          blue = remainder % 6 / 5;
+        }
+        const value2 = Math.max(red, green, blue) * 2;
+        if (value2 === 0) {
+          return 30;
+        }
+        let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
+        if (value2 === 2) {
+          result += 60;
+        }
+        return result;
+      },
+      enumerable: false
+    },
+    rgbToAnsi: {
+      value: (red, green, blue) => styles.ansi256ToAnsi(styles.rgbToAnsi256(red, green, blue)),
+      enumerable: false
+    },
+    hexToAnsi: {
+      value: (hex) => styles.ansi256ToAnsi(styles.hexToAnsi256(hex)),
+      enumerable: false
+    }
+  });
+  return styles;
+}
+var ansiStyles = assembleStyles();
+var ansi_styles_default = ansiStyles;
+
+// node_modules/chalk/source/vendor/supports-color/index.js
+import process2 from "node:process";
+import os from "node:os";
+import tty from "node:tty";
+function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process2.argv) {
+  const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+  const position = argv.indexOf(prefix + flag);
+  const terminatorPosition = argv.indexOf("--");
+  return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+}
+var { env } = process2;
+var flagForceColor;
+if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
+  flagForceColor = 0;
+} else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
+  flagForceColor = 1;
+}
+function envForceColor() {
+  if ("FORCE_COLOR" in env) {
+    if (env.FORCE_COLOR === "true") {
+      return 1;
+    }
+    if (env.FORCE_COLOR === "false") {
+      return 0;
+    }
+    return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
+  }
+}
+function translateLevel(level) {
+  if (level === 0) {
+    return false;
+  }
+  return {
+    level,
+    hasBasic: true,
+    has256: level >= 2,
+    has16m: level >= 3
+  };
+}
+function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
+  const noFlagForceColor = envForceColor();
+  if (noFlagForceColor !== undefined) {
+    flagForceColor = noFlagForceColor;
+  }
+  const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
+  if (forceColor === 0) {
+    return 0;
+  }
+  if (sniffFlags) {
+    if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
+      return 3;
+    }
+    if (hasFlag("color=256")) {
+      return 2;
+    }
+  }
+  if ("TF_BUILD" in env && "AGENT_NAME" in env) {
+    return 1;
+  }
+  if (haveStream && !streamIsTTY && forceColor === undefined) {
+    return 0;
+  }
+  const min = forceColor || 0;
+  if (env.TERM === "dumb") {
+    return min;
+  }
+  if (process2.platform === "win32") {
+    const osRelease = os.release().split(".");
+    if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
+      return Number(osRelease[2]) >= 14931 ? 3 : 2;
+    }
+    return 1;
+  }
+  if ("CI" in env) {
+    if (["GITHUB_ACTIONS", "GITEA_ACTIONS", "CIRCLECI"].some((key) => (key in env))) {
+      return 3;
+    }
+    if (["TRAVIS", "APPVEYOR", "GITLAB_CI", "BUILDKITE", "DRONE"].some((sign) => (sign in env)) || env.CI_NAME === "codeship") {
+      return 1;
+    }
+    return min;
+  }
+  if ("TEAMCITY_VERSION" in env) {
+    return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+  }
+  if (env.COLORTERM === "truecolor") {
+    return 3;
+  }
+  if (env.TERM === "xterm-kitty") {
+    return 3;
+  }
+  if (env.TERM === "xterm-ghostty") {
+    return 3;
+  }
+  if (env.TERM === "wezterm") {
+    return 3;
+  }
+  if ("TERM_PROGRAM" in env) {
+    const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+    switch (env.TERM_PROGRAM) {
+      case "iTerm.app": {
+        return version >= 3 ? 3 : 2;
+      }
+      case "Apple_Terminal": {
+        return 2;
+      }
+    }
+  }
+  if (/-256(color)?$/i.test(env.TERM)) {
+    return 2;
+  }
+  if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+    return 1;
+  }
+  if ("COLORTERM" in env) {
+    return 1;
+  }
+  return min;
+}
+function createSupportsColor(stream, options = {}) {
+  const level = _supportsColor(stream, {
+    streamIsTTY: stream && stream.isTTY,
+    ...options
+  });
+  return translateLevel(level);
+}
+var supportsColor = {
+  stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
+  stderr: createSupportsColor({ isTTY: tty.isatty(2) })
+};
+var supports_color_default = supportsColor;
+
+// node_modules/chalk/source/utilities.js
+function stringReplaceAll(string, substring, replacer) {
+  let index = string.indexOf(substring);
+  if (index === -1) {
+    return string;
+  }
+  const substringLength = substring.length;
+  let endIndex = 0;
+  let returnValue = "";
+  do {
+    returnValue += string.slice(endIndex, index) + substring + replacer;
+    endIndex = index + substringLength;
+    index = string.indexOf(substring, endIndex);
+  } while (index !== -1);
+  returnValue += string.slice(endIndex);
+  return returnValue;
+}
+function stringEncaseCRLFWithFirstIndex(string, prefix, postfix, index) {
+  let endIndex = 0;
+  let returnValue = "";
+  do {
+    const gotCR = string[index - 1] === "\r";
+    returnValue += string.slice(endIndex, gotCR ? index - 1 : index) + prefix + (gotCR ? `\r
+` : `
+`) + postfix;
+    endIndex = index + 1;
+    index = string.indexOf(`
+`, endIndex);
+  } while (index !== -1);
+  returnValue += string.slice(endIndex);
+  return returnValue;
+}
+
+// node_modules/chalk/source/index.js
+var { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
+var GENERATOR = Symbol("GENERATOR");
+var STYLER = Symbol("STYLER");
+var IS_EMPTY = Symbol("IS_EMPTY");
+var levelMapping = [
+  "ansi",
+  "ansi",
+  "ansi256",
+  "ansi16m"
+];
+var styles2 = Object.create(null);
+var applyOptions = (object, options = {}) => {
+  if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) {
+    throw new Error("The `level` option should be an integer from 0 to 3");
+  }
+  const colorLevel = stdoutColor ? stdoutColor.level : 0;
+  object.level = options.level === undefined ? colorLevel : options.level;
+};
+var chalkFactory = (options) => {
+  const chalk = (...strings) => strings.join(" ");
+  applyOptions(chalk, options);
+  Object.setPrototypeOf(chalk, createChalk.prototype);
+  return chalk;
+};
+function createChalk(options) {
+  return chalkFactory(options);
+}
+Object.setPrototypeOf(createChalk.prototype, Function.prototype);
+for (const [styleName, style] of Object.entries(ansi_styles_default)) {
+  styles2[styleName] = {
+    get() {
+      const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
+      Object.defineProperty(this, styleName, { value: builder });
+      return builder;
+    }
+  };
+}
+styles2.visible = {
+  get() {
+    const builder = createBuilder(this, this[STYLER], true);
+    Object.defineProperty(this, "visible", { value: builder });
+    return builder;
+  }
+};
+var getModelAnsi = (model, level, type, ...arguments_) => {
+  if (model === "rgb") {
+    if (level === "ansi16m") {
+      return ansi_styles_default[type].ansi16m(...arguments_);
+    }
+    if (level === "ansi256") {
+      return ansi_styles_default[type].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
+    }
+    return ansi_styles_default[type].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
+  }
+  if (model === "hex") {
+    return getModelAnsi("rgb", level, type, ...ansi_styles_default.hexToRgb(...arguments_));
+  }
+  return ansi_styles_default[type][model](...arguments_);
+};
+var usedModels = ["rgb", "hex", "ansi256"];
+for (const model of usedModels) {
+  styles2[model] = {
+    get() {
+      const { level } = this;
+      return function(...arguments_) {
+        const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
+        return createBuilder(this, styler, this[IS_EMPTY]);
+      };
+    }
+  };
+  const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
+  styles2[bgModel] = {
+    get() {
+      const { level } = this;
+      return function(...arguments_) {
+        const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
+        return createBuilder(this, styler, this[IS_EMPTY]);
+      };
+    }
+  };
+}
+var proto = Object.defineProperties(() => {}, {
+  ...styles2,
+  level: {
+    enumerable: true,
+    get() {
+      return this[GENERATOR].level;
+    },
+    set(level) {
+      this[GENERATOR].level = level;
+    }
+  }
+});
+var createStyler = (open, close, parent) => {
+  let openAll;
+  let closeAll;
+  if (parent === undefined) {
+    openAll = open;
+    closeAll = close;
+  } else {
+    openAll = parent.openAll + open;
+    closeAll = close + parent.closeAll;
+  }
+  return {
+    open,
+    close,
+    openAll,
+    closeAll,
+    parent
+  };
+};
+var createBuilder = (self2, _styler, _isEmpty) => {
+  const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
+  Object.setPrototypeOf(builder, proto);
+  builder[GENERATOR] = self2;
+  builder[STYLER] = _styler;
+  builder[IS_EMPTY] = _isEmpty;
+  return builder;
+};
+var applyStyle = (self2, string) => {
+  if (self2.level <= 0 || !string) {
+    return self2[IS_EMPTY] ? "" : string;
+  }
+  let styler = self2[STYLER];
+  if (styler === undefined) {
+    return string;
+  }
+  const { openAll, closeAll } = styler;
+  if (string.includes("\x1B")) {
+    while (styler !== undefined) {
+      string = stringReplaceAll(string, styler.close, styler.open);
+      styler = styler.parent;
+    }
+  }
+  const lfIndex = string.indexOf(`
+`);
+  if (lfIndex !== -1) {
+    string = stringEncaseCRLFWithFirstIndex(string, closeAll, openAll, lfIndex);
+  }
+  return openAll + string + closeAll;
+};
+Object.defineProperties(createChalk.prototype, styles2);
+var chalk = createChalk();
+var chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
+var source_default = chalk;
 
 // node_modules/@earendil-works/pi-coding-agent/dist/config.js
 import { accessSync, constants, existsSync, readFileSync, realpathSync as realpathSync2 } from "fs";
@@ -224140,7 +225433,14 @@ function getInteractiveAssetsDir() {
 function getBundledInteractiveAssetPath(name) {
   return join2(getInteractiveAssetsDir(), name);
 }
-var pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8"));
+var pkg = {};
+try {
+  pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8"));
+} catch (e) {
+  const err = e;
+  if (err.code !== "ENOENT")
+    throw e;
+}
 var piConfigName = pkg.piConfig?.name;
 var PACKAGE_NAME = pkg.name || "@earendil-works/pi-coding-agent";
 var APP_NAME = piConfigName || "pi";
@@ -224179,8 +225479,330 @@ function getSessionsDir() {
 function getDebugLogPath() {
   return join2(getAgentDir(), `${APP_NAME}-debug.log`);
 }
+
+// node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js
+var VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
+function isValidThinkingLevel(level) {
+  return VALID_THINKING_LEVELS.includes(level);
+}
+function parseArgs2(args2) {
+  const result = {
+    messages: [],
+    fileArgs: [],
+    unknownFlags: new Map,
+    diagnostics: []
+  };
+  for (let i = 0;i < args2.length; i++) {
+    const arg = args2[i];
+    if (arg === "--help" || arg === "-h") {
+      result.help = true;
+    } else if (arg === "--version" || arg === "-v") {
+      result.version = true;
+    } else if (arg === "--mode" && i + 1 < args2.length) {
+      const mode = args2[++i];
+      if (mode === "text" || mode === "json" || mode === "rpc") {
+        result.mode = mode;
+      }
+    } else if (arg === "--continue" || arg === "-c") {
+      result.continue = true;
+    } else if (arg === "--resume" || arg === "-r") {
+      result.resume = true;
+    } else if (arg === "--provider" && i + 1 < args2.length) {
+      result.provider = args2[++i];
+    } else if (arg === "--model" && i + 1 < args2.length) {
+      result.model = args2[++i];
+    } else if (arg === "--api-key" && i + 1 < args2.length) {
+      result.apiKey = args2[++i];
+    } else if (arg === "--system-prompt" && i + 1 < args2.length) {
+      result.systemPrompt = args2[++i];
+    } else if (arg === "--append-system-prompt" && i + 1 < args2.length) {
+      result.appendSystemPrompt = result.appendSystemPrompt ?? [];
+      result.appendSystemPrompt.push(args2[++i]);
+    } else if (arg === "--name" || arg === "-n") {
+      if (i + 1 < args2.length) {
+        result.name = args2[++i];
+      } else {
+        result.diagnostics.push({ type: "error", message: "--name requires a value" });
+      }
+    } else if (arg === "--no-session") {
+      result.noSession = true;
+    } else if (arg === "--session" && i + 1 < args2.length) {
+      result.session = args2[++i];
+    } else if (arg === "--session-id" && i + 1 < args2.length) {
+      result.sessionId = args2[++i];
+    } else if (arg === "--fork" && i + 1 < args2.length) {
+      result.fork = args2[++i];
+    } else if (arg === "--session-dir" && i + 1 < args2.length) {
+      result.sessionDir = args2[++i];
+    } else if (arg === "--models" && i + 1 < args2.length) {
+      result.models = args2[++i].split(",").map((s) => s.trim());
+    } else if (arg === "--no-tools" || arg === "-nt") {
+      result.noTools = true;
+    } else if (arg === "--no-builtin-tools" || arg === "-nbt") {
+      result.noBuiltinTools = true;
+    } else if ((arg === "--tools" || arg === "-t") && i + 1 < args2.length) {
+      result.tools = args2[++i].split(",").map((s) => s.trim()).filter((name) => name.length > 0);
+    } else if ((arg === "--exclude-tools" || arg === "-xt") && i + 1 < args2.length) {
+      result.excludeTools = args2[++i].split(",").map((s) => s.trim()).filter((name) => name.length > 0);
+    } else if (arg === "--thinking" && i + 1 < args2.length) {
+      const level = args2[++i];
+      if (isValidThinkingLevel(level)) {
+        result.thinking = level;
+      } else {
+        result.diagnostics.push({
+          type: "warning",
+          message: `Invalid thinking level "${level}". Valid values: ${VALID_THINKING_LEVELS.join(", ")}`
+        });
+      }
+    } else if (arg === "--print" || arg === "-p") {
+      result.print = true;
+      const next = args2[i + 1];
+      if (next !== undefined && !next.startsWith("@") && (!next.startsWith("-") || next.startsWith("---"))) {
+        result.messages.push(next);
+        i++;
+      }
+    } else if (arg === "--export" && i + 1 < args2.length) {
+      result.export = args2[++i];
+    } else if ((arg === "--extension" || arg === "-e") && i + 1 < args2.length) {
+      result.extensions = result.extensions ?? [];
+      result.extensions.push(args2[++i]);
+    } else if (arg === "--no-extensions" || arg === "-ne") {
+      result.noExtensions = true;
+    } else if (arg === "--skill" && i + 1 < args2.length) {
+      result.skills = result.skills ?? [];
+      result.skills.push(args2[++i]);
+    } else if (arg === "--prompt-template" && i + 1 < args2.length) {
+      result.promptTemplates = result.promptTemplates ?? [];
+      result.promptTemplates.push(args2[++i]);
+    } else if (arg === "--theme" && i + 1 < args2.length) {
+      result.themes = result.themes ?? [];
+      result.themes.push(args2[++i]);
+    } else if (arg === "--no-skills" || arg === "-ns") {
+      result.noSkills = true;
+    } else if (arg === "--no-prompt-templates" || arg === "-np") {
+      result.noPromptTemplates = true;
+    } else if (arg === "--no-themes") {
+      result.noThemes = true;
+    } else if (arg === "--no-context-files" || arg === "-nc") {
+      result.noContextFiles = true;
+    } else if (arg === "--list-models") {
+      if (i + 1 < args2.length && !args2[i + 1].startsWith("-") && !args2[i + 1].startsWith("@")) {
+        result.listModels = args2[++i];
+      } else {
+        result.listModels = true;
+      }
+    } else if (arg === "--verbose") {
+      result.verbose = true;
+    } else if (arg === "--approve" || arg === "-a") {
+      result.projectTrustOverride = true;
+    } else if (arg === "--no-approve" || arg === "-na") {
+      result.projectTrustOverride = false;
+    } else if (arg === "--offline") {
+      result.offline = true;
+    } else if (arg.startsWith("@")) {
+      result.fileArgs.push(arg.slice(1));
+    } else if (arg.startsWith("--")) {
+      const eqIndex = arg.indexOf("=");
+      if (eqIndex !== -1) {
+        result.unknownFlags.set(arg.slice(2, eqIndex), arg.slice(eqIndex + 1));
+      } else {
+        const flagName = arg.slice(2);
+        const next = args2[i + 1];
+        if (next !== undefined && !next.startsWith("-") && !next.startsWith("@")) {
+          result.unknownFlags.set(flagName, next);
+          i++;
+        } else {
+          result.unknownFlags.set(flagName, true);
+        }
+      }
+    } else if (arg.startsWith("-") && !arg.startsWith("--")) {
+      result.diagnostics.push({ type: "error", message: `Unknown option: ${arg}` });
+    } else if (!arg.startsWith("-")) {
+      result.messages.push(arg);
+    }
+  }
+  return result;
+}
+function printHelp(extensionFlags) {
+  const extensionFlagsText = extensionFlags && extensionFlags.length > 0 ? `
+${source_default.bold("Extension CLI Flags:")}
+${extensionFlags.map((flag) => {
+    const value2 = flag.type === "string" ? " <value>" : "";
+    const description = flag.description ?? `Registered by ${flag.extensionPath}`;
+    return `  --${flag.name}${value2}`.padEnd(30) + description;
+  }).join(`
+`)}
+` : "";
+  console.log(`${source_default.bold(APP_NAME)} - AI coding assistant with read, bash, edit, write tools
+
+${source_default.bold("Usage:")}
+  ${APP_NAME} [options] [@files...] [messages...]
+
+${source_default.bold("Commands:")}
+  ${APP_NAME} install <source> [-l]     Install extension source and add to settings
+  ${APP_NAME} remove <source> [-l]      Remove extension source from settings
+  ${APP_NAME} uninstall <source> [-l]   Alias for remove
+  ${APP_NAME} update [source|self|pi]   Update pi and installed extensions
+  ${APP_NAME} list                      List installed extensions from settings
+  ${APP_NAME} config                    Open TUI to enable/disable package resources
+  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list
+
+${source_default.bold("Options:")}
+  --provider <name>              Provider name (default: google)
+  --model <pattern>              Model pattern or ID (supports "provider/id" and optional ":<thinking>")
+  --api-key <key>                API key (defaults to env vars)
+  --system-prompt <text>         System prompt (default: coding assistant prompt)
+  --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
+  --mode <mode>                  Output mode: text (default), json, or rpc
+  --print, -p                    Non-interactive mode: process prompt and exit
+  --continue, -c                 Continue previous session
+  --resume, -r                   Select a session to resume
+  --session <path|id>            Use specific session file or partial UUID
+  --session-id <id>              Use exact project session ID, creating it if missing
+  --fork <path|id>               Fork specific session file or partial UUID into a new session
+  --session-dir <dir>            Directory for session storage and lookup
+  --no-session                   Don't save session (ephemeral)
+  --name, -n <name>              Set session display name
+  --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
+                                 Supports globs (anthropic/*, *sonnet*) and fuzzy matching
+  --no-tools, -nt                Disable all tools by default (built-in and extension)
+  --no-builtin-tools, -nbt       Disable built-in tools by default but keep extension/custom tools enabled
+  --tools, -t <tools>            Comma-separated allowlist of tool names to enable
+                                 Applies to built-in, extension, and custom tools
+  --exclude-tools, -xt <tools>   Comma-separated denylist of tool names to disable
+                                 Applies to built-in, extension, and custom tools
+  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
+  --extension, -e <path>         Load an extension file (can be used multiple times)
+  --no-extensions, -ne           Disable extension discovery (explicit -e paths still work)
+  --skill <path>                 Load a skill file or directory (can be used multiple times)
+  --no-skills, -ns               Disable skills discovery and loading
+  --prompt-template <path>       Load a prompt template file or directory (can be used multiple times)
+  --no-prompt-templates, -np     Disable prompt template discovery and loading
+  --theme <path>                 Load a theme file or directory (can be used multiple times)
+  --no-themes                    Disable theme discovery and loading
+  --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
+  --export <file>                Export session file to HTML and exit
+  --list-models [search]         List available models (with optional fuzzy search)
+  --verbose                      Force verbose startup (overrides quietStartup setting)
+  --approve, -a                  Trust project-local files for this run
+  --no-approve, -na              Ignore project-local files for this run
+  --offline                      Disable startup network operations (same as PI_OFFLINE=1)
+  --help, -h                     Show this help
+  --version, -v                  Show version number
+
+Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
+
+${source_default.bold("Examples:")}
+  # Interactive mode
+  ${APP_NAME}
+
+  # Interactive mode with initial prompt
+  ${APP_NAME} "List all .ts files in src/"
+
+  # Include files in initial message
+  ${APP_NAME} @prompt.md @image.png "What color is the sky?"
+
+  # Non-interactive mode (process and exit)
+  ${APP_NAME} -p "List all .ts files in src/"
+
+  # Multiple messages (interactive)
+  ${APP_NAME} "Read package.json" "What dependencies do we have?"
+
+  # Continue previous session
+  ${APP_NAME} --continue "What did we discuss?"
+
+  # Start a named session
+  ${APP_NAME} --name "Refactor auth module"
+
+  # Use different model
+  ${APP_NAME} --provider openai --model gpt-4o-mini "Help me refactor this code"
+
+  # Use model with provider prefix (no --provider needed)
+  ${APP_NAME} --model openai/gpt-4o "Help me refactor this code"
+
+  # Use model with thinking level shorthand
+  ${APP_NAME} --model sonnet:high "Solve this complex problem"
+
+  # Limit model cycling to specific models
+  ${APP_NAME} --models claude-sonnet,claude-haiku,gpt-4o
+
+  # Limit to a specific provider with glob pattern
+  ${APP_NAME} --models "github-copilot/*"
+
+  # Cycle models with fixed thinking levels
+  ${APP_NAME} --models sonnet:high,haiku:low
+
+  # Start with a specific thinking level
+  ${APP_NAME} --thinking high "Solve this complex problem"
+
+  # Read-only mode (no file modifications possible)
+  ${APP_NAME} --tools read,grep,find,ls -p "Review the code in src/"
+
+  # Disable one tool while keeping the rest available
+  ${APP_NAME} --exclude-tools ask_question
+
+  # Export a session file to HTML
+  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl
+  ${APP_NAME} --export session.jsonl output.html
+
+${source_default.bold("Environment Variables:")}
+  ANTHROPIC_API_KEY                - Anthropic Claude API key
+  ANTHROPIC_OAUTH_TOKEN            - Anthropic OAuth token (alternative to API key)
+  ANT_LING_API_KEY                 - Ant Ling API key
+  OPENAI_API_KEY                   - OpenAI GPT API key
+  AZURE_OPENAI_API_KEY             - Azure OpenAI API key
+  AZURE_OPENAI_BASE_URL            - Azure OpenAI/Cognitive Services base URL (e.g. https://{resource}.openai.azure.com)
+  AZURE_OPENAI_RESOURCE_NAME       - Azure OpenAI resource name (alternative to base URL)
+  AZURE_OPENAI_API_VERSION         - Azure OpenAI API version (default: v1)
+  AZURE_OPENAI_DEPLOYMENT_NAME_MAP - Azure OpenAI model=deployment map (comma-separated)
+  DEEPSEEK_API_KEY                 - DeepSeek API key
+  NVIDIA_API_KEY                   - NVIDIA NIM API key
+  GEMINI_API_KEY                   - Google Gemini API key
+  GROQ_API_KEY                     - Groq API key
+  CEREBRAS_API_KEY                 - Cerebras API key
+  XAI_API_KEY                      - xAI Grok API key
+  FIREWORKS_API_KEY                - Fireworks API key
+  TOGETHER_API_KEY                 - Together AI API key
+  OPENROUTER_API_KEY               - OpenRouter API key
+  AI_GATEWAY_API_KEY               - Vercel AI Gateway API key
+  ZAI_API_KEY                      - ZAI API key
+  ZAI_CODING_CN_API_KEY            - ZAI Coding Plan API key (China)
+  MISTRAL_API_KEY                  - Mistral API key
+  MINIMAX_API_KEY                  - MiniMax API key
+  MOONSHOT_API_KEY                 - Moonshot AI API key
+  OPENCODE_API_KEY                 - OpenCode Zen/OpenCode Go API key
+  KIMI_API_KEY                     - Kimi For Coding API key
+  CLOUDFLARE_API_KEY               - Cloudflare API token (Workers AI and AI Gateway)
+  CLOUDFLARE_ACCOUNT_ID            - Cloudflare account id (required for both)
+  CLOUDFLARE_GATEWAY_ID            - Cloudflare AI Gateway slug (required for AI Gateway)
+  XIAOMI_API_KEY                   - Xiaomi MiMo API key (api.xiaomimimo.com billing)
+  XIAOMI_TOKEN_PLAN_CN_API_KEY     - Xiaomi MiMo Token Plan API key (China region)
+  XIAOMI_TOKEN_PLAN_AMS_API_KEY    - Xiaomi MiMo Token Plan API key (Amsterdam region)
+  XIAOMI_TOKEN_PLAN_SGP_API_KEY    - Xiaomi MiMo Token Plan API key (Singapore region)
+  AWS_PROFILE                      - AWS profile for Amazon Bedrock
+  AWS_ACCESS_KEY_ID                - AWS access key for Amazon Bedrock
+  AWS_SECRET_ACCESS_KEY            - AWS secret key for Amazon Bedrock
+  AWS_BEARER_TOKEN_BEDROCK         - Bedrock API key (bearer token)
+  AWS_REGION                       - AWS region for Amazon Bedrock (e.g., us-east-1)
+  ${ENV_AGENT_DIR.padEnd(32)} - Config directory (default: ~/${CONFIG_DIR_NAME}/agent)
+  ${ENV_SESSION_DIR.padEnd(32)} - Session storage directory (overridden by --session-dir)
+  PI_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
+  PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes
+  PI_TELEMETRY                     - Override install telemetry when set to 1/true/yes or 0/false/no
+  PI_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
+
+${source_default.bold("Built-in Tool Names:")}
+  read   - Read file contents
+  bash   - Execute bash commands
+  edit   - Edit files with find/replace
+  write  - Write files (creates/overwrites)
+  grep   - Search file contents (read-only, off by default)
+  find   - Find files by glob pattern (read-only, off by default)
+  ls     - List directory contents (read-only, off by default)
+`);
+}
 // node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js
-import { existsSync as existsSync10, mkdirSync as mkdirSync4, readFileSync as readFileSync8, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync10, mkdirSync as mkdirSync4, readFileSync as readFileSync7, writeFileSync as writeFileSync4 } from "node:fs";
 import { basename as basename9, dirname as dirname12 } from "node:path";
 
 // node_modules/@earendil-works/pi-ai/dist/index.js
@@ -224863,10 +226485,10 @@ function IsMultipleOf(dividend, divisor) {
 function IsClassInstance(value2) {
   if (!IsObject(value2))
     return false;
-  const proto = globalThis.Object.getPrototypeOf(value2);
-  if (IsNull(proto))
+  const proto2 = globalThis.Object.getPrototypeOf(value2);
+  if (IsNull(proto2))
     return false;
-  return IsEqual(typeof proto.constructor, "function") && !(IsEqual(proto.constructor, globalThis.Object) || IsEqual(proto.constructor.name, "Object"));
+  return IsEqual(typeof proto2.constructor, "function") && !(IsEqual(proto2.constructor, globalThis.Object) || IsEqual(proto2.constructor.name, "Object"));
 }
 function IsValueLike(value2) {
   return IsBigInt(value2) || IsBoolean(value2) || IsNull(value2) || IsNumber(value2) || IsString(value2) || IsUndefined(value2);
@@ -229170,10 +230792,145 @@ function unregisterApiProviders(sourceId) {
 function clearApiProviders() {
   apiProviderRegistry.clear();
 }
-
-// node_modules/@earendil-works/pi-ai/dist/index.js
-init_env_api_keys();
-
+// node_modules/@earendil-works/pi-ai/dist/env-api-keys.js
+var __rewriteRelativeImportExtension = function(path, preserveJsx) {
+  if (typeof path === "string" && /^\.\.?\//.test(path)) {
+    return path.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m, tsx, d, ext, cm) {
+      return tsx ? preserveJsx ? ".jsx" : ".js" : d && (!ext || !cm) ? m : d + ext + "." + cm.toLowerCase() + "js";
+    });
+  }
+  return path;
+};
+var _existsSync = null;
+var _homedir = null;
+var _join = null;
+var dynamicImport = (specifier) => import(__rewriteRelativeImportExtension(specifier));
+var NODE_FS_SPECIFIER = "node:fs";
+var NODE_OS_SPECIFIER = "node:os";
+var NODE_PATH_SPECIFIER = "node:path";
+if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
+  dynamicImport(NODE_FS_SPECIFIER).then((m) => {
+    _existsSync = m.existsSync;
+  });
+  dynamicImport(NODE_OS_SPECIFIER).then((m) => {
+    _homedir = m.homedir;
+  });
+  dynamicImport(NODE_PATH_SPECIFIER).then((m) => {
+    _join = m.join;
+  });
+}
+var _procEnvCache = null;
+function getProcEnv(key) {
+  if (!process.versions?.bun)
+    return;
+  if (typeof process === "undefined")
+    return;
+  if (Object.keys(process.env).length > 0)
+    return;
+  if (_procEnvCache === null) {
+    _procEnvCache = new Map;
+    try {
+      const { readFileSync: readFileSync2 } = __require("node:fs");
+      const data = readFileSync2("/proc/self/environ", "utf-8");
+      for (const entry of data.split("\x00")) {
+        const idx = entry.indexOf("=");
+        if (idx > 0) {
+          _procEnvCache.set(entry.slice(0, idx), entry.slice(idx + 1));
+        }
+      }
+    } catch {}
+  }
+  return _procEnvCache.get(key);
+}
+var cachedVertexAdcCredentialsExists = null;
+function hasVertexAdcCredentials() {
+  if (cachedVertexAdcCredentialsExists === null) {
+    if (!_existsSync || !_homedir || !_join) {
+      const isNode = typeof process !== "undefined" && (process.versions?.node || process.versions?.bun);
+      if (!isNode) {
+        cachedVertexAdcCredentialsExists = false;
+      }
+      return false;
+    }
+    const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || getProcEnv("GOOGLE_APPLICATION_CREDENTIALS");
+    if (gacPath) {
+      cachedVertexAdcCredentialsExists = _existsSync(gacPath);
+    } else {
+      cachedVertexAdcCredentialsExists = _existsSync(_join(_homedir(), ".config", "gcloud", "application_default_credentials.json"));
+    }
+  }
+  return cachedVertexAdcCredentialsExists;
+}
+function getApiKeyEnvVars(provider) {
+  if (provider === "github-copilot") {
+    return ["COPILOT_GITHUB_TOKEN"];
+  }
+  if (provider === "anthropic") {
+    return ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
+  }
+  const envMap = {
+    "ant-ling": "ANT_LING_API_KEY",
+    openai: "OPENAI_API_KEY",
+    "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+    nvidia: "NVIDIA_API_KEY",
+    deepseek: "DEEPSEEK_API_KEY",
+    google: "GEMINI_API_KEY",
+    "google-vertex": "GOOGLE_CLOUD_API_KEY",
+    groq: "GROQ_API_KEY",
+    cerebras: "CEREBRAS_API_KEY",
+    xai: "XAI_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+    "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+    zai: "ZAI_API_KEY",
+    "zai-coding-cn": "ZAI_CODING_CN_API_KEY",
+    mistral: "MISTRAL_API_KEY",
+    minimax: "MINIMAX_API_KEY",
+    "minimax-cn": "MINIMAX_CN_API_KEY",
+    moonshotai: "MOONSHOT_API_KEY",
+    "moonshotai-cn": "MOONSHOT_API_KEY",
+    huggingface: "HF_TOKEN",
+    fireworks: "FIREWORKS_API_KEY",
+    together: "TOGETHER_API_KEY",
+    opencode: "OPENCODE_API_KEY",
+    "opencode-go": "OPENCODE_API_KEY",
+    "kimi-coding": "KIMI_API_KEY",
+    "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
+    "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+    xiaomi: "XIAOMI_API_KEY",
+    "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+    "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+    "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY"
+  };
+  const envVar = envMap[provider];
+  return envVar ? [envVar] : undefined;
+}
+function findEnvKeys(provider) {
+  const envVars = getApiKeyEnvVars(provider);
+  if (!envVars)
+    return;
+  const found = envVars.filter((envVar) => !!process.env[envVar] || !!getProcEnv(envVar));
+  return found.length > 0 ? found : undefined;
+}
+function getEnvApiKey(provider) {
+  const envKeys = findEnvKeys(provider);
+  if (envKeys?.[0]) {
+    return process.env[envKeys[0]] || getProcEnv(envKeys[0]);
+  }
+  if (provider === "google-vertex") {
+    const hasCredentials = hasVertexAdcCredentials();
+    const hasProject = !!(process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || getProcEnv("GOOGLE_CLOUD_PROJECT") || getProcEnv("GCLOUD_PROJECT"));
+    const hasLocation = !!(process.env.GOOGLE_CLOUD_LOCATION || getProcEnv("GOOGLE_CLOUD_LOCATION"));
+    if (hasCredentials && hasProject && hasLocation) {
+      return "<authenticated>";
+    }
+  }
+  if (provider === "amazon-bedrock") {
+    if (process.env.AWS_PROFILE || process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY || process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI || process.env.AWS_WEB_IDENTITY_TOKEN_FILE || getProcEnv("AWS_PROFILE") || getProcEnv("AWS_ACCESS_KEY_ID") && getProcEnv("AWS_SECRET_ACCESS_KEY") || getProcEnv("AWS_BEARER_TOKEN_BEDROCK") || getProcEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") || getProcEnv("AWS_CONTAINER_CREDENTIALS_FULL_URI") || getProcEnv("AWS_WEB_IDENTITY_TOKEN_FILE")) {
+      return "<authenticated>";
+    }
+  }
+  return;
+}
 // node_modules/@earendil-works/pi-ai/dist/image-models.generated.js
 var IMAGE_MODELS = {
   openrouter: {
@@ -229293,6 +231050,21 @@ var IMAGE_MODELS = {
       cost: {
         input: 0.5,
         output: 3,
+        cacheRead: 0,
+        cacheWrite: 0
+      }
+    },
+    "microsoft/mai-image-2.5": {
+      id: "microsoft/mai-image-2.5",
+      name: "Microsoft: MAI-Image-2.5",
+      api: "openrouter-images",
+      provider: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      input: ["text", "image"],
+      output: ["image"],
+      cost: {
+        input: 5,
+        output: 0,
         cacheRead: 0,
         cacheWrite: 0
       }
@@ -229585,6 +231357,36 @@ var IMAGE_MODELS = {
     "sourceful/riverflow-v2-standard-preview": {
       id: "sourceful/riverflow-v2-standard-preview",
       name: "Sourceful: Riverflow V2 Standard Preview",
+      api: "openrouter-images",
+      provider: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      input: ["text", "image"],
+      output: ["image"],
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      }
+    },
+    "sourceful/riverflow-v2.5-fast": {
+      id: "sourceful/riverflow-v2.5-fast",
+      name: "Sourceful: Riverflow V2.5 Fast",
+      api: "openrouter-images",
+      provider: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      input: ["text", "image"],
+      output: ["image"],
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      }
+    },
+    "sourceful/riverflow-v2.5-pro": {
+      id: "sourceful/riverflow-v2.5-pro",
+      name: "Sourceful: Riverflow V2.5 Pro",
       api: "openrouter-images",
       provider: "openrouter",
       baseUrl: "https://openrouter.ai/api/v1",
@@ -230325,7 +232127,17 @@ registerBuiltInApiProviders();
 init_session_resources();
 
 // node_modules/@earendil-works/pi-ai/dist/stream.js
-init_env_api_keys();
+function hasExplicitApiKey(apiKey) {
+  return typeof apiKey === "string" && apiKey.trim().length > 0;
+}
+function withEnvApiKey(model, options3) {
+  if (hasExplicitApiKey(options3?.apiKey))
+    return options3;
+  const apiKey = getEnvApiKey(model.provider);
+  if (!apiKey)
+    return options3;
+  return { ...options3, apiKey };
+}
 function resolveApiProvider(api2) {
   const provider = getApiProvider(api2);
   if (!provider) {
@@ -230335,7 +232147,7 @@ function resolveApiProvider(api2) {
 }
 function stream2(model, context, options3) {
   const provider = resolveApiProvider(model.api);
-  return provider.stream(model, context, options3);
+  return provider.stream(model, context, withEnvApiKey(model, options3));
 }
 async function complete(model, context, options3) {
   const s2 = stream2(model, context, options3);
@@ -230343,7 +232155,7 @@ async function complete(model, context, options3) {
 }
 function streamSimple(model, context, options3) {
   const provider = resolveApiProvider(model.api);
-  return provider.streamSimple(model, context, options3);
+  return provider.streamSimple(model, context, withEnvApiKey(model, options3));
 }
 async function completeSimple(model, context, options3) {
   const s2 = streamSimple(model, context, options3);
@@ -236092,6 +237904,7 @@ var leadingNonPrintingRegex = /^[\p{Default_Ignorable_Code_Point}\p{Control}\p{F
 var rgiEmojiRegex = /^\p{RGI_Emoji}$/v;
 var WIDTH_CACHE_SIZE = 512;
 var widthCache = new Map;
+var cjkBreakRegex = /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}\p{Script_Extensions=Bopomofo}]/u;
 function isPrintableAscii(str2) {
   for (let i2 = 0;i2 < str2.length; i2++) {
     const code2 = str2.charCodeAt(i2);
@@ -236184,6 +237997,9 @@ function finalizeTruncatedResult(prefix, prefixWidth, ellipsis, ellipsisWidth, m
   return pad ? result + " ".repeat(Math.max(0, maxWidth - visibleWidth)) : result;
 }
 function graphemeWidth(segment) {
+  if (segment === "\t") {
+    return 3;
+  }
   if (zeroWidthRegex.test(segment)) {
     return 0;
   }
@@ -236518,8 +238334,16 @@ function splitIntoTokensWithAnsi(text) {
   const tokens = [];
   let current = "";
   let pendingAnsi = "";
-  let inWhitespace = false;
+  let currentKind = null;
   let i2 = 0;
+  const flushCurrent = () => {
+    if (!current) {
+      return;
+    }
+    tokens.push(current);
+    current = "";
+    currentKind = null;
+  };
   while (i2 < text.length) {
     const ansiResult = extractAnsiCode(text, i2);
     if (ansiResult) {
@@ -236527,22 +238351,40 @@ function splitIntoTokensWithAnsi(text) {
       i2 += ansiResult.length;
       continue;
     }
-    const char = text[i2];
-    const charIsSpace = char === " ";
-    if (charIsSpace !== inWhitespace && current) {
-      tokens.push(current);
-      current = "";
+    let end = i2;
+    while (end < text.length && !extractAnsiCode(text, end)) {
+      end++;
     }
-    if (pendingAnsi) {
-      current += pendingAnsi;
-      pendingAnsi = "";
+    for (const { segment } of graphemeSegmenter.segment(text.slice(i2, end))) {
+      const segmentIsSpace = segment === " ";
+      if (!segmentIsSpace && cjkBreakRegex.test(segment)) {
+        flushCurrent();
+        const token = pendingAnsi + segment;
+        pendingAnsi = "";
+        tokens.push(token);
+        continue;
+      }
+      const segmentKind = segmentIsSpace ? "space" : "word";
+      if (current && currentKind !== segmentKind) {
+        flushCurrent();
+      }
+      if (pendingAnsi) {
+        current += pendingAnsi;
+        pendingAnsi = "";
+      }
+      currentKind = segmentKind;
+      current += segment;
     }
-    inWhitespace = charIsSpace;
-    current += char;
-    i2++;
+    i2 = end;
   }
   if (pendingAnsi) {
-    current += pendingAnsi;
+    if (current) {
+      current += pendingAnsi;
+    } else if (tokens.length > 0) {
+      tokens[tokens.length - 1] += pendingAnsi;
+    } else {
+      current = pendingAnsi;
+    }
   }
   if (current) {
     tokens.push(current);
@@ -236559,7 +238401,10 @@ function wrapTextWithAnsi(text, width) {
   const tracker = new AnsiCodeTracker;
   for (const inputLine of inputLines) {
     const prefix = result.length > 0 ? tracker.getActiveCodes() : "";
-    result.push(...wrapSingleLine(prefix + inputLine, width));
+    const wrappedLines = wrapSingleLine(prefix + inputLine, width);
+    for (const wrappedLine of wrappedLines) {
+      result.push(wrappedLine);
+    }
     updateTrackerFromText(inputLine, tracker);
   }
   return result.length > 0 ? result : [""];
@@ -236591,7 +238436,9 @@ function wrapSingleLine(line, width) {
         currentVisibleLength = 0;
       }
       const broken = breakLongWord(token, width, tracker);
-      wrapped.push(...broken.slice(0, -1));
+      for (let i2 = 0;i2 < broken.length - 1; i2++) {
+        wrapped.push(broken[i2]);
+      }
       currentLine = broken[broken.length - 1];
       currentVisibleLength = visibleWidth(currentLine);
       continue;
@@ -238274,11 +240121,12 @@ class KillRing {
 
 // node_modules/@earendil-works/pi-tui/dist/tui.js
 import * as fs3 from "node:fs";
-import * as os from "node:os";
+import * as os2 from "node:os";
 import * as path4 from "node:path";
 import { performance as performance2 } from "node:perf_hooks";
 
 // node_modules/@earendil-works/pi-tui/dist/terminal-image.js
+import { execSync } from "node:child_process";
 var cachedCapabilities = null;
 var cellDimensions = { widthPx: 9, heightPx: 18 };
 function getCellDimensions() {
@@ -238287,14 +240135,28 @@ function getCellDimensions() {
 function setCellDimensions(dims) {
   cellDimensions = dims;
 }
-function detectCapabilities() {
+function probeTmuxHyperlinks() {
+  try {
+    const termfeatures = execSync("tmux display-message -p '#{client_termfeatures}'", {
+      encoding: "utf8",
+      timeout: 250,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    return termfeatures.split(",").map((feature) => feature.trim()).includes("hyperlinks");
+  } catch {
+    return false;
+  }
+}
+function detectCapabilities(tmuxForwardsHyperlink = probeTmuxHyperlinks) {
   const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
   const terminalEmulator = process.env.TERMINAL_EMULATOR?.toLowerCase() || "";
   const term = process.env.TERM?.toLowerCase() || "";
   const colorTerm = process.env.COLORTERM?.toLowerCase() || "";
   const hasTrueColorHint = colorTerm === "truecolor" || colorTerm === "24bit";
-  const inTmuxOrScreen = !!process.env.TMUX || term.startsWith("tmux") || term.startsWith("screen");
-  if (inTmuxOrScreen) {
+  if (process.env.TMUX || term.startsWith("tmux")) {
+    return { images: null, trueColor: hasTrueColorHint, hyperlinks: tmuxForwardsHyperlink() };
+  }
+  if (term.startsWith("screen")) {
     return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
   }
   if (process.env.KITTY_WINDOW_ID || termProgram === "kitty") {
@@ -238673,6 +240535,7 @@ class TUI extends Container {
   stopped = false;
   focusOrderCounter = 0;
   overlayStack = [];
+  overlayFocusRestore = { status: "inactive" };
   constructor(terminal, showHardwareCursor) {
     super();
     this.terminal = terminal;
@@ -238702,18 +240565,108 @@ class TUI extends Container {
     this.clearOnShrink = enabled;
   }
   setFocus(component) {
+    this.setFocusInternal({ component, overlayFocusRestore: "clear" });
+  }
+  setFocusInternal({ component, overlayFocusRestore }) {
+    const previousFocus = this.focusedComponent;
+    let nextFocus = component;
+    const previousFocusedOverlay = previousFocus ? this.overlayStack.find((entry) => entry.component === previousFocus && this.isOverlayVisible(entry)) : undefined;
+    const nextFocusIsOverlay = nextFocus ? this.overlayStack.some((entry) => entry.component === nextFocus) : false;
+    const restoreState = this.getVisibleOverlayFocusRestore();
+    if (nextFocus && !nextFocusIsOverlay) {
+      if (restoreState.status === "blocked" && restoreState.blockedBy === previousFocus) {
+        if (restoreState.resume.status === "focus-target" || !this.isComponentMounted(restoreState.blockedBy)) {
+          nextFocus = this.resolveBlockedOverlayFocusResume(restoreState);
+        } else {
+          this.overlayFocusRestore = {
+            status: "blocked",
+            overlay: restoreState.overlay,
+            blockedBy: nextFocus,
+            resume: restoreState.resume
+          };
+        }
+      } else if (previousFocusedOverlay && restoreState.status !== "inactive" && restoreState.overlay === previousFocusedOverlay && !this.isOverlayFocusAncestor(previousFocusedOverlay, nextFocus)) {
+        this.overlayFocusRestore = {
+          status: "blocked",
+          overlay: previousFocusedOverlay,
+          blockedBy: nextFocus,
+          resume: { status: "restore-overlay" }
+        };
+      }
+    } else if (nextFocus === null) {
+      if (restoreState.status === "blocked" && restoreState.blockedBy === previousFocus) {
+        nextFocus = this.resolveBlockedOverlayFocusResume(restoreState);
+      } else if (overlayFocusRestore === "clear") {
+        this.clearOverlayFocusRestore();
+      }
+    }
     if (isFocusable(this.focusedComponent)) {
       this.focusedComponent.focused = false;
     }
-    this.focusedComponent = component;
-    if (isFocusable(component)) {
-      component.focused = true;
+    this.focusedComponent = nextFocus;
+    if (isFocusable(nextFocus)) {
+      nextFocus.focused = true;
     }
+    const focusedOverlay = nextFocus ? this.overlayStack.find((entry) => entry.component === nextFocus && this.isOverlayVisible(entry)) : undefined;
+    if (focusedOverlay) {
+      this.overlayFocusRestore = { status: "eligible", overlay: focusedOverlay };
+    }
+  }
+  clearOverlayFocusRestore() {
+    this.overlayFocusRestore = { status: "inactive" };
+  }
+  clearOverlayFocusRestoreFor(overlay) {
+    if (this.overlayFocusRestore.status !== "inactive" && this.overlayFocusRestore.overlay === overlay) {
+      this.clearOverlayFocusRestore();
+    }
+  }
+  resolveBlockedOverlayFocusResume(restoreState) {
+    if (restoreState.resume.status === "restore-overlay")
+      return restoreState.overlay.component;
+    this.clearOverlayFocusRestore();
+    return restoreState.resume.target;
+  }
+  getVisibleOverlayFocusRestore() {
+    const restoreState = this.overlayFocusRestore;
+    if (restoreState.status === "inactive")
+      return restoreState;
+    if (!this.overlayStack.includes(restoreState.overlay) || !this.isOverlayVisible(restoreState.overlay)) {
+      return { status: "inactive" };
+    }
+    return restoreState;
+  }
+  isOverlayFocusAncestor(entry, component) {
+    const visited2 = new Set;
+    let current = entry.preFocus;
+    while (current && !visited2.has(current)) {
+      visited2.add(current);
+      if (current === component)
+        return true;
+      current = this.overlayStack.find((overlay) => overlay.component === current)?.preFocus ?? null;
+    }
+    return false;
+  }
+  retargetOverlayPreFocus(removed) {
+    for (const overlay of this.overlayStack) {
+      if (overlay !== removed && overlay.preFocus === removed.component) {
+        overlay.preFocus = removed.preFocus;
+      }
+    }
+  }
+  isComponentMounted(component) {
+    return this.children.some((child) => this.containsComponent(child, component));
+  }
+  containsComponent(root, target2) {
+    if (root === target2)
+      return true;
+    if (!(root instanceof Container))
+      return false;
+    return root.children.some((child) => this.containsComponent(child, target2));
   }
   showOverlay(component, options3) {
     const entry = {
       component,
-      options: options3,
+      ...options3 === undefined ? {} : { options: options3 },
       preFocus: this.focusedComponent,
       hidden: false,
       focusOrder: ++this.focusOrderCounter
@@ -238728,6 +240681,8 @@ class TUI extends Container {
       hide: () => {
         const index2 = this.overlayStack.indexOf(entry);
         if (index2 !== -1) {
+          this.clearOverlayFocusRestoreFor(entry);
+          this.retargetOverlayPreFocus(entry);
           this.overlayStack.splice(index2, 1);
           if (this.focusedComponent === component) {
             const topVisible = this.getTopmostVisibleOverlay();
@@ -238743,6 +240698,7 @@ class TUI extends Container {
           return;
         entry.hidden = hidden;
         if (hidden) {
+          this.clearOverlayFocusRestoreFor(entry);
           if (this.focusedComponent === component) {
             const topVisible = this.getTopmostVisibleOverlay();
             this.setFocus(topVisible?.component ?? entry.preFocus);
@@ -238759,26 +240715,48 @@ class TUI extends Container {
       focus: () => {
         if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry))
           return;
-        if (this.focusedComponent !== component) {
-          this.setFocus(component);
-        }
         entry.focusOrder = ++this.focusOrderCounter;
+        this.setFocus(component);
         this.requestRender();
       },
-      unfocus: () => {
-        if (this.focusedComponent !== component)
+      unfocus: (unfocusOptions) => {
+        const isFocused = this.focusedComponent === component;
+        const restoreState = this.overlayFocusRestore;
+        const hasPendingRestore = restoreState.status !== "inactive" && restoreState.overlay === entry;
+        if (!isFocused && !hasPendingRestore)
           return;
-        const topVisible = this.getTopmostVisibleOverlay();
-        this.setFocus(topVisible && topVisible !== entry ? topVisible.component : entry.preFocus);
+        if (restoreState.status === "blocked" && restoreState.overlay === entry && this.focusedComponent === restoreState.blockedBy) {
+          if (unfocusOptions) {
+            this.overlayFocusRestore = {
+              status: "blocked",
+              overlay: entry,
+              blockedBy: restoreState.blockedBy,
+              resume: { status: "focus-target", target: unfocusOptions.target }
+            };
+          } else {
+            this.clearOverlayFocusRestore();
+          }
+          this.requestRender();
+          return;
+        }
+        this.clearOverlayFocusRestoreFor(entry);
+        if (isFocused || unfocusOptions) {
+          const topVisible = this.getTopmostVisibleOverlay();
+          const fallbackTarget = topVisible && topVisible !== entry ? topVisible.component : entry.preFocus;
+          this.setFocus(unfocusOptions ? unfocusOptions.target : fallbackTarget);
+        }
         this.requestRender();
       },
       isFocused: () => this.focusedComponent === component
     };
   }
   hideOverlay() {
-    const overlay = this.overlayStack.pop();
+    const overlay = this.overlayStack[this.overlayStack.length - 1];
     if (!overlay)
       return;
+    this.clearOverlayFocusRestoreFor(overlay);
+    this.retargetOverlayPreFocus(overlay);
+    this.overlayStack.pop();
     if (this.focusedComponent === overlay.component) {
       const topVisible = this.getTopmostVisibleOverlay();
       this.setFocus(topVisible?.component ?? overlay.preFocus);
@@ -238799,14 +240777,15 @@ class TUI extends Container {
     return true;
   }
   getTopmostVisibleOverlay() {
-    for (let i2 = this.overlayStack.length - 1;i2 >= 0; i2--) {
-      if (this.overlayStack[i2].options?.nonCapturing)
+    let topmost;
+    for (const overlay of this.overlayStack) {
+      if (overlay.options?.nonCapturing || !this.isOverlayVisible(overlay))
         continue;
-      if (this.isOverlayVisible(this.overlayStack[i2])) {
-        return this.overlayStack[i2];
+      if (!topmost || overlay.focusOrder > topmost.focusOrder) {
+        topmost = overlay;
       }
     }
-    return;
+    return topmost;
   }
   invalidate() {
     super.invalidate();
@@ -238933,7 +240912,21 @@ class TUI extends Container {
       if (topVisible) {
         this.setFocus(topVisible.component);
       } else {
-        this.setFocus(focusedOverlay.preFocus);
+        this.setFocusInternal({ component: focusedOverlay.preFocus, overlayFocusRestore: "preserve" });
+      }
+    }
+    const focusIsOverlay = this.overlayStack.some((o) => o.component === this.focusedComponent);
+    if (!focusIsOverlay) {
+      const restoreState = this.getVisibleOverlayFocusRestore();
+      if (restoreState.status === "eligible") {
+        this.setFocus(restoreState.overlay.component);
+      } else if (restoreState.status === "blocked" && restoreState.blockedBy !== this.focusedComponent) {
+        if (restoreState.resume.status === "restore-overlay") {
+          this.setFocus(restoreState.overlay.component);
+        } else {
+          this.clearOverlayFocusRestore();
+          this.setFocus(restoreState.resume.target);
+        }
       }
     }
     if (this.focusedComponent?.handleInput) {
@@ -239227,7 +241220,7 @@ class TUI extends Container {
     const logRedraw = (reason) => {
       if (!debugRedraw)
         return;
-      const logPath = path4.join(os.homedir(), ".pi", "agent", "pi-debug.log");
+      const logPath = path4.join(os2.homedir(), ".pi", "agent", "pi-debug.log");
       const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})
 `;
       fs3.appendFileSync(logPath, msg);
@@ -239304,16 +241297,18 @@ class TUI extends Container {
           fullRender(true);
           return;
         }
-        if (extraLines > 0) {
-          buffer2 += "\x1B[1B";
+        const clearStartOffset = newLines.length === 0 ? 0 : 1;
+        if (extraLines > 0 && clearStartOffset > 0) {
+          buffer2 += `\x1B[${clearStartOffset}B`;
         }
         for (let i2 = 0;i2 < extraLines; i2++) {
           buffer2 += "\r\x1B[2K";
           if (i2 < extraLines - 1)
             buffer2 += "\x1B[1B";
         }
-        if (extraLines > 0) {
-          buffer2 += `\x1B[${extraLines}A`;
+        const moveBack = Math.max(0, extraLines - 1 + clearStartOffset);
+        if (moveBack > 0) {
+          buffer2 += `\x1B[${moveBack}A`;
         }
         buffer2 += "\x1B[?2026l";
         this.terminal.write(buffer2);
@@ -239367,7 +241362,7 @@ class TUI extends Container {
       const line = newLines[i2];
       const isImage = isImageLine(line);
       if (!isImage && visibleWidth(line) > width) {
-        const crashLogPath = path4.join(os.homedir(), ".pi", "agent", "pi-crash.log");
+        const crashLogPath = path4.join(os2.homedir(), ".pi", "agent", "pi-crash.log");
         const crashData = [
           `Crash at ${new Date().toISOString()}`,
           `Terminal width: ${width}`,
@@ -239802,6 +241797,17 @@ var SLASH_COMMAND_SELECT_LIST_LAYOUT = {
   maxPrimaryColumnWidth: 32
 };
 var ATTACHMENT_AUTOCOMPLETE_DEBOUNCE_MS = 20;
+var DEFAULT_AUTOCOMPLETE_TRIGGER_CHARACTERS = ["@", "#"];
+function escapeCharacterClass(value2) {
+  return value2.replace(/[\\^$.*+?()[\]{}|-]/g, "\\$&");
+}
+function buildTriggerPattern(triggerCharacters) {
+  return new RegExp(`(?:^|[\\s])[${triggerCharacters.map(escapeCharacterClass).join("")}][^\\s]*$`);
+}
+function buildDebouncePattern(triggerCharacters) {
+  const escapedWithoutAt = triggerCharacters.filter((character) => character !== "@").map(escapeCharacterClass);
+  return new RegExp(`(?:^|[ \\t])(?:@(?:"[^"]*|[^\\s]*)|[${escapedWithoutAt.join("")}][^\\s]*)$`);
+}
 
 class Editor {
   state = {
@@ -239817,6 +241823,9 @@ class Editor {
   scrollOffset = 0;
   borderColor;
   autocompleteProvider;
+  autocompleteTriggerCharacters = [...DEFAULT_AUTOCOMPLETE_TRIGGER_CHARACTERS];
+  autocompleteTriggerPattern = buildTriggerPattern(this.autocompleteTriggerCharacters);
+  autocompleteDebouncePattern = buildDebouncePattern(this.autocompleteTriggerCharacters);
   autocompleteList;
   autocompleteState = null;
   autocompletePrefix = "";
@@ -239832,6 +241841,7 @@ class Editor {
   isInPaste = false;
   history = [];
   historyIndex = -1;
+  historyDraft = null;
   killRing = new KillRing;
   lastAction = null;
   jumpMode = null;
@@ -239879,6 +241889,7 @@ class Editor {
   setAutocompleteProvider(provider) {
     this.cancelAutocomplete();
     this.autocompleteProvider = provider;
+    this.setAutocompleteTriggerCharacters(provider.triggerCharacters ?? []);
   }
   addToHistory(text) {
     const trimmed = text.trim();
@@ -239890,9 +241901,6 @@ class Editor {
     if (this.history.length > 100) {
       this.history.pop();
     }
-  }
-  isEditorEmpty() {
-    return this.state.lines.length === 1 && this.state.lines[0] === "";
   }
   isOnFirstVisualLine() {
     const visualLines = this.buildVisualLineMap(this.lastWidth);
@@ -239913,20 +241921,36 @@ class Editor {
       return;
     if (this.historyIndex === -1 && newIndex >= 0) {
       this.pushUndoSnapshot();
+      this.historyDraft = structuredClone(this.state);
     }
     this.historyIndex = newIndex;
     if (this.historyIndex === -1) {
-      this.setTextInternal("");
+      const draft = this.historyDraft;
+      this.historyDraft = null;
+      if (draft) {
+        this.state = draft;
+        this.preferredVisualCol = null;
+        this.snappedFromCursorCol = null;
+        this.scrollOffset = 0;
+        if (this.onChange)
+          this.onChange(this.getText());
+      } else {
+        this.setTextInternal("");
+      }
     } else {
-      this.setTextInternal(this.history[this.historyIndex] || "");
+      this.setTextInternal(this.history[this.historyIndex] || "", direction === -1 ? "start" : "end");
     }
   }
-  setTextInternal(text) {
+  exitHistoryBrowsing() {
+    this.historyIndex = -1;
+    this.historyDraft = null;
+  }
+  setTextInternal(text, cursorPlacement = "end") {
     const lines = text.split(`
 `);
     this.state.lines = lines.length === 0 ? [""] : lines;
-    this.state.cursorLine = this.state.lines.length - 1;
-    this.setCursorCol(this.state.lines[this.state.cursorLine]?.length || 0);
+    this.state.cursorLine = cursorPlacement === "start" ? 0 : this.state.lines.length - 1;
+    this.setCursorCol(cursorPlacement === "start" ? 0 : this.state.lines[this.state.cursorLine]?.length || 0);
     this.scrollOffset = 0;
     if (this.onChange) {
       this.onChange(this.getText());
@@ -239968,7 +241992,7 @@ class Editor {
     } else {
       result.push(horizontal.repeat(width));
     }
-    const emitCursorMarker = this.focused && !this.autocompleteState;
+    const emitCursorMarker = this.focused;
     for (const layoutLine of visibleLines) {
       let displayText = layoutLine.text;
       let lineVisibleWidth = visibleWidth(layoutLine.text);
@@ -240179,9 +242203,7 @@ class Editor {
       return;
     }
     if (kb.matches(data, "tui.editor.cursorUp")) {
-      if (this.isEditorEmpty()) {
-        this.navigateHistory(-1);
-      } else if (this.historyIndex > -1 && this.isOnFirstVisualLine()) {
+      if (this.isOnFirstVisualLine() && this.history.length > 0) {
         this.navigateHistory(-1);
       } else if (this.isOnFirstVisualLine()) {
         this.moveToLineStart();
@@ -240330,7 +242352,7 @@ class Editor {
   setText(text) {
     this.cancelAutocomplete();
     this.lastAction = null;
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     const normalized = this.normalizeText(text);
     if (this.getText() !== normalized) {
       this.pushUndoSnapshot();
@@ -240343,7 +242365,7 @@ class Editor {
     this.cancelAutocomplete();
     this.pushUndoSnapshot();
     this.lastAction = null;
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     this.insertTextAtCursorInternal(text);
   }
   normalizeText(text) {
@@ -240379,7 +242401,7 @@ class Editor {
     }
   }
   insertCharacter(char, skipUndoCoalescing) {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     if (!skipUndoCoalescing) {
       if (isWhitespaceChar(char) || this.lastAction !== "type-word") {
         this.pushUndoSnapshot();
@@ -240397,7 +242419,7 @@ class Editor {
     if (!this.autocompleteState) {
       if (char === "/" && this.isAtStartOfMessage()) {
         this.tryTriggerAutocomplete();
-      } else if (char === "@" || char === "#") {
+      } else if (this.autocompleteTriggerCharacters.includes(char)) {
         const currentLine = this.state.lines[this.state.cursorLine] || "";
         const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
         const charBeforeSymbol = textBeforeCursor[textBeforeCursor.length - 2];
@@ -240409,7 +242431,7 @@ class Editor {
         const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
         if (this.isInSlashCommandContext(textBeforeCursor)) {
           this.tryTriggerAutocomplete();
-        } else if (textBeforeCursor.match(/(?:^|[\s])[@#][^\s]*$/)) {
+        } else if (this.autocompleteTriggerPattern.test(textBeforeCursor)) {
           this.tryTriggerAutocomplete();
         }
       }
@@ -240419,7 +242441,7 @@ class Editor {
   }
   handlePaste(pastedText) {
     this.cancelAutocomplete();
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     this.lastAction = null;
     this.pushUndoSnapshot();
     const decodedText = pastedText.replace(/\x1b\[(\d+);5u/g, (match2, code2) => {
@@ -240459,7 +242481,7 @@ class Editor {
   }
   addNewLine() {
     this.cancelAutocomplete();
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     this.lastAction = null;
     this.pushUndoSnapshot();
     const currentLine = this.state.lines[this.state.cursorLine] || "";
@@ -240492,7 +242514,7 @@ class Editor {
     this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
     this.pastes.clear();
     this.pasteCounter = 0;
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     this.scrollOffset = 0;
     this.undoStack.clear();
     this.lastAction = null;
@@ -240502,7 +242524,7 @@ class Editor {
       this.onSubmit(result);
   }
   handleBackspace() {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     this.lastAction = null;
     if (this.state.cursorCol > 0) {
       this.pushUndoSnapshot();
@@ -240534,7 +242556,7 @@ class Editor {
       const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
       if (this.isInSlashCommandContext(textBeforeCursor)) {
         this.tryTriggerAutocomplete();
-      } else if (textBeforeCursor.match(/(?:^|[\s])[@#][^\s]*$/)) {
+      } else if (this.autocompleteTriggerPattern.test(textBeforeCursor)) {
         this.tryTriggerAutocomplete();
       }
     }
@@ -240622,7 +242644,7 @@ class Editor {
     this.setCursorCol(currentLine.length);
   }
   deleteToStartOfLine() {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     const currentLine = this.state.lines[this.state.cursorLine] || "";
     if (this.state.cursorCol > 0) {
       this.pushUndoSnapshot();
@@ -240647,7 +242669,7 @@ class Editor {
     }
   }
   deleteToEndOfLine() {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     const currentLine = this.state.lines[this.state.cursorLine] || "";
     if (this.state.cursorCol < currentLine.length) {
       this.pushUndoSnapshot();
@@ -240669,7 +242691,7 @@ class Editor {
     }
   }
   deleteWordBackwards() {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     const currentLine = this.state.lines[this.state.cursorLine] || "";
     if (this.state.cursorCol === 0) {
       if (this.state.cursorLine > 0) {
@@ -240701,7 +242723,7 @@ class Editor {
     }
   }
   deleteWordForward() {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     const currentLine = this.state.lines[this.state.cursorLine] || "";
     if (this.state.cursorCol >= currentLine.length) {
       if (this.state.cursorLine < this.state.lines.length - 1) {
@@ -240730,7 +242752,7 @@ class Editor {
     }
   }
   handleForwardDelete() {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     this.lastAction = null;
     const currentLine = this.state.lines[this.state.cursorLine] || "";
     if (this.state.cursorCol < currentLine.length) {
@@ -240758,7 +242780,7 @@ class Editor {
       const textBeforeCursor = currentLine2.slice(0, this.state.cursorCol);
       if (this.isInSlashCommandContext(textBeforeCursor)) {
         this.tryTriggerAutocomplete();
-      } else if (textBeforeCursor.match(/(?:^|[\s])[@#][^\s]*$/)) {
+      } else if (this.autocompleteTriggerPattern.test(textBeforeCursor)) {
         this.tryTriggerAutocomplete();
       }
     }
@@ -240841,6 +242863,9 @@ class Editor {
         }
       }
     }
+    if (this.autocompleteState) {
+      this.updateAutocomplete();
+    }
   }
   pageScroll(direction) {
     this.lastAction = null;
@@ -240886,7 +242911,7 @@ class Editor {
     this.lastAction = "yank";
   }
   insertYankedText(text) {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     const lines = text.split(`
 `);
     if (lines.length === 1) {
@@ -240942,7 +242967,7 @@ class Editor {
     this.undoStack.push(this.state);
   }
   undo() {
-    this.historyIndex = -1;
+    this.exitHistoryBrowsing();
     const snapshot = this.undoStack.pop();
     if (!snapshot)
       return;
@@ -241076,14 +243101,25 @@ class Editor {
     })();
     await this.autocompleteRequestTask;
   }
+  setAutocompleteTriggerCharacters(triggerCharacters) {
+    const next = [...DEFAULT_AUTOCOMPLETE_TRIGGER_CHARACTERS];
+    for (const character of triggerCharacters) {
+      if (character.length !== 1 || character === "/" || isWhitespaceChar(character) || next.includes(character)) {
+        continue;
+      }
+      next.push(character);
+    }
+    this.autocompleteTriggerCharacters = next;
+    this.autocompleteTriggerPattern = buildTriggerPattern(next);
+    this.autocompleteDebouncePattern = buildDebouncePattern(next);
+  }
   getAutocompleteDebounceMs(options3) {
     if (options3.explicitTab || options3.force) {
       return 0;
     }
     const currentLine = this.state.lines[this.state.cursorLine] || "";
     const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
-    const isSymbolAutocompleteContext = /(?:^|[ \t])(?:@(?:"[^"]*|[^\s]*)|#[^\s]*)$/.test(textBeforeCursor);
-    return isSymbolAutocompleteContext ? ATTACHMENT_AUTOCOMPLETE_DEBOUNCE_MS : 0;
+    return this.autocompleteDebouncePattern.test(textBeforeCursor) ? ATTACHMENT_AUTOCOMPLETE_DEBOUNCE_MS : 0;
   }
   async runAutocompleteRequest(requestId, controller, snapshotText, snapshotLine, snapshotCol, options3) {
     if (!this.autocompleteProvider)
@@ -244773,7 +246809,6 @@ var TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1B]9;4;3\x07";
 var TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1B]9;4;0;\x07";
 var APPLE_TERMINAL_SHIFT_ENTER_SEQUENCE = "\x1B[13;2u";
 var DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS = 7;
-var KITTY_KEYBOARD_PROTOCOL_FALLBACK_TIMEOUT_MS = 150;
 var KEYBOARD_PROTOCOL_RESPONSE_FRAGMENT_TIMEOUT_MS = 150;
 var KITTY_KEYBOARD_PROTOCOL_QUERY = `\x1B[>${DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS}u\x1B[?u\x1B[c`;
 function parseKeyboardProtocolNegotiationSequence(sequence) {
@@ -244786,8 +246821,8 @@ function parseKeyboardProtocolNegotiationSequence(sequence) {
   }
   return;
 }
-function isKeyboardProtocolNegotiationSequencePrefix(sequence, allowBareEscapePrefix) {
-  return allowBareEscapePrefix && sequence === "\x1B" || sequence === "\x1B[" || /^\x1b\[\?[\d;]*$/.test(sequence);
+function isKeyboardProtocolNegotiationSequencePrefix(sequence) {
+  return sequence === "\x1B[" || /^\x1b\[\?[\d;]*$/.test(sequence);
 }
 function isAppleTerminalSession() {
   return process.platform === "darwin" && process.env.TERM_PROGRAM === "Apple_Terminal";
@@ -244805,29 +246840,29 @@ class ProcessTerminal {
   _kittyProtocolActive = false;
   _modifyOtherKeysActive = false;
   keyboardProtocolPushed = false;
-  keyboardProtocolNegotiationPending = false;
-  keyboardProtocolLateResponsePending = false;
   keyboardProtocolNegotiationBuffer = "";
-  keyboardProtocolFallbackTimer;
   keyboardProtocolBufferFlushTimer;
   stdinBuffer;
   stdinDataHandler;
   progressInterval;
   writeLogPath = (() => {
-    const env3 = process.env.PI_TUI_WRITE_LOG || "";
-    if (!env3)
+    const env4 = process.env.PI_TUI_WRITE_LOG || "";
+    if (!env4)
       return "";
     try {
-      if (fs4.statSync(env3).isDirectory()) {
+      if (fs4.statSync(env4).isDirectory()) {
         const now = new Date;
         const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
-        return path6.join(env3, `tui-${ts}-${process.pid}.log`);
+        return path6.join(env4, `tui-${ts}-${process.pid}.log`);
       }
     } catch {}
-    return env3;
+    return env4;
   })();
   get kittyProtocolActive() {
     return this._kittyProtocolActive;
+  }
+  get modifyOtherKeysActive() {
+    return this._modifyOtherKeysActive;
   }
   start(onInput, onResize) {
     this.inputHandler = onInput;
@@ -244849,24 +246884,13 @@ class ProcessTerminal {
   setupStdinBuffer() {
     this.stdinBuffer = new StdinBuffer({ timeout: 10 });
     this.stdinBuffer.on("data", (sequence) => {
-      if (this.keyboardProtocolNegotiationPending) {
-        const negotiationSequence = this.readKeyboardProtocolNegotiationSequence(sequence, true);
-        if (negotiationSequence === "pending") {
-          return;
-        }
-        if (this.handleKeyboardProtocolNegotiationSequence(negotiationSequence)) {
-          return;
-        }
+      const negotiationSequence = this.readKeyboardProtocolNegotiationSequence(sequence);
+      if (negotiationSequence === "pending") {
+        this.scheduleKeyboardProtocolNegotiationBufferFlush();
+        return;
       }
-      if (this.keyboardProtocolLateResponsePending) {
-        const negotiationSequence = this.readKeyboardProtocolNegotiationSequence(sequence, false);
-        if (negotiationSequence === "pending") {
-          this.scheduleKeyboardProtocolNegotiationBufferFlush();
-          return;
-        }
-        if (this.handleKeyboardProtocolNegotiationSequence(negotiationSequence)) {
-          return;
-        }
+      if (this.handleKeyboardProtocolNegotiationSequence(negotiationSequence)) {
+        return;
       }
       this.forwardInputSequence(sequence);
     });
@@ -244883,44 +246907,31 @@ class ProcessTerminal {
     this.setupStdinBuffer();
     process.stdin.on("data", this.stdinDataHandler);
     this.keyboardProtocolPushed = true;
-    this.keyboardProtocolNegotiationPending = true;
-    this.keyboardProtocolLateResponsePending = false;
     this.clearKeyboardProtocolNegotiationBuffer();
     process.stdout.write(KITTY_KEYBOARD_PROTOCOL_QUERY);
-    this.keyboardProtocolFallbackTimer = setTimeout(() => {
-      this.keyboardProtocolFallbackTimer = undefined;
-      this.keyboardProtocolNegotiationPending = false;
-      this.keyboardProtocolLateResponsePending = true;
-      if (this.keyboardProtocolNegotiationBuffer === "\x1B") {
-        this.flushKeyboardProtocolNegotiationBufferAsInput();
-      } else {
-        this.scheduleKeyboardProtocolNegotiationBufferFlush();
-      }
-      this.enableModifyOtherKeys();
-    }, KITTY_KEYBOARD_PROTOCOL_FALLBACK_TIMEOUT_MS);
   }
   handleKeyboardProtocolNegotiationSequence(negotiationSequence) {
     if (!negotiationSequence)
       return false;
+    this.clearKeyboardProtocolNegotiationBuffer();
     if (negotiationSequence.type === "kitty-flags") {
-      if (negotiationSequence.flags !== 0 && !this._kittyProtocolActive) {
-        this._kittyProtocolActive = true;
-        setKittyProtocolActive(true);
-        this.keyboardProtocolNegotiationPending = false;
-        this.keyboardProtocolLateResponsePending = true;
-        this.clearKeyboardProtocolNegotiationBuffer();
-        this.clearKeyboardProtocolFallbackTimer();
+      if (negotiationSequence.flags !== 0) {
+        this.disableModifyOtherKeys();
+        if (!this._kittyProtocolActive) {
+          this._kittyProtocolActive = true;
+          setKittyProtocolActive(true);
+        }
+      } else {
+        this.enableModifyOtherKeys();
       }
       return true;
     }
-    this.keyboardProtocolNegotiationPending = false;
-    this.keyboardProtocolLateResponsePending = true;
-    this.clearKeyboardProtocolNegotiationBuffer();
-    this.clearKeyboardProtocolFallbackTimer();
-    this.enableModifyOtherKeys();
+    if (!this._kittyProtocolActive) {
+      this.enableModifyOtherKeys();
+    }
     return true;
   }
-  readKeyboardProtocolNegotiationSequence(sequence, allowBareEscapePrefix) {
+  readKeyboardProtocolNegotiationSequence(sequence) {
     if (this.keyboardProtocolNegotiationBuffer) {
       const bufferedSequence = this.keyboardProtocolNegotiationBuffer + sequence;
       const negotiationSequence2 = parseKeyboardProtocolNegotiationSequence(bufferedSequence);
@@ -244928,7 +246939,7 @@ class ProcessTerminal {
         this.clearKeyboardProtocolNegotiationBuffer();
         return negotiationSequence2;
       }
-      if (isKeyboardProtocolNegotiationSequencePrefix(bufferedSequence, allowBareEscapePrefix)) {
+      if (isKeyboardProtocolNegotiationSequencePrefix(bufferedSequence)) {
         this.setKeyboardProtocolNegotiationBuffer(bufferedSequence);
         return "pending";
       }
@@ -244937,7 +246948,7 @@ class ProcessTerminal {
     const negotiationSequence = parseKeyboardProtocolNegotiationSequence(sequence);
     if (negotiationSequence)
       return negotiationSequence;
-    if (isKeyboardProtocolNegotiationSequencePrefix(sequence, allowBareEscapePrefix)) {
+    if (isKeyboardProtocolNegotiationSequencePrefix(sequence)) {
       this.setKeyboardProtocolNegotiationBuffer(sequence);
       return "pending";
     }
@@ -244985,11 +246996,11 @@ class ProcessTerminal {
     process.stdout.write("\x1B[>4;2m");
     this._modifyOtherKeysActive = true;
   }
-  clearKeyboardProtocolFallbackTimer() {
-    if (!this.keyboardProtocolFallbackTimer)
+  disableModifyOtherKeys() {
+    if (!this._modifyOtherKeysActive)
       return;
-    clearTimeout(this.keyboardProtocolFallbackTimer);
-    this.keyboardProtocolFallbackTimer = undefined;
+    process.stdout.write("\x1B[>4;0m");
+    this._modifyOtherKeysActive = false;
   }
   enableWindowsVTInput() {
     if (process.platform !== "win32")
@@ -245015,21 +247026,15 @@ class ProcessTerminal {
     } catch {}
   }
   async drainInput(maxMs = 1000, idleMs = 50) {
-    const shouldDisableKittyProtocol = this.keyboardProtocolPushed || this._kittyProtocolActive || this.keyboardProtocolNegotiationPending;
-    this.keyboardProtocolLateResponsePending = false;
+    const shouldDisableKittyProtocol = this.keyboardProtocolPushed || this._kittyProtocolActive;
     this.clearKeyboardProtocolNegotiationBuffer();
-    this.clearKeyboardProtocolFallbackTimer();
     if (shouldDisableKittyProtocol) {
       process.stdout.write("\x1B[<u");
       this.keyboardProtocolPushed = false;
       this._kittyProtocolActive = false;
       setKittyProtocolActive(false);
     }
-    this.keyboardProtocolNegotiationPending = false;
-    if (this._modifyOtherKeysActive) {
-      process.stdout.write("\x1B[>4;0m");
-      this._modifyOtherKeysActive = false;
-    }
+    this.disableModifyOtherKeys();
     const previousHandler = this.inputHandler;
     this.inputHandler = undefined;
     let lastDataTime = Date.now();
@@ -245058,21 +247063,15 @@ class ProcessTerminal {
       process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
     }
     process.stdout.write("\x1B[?2004l");
-    const shouldDisableKittyProtocol = this.keyboardProtocolPushed || this._kittyProtocolActive || this.keyboardProtocolNegotiationPending;
-    this.keyboardProtocolLateResponsePending = false;
+    const shouldDisableKittyProtocol = this.keyboardProtocolPushed || this._kittyProtocolActive;
     this.clearKeyboardProtocolNegotiationBuffer();
-    this.clearKeyboardProtocolFallbackTimer();
     if (shouldDisableKittyProtocol) {
       process.stdout.write("\x1B[<u");
       this.keyboardProtocolPushed = false;
       this._kittyProtocolActive = false;
       setKittyProtocolActive(false);
     }
-    this.keyboardProtocolNegotiationPending = false;
-    if (this._modifyOtherKeysActive) {
-      process.stdout.write("\x1B[>4;0m");
-      this._modifyOtherKeysActive = false;
-    }
+    this.disableModifyOtherKeys();
     if (this.stdinBuffer) {
       this.stdinBuffer.destroy();
       this.stdinBuffer = undefined;
@@ -245151,495 +247150,6 @@ class ProcessTerminal {
     return true;
   }
 }
-// node_modules/chalk/source/vendor/ansi-styles/index.js
-var ANSI_BACKGROUND_OFFSET = 10;
-var wrapAnsi16 = (offset = 0) => (code2) => `\x1B[${code2 + offset}m`;
-var wrapAnsi256 = (offset = 0) => (code2) => `\x1B[${38 + offset};5;${code2}m`;
-var wrapAnsi16m = (offset = 0) => (red, green, blue) => `\x1B[${38 + offset};2;${red};${green};${blue}m`;
-var styles = {
-  modifier: {
-    reset: [0, 0],
-    bold: [1, 22],
-    dim: [2, 22],
-    italic: [3, 23],
-    underline: [4, 24],
-    overline: [53, 55],
-    inverse: [7, 27],
-    hidden: [8, 28],
-    strikethrough: [9, 29]
-  },
-  color: {
-    black: [30, 39],
-    red: [31, 39],
-    green: [32, 39],
-    yellow: [33, 39],
-    blue: [34, 39],
-    magenta: [35, 39],
-    cyan: [36, 39],
-    white: [37, 39],
-    blackBright: [90, 39],
-    gray: [90, 39],
-    grey: [90, 39],
-    redBright: [91, 39],
-    greenBright: [92, 39],
-    yellowBright: [93, 39],
-    blueBright: [94, 39],
-    magentaBright: [95, 39],
-    cyanBright: [96, 39],
-    whiteBright: [97, 39]
-  },
-  bgColor: {
-    bgBlack: [40, 49],
-    bgRed: [41, 49],
-    bgGreen: [42, 49],
-    bgYellow: [43, 49],
-    bgBlue: [44, 49],
-    bgMagenta: [45, 49],
-    bgCyan: [46, 49],
-    bgWhite: [47, 49],
-    bgBlackBright: [100, 49],
-    bgGray: [100, 49],
-    bgGrey: [100, 49],
-    bgRedBright: [101, 49],
-    bgGreenBright: [102, 49],
-    bgYellowBright: [103, 49],
-    bgBlueBright: [104, 49],
-    bgMagentaBright: [105, 49],
-    bgCyanBright: [106, 49],
-    bgWhiteBright: [107, 49]
-  }
-};
-var modifierNames = Object.keys(styles.modifier);
-var foregroundColorNames = Object.keys(styles.color);
-var backgroundColorNames = Object.keys(styles.bgColor);
-var colorNames = [...foregroundColorNames, ...backgroundColorNames];
-function assembleStyles() {
-  const codes = new Map;
-  for (const [groupName, group] of Object.entries(styles)) {
-    for (const [styleName, style] of Object.entries(group)) {
-      styles[styleName] = {
-        open: `\x1B[${style[0]}m`,
-        close: `\x1B[${style[1]}m`
-      };
-      group[styleName] = styles[styleName];
-      codes.set(style[0], style[1]);
-    }
-    Object.defineProperty(styles, groupName, {
-      value: group,
-      enumerable: false
-    });
-  }
-  Object.defineProperty(styles, "codes", {
-    value: codes,
-    enumerable: false
-  });
-  styles.color.close = "\x1B[39m";
-  styles.bgColor.close = "\x1B[49m";
-  styles.color.ansi = wrapAnsi16();
-  styles.color.ansi256 = wrapAnsi256();
-  styles.color.ansi16m = wrapAnsi16m();
-  styles.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
-  styles.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
-  styles.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
-  Object.defineProperties(styles, {
-    rgbToAnsi256: {
-      value(red, green, blue) {
-        if (red === green && green === blue) {
-          if (red < 8) {
-            return 16;
-          }
-          if (red > 248) {
-            return 231;
-          }
-          return Math.round((red - 8) / 247 * 24) + 232;
-        }
-        return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
-      },
-      enumerable: false
-    },
-    hexToRgb: {
-      value(hex3) {
-        const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex3.toString(16));
-        if (!matches) {
-          return [0, 0, 0];
-        }
-        let [colorString] = matches;
-        if (colorString.length === 3) {
-          colorString = [...colorString].map((character) => character + character).join("");
-        }
-        const integer4 = Number.parseInt(colorString, 16);
-        return [
-          integer4 >> 16 & 255,
-          integer4 >> 8 & 255,
-          integer4 & 255
-        ];
-      },
-      enumerable: false
-    },
-    hexToAnsi256: {
-      value: (hex3) => styles.rgbToAnsi256(...styles.hexToRgb(hex3)),
-      enumerable: false
-    },
-    ansi256ToAnsi: {
-      value(code2) {
-        if (code2 < 8) {
-          return 30 + code2;
-        }
-        if (code2 < 16) {
-          return 90 + (code2 - 8);
-        }
-        let red;
-        let green;
-        let blue;
-        if (code2 >= 232) {
-          red = ((code2 - 232) * 10 + 8) / 255;
-          green = red;
-          blue = red;
-        } else {
-          code2 -= 16;
-          const remainder = code2 % 36;
-          red = Math.floor(code2 / 36) / 5;
-          green = Math.floor(remainder / 6) / 5;
-          blue = remainder % 6 / 5;
-        }
-        const value2 = Math.max(red, green, blue) * 2;
-        if (value2 === 0) {
-          return 30;
-        }
-        let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
-        if (value2 === 2) {
-          result += 60;
-        }
-        return result;
-      },
-      enumerable: false
-    },
-    rgbToAnsi: {
-      value: (red, green, blue) => styles.ansi256ToAnsi(styles.rgbToAnsi256(red, green, blue)),
-      enumerable: false
-    },
-    hexToAnsi: {
-      value: (hex3) => styles.ansi256ToAnsi(styles.hexToAnsi256(hex3)),
-      enumerable: false
-    }
-  });
-  return styles;
-}
-var ansiStyles = assembleStyles();
-var ansi_styles_default = ansiStyles;
-
-// node_modules/chalk/source/vendor/supports-color/index.js
-import process3 from "node:process";
-import os2 from "node:os";
-import tty from "node:tty";
-function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process3.argv) {
-  const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
-  const position = argv.indexOf(prefix + flag);
-  const terminatorPosition = argv.indexOf("--");
-  return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
-}
-var { env: env3 } = process3;
-var flagForceColor;
-if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
-  flagForceColor = 0;
-} else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
-  flagForceColor = 1;
-}
-function envForceColor() {
-  if ("FORCE_COLOR" in env3) {
-    if (env3.FORCE_COLOR === "true") {
-      return 1;
-    }
-    if (env3.FORCE_COLOR === "false") {
-      return 0;
-    }
-    return env3.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env3.FORCE_COLOR, 10), 3);
-  }
-}
-function translateLevel(level) {
-  if (level === 0) {
-    return false;
-  }
-  return {
-    level,
-    hasBasic: true,
-    has256: level >= 2,
-    has16m: level >= 3
-  };
-}
-function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
-  const noFlagForceColor = envForceColor();
-  if (noFlagForceColor !== undefined) {
-    flagForceColor = noFlagForceColor;
-  }
-  const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
-  if (forceColor === 0) {
-    return 0;
-  }
-  if (sniffFlags) {
-    if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
-      return 3;
-    }
-    if (hasFlag("color=256")) {
-      return 2;
-    }
-  }
-  if ("TF_BUILD" in env3 && "AGENT_NAME" in env3) {
-    return 1;
-  }
-  if (haveStream && !streamIsTTY && forceColor === undefined) {
-    return 0;
-  }
-  const min = forceColor || 0;
-  if (env3.TERM === "dumb") {
-    return min;
-  }
-  if (process3.platform === "win32") {
-    const osRelease = os2.release().split(".");
-    if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
-      return Number(osRelease[2]) >= 14931 ? 3 : 2;
-    }
-    return 1;
-  }
-  if ("CI" in env3) {
-    if (["GITHUB_ACTIONS", "GITEA_ACTIONS", "CIRCLECI"].some((key) => (key in env3))) {
-      return 3;
-    }
-    if (["TRAVIS", "APPVEYOR", "GITLAB_CI", "BUILDKITE", "DRONE"].some((sign) => (sign in env3)) || env3.CI_NAME === "codeship") {
-      return 1;
-    }
-    return min;
-  }
-  if ("TEAMCITY_VERSION" in env3) {
-    return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env3.TEAMCITY_VERSION) ? 1 : 0;
-  }
-  if (env3.COLORTERM === "truecolor") {
-    return 3;
-  }
-  if (env3.TERM === "xterm-kitty") {
-    return 3;
-  }
-  if (env3.TERM === "xterm-ghostty") {
-    return 3;
-  }
-  if (env3.TERM === "wezterm") {
-    return 3;
-  }
-  if ("TERM_PROGRAM" in env3) {
-    const version2 = Number.parseInt((env3.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
-    switch (env3.TERM_PROGRAM) {
-      case "iTerm.app": {
-        return version2 >= 3 ? 3 : 2;
-      }
-      case "Apple_Terminal": {
-        return 2;
-      }
-    }
-  }
-  if (/-256(color)?$/i.test(env3.TERM)) {
-    return 2;
-  }
-  if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env3.TERM)) {
-    return 1;
-  }
-  if ("COLORTERM" in env3) {
-    return 1;
-  }
-  return min;
-}
-function createSupportsColor(stream4, options4 = {}) {
-  const level = _supportsColor(stream4, {
-    streamIsTTY: stream4 && stream4.isTTY,
-    ...options4
-  });
-  return translateLevel(level);
-}
-var supportsColor = {
-  stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
-  stderr: createSupportsColor({ isTTY: tty.isatty(2) })
-};
-var supports_color_default = supportsColor;
-
-// node_modules/chalk/source/utilities.js
-function stringReplaceAll(string7, substring, replacer) {
-  let index2 = string7.indexOf(substring);
-  if (index2 === -1) {
-    return string7;
-  }
-  const substringLength = substring.length;
-  let endIndex = 0;
-  let returnValue = "";
-  do {
-    returnValue += string7.slice(endIndex, index2) + substring + replacer;
-    endIndex = index2 + substringLength;
-    index2 = string7.indexOf(substring, endIndex);
-  } while (index2 !== -1);
-  returnValue += string7.slice(endIndex);
-  return returnValue;
-}
-function stringEncaseCRLFWithFirstIndex(string7, prefix, postfix, index2) {
-  let endIndex = 0;
-  let returnValue = "";
-  do {
-    const gotCR = string7[index2 - 1] === "\r";
-    returnValue += string7.slice(endIndex, gotCR ? index2 - 1 : index2) + prefix + (gotCR ? `\r
-` : `
-`) + postfix;
-    endIndex = index2 + 1;
-    index2 = string7.indexOf(`
-`, endIndex);
-  } while (index2 !== -1);
-  returnValue += string7.slice(endIndex);
-  return returnValue;
-}
-
-// node_modules/chalk/source/index.js
-var { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
-var GENERATOR = Symbol("GENERATOR");
-var STYLER = Symbol("STYLER");
-var IS_EMPTY = Symbol("IS_EMPTY");
-var levelMapping = [
-  "ansi",
-  "ansi",
-  "ansi256",
-  "ansi16m"
-];
-var styles2 = Object.create(null);
-var applyOptions = (object5, options4 = {}) => {
-  if (options4.level && !(Number.isInteger(options4.level) && options4.level >= 0 && options4.level <= 3)) {
-    throw new Error("The `level` option should be an integer from 0 to 3");
-  }
-  const colorLevel = stdoutColor ? stdoutColor.level : 0;
-  object5.level = options4.level === undefined ? colorLevel : options4.level;
-};
-var chalkFactory = (options4) => {
-  const chalk = (...strings) => strings.join(" ");
-  applyOptions(chalk, options4);
-  Object.setPrototypeOf(chalk, createChalk.prototype);
-  return chalk;
-};
-function createChalk(options4) {
-  return chalkFactory(options4);
-}
-Object.setPrototypeOf(createChalk.prototype, Function.prototype);
-for (const [styleName, style] of Object.entries(ansi_styles_default)) {
-  styles2[styleName] = {
-    get() {
-      const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
-      Object.defineProperty(this, styleName, { value: builder });
-      return builder;
-    }
-  };
-}
-styles2.visible = {
-  get() {
-    const builder = createBuilder(this, this[STYLER], true);
-    Object.defineProperty(this, "visible", { value: builder });
-    return builder;
-  }
-};
-var getModelAnsi = (model, level, type3, ...arguments_) => {
-  if (model === "rgb") {
-    if (level === "ansi16m") {
-      return ansi_styles_default[type3].ansi16m(...arguments_);
-    }
-    if (level === "ansi256") {
-      return ansi_styles_default[type3].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
-    }
-    return ansi_styles_default[type3].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
-  }
-  if (model === "hex") {
-    return getModelAnsi("rgb", level, type3, ...ansi_styles_default.hexToRgb(...arguments_));
-  }
-  return ansi_styles_default[type3][model](...arguments_);
-};
-var usedModels = ["rgb", "hex", "ansi256"];
-for (const model of usedModels) {
-  styles2[model] = {
-    get() {
-      const { level } = this;
-      return function(...arguments_) {
-        const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
-        return createBuilder(this, styler, this[IS_EMPTY]);
-      };
-    }
-  };
-  const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
-  styles2[bgModel] = {
-    get() {
-      const { level } = this;
-      return function(...arguments_) {
-        const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
-        return createBuilder(this, styler, this[IS_EMPTY]);
-      };
-    }
-  };
-}
-var proto = Object.defineProperties(() => {}, {
-  ...styles2,
-  level: {
-    enumerable: true,
-    get() {
-      return this[GENERATOR].level;
-    },
-    set(level) {
-      this[GENERATOR].level = level;
-    }
-  }
-});
-var createStyler = (open2, close, parent) => {
-  let openAll;
-  let closeAll;
-  if (parent === undefined) {
-    openAll = open2;
-    closeAll = close;
-  } else {
-    openAll = parent.openAll + open2;
-    closeAll = close + parent.closeAll;
-  }
-  return {
-    open: open2,
-    close,
-    openAll,
-    closeAll,
-    parent
-  };
-};
-var createBuilder = (self2, _styler, _isEmpty) => {
-  const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
-  Object.setPrototypeOf(builder, proto);
-  builder[GENERATOR] = self2;
-  builder[STYLER] = _styler;
-  builder[IS_EMPTY] = _isEmpty;
-  return builder;
-};
-var applyStyle = (self2, string7) => {
-  if (self2.level <= 0 || !string7) {
-    return self2[IS_EMPTY] ? "" : string7;
-  }
-  let styler = self2[STYLER];
-  if (styler === undefined) {
-    return string7;
-  }
-  const { openAll, closeAll } = styler;
-  if (string7.includes("\x1B")) {
-    while (styler !== undefined) {
-      string7 = stringReplaceAll(string7, styler.close, styler.open);
-      styler = styler.parent;
-    }
-  }
-  const lfIndex = string7.indexOf(`
-`);
-  if (lfIndex !== -1) {
-    string7 = stringEncaseCRLFWithFirstIndex(string7, closeAll, openAll, lfIndex);
-  }
-  return openAll + string7 + closeAll;
-};
-Object.defineProperties(createChalk.prototype, styles2);
-var chalk = createChalk();
-var chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
-var source_default = chalk;
-
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/fs-watch.js
 import { watch } from "node:fs";
 var FS_WATCH_RETRY_DELAY_MS = 5000;
@@ -249020,7 +250530,7 @@ function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
     isSplitTurn: !isUserMessage && turnStartIndex !== -1
   };
 }
-var SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
+var SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
 var SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
@@ -252037,9 +253547,11 @@ function processProxyEvent(proxyEvent, partial4) {
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js
 import { randomUUID } from "crypto";
-import { appendFileSync as appendFileSync3, closeSync, existsSync as existsSync4, mkdirSync as mkdirSync2, openSync, readdirSync as readdirSync3, readFileSync as readFileSync3, readSync, statSync as statSync4, writeFileSync as writeFileSync2 } from "fs";
-import { readdir, readFile, stat as stat3 } from "fs/promises";
+import { appendFileSync as appendFileSync3, closeSync, createReadStream as createReadStream2, existsSync as existsSync4, mkdirSync as mkdirSync2, openSync, readdirSync as readdirSync3, readSync, statSync as statSync4, writeFileSync as writeFileSync2 } from "fs";
+import { readdir, stat as stat3 } from "fs/promises";
 import { join as join10, resolve as resolve3 } from "path";
+import { createInterface } from "readline";
+import { StringDecoder } from "string_decoder";
 var CURRENT_SESSION_VERSION = 3;
 function createSessionId2() {
   return uuidv72();
@@ -252217,21 +253729,50 @@ function getDefaultSessionDir(cwd, agentDir = getAgentDir()) {
   }
   return sessionDir;
 }
+var SESSION_READ_BUFFER_SIZE = 1024 * 1024;
+function parseSessionEntryLine(line) {
+  if (!line.trim())
+    return null;
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
 function loadEntriesFromFile(filePath) {
   const resolvedFilePath = normalizePath(filePath);
   if (!existsSync4(resolvedFilePath))
     return [];
-  const content = readFileSync3(resolvedFilePath, "utf8");
   const entries = [];
-  const lines = content.trim().split(`
-`);
-  for (const line of lines) {
-    if (!line.trim())
-      continue;
-    try {
-      const entry = JSON.parse(line);
-      entries.push(entry);
-    } catch {}
+  const fd = openSync(resolvedFilePath, "r");
+  try {
+    const decoder = new StringDecoder("utf8");
+    const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
+    let pending = "";
+    while (true) {
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0)
+        break;
+      pending += decoder.write(buffer.subarray(0, bytesRead));
+      let lineStart = 0;
+      let newlineIndex = pending.indexOf(`
+`, lineStart);
+      while (newlineIndex !== -1) {
+        const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
+        if (entry)
+          entries.push(entry);
+        lineStart = newlineIndex + 1;
+        newlineIndex = pending.indexOf(`
+`, lineStart);
+      }
+      pending = pending.slice(lineStart);
+    }
+    pending += decoder.end();
+    const finalEntry = parseSessionEntryLine(pending);
+    if (finalEntry)
+      entries.push(finalEntry);
+  } finally {
+    closeSync(fd);
   }
   if (entries.length === 0)
     return entries;
@@ -252287,70 +253828,52 @@ function extractTextContent(message) {
   }
   return content.filter((block2) => block2.type === "text").map((block2) => block2.text).join(" ");
 }
-function getLastActivityTime(entries) {
-  let lastActivityTime;
-  for (const entry of entries) {
-    if (entry.type !== "message")
-      continue;
-    const message = entry.message;
-    if (!isMessageWithContent(message))
-      continue;
-    if (message.role !== "user" && message.role !== "assistant")
-      continue;
-    const msgTimestamp = message.timestamp;
-    if (typeof msgTimestamp === "number") {
-      lastActivityTime = Math.max(lastActivityTime ?? 0, msgTimestamp);
-      continue;
-    }
-    const entryTimestamp = entry.timestamp;
-    if (typeof entryTimestamp === "string") {
-      const t2 = new Date(entryTimestamp).getTime();
-      if (!Number.isNaN(t2)) {
-        lastActivityTime = Math.max(lastActivityTime ?? 0, t2);
-      }
-    }
+function getMessageActivityTime(entry) {
+  const message = entry.message;
+  if (!isMessageWithContent(message))
+    return;
+  if (message.role !== "user" && message.role !== "assistant")
+    return;
+  const msgTimestamp = message.timestamp;
+  if (typeof msgTimestamp === "number") {
+    return msgTimestamp;
   }
-  return lastActivityTime;
-}
-function getSessionModifiedDate(entries, header, statsMtime) {
-  const lastActivityTime = getLastActivityTime(entries);
-  if (typeof lastActivityTime === "number" && lastActivityTime > 0) {
-    return new Date(lastActivityTime);
-  }
-  const headerTime = typeof header.timestamp === "string" ? new Date(header.timestamp).getTime() : NaN;
-  return !Number.isNaN(headerTime) ? new Date(headerTime) : statsMtime;
+  const t2 = new Date(entry.timestamp).getTime();
+  return Number.isNaN(t2) ? undefined : t2;
 }
 async function buildSessionInfo(filePath) {
   try {
-    const content = await readFile(filePath, "utf8");
-    const entries = [];
-    const lines = content.trim().split(`
-`);
-    for (const line of lines) {
-      if (!line.trim())
-        continue;
-      try {
-        entries.push(JSON.parse(line));
-      } catch {}
-    }
-    if (entries.length === 0)
-      return null;
-    const header = entries[0];
-    if (header.type !== "session")
-      return null;
     const stats = await stat3(filePath);
+    let header = null;
     let messageCount = 0;
     let firstMessage = "";
     const allMessages = [];
     let name;
-    for (const entry of entries) {
+    let lastActivityTime;
+    const rl = createInterface({
+      input: createReadStream2(filePath, { encoding: "utf8" }),
+      crlfDelay: Infinity
+    });
+    for await (const line of rl) {
+      const entry = parseSessionEntryLine(line);
+      if (!entry)
+        continue;
+      if (!header) {
+        if (entry.type !== "session")
+          return null;
+        header = entry;
+        continue;
+      }
       if (entry.type === "session_info") {
-        const infoEntry = entry;
-        name = infoEntry.name?.trim() || undefined;
+        name = entry.name?.trim() || undefined;
       }
       if (entry.type !== "message")
         continue;
       messageCount++;
+      const activityTime = getMessageActivityTime(entry);
+      if (typeof activityTime === "number") {
+        lastActivityTime = Math.max(lastActivityTime ?? 0, activityTime);
+      }
       const message = entry.message;
       if (!isMessageWithContent(message))
         continue;
@@ -252364,9 +253887,12 @@ async function buildSessionInfo(filePath) {
         firstMessage = textContent;
       }
     }
+    if (!header)
+      return null;
     const cwd = typeof header.cwd === "string" ? header.cwd : "";
     const parentSessionPath = header.parentSession;
-    const modified = getSessionModifiedDate(entries, header, stats.mtime);
+    const headerTime = typeof header.timestamp === "string" ? new Date(header.timestamp).getTime() : NaN;
+    const modified = typeof lastActivityTime === "number" && lastActivityTime > 0 ? new Date(lastActivityTime) : !Number.isNaN(headerTime) ? new Date(headerTime) : stats.mtime;
     return {
       path: filePath,
       id: header.id,
@@ -252536,10 +254062,15 @@ class SessionManager {
   _rewriteFile() {
     if (!this.persist || !this.sessionFile)
       return;
-    const content = `${this.fileEntries.map((e2) => JSON.stringify(e2)).join(`
-`)}
-`;
-    writeFileSync2(this.sessionFile, content);
+    const fd = openSync(this.sessionFile, "w");
+    try {
+      for (const entry of this.fileEntries) {
+        writeFileSync2(fd, `${JSON.stringify(entry)}
+`);
+      }
+    } finally {
+      closeSync(fd);
+    }
   }
   isPersisted() {
     return this.persist;
@@ -253123,7 +254654,7 @@ function serializeConversation2(messages3) {
 
 `);
 }
-var SUMMARIZATION_SYSTEM_PROMPT2 = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
+var SUMMARIZATION_SYSTEM_PROMPT2 = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
 
@@ -253751,7 +255282,7 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 async function generateBranchSummary2(entries, options4) {
-  const { model, apiKey, headers, signal, customInstructions, replaceInstructions, reserveTokens = 16384 } = options4;
+  const { model, apiKey, headers, signal, customInstructions, replaceInstructions, reserveTokens = 16384, streamFn } = options4;
   const contextWindow = model.contextWindow || 128000;
   const tokenBudget = contextWindow - reserveTokens;
   const { messages: messages3, fileOps } = prepareBranchEntries2(entries, tokenBudget);
@@ -253782,7 +255313,9 @@ ${instructions}`;
       timestamp: Date.now()
     }
   ];
-  const response = await completeSimple(model, { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT2, messages: summarizationMessages }, { apiKey, headers, signal, maxTokens: 2048 });
+  const context = { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT2, messages: summarizationMessages };
+  const requestOptions = { apiKey, headers, signal, maxTokens: 2048 };
+  const response = streamFn ? await (await streamFn(model, context, requestOptions)).result() : await completeSimple(model, context, requestOptions);
   if (response.stopReason === "aborted") {
     return { aborted: true };
   }
@@ -253804,7 +255337,7 @@ ${instructions}`;
 var DEFAULT_THINKING_LEVEL = "medium";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/index.js
-import { existsSync as existsSync5, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync5, readFileSync as readFileSync3, writeFileSync as writeFileSync3 } from "fs";
 import { basename as basename5, join as join11 } from "path";
 function parseColor(color) {
   const hexMatch = color.match(/^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
@@ -253880,11 +255413,11 @@ function generateThemeVars(themeName) {
 }
 function generateHtml(sessionData, themeName) {
   const templateDir = getExportTemplateDir();
-  const template2 = readFileSync4(join11(templateDir, "template.html"), "utf-8");
-  const templateCss = readFileSync4(join11(templateDir, "template.css"), "utf-8");
-  const templateJs = readFileSync4(join11(templateDir, "template.js"), "utf-8");
-  const markedJs = readFileSync4(join11(templateDir, "vendor", "marked.min.js"), "utf-8");
-  const hljsJs = readFileSync4(join11(templateDir, "vendor", "highlight.min.js"), "utf-8");
+  const template2 = readFileSync3(join11(templateDir, "template.html"), "utf-8");
+  const templateCss = readFileSync3(join11(templateDir, "template.css"), "utf-8");
+  const templateJs = readFileSync3(join11(templateDir, "template.js"), "utf-8");
+  const markedJs = readFileSync3(join11(templateDir, "vendor", "marked.min.js"), "utf-8");
+  const hljsJs = readFileSync3(join11(templateDir, "vendor", "highlight.min.js"), "utf-8");
   const themeVars = generateThemeVars(themeName);
   const colors = getResolvedThemeColors(themeName);
   const themeExport = getThemeExportColors(themeName);
@@ -254839,10 +256372,19 @@ async function startDeviceFlow(domain2) {
   if (typeof deviceCode !== "string" || typeof userCode !== "string" || typeof verificationUri !== "string" || interval !== undefined && typeof interval !== "number" || typeof expiresIn !== "number") {
     throw new Error("Invalid device code response fields");
   }
+  let parsedUri;
+  try {
+    parsedUri = new URL(verificationUri);
+  } catch {
+    throw new Error("Untrusted verification_uri in device code response");
+  }
+  if (parsedUri.protocol !== "https:" && parsedUri.protocol !== "http:") {
+    throw new Error("Untrusted verification_uri in device code response");
+  }
   return {
     device_code: deviceCode,
     user_code: userCode,
-    verification_uri: verificationUri,
+    verification_uri: parsedUri.href,
     interval,
     expires_in: expiresIn
   };
@@ -255001,7 +256543,6 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
     _http = m2;
   });
 }
-var CALLBACK_HOST2 = process.env.PI_OAUTH_CALLBACK_HOST || "127.0.0.1";
 var CLIENT_ID3 = "app_EMoamEEZ73f0CkXaXp7hrann";
 var AUTH_BASE_URL = "https://auth.openai.com";
 var AUTHORIZE_URL2 = `${AUTH_BASE_URL}/oauth/authorize`;
@@ -255016,6 +256557,9 @@ var OPENAI_CODEX_BROWSER_LOGIN_METHOD = "browser";
 var OPENAI_CODEX_DEVICE_CODE_LOGIN_METHOD = "device_code";
 var SCOPE = "openid profile email offline_access";
 var JWT_CLAIM_PATH2 = "https://api.openai.com/auth";
+function getCallbackHost() {
+  return typeof process !== "undefined" ? process.env.PI_OAUTH_CALLBACK_HOST || "127.0.0.1" : "127.0.0.1";
+}
 function createState() {
   if (!_randomBytes) {
     throw new Error("OpenAI Codex OAuth is only available in Node.js environments");
@@ -255257,7 +256801,7 @@ function startLocalOAuthServer(state2) {
     }
   });
   return new Promise((resolve4) => {
-    server.listen(1455, CALLBACK_HOST2, () => {
+    server.listen(1455, getCallbackHost(), () => {
       resolve4({
         close: () => server.close(),
         cancelWait: () => {
@@ -255867,14 +257411,14 @@ async function loadExtensionFromFactory(factory, cwd, eventBus, runtime, extensi
   await factory(api2);
   return extension;
 }
-async function loadExtensions(paths, cwd, eventBus) {
+async function loadExtensions(paths, cwd, eventBus, runtime) {
   const extensions = [];
   const errors8 = [];
   const resolvedCwd = resolvePath(cwd);
   const resolvedEventBus = eventBus ?? createEventBus();
-  const runtime = createExtensionRuntime();
+  const resolvedRuntime = runtime ?? createExtensionRuntime();
   for (const extPath of paths) {
-    const { extension, error: error51 } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, runtime);
+    const { extension, error: error51 } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, resolvedRuntime);
     if (error51) {
       errors8.push({ path: extPath, error: error51 });
       continue;
@@ -255886,7 +257430,7 @@ async function loadExtensions(paths, cwd, eventBus) {
   return {
     extensions,
     errors: errors8,
-    runtime
+    runtime: resolvedRuntime
   };
 }
 function readPiManifest(packageJsonPath) {
@@ -256036,6 +257580,31 @@ async function emitSessionShutdownEvent(extensionRunner, event2) {
   }
   return false;
 }
+async function emitProjectTrustEvent(extensionsResult, event2, ctx) {
+  const errors8 = [];
+  for (const ext of extensionsResult.extensions) {
+    const handlers = ext.handlers.get("project_trust");
+    if (!handlers || handlers.length === 0)
+      continue;
+    for (const handler of handlers) {
+      try {
+        const handlerResult = await handler(event2, ctx);
+        if (handlerResult.trusted === "undecided") {
+          continue;
+        }
+        return { result: handlerResult, errors: errors8 };
+      } catch (error51) {
+        errors8.push({
+          extensionPath: ext.path,
+          event: event2.type,
+          error: error51 instanceof Error ? error51.message : String(error51),
+          stack: error51 instanceof Error ? error51.stack : undefined
+        });
+      }
+    }
+  }
+  return { errors: errors8 };
+}
 var noOpUIContext = {
   select: async () => {
     return;
@@ -256085,6 +257654,7 @@ class ExtensionRunner {
   extensions;
   runtime;
   uiContext;
+  mode = "print";
   cwd;
   sessionManager;
   modelRegistry;
@@ -256093,6 +257663,7 @@ class ExtensionRunner {
     return;
   };
   isIdleFn = () => true;
+  isProjectTrustedFn = () => true;
   getSignalFn = () => {
     return;
   };
@@ -256104,6 +257675,7 @@ class ExtensionRunner {
   };
   compactFn = () => {};
   getSystemPromptFn = () => "";
+  getSystemPromptOptionsFn = () => ({ cwd: this.cwd });
   newSessionHandler = async () => ({ cancelled: false });
   forkHandler = async () => ({ cancelled: false });
   navigateTreeHandler = async () => ({ cancelled: false });
@@ -256138,6 +257710,7 @@ class ExtensionRunner {
     this.runtime.setThinkingLevel = actions.setThinkingLevel;
     this.getModel = contextActions.getModel;
     this.isIdleFn = contextActions.isIdle;
+    this.isProjectTrustedFn = contextActions.isProjectTrusted;
     this.getSignalFn = contextActions.getSignal;
     this.abortFn = contextActions.abort;
     this.hasPendingMessagesFn = contextActions.hasPendingMessages;
@@ -256145,6 +257718,7 @@ class ExtensionRunner {
     this.getContextUsageFn = contextActions.getContextUsage;
     this.compactFn = contextActions.compact;
     this.getSystemPromptFn = contextActions.getSystemPrompt;
+    this.getSystemPromptOptionsFn = contextActions.getSystemPromptOptions ?? (() => ({ cwd: this.cwd }));
     for (const { name, config: config3, extensionPath } of this.runtime.pendingProviderRegistrations) {
       try {
         if (providerActions?.registerProvider) {
@@ -256194,8 +257768,9 @@ class ExtensionRunner {
     this.switchSessionHandler = async () => ({ cancelled: false });
     this.reloadHandler = async () => {};
   }
-  setUIContext(uiContext) {
+  setUIContext(uiContext, mode = "print") {
     this.uiContext = uiContext ?? noOpUIContext;
+    this.mode = mode;
   }
   getUIContext() {
     return this.uiContext;
@@ -256364,6 +257939,10 @@ class ExtensionRunner {
         runner.assertActive();
         return runner.uiContext;
       },
+      get mode() {
+        runner.assertActive();
+        return runner.mode;
+      },
       get hasUI() {
         runner.assertActive();
         return runner.hasUI();
@@ -256387,6 +257966,10 @@ class ExtensionRunner {
       isIdle: () => {
         runner.assertActive();
         return runner.isIdleFn();
+      },
+      isProjectTrusted: () => {
+        runner.assertActive();
+        return runner.isProjectTrustedFn();
       },
       get signal() {
         runner.assertActive();
@@ -256420,6 +258003,10 @@ class ExtensionRunner {
   }
   createCommandContext() {
     const context = Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.createContext()));
+    context.getSystemPromptOptions = () => {
+      this.assertActive();
+      return this.getSystemPromptOptionsFn();
+    };
     context.waitForIdle = () => {
       this.assertActive();
       return this.waitForIdleFn();
@@ -256854,7 +258441,7 @@ function wrapRegisteredTools(registeredTools, runner) {
   return wrapToolDefinitions(registeredTools.map((registeredTool) => registeredTool.definition), () => runner.createContext());
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/prompt-templates.js
-import { existsSync as existsSync7, readdirSync as readdirSync5, readFileSync as readFileSync6, statSync as statSync6 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync5, readFileSync as readFileSync5, statSync as statSync6 } from "fs";
 import { basename as basename6, dirname as dirname7, join as join13, resolve as resolve5, sep as sep3 } from "path";
 function parseCommandArgs2(argsString) {
   const args2 = [];
@@ -256885,29 +258472,33 @@ function parseCommandArgs2(argsString) {
   return args2;
 }
 function substituteArgs2(content, args2) {
-  let result = content;
-  result = result.replace(/\$(\d+)/g, (_, num) => {
-    const index2 = parseInt(num, 10) - 1;
+  const allArgs = args2.join(" ");
+  return content.replace(/\$\{(\d+):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/g, (_match, defaultNum, defaultValue, sliceStart, sliceLength, simple) => {
+    if (defaultNum) {
+      const index3 = parseInt(defaultNum, 10) - 1;
+      const value2 = args2[index3];
+      return value2 ? value2 : defaultValue;
+    }
+    if (sliceStart) {
+      let start = parseInt(sliceStart, 10) - 1;
+      if (start < 0)
+        start = 0;
+      if (sliceLength) {
+        const length = parseInt(sliceLength, 10);
+        return args2.slice(start, start + length).join(" ");
+      }
+      return args2.slice(start).join(" ");
+    }
+    if (simple === "ARGUMENTS" || simple === "@") {
+      return allArgs;
+    }
+    const index2 = parseInt(simple, 10) - 1;
     return args2[index2] ?? "";
   });
-  result = result.replace(/\$\{@:(\d+)(?::(\d+))?\}/g, (_, startStr, lengthStr) => {
-    let start = parseInt(startStr, 10) - 1;
-    if (start < 0)
-      start = 0;
-    if (lengthStr) {
-      const length = parseInt(lengthStr, 10);
-      return args2.slice(start, start + length).join(" ");
-    }
-    return args2.slice(start).join(" ");
-  });
-  const allArgs = args2.join(" ");
-  result = result.replace(/\$ARGUMENTS/g, allArgs);
-  result = result.replace(/\$@/g, allArgs);
-  return result;
 }
 function loadTemplateFromFile2(filePath, sourceInfo) {
   try {
-    const rawContent = readFileSync6(filePath, "utf-8");
+    const rawContent = readFileSync5(filePath, "utf-8");
     const { frontmatter, body } = parseFrontmatter(rawContent);
     const name = basename6(filePath).replace(/\.md$/, "");
     let description = frontmatter.description || "";
@@ -257039,7 +258630,7 @@ function expandPromptTemplate(text, templates) {
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js
 var import_ignore2 = __toESM(require_ignore(), 1);
-import { existsSync as existsSync8, readdirSync as readdirSync6, readFileSync as readFileSync7, statSync as statSync7 } from "fs";
+import { existsSync as existsSync8, readdirSync as readdirSync6, readFileSync as readFileSync6, statSync as statSync7 } from "fs";
 import { basename as basename7, dirname as dirname8, join as join14, relative as relative2, resolve as resolve6, sep as sep4 } from "path";
 var MAX_NAME_LENGTH2 = 64;
 var MAX_DESCRIPTION_LENGTH2 = 1024;
@@ -257075,7 +258666,7 @@ function addIgnoreRules2(ig, dir, rootDir) {
     if (!existsSync8(ignorePath))
       continue;
     try {
-      const content = readFileSync7(ignorePath, "utf-8");
+      const content = readFileSync6(ignorePath, "utf-8");
       const patterns2 = content.split(/\r?\n/).map((line) => prefixIgnorePattern2(line, prefix)).filter((line) => Boolean(line));
       if (patterns2.length > 0) {
         ig.add(patterns2);
@@ -257215,7 +258806,7 @@ function loadSkillsFromDirInternal2(dir, source2, includeRootFiles, ignoreMatche
 function loadSkillFromFile2(filePath, source2) {
   const diagnostics2 = [];
   try {
-    const rawContent = readFileSync7(filePath, "utf-8");
+    const rawContent = readFileSync6(filePath, "utf-8");
     const { frontmatter } = parseFrontmatter(rawContent);
     const skillDir = dirname8(filePath);
     const parentDirName = basename7(skillDir);
@@ -257723,6 +259314,7 @@ class OutputAccumulator {
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/tools/render-utils.js
 import * as os3 from "node:os";
+import { pathToFileURL } from "node:url";
 function shortenPath(path9) {
   if (typeof path9 !== "string")
     return "";
@@ -257731,6 +259323,12 @@ function shortenPath(path9) {
     return `~${path9.slice(home.length)}`;
   }
   return path9;
+}
+function linkPath(styledText, rawPath, cwd) {
+  if (!getCapabilities().hyperlinks)
+    return styledText;
+  const absolutePath = resolvePath(rawPath, cwd);
+  return hyperlink(styledText, pathToFileURL(absolutePath).href);
 }
 function str2(value2) {
   if (typeof value2 === "string")
@@ -257767,6 +259365,14 @@ ${imageIndicators}` : imageIndicators;
 }
 function invalidArgText(theme2) {
   return theme2.fg("error", "[invalid arg]");
+}
+function renderToolPath(rawPath, theme2, cwd, options4) {
+  if (rawPath === null)
+    return invalidArgText(theme2);
+  const value2 = rawPath || options4?.emptyFallback;
+  if (!value2)
+    return theme2.fg("toolOutput", "...");
+  return linkPath(theme2.fg("accent", shortenPath(value2)), value2, cwd);
 }
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/tools/bash.js
@@ -257892,7 +259498,7 @@ ${styledOutput}`, 0, 0));
             state2.cachedWidth = width;
           }
           if (state2.cachedSkipped && state2.cachedSkipped > 0) {
-            const hint = theme.fg("muted", `... (${state2.cachedSkipped} earlier lines,`) + ` ${keyHint("app.tools.expand", "to expand")})`;
+            const hint = theme.fg("muted", `... (${state2.cachedSkipped} earlier lines,`) + ` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
             return ["", truncateToWidth(hint, width, "..."), ...state2.cachedLines ?? []];
           }
           return ["", ...state2.cachedLines ?? []];
@@ -259039,7 +260645,7 @@ function renderDiff(diffText, _options = {}) {
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit-diff.js
 import { constants as constants4 } from "fs";
-import { access as access2, readFile as readFile2 } from "fs/promises";
+import { access as access2, readFile } from "fs/promises";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js
 import { accessSync as accessSync2, constants as constants3 } from "node:fs";
@@ -259382,7 +260988,7 @@ async function computeEditsDiff(path9, edits, cwd) {
       const errorMessage = error51 instanceof Error && "code" in error51 ? `Error code: ${error51.code}` : String(error51);
       return { error: `Could not edit file: ${path9}. ${errorMessage}.` };
     }
-    const rawContent = await readFile2(absolutePath, "utf-8");
+    const rawContent = await readFile(absolutePath, "utf-8");
     const { text: content } = stripBom(rawContent);
     const normalizedContent = normalizeToLF(content);
     const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path9);
@@ -259522,11 +261128,8 @@ function getRenderablePreviewInput(args2) {
   }
   return null;
 }
-function formatEditCall(args2, theme2) {
-  const invalidArg = invalidArgText(theme2);
-  const rawPath = str2(args2?.file_path ?? args2?.path);
-  const path9 = rawPath !== null ? shortenPath(rawPath) : null;
-  const pathDisplay = path9 === null ? invalidArg : path9 ? theme2.fg("accent", path9) : theme2.fg("toolOutput", "...");
+function formatEditCall(args2, theme2, cwd) {
+  const pathDisplay = renderToolPath(str2(args2?.file_path ?? args2?.path), theme2, cwd);
   return `${theme2.fg("toolTitle", theme2.bold("edit"))} ${pathDisplay}`;
 }
 function formatEditResult(args2, preview, result, theme2, isError) {
@@ -259559,10 +261162,10 @@ function getEditHeaderBg(preview, settledError, theme2) {
   }
   return (text) => theme2.bg("toolPendingBg", text);
 }
-function buildEditCallComponent(component, args2, theme2) {
+function buildEditCallComponent(component, args2, theme2, cwd) {
   component.setBgFn(getEditHeaderBg(component.preview, component.settledError, theme2));
   component.clear();
-  component.addChild(new Text(formatEditCall(args2, theme2), 0, 0));
+  component.addChild(new Text(formatEditCall(args2, theme2, cwd), 0, 0));
   if (!component.preview) {
     return component;
   }
@@ -259656,7 +261259,7 @@ function createEditToolDefinition(cwd, options4) {
           }
         });
       }
-      return buildEditCallComponent(component, args2, theme2);
+      return buildEditCallComponent(component, args2, theme2, context.cwd);
     },
     renderResult(result, _options, theme2, context) {
       const callComponent = context.state.callComponent;
@@ -259674,7 +261277,7 @@ function createEditToolDefinition(cwd, options4) {
           changed = true;
         }
         if (changed) {
-          buildEditCallComponent(callComponent, context.args, theme2);
+          buildEditCallComponent(callComponent, context.args, theme2, context.cwd);
         }
       }
       const output = formatEditResult(context.args, callComponent?.preview, typedResult, theme2, context.isError);
@@ -259693,7 +261296,7 @@ function createEditTool(cwd, options4) {
   return wrapToolDefinition(createEditToolDefinition(cwd, options4));
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/tools/find.js
-import { createInterface } from "node:readline";
+import { createInterface as createInterface2 } from "node:readline";
 import { spawn as spawn5 } from "child_process";
 import path9 from "path";
 
@@ -260029,7 +261632,7 @@ ${displayLines.map((line) => theme2.fg("toolOutput", line)).join(`
 `)}`;
     if (remaining > 0) {
       text += `${theme2.fg("muted", `
-... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")})`;
+... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme2.fg("muted", ")")}`;
     }
   }
   const resultLimit = result.details?.resultLimitReached;
@@ -260160,7 +261763,7 @@ function createFindToolDefinition(cwd, options4) {
             }
             args2.push("--", effectivePattern, searchPath);
             const child = spawn5(fdPath, args2, { stdio: ["ignore", "pipe", "pipe"] });
-            const rl = createInterface({ input: child.stdout });
+            const rl = createInterface2({ input: child.stdout });
             let stderr = "";
             const lines = [];
             stopChild = () => {
@@ -260272,7 +261875,7 @@ function createFindTool(cwd, options4) {
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/tools/grep.js
 import { readFile as fsReadFile2, stat as fsStat } from "node:fs/promises";
-import { createInterface as createInterface2 } from "node:readline";
+import { createInterface as createInterface3 } from "node:readline";
 import { spawn as spawn6 } from "child_process";
 import path10 from "path";
 var grepSchema = exports_typebox.Object({
@@ -260317,7 +261920,7 @@ ${displayLines.map((line) => theme2.fg("toolOutput", line)).join(`
 `)}`;
     if (remaining > 0) {
       text += `${theme2.fg("muted", `
-... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")})`;
+... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme2.fg("muted", ")")}`;
     }
   }
   const matchLimit = result.details?.matchLimitReached;
@@ -260410,7 +262013,7 @@ function createGrepToolDefinition(cwd, options4) {
               args2.push("--glob", glob);
             args2.push("--", pattern4, searchPath);
             const child = spawn6(rgPath, args2, { stdio: ["ignore", "pipe", "pipe"] });
-            const rl = createInterface2({ input: child.stdout });
+            const rl = createInterface3({ input: child.stdout });
             let stderr = "";
             let matchCount = 0;
             let matchLimitReached = false;
@@ -260575,12 +262178,10 @@ var defaultLsOperations = {
   stat: fsStat2,
   readdir: fsReaddir
 };
-function formatLsCall(args2, theme2) {
-  const rawPath = str2(args2?.path);
-  const path11 = rawPath !== null ? shortenPath(rawPath || ".") : null;
+function formatLsCall(args2, theme2, cwd) {
   const limit2 = args2?.limit;
-  const invalidArg = invalidArgText(theme2);
-  let text = `${theme2.fg("toolTitle", theme2.bold("ls"))} ${path11 === null ? invalidArg : theme2.fg("accent", path11)}`;
+  const pathDisplay = renderToolPath(str2(args2?.path), theme2, cwd, { emptyFallback: "." });
+  let text = `${theme2.fg("toolTitle", theme2.bold("ls"))} ${pathDisplay}`;
   if (limit2 !== undefined) {
     text += theme2.fg("toolOutput", ` (limit ${limit2})`);
   }
@@ -260600,7 +262201,7 @@ ${displayLines.map((line) => theme2.fg("toolOutput", line)).join(`
 `)}`;
     if (remaining > 0) {
       text += `${theme2.fg("muted", `
-... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")})`;
+... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme2.fg("muted", ")")}`;
     }
   }
   const entryLimit = result.details?.entryLimitReached;
@@ -260708,7 +262309,7 @@ function createLsToolDefinition(cwd, options4) {
     },
     renderCall(args2, theme2, context) {
       const text = context.lastComponent ?? new Text("", 0, 0);
-      text.setText(formatLsCall(args2, theme2));
+      text.setText(formatLsCall(args2, theme2, context.cwd));
       return text;
     },
     renderResult(result, options5, theme2, context) {
@@ -261235,11 +262836,8 @@ function formatReadLineRange(args2, theme2) {
   const endLine = args2.limit !== undefined ? startLine + args2.limit - 1 : "";
   return theme2.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
 }
-function formatReadCall(args2, theme2) {
-  const rawPath = str2(args2?.file_path ?? args2?.path);
-  const path12 = rawPath !== null ? shortenPath(rawPath) : null;
-  const invalidArg = invalidArgText(theme2);
-  const pathDisplay = path12 === null ? invalidArg : path12 ? theme2.fg("accent", path12) : theme2.fg("toolOutput", "...");
+function formatReadCall(args2, theme2, cwd) {
+  const pathDisplay = renderToolPath(str2(args2?.file_path ?? args2?.path), theme2, cwd);
   return `${theme2.fg("toolTitle", theme2.bold("read"))} ${pathDisplay}${formatReadLineRange(args2, theme2)}`;
 }
 function trimTrailingEmptyLines(lines) {
@@ -261312,7 +262910,7 @@ ${displayLines.map((line) => lang ? replaceTabs(line) : theme2.fg("toolOutput", 
 `)}`;
   if (remaining > 0) {
     text += `${theme2.fg("muted", `
-... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")})`;
+... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme2.fg("muted", ")")}`;
   }
   const truncation = result.details?.truncation;
   if (truncation?.truncated) {
@@ -261466,7 +263064,7 @@ ${nonVisionImageNote}`;
     renderCall(args2, theme2, context) {
       const text = context.lastComponent ?? new Text("", 0, 0);
       const classification = !context.expanded ? getCompactReadClassification(args2, context.cwd) : undefined;
-      text.setText(classification ? formatCompactReadCall(classification, args2, theme2) : formatReadCall(args2, theme2));
+      text.setText(classification ? formatCompactReadCall(classification, args2, theme2) : formatReadCall(args2, theme2, context.cwd));
       return text;
     },
     renderResult(result, options5, theme2, context) {
@@ -261567,12 +263165,11 @@ function trimTrailingEmptyLines2(lines) {
   }
   return lines.slice(0, end);
 }
-function formatWriteCall(args2, options4, theme2, cache) {
+function formatWriteCall(args2, options4, theme2, cache, cwd) {
   const rawPath = str2(args2?.file_path ?? args2?.path);
   const fileContent = str2(args2?.content);
-  const path12 = rawPath !== null ? shortenPath(rawPath) : null;
-  const invalidArg = invalidArgText(theme2);
-  let text = `${theme2.fg("toolTitle", theme2.bold("write"))} ${path12 === null ? invalidArg : path12 ? theme2.fg("accent", path12) : theme2.fg("toolOutput", "...")}`;
+  const pathDisplay = renderToolPath(rawPath, theme2, cwd);
+  let text = `${theme2.fg("toolTitle", theme2.bold("write"))} ${pathDisplay}`;
   if (fileContent === null) {
     text += `
 
@@ -261592,7 +263189,7 @@ ${displayLines.map((line) => lang ? line : theme2.fg("toolOutput", replaceTabs(l
 `)}`;
     if (remaining > 0) {
       text += `${theme2.fg("muted", `
-... (${remaining} more lines, ${totalLines} total,`)} ${keyHint("app.tools.expand", "to expand")})`;
+... (${remaining} more lines, ${totalLines} total,`)} ${keyHint("app.tools.expand", "to expand")}${theme2.fg("muted", ")")}`;
     }
   }
   return text;
@@ -261647,7 +263244,7 @@ function createWriteToolDefinition(cwd, options4) {
       } else {
         component.cache = undefined;
       }
-      component.setText(formatWriteCall(renderArgs, { expanded: context.expanded, isPartial: context.isPartial }, theme2, component.cache));
+      component.setText(formatWriteCall(renderArgs, { expanded: context.expanded, isPartial: context.isPartial }, theme2, component.cache, context.cwd));
       return component;
     },
     renderResult(result, _options, theme2, context) {
@@ -261741,6 +263338,7 @@ class AgentSession {
   _baseToolsOverride;
   _sessionStartEvent;
   _extensionUIContext;
+  _extensionMode = "print";
   _extensionCommandContextActions;
   _extensionAbortHandler;
   _extensionShutdownHandler;
@@ -262347,7 +263945,7 @@ class AgentSession {
     if (!skill)
       return text;
     try {
-      const content = readFileSync8(skill.filePath, "utf-8");
+      const content = readFileSync7(skill.filePath, "utf-8");
       const body = stripFrontmatter(content).trim();
       const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">
 References are relative to ${skill.baseDir}.
@@ -262609,6 +264207,10 @@ ${args2}` : skillBlock;
   }
   _clampThinkingLevel(level, _availableLevels) {
     return this.model ? clampThinkingLevel(this.model, level) : "off";
+  }
+  syncQueueModesFromSettings() {
+    this.agent.steeringMode = this.settingsManager.getSteeringMode();
+    this.agent.followUpMode = this.settingsManager.getFollowUpMode();
   }
   setSteeringMode(mode) {
     this.agent.steeringMode = mode;
@@ -262926,6 +264528,9 @@ ${args2}` : skillBlock;
     if (bindings.uiContext !== undefined) {
       this._extensionUIContext = bindings.uiContext;
     }
+    if (bindings.mode !== undefined) {
+      this._extensionMode = bindings.mode;
+    }
     if (bindings.commandContextActions !== undefined) {
       this._extensionCommandContextActions = bindings.commandContextActions;
     }
@@ -262983,7 +264588,7 @@ ${args2}` : skillBlock;
     return `extension:${name}`;
   }
   _applyExtensionBindings(runner) {
-    runner.setUIContext(this._extensionUIContext);
+    runner.setUIContext(this._extensionUIContext, this._extensionMode);
     runner.bindCommandContext(this._extensionCommandContextActions);
     this._extensionErrorUnsubscriber?.();
     this._extensionErrorUnsubscriber = this._extensionErrorListener ? runner.onError(this._extensionErrorListener) : undefined;
@@ -263068,6 +264673,7 @@ ${args2}` : skillBlock;
     }, {
       getModel: () => this.model,
       isIdle: () => !this.isStreaming,
+      isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
       getSignal: () => this.agent.signal,
       abort: () => {
         if (this._extensionAbortHandler) {
@@ -263092,7 +264698,8 @@ ${args2}` : skillBlock;
           }
         })();
       },
-      getSystemPrompt: () => this.systemPrompt
+      getSystemPrompt: () => this.systemPrompt,
+      getSystemPromptOptions: () => this._baseSystemPromptOptions
     }, {
       registerProvider: (name, config3) => {
         this._modelRegistry.registerProvider(name, config3);
@@ -263206,6 +264813,7 @@ ${args2}` : skillBlock;
     const previousFlagValues = this._extensionRunner.getFlagValues();
     await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
     await this.settingsManager.reload();
+    this.syncQueueModesFromSettings();
     resetApiProviders();
     await this._resourceLoader.reload();
     this._buildRuntime({
@@ -263409,7 +265017,8 @@ ${command}` : command;
           signal: this._branchSummaryAbortController.signal,
           customInstructions,
           replaceInstructions,
-          reserveTokens: branchSummarySettings.reserveTokens
+          reserveTokens: branchSummarySettings.reserveTokens,
+          streamFn: this.agent.streamFn
         });
         if (result.aborted) {
           return { cancelled: true, aborted: true };
@@ -263640,11 +265249,11 @@ ${command}` : command;
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/auth-storage.js
 var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
-import { chmodSync as chmodSync2, existsSync as existsSync11, mkdirSync as mkdirSync5, readFileSync as readFileSync9, writeFileSync as writeFileSync5 } from "fs";
+import { chmodSync as chmodSync2, existsSync as existsSync11, mkdirSync as mkdirSync5, readFileSync as readFileSync8, writeFileSync as writeFileSync5 } from "fs";
 import { dirname as dirname13, join as join18 } from "path";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/resolve-config-value.js
-import { execSync, spawnSync as spawnSync3 } from "child_process";
+import { execSync as execSync2, spawnSync as spawnSync3 } from "child_process";
 var commandResultCache = new Map;
 var ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 var ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
@@ -263785,7 +265394,7 @@ function executeWithConfiguredShell(command) {
 }
 function executeWithDefaultShell(command) {
   try {
-    const output = execSync(command, {
+    const output = execSync2(command, {
       encoding: "utf-8",
       timeout: 1e4,
       stdio: ["ignore", "pipe", "ignore"]
@@ -263848,6 +265457,8 @@ function resolveHeadersOrThrow(headers, description) {
 }
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/auth-storage.js
+var AUTH_FILE_WRITE_OPTIONS = { encoding: "utf-8", mode: 384 };
+
 class FileAuthStorageBackend {
   authPath;
   constructor(authPath = join18(getAgentDir(), "auth.json")) {
@@ -263861,7 +265472,7 @@ class FileAuthStorageBackend {
   }
   ensureFileExists() {
     if (!existsSync11(this.authPath)) {
-      writeFileSync5(this.authPath, "{}", "utf-8");
+      writeFileSync5(this.authPath, "{}", AUTH_FILE_WRITE_OPTIONS);
       chmodSync2(this.authPath, 384);
     }
   }
@@ -263890,10 +265501,10 @@ class FileAuthStorageBackend {
     let release;
     try {
       release = this.acquireLockSyncWithRetry(this.authPath);
-      const current = existsSync11(this.authPath) ? readFileSync9(this.authPath, "utf-8") : undefined;
+      const current = existsSync11(this.authPath) ? readFileSync8(this.authPath, "utf-8") : undefined;
       const { result, next } = fn(current);
       if (next !== undefined) {
-        writeFileSync5(this.authPath, next, "utf-8");
+        writeFileSync5(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
         chmodSync2(this.authPath, 384);
       }
       return result;
@@ -263930,11 +265541,11 @@ class FileAuthStorageBackend {
         }
       });
       throwIfCompromised();
-      const current = existsSync11(this.authPath) ? readFileSync9(this.authPath, "utf-8") : undefined;
+      const current = existsSync11(this.authPath) ? readFileSync8(this.authPath, "utf-8") : undefined;
       const { result, next } = await fn(current);
       throwIfCompromised();
       if (next !== undefined) {
-        writeFileSync5(this.authPath, next, "utf-8");
+        writeFileSync5(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
         chmodSync2(this.authPath, 384);
       }
       throwIfCompromised();
@@ -264187,7 +265798,7 @@ class AuthStorage {
   }
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/model-registry.js
-import { existsSync as existsSync12, readFileSync as readFileSync10 } from "fs";
+import { existsSync as existsSync12, readFileSync as readFileSync9 } from "fs";
 import { join as join19 } from "path";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/deprecation.js
@@ -264208,6 +265819,7 @@ function stripJsonComments(input) {
 var BUILT_IN_PROVIDER_DISPLAY_NAMES = {
   anthropic: "Anthropic",
   "amazon-bedrock": "Amazon Bedrock",
+  "ant-ling": "Ant Ling",
   "azure-openai-responses": "Azure OpenAI Responses",
   cerebras: "Cerebras",
   "cloudflare-ai-gateway": "Cloudflare AI Gateway",
@@ -264224,6 +265836,7 @@ var BUILT_IN_PROVIDER_DISPLAY_NAMES = {
   "minimax-cn": "MiniMax (China)",
   moonshotai: "Moonshot AI",
   "moonshotai-cn": "Moonshot AI (China)",
+  nvidia: "NVIDIA NIM",
   opencode: "OpenCode Zen",
   "opencode-go": "OpenCode Go",
   openai: "OpenAI",
@@ -264232,6 +265845,7 @@ var BUILT_IN_PROVIDER_DISPLAY_NAMES = {
   "vercel-ai-gateway": "Vercel AI Gateway",
   xai: "xAI",
   zai: "ZAI",
+  "zai-coding-cn": "ZAI Coding Plan (China)",
   xiaomi: "Xiaomi MiMo",
   "xiaomi-token-plan-cn": "Xiaomi MiMo Token Plan (China)",
   "xiaomi-token-plan-ams": "Xiaomi MiMo Token Plan (Amsterdam)",
@@ -264311,6 +265925,7 @@ var OpenAICompletionsCompatSchema = exports_typebox.Object({
   supportsLongCacheRetention: exports_typebox.Optional(exports_typebox.Boolean())
 });
 var OpenAIResponsesCompatSchema = exports_typebox.Object({
+  supportsDeveloperRole: exports_typebox.Optional(exports_typebox.Boolean()),
   sendSessionIdHeader: exports_typebox.Optional(exports_typebox.Boolean()),
   supportsLongCacheRetention: exports_typebox.Optional(exports_typebox.Boolean())
 });
@@ -264578,7 +266193,7 @@ class ModelRegistry {
       return emptyCustomModelsResult();
     }
     try {
-      const content = readFileSync10(modelsJsonPath, "utf-8");
+      const content = readFileSync9(modelsJsonPath, "utf-8");
       const parsed = JSON.parse(stripJsonComments(content));
       if (!validateModelsConfig.Check(parsed)) {
         const errors8 = validateModelsConfig.Errors(parsed).map((error51) => `  - ${formatValidationPath2(error51)}: ${error51.message}`).join(`
@@ -264899,8 +266514,8 @@ File: ${modelsJsonPath}`);
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/package-manager.js
 import { createHash } from "node:crypto";
-import { existsSync as existsSync13, mkdirSync as mkdirSync6, readdirSync as readdirSync8, readFileSync as readFileSync11, rmSync as rmSync2, statSync as statSync8, writeFileSync as writeFileSync6 } from "node:fs";
-import { homedir as homedir6, tmpdir as tmpdir3 } from "node:os";
+import { chmodSync as chmodSync3, existsSync as existsSync13, mkdirSync as mkdirSync6, readdirSync as readdirSync8, readFileSync as readFileSync10, rmSync as rmSync2, statSync as statSync8, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
 import { basename as basename10, dirname as dirname14, join as join20, relative as relative4, resolve as resolve8, sep as sep7 } from "node:path";
 
 // node_modules/glob/dist/esm/index.min.js
@@ -269931,6 +271546,52 @@ function splitRef(url2) {
     ref: ref6
   };
 }
+function decodeForValidation(value2) {
+  try {
+    return decodeURIComponent(value2);
+  } catch {
+    return null;
+  }
+}
+function hasUnsafeGitInstallPart(value2, allowSlash) {
+  const decoded = decodeForValidation(value2);
+  if (decoded === null) {
+    return true;
+  }
+  const candidates2 = [value2, decoded];
+  for (const candidate of candidates2) {
+    if (candidate.includes("\x00") || candidate.includes("\\") || candidate.startsWith("/")) {
+      return true;
+    }
+    if (!allowSlash && candidate.includes("/")) {
+      return true;
+    }
+    if (candidate.split("/").includes("..")) {
+      return true;
+    }
+  }
+  return false;
+}
+function buildGitSource(args2) {
+  if (args2.path.startsWith("/")) {
+    return null;
+  }
+  const normalizedPath = args2.path.replace(/\.git$/, "").replace(/^\/+/, "");
+  if (!args2.host || !normalizedPath || normalizedPath.split("/").length < 2) {
+    return null;
+  }
+  if (hasUnsafeGitInstallPart(args2.host, false) || hasUnsafeGitInstallPart(normalizedPath, true)) {
+    return null;
+  }
+  return {
+    type: "git",
+    repo: args2.repo,
+    host: args2.host,
+    path: normalizedPath,
+    ref: args2.ref,
+    pinned: Boolean(args2.ref)
+  };
+}
 function parseGenericGitUrl(url2) {
   const { repo: repoWithoutRef, ref: ref6 } = splitRef(url2);
   let repo = repoWithoutRef;
@@ -269960,18 +271621,7 @@ function parseGenericGitUrl(url2) {
     }
     repo = `https://${repoWithoutRef}`;
   }
-  const normalizedPath = path13.replace(/\.git$/, "").replace(/^\/+/, "");
-  if (!host || !normalizedPath || normalizedPath.split("/").length < 2) {
-    return null;
-  }
-  return {
-    type: "git",
-    repo,
-    host,
-    path: normalizedPath,
-    ref: ref6,
-    pinned: Boolean(ref6)
-  };
+  return buildGitSource({ repo, host, path: path13, ref: ref6 });
 }
 function parseGitUrl(source2) {
   const trimmed = source2.trim();
@@ -269989,14 +271639,12 @@ function parseGitUrl(source2) {
         continue;
       }
       const useHttpsPrefix = !split.repo.startsWith("http://") && !split.repo.startsWith("https://") && !split.repo.startsWith("ssh://") && !split.repo.startsWith("git://") && !split.repo.startsWith("git@");
-      return {
-        type: "git",
+      return buildGitSource({
         repo: useHttpsPrefix ? `https://${split.repo}` : split.repo,
         host: info.domain || "",
-        path: `${info.user}/${info.project}`.replace(/\.git$/, ""),
-        ref: info.committish || split.ref || undefined,
-        pinned: Boolean(info.committish || split.ref)
-      };
+        path: `${info.user}/${info.project}`,
+        ref: info.committish || split.ref || undefined
+      });
     }
   }
   const httpsCandidates = [split.ref ? `https://${split.repo}#${split.ref}` : undefined, `https://${url2}`].filter((value2) => Boolean(value2));
@@ -270006,14 +271654,12 @@ function parseGitUrl(source2) {
       if (split.ref && info.project?.includes("@")) {
         continue;
       }
-      return {
-        type: "git",
+      return buildGitSource({
         repo: `https://${split.repo}`,
         host: info.domain || "",
-        path: `${info.user}/${info.project}`.replace(/\.git$/, ""),
-        ref: info.committish || split.ref || undefined,
-        pinned: Boolean(info.committish || split.ref)
-      };
+        path: `${info.user}/${info.project}`,
+        ref: info.committish || split.ref || undefined
+      });
     }
   }
   return parseGenericGitUrl(url2);
@@ -270113,7 +271759,7 @@ function getEnv2() {
     return process.env;
   }
   try {
-    const data = readFileSync11("/proc/self/environ", "utf-8");
+    const data = readFileSync10("/proc/self/environ", "utf-8");
     const env4 = {};
     for (const entry of data.split("\x00")) {
       const idx = entry.indexOf("=");
@@ -270155,6 +271801,12 @@ function toPosixPath4(p) {
 function getHomeDir() {
   return process.env.HOME || homedir6();
 }
+function getExtensionTempFolder(agentDir) {
+  const tempFolder = join20(agentDir, "tmp", "extensions");
+  mkdirSync6(tempFolder, { recursive: true, mode: 448 });
+  chmodSync3(tempFolder, 448);
+  return tempFolder;
+}
 function prefixIgnorePattern3(line, prefix) {
   const trimmed = line.trim();
   if (!trimmed)
@@ -270183,7 +271835,7 @@ function addIgnoreRules3(ig, dir, rootDir) {
     if (!existsSync13(ignorePath))
       continue;
     try {
-      const content = readFileSync11(ignorePath, "utf-8");
+      const content = readFileSync10(ignorePath, "utf-8");
       const patterns2 = content.split(/\r?\n/).map((line) => prefixIgnorePattern3(line, prefix)).filter((line) => Boolean(line));
       if (patterns2.length > 0) {
         ig.add(patterns2);
@@ -270410,7 +272062,7 @@ function collectAutoThemeEntries(dir) {
 }
 function readPiManifestFile(packageJsonPath) {
   try {
-    const content = readFileSync11(packageJsonPath, "utf-8");
+    const content = readFileSync10(packageJsonPath, "utf-8");
     const pkg2 = JSON.parse(content);
     return pkg2.pi ?? null;
   } catch {
@@ -270756,6 +272408,7 @@ class DefaultPackageManager {
   async install(source2, options4) {
     const parsed = this.parseSource(source2);
     const scope = options4?.local ? "project" : "user";
+    this.assertProjectTrustedForScope(scope);
     await this.withProgress("install", source2, `Installing ${source2}...`, async () => {
       if (parsed.type === "npm") {
         await this.installNpm(parsed, scope, false);
@@ -270782,6 +272435,7 @@ class DefaultPackageManager {
   async remove(source2, options4) {
     const parsed = this.parseSource(source2);
     const scope = options4?.local ? "project" : "user";
+    this.assertProjectTrustedForScope(scope);
     await this.withProgress("remove", source2, `Removing ${source2}...`, async () => {
       if (parsed.type === "npm") {
         await this.uninstallNpm(parsed, scope);
@@ -271166,7 +272820,7 @@ class DefaultPackageManager {
     if (!existsSync13(packageJsonPath))
       return;
     try {
-      const content = readFileSync11(packageJsonPath, "utf-8");
+      const content = readFileSync10(packageJsonPath, "utf-8");
       const pkg2 = JSON.parse(content);
       return pkg2.version;
     } catch {
@@ -271353,6 +273007,11 @@ class DefaultPackageManager {
     const name = match3[1] ?? spec;
     const version2 = match3[2];
     return { name, version: version2 };
+  }
+  assertProjectTrustedForScope(scope) {
+    if (scope === "project" && !this.settingsManager.isProjectTrusted()) {
+      throw new Error("Project is not trusted; refusing to access project package storage");
+    }
   }
   getNpmCommand() {
     const configuredCommand = this.settingsManager.getNpmCommand();
@@ -271547,6 +273206,7 @@ class DefaultPackageManager {
       return this.getTemporaryDir("npm");
     }
     if (scope === "project") {
+      this.assertProjectTrustedForScope(scope);
       return join20(this.cwd, CONFIG_DIR_NAME, "npm");
     }
     return join20(this.agentDir, "npm");
@@ -271584,6 +273244,7 @@ class DefaultPackageManager {
       return join20(this.getTemporaryDir("npm"), "node_modules", source2.name);
     }
     if (scope === "project") {
+      this.assertProjectTrustedForScope(scope);
       return join20(this.cwd, CONFIG_DIR_NAME, "npm", "node_modules", source2.name);
     }
     return join20(this.agentDir, "npm", "node_modules", source2.name);
@@ -271607,26 +273268,38 @@ class DefaultPackageManager {
     if (scope === "temporary") {
       return this.getTemporaryDir(`git-${source2.host}`, source2.path);
     }
-    if (scope === "project") {
-      return join20(this.cwd, CONFIG_DIR_NAME, "git", source2.host, source2.path);
+    const installRoot = this.getGitInstallRoot(scope);
+    if (!installRoot) {
+      throw new Error("Missing git install root");
     }
-    return join20(this.agentDir, "git", source2.host, source2.path);
+    return this.resolveManagedPath(installRoot, source2.host, source2.path);
   }
   getGitInstallRoot(scope) {
     if (scope === "temporary") {
       return;
     }
     if (scope === "project") {
+      this.assertProjectTrustedForScope(scope);
       return join20(this.cwd, CONFIG_DIR_NAME, "git");
     }
     return join20(this.agentDir, "git");
   }
   getTemporaryDir(prefix, suffix) {
+    const root = this.resolveManagedPath(getExtensionTempFolder(this.agentDir), prefix);
     const hash4 = createHash("sha256").update(`${prefix}-${suffix ?? ""}`).digest("hex").slice(0, 8);
-    return join20(tmpdir3(), "pi-extensions", prefix, hash4, suffix ?? "");
+    return this.resolveManagedPath(root, hash4, suffix ?? "");
+  }
+  resolveManagedPath(root, ...parts) {
+    const resolvedRoot = resolve8(root);
+    const resolvedPath = resolve8(resolvedRoot, ...parts);
+    if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(`${resolvedRoot}${sep7}`)) {
+      throw new Error(`Refusing to use path outside package install root: ${resolvedPath}`);
+    }
+    return resolvedPath;
   }
   getBaseDirForScope(scope) {
     if (scope === "project") {
+      this.assertProjectTrustedForScope(scope);
       return join20(this.cwd, CONFIG_DIR_NAME);
     }
     if (scope === "user") {
@@ -271725,7 +273398,7 @@ class DefaultPackageManager {
       return null;
     }
     try {
-      const content = readFileSync11(packageJsonPath, "utf-8");
+      const content = readFileSync10(packageJsonPath, "utf-8");
       const pkg2 = JSON.parse(content);
       return pkg2.pi ?? null;
     } catch {
@@ -271808,7 +273481,8 @@ class DefaultPackageManager {
       themes: join20(projectBaseDir, "themes")
     };
     const userAgentsSkillsDir = join20(getHomeDir(), ".agents", "skills");
-    const projectAgentsSkillDirs = collectAncestorAgentsSkillDirs(this.cwd).filter((dir) => resolve8(dir) !== resolve8(userAgentsSkillsDir));
+    const projectTrusted = this.settingsManager.isProjectTrusted();
+    const projectAgentsSkillDirs = projectTrusted ? collectAncestorAgentsSkillDirs(this.cwd).filter((dir) => resolve8(dir) !== resolve8(userAgentsSkillsDir)) : [];
     const addResources = (resourceType, paths, metadata, overrides, baseDir) => {
       const target2 = this.getTargetMap(accumulator, resourceType);
       for (const path13 of paths) {
@@ -271816,8 +273490,10 @@ class DefaultPackageManager {
         this.addResource(target2, path13, metadata, enabled);
       }
     };
-    addResources("extensions", collectAutoExtensionEntries(projectDirs.extensions), projectMetadata, projectOverrides.extensions, projectBaseDir);
-    addResources("skills", collectAutoSkillEntries(projectDirs.skills, "pi"), projectMetadata, projectOverrides.skills, projectBaseDir);
+    if (projectTrusted) {
+      addResources("extensions", collectAutoExtensionEntries(projectDirs.extensions), projectMetadata, projectOverrides.extensions, projectBaseDir);
+      addResources("skills", collectAutoSkillEntries(projectDirs.skills, "pi"), projectMetadata, projectOverrides.skills, projectBaseDir);
+    }
     for (const agentsSkillsDir of projectAgentsSkillDirs) {
       const agentsBaseDir = dirname14(agentsSkillsDir);
       const agentsMetadata = {
@@ -271826,8 +273502,10 @@ class DefaultPackageManager {
       };
       addResources("skills", collectAutoSkillEntries(agentsSkillsDir, "agents"), agentsMetadata, projectOverrides.skills, agentsBaseDir);
     }
-    addResources("prompts", collectAutoPromptEntries(projectDirs.prompts), projectMetadata, projectOverrides.prompts, projectBaseDir);
-    addResources("themes", collectAutoThemeEntries(projectDirs.themes), projectMetadata, projectOverrides.themes, projectBaseDir);
+    if (projectTrusted) {
+      addResources("prompts", collectAutoPromptEntries(projectDirs.prompts), projectMetadata, projectOverrides.prompts, projectBaseDir);
+      addResources("themes", collectAutoThemeEntries(projectDirs.themes), projectMetadata, projectOverrides.themes, projectBaseDir);
+    }
     addResources("extensions", collectAutoExtensionEntries(userDirs.extensions), userMetadata, userOverrides.extensions, globalBaseDir);
     addResources("skills", collectAutoSkillEntries(userDirs.skills, "pi"), userMetadata, userOverrides.skills, globalBaseDir);
     const userAgentsBaseDir = dirname14(userAgentsSkillsDir);
@@ -271989,12 +273667,12 @@ class DefaultPackageManager {
   }
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/core/resource-loader.js
-import { existsSync as existsSync15, readdirSync as readdirSync9, readFileSync as readFileSync13, statSync as statSync9 } from "node:fs";
+import { existsSync as existsSync15, readdirSync as readdirSync9, readFileSync as readFileSync12, statSync as statSync9 } from "node:fs";
 import { join as join22, resolve as resolve9, sep as sep8 } from "node:path";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
 var import_proper_lockfile2 = __toESM(require_proper_lockfile(), 1);
-import { existsSync as existsSync14, mkdirSync as mkdirSync7, readFileSync as readFileSync12, writeFileSync as writeFileSync7 } from "fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync7 } from "fs";
 import { dirname as dirname15, join as join21 } from "path";
 
 // node_modules/undici/index.js
@@ -272268,7 +273946,7 @@ class FileSettingsStorage {
       if (fileExists2) {
         release = this.acquireLockSyncWithRetry(path13);
       }
-      const current = fileExists2 ? readFileSync12(path13, "utf-8") : undefined;
+      const current = fileExists2 ? readFileSync11(path13, "utf-8") : undefined;
       const next = fn(current);
       if (next !== undefined) {
         if (!existsSync14(dir)) {
@@ -272308,6 +273986,7 @@ class SettingsManager {
   globalSettings;
   projectSettings;
   settings;
+  projectTrusted;
   modifiedFields = new Set;
   modifiedNestedFields = new Map;
   modifiedProjectFields = new Set;
@@ -272316,22 +273995,24 @@ class SettingsManager {
   projectSettingsLoadError = null;
   writeQueue = Promise.resolve();
   errors;
-  constructor(storage, initialGlobal, initialProject, globalLoadError = null, projectLoadError = null, initialErrors = []) {
+  constructor(storage, initialGlobal, initialProject, globalLoadError = null, projectLoadError = null, initialErrors = [], projectTrusted = true) {
     this.storage = storage;
     this.globalSettings = initialGlobal;
     this.projectSettings = initialProject;
+    this.projectTrusted = projectTrusted;
     this.globalSettingsLoadError = globalLoadError;
     this.projectSettingsLoadError = projectLoadError;
     this.errors = [...initialErrors];
     this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
   }
-  static create(cwd, agentDir = getAgentDir()) {
+  static create(cwd, agentDir = getAgentDir(), options4 = {}) {
     const storage = new FileSettingsStorage(cwd, agentDir);
-    return SettingsManager.fromStorage(storage);
+    return SettingsManager.fromStorage(storage, options4);
   }
-  static fromStorage(storage) {
+  static fromStorage(storage, options4 = {}) {
+    const projectTrusted = options4.projectTrusted ?? true;
     const globalLoad = SettingsManager.tryLoadFromStorage(storage, "global");
-    const projectLoad = SettingsManager.tryLoadFromStorage(storage, "project");
+    const projectLoad = SettingsManager.tryLoadFromStorage(storage, "project", projectTrusted);
     const initialErrors = [];
     if (globalLoad.error) {
       initialErrors.push({ scope: "global", error: globalLoad.error });
@@ -272339,7 +274020,7 @@ class SettingsManager {
     if (projectLoad.error) {
       initialErrors.push({ scope: "project", error: projectLoad.error });
     }
-    return new SettingsManager(storage, globalLoad.settings, projectLoad.settings, globalLoad.error, projectLoad.error, initialErrors);
+    return new SettingsManager(storage, globalLoad.settings, projectLoad.settings, globalLoad.error, projectLoad.error, initialErrors, projectTrusted);
   }
   static inMemory(settings3 = {}) {
     const storage = new InMemorySettingsStorage;
@@ -272347,7 +274028,10 @@ class SettingsManager {
     storage.withLock("global", () => JSON.stringify(initialSettings, null, 2));
     return SettingsManager.fromStorage(storage);
   }
-  static loadFromStorage(storage, scope) {
+  static loadFromStorage(storage, scope, projectTrusted = true) {
+    if (scope === "project" && !projectTrusted) {
+      return {};
+    }
     let content;
     storage.withLock(scope, (current) => {
       content = current;
@@ -272359,9 +274043,9 @@ class SettingsManager {
     const settings3 = JSON.parse(content);
     return SettingsManager.migrateSettings(settings3);
   }
-  static tryLoadFromStorage(storage, scope) {
+  static tryLoadFromStorage(storage, scope, projectTrusted = true) {
     try {
-      return { settings: SettingsManager.loadFromStorage(storage, scope), error: null };
+      return { settings: SettingsManager.loadFromStorage(storage, scope, projectTrusted), error: null };
     } catch (error51) {
       return { settings: {}, error: error51 };
     }
@@ -272405,6 +274089,30 @@ class SettingsManager {
   getProjectSettings() {
     return structuredClone(this.projectSettings);
   }
+  isProjectTrusted() {
+    return this.projectTrusted;
+  }
+  setProjectTrusted(trusted) {
+    if (this.projectTrusted === trusted) {
+      return;
+    }
+    this.projectTrusted = trusted;
+    this.modifiedProjectFields.clear();
+    this.modifiedProjectNestedFields.clear();
+    if (!trusted) {
+      this.projectSettings = {};
+      this.projectSettingsLoadError = null;
+      this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+      return;
+    }
+    const projectLoad = SettingsManager.tryLoadFromStorage(this.storage, "project", trusted);
+    this.projectSettings = projectLoad.settings;
+    this.projectSettingsLoadError = projectLoad.error;
+    if (projectLoad.error) {
+      this.recordError("project", projectLoad.error);
+    }
+    this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+  }
   async reload() {
     await this.writeQueue;
     const globalLoad = SettingsManager.tryLoadFromStorage(this.storage, "global");
@@ -272419,7 +274127,7 @@ class SettingsManager {
     this.modifiedNestedFields.clear();
     this.modifiedProjectFields.clear();
     this.modifiedProjectNestedFields.clear();
-    const projectLoad = SettingsManager.tryLoadFromStorage(this.storage, "project");
+    const projectLoad = SettingsManager.tryLoadFromStorage(this.storage, "project", this.projectTrusted);
     if (!projectLoad.error) {
       this.projectSettings = projectLoad.settings;
       this.projectSettingsLoadError = null;
@@ -272450,6 +274158,11 @@ class SettingsManager {
       this.modifiedProjectNestedFields.get(field).add(nestedKey);
     }
   }
+  assertProjectTrustedForWrite() {
+    if (!this.projectTrusted) {
+      throw new Error("Project is not trusted; refusing to write project settings");
+    }
+  }
   recordError(scope, error51) {
     const normalizedError = error51 instanceof Error ? error51 : new Error(String(error51));
     this.errors.push({ scope, error: normalizedError });
@@ -272465,6 +274178,9 @@ class SettingsManager {
   }
   enqueueWrite(scope, task) {
     this.writeQueue = this.writeQueue.then(() => {
+      if (scope === "project") {
+        this.assertProjectTrustedForWrite();
+      }
       task();
       this.clearModifiedScope(scope);
     }).catch((error51) => {
@@ -272513,6 +274229,7 @@ class SettingsManager {
     });
   }
   saveProjectSettings(settings3) {
+    this.assertProjectTrustedForWrite();
     this.projectSettings = structuredClone(settings3);
     this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
     if (this.projectSettingsLoadError) {
@@ -272524,6 +274241,13 @@ class SettingsManager {
     this.enqueueWrite("project", () => {
       this.persistScopedSettings("project", snapshotProjectSettings, modifiedFields, modifiedNestedFields);
     });
+  }
+  updateProjectSettings(field, update2) {
+    this.assertProjectTrustedForWrite();
+    const projectSettings = structuredClone(this.projectSettings);
+    update2(projectSettings);
+    this.markProjectModified(field);
+    this.saveProjectSettings(projectSettings);
   }
   async flush() {
     await this.writeQueue;
@@ -272704,6 +274428,15 @@ class SettingsManager {
     this.markModified("quietStartup");
     this.save();
   }
+  getDefaultProjectTrust() {
+    const value2 = this.globalSettings.defaultProjectTrust;
+    return value2 === "always" || value2 === "never" ? value2 : "ask";
+  }
+  setDefaultProjectTrust(defaultProjectTrust) {
+    this.globalSettings.defaultProjectTrust = defaultProjectTrust;
+    this.markModified("defaultProjectTrust");
+    this.save();
+  }
   getShellCommandPrefix() {
     return this.settings.shellCommandPrefix;
   }
@@ -272745,10 +274478,9 @@ class SettingsManager {
     this.save();
   }
   setProjectPackages(packages) {
-    const projectSettings = structuredClone(this.projectSettings);
-    projectSettings.packages = packages;
-    this.markProjectModified("packages");
-    this.saveProjectSettings(projectSettings);
+    this.updateProjectSettings("packages", (settings3) => {
+      settings3.packages = packages;
+    });
   }
   getExtensionPaths() {
     return [...this.settings.extensions ?? []];
@@ -272759,10 +274491,9 @@ class SettingsManager {
     this.save();
   }
   setProjectExtensionPaths(paths) {
-    const projectSettings = structuredClone(this.projectSettings);
-    projectSettings.extensions = paths;
-    this.markProjectModified("extensions");
-    this.saveProjectSettings(projectSettings);
+    this.updateProjectSettings("extensions", (settings3) => {
+      settings3.extensions = paths;
+    });
   }
   getSkillPaths() {
     return [...this.settings.skills ?? []];
@@ -272773,10 +274504,9 @@ class SettingsManager {
     this.save();
   }
   setProjectSkillPaths(paths) {
-    const projectSettings = structuredClone(this.projectSettings);
-    projectSettings.skills = paths;
-    this.markProjectModified("skills");
-    this.saveProjectSettings(projectSettings);
+    this.updateProjectSettings("skills", (settings3) => {
+      settings3.skills = paths;
+    });
   }
   getPromptTemplatePaths() {
     return [...this.settings.prompts ?? []];
@@ -272787,10 +274517,9 @@ class SettingsManager {
     this.save();
   }
   setProjectPromptTemplatePaths(paths) {
-    const projectSettings = structuredClone(this.projectSettings);
-    projectSettings.prompts = paths;
-    this.markProjectModified("prompts");
-    this.saveProjectSettings(projectSettings);
+    this.updateProjectSettings("prompts", (settings3) => {
+      settings3.prompts = paths;
+    });
   }
   getThemePaths() {
     return [...this.settings.themes ?? []];
@@ -272801,10 +274530,9 @@ class SettingsManager {
     this.save();
   }
   setProjectThemePaths(paths) {
-    const projectSettings = structuredClone(this.projectSettings);
-    projectSettings.themes = paths;
-    this.markProjectModified("themes");
-    this.saveProjectSettings(projectSettings);
+    this.updateProjectSettings("themes", (settings3) => {
+      settings3.themes = paths;
+    });
   }
   getEnableSkillCommands() {
     return this.settings.enableSkillCommands ?? true;
@@ -272960,7 +274688,7 @@ function resolvePromptInput(input, description) {
   }
   if (existsSync15(input)) {
     try {
-      return readFileSync13(input, "utf-8");
+      return readFileSync12(input, "utf-8");
     } catch (error51) {
       console.error(source_default.yellow(`Warning: Could not read ${description} file ${input}: ${error51}`));
       return input;
@@ -272976,7 +274704,7 @@ function loadContextFileFromDir(dir) {
       try {
         return {
           path: filePath,
-          content: readFileSync13(filePath, "utf-8")
+          content: readFileSync12(filePath, "utf-8")
         };
       } catch (error51) {
         console.error(source_default.yellow(`Warning: Could not read ${filePath}: ${error51}`));
@@ -273148,7 +274876,18 @@ class DefaultResourceLoader {
       this.updateThemesFromPaths(this.lastThemePaths);
     }
   }
-  async reload() {
+  async loadProjectTrustExtensions() {
+    this.settingsManager.setProjectTrusted(false);
+    await this.settingsManager.reload();
+    return this.loadCurrentExtensionSet({ includeInlineFactories: true });
+  }
+  async reload(options4) {
+    let preTrustExtensions;
+    if (options4?.resolveProjectTrust) {
+      preTrustExtensions = await this.loadProjectTrustExtensions();
+      const projectTrusted = await options4.resolveProjectTrust({ extensionsResult: preTrustExtensions });
+      this.settingsManager.setProjectTrusted(projectTrusted);
+    }
     await this.settingsManager.reload();
     const resolvedPaths = await this.packageManager.resolve();
     const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
@@ -273171,28 +274910,7 @@ class DefaultResourceLoader {
     const enabledSkillResources = getEnabledResources(resolvedPaths.skills);
     const enabledPrompts = getEnabledPaths(resolvedPaths.prompts);
     const enabledThemes = getEnabledPaths(resolvedPaths.themes);
-    const mapSkillPath = (resource) => {
-      if (resource.metadata.source !== "auto" && resource.metadata.origin !== "package") {
-        return resource.path;
-      }
-      try {
-        const stats = statSync9(resource.path);
-        if (!stats.isDirectory()) {
-          return resource.path;
-        }
-      } catch {
-        return resource.path;
-      }
-      const skillFile = join22(resource.path, "SKILL.md");
-      if (existsSync15(skillFile)) {
-        if (!metadataByPath.has(skillFile)) {
-          metadataByPath.set(skillFile, resource.metadata);
-        }
-        return skillFile;
-      }
-      return resource.path;
-    };
-    const enabledSkills = enabledSkillResources.map(mapSkillPath);
+    const enabledSkills = enabledSkillResources.map((resource) => this.mapSkillPath(resource, metadataByPath));
     for (const r2 of cliExtensionPaths.extensions) {
       if (!metadataByPath.has(r2.path)) {
         metadataByPath.set(r2.path, { source: "cli", scope: "temporary", origin: "top-level" });
@@ -273208,14 +274926,7 @@ class DefaultResourceLoader {
     const cliEnabledPrompts = getEnabledPaths(cliExtensionPaths.prompts);
     const cliEnabledThemes = getEnabledPaths(cliExtensionPaths.themes);
     const extensionPaths = this.noExtensions ? cliEnabledExtensions : this.mergePaths(cliEnabledExtensions, enabledExtensions);
-    const extensionsResult = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
-    const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
-    extensionsResult.extensions.push(...inlineExtensions.extensions);
-    extensionsResult.errors.push(...inlineExtensions.errors);
-    const conflicts = this.detectExtensionConflicts(extensionsResult.extensions);
-    for (const conflict of conflicts) {
-      extensionsResult.errors.push({ path: conflict.path, error: conflict.message });
-    }
+    const extensionsResult = await this.loadFinalExtensionSet(extensionPaths, preTrustExtensions);
     for (const p of this.additionalExtensionPaths) {
       if (isLocalPath(p)) {
         const resolved = this.resolveResourcePath(p);
@@ -273262,7 +274973,10 @@ class DefaultResourceLoader {
       }
     }
     const agentsFiles = {
-      agentsFiles: this.noContextFiles ? [] : loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir })
+      agentsFiles: this.noContextFiles ? [] : loadProjectContextFiles({
+        cwd: this.cwd,
+        agentDir: this.agentDir
+      })
     };
     const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
     this.agentsFiles = resolvedAgentsFiles.agentsFiles;
@@ -273271,6 +274985,84 @@ class DefaultResourceLoader {
     const appendSources = this.appendSystemPromptSource ?? (this.discoverAppendSystemPromptFile() ? [this.discoverAppendSystemPromptFile()] : []);
     const baseAppend = appendSources.map((s2) => resolvePromptInput(s2, "append system prompt")).filter((s2) => s2 !== undefined);
     this.appendSystemPrompt = this.appendSystemPromptOverride ? this.appendSystemPromptOverride(baseAppend) : baseAppend;
+  }
+  async loadCurrentExtensionSet(options4) {
+    const resolvedPaths = await this.packageManager.resolve();
+    const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
+      temporary: true
+    });
+    const enabledExtensions = resolvedPaths.extensions.filter((r2) => r2.enabled).map((r2) => r2.path);
+    const cliEnabledExtensions = cliExtensionPaths.extensions.filter((r2) => r2.enabled).map((r2) => r2.path);
+    const extensionPaths = this.noExtensions ? cliEnabledExtensions : this.mergePaths(cliEnabledExtensions, enabledExtensions);
+    const extensionsResult = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
+    if (!options4.includeInlineFactories) {
+      return extensionsResult;
+    }
+    const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
+    extensionsResult.extensions.push(...inlineExtensions.extensions);
+    extensionsResult.errors.push(...inlineExtensions.errors);
+    return extensionsResult;
+  }
+  resolveExtensionLoadPath(path13) {
+    return resolvePath(path13, this.cwd, { normalizeUnicodeSpaces: true });
+  }
+  async loadFinalExtensionSet(extensionPaths, preTrustExtensions) {
+    if (!preTrustExtensions) {
+      const extensionsResult2 = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
+      const inlineExtensions2 = await this.loadExtensionFactories(extensionsResult2.runtime);
+      extensionsResult2.extensions.push(...inlineExtensions2.extensions);
+      extensionsResult2.errors.push(...inlineExtensions2.errors);
+      this.addExtensionConflictDiagnostics(extensionsResult2);
+      return extensionsResult2;
+    }
+    const preloadedByPath = new Map(preTrustExtensions.extensions.filter((extension) => !extension.path.startsWith("<inline:")).map((extension) => [extension.resolvedPath, extension]));
+    const failedPreloadPaths = new Set(preTrustExtensions.errors.map((error51) => this.resolveExtensionLoadPath(error51.path)));
+    const remainingPaths = extensionPaths.filter((path13) => {
+      const resolvedPath = this.resolveExtensionLoadPath(path13);
+      return !preloadedByPath.has(resolvedPath) && !failedPreloadPaths.has(resolvedPath);
+    });
+    const remainingExtensions = await loadExtensions(remainingPaths, this.cwd, this.eventBus, preTrustExtensions.runtime);
+    const loadedByPath = new Map(preloadedByPath);
+    for (const extension of remainingExtensions.extensions) {
+      loadedByPath.set(extension.resolvedPath, extension);
+    }
+    const inlineExtensions = preTrustExtensions.extensions.filter((extension) => extension.path.startsWith("<inline:"));
+    const orderedExtensions = extensionPaths.map((path13) => loadedByPath.get(this.resolveExtensionLoadPath(path13))).filter((extension) => extension !== undefined);
+    orderedExtensions.push(...inlineExtensions);
+    const extensionsResult = {
+      extensions: orderedExtensions,
+      errors: [...preTrustExtensions.errors, ...remainingExtensions.errors],
+      runtime: preTrustExtensions.runtime
+    };
+    this.addExtensionConflictDiagnostics(extensionsResult);
+    return extensionsResult;
+  }
+  addExtensionConflictDiagnostics(extensionsResult) {
+    const conflicts = this.detectExtensionConflicts(extensionsResult.extensions);
+    for (const conflict of conflicts) {
+      extensionsResult.errors.push({ path: conflict.path, error: conflict.message });
+    }
+  }
+  mapSkillPath(resource, metadataByPath) {
+    if (resource.metadata.source !== "auto" && resource.metadata.origin !== "package") {
+      return resource.path;
+    }
+    try {
+      const stats = statSync9(resource.path);
+      if (!stats.isDirectory()) {
+        return resource.path;
+      }
+    } catch {
+      return resource.path;
+    }
+    const skillFile = join22(resource.path, "SKILL.md");
+    if (existsSync15(skillFile)) {
+      if (!metadataByPath.has(skillFile)) {
+        metadataByPath.set(skillFile, resource.metadata);
+      }
+      return skillFile;
+    }
+    return resource.path;
   }
   normalizeExtensionPaths(entries) {
     return entries.map((entry) => {
@@ -273565,7 +275357,7 @@ class DefaultResourceLoader {
   }
   discoverSystemPromptFile() {
     const projectPath = join22(this.cwd, CONFIG_DIR_NAME, "SYSTEM.md");
-    if (existsSync15(projectPath)) {
+    if (this.settingsManager.isProjectTrusted() && existsSync15(projectPath)) {
       return projectPath;
     }
     const globalPath = join22(this.agentDir, "SYSTEM.md");
@@ -273576,7 +275368,7 @@ class DefaultResourceLoader {
   }
   discoverAppendSystemPromptFile() {
     const projectPath = join22(this.cwd, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
-    if (existsSync15(projectPath)) {
+    if (this.settingsManager.isProjectTrusted() && existsSync15(projectPath)) {
       return projectPath;
     }
     const globalPath = join22(this.agentDir, "APPEND_SYSTEM.md");
@@ -273627,316 +275419,15 @@ class DefaultResourceLoader {
 // node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
 import { join as join25 } from "node:path";
 
-// node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js
-var VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
-function isValidThinkingLevel(level) {
-  return VALID_THINKING_LEVELS.includes(level);
-}
-function parseArgs2(args2) {
-  const result = {
-    messages: [],
-    fileArgs: [],
-    unknownFlags: new Map,
-    diagnostics: []
-  };
-  for (let i2 = 0;i2 < args2.length; i2++) {
-    const arg = args2[i2];
-    if (arg === "--help" || arg === "-h") {
-      result.help = true;
-    } else if (arg === "--version" || arg === "-v") {
-      result.version = true;
-    } else if (arg === "--mode" && i2 + 1 < args2.length) {
-      const mode = args2[++i2];
-      if (mode === "text" || mode === "json" || mode === "rpc") {
-        result.mode = mode;
-      }
-    } else if (arg === "--continue" || arg === "-c") {
-      result.continue = true;
-    } else if (arg === "--resume" || arg === "-r") {
-      result.resume = true;
-    } else if (arg === "--provider" && i2 + 1 < args2.length) {
-      result.provider = args2[++i2];
-    } else if (arg === "--model" && i2 + 1 < args2.length) {
-      result.model = args2[++i2];
-    } else if (arg === "--api-key" && i2 + 1 < args2.length) {
-      result.apiKey = args2[++i2];
-    } else if (arg === "--system-prompt" && i2 + 1 < args2.length) {
-      result.systemPrompt = args2[++i2];
-    } else if (arg === "--append-system-prompt" && i2 + 1 < args2.length) {
-      result.appendSystemPrompt = result.appendSystemPrompt ?? [];
-      result.appendSystemPrompt.push(args2[++i2]);
-    } else if (arg === "--no-session") {
-      result.noSession = true;
-    } else if (arg === "--session" && i2 + 1 < args2.length) {
-      result.session = args2[++i2];
-    } else if (arg === "--session-id" && i2 + 1 < args2.length) {
-      result.sessionId = args2[++i2];
-    } else if (arg === "--fork" && i2 + 1 < args2.length) {
-      result.fork = args2[++i2];
-    } else if (arg === "--session-dir" && i2 + 1 < args2.length) {
-      result.sessionDir = args2[++i2];
-    } else if (arg === "--models" && i2 + 1 < args2.length) {
-      result.models = args2[++i2].split(",").map((s2) => s2.trim());
-    } else if (arg === "--no-tools" || arg === "-nt") {
-      result.noTools = true;
-    } else if (arg === "--no-builtin-tools" || arg === "-nbt") {
-      result.noBuiltinTools = true;
-    } else if ((arg === "--tools" || arg === "-t") && i2 + 1 < args2.length) {
-      result.tools = args2[++i2].split(",").map((s2) => s2.trim()).filter((name) => name.length > 0);
-    } else if ((arg === "--exclude-tools" || arg === "-xt") && i2 + 1 < args2.length) {
-      result.excludeTools = args2[++i2].split(",").map((s2) => s2.trim()).filter((name) => name.length > 0);
-    } else if (arg === "--thinking" && i2 + 1 < args2.length) {
-      const level = args2[++i2];
-      if (isValidThinkingLevel(level)) {
-        result.thinking = level;
-      } else {
-        result.diagnostics.push({
-          type: "warning",
-          message: `Invalid thinking level "${level}". Valid values: ${VALID_THINKING_LEVELS.join(", ")}`
-        });
-      }
-    } else if (arg === "--print" || arg === "-p") {
-      result.print = true;
-      const next = args2[i2 + 1];
-      if (next !== undefined && !next.startsWith("@") && (!next.startsWith("-") || next.startsWith("---"))) {
-        result.messages.push(next);
-        i2++;
-      }
-    } else if (arg === "--export" && i2 + 1 < args2.length) {
-      result.export = args2[++i2];
-    } else if ((arg === "--extension" || arg === "-e") && i2 + 1 < args2.length) {
-      result.extensions = result.extensions ?? [];
-      result.extensions.push(args2[++i2]);
-    } else if (arg === "--no-extensions" || arg === "-ne") {
-      result.noExtensions = true;
-    } else if (arg === "--skill" && i2 + 1 < args2.length) {
-      result.skills = result.skills ?? [];
-      result.skills.push(args2[++i2]);
-    } else if (arg === "--prompt-template" && i2 + 1 < args2.length) {
-      result.promptTemplates = result.promptTemplates ?? [];
-      result.promptTemplates.push(args2[++i2]);
-    } else if (arg === "--theme" && i2 + 1 < args2.length) {
-      result.themes = result.themes ?? [];
-      result.themes.push(args2[++i2]);
-    } else if (arg === "--no-skills" || arg === "-ns") {
-      result.noSkills = true;
-    } else if (arg === "--no-prompt-templates" || arg === "-np") {
-      result.noPromptTemplates = true;
-    } else if (arg === "--no-themes") {
-      result.noThemes = true;
-    } else if (arg === "--no-context-files" || arg === "-nc") {
-      result.noContextFiles = true;
-    } else if (arg === "--list-models") {
-      if (i2 + 1 < args2.length && !args2[i2 + 1].startsWith("-") && !args2[i2 + 1].startsWith("@")) {
-        result.listModels = args2[++i2];
-      } else {
-        result.listModels = true;
-      }
-    } else if (arg === "--verbose") {
-      result.verbose = true;
-    } else if (arg === "--offline") {
-      result.offline = true;
-    } else if (arg.startsWith("@")) {
-      result.fileArgs.push(arg.slice(1));
-    } else if (arg.startsWith("--")) {
-      const eqIndex = arg.indexOf("=");
-      if (eqIndex !== -1) {
-        result.unknownFlags.set(arg.slice(2, eqIndex), arg.slice(eqIndex + 1));
-      } else {
-        const flagName = arg.slice(2);
-        const next = args2[i2 + 1];
-        if (next !== undefined && !next.startsWith("-") && !next.startsWith("@")) {
-          result.unknownFlags.set(flagName, next);
-          i2++;
-        } else {
-          result.unknownFlags.set(flagName, true);
-        }
-      }
-    } else if (arg.startsWith("-") && !arg.startsWith("--")) {
-      result.diagnostics.push({ type: "error", message: `Unknown option: ${arg}` });
-    } else if (!arg.startsWith("-")) {
-      result.messages.push(arg);
-    }
-  }
-  return result;
-}
-function printHelp(extensionFlags) {
-  const extensionFlagsText = extensionFlags && extensionFlags.length > 0 ? `
-${source_default.bold("Extension CLI Flags:")}
-${extensionFlags.map((flag) => {
-    const value2 = flag.type === "string" ? " <value>" : "";
-    const description = flag.description ?? `Registered by ${flag.extensionPath}`;
-    return `  --${flag.name}${value2}`.padEnd(30) + description;
-  }).join(`
-`)}
-` : "";
-  console.log(`${source_default.bold(APP_NAME)} - AI coding assistant with read, bash, edit, write tools
-
-${source_default.bold("Usage:")}
-  ${APP_NAME} [options] [@files...] [messages...]
-
-${source_default.bold("Commands:")}
-  ${APP_NAME} install <source> [-l]     Install extension source and add to settings
-  ${APP_NAME} remove <source> [-l]      Remove extension source from settings
-  ${APP_NAME} uninstall <source> [-l]   Alias for remove
-  ${APP_NAME} update [source|self|pi]   Update pi and installed extensions
-  ${APP_NAME} list                      List installed extensions from settings
-  ${APP_NAME} config                    Open TUI to enable/disable package resources
-  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list
-
-${source_default.bold("Options:")}
-  --provider <name>              Provider name (default: google)
-  --model <pattern>              Model pattern or ID (supports "provider/id" and optional ":<thinking>")
-  --api-key <key>                API key (defaults to env vars)
-  --system-prompt <text>         System prompt (default: coding assistant prompt)
-  --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
-  --mode <mode>                  Output mode: text (default), json, or rpc
-  --print, -p                    Non-interactive mode: process prompt and exit
-  --continue, -c                 Continue previous session
-  --resume, -r                   Select a session to resume
-  --session <path|id>            Use specific session file or partial UUID
-  --session-id <id>              Use exact project session ID, creating it if missing
-  --fork <path|id>               Fork specific session file or partial UUID into a new session
-  --session-dir <dir>            Directory for session storage and lookup
-  --no-session                   Don't save session (ephemeral)
-  --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
-                                 Supports globs (anthropic/*, *sonnet*) and fuzzy matching
-  --no-tools, -nt                Disable all tools by default (built-in and extension)
-  --no-builtin-tools, -nbt       Disable built-in tools by default but keep extension/custom tools enabled
-  --tools, -t <tools>            Comma-separated allowlist of tool names to enable
-                                 Applies to built-in, extension, and custom tools
-  --exclude-tools, -xt <tools>   Comma-separated denylist of tool names to disable
-                                 Applies to built-in, extension, and custom tools
-  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
-  --extension, -e <path>         Load an extension file (can be used multiple times)
-  --no-extensions, -ne           Disable extension discovery (explicit -e paths still work)
-  --skill <path>                 Load a skill file or directory (can be used multiple times)
-  --no-skills, -ns               Disable skills discovery and loading
-  --prompt-template <path>       Load a prompt template file or directory (can be used multiple times)
-  --no-prompt-templates, -np     Disable prompt template discovery and loading
-  --theme <path>                 Load a theme file or directory (can be used multiple times)
-  --no-themes                    Disable theme discovery and loading
-  --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
-  --export <file>                Export session file to HTML and exit
-  --list-models [search]         List available models (with optional fuzzy search)
-  --verbose                      Force verbose startup (overrides quietStartup setting)
-  --offline                      Disable startup network operations (same as PI_OFFLINE=1)
-  --help, -h                     Show this help
-  --version, -v                  Show version number
-
-Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
-
-${source_default.bold("Examples:")}
-  # Interactive mode
-  ${APP_NAME}
-
-  # Interactive mode with initial prompt
-  ${APP_NAME} "List all .ts files in src/"
-
-  # Include files in initial message
-  ${APP_NAME} @prompt.md @image.png "What color is the sky?"
-
-  # Non-interactive mode (process and exit)
-  ${APP_NAME} -p "List all .ts files in src/"
-
-  # Multiple messages (interactive)
-  ${APP_NAME} "Read package.json" "What dependencies do we have?"
-
-  # Continue previous session
-  ${APP_NAME} --continue "What did we discuss?"
-
-  # Use different model
-  ${APP_NAME} --provider openai --model gpt-4o-mini "Help me refactor this code"
-
-  # Use model with provider prefix (no --provider needed)
-  ${APP_NAME} --model openai/gpt-4o "Help me refactor this code"
-
-  # Use model with thinking level shorthand
-  ${APP_NAME} --model sonnet:high "Solve this complex problem"
-
-  # Limit model cycling to specific models
-  ${APP_NAME} --models claude-sonnet,claude-haiku,gpt-4o
-
-  # Limit to a specific provider with glob pattern
-  ${APP_NAME} --models "github-copilot/*"
-
-  # Cycle models with fixed thinking levels
-  ${APP_NAME} --models sonnet:high,haiku:low
-
-  # Start with a specific thinking level
-  ${APP_NAME} --thinking high "Solve this complex problem"
-
-  # Read-only mode (no file modifications possible)
-  ${APP_NAME} --tools read,grep,find,ls -p "Review the code in src/"
-
-  # Disable one tool while keeping the rest available
-  ${APP_NAME} --exclude-tools ask_question
-
-  # Export a session file to HTML
-  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl
-  ${APP_NAME} --export session.jsonl output.html
-
-${source_default.bold("Environment Variables:")}
-  ANTHROPIC_API_KEY                - Anthropic Claude API key
-  ANTHROPIC_OAUTH_TOKEN            - Anthropic OAuth token (alternative to API key)
-  OPENAI_API_KEY                   - OpenAI GPT API key
-  AZURE_OPENAI_API_KEY             - Azure OpenAI API key
-  AZURE_OPENAI_BASE_URL            - Azure OpenAI/Cognitive Services base URL (e.g. https://{resource}.openai.azure.com)
-  AZURE_OPENAI_RESOURCE_NAME       - Azure OpenAI resource name (alternative to base URL)
-  AZURE_OPENAI_API_VERSION         - Azure OpenAI API version (default: v1)
-  AZURE_OPENAI_DEPLOYMENT_NAME_MAP - Azure OpenAI model=deployment map (comma-separated)
-  DEEPSEEK_API_KEY                 - DeepSeek API key
-  GEMINI_API_KEY                   - Google Gemini API key
-  GROQ_API_KEY                     - Groq API key
-  CEREBRAS_API_KEY                 - Cerebras API key
-  XAI_API_KEY                      - xAI Grok API key
-  FIREWORKS_API_KEY                - Fireworks API key
-  TOGETHER_API_KEY                 - Together AI API key
-  OPENROUTER_API_KEY               - OpenRouter API key
-  AI_GATEWAY_API_KEY               - Vercel AI Gateway API key
-  ZAI_API_KEY                      - ZAI API key
-  MISTRAL_API_KEY                  - Mistral API key
-  MINIMAX_API_KEY                  - MiniMax API key
-  MOONSHOT_API_KEY                 - Moonshot AI API key
-  OPENCODE_API_KEY                 - OpenCode Zen/OpenCode Go API key
-  KIMI_API_KEY                     - Kimi For Coding API key
-  CLOUDFLARE_API_KEY               - Cloudflare API token (Workers AI and AI Gateway)
-  CLOUDFLARE_ACCOUNT_ID            - Cloudflare account id (required for both)
-  CLOUDFLARE_GATEWAY_ID            - Cloudflare AI Gateway slug (required for AI Gateway)
-  XIAOMI_API_KEY                   - Xiaomi MiMo API key (api.xiaomimimo.com billing)
-  XIAOMI_TOKEN_PLAN_CN_API_KEY     - Xiaomi MiMo Token Plan API key (China region)
-  XIAOMI_TOKEN_PLAN_AMS_API_KEY    - Xiaomi MiMo Token Plan API key (Amsterdam region)
-  XIAOMI_TOKEN_PLAN_SGP_API_KEY    - Xiaomi MiMo Token Plan API key (Singapore region)
-  AWS_PROFILE                      - AWS profile for Amazon Bedrock
-  AWS_ACCESS_KEY_ID                - AWS access key for Amazon Bedrock
-  AWS_SECRET_ACCESS_KEY            - AWS secret key for Amazon Bedrock
-  AWS_BEARER_TOKEN_BEDROCK         - Bedrock API key (bearer token)
-  AWS_REGION                       - AWS region for Amazon Bedrock (e.g., us-east-1)
-  ${ENV_AGENT_DIR.padEnd(32)} - Config directory (default: ~/${CONFIG_DIR_NAME}/agent)
-  ${ENV_SESSION_DIR.padEnd(32)} - Session storage directory (overridden by --session-dir)
-  PI_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
-  PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes
-  PI_TELEMETRY                     - Override install telemetry when set to 1/true/yes or 0/false/no
-  PI_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
-
-${source_default.bold("Built-in Tool Names:")}
-  read   - Read file contents
-  bash   - Execute bash commands
-  edit   - Edit files with find/replace
-  write  - Write files (creates/overwrites)
-  grep   - Search file contents (read-only, off by default)
-  find   - Find files by glob pattern (read-only, off by default)
-  ls     - List directory contents (read-only, off by default)
-`);
-}
-
 // node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js
 var defaultModelPerProvider = {
   "amazon-bedrock": "us.anthropic.claude-opus-4-6-v1",
+  "ant-ling": "Ring-2.6-1T",
   anthropic: "claude-opus-4-8",
   openai: "gpt-5.4",
   "azure-openai-responses": "gpt-5.4",
   "openai-codex": "gpt-5.5",
+  nvidia: "nvidia/nemotron-3-super-120b-a12b",
   deepseek: "deepseek-v4-pro",
   google: "gemini-3.1-pro-preview",
   "google-vertex": "gemini-3.1-pro-preview",
@@ -273947,6 +275438,7 @@ var defaultModelPerProvider = {
   groq: "openai/gpt-oss-120b",
   cerebras: "zai-glm-4.7",
   zai: "glm-5.1",
+  "zai-coding-cn": "glm-5.1",
   mistral: "devstral-medium-latest",
   minimax: "MiniMax-M2.7",
   "minimax-cn": "MiniMax-M2.7",
@@ -274264,6 +275756,72 @@ function isInstallTelemetryEnabled(settingsManager, telemetryEnv = process.env.P
   return telemetryEnv !== undefined ? isTruthyEnvFlag(telemetryEnv) : settingsManager.getEnableInstallTelemetry();
 }
 
+// node_modules/@earendil-works/pi-coding-agent/dist/core/provider-attribution.js
+var OPENROUTER_HOST = "openrouter.ai";
+var NVIDIA_NIM_HOST = "integrate.api.nvidia.com";
+var CLOUDFLARE_API_HOST = "api.cloudflare.com";
+var CLOUDFLARE_AI_GATEWAY_HOST = "gateway.ai.cloudflare.com";
+var OPENCODE_HOST = "opencode.ai";
+function matchesHost(baseUrl, expectedHost) {
+  try {
+    return new URL(baseUrl).hostname === expectedHost;
+  } catch {
+    return false;
+  }
+}
+function isOpenRouterModel(model) {
+  return model.provider === "openrouter" || model.baseUrl.includes(OPENROUTER_HOST);
+}
+function isNvidiaNimModel(model) {
+  return model.provider === "nvidia" || matchesHost(model.baseUrl, NVIDIA_NIM_HOST);
+}
+function isCloudflareModel(model) {
+  return model.provider === "cloudflare-workers-ai" || model.provider === "cloudflare-ai-gateway" || matchesHost(model.baseUrl, CLOUDFLARE_API_HOST) || matchesHost(model.baseUrl, CLOUDFLARE_AI_GATEWAY_HOST);
+}
+function getDefaultAttributionHeaders(model, settingsManager) {
+  if (!isInstallTelemetryEnabled(settingsManager)) {
+    return;
+  }
+  if (isOpenRouterModel(model)) {
+    return {
+      "HTTP-Referer": "https://pi.dev",
+      "X-OpenRouter-Title": "pi",
+      "X-OpenRouter-Categories": "cli-agent"
+    };
+  }
+  if (isNvidiaNimModel(model)) {
+    return {
+      "X-BILLING-INVOKE-ORIGIN": "Pi"
+    };
+  }
+  if (isCloudflareModel(model)) {
+    return {
+      "User-Agent": "pi-coding-agent"
+    };
+  }
+  return;
+}
+function getSessionHeaders(model, sessionId) {
+  if (!sessionId)
+    return;
+  if (model.provider !== "opencode" && model.provider !== "opencode-go" && !matchesHost(model.baseUrl, OPENCODE_HOST)) {
+    return;
+  }
+  return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
+}
+function mergeProviderAttributionHeaders(model, settingsManager, sessionId, ...headerSources) {
+  const merged = {
+    ...getSessionHeaders(model, sessionId),
+    ...getDefaultAttributionHeaders(model, settingsManager)
+  };
+  for (const headers of headerSources) {
+    if (headers) {
+      Object.assign(merged, headers);
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 // node_modules/@earendil-works/pi-coding-agent/dist/core/timings.js
 var ENABLED = process.env.PI_TIMING === "1";
 var timings = [];
@@ -274398,7 +275956,7 @@ async function createAgentSessionServices(options4) {
     agentDir,
     settingsManager
   });
-  await resourceLoader.reload();
+  await resourceLoader.reload(options4.resourceLoaderReloadOptions);
   const diagnostics2 = [];
   const extensionsResult = resourceLoader.getExtensions();
   for (const { name, config: config3, extensionPath } of extensionsResult.runtime.pendingProviderRegistrations) {
@@ -274556,7 +276114,8 @@ class AgentSessionRuntime {
       cwd: sessionManager.getCwd(),
       agentDir: this.services.agentDir,
       sessionManager,
-      sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile }
+      sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+      projectTrustContext: options4?.projectTrustContextFactory?.(sessionManager.getCwd())
     }));
     await this.finishSessionReplacement(options4?.withSession);
     return { cancelled: false };
@@ -274568,7 +276127,7 @@ class AgentSessionRuntime {
     }
     const previousSessionFile = this.session.sessionFile;
     const sessionDir = this.session.sessionManager.getSessionDir();
-    const sessionManager = SessionManager.create(this.cwd, sessionDir);
+    const sessionManager = this.session.sessionManager.isPersisted() ? SessionManager.create(this.cwd, sessionDir) : SessionManager.inMemory(this.cwd);
     if (options4?.parentSession) {
       sessionManager.newSession({ parentSession: options4.parentSession });
     }
@@ -274706,27 +276265,6 @@ async function createAgentSessionRuntime(createRuntime, options4) {
 function getDefaultAgentDir() {
   return getAgentDir();
 }
-function getAttributionHeaders(model, settingsManager, sessionId) {
-  if (sessionId && (model.provider === "opencode" || model.provider === "opencode-go" || model.baseUrl.includes("opencode.ai"))) {
-    return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
-  }
-  if (!isInstallTelemetryEnabled(settingsManager)) {
-    return;
-  }
-  if (model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")) {
-    return {
-      "HTTP-Referer": "https://pi.dev",
-      "X-OpenRouter-Title": "pi",
-      "X-OpenRouter-Categories": "cli-agent"
-    };
-  }
-  if (model.provider === "cloudflare-workers-ai" || model.provider === "cloudflare-ai-gateway" || model.baseUrl.includes("api.cloudflare.com") || model.baseUrl.includes("gateway.ai.cloudflare.com")) {
-    return {
-      "User-Agent": "pi-coding-agent"
-    };
-  }
-  return;
-}
 async function createAgentSession(options4 = {}) {
   const cwd = resolvePath(options4.cwd ?? options4.sessionManager?.getCwd() ?? process.cwd());
   const agentDir = options4.agentDir ? resolvePath(options4.agentDir) : getDefaultAgentDir();
@@ -274824,9 +276362,10 @@ async function createAgentSession(options4 = {}) {
         throw new Error(auth.error);
       }
       const providerRetrySettings = settingsManager.getProviderRetrySettings();
-      const timeoutMs = options5?.timeoutMs ?? providerRetrySettings.timeoutMs ?? (model2.api === "openai-codex-responses" ? settingsManager.getHttpIdleTimeoutMs() : undefined);
+      const httpIdleTimeoutMs = settingsManager.getHttpIdleTimeoutMs();
+      const effectiveTimeoutMs = httpIdleTimeoutMs === 0 ? 2147483647 : httpIdleTimeoutMs;
+      const timeoutMs = options5?.timeoutMs ?? providerRetrySettings.timeoutMs ?? effectiveTimeoutMs;
       const websocketConnectTimeoutMs = options5?.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs();
-      const attributionHeaders = getAttributionHeaders(model2, settingsManager, options5?.sessionId);
       return streamSimple(model2, context, {
         ...options5,
         apiKey: auth.apiKey,
@@ -274834,7 +276373,7 @@ async function createAgentSession(options4 = {}) {
         websocketConnectTimeoutMs,
         maxRetries: options5?.maxRetries ?? providerRetrySettings.maxRetries,
         maxRetryDelayMs: options5?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-        headers: attributionHeaders || auth.headers || options5?.headers ? { ...attributionHeaders, ...auth.headers, ...options5?.headers } : undefined
+        headers: mergeProviderAttributionHeaders(model2, settingsManager, options5?.sessionId, auth.headers, options5?.headers)
       });
     },
     onPayload: async (payload, _model) => {
@@ -274901,11 +276440,190 @@ async function createAgentSession(options4 = {}) {
     modelFallbackMessage
   };
 }
+// node_modules/@earendil-works/pi-coding-agent/dist/core/trust-manager.js
+var import_proper_lockfile3 = __toESM(require_proper_lockfile(), 1);
+import { existsSync as existsSync18, mkdirSync as mkdirSync9, readFileSync as readFileSync13, writeFileSync as writeFileSync8 } from "node:fs";
+import { dirname as dirname16, join as join26 } from "node:path";
+function normalizeCwd(cwd) {
+  return canonicalizePath(resolvePath(cwd));
+}
+function findNearestTrustEntry(data, cwd) {
+  let currentDir = normalizeCwd(cwd);
+  while (true) {
+    const value2 = data[currentDir];
+    if (value2 === true || value2 === false) {
+      return { path: currentDir, decision: value2 };
+    }
+    const parentDir = dirname16(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+    currentDir = parentDir;
+  }
+}
+function getProjectTrustPath(cwd) {
+  return normalizeCwd(cwd);
+}
+function getProjectTrustParentPath(cwd) {
+  const trustPath = getProjectTrustPath(cwd);
+  const parentDir = dirname16(trustPath);
+  return parentDir === trustPath ? undefined : parentDir;
+}
+function getProjectTrustOptions(cwd, options4) {
+  const trustPath = getProjectTrustPath(cwd);
+  const trustOptions = [
+    { label: "Trust", trusted: true, updates: [{ path: trustPath, decision: true }], savedPath: trustPath }
+  ];
+  const parentPath = getProjectTrustParentPath(cwd);
+  if (parentPath !== undefined) {
+    trustOptions.push({
+      label: `Trust parent folder (${parentPath})`,
+      trusted: true,
+      updates: [
+        { path: parentPath, decision: true },
+        { path: trustPath, decision: null }
+      ],
+      savedPath: parentPath
+    });
+  }
+  if (options4?.includeSessionOnly) {
+    trustOptions.push({ label: "Trust (this session only)", trusted: true, updates: [] });
+  }
+  trustOptions.push({
+    label: "Do not trust",
+    trusted: false,
+    updates: [{ path: trustPath, decision: false }],
+    savedPath: trustPath
+  });
+  if (options4?.includeSessionOnly) {
+    trustOptions.push({ label: "Do not trust (this session only)", trusted: false, updates: [] });
+  }
+  return trustOptions;
+}
+function readTrustFile(path13) {
+  if (!existsSync18(path13)) {
+    return {};
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync13(path13, "utf-8"));
+  } catch (error51) {
+    const message = error51 instanceof Error ? error51.message : String(error51);
+    throw new Error(`Failed to read trust store ${path13}: ${message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid trust store ${path13}: expected an object`);
+  }
+  const data = {};
+  for (const [key, value2] of Object.entries(parsed)) {
+    if (value2 !== true && value2 !== false && value2 !== null) {
+      throw new Error(`Invalid trust store ${path13}: value for ${JSON.stringify(key)} must be true, false, or null`);
+    }
+    data[key] = value2;
+  }
+  return data;
+}
+function writeTrustFile(path13, data) {
+  const sorted = {};
+  for (const key of Object.keys(data).sort()) {
+    const value2 = data[key];
+    if (value2 === true || value2 === false || value2 === null) {
+      sorted[key] = value2;
+    }
+  }
+  mkdirSync9(dirname16(path13), { recursive: true });
+  writeFileSync8(path13, `${JSON.stringify(sorted, null, 2)}
+`, "utf-8");
+}
+function acquireTrustLockSync(path13) {
+  const trustDir = dirname16(path13);
+  mkdirSync9(trustDir, { recursive: true });
+  const maxAttempts = 10;
+  const delayMs = 20;
+  let lastError;
+  for (let attempt = 1;attempt <= maxAttempts; attempt++) {
+    try {
+      return import_proper_lockfile3.default.lockSync(trustDir, { realpath: false, lockfilePath: `${path13}.lock` });
+    } catch (error51) {
+      const code2 = typeof error51 === "object" && error51 !== null && "code" in error51 ? String(error51.code) : undefined;
+      if (code2 !== "ELOCKED" || attempt === maxAttempts) {
+        throw error51;
+      }
+      lastError = error51;
+      const start = Date.now();
+      while (Date.now() - start < delayMs) {}
+    }
+  }
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error("Failed to acquire trust store lock");
+}
+function withTrustFileLock(path13, fn) {
+  const release = acquireTrustLockSync(path13);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+function hasProjectConfigDir(cwd) {
+  return existsSync18(join26(canonicalizePath(resolvePath(cwd)), CONFIG_DIR_NAME));
+}
+function hasProjectTrustInputs(cwd) {
+  let currentDir = canonicalizePath(resolvePath(cwd));
+  if (hasProjectConfigDir(currentDir)) {
+    return true;
+  }
+  while (true) {
+    if (existsSync18(join26(currentDir, ".agents", "skills"))) {
+      return true;
+    }
+    const parentDir = dirname16(currentDir);
+    if (parentDir === currentDir) {
+      return false;
+    }
+    currentDir = parentDir;
+  }
+}
+
+class ProjectTrustStore {
+  trustPath;
+  constructor(agentDir) {
+    this.trustPath = join26(resolvePath(agentDir), "trust.json");
+  }
+  get(cwd) {
+    return this.getEntry(cwd)?.decision ?? null;
+  }
+  getEntry(cwd) {
+    return withTrustFileLock(this.trustPath, () => {
+      const data = readTrustFile(this.trustPath);
+      return findNearestTrustEntry(data, cwd);
+    });
+  }
+  set(cwd, decision) {
+    this.setMany([{ path: cwd, decision }]);
+  }
+  setMany(decisions) {
+    withTrustFileLock(this.trustPath, () => {
+      const data = readTrustFile(this.trustPath);
+      for (const { path: path13, decision } of decisions) {
+        const key = normalizeCwd(path13);
+        if (decision === null) {
+          delete data[key];
+        } else {
+          data[key] = decision;
+        }
+      }
+      writeTrustFile(this.trustPath, data);
+    });
+  }
+}
 // node_modules/@earendil-works/pi-coding-agent/dist/main.js
-import { createInterface as createInterface3 } from "node:readline";
+import { createInterface as createInterface4 } from "node:readline";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/cli/file-processor.js
-import { access as access3, readFile as readFile3, stat as stat4 } from "node:fs/promises";
+import { access as access3, readFile as readFile2, stat as stat4 } from "node:fs/promises";
 import { resolve as resolve11 } from "path";
 async function processFileArguments(fileArgs, options4) {
   const autoResizeImages = options4?.autoResizeImages ?? true;
@@ -274925,7 +276643,7 @@ async function processFileArguments(fileArgs, options4) {
     }
     const mimeType = await detectSupportedImageMimeTypeFromFile(absolutePath);
     if (mimeType) {
-      const content = await readFile3(absolutePath);
+      const content = await readFile2(absolutePath);
       let attachment;
       let dimensionNote;
       if (autoResizeImages) {
@@ -274958,7 +276676,7 @@ async function processFileArguments(fileArgs, options4) {
       }
     } else {
       try {
-        const content = await readFile3(absolutePath, "utf-8");
+        const content = await readFile2(absolutePath, "utf-8");
         text += `<file name="${absolutePath}">
 ${content}
 </file>
@@ -275076,8 +276794,8 @@ ${loadError}`));
 }
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js
-import { existsSync as existsSync18, readFileSync as readFileSync14 } from "fs";
-import { join as join26 } from "path";
+import { existsSync as existsSync19, readFileSync as readFileSync14 } from "fs";
+import { join as join27 } from "path";
 var KEYBINDINGS = {
   ...TUI_KEYBINDINGS,
   "app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
@@ -275330,7 +277048,7 @@ function orderKeybindingsConfig(config3) {
   return ordered;
 }
 function loadRawConfig(path13) {
-  if (!existsSync18(path13))
+  if (!existsSync19(path13))
     return;
   try {
     const parsed = JSON.parse(readFileSync14(path13, "utf-8"));
@@ -275347,7 +277065,7 @@ class KeybindingsManager2 extends KeybindingsManager {
     this.configPath = configPath;
   }
   static create(agentDir = getAgentDir()) {
-    const configPath = join26(agentDir, "keybindings.json");
+    const configPath = join27(agentDir, "keybindings.json");
     const userBindings = KeybindingsManager2.loadFromFile(configPath);
     return new KeybindingsManager2(userBindings, configPath);
   }
@@ -275367,11 +277085,36 @@ class KeybindingsManager2 extends KeybindingsManager {
   }
 }
 
-// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector.js
-import { spawnSync as spawnSync4 } from "node:child_process";
-import { existsSync as existsSync19 } from "node:fs";
-import { unlink } from "node:fs/promises";
-import * as os5 from "node:os";
+// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/countdown-timer.js
+class CountdownTimer {
+  intervalId;
+  remainingSeconds;
+  tui;
+  onTick;
+  onExpire;
+  constructor(timeoutMs, tui, onTick, onExpire) {
+    this.tui = tui;
+    this.onTick = onTick;
+    this.onExpire = onExpire;
+    this.remainingSeconds = Math.ceil(timeoutMs / 1000);
+    this.onTick(this.remainingSeconds);
+    this.intervalId = setInterval(() => {
+      this.remainingSeconds--;
+      this.onTick(this.remainingSeconds);
+      this.tui?.requestRender();
+      if (this.remainingSeconds <= 0) {
+        this.dispose();
+        this.onExpire();
+      }
+    }, 1000);
+  }
+  dispose() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = undefined;
+    }
+  }
+}
 
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/dynamic-border.js
 class DynamicBorder {
@@ -275384,6 +277127,233 @@ class DynamicBorder {
     return [this.color("─".repeat(Math.max(1, width)))];
   }
 }
+
+// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/extension-input.js
+class ExtensionInputComponent extends Container {
+  input;
+  onSubmitCallback;
+  onCancelCallback;
+  titleText;
+  baseTitle;
+  countdown;
+  _focused = false;
+  get focused() {
+    return this._focused;
+  }
+  set focused(value2) {
+    this._focused = value2;
+    this.input.focused = value2;
+  }
+  constructor(title, _placeholder, onSubmit, onCancel, opts) {
+    super();
+    this.onSubmitCallback = onSubmit;
+    this.onCancelCallback = onCancel;
+    this.baseTitle = title;
+    this.addChild(new DynamicBorder);
+    this.addChild(new Spacer(1));
+    this.titleText = new Text(theme.fg("accent", title), 1, 0);
+    this.addChild(this.titleText);
+    this.addChild(new Spacer(1));
+    if (opts?.timeout && opts.timeout > 0 && opts.tui) {
+      this.countdown = new CountdownTimer(opts.timeout, opts.tui, (s2) => this.titleText.setText(theme.fg("accent", `${this.baseTitle} (${s2}s)`)), () => this.onCancelCallback());
+    }
+    this.input = new Input;
+    this.addChild(this.input);
+    this.addChild(new Spacer(1));
+    this.addChild(new Text(`${keyHint("tui.select.confirm", "submit")}  ${keyHint("tui.select.cancel", "cancel")}`, 1, 0));
+    this.addChild(new Spacer(1));
+    this.addChild(new DynamicBorder);
+  }
+  handleInput(keyData) {
+    const kb = getKeybindings();
+    if (kb.matches(keyData, "tui.select.confirm") || keyData === `
+`) {
+      this.onSubmitCallback(this.input.getValue());
+    } else if (kb.matches(keyData, "tui.select.cancel")) {
+      this.onCancelCallback();
+    } else {
+      this.input.handleInput(keyData);
+    }
+  }
+  dispose() {
+    this.countdown?.dispose();
+  }
+}
+
+// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/extension-selector.js
+class ExtensionSelectorComponent extends Container {
+  options;
+  selectedIndex = 0;
+  listContainer;
+  onSelectCallback;
+  onCancelCallback;
+  titleText;
+  baseTitle;
+  countdown;
+  onToggleToolsExpanded;
+  constructor(title, options4, onSelect, onCancel, opts) {
+    super();
+    this.options = options4;
+    this.onSelectCallback = onSelect;
+    this.onCancelCallback = onCancel;
+    this.onToggleToolsExpanded = opts?.onToggleToolsExpanded;
+    this.baseTitle = title;
+    this.addChild(new DynamicBorder);
+    this.addChild(new Spacer(1));
+    this.titleText = new Text(theme.fg("accent", theme.bold(title)), 1, 0);
+    this.addChild(this.titleText);
+    this.addChild(new Spacer(1));
+    if (opts?.timeout && opts.timeout > 0 && opts.tui) {
+      this.countdown = new CountdownTimer(opts.timeout, opts.tui, (s2) => this.titleText.setText(theme.fg("accent", theme.bold(`${this.baseTitle} (${s2}s)`))), () => this.onCancelCallback());
+    }
+    this.listContainer = new Container;
+    this.addChild(this.listContainer);
+    this.addChild(new Spacer(1));
+    this.addChild(new Text(rawKeyHint("↑↓", "navigate") + "  " + keyHint("tui.select.confirm", "select") + "  " + keyHint("tui.select.cancel", "cancel"), 1, 0));
+    this.addChild(new Spacer(1));
+    this.addChild(new DynamicBorder);
+    this.updateList();
+  }
+  updateList() {
+    this.listContainer.clear();
+    for (let i2 = 0;i2 < this.options.length; i2++) {
+      const isSelected = i2 === this.selectedIndex;
+      const text = isSelected ? theme.fg("accent", "→ ") + theme.fg("accent", this.options[i2]) : `  ${theme.fg("text", this.options[i2])}`;
+      this.listContainer.addChild(new Text(text, 1, 0));
+    }
+  }
+  handleInput(keyData) {
+    const kb = getKeybindings();
+    if (kb.matches(keyData, "app.tools.expand")) {
+      this.onToggleToolsExpanded?.();
+    } else if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
+      this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+      this.updateList();
+    } else if (kb.matches(keyData, "tui.select.down") || keyData === "j") {
+      this.selectedIndex = Math.min(this.options.length - 1, this.selectedIndex + 1);
+      this.updateList();
+    } else if (kb.matches(keyData, "tui.select.confirm") || keyData === `
+`) {
+      const selected = this.options[this.selectedIndex];
+      if (selected)
+        this.onSelectCallback(selected);
+    } else if (kb.matches(keyData, "tui.select.cancel")) {
+      this.onCancelCallback();
+    }
+  }
+  dispose() {
+    this.countdown?.dispose();
+  }
+}
+
+// node_modules/@earendil-works/pi-coding-agent/dist/cli/startup-ui.js
+function createStartupTui(settingsManager) {
+  initTheme(settingsManager.getTheme());
+  setKeybindings(KeybindingsManager2.create());
+  const ui2 = new TUI(new ProcessTerminal, settingsManager.getShowHardwareCursor());
+  ui2.setClearOnShrink(settingsManager.getClearOnShrink());
+  return ui2;
+}
+async function clearStartupTui(ui2) {
+  ui2.clear();
+  ui2.requestRender();
+  await new Promise((resolve12) => setTimeout(resolve12, 25));
+}
+async function showStartupSelector(settingsManager, title, options4) {
+  return new Promise((resolve12) => {
+    const ui2 = createStartupTui(settingsManager);
+    let settled = false;
+    const finish = async (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      await clearStartupTui(ui2);
+      ui2.stop();
+      resolve12(result);
+    };
+    const selector = new ExtensionSelectorComponent(title, options4.map((option) => option.label), (option) => void finish(options4.find((entry) => entry.label === option)?.value), () => void finish(undefined), { tui: ui2 });
+    ui2.addChild(selector);
+    ui2.setFocus(selector);
+    ui2.start();
+  });
+}
+async function showStartupInput(settingsManager, title, placeholder) {
+  return new Promise((resolve12) => {
+    const ui2 = createStartupTui(settingsManager);
+    let settled = false;
+    const finish = async (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      input.dispose();
+      await clearStartupTui(ui2);
+      ui2.stop();
+      resolve12(result);
+    };
+    const input = new ExtensionInputComponent(title, placeholder, (value2) => void finish(value2), () => void finish(undefined), {
+      tui: ui2
+    });
+    ui2.addChild(input);
+    ui2.setFocus(input);
+    ui2.start();
+  });
+}
+
+// node_modules/@earendil-works/pi-coding-agent/dist/cli/project-trust.js
+function createProjectTrustContext(options4) {
+  return {
+    cwd: options4.cwd,
+    mode: options4.mode === "interactive" ? "tui" : options4.mode,
+    hasUI: options4.hasUI,
+    ui: {
+      select: async (title, selectOptions) => {
+        if (!options4.hasUI) {
+          return;
+        }
+        if (options4.mode !== "interactive") {
+          return;
+        }
+        return showStartupSelector(options4.settingsManager, title, selectOptions.map((option) => ({ label: option, value: option })));
+      },
+      confirm: async (title, message) => {
+        if (!options4.hasUI) {
+          return false;
+        }
+        if (options4.mode !== "interactive") {
+          return false;
+        }
+        return await showStartupSelector(options4.settingsManager, `${title}
+${message}`, [
+          { label: "Yes", value: true },
+          { label: "No", value: false }
+        ]) ?? false;
+      },
+      input: async (title, placeholder) => {
+        if (!options4.hasUI) {
+          return;
+        }
+        if (options4.mode !== "interactive") {
+          return;
+        }
+        return showStartupInput(options4.settingsManager, title, placeholder);
+      },
+      notify: (message, type3 = "info") => {
+        if (options4.mode !== "interactive") {
+          const color = type3 === "error" ? source_default.red : type3 === "warning" ? source_default.yellow : source_default.cyan;
+          console.error(color(message));
+        }
+      }
+    }
+  };
+}
+
+// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector.js
+import { spawnSync as spawnSync4 } from "node:child_process";
+import { existsSync as existsSync20 } from "node:fs";
+import { unlink } from "node:fs/promises";
+import * as os5 from "node:os";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector-search.js
 function normalizeWhitespaceLower(text) {
@@ -276000,7 +277970,7 @@ async function deleteSessionFile(sessionPath) {
       return null;
     return `trash: ${parts.join(" · ").slice(0, 200)}`;
   };
-  if (trashResult.status === 0 || !existsSync19(sessionPath)) {
+  if (trashResult.status === 0 || !existsSync20(sessionPath)) {
     return { ok: true, method: "trash" };
   }
   try {
@@ -276322,21 +278292,81 @@ async function selectSession(currentSessionsLoader, allSessionsLoader) {
   });
 }
 
+// node_modules/@earendil-works/pi-coding-agent/dist/core/project-trust.js
+function formatProjectTrustPrompt(cwd) {
+  return `Trust project folder?
+${cwd}
+
+This allows pi to load .pi settings and resources, install missing project packages, and execute project extensions.`;
+}
+async function selectProjectTrustOption(cwd, ctx) {
+  const options4 = getProjectTrustOptions(cwd, { includeSessionOnly: true });
+  const selected = await ctx.ui.select(formatProjectTrustPrompt(cwd), options4.map((option) => option.label));
+  return options4.find((option) => option.label === selected);
+}
+function saveProjectTrustPromptResult(trustStore, result) {
+  if (result.updates.length > 0) {
+    trustStore.setMany(result.updates);
+  }
+}
+async function resolveProjectTrusted(options4) {
+  if (options4.trustOverride !== undefined) {
+    return options4.trustOverride;
+  }
+  if (!hasProjectTrustInputs(options4.cwd)) {
+    return true;
+  }
+  if (options4.extensionsResult) {
+    const { result, errors: errors9 } = await emitProjectTrustEvent(options4.extensionsResult, { type: "project_trust", cwd: options4.cwd }, options4.projectTrustContext);
+    for (const error51 of errors9) {
+      options4.onExtensionError?.(`Extension "${error51.extensionPath}" project_trust error: ${error51.error}`);
+    }
+    if (result) {
+      const trusted = result.trusted === "yes";
+      if (result.remember === true) {
+        options4.trustStore.set(options4.cwd, trusted);
+      }
+      return trusted;
+    }
+  }
+  const decision = options4.trustStore.get(options4.cwd);
+  if (decision !== null) {
+    return decision;
+  }
+  switch (options4.defaultProjectTrust ?? "ask") {
+    case "always":
+      return true;
+    case "never":
+      return false;
+    case "ask":
+      break;
+  }
+  if (!options4.projectTrustContext.hasUI) {
+    return false;
+  }
+  const selected = await selectProjectTrustOption(options4.cwd, options4.projectTrustContext);
+  if (selected !== undefined) {
+    saveProjectTrustPromptResult(options4.trustStore, selected);
+    return selected.trusted;
+  }
+  return false;
+}
+
 // node_modules/@earendil-works/pi-coding-agent/dist/migrations.js
-import { chmodSync as chmodSync3, existsSync as existsSync20, mkdirSync as mkdirSync9, readdirSync as readdirSync10, readFileSync as readFileSync15, renameSync as renameSync2, rmSync as rmSync3, writeFileSync as writeFileSync8 } from "fs";
-import { dirname as dirname16, join as join27 } from "path";
+import { chmodSync as chmodSync4, existsSync as existsSync21, mkdirSync as mkdirSync10, readdirSync as readdirSync10, readFileSync as readFileSync15, renameSync as renameSync2, rmSync as rmSync3, writeFileSync as writeFileSync9 } from "fs";
+import { dirname as dirname17, join as join28 } from "path";
 var MIGRATION_GUIDE_URL = "https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
 var EXTENSIONS_DOC_URL = "https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/extensions.md";
 function migrateAuthToAuthJson() {
   const agentDir = getAgentDir();
-  const authPath = join27(agentDir, "auth.json");
-  const oauthPath = join27(agentDir, "oauth.json");
-  const settingsPath = join27(agentDir, "settings.json");
-  if (existsSync20(authPath))
+  const authPath = join28(agentDir, "auth.json");
+  const oauthPath = join28(agentDir, "oauth.json");
+  const settingsPath = join28(agentDir, "settings.json");
+  if (existsSync21(authPath))
     return [];
   const migrated = {};
   const providers = [];
-  if (existsSync20(oauthPath)) {
+  if (existsSync21(oauthPath)) {
     try {
       const oauth2 = JSON.parse(readFileSync15(oauthPath, "utf-8"));
       for (const [provider, cred] of Object.entries(oauth2)) {
@@ -276346,7 +278376,7 @@ function migrateAuthToAuthJson() {
       renameSync2(oauthPath, `${oauthPath}.migrated`);
     } catch {}
   }
-  if (existsSync20(settingsPath)) {
+  if (existsSync21(settingsPath)) {
     try {
       const content = readFileSync15(settingsPath, "utf-8");
       const settings3 = JSON.parse(content);
@@ -276358,13 +278388,13 @@ function migrateAuthToAuthJson() {
           }
         }
         delete settings3.apiKeys;
-        writeFileSync8(settingsPath, JSON.stringify(settings3, null, 2));
+        writeFileSync9(settingsPath, JSON.stringify(settings3, null, 2));
       }
     } catch {}
   }
   if (Object.keys(migrated).length > 0) {
-    mkdirSync9(dirname16(authPath), { recursive: true });
-    writeFileSync8(authPath, JSON.stringify(migrated, null, 2), { mode: 384 });
+    mkdirSync10(dirname17(authPath), { recursive: true });
+    writeFileSync9(authPath, JSON.stringify(migrated, null, 2), { mode: 384 });
   }
   return providers;
 }
@@ -276400,8 +278430,8 @@ function migrateHeadersConfig(headers, location, migrations) {
   return migrated;
 }
 function migrateAuthJsonConfigValues(agentDir) {
-  const authPath = join27(agentDir, "auth.json");
-  if (!existsSync20(authPath))
+  const authPath = join28(agentDir, "auth.json");
+  if (!existsSync21(authPath))
     return [];
   try {
     const parsed = JSON.parse(readFileSync15(authPath, "utf-8"));
@@ -276419,58 +278449,62 @@ function migrateAuthJsonConfigValues(agentDir) {
     }
     if (migrations.length === 0)
       return [];
-    writeFileSync8(authPath, `${JSON.stringify(parsed, null, 2)}
+    writeFileSync9(authPath, `${JSON.stringify(parsed, null, 2)}
 `, "utf-8");
-    chmodSync3(authPath, 384);
+    chmodSync4(authPath, 384);
     return migrations;
   } catch {
     return [];
   }
 }
 function migrateModelsJsonConfigValues(agentDir) {
-  const modelsPath = join27(agentDir, "models.json");
-  if (!existsSync20(modelsPath))
+  const modelsPath = join28(agentDir, "models.json");
+  if (!existsSync21(modelsPath))
     return [];
-  const parsed = JSON.parse(stripJsonComments(readFileSync15(modelsPath, "utf-8")));
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-    return [];
-  const modelsData = parsed;
-  const providers = modelsData.providers;
-  if (typeof providers !== "object" || providers === null || Array.isArray(providers))
-    return [];
-  const migrations = [];
-  for (const [provider, providerConfig] of Object.entries(providers)) {
-    if (typeof providerConfig !== "object" || providerConfig === null || Array.isArray(providerConfig))
-      continue;
-    const providerRecord = providerConfig;
-    const providerLocation = `models.json.providers[${JSON.stringify(provider)}]`;
-    migrateStringProperty(providerRecord, "apiKey", `${providerLocation}.apiKey`, migrations);
-    migrateHeadersConfig(providerRecord.headers, `${providerLocation}.headers`, migrations);
-    if (Array.isArray(providerRecord.models)) {
-      for (let index2 = 0;index2 < providerRecord.models.length; index2++) {
-        const modelConfig = providerRecord.models[index2];
-        if (typeof modelConfig !== "object" || modelConfig === null || Array.isArray(modelConfig))
-          continue;
-        const modelRecord = modelConfig;
-        const modelKey = typeof modelRecord.id === "string" ? JSON.stringify(modelRecord.id) : String(index2);
-        migrateHeadersConfig(modelRecord.headers, `${providerLocation}.models[${modelKey}].headers`, migrations);
+  try {
+    const parsed = JSON.parse(stripJsonComments(readFileSync15(modelsPath, "utf-8")));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+      return [];
+    const modelsData = parsed;
+    const providers = modelsData.providers;
+    if (typeof providers !== "object" || providers === null || Array.isArray(providers))
+      return [];
+    const migrations = [];
+    for (const [provider, providerConfig] of Object.entries(providers)) {
+      if (typeof providerConfig !== "object" || providerConfig === null || Array.isArray(providerConfig))
+        continue;
+      const providerRecord = providerConfig;
+      const providerLocation = `models.json.providers[${JSON.stringify(provider)}]`;
+      migrateStringProperty(providerRecord, "apiKey", `${providerLocation}.apiKey`, migrations);
+      migrateHeadersConfig(providerRecord.headers, `${providerLocation}.headers`, migrations);
+      if (Array.isArray(providerRecord.models)) {
+        for (let index2 = 0;index2 < providerRecord.models.length; index2++) {
+          const modelConfig = providerRecord.models[index2];
+          if (typeof modelConfig !== "object" || modelConfig === null || Array.isArray(modelConfig))
+            continue;
+          const modelRecord = modelConfig;
+          const modelKey = typeof modelRecord.id === "string" ? JSON.stringify(modelRecord.id) : String(index2);
+          migrateHeadersConfig(modelRecord.headers, `${providerLocation}.models[${modelKey}].headers`, migrations);
+        }
+      }
+      const modelOverrides = providerRecord.modelOverrides;
+      if (typeof modelOverrides === "object" && modelOverrides !== null && !Array.isArray(modelOverrides)) {
+        for (const [modelId, modelOverride] of Object.entries(modelOverrides)) {
+          if (typeof modelOverride !== "object" || modelOverride === null || Array.isArray(modelOverride))
+            continue;
+          const modelOverrideRecord = modelOverride;
+          migrateHeadersConfig(modelOverrideRecord.headers, `${providerLocation}.modelOverrides[${JSON.stringify(modelId)}].headers`, migrations);
+        }
       }
     }
-    const modelOverrides = providerRecord.modelOverrides;
-    if (typeof modelOverrides === "object" && modelOverrides !== null && !Array.isArray(modelOverrides)) {
-      for (const [modelId, modelOverride] of Object.entries(modelOverrides)) {
-        if (typeof modelOverride !== "object" || modelOverride === null || Array.isArray(modelOverride))
-          continue;
-        const modelOverrideRecord = modelOverride;
-        migrateHeadersConfig(modelOverrideRecord.headers, `${providerLocation}.modelOverrides[${JSON.stringify(modelId)}].headers`, migrations);
-      }
-    }
-  }
-  if (migrations.length === 0)
-    return [];
-  writeFileSync8(modelsPath, `${JSON.stringify(parsed, null, 2)}
+    if (migrations.length === 0)
+      return [];
+    writeFileSync9(modelsPath, `${JSON.stringify(parsed, null, 2)}
 `, "utf-8");
-  return migrations;
+    return migrations;
+  } catch {
+    return [];
+  }
 }
 function migrateExplicitEnvVarConfigValues() {
   const agentDir = getAgentDir();
@@ -276488,7 +278522,7 @@ function migrateSessionsFromAgentRoot() {
   const agentDir = getAgentDir();
   let files2;
   try {
-    files2 = readdirSync10(agentDir).filter((f3) => f3.endsWith(".jsonl")).map((f3) => join27(agentDir, f3));
+    files2 = readdirSync10(agentDir).filter((f3) => f3.endsWith(".jsonl")).map((f3) => join28(agentDir, f3));
   } catch {
     return;
   }
@@ -276506,22 +278540,22 @@ function migrateSessionsFromAgentRoot() {
         continue;
       const cwd = header.cwd;
       const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-      const correctDir = join27(agentDir, "sessions", safePath);
-      if (!existsSync20(correctDir)) {
-        mkdirSync9(correctDir, { recursive: true });
+      const correctDir = join28(agentDir, "sessions", safePath);
+      if (!existsSync21(correctDir)) {
+        mkdirSync10(correctDir, { recursive: true });
       }
       const fileName = file3.split("/").pop() || file3.split("\\").pop();
-      const newPath = join27(correctDir, fileName);
-      if (existsSync20(newPath))
+      const newPath = join28(correctDir, fileName);
+      if (existsSync21(newPath))
         continue;
       renameSync2(file3, newPath);
     } catch {}
   }
 }
 function migrateCommandsToPrompts(baseDir, label) {
-  const commandsDir = join27(baseDir, "commands");
-  const promptsDir = join27(baseDir, "prompts");
-  if (existsSync20(commandsDir) && !existsSync20(promptsDir)) {
+  const commandsDir = join28(baseDir, "commands");
+  const promptsDir = join28(baseDir, "prompts");
+  if (existsSync21(commandsDir) && !existsSync21(promptsDir)) {
     try {
       renameSync2(commandsDir, promptsDir);
       console.log(source_default.green(`Migrated ${label} commands/ → prompts/`));
@@ -276533,8 +278567,8 @@ function migrateCommandsToPrompts(baseDir, label) {
   return false;
 }
 function migrateKeybindingsConfigFile() {
-  const configPath = join27(getAgentDir(), "keybindings.json");
-  if (!existsSync20(configPath))
+  const configPath = join28(getAgentDir(), "keybindings.json");
+  if (!existsSync21(configPath))
     return;
   try {
     const parsed = JSON.parse(readFileSync15(configPath, "utf-8"));
@@ -276544,26 +278578,26 @@ function migrateKeybindingsConfigFile() {
     const { config: config3, migrated } = migrateKeybindingsConfig(parsed);
     if (!migrated)
       return;
-    writeFileSync8(configPath, `${JSON.stringify(config3, null, 2)}
+    writeFileSync9(configPath, `${JSON.stringify(config3, null, 2)}
 `, "utf-8");
   } catch {}
 }
 function migrateToolsToBin() {
   const agentDir = getAgentDir();
-  const toolsDir = join27(agentDir, "tools");
+  const toolsDir = join28(agentDir, "tools");
   const binDir = getBinDir();
-  if (!existsSync20(toolsDir))
+  if (!existsSync21(toolsDir))
     return;
   const binaries = ["fd", "rg", "fd.exe", "rg.exe"];
   let movedAny = false;
   for (const bin of binaries) {
-    const oldPath = join27(toolsDir, bin);
-    const newPath = join27(binDir, bin);
-    if (existsSync20(oldPath)) {
-      if (!existsSync20(binDir)) {
-        mkdirSync9(binDir, { recursive: true });
+    const oldPath = join28(toolsDir, bin);
+    const newPath = join28(binDir, bin);
+    if (existsSync21(oldPath)) {
+      if (!existsSync21(binDir)) {
+        mkdirSync10(binDir, { recursive: true });
       }
-      if (!existsSync20(newPath)) {
+      if (!existsSync21(newPath)) {
         try {
           renameSync2(oldPath, newPath);
           movedAny = true;
@@ -276580,13 +278614,13 @@ function migrateToolsToBin() {
   }
 }
 function checkDeprecatedExtensionDirs(baseDir, label) {
-  const hooksDir = join27(baseDir, "hooks");
-  const toolsDir = join27(baseDir, "tools");
+  const hooksDir = join28(baseDir, "hooks");
+  const toolsDir = join28(baseDir, "tools");
   const warnings = [];
-  if (existsSync20(hooksDir)) {
+  if (existsSync21(hooksDir)) {
     warnings.push(`${label} hooks/ directory found. Hooks have been renamed to extensions.`);
   }
-  if (existsSync20(toolsDir)) {
+  if (existsSync21(toolsDir)) {
     try {
       const entries = readdirSync10(toolsDir);
       const customTools = entries.filter((e2) => {
@@ -276602,7 +278636,7 @@ function checkDeprecatedExtensionDirs(baseDir, label) {
 }
 function migrateExtensionSystem(cwd) {
   const agentDir = getAgentDir();
-  const projectDir = join27(cwd, CONFIG_DIR_NAME);
+  const projectDir = join28(cwd, CONFIG_DIR_NAME);
   migrateCommandsToPrompts(agentDir, "Global");
   migrateCommandsToPrompts(projectDir, "Project");
   const warnings = [
@@ -276648,34 +278682,34 @@ function runMigrations(cwd) {
 import * as crypto2 from "node:crypto";
 import * as fs11 from "node:fs";
 import * as os7 from "node:os";
-import * as path14 from "node:path";
-import { spawn as spawn9, spawnSync as spawnSync7 } from "child_process";
+import * as path15 from "node:path";
+import { spawn as spawn10, spawnSync as spawnSync7 } from "child_process";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/footer-data-provider.js
 import { execFile, spawnSync as spawnSync5 } from "child_process";
-import { existsSync as existsSync21, readFileSync as readFileSync16, statSync as statSync10, unwatchFile, watchFile } from "fs";
-import { dirname as dirname17, join as join28, resolve as resolve12 } from "path";
+import { existsSync as existsSync22, readFileSync as readFileSync16, statSync as statSync10, unwatchFile, watchFile } from "fs";
+import { dirname as dirname18, join as join29, resolve as resolve12 } from "path";
 function findGitPaths(cwd) {
   let dir = cwd;
   while (true) {
-    const gitPath = join28(dir, ".git");
-    if (existsSync21(gitPath)) {
+    const gitPath = join29(dir, ".git");
+    if (existsSync22(gitPath)) {
       try {
         const stat5 = statSync10(gitPath);
         if (stat5.isFile()) {
           const content = readFileSync16(gitPath, "utf8").trim();
           if (content.startsWith("gitdir: ")) {
             const gitDir = resolve12(dir, content.slice(8).trim());
-            const headPath = join28(gitDir, "HEAD");
-            if (!existsSync21(headPath))
+            const headPath = join29(gitDir, "HEAD");
+            if (!existsSync22(headPath))
               return null;
-            const commonDirPath = join28(gitDir, "commondir");
-            const commonGitDir = existsSync21(commonDirPath) ? resolve12(gitDir, readFileSync16(commonDirPath, "utf8").trim()) : gitDir;
+            const commonDirPath = join29(gitDir, "commondir");
+            const commonGitDir = existsSync22(commonDirPath) ? resolve12(gitDir, readFileSync16(commonDirPath, "utf8").trim()) : gitDir;
             return { repoDir: dir, commonGitDir, headPath };
           }
         } else if (stat5.isDirectory()) {
-          const headPath = join28(gitPath, "HEAD");
-          if (!existsSync21(headPath))
+          const headPath = join29(gitPath, "HEAD");
+          if (!existsSync22(headPath))
             return null;
           return { repoDir: dir, commonGitDir: gitPath, headPath };
         }
@@ -276683,7 +278717,7 @@ function findGitPaths(cwd) {
         return null;
       }
     }
-    const parent = dirname17(dir);
+    const parent = dirname18(dir);
     if (parent === dir)
       return null;
     dir = parent;
@@ -276713,6 +278747,15 @@ function resolveBranchWithGitAsync(repoDir) {
     });
   });
 }
+function isWslEnvironment() {
+  return process.platform === "linux" && !!(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP);
+}
+function isWindowsMountedRepoPath(repoDir) {
+  return /^\/mnt\/[a-z](?:\/|$)/i.test(repoDir);
+}
+function shouldPollGitHead(repoDir) {
+  return isWslEnvironment() && isWindowsMountedRepoPath(repoDir);
+}
 
 class FooterDataProvider {
   cwd;
@@ -276721,6 +278764,8 @@ class FooterDataProvider {
   cachedBranch = undefined;
   gitPaths = undefined;
   headWatcher = null;
+  headWatchFilePath = null;
+  headWatchFileListener = null;
   reftableWatcher = null;
   reftableTablesListWatcher = null;
   reftableTablesListPath = null;
@@ -276862,6 +278907,11 @@ class FooterDataProvider {
   clearGitWatchers() {
     closeWatcher(this.headWatcher);
     this.headWatcher = null;
+    if (this.headWatchFilePath && this.headWatchFileListener) {
+      unwatchFile(this.headWatchFilePath, this.headWatchFileListener);
+      this.headWatchFilePath = null;
+      this.headWatchFileListener = null;
+    }
     closeWatcher(this.reftableWatcher);
     this.reftableWatcher = null;
     closeWatcher(this.reftableTablesListWatcher);
@@ -276892,24 +278942,34 @@ class FooterDataProvider {
     this.clearGitWatchers();
     if (!this.gitPaths)
       return;
-    this.headWatcher = watchWithErrorHandler(dirname17(this.gitPaths.headPath), (_eventType, filename) => {
+    const pollGitHead = shouldPollGitHead(this.gitPaths.repoDir);
+    this.headWatcher = watchWithErrorHandler(dirname18(this.gitPaths.headPath), (_eventType, filename) => {
       if (!filename || filename === "HEAD") {
         this.scheduleRefresh();
       }
     }, () => this.handleGitWatcherError());
-    if (!this.headWatcher) {
+    if (pollGitHead) {
+      this.headWatchFilePath = this.gitPaths.headPath;
+      this.headWatchFileListener = (current, previous) => {
+        if (current.mtimeMs !== previous.mtimeMs || current.ctimeMs !== previous.ctimeMs || current.size !== previous.size) {
+          this.scheduleRefresh();
+        }
+      };
+      watchFile(this.headWatchFilePath, { interval: 1000 }, this.headWatchFileListener);
+    }
+    if (!this.headWatcher && !pollGitHead) {
       return;
     }
-    const reftableDir = join28(this.gitPaths.commonGitDir, "reftable");
-    if (existsSync21(reftableDir)) {
+    const reftableDir = join29(this.gitPaths.commonGitDir, "reftable");
+    if (existsSync22(reftableDir)) {
       this.reftableWatcher = watchWithErrorHandler(reftableDir, () => {
         this.scheduleRefresh();
       }, () => this.handleGitWatcherError());
       if (!this.reftableWatcher) {
         return;
       }
-      const tablesListPath = join28(reftableDir, "tables.list");
-      if (existsSync21(tablesListPath)) {
+      const tablesListPath = join29(reftableDir, "tables.list");
+      if (existsSync22(tablesListPath)) {
         this.reftableTablesListPath = tablesListPath;
         this.reftableTablesListWatcher = watchWithErrorHandler(tablesListPath, () => {
           this.scheduleRefresh();
@@ -276943,6 +279003,7 @@ var BUILTIN_SLASH_COMMANDS = [
   { name: "fork", description: "Create a new fork from a previous user message" },
   { name: "clone", description: "Duplicate the current session at the current position" },
   { name: "tree", description: "Navigate session tree (switch branches)" },
+  { name: "trust", description: "Save project trust decision for future sessions" },
   { name: "login", description: "Configure provider authentication" },
   { name: "logout", description: "Remove provider authentication" },
   { name: "new", description: "Start a new session" },
@@ -276953,9 +279014,85 @@ var BUILTIN_SLASH_COMMANDS = [
 ];
 
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/changelog.js
-import { existsSync as existsSync22, readFileSync as readFileSync17 } from "fs";
+import path13 from "node:path";
+import { existsSync as existsSync23, readFileSync as readFileSync17 } from "fs";
+var GITHUB_REPO = "earendil-works/pi";
+var CHANGELOG_LINK_BASE_PATH = "packages/coding-agent";
+var LEGACY_REPO_RE = /^https:\/\/github\.com\/(?:badlogic|earendil-works)\/pi-mono(?=\/|$)/;
+var URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+var INLINE_MARKDOWN_LINK_RE = /(!?\[[^\]\n]+\]\()([^\s)]+)((?:\s+[^)]*)?\))/g;
+function entryVersion(entry) {
+  return `${entry.major}.${entry.minor}.${entry.patch}`;
+}
+function normalizeTag(version2) {
+  const versionString = typeof version2 === "string" ? version2 : entryVersion(version2);
+  return versionString.startsWith("v") ? versionString : `v${versionString}`;
+}
+function splitLocalTarget(target2) {
+  const hashIndex = target2.indexOf("#");
+  const beforeHash = hashIndex === -1 ? target2 : target2.slice(0, hashIndex);
+  const fragment = hashIndex === -1 ? "" : target2.slice(hashIndex);
+  const queryIndex = beforeHash.indexOf("?");
+  if (queryIndex === -1) {
+    return { fragment, pathPart: beforeHash, query: "" };
+  }
+  return {
+    fragment,
+    pathPart: beforeHash.slice(0, queryIndex),
+    query: beforeHash.slice(queryIndex)
+  };
+}
+function normalizePathPart(value2) {
+  return value2.replaceAll("\\", "/");
+}
+function resolveRepositoryPath(targetPath) {
+  const normalizedTarget = normalizePathPart(targetPath);
+  const joined = normalizedTarget.startsWith("/") ? path13.posix.normalize(normalizedTarget.replace(/^\/+/, "")) : path13.posix.normalize(path13.posix.join(CHANGELOG_LINK_BASE_PATH, normalizedTarget));
+  if (joined === "." || joined.startsWith("../") || joined === "..") {
+    return;
+  }
+  return joined;
+}
+function isDirectoryTarget(originalPath, repositoryPath) {
+  if (originalPath.endsWith("/")) {
+    return true;
+  }
+  const basename12 = path13.posix.basename(repositoryPath);
+  return !basename12.includes(".");
+}
+function normalizeChangelogLinkTarget(target2, tag2) {
+  let canonicalTarget = target2.replace(LEGACY_REPO_RE, `https://github.com/${GITHUB_REPO}`);
+  const repoUrl = `https://github.com/${GITHUB_REPO}`;
+  for (const route2 of ["blob", "tree"]) {
+    for (const branch of ["main", "master"]) {
+      const floatingRefPrefix = `${repoUrl}/${route2}/${branch}/`;
+      if (canonicalTarget.startsWith(floatingRefPrefix)) {
+        canonicalTarget = `${repoUrl}/${route2}/${tag2}/${canonicalTarget.slice(floatingRefPrefix.length)}`;
+      }
+    }
+  }
+  if (canonicalTarget.startsWith("#") || canonicalTarget.startsWith("//") || URL_SCHEME_RE.test(canonicalTarget)) {
+    return canonicalTarget;
+  }
+  const { fragment, pathPart, query: query2 } = splitLocalTarget(canonicalTarget);
+  if (!pathPart) {
+    return canonicalTarget;
+  }
+  const repositoryPath = resolveRepositoryPath(pathPart);
+  if (!repositoryPath) {
+    return canonicalTarget;
+  }
+  const route = isDirectoryTarget(pathPart, repositoryPath) ? "tree" : "blob";
+  return `https://github.com/${GITHUB_REPO}/${route}/${tag2}/${encodeURI(repositoryPath)}${query2}${fragment}`;
+}
+function normalizeChangelogLinks(markdown, version2) {
+  const tag2 = normalizeTag(version2);
+  return markdown.replace(INLINE_MARKDOWN_LINK_RE, (_match, prefix, target2, suffix) => {
+    return `${prefix}${normalizeChangelogLinkTarget(target2, tag2)}${suffix}`;
+  });
+}
 function parseChangelog(changelogPath) {
-  if (!existsSync22(changelogPath)) {
+  if (!existsSync23(changelogPath)) {
     return [];
   }
   try {
@@ -277022,22 +279159,22 @@ function getNewEntries(entries, lastVersion) {
 }
 
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard.js
-import { execSync as execSync2, spawn as spawn7 } from "child_process";
+import { execSync as execSync3, spawn as spawn7 } from "child_process";
 import { platform as platform2 } from "os";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard-image.js
 import { spawnSync as spawnSync6 } from "child_process";
 import { randomUUID as randomUUID2 } from "crypto";
 import { readFileSync as readFileSync18, unlinkSync } from "fs";
-import { tmpdir as tmpdir4 } from "os";
-import { join as join30 } from "path";
+import { tmpdir as tmpdir3 } from "os";
+import { join as join31 } from "path";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard-native.js
 import { createRequire as createRequire7 } from "module";
-import { dirname as dirname18, join as join29 } from "path";
-import { pathToFileURL } from "url";
+import { dirname as dirname19, join as join30 } from "path";
+import { pathToFileURL as pathToFileURL2 } from "url";
 var moduleRequire = createRequire7(import.meta.url);
-var executableDirRequire = createRequire7(pathToFileURL(join29(dirname18(process.execPath), "package.json")).href);
+var executableDirRequire = createRequire7(pathToFileURL2(join30(dirname19(process.execPath), "package.json")).href);
 var hasDisplay = process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 function loadClipboardNative(requires = [moduleRequire, executableDirRequire]) {
   for (const requireClipboard of requires) {
@@ -277151,7 +279288,7 @@ function isWSL(env4 = process.env) {
   }
 }
 function readClipboardImageViaPowerShell() {
-  const tmpFile = join30(tmpdir4(), `pi-wsl-clip-${randomUUID2()}.png`);
+  const tmpFile = join31(tmpdir3(), `pi-wsl-clip-${randomUUID2()}.png`);
   try {
     const winPathResult = runCommand("wslpath", ["-w", tmpFile], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
     if (!winPathResult.ok) {
@@ -277259,9 +279396,9 @@ async function readClipboardImage(options4) {
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard.js
 function copyToX11Clipboard(options4) {
   try {
-    execSync2("xclip -selection clipboard", options4);
+    execSync3("xclip -selection clipboard", options4);
   } catch {
-    execSync2("xsel --clipboard --input", options4);
+    execSync3("xsel --clipboard --input", options4);
   }
 }
 var MAX_OSC52_ENCODED_LENGTH = 1e5;
@@ -277293,15 +279430,15 @@ async function copyToClipboard(text) {
   if (!copied) {
     try {
       if (p === "darwin") {
-        execSync2("pbcopy", options4);
+        execSync3("pbcopy", options4);
         copied = true;
       } else if (p === "win32") {
-        execSync2("clip", options4);
+        execSync3("clip", options4);
         copied = true;
       } else {
         if (process.env.TERMUX_VERSION) {
           try {
-            execSync2("termux-clipboard-set", options4);
+            execSync3("termux-clipboard-set", options4);
             copied = true;
           } catch {}
         }
@@ -277311,7 +279448,7 @@ async function copyToClipboard(text) {
           const isWayland = isWaylandSession();
           if (isWayland && hasWaylandDisplay) {
             try {
-              execSync2("which wl-copy", { stdio: "ignore" });
+              execSync3("which wl-copy", { stdio: "ignore" });
               const proc = spawn7("wl-copy", [], { stdio: ["pipe", "ignore", "ignore"] });
               proc.stdin.on("error", () => {});
               proc.stdin.write(text);
@@ -278073,9 +280210,9 @@ ${styledOutput}`;
       const statusParts = [];
       if (hiddenLineCount > 0) {
         if (this.expanded) {
-          statusParts.push(`(${keyHint("app.tools.expand", "to collapse")})`);
+          statusParts.push(`${theme.fg("muted", "(")}${keyHint("app.tools.expand", "to collapse")}${theme.fg("muted", ")")}`);
         } else {
-          statusParts.push(`${theme.fg("muted", `... ${hiddenLineCount} more lines`)} (${keyHint("app.tools.expand", "to expand")})`);
+          statusParts.push(`${theme.fg("muted", `... ${hiddenLineCount} more lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`);
         }
       }
       if (this.status === "cancelled") {
@@ -278223,37 +280360,6 @@ class CompactionSummaryMessageComponent extends Box {
       }));
     } else {
       this.addChild(new Text(theme.fg("customMessageText", `Compacted from ${tokenStr} tokens (`) + theme.fg("dim", keyText("app.tools.expand")) + theme.fg("customMessageText", " to expand)"), 0, 0));
-    }
-  }
-}
-
-// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/countdown-timer.js
-class CountdownTimer {
-  intervalId;
-  remainingSeconds;
-  tui;
-  onTick;
-  onExpire;
-  constructor(timeoutMs, tui, onTick, onExpire) {
-    this.tui = tui;
-    this.onTick = onTick;
-    this.onExpire = onExpire;
-    this.remainingSeconds = Math.ceil(timeoutMs / 1000);
-    this.onTick(this.remainingSeconds);
-    this.intervalId = setInterval(() => {
-      this.remainingSeconds--;
-      this.onTick(this.remainingSeconds);
-      this.tui?.requestRender();
-      if (this.remainingSeconds <= 0) {
-        this.dispose();
-        this.onExpire();
-      }
-    }, 1000);
-  }
-  dispose() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = undefined;
     }
   }
 }
@@ -278539,7 +280645,7 @@ class EarendilAnnouncementComponent extends Container {
 import { spawn as spawn8 } from "node:child_process";
 import * as fs10 from "node:fs";
 import * as os6 from "node:os";
-import * as path13 from "node:path";
+import * as path14 from "node:path";
 class ExtensionEditorComponent extends Container {
   editor;
   onSubmitCallback;
@@ -278597,7 +280703,7 @@ class ExtensionEditorComponent extends Container {
       return;
     }
     const currentText = this.editor.getText();
-    const tmpFile = path13.join(os6.tmpdir(), `pi-extension-editor-${Date.now()}.md`);
+    const tmpFile = path14.join(os6.tmpdir(), `pi-extension-editor-${Date.now()}.md`);
     try {
       fs10.writeFileSync(tmpFile, currentText, "utf-8");
       this.tui.stop();
@@ -278624,124 +280730,6 @@ Pi will resume when the editor exits.
       this.tui.start();
       this.tui.requestRender(true);
     }
-  }
-}
-
-// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/extension-input.js
-class ExtensionInputComponent extends Container {
-  input;
-  onSubmitCallback;
-  onCancelCallback;
-  titleText;
-  baseTitle;
-  countdown;
-  _focused = false;
-  get focused() {
-    return this._focused;
-  }
-  set focused(value2) {
-    this._focused = value2;
-    this.input.focused = value2;
-  }
-  constructor(title, _placeholder, onSubmit, onCancel, opts) {
-    super();
-    this.onSubmitCallback = onSubmit;
-    this.onCancelCallback = onCancel;
-    this.baseTitle = title;
-    this.addChild(new DynamicBorder);
-    this.addChild(new Spacer(1));
-    this.titleText = new Text(theme.fg("accent", title), 1, 0);
-    this.addChild(this.titleText);
-    this.addChild(new Spacer(1));
-    if (opts?.timeout && opts.timeout > 0 && opts.tui) {
-      this.countdown = new CountdownTimer(opts.timeout, opts.tui, (s2) => this.titleText.setText(theme.fg("accent", `${this.baseTitle} (${s2}s)`)), () => this.onCancelCallback());
-    }
-    this.input = new Input;
-    this.addChild(this.input);
-    this.addChild(new Spacer(1));
-    this.addChild(new Text(`${keyHint("tui.select.confirm", "submit")}  ${keyHint("tui.select.cancel", "cancel")}`, 1, 0));
-    this.addChild(new Spacer(1));
-    this.addChild(new DynamicBorder);
-  }
-  handleInput(keyData) {
-    const kb = getKeybindings();
-    if (kb.matches(keyData, "tui.select.confirm") || keyData === `
-`) {
-      this.onSubmitCallback(this.input.getValue());
-    } else if (kb.matches(keyData, "tui.select.cancel")) {
-      this.onCancelCallback();
-    } else {
-      this.input.handleInput(keyData);
-    }
-  }
-  dispose() {
-    this.countdown?.dispose();
-  }
-}
-
-// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/extension-selector.js
-class ExtensionSelectorComponent extends Container {
-  options;
-  selectedIndex = 0;
-  listContainer;
-  onSelectCallback;
-  onCancelCallback;
-  titleText;
-  baseTitle;
-  countdown;
-  onToggleToolsExpanded;
-  constructor(title, options4, onSelect, onCancel, opts) {
-    super();
-    this.options = options4;
-    this.onSelectCallback = onSelect;
-    this.onCancelCallback = onCancel;
-    this.onToggleToolsExpanded = opts?.onToggleToolsExpanded;
-    this.baseTitle = title;
-    this.addChild(new DynamicBorder);
-    this.addChild(new Spacer(1));
-    this.titleText = new Text(theme.fg("accent", theme.bold(title)), 1, 0);
-    this.addChild(this.titleText);
-    this.addChild(new Spacer(1));
-    if (opts?.timeout && opts.timeout > 0 && opts.tui) {
-      this.countdown = new CountdownTimer(opts.timeout, opts.tui, (s2) => this.titleText.setText(theme.fg("accent", theme.bold(`${this.baseTitle} (${s2}s)`))), () => this.onCancelCallback());
-    }
-    this.listContainer = new Container;
-    this.addChild(this.listContainer);
-    this.addChild(new Spacer(1));
-    this.addChild(new Text(rawKeyHint("↑↓", "navigate") + "  " + keyHint("tui.select.confirm", "select") + "  " + keyHint("tui.select.cancel", "cancel"), 1, 0));
-    this.addChild(new Spacer(1));
-    this.addChild(new DynamicBorder);
-    this.updateList();
-  }
-  updateList() {
-    this.listContainer.clear();
-    for (let i2 = 0;i2 < this.options.length; i2++) {
-      const isSelected = i2 === this.selectedIndex;
-      const text = isSelected ? theme.fg("accent", "→ ") + theme.fg("accent", this.options[i2]) : `  ${theme.fg("text", this.options[i2])}`;
-      this.listContainer.addChild(new Text(text, 1, 0));
-    }
-  }
-  handleInput(keyData) {
-    const kb = getKeybindings();
-    if (kb.matches(keyData, "app.tools.expand")) {
-      this.onToggleToolsExpanded?.();
-    } else if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
-      this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-      this.updateList();
-    } else if (kb.matches(keyData, "tui.select.down") || keyData === "j") {
-      this.selectedIndex = Math.min(this.options.length - 1, this.selectedIndex + 1);
-      this.updateList();
-    } else if (kb.matches(keyData, "tui.select.confirm") || keyData === `
-`) {
-      const selected = this.options[this.selectedIndex];
-      if (selected)
-        this.onSelectCallback(selected);
-    } else if (kb.matches(keyData, "tui.select.cancel")) {
-      this.onCancelCallback();
-    }
-  }
-  dispose() {
-    this.countdown?.dispose();
   }
 }
 
@@ -278796,6 +280784,7 @@ class FooterComponent {
     let totalCacheRead = 0;
     let totalCacheWrite = 0;
     let totalCost = 0;
+    let latestCacheHitRate;
     for (const entry of this.session.sessionManager.getEntries()) {
       if (entry.type === "message" && entry.message.role === "assistant") {
         totalInput += entry.message.usage.input;
@@ -278803,6 +280792,8 @@ class FooterComponent {
         totalCacheRead += entry.message.usage.cacheRead;
         totalCacheWrite += entry.message.usage.cacheWrite;
         totalCost += entry.message.usage.cost.total;
+        const latestPromptTokens = entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
+        latestCacheHitRate = latestPromptTokens > 0 ? entry.message.usage.cacheRead / latestPromptTokens * 100 : undefined;
       }
     }
     const contextUsage = this.session.getContextUsage();
@@ -278827,6 +280818,9 @@ class FooterComponent {
       statsParts.push(`R${formatTokens(totalCacheRead)}`);
     if (totalCacheWrite)
       statsParts.push(`W${formatTokens(totalCacheWrite)}`);
+    if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) {
+      statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+    }
     const usingSubscription = state2.model ? this.session.modelRegistry.isUsingOAuth(state2.model) : false;
     if (totalCost || usingSubscription) {
       const costStr = `$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`;
@@ -278895,8 +280889,14 @@ class FooterComponent {
   }
 }
 
+// node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js
+import { spawn as spawn9 } from "node:child_process";
+function openBrowser(target2) {
+  const [cmd, args2] = process.platform === "darwin" ? ["open", [target2]] : process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", target2]] : ["xdg-open", [target2]];
+  spawn9(cmd, args2, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+}
+
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/login-dialog.js
-import { exec } from "child_process";
 class LoginDialogComponent extends Container {
   contentContainer;
   input;
@@ -278927,7 +280927,9 @@ class LoginDialogComponent extends Container {
     this.input = new Input;
     this.input.onSubmit = () => {
       if (this.inputResolver) {
-        this.inputResolver(this.input.getValue());
+        const value2 = this.input.getValue();
+        this.replaceInputWithSubmittedText(value2);
+        this.inputResolver(value2);
         this.inputResolver = undefined;
         this.inputRejecter = undefined;
       }
@@ -278939,6 +280941,9 @@ class LoginDialogComponent extends Container {
   }
   get signal() {
     return this.abortController.signal;
+  }
+  replaceInputWithSubmittedText(value2) {
+    this.contentContainer.children = this.contentContainer.children.map((child) => child === this.input ? new Text(`> ${value2}`, 0, 0) : child);
   }
   cancel() {
     this.abortController.abort();
@@ -278961,7 +280966,7 @@ class LoginDialogComponent extends Container {
       this.contentContainer.addChild(new Spacer(1));
       this.contentContainer.addChild(new Text(theme.fg("warning", instructions), 1, 0));
     }
-    this.openUrl(url2);
+    openBrowser(url2);
     this.tui.requestRender();
   }
   showDeviceCode(info) {
@@ -278974,16 +280979,11 @@ class LoginDialogComponent extends Container {
     this.contentContainer.addChild(new Text(theme.fg("dim", hyperlink2), 1, 0));
     this.contentContainer.addChild(new Spacer(1));
     this.contentContainer.addChild(new Text(theme.fg("warning", `Enter code: ${info.userCode}`), 1, 0));
-    this.openUrl(info.verificationUri);
+    openBrowser(info.verificationUri);
     this.tui.requestRender();
   }
-  openUrl(url2) {
-    const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-    try {
-      exec(`${openCmd} "${url2}"`, () => {});
-    } catch {}
-  }
   showManualInput(prompt) {
+    this.input.setValue("");
     this.contentContainer.addChild(new Spacer(1));
     this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
     this.contentContainer.addChild(this.input);
@@ -279684,6 +281684,12 @@ var THINKING_DESCRIPTIONS = {
   high: "Deep reasoning (~16k tokens)",
   xhigh: "Maximum reasoning (~32k tokens)"
 };
+var DEFAULT_PROJECT_TRUST_LABELS = {
+  ask: "Ask",
+  always: "Always trust",
+  never: "Never trust"
+};
+var DEFAULT_PROJECT_TRUST_BY_LABEL = new Map(Object.entries(DEFAULT_PROJECT_TRUST_LABELS).map(([value2, label]) => [label, value2]));
 
 class WarningSettingsSubmenu extends Container {
   settingsList;
@@ -279818,6 +281824,13 @@ class SettingsSelectorComponent extends Container {
         description: "Send an anonymous version/update ping after changelog-detected updates",
         currentValue: config3.enableInstallTelemetry ? "true" : "false",
         values: ["true", "false"]
+      },
+      {
+        id: "default-project-trust",
+        label: "Default project trust",
+        description: "Fallback behavior when no extension or saved trust decision decides project trust",
+        currentValue: DEFAULT_PROJECT_TRUST_LABELS[config3.defaultProjectTrust],
+        values: Object.values(DEFAULT_PROJECT_TRUST_LABELS)
       },
       {
         id: "double-escape-action",
@@ -280004,6 +282017,13 @@ class SettingsSelectorComponent extends Container {
         case "install-telemetry":
           callbacks.onEnableInstallTelemetryChange(newValue === "true");
           break;
+        case "default-project-trust": {
+          const defaultProjectTrust = DEFAULT_PROJECT_TRUST_BY_LABEL.get(newValue);
+          if (defaultProjectTrust) {
+            callbacks.onDefaultProjectTrustChange(defaultProjectTrust);
+          }
+          break;
+        }
         case "double-escape-action":
           callbacks.onDoubleEscapeActionChange(newValue);
           break;
@@ -280272,6 +282292,28 @@ class ToolExecutionComponent extends Container {
   render(width) {
     if (this.hideComponent) {
       return [];
+    }
+    if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
+      const contentLines = this.selfRenderContainer.render(width);
+      if (contentLines.length === 0 && this.imageComponents.length === 0) {
+        return [];
+      }
+      const lines = [];
+      if (contentLines.length > 0) {
+        lines.push("");
+        lines.push(...contentLines);
+      }
+      for (let i2 = 0;i2 < this.imageComponents.length; i2++) {
+        const spacer = this.imageSpacers[i2];
+        if (spacer) {
+          lines.push(...spacer.render(width));
+        }
+        const imageComponent = this.imageComponents[i2];
+        if (imageComponent) {
+          lines.push(...imageComponent.render(width));
+        }
+      }
+      return lines;
     }
     return super.render(width);
   }
@@ -280975,10 +283017,10 @@ class TreeList {
     };
     switch (name) {
       case "read": {
-        const path14 = shortenPath3(String(args2.path || args2.file_path || ""));
+        const path15 = shortenPath3(String(args2.path || args2.file_path || ""));
         const offset = args2.offset;
         const limit2 = args2.limit;
-        let display = path14;
+        let display = path15;
         if (offset !== undefined || limit2 !== undefined) {
           const start = offset ?? 1;
           const end = limit2 !== undefined ? start + limit2 - 1 : "";
@@ -280987,12 +283029,12 @@ class TreeList {
         return `[read: ${display}]`;
       }
       case "write": {
-        const path14 = shortenPath3(String(args2.path || args2.file_path || ""));
-        return `[write: ${path14}]`;
+        const path15 = shortenPath3(String(args2.path || args2.file_path || ""));
+        return `[write: ${path15}]`;
       }
       case "edit": {
-        const path14 = shortenPath3(String(args2.path || args2.file_path || ""));
-        return `[edit: ${path14}]`;
+        const path15 = shortenPath3(String(args2.path || args2.file_path || ""));
+        return `[edit: ${path15}]`;
       }
       case "bash": {
         const rawCmd = String(args2.command || "");
@@ -281001,17 +283043,17 @@ class TreeList {
       }
       case "grep": {
         const pattern4 = String(args2.pattern || "");
-        const path14 = shortenPath3(String(args2.path || "."));
-        return `[grep: /${pattern4}/ in ${path14}]`;
+        const path15 = shortenPath3(String(args2.path || "."));
+        return `[grep: /${pattern4}/ in ${path15}]`;
       }
       case "find": {
         const pattern4 = String(args2.pattern || "");
-        const path14 = shortenPath3(String(args2.path || "."));
-        return `[find: ${pattern4} in ${path14}]`;
+        const path15 = shortenPath3(String(args2.path || "."));
+        return `[find: ${pattern4} in ${path15}]`;
       }
       case "ls": {
-        const path14 = shortenPath3(String(args2.path || "."));
-        return `[ls: ${path14}]`;
+        const path15 = shortenPath3(String(args2.path || "."));
+        return `[ls: ${path15}]`;
       }
       default: {
         const argsStr = JSON.stringify(args2).slice(0, 40);
@@ -281298,6 +283340,86 @@ class TreeSelectorComponent extends Container {
   }
 }
 
+// node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/trust-selector.js
+function formatDecision(cwd, decision) {
+  if (decision === null) {
+    return "none";
+  }
+  const label = decision.decision ? "trusted" : "untrusted";
+  if (decision.path !== getProjectTrustPath(cwd)) {
+    return `${label} (inherited from ${decision.path})`;
+  }
+  return `${label} (${decision.path})`;
+}
+
+class TrustSelectorComponent extends Container {
+  selectedIndex;
+  listContainer;
+  trustOptions;
+  savedDecision;
+  onSelectCallback;
+  onCancelCallback;
+  constructor(options4) {
+    super();
+    this.savedDecision = options4.savedDecision;
+    this.trustOptions = getProjectTrustOptions(options4.cwd);
+    this.selectedIndex = Math.max(0, this.trustOptions.findIndex((option) => this.isSavedOption(option)));
+    this.onSelectCallback = options4.onSelect;
+    this.onCancelCallback = options4.onCancel;
+    this.addChild(new DynamicBorder);
+    this.addChild(new Spacer(1));
+    this.addChild(new Text(theme.fg("accent", theme.bold("Project trust")), 1, 0));
+    this.addChild(new Text(theme.fg("muted", options4.cwd), 1, 0));
+    this.addChild(new Spacer(1));
+    this.addChild(new Text(theme.fg("muted", `Saved decision: ${formatDecision(options4.cwd, options4.savedDecision)}`), 1, 0));
+    this.addChild(new Text(theme.fg("muted", `Current session: ${options4.projectTrusted ? "trusted" : "untrusted"}`), 1, 0));
+    this.addChild(new Spacer(1));
+    this.listContainer = new Container;
+    this.addChild(this.listContainer);
+    this.addChild(new Spacer(1));
+    this.addChild(new Text(rawKeyHint("↑↓", "navigate") + "  " + keyHint("tui.select.confirm", "save") + "  " + keyHint("tui.select.cancel", "cancel"), 1, 0));
+    this.addChild(new Spacer(1));
+    this.addChild(new DynamicBorder);
+    this.updateList();
+  }
+  isSavedOption(option) {
+    return option.savedPath !== undefined && this.savedDecision?.decision === option.trusted && this.savedDecision.path === option.savedPath;
+  }
+  updateList() {
+    this.listContainer.clear();
+    for (let i2 = 0;i2 < this.trustOptions.length; i2++) {
+      const option = this.trustOptions[i2];
+      if (!option) {
+        continue;
+      }
+      const isSelected = i2 === this.selectedIndex;
+      const isCurrent = this.isSavedOption(option);
+      const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
+      const prefix = isSelected ? theme.fg("accent", "→ ") : "  ";
+      const label = isSelected ? theme.fg("accent", option.label) : theme.fg("text", option.label);
+      this.listContainer.addChild(new Text(`${prefix}${label}${checkmark}`, 1, 0));
+    }
+  }
+  handleInput(keyData) {
+    const kb = getKeybindings();
+    if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
+      this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+      this.updateList();
+    } else if (kb.matches(keyData, "tui.select.down") || keyData === "j") {
+      this.selectedIndex = Math.min(this.trustOptions.length - 1, this.selectedIndex + 1);
+      this.updateList();
+    } else if (kb.matches(keyData, "tui.select.confirm") || keyData === `
+`) {
+      const selected = this.trustOptions[this.selectedIndex];
+      if (selected) {
+        this.onSelectCallback({ trusted: selected.trusted, updates: selected.updates });
+      }
+    } else if (kb.matches(keyData, "tui.select.cancel")) {
+      this.onCancelCallback();
+    }
+  }
+}
+
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js
 var OSC133_ZONE_START2 = "\x1B]133;A\x07";
 var OSC133_ZONE_END2 = "\x1B]133;B\x07";
@@ -281442,6 +283564,27 @@ function isAnthropicSubscriptionAuthKey(apiKey) {
 function isUnknownModel(model) {
   return !!model && model.provider === "unknown" && model.id === "unknown" && model.api === "unknown";
 }
+function quoteIfNeeded(value2) {
+  if (value2.length > 0 && !/[^a-zA-Z0-9_\-./~:@]/.test(value2)) {
+    return value2;
+  }
+  return `'${value2.replace(/'/g, `'\\''`)}'`;
+}
+function formatResumeCommand(sessionManager) {
+  if (!process.stdout.isTTY)
+    return;
+  if (!sessionManager.isPersisted())
+    return;
+  const sessionFile = sessionManager.getSessionFile();
+  if (!sessionFile || !fs11.existsSync(sessionFile))
+    return;
+  const args2 = [APP_NAME];
+  if (!sessionManager.usesDefaultSessionDir()) {
+    args2.push("--session-dir", quoteIfNeeded(sessionManager.getSessionDir()));
+  }
+  args2.push("--session", sessionManager.getSessionId());
+  return args2.join(" ");
+}
 function hasDefaultModelProvider(providerId) {
   return providerId in defaultModelPerProvider;
 }
@@ -281476,6 +283619,7 @@ class InteractiveMode {
   version;
   isInitialized = false;
   onInputCallback;
+  pendingUserInputs = [];
   loadingAnimation = undefined;
   workingMessage = undefined;
   workingVisible = true;
@@ -281521,6 +283665,7 @@ class InteractiveMode {
   builtInHeader = undefined;
   customHeader = undefined;
   options;
+  autoTrustOnReloadCwd;
   get session() {
     return this.runtimeHost.session;
   }
@@ -281536,6 +283681,7 @@ class InteractiveMode {
   constructor(runtimeHost, options4 = {}) {
     this.runtimeHost = runtimeHost;
     this.options = options4;
+    this.autoTrustOnReloadCwd = options4.autoTrustOnReloadCwd;
     this.runtimeHost.setBeforeSessionInvalidate(() => {
       this.resetExtensionUI();
     });
@@ -281656,8 +283802,13 @@ class InteractiveMode {
   }
   setupAutocompleteProvider() {
     let provider = this.createBaseAutocompleteProvider();
+    const triggerCharacters = [];
     for (const wrapProvider of this.autocompleteProviderWrappers) {
       provider = wrapProvider(provider);
+      triggerCharacters.push(...provider.triggerCharacters ?? []);
+    }
+    if (triggerCharacters.length > 0) {
+      provider.triggerCharacters = [...new Set(triggerCharacters)];
     }
     this.autocompleteProvider = provider;
     this.defaultEditor.setAutocompleteProvider(provider);
@@ -281782,7 +283933,7 @@ ${onboarding}`, this.getStartupExpansionState(), 1, 0);
     await this.updateAvailableProviderCount();
   }
   updateTerminalTitle() {
-    const cwdBasename = path14.basename(this.sessionManager.getCwd());
+    const cwdBasename = path15.basename(this.sessionManager.getCwd());
     const sessionName = this.sessionManager.getSessionName();
     if (sessionName) {
       this.ui.terminal.setTitle(`${APP_TITLE} - ${sessionName} - ${cwdBasename}`);
@@ -281868,7 +284019,7 @@ ${onboarding}`, this.getStartupExpansionState(), 1, 0);
       return;
     const runTmuxShow = (option) => {
       return new Promise((resolve15) => {
-        const proc = spawn9("tmux", ["show", "-gv", option], {
+        const proc = spawn10("tmux", ["show", "-gv", option], {
           stdio: ["ignore", "pipe", "ignore"]
         });
         let stdout = "";
@@ -281919,7 +284070,7 @@ ${onboarding}`, this.getStartupExpansionState(), 1, 0);
     if (newEntries.length > 0) {
       this.settingsManager.setLastChangelogVersion(VERSION);
       this.reportInstallTelemetry(VERSION);
-      return newEntries.map((e2) => e2.content).join(`
+      return newEntries.map((e2) => normalizeChangelogLinks(e2.content, e2)).join(`
 
 `);
     }
@@ -281957,14 +284108,14 @@ ${onboarding}`, this.getStartupExpansionState(), 1, 0);
     }
     return result;
   }
-  formatExtensionDisplayPath(path15) {
-    let result = this.formatDisplayPath(path15);
+  formatExtensionDisplayPath(path16) {
+    let result = this.formatDisplayPath(path16);
     result = result.replace(/\/index\.ts$/, "").replace(/\/index\.js$/, "");
     return result;
   }
   formatContextPath(p) {
-    const cwd = path14.resolve(this.sessionManager.getCwd());
-    const absolutePath = path14.isAbsolute(p) ? path14.resolve(p) : path14.resolve(cwd, p);
+    const cwd = path15.resolve(this.sessionManager.getCwd());
+    const absolutePath = path15.isAbsolute(p) ? path15.resolve(p) : path15.resolve(cwd, p);
     const relativePath = getCwdRelativePath(absolutePath, cwd);
     if (relativePath !== undefined) {
       return relativePath;
@@ -281977,8 +284128,8 @@ ${onboarding}`, this.getStartupExpansionState(), 1, 0);
   getShortPath(fullPath, sourceInfo) {
     const baseDir = sourceInfo?.baseDir;
     if (baseDir && this.isPackageSource(sourceInfo)) {
-      const relativePath = path14.relative(path14.resolve(baseDir), path14.resolve(fullPath));
-      if (relativePath && relativePath !== "." && !relativePath.startsWith("..") && !relativePath.startsWith(`..${path14.sep}`) && !path14.isAbsolute(relativePath)) {
+      const relativePath = path15.relative(path15.resolve(baseDir), path15.resolve(fullPath));
+      if (relativePath && relativePath !== "." && !relativePath.startsWith("..") && !relativePath.startsWith(`..${path15.sep}`) && !path15.isAbsolute(relativePath)) {
         return relativePath.replace(/\\/g, "/");
       }
     }
@@ -282023,7 +284174,7 @@ ${onboarding}`, this.getStartupExpansionState(), 1, 0);
     }
     const shortPath = this.getShortPath(resourcePath, sourceInfo).replace(/\\/g, "/");
     const packagePath = shortPath.startsWith("extensions/") ? shortPath.slice("extensions/".length) : shortPath;
-    const parsedPath = path14.posix.parse(packagePath);
+    const parsedPath = path15.posix.parse(packagePath);
     if (parsedPath.name === "index") {
       return !parsedPath.dir || parsedPath.dir === "." ? sourceLabel : `${sourceLabel}:${parsedPath.dir}`;
     }
@@ -282365,6 +284516,7 @@ ${warningLines}`, 0, 0));
     const uiContext = this.createExtensionUIContext();
     await this.session.bindExtensions({
       uiContext,
+      mode: "tui",
       abortHandler: () => {
         this.restoreQueuedMessagesToEditor({ abort: true });
       },
@@ -282495,12 +284647,14 @@ ${warningLines}`, 0, 0));
       return;
     const createContext = () => ({
       ui: this.createExtensionUIContext(),
+      mode: "tui",
       hasUI: true,
       cwd: this.sessionManager.getCwd(),
       sessionManager: this.sessionManager,
       modelRegistry: this.session.modelRegistry,
       model: this.session.model,
       isIdle: () => !this.session.isStreaming,
+      isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
       signal: this.session.agent.signal,
       abort: () => {
         this.restoreQueuedMessagesToEditor({ abort: true });
@@ -282739,6 +284893,20 @@ ${warningLines}`, 0, 0));
       unsubscribe();
     }
     this.extensionTerminalInputUnsubscribers.clear();
+  }
+  createProjectTrustContext(cwd) {
+    const ui2 = this.createExtensionUIContext();
+    return {
+      cwd,
+      mode: "tui",
+      hasUI: true,
+      ui: {
+        select: ui2.select,
+        confirm: ui2.confirm,
+        input: ui2.input,
+        notify: ui2.notify
+      }
+    };
   }
   createExtensionUIContext() {
     return {
@@ -283083,7 +285251,7 @@ ${message}`, ["Yes", "No"], opts);
       const tmpDir = os7.tmpdir();
       const ext2 = extensionForImageMimeType(image.mimeType) ?? "png";
       const fileName = `pi-clipboard-${crypto2.randomUUID()}.${ext2}`;
-      const filePath = path14.join(tmpDir, fileName);
+      const filePath = path15.join(tmpDir, fileName);
       fs11.writeFileSync(filePath, Buffer.from(image.bytes));
       this.editor.insertTextAtCursor?.(filePath);
       this.ui.requestRender();
@@ -283162,6 +285330,11 @@ ${message}`, ["Yes", "No"], opts);
       }
       if (text === "/tree") {
         this.showTreeSelector();
+        this.editor.setText("");
+        return;
+      }
+      if (text === "/trust") {
+        this.showTrustSelector();
         this.editor.setText("");
         return;
       }
@@ -283253,6 +285426,8 @@ ${message}`, ["Yes", "No"], opts);
       this.flushPendingBashComponents();
       if (this.onInputCallback) {
         this.onInputCallback(text);
+      } else {
+        this.pendingUserInputs.push(text);
       }
       this.editor.addToHistory?.(text);
     };
@@ -283591,6 +285766,7 @@ ${message}`, ["Yes", "No"], opts);
             component.setExpanded(this.toolOutputExpanded);
             this.chatContainer.addChild(component);
             if (skillBlock.userMessage) {
+              this.chatContainer.addChild(new Spacer(1));
               const userComponent = new UserMessageComponent(skillBlock.userMessage, this.getMarkdownThemeWithSettings());
               this.chatContainer.addChild(userComponent);
             }
@@ -283670,6 +285846,7 @@ ${message}`, ["Yes", "No"], opts);
       updateFooter: true,
       populateHistory: true
     });
+    this.renderProjectTrustWarningIfNeeded();
     const allEntries = this.sessionManager.getEntries();
     const compactionCount = allEntries.filter((e2) => e2.type === "compaction").length;
     if (compactionCount > 0) {
@@ -283677,7 +285854,20 @@ ${message}`, ["Yes", "No"], opts);
       this.showStatus(`Session compacted ${times}`);
     }
   }
+  renderProjectTrustWarningIfNeeded() {
+    if (this.settingsManager.isProjectTrusted() || !hasProjectTrustInputs(this.sessionManager.getCwd())) {
+      return;
+    }
+    if (this.chatContainer.children.length > 0) {
+      this.chatContainer.addChild(new Spacer(1));
+    }
+    this.chatContainer.addChild(new Text(theme.fg("warning", "This project is not trusted. Project .pi resources and packages are ignored. Use /trust to save a trust decision, then restart pi."), 1, 0));
+  }
   async getUserInput() {
+    const queuedInput = this.pendingUserInputs.shift();
+    if (queuedInput !== undefined) {
+      return queuedInput;
+    }
     return new Promise((resolve15) => {
       this.onInputCallback = (text) => {
         this.onInputCallback = undefined;
@@ -283717,6 +285907,11 @@ ${message}`, ["Yes", "No"], opts);
     await this.ui.terminal.drainInput(1000);
     this.stop();
     await this.runtimeHost.dispose();
+    const resumeCommand = formatResumeCommand(this.sessionManager);
+    if (resumeCommand) {
+      process.stdout.write(`${source_default.dim("To resume this session:")} ${resumeCommand}
+`);
+    }
     process.exit(0);
   }
   emergencyTerminalExit() {
@@ -283909,7 +286104,7 @@ ${message}`, ["Yes", "No"], opts);
       return;
     }
     const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-    const tmpFile = path14.join(os7.tmpdir(), `pi-editor-${Date.now()}.pi.md`);
+    const tmpFile = path15.join(os7.tmpdir(), `pi-editor-${Date.now()}.pi.md`);
     try {
       fs11.writeFileSync(tmpFile, currentText, "utf-8");
       this.ui.stop();
@@ -283918,7 +286113,7 @@ ${message}`, ["Yes", "No"], opts);
 Pi will resume when the editor exits.
 `);
       const status = await new Promise((resolve15) => {
-        const child = spawn9(editor, [...editorArgs, tmpFile], {
+        const child = spawn10(editor, [...editorArgs, tmpFile], {
           stdio: "inherit",
           shell: process.platform === "win32"
         });
@@ -284166,6 +286361,7 @@ ${packageLines}`, 1, 0));
         doubleEscapeAction: this.settingsManager.getDoubleEscapeAction(),
         treeFilterMode: this.settingsManager.getTreeFilterMode(),
         showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
+        defaultProjectTrust: this.settingsManager.getDefaultProjectTrust(),
         editorPaddingX: this.settingsManager.getEditorPaddingX(),
         autocompleteMaxVisible: this.settingsManager.getAutocompleteMaxVisible(),
         quietStartup: this.settingsManager.getQuietStartup(),
@@ -284258,6 +286454,9 @@ Fell back to dark theme.`);
         },
         onQuietStartupChange: (enabled) => {
           this.settingsManager.setQuietStartup(enabled);
+        },
+        onDefaultProjectTrustChange: (defaultProjectTrust) => {
+          this.settingsManager.setDefaultProjectTrust(defaultProjectTrust);
         },
         onDoubleEscapeActionChange: (action3) => {
           this.settingsManager.setDoubleEscapeAction(action3);
@@ -284366,6 +286565,50 @@ Fell back to dark theme.`);
       this.anthropicSubscriptionWarningShown = true;
       this.showWarning(ANTHROPIC_SUBSCRIPTION_AUTH_WARNING);
     } catch {}
+  }
+  maybeSaveImplicitProjectTrustAfterReload() {
+    const cwd = this.sessionManager.getCwd();
+    if (this.autoTrustOnReloadCwd !== cwd) {
+      return false;
+    }
+    if (!this.settingsManager.isProjectTrusted() || !hasProjectConfigDir(cwd)) {
+      return false;
+    }
+    const trustStore = new ProjectTrustStore(this.runtimeHost.services.agentDir);
+    try {
+      if (trustStore.get(cwd) !== null) {
+        this.autoTrustOnReloadCwd = undefined;
+        return false;
+      }
+      trustStore.set(cwd, true);
+      this.autoTrustOnReloadCwd = undefined;
+      return true;
+    } catch (error51) {
+      this.showWarning(`Could not save project trust after reload: ${error51 instanceof Error ? error51.message : String(error51)}`);
+      return false;
+    }
+  }
+  showTrustSelector() {
+    const cwd = this.sessionManager.getCwd();
+    const trustStore = new ProjectTrustStore(this.runtimeHost.services.agentDir);
+    const savedDecision = trustStore.getEntry(cwd);
+    this.showSelector((done) => {
+      const selector = new TrustSelectorComponent({
+        cwd,
+        savedDecision,
+        projectTrusted: this.settingsManager.isProjectTrusted(),
+        onSelect: (selection) => {
+          trustStore.setMany(selection.updates);
+          done();
+          this.showStatus(`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart pi for this to take effect.`);
+        },
+        onCancel: () => {
+          done();
+          this.ui.requestRender();
+        }
+      });
+      return { component: selector, focus: selector };
+    });
   }
   showModelSelector(initialSearchInput) {
     this.showSelector((done) => {
@@ -284615,7 +286858,8 @@ Fell back to dark theme.`);
     this.statusContainer.clear();
     try {
       const result = await this.runtimeHost.switchSession(sessionPath, {
-        withSession: options4?.withSession
+        withSession: options4?.withSession,
+        projectTrustContextFactory: (cwd) => this.createProjectTrustContext(cwd)
       });
       if (result.cancelled) {
         return result;
@@ -284632,7 +286876,8 @@ Fell back to dark theme.`);
         }
         const result = await this.runtimeHost.switchSession(sessionPath, {
           cwdOverride: selectedCwd,
-          withSession: options4?.withSession
+          withSession: options4?.withSession,
+          projectTrustContextFactory: (cwd) => this.createProjectTrustContext(cwd)
         });
         if (result.cancelled) {
           return result;
@@ -284814,7 +287059,7 @@ Fell back to dark theme.`);
       theme.fg("text", "Amazon Bedrock uses AWS credentials instead of a single API key."),
       theme.fg("text", "Configure an AWS profile, IAM keys, bearer token, or role-based credentials."),
       theme.fg("muted", "See:"),
-      theme.fg("accent", `  ${path14.join(getDocsPath(), "providers.md")}`)
+      theme.fg("accent", `  ${path15.join(getDocsPath(), "providers.md")}`)
     ]);
     this.editorContainer.clear();
     this.editorContainer.addChild(dialog);
@@ -284999,11 +287244,12 @@ Fell back to dark theme.`);
         force: false,
         showDiagnosticsWhenQuiet: true
       });
+      const savedImplicitProjectTrust = this.maybeSaveImplicitProjectTrustAfterReload();
       const modelsJsonError = this.session.modelRegistry.getError();
       if (modelsJsonError) {
         this.showError(`models.json error: ${modelsJsonError}`);
       }
-      this.showStatus("Reloaded keybindings, extensions, skills, prompts, themes");
+      this.showStatus(savedImplicitProjectTrust ? "Reloaded keybindings, extensions, skills, prompts, themes; saved project trust" : "Reloaded keybindings, extensions, skills, prompts, themes");
     } catch (error51) {
       dismissReloadBox(previousEditor);
       this.showError(`Reload failed: ${error51 instanceof Error ? error51.message : String(error51)}`);
@@ -285106,7 +287352,7 @@ Fell back to dark theme.`);
       this.showError("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
       return;
     }
-    const tmpFile = path14.join(os7.tmpdir(), "session.html");
+    const tmpFile = path15.join(os7.tmpdir(), "session.html");
     try {
       await this.session.exportToHtml(tmpFile);
     } catch (error51) {
@@ -285135,7 +287381,7 @@ Fell back to dark theme.`);
     };
     try {
       const result = await new Promise((resolve15) => {
-        proc = spawn9("gh", ["gist", "create", "--public=false", tmpFile]);
+        proc = spawn10("gh", ["gist", "create", "--public=false", tmpFile]);
         let stdout = "";
         let stderr = "";
         proc.stdout?.on("data", (data) => {
@@ -285258,7 +287504,7 @@ ${theme.bold("Cost")}
   handleChangelogCommand() {
     const changelogPath = getChangelogPath();
     const allEntries = parseChangelog(changelogPath);
-    const changelogMarkdown = allEntries.length > 0 ? allEntries.reverse().map((e2) => e2.content).join(`
+    const changelogMarkdown = allEntries.length > 0 ? allEntries.reverse().map((e2) => normalizeChangelogLinks(e2.content, e2)).join(`
 
 `) : "No changelog entries found.";
     this.chatContainer.addChild(new Spacer(1));
@@ -285316,7 +287562,7 @@ ${theme.bold("Cost")}
 **Navigation**
 | Key | Action |
 |-----|--------|
-| \`${cursorUp}\` / \`${cursorDown}\` / \`${cursorLeft}\` / \`${cursorRight}\` | Move cursor / browse history (Up when empty) |
+| \`${cursorUp}\` / \`${cursorDown}\` / \`${cursorLeft}\` / \`${cursorRight}\` | Move cursor / browse history |
 | \`${cursorWordLeft}\` / \`${cursorWordRight}\` | Move by word |
 | \`${cursorLineStart}\` | Start of line |
 | \`${cursorLineEnd}\` | End of line |
@@ -285422,7 +287668,7 @@ ${theme.bold("Cost")}
       ""
     ].join(`
 `);
-    fs11.mkdirSync(path14.dirname(debugLogPath), { recursive: true });
+    fs11.mkdirSync(path15.dirname(debugLogPath), { recursive: true });
     fs11.writeFileSync(debugLogPath, debugData);
     this.chatContainer.addChild(new Spacer(1));
     this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ Debug log written")}
@@ -285578,6 +287824,7 @@ async function runPrintMode(runtimeHost, options4) {
   const rebindSession = async () => {
     session2 = runtimeHost.session;
     await session2.bindExtensions({
+      mode: mode === "json" ? "json" : "print",
       commandContextActions: {
         waitForIdle: () => session2.agent.waitForIdle(),
         newSession: async (newSessionOptions) => runtimeHost.newSession(newSessionOptions),
@@ -285659,16 +287906,16 @@ async function runPrintMode(runtimeHost, options4) {
   }
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-client.js
-import { spawn as spawn10 } from "node:child_process";
+import { spawn as spawn11 } from "node:child_process";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/jsonl.js
-import { StringDecoder } from "node:string_decoder";
+import { StringDecoder as StringDecoder2 } from "node:string_decoder";
 function serializeJsonLine(value2) {
   return `${JSON.stringify(value2)}
 `;
 }
 function attachJsonlLineReader(stream4, onLine) {
-  const decoder = new StringDecoder("utf8");
+  const decoder = new StringDecoder2("utf8");
   let buffer = "";
   const emitLine = (line) => {
     onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
@@ -285729,7 +287976,7 @@ class RpcClient {
     if (this.options.args) {
       args2.push(...this.options.args);
     }
-    const childProcess = spawn10("node", [cliPath, ...args2], {
+    const childProcess = spawn11("node", [cliPath, ...args2], {
       cwd: this.options.cwd,
       env: { ...process.env, ...this.options.env },
       stdio: ["pipe", "pipe", "pipe"]
@@ -286191,6 +288438,7 @@ async function runRpcMode(runtimeHost) {
     session2 = runtimeHost.session;
     await session2.bindExtensions({
       uiContext: createExtensionUIContext(),
+      mode: "rpc",
       commandContextActions: {
         waitForIdle: () => session2.agent.waitForIdle(),
         newSession: async (options4) => runtimeHost.newSession(options4),
@@ -286375,8 +288623,8 @@ async function runRpcMode(runtimeHost) {
         return success2(id2, "get_session_stats", stats);
       }
       case "export_html": {
-        const path15 = await session2.exportToHtml(command.outputPath);
-        return success2(id2, "export_html", { path: path15 });
+        const path16 = await session2.exportToHtml(command.outputPath);
+        return success2(id2, "export_html", { path: path16 });
       }
       case "switch_session": {
         const result = await runtimeHost.switchSession(command.sessionPath);
@@ -286528,7 +288776,7 @@ async function runRpcMode(runtimeHost) {
 }
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/config-selector.js
 import { homedir as homedir9 } from "node:os";
-import { basename as basename13, dirname as dirname20, join as join33, relative as relative7 } from "node:path";
+import { basename as basename13, dirname as dirname21, join as join34, relative as relative7 } from "node:path";
 var RESOURCE_TYPE_LABELS = {
   extensions: "Extensions",
   skills: "Skills",
@@ -286564,7 +288812,7 @@ function buildGroups(resolved) {
   const groupMap = new Map;
   const addToGroup = (resources, resourceType) => {
     for (const res of resources) {
-      const { path: path15, enabled, metadata } = res;
+      const { path: path16, enabled, metadata } = res;
       const groupKey = `${metadata.origin}:${metadata.scope}:${metadata.source}:${metadata.baseDir ?? ""}`;
       if (!groupMap.has(groupKey)) {
         groupMap.set(groupKey, {
@@ -286587,8 +288835,8 @@ function buildGroups(resolved) {
         };
         group.subgroups.push(subgroup);
       }
-      const fileName = basename13(path15);
-      const parentFolder = basename13(dirname20(path15));
+      const fileName = basename13(path16);
+      const parentFolder = basename13(dirname21(path16));
       let displayName;
       if (resourceType === "extensions" && parentFolder !== "extensions") {
         displayName = `${parentFolder}/${fileName}`;
@@ -286598,7 +288846,7 @@ function buildGroups(resolved) {
         displayName = fileName;
       }
       subgroup.items.push({
-        path: path15,
+        path: path16,
         enabled,
         metadata,
         resourceType,
@@ -286934,7 +289182,7 @@ class ResourceList {
     }
   }
   getTopLevelBaseDir(scope) {
-    return scope === "project" ? join33(this.cwd, CONFIG_DIR_NAME) : this.agentDir;
+    return scope === "project" ? join34(this.cwd, CONFIG_DIR_NAME) : this.agentDir;
   }
   getResourcePattern(item) {
     const scope = item.metadata.scope;
@@ -286942,7 +289190,7 @@ class ResourceList {
     return relative7(baseDir, item.path);
   }
   getPackageResourcePattern(item) {
-    const baseDir = item.metadata.baseDir ?? dirname20(item.path);
+    const baseDir = item.metadata.baseDir ?? dirname21(item.path);
     return relative7(baseDir, item.path);
   }
 }
@@ -287004,19 +289252,19 @@ async function selectConfig(options4) {
 
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/windows-self-update.js
 import { randomUUID as randomUUID5 } from "node:crypto";
-import { copyFileSync as copyFileSync2, existsSync as existsSync23, mkdirSync as mkdirSync11, renameSync as renameSync3, rmSync as rmSync4 } from "node:fs";
-import { basename as basename14, dirname as dirname21, join as join34, relative as relative8, resolve as resolve15, toNamespacedPath } from "node:path";
+import { copyFileSync as copyFileSync2, existsSync as existsSync25, mkdirSync as mkdirSync12, renameSync as renameSync3, rmSync as rmSync4 } from "node:fs";
+import { basename as basename14, dirname as dirname22, join as join35, relative as relative8, resolve as resolve15, toNamespacedPath } from "node:path";
 var QUARANTINE_DIR_NAME = ".pi-native-quarantine";
-function normalizePath2(path15) {
-  return toNamespacedPath(resolve15(path15));
+function normalizePath2(path16) {
+  return toNamespacedPath(resolve15(path16));
 }
 function getQuarantineRoot(packageDir) {
   let current = resolve15(packageDir);
   while (true) {
     if (basename14(current).toLowerCase() === "node_modules") {
-      return join34(current, QUARANTINE_DIR_NAME);
+      return join35(current, QUARANTINE_DIR_NAME);
     }
-    const parent = dirname21(current);
+    const parent = dirname22(current);
     if (parent === current) {
       return;
     }
@@ -287064,13 +289312,13 @@ function quarantineWindowsNativeDependencies(packageDir) {
   if (loadedFiles.length === 0) {
     return;
   }
-  const quarantineRunDir = join34(quarantineRoot, `${Date.now()}-${process.pid}-${randomUUID5()}`);
+  const quarantineRunDir = join35(quarantineRoot, `${Date.now()}-${process.pid}-${randomUUID5()}`);
   for (const loadedFile of loadedFiles) {
-    if (!existsSync23(loadedFile)) {
+    if (!existsSync25(loadedFile)) {
       continue;
     }
-    const quarantinePath = join34(quarantineRunDir, relative8(resolvedPackageDir, loadedFile));
-    mkdirSync11(dirname21(quarantinePath), { recursive: true });
+    const quarantinePath = join35(quarantineRunDir, relative8(resolvedPackageDir, loadedFile));
+    mkdirSync12(dirname22(quarantinePath), { recursive: true });
     renameSync3(loadedFile, quarantinePath);
     copyFileSync2(quarantinePath, loadedFile);
   }
@@ -287105,13 +289353,13 @@ function reportSettingsErrors(settingsManager, context) {
 function getPackageCommandUsage(command) {
   switch (command) {
     case "install":
-      return `${APP_NAME} install <source> [-l]`;
+      return `${APP_NAME} install <source> [-l] [--approve|--no-approve]`;
     case "remove":
-      return `${APP_NAME} remove <source> [-l]`;
+      return `${APP_NAME} remove <source> [-l] [--approve|--no-approve]`;
     case "update":
-      return `${APP_NAME} update [source|self|pi] [--self] [--extensions] [--extension <source>] [--force]`;
+      return `${APP_NAME} update [source|self|pi] [--self] [--extensions] [--extension <source>] [--approve|--no-approve] [--force]`;
     case "list":
-      return `${APP_NAME} list`;
+      return `${APP_NAME} list [--approve|--no-approve]`;
   }
 }
 function printPackageCommandHelp(command) {
@@ -287123,7 +289371,9 @@ function printPackageCommandHelp(command) {
 Install a package and add it to settings.
 
 Options:
-  -l, --local    Install project-locally (.pi/settings.json)
+  -l, --local       Install project-locally (.pi/settings.json)
+  -a, --approve     Trust project-local files for this command
+  -na, --no-approve Ignore project-local files for this command
 
 Examples:
   ${APP_NAME} install npm:@foo/bar
@@ -287142,7 +289392,9 @@ Remove a package and its source from settings.
 Alias: ${APP_NAME} uninstall <source> [-l]
 
 Options:
-  -l, --local    Remove from project settings (.pi/settings.json)
+  -l, --local       Remove from project settings (.pi/settings.json)
+  -a, --approve     Trust project-local files for this command
+  -na, --no-approve Ignore project-local files for this command
 
 Examples:
   ${APP_NAME} remove npm:@foo/bar
@@ -287159,6 +289411,8 @@ Options:
   --self                  Update pi only
   --extensions            Update installed packages only
   --extension <source>    Update one package only
+  -a, --approve           Trust project-local files for this command
+  -na, --no-approve       Ignore project-local files for this command
   --force                 Reinstall pi even if the current version is latest
 
 Short forms:
@@ -287172,6 +289426,10 @@ Short forms:
   ${getPackageCommandUsage("list")}
 
 List installed packages from user and project settings.
+
+Options:
+  -a, --approve      Trust project-local files for this command
+  -na, --no-approve  Ignore project-local files for this command
 `);
       return;
   }
@@ -287189,6 +289447,7 @@ function parsePackageCommand(args2) {
   }
   let local = false;
   let force = false;
+  let projectTrustOverride;
   let help = false;
   let invalidOption;
   let invalidArgument;
@@ -287226,6 +289485,14 @@ function parsePackageCommand(args2) {
       } else {
         invalidOption = invalidOption ?? arg;
       }
+      continue;
+    }
+    if (arg === "--approve" || arg === "-a") {
+      projectTrustOverride = true;
+      continue;
+    }
+    if (arg === "--no-approve" || arg === "-na") {
+      projectTrustOverride = false;
       continue;
     }
     if (arg === "--force") {
@@ -287299,6 +289566,7 @@ function parsePackageCommand(args2) {
     updateTarget,
     local,
     force,
+    projectTrustOverride,
     help,
     invalidOption,
     invalidArgument,
@@ -287387,13 +289655,68 @@ function prepareWindowsNpmSelfUpdate() {
   cleanupWindowsSelfUpdateQuarantine(packageDir);
   quarantineWindowsNativeDependencies(packageDir);
 }
-async function handleConfigCommand(args2) {
+function parseProjectTrustOverride(args2) {
+  let trustOverride;
+  for (const arg of args2) {
+    if (arg === "--approve" || arg === "-a") {
+      trustOverride = true;
+    } else if (arg === "--no-approve" || arg === "-na") {
+      trustOverride = false;
+    }
+  }
+  return trustOverride;
+}
+function getCommandAppMode() {
+  return process.stdin.isTTY && process.stdout.isTTY ? "interactive" : "print";
+}
+function reportProjectTrustWarnings(warnings) {
+  for (const warning of warnings) {
+    console.error(source_default.yellow(`Warning: ${warning}`));
+  }
+}
+async function createCommandSettingsManager(options4) {
+  const settingsManager = SettingsManager.create(options4.cwd, options4.agentDir, { projectTrusted: false });
+  const projectTrustWarnings = [];
+  const appMode = getCommandAppMode();
+  const extensionsResult = options4.projectTrustOverride === undefined && hasProjectTrustInputs(options4.cwd) ? await new DefaultResourceLoader({
+    cwd: options4.cwd,
+    agentDir: options4.agentDir,
+    settingsManager,
+    extensionFactories: options4.extensionFactories
+  }).loadProjectTrustExtensions() : undefined;
+  for (const error51 of extensionsResult?.errors ?? []) {
+    projectTrustWarnings.push(`Failed to load extension "${error51.path}": ${error51.error}`);
+  }
+  const projectTrusted = await resolveProjectTrusted({
+    cwd: options4.cwd,
+    trustStore: new ProjectTrustStore(options4.agentDir),
+    trustOverride: options4.projectTrustOverride,
+    defaultProjectTrust: settingsManager.getDefaultProjectTrust(),
+    extensionsResult,
+    projectTrustContext: createProjectTrustContext({
+      cwd: options4.cwd,
+      mode: appMode,
+      settingsManager,
+      hasUI: appMode === "interactive"
+    }),
+    onExtensionError: (message) => projectTrustWarnings.push(message)
+  });
+  settingsManager.setProjectTrusted(projectTrusted);
+  return { settingsManager, projectTrustWarnings };
+}
+async function handleConfigCommand(args2, runtimeOptions = {}) {
   if (args2[0] !== "config") {
     return false;
   }
   const cwd = process.cwd();
   const agentDir = getAgentDir();
-  const settingsManager = SettingsManager.create(cwd, agentDir);
+  const { settingsManager, projectTrustWarnings } = await createCommandSettingsManager({
+    cwd,
+    agentDir,
+    projectTrustOverride: parseProjectTrustOverride(args2),
+    extensionFactories: runtimeOptions.extensionFactories
+  });
+  reportProjectTrustWarnings(projectTrustWarnings);
   reportSettingsErrors(settingsManager, "config command");
   const packageManager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
   const resolvedPaths = await packageManager.resolve();
@@ -287405,7 +289728,7 @@ async function handleConfigCommand(args2) {
   });
   process.exit(0);
 }
-async function handlePackageCommand(args2) {
+async function handlePackageCommand(args2, runtimeOptions = {}) {
   const options4 = parsePackageCommand(args2);
   if (!options4) {
     return false;
@@ -287447,7 +289770,19 @@ async function handlePackageCommand(args2) {
   }
   const cwd = process.cwd();
   const agentDir = getAgentDir();
-  const settingsManager = SettingsManager.create(cwd, agentDir);
+  const writesProjectPackageConfig = (options4.command === "install" || options4.command === "remove") && options4.local;
+  const { settingsManager, projectTrustWarnings } = await createCommandSettingsManager({
+    cwd,
+    agentDir,
+    projectTrustOverride: options4.projectTrustOverride,
+    extensionFactories: runtimeOptions.extensionFactories
+  });
+  reportProjectTrustWarnings(projectTrustWarnings);
+  if (!settingsManager.isProjectTrusted() && writesProjectPackageConfig) {
+    console.error(source_default.red("Project is not trusted. Use --approve to modify local package config."));
+    process.exitCode = 1;
+    return true;
+  }
   reportSettingsErrors(settingsManager, "package command");
   const selfUpdateNpmCommand = settingsManager.getGlobalSettings().npmCommand;
   const packageManager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
@@ -287596,20 +289931,23 @@ function isTruthyEnvFlag2(value2) {
     return false;
   return value2 === "1" || value2.toLowerCase() === "true" || value2.toLowerCase() === "yes";
 }
-function resolveAppMode(parsed, stdinIsTTY) {
+function resolveAppMode(parsed, stdinIsTTY, stdoutIsTTY) {
   if (parsed.mode === "rpc") {
     return "rpc";
   }
   if (parsed.mode === "json") {
     return "json";
   }
-  if (parsed.print || !stdinIsTTY) {
+  if (parsed.print || !stdinIsTTY || !stdoutIsTTY) {
     return "print";
   }
   return "interactive";
 }
 function toPrintOutputMode(appMode) {
   return appMode === "json" ? "json" : "text";
+}
+function isPlainRuntimeMetadataCommand(parsed) {
+  return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
 }
 async function prepareInitialMessage(parsed, autoResizeImages, stdinContent) {
   if (parsed.fileArgs.length === 0) {
@@ -287646,7 +289984,7 @@ async function resolveSessionPath(sessionArg, cwd, sessionDir) {
 }
 async function promptConfirm(message) {
   return new Promise((resolve16) => {
-    const rl = createInterface3({
+    const rl = createInterface4({
       input: process.stdin,
       output: process.stdout
     });
@@ -287834,25 +290172,10 @@ function resolveCliPaths(cwd, paths) {
   return paths?.map((value2) => isLocalPath(value2) ? resolvePath(value2, cwd) : value2);
 }
 async function promptForMissingSessionCwd(issue2, settingsManager) {
-  initTheme(settingsManager.getTheme());
-  setKeybindings(KeybindingsManager2.create());
-  return new Promise((resolve16) => {
-    const ui2 = new TUI(new ProcessTerminal, settingsManager.getShowHardwareCursor());
-    ui2.setClearOnShrink(settingsManager.getClearOnShrink());
-    let settled = false;
-    const finish = (result) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      ui2.stop();
-      resolve16(result);
-    };
-    const selector = new ExtensionSelectorComponent(formatMissingSessionCwdPrompt(issue2), ["Continue", "Cancel"], (option) => finish(option === "Continue" ? issue2.fallbackCwd : undefined), () => finish(undefined), { tui: ui2 });
-    ui2.addChild(selector);
-    ui2.setFocus(selector);
-    ui2.start();
-  });
+  return showStartupSelector(settingsManager, formatMissingSessionCwdPrompt(issue2), [
+    { label: "Continue", value: issue2.fallbackCwd },
+    { label: "Cancel", value: undefined }
+  ]);
 }
 async function main(args2, options4) {
   resetTimings();
@@ -287864,10 +290187,10 @@ async function main(args2, options4) {
   if (process.platform === "win32") {
     cleanupWindowsSelfUpdateQuarantine(getPackageDir());
   }
-  if (await handlePackageCommand(args2)) {
+  if (await handlePackageCommand(args2, { extensionFactories: options4?.extensionFactories })) {
     return;
   }
-  if (await handleConfigCommand(args2)) {
+  if (await handleConfigCommand(args2, { extensionFactories: options4?.extensionFactories })) {
     return;
   }
   const parsed = parseArgs2(args2);
@@ -287881,11 +290204,6 @@ async function main(args2, options4) {
     }
   }
   time3("parseArgs");
-  let appMode = resolveAppMode(parsed, process.stdin.isTTY);
-  const shouldTakeOverStdout = appMode !== "interactive";
-  if (shouldTakeOverStdout) {
-    takeOverStdout();
-  }
   if (parsed.version) {
     console.log(VERSION);
     process.exit(0);
@@ -287902,6 +290220,11 @@ async function main(args2, options4) {
     }
     console.log(`Exported to: ${result}`);
     process.exit(0);
+  }
+  let appMode = resolveAppMode(parsed, process.stdin.isTTY, process.stdout.isTTY);
+  const shouldTakeOverStdout = appMode !== "interactive" && !isPlainRuntimeMetadataCommand(parsed);
+  if (shouldTakeOverStdout) {
+    takeOverStdout();
   }
   if (parsed.mode === "rpc" && parsed.fileArgs.length > 0) {
     console.error(source_default.red("Error: @file arguments are not supported in RPC mode"));
@@ -287931,18 +290254,59 @@ async function main(args2, options4) {
       process.exit(1);
     }
   }
+  if (parsed.name !== undefined) {
+    const name = parsed.name.trim();
+    if (!name) {
+      console.error(source_default.red("Error: --name requires a non-empty value"));
+      process.exit(1);
+    }
+    sessionManager.appendSessionInfo(name);
+  }
   time3("createSessionManager");
+  const trustStore = new ProjectTrustStore(agentDir);
+  const sessionCwd = sessionManager.getCwd();
+  const autoTrustOnReloadCwd = parsed.projectTrustOverride === undefined && !hasProjectTrustInputs(sessionCwd) ? sessionCwd : undefined;
+  const trustPromptMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
+  const projectTrustByCwd = new Map;
   const resolvedExtensionPaths = resolveCliPaths(cwd, parsed.extensions);
   const resolvedSkillPaths = resolveCliPaths(cwd, parsed.skills);
   const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
   const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
   const authStorage = AuthStorage.create();
-  const createRuntime = async ({ cwd: cwd2, agentDir: agentDir2, sessionManager: sessionManager2, sessionStartEvent }) => {
+  const createRuntime = async ({ cwd: cwd2, agentDir: agentDir2, sessionManager: sessionManager2, sessionStartEvent, projectTrustContext }) => {
+    const isInitialRuntime = sessionStartEvent === undefined;
+    const projectTrustDiagnostics = [];
+    const cachedProjectTrust = projectTrustByCwd.get(cwd2);
+    const hasTrustInputs = hasProjectTrustInputs(cwd2);
+    const shouldResolveProjectTrust = parsed.projectTrustOverride === undefined && cachedProjectTrust === undefined && hasTrustInputs;
+    const projectTrusted = shouldResolveProjectTrust ? false : cachedProjectTrust ?? parsed.projectTrustOverride ?? (!hasTrustInputs || trustStore.get(cwd2) === true);
+    const runtimeSettingsManager = SettingsManager.create(cwd2, agentDir2, { projectTrusted });
     const services2 = await createAgentSessionServices({
       cwd: cwd2,
       agentDir: agentDir2,
       authStorage,
+      settingsManager: runtimeSettingsManager,
       extensionFlagValues: parsed.unknownFlags,
+      resourceLoaderReloadOptions: shouldResolveProjectTrust ? {
+        resolveProjectTrust: async ({ extensionsResult }) => {
+          const trusted = await resolveProjectTrusted({
+            cwd: cwd2,
+            trustStore,
+            trustOverride: parsed.projectTrustOverride,
+            defaultProjectTrust: startupSettingsManager.getDefaultProjectTrust(),
+            extensionsResult,
+            projectTrustContext: projectTrustContext ?? createProjectTrustContext({
+              cwd: cwd2,
+              mode: isInitialRuntime ? trustPromptMode : appMode,
+              settingsManager: startupSettingsManager,
+              hasUI: isInitialRuntime && trustPromptMode === "interactive"
+            }),
+            onExtensionError: (message) => projectTrustDiagnostics.push({ type: "warning", message })
+          });
+          projectTrustByCwd.set(cwd2, trusted);
+          return trusted;
+        }
+      } : undefined,
       resourceLoaderOptions: {
         additionalExtensionPaths: resolvedExtensionPaths,
         additionalSkillPaths: resolvedSkillPaths,
@@ -287960,11 +290324,12 @@ async function main(args2, options4) {
     });
     const { settingsManager: settingsManager2, modelRegistry: modelRegistry3, resourceLoader: resourceLoader2 } = services2;
     const diagnostics2 = [
+      ...projectTrustDiagnostics,
       ...services2.diagnostics,
       ...collectSettingsDiagnostics(settingsManager2, "runtime creation"),
-      ...resourceLoader2.getExtensions().errors.map(({ path: path15, error: error51 }) => ({
+      ...resourceLoader2.getExtensions().errors.map(({ path: path16, error: error51 }) => ({
         type: "error",
-        message: `Failed to load extension "${path15}": ${error51}`
+        message: `Failed to load extension "${path16}": ${error51}`
       }))
     ];
     const modelPatterns = parsed.models ?? settingsManager2.getEnabledModels();
@@ -288060,6 +290425,7 @@ async function main(args2, options4) {
     const interactiveMode = new InteractiveMode(runtime, {
       migratedProviders,
       modelFallbackMessage,
+      autoTrustOnReloadCwd,
       initialMessage,
       initialImages,
       initialMessages: parsed.messages,
@@ -288211,7 +290577,7 @@ class ThinkingSelectorComponent extends Container {
 }
 // src/debug-recorder.ts
 import fs12 from "node:fs";
-import path15 from "node:path";
+import path16 from "node:path";
 
 class DebugRecorder {
   rawJsonlPath;
@@ -288223,8 +290589,8 @@ class DebugRecorder {
       return;
     }
     fs12.mkdirSync(options4.debugDir, { recursive: true });
-    this.rawJsonlPath = path15.join(options4.debugDir, `session-${options4.sessionId}.raw.jsonl`);
-    this.rawLogPath = path15.join(options4.debugDir, `session-${options4.sessionId}.raw.log`);
+    this.rawJsonlPath = path16.join(options4.debugDir, `session-${options4.sessionId}.raw.jsonl`);
+    this.rawLogPath = path16.join(options4.debugDir, `session-${options4.sessionId}.raw.log`);
     fs12.writeFileSync(this.rawJsonlPath, "", "utf8");
     fs12.writeFileSync(this.rawLogPath, "", "utf8");
   }
@@ -288647,8 +291013,8 @@ var MODEL_SHORTNAMES = {
   "gpt-4o": "openai/gpt-4o"
 };
 function detectBundledPiVersion() {
-  const currentDir = path16.dirname(fileURLToPath7(import.meta.url));
-  const candidates2 = [path16.join(currentDir, "VERSION"), path16.join(currentDir, "..", "VERSION")];
+  const currentDir = path17.dirname(fileURLToPath7(import.meta.url));
+  const candidates2 = [path17.join(currentDir, "VERSION"), path17.join(currentDir, "..", "VERSION")];
   for (const candidate of candidates2) {
     try {
       const raw = fs13.readFileSync(candidate, "utf8").trim();
@@ -288662,7 +291028,7 @@ function getSessionStorageDir(debugDir) {
   if (!debugDir) {
     return;
   }
-  const sessionDir = path16.join(debugDir, "sessions");
+  const sessionDir = path17.join(debugDir, "sessions");
   fs13.mkdirSync(sessionDir, { recursive: true });
   return sessionDir;
 }
@@ -289045,7 +291411,7 @@ function writePreInitError(debugDir, message) {
   }
   try {
     fs14.mkdirSync(debugDir, { recursive: true });
-    fs14.appendFileSync(path17.join(debugDir, "session-unknown.raw.log"), `${message}
+    fs14.appendFileSync(path18.join(debugDir, "session-unknown.raw.log"), `${message}
 `, "utf8");
   } catch {}
 }
@@ -289055,10 +291421,10 @@ function writeSyntheticDebugFiles(debugDir, sessionId, events, logLine) {
   }
   try {
     fs14.mkdirSync(debugDir, { recursive: true });
-    fs14.writeFileSync(path17.join(debugDir, `session-${sessionId}.raw.jsonl`), `${events.map((event2) => JSON.stringify(event2)).join(`
+    fs14.writeFileSync(path18.join(debugDir, `session-${sessionId}.raw.jsonl`), `${events.map((event2) => JSON.stringify(event2)).join(`
 `)}
 `, "utf8");
-    fs14.writeFileSync(path17.join(debugDir, `session-${sessionId}.raw.log`), `${logLine}
+    fs14.writeFileSync(path18.join(debugDir, `session-${sessionId}.raw.log`), `${logLine}
 `, "utf8");
   } catch {}
 }

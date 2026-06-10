@@ -562,6 +562,45 @@ describe("LlmProviderRegistry", () => {
       });
     });
 
+    describe("Claude Fable 5 resolution", () => {
+      it("should resolve claude-fable-5 by exact model ID", () => {
+        const result = registry.resolveModel({
+          model: "claude-fable-5",
+        });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.modelInfo.providerId).toBe("anthropic");
+          expect(result.modelInfo.modelId).toBe("claude-fable-5");
+          expect(result.matchType).toBe("exact-with-inferred-provider");
+        }
+      });
+
+      it("should resolve with full model ID anthropic/claude-fable-5", () => {
+        const result = registry.resolveModel({
+          model: "anthropic/claude-fable-5",
+        });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.modelInfo.providerId).toBe("anthropic");
+          expect(result.modelInfo.modelId).toBe("claude-fable-5");
+        }
+      });
+
+      it("should return model metadata via getModelInfo", () => {
+        const result = registry.getModelInfo("anthropic/claude-fable-5");
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.info.name).toBe("Claude Fable 5");
+          expect(result.info.reasoning).toBe(true);
+          expect(result.info.limit.context).toBe(1000000);
+          expect(result.info.limit.output).toBe(128000);
+        }
+      });
+    });
+
     describe("fuzzy matching", () => {
       it("should fuzzy match partial model names", () => {
         const result = registry.resolveModel({
@@ -1277,8 +1316,16 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block all models from a blocked provider", () => {
-        // Groq is in the blocklist
-        const result = registry.getModelInfo("llama3-8b-8192");
+        // Use google: gemini models always resolve to google for bare model IDs
+        // (groq's models are also served by resellers, which can win the bare-ID lookup)
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            providers: ["google"],
+          },
+        });
+
+        const result = registry.getModelInfo("gemini-2.5-pro");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1287,7 +1334,7 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block provider models even with full model ID", () => {
-        const result = registry.getModelInfo("groq/llama3-8b-8192");
+        const result = registry.getModelInfo("groq/llama-3.1-8b-instant");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1401,8 +1448,16 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block all models from a blocked provider", () => {
-        // Groq is in the blocklist
-        const result = registry.getProviderForModel("llama3-8b-8192");
+        // Use google: gemini models always resolve to google for bare model IDs
+        // (groq's models are also served by resellers, which can win the bare-ID lookup)
+        registry = new LlmProviderRegistry({
+          logger: mockLogger,
+          blockList: {
+            providers: ["google"],
+          },
+        });
+
+        const result = registry.getProviderForModel("gemini-2.5-pro");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1411,7 +1466,7 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block provider models even with full model ID", () => {
-        const result = registry.getProviderForModel("groq/llama3-8b-8192");
+        const result = registry.getProviderForModel("groq/llama-3.1-8b-instant");
 
         expect(result.success).toBe(false);
         if (result.success === false) {

@@ -19,7 +19,9 @@ let inCorrectDir = false;
 try {
   if (fs.existsSync("package.json")) {
     const packageJson = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-    inCorrectDir = packageJson.name === "hankweave" && fs.existsSync("server/index.ts");
+    inCorrectDir =
+      (packageJson.name === "hankweave" || packageJson.name === "@southbridgeai/hankweave") &&
+      fs.existsSync("server/index.ts");
   }
 } catch {
   inCorrectDir = false;
