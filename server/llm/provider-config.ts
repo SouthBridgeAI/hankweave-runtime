@@ -63,6 +63,33 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
       }),
     healthCheckModels: ["gemini-flash-latest"],
   },
+  {
+    // DeepSeek exposes an OpenAI-compatible API, so we reuse the OpenAI
+    // provider factory pointed at the DeepSeek base URL. This lets the registry
+    // treat DeepSeek as a configurable provider for health checks, direct
+    // generateText calls, passthrough shims, and pricing metadata.
+    id: "deepseek",
+    apiKeyEnvVar: "DEEPSEEK_API_KEY",
+    createProvider: (apiKey) => {
+      const openai = createOpenAI({
+        apiKey,
+        baseURL: process.env.DEEPSEEK_BASE_URL?.replace(/\/+$/, "") || "https://api.deepseek.com",
+      });
+      // DeepSeek implements the OpenAI /chat/completions API but NOT the newer
+      // Responses API that @ai-sdk/openai's languageModel() targets by default.
+      // Route languageModel() to chat() so health checks and direct generateText
+      // calls hit /chat/completions instead of 404ing on /responses.
+      return new Proxy(openai, {
+        get(target, prop, receiver) {
+          if (prop === "languageModel") {
+            return (modelId: string) => target.chat(modelId);
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }) as unknown as Provider;
+    },
+    healthCheckModels: ["deepseek-v4-flash"],
+  },
   // Note: Mistral is not included as @ai-sdk/mistral is not currently available
   // but the models data includes mistral models for future use
 ];

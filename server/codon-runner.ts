@@ -6,8 +6,10 @@ import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
 import { TIMEOUTS } from "./config.js";
 import { CostTracker } from "./cost-tracker.js";
+import { classifyApiErrorText } from "./error-classification.js";
 import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
+import { isSupportedCodonProvider } from "./provider-ids.js";
 import { ReplayProcessManager } from "./replay-process-manager.js";
 import { ShimProcessManager } from "./shim-process-manager.js";
 import {
@@ -53,8 +55,10 @@ import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js
  * @throws Error if shims are not available
  */
 async function resolveShimPath(currentFilePath: string, providerId: string): Promise<string> {
+  type ShimName = "gemini" | "codex" | "pi" | "opencode";
+
   // Map provider ID to shim name
-  const shimNameMap: Record<string, string> = {
+  const shimNameMap: Record<string, ShimName> = {
     google: "gemini",
     openai: "codex",
     pi: "pi",
@@ -69,12 +73,12 @@ async function resolveShimPath(currentFilePath: string, providerId: string): Pro
   // Check if running from compiled executable
   if (isCompiledExecutable()) {
     // Extract shims if needed
-    if (needsShimExtraction(shimName as "gemini" | "codex" | "pi" | "opencode")) {
+    if (needsShimExtraction(shimName)) {
       await extractShimFiles();
     }
 
     // Return path to extracted shim
-    return getExtractedShimPath(shimName as "gemini" | "codex" | "pi" | "opencode");
+    return getExtractedShimPath(shimName);
   }
 
   const currentDir = path.dirname(currentFilePath);
@@ -222,13 +226,10 @@ export type CodonRunnerConfig = CodonRunnerConfigWithoutExtension | CodonRunnerC
  * ensuring they are created together, used together, and cleaned up together.
  */
 /**
- * Failure reasons that prevent extension
+ * Failure reasons that prevent extension.
+ * Shared with the runtime's failure-policy machinery (see event-schemas.ts).
  */
-type FailureReason =
-  | { type: "timeout"; retriable: boolean }
-  | { type: "rate-limit"; retriable: boolean }
-  | { type: "api-error"; retriable: boolean }
-  | { type: "unknown"; retriable: boolean };
+type FailureReason = import("./types/types.js").FailureReason;
 
 /**
  * Determines whether a codon should extend based on exit conditions.
@@ -252,9 +253,16 @@ export function shouldExtendCodon(params: {
   isInterrupted: boolean;
   failureReason: FailureReason | undefined;
   isBudgetExceeded?: boolean;
+  errorResultReceived?: boolean;
 }): boolean {
   // Cannot extend if no extension config
   if (!params.extensionConfig) return false;
+
+  // Cannot extend if the result was an error. An empty subtype:"error" result is
+  // the SDK placeholder (result:""); it intentionally leaves failureReason unset
+  // so a later thrown error can be classified authoritatively, but it must still
+  // block extension — the codon should fail, not be re-prompted.
+  if (params.errorResultReceived) return false;
 
   // Cannot extend if interrupted (user skip/force-stop)
   if (params.isInterrupted) return false;
@@ -301,8 +309,18 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   // Extension state - tracked internally
   private extensionCount = 0;
   private resultMessageReceived = false;
+  // Whether the received result was an error (subtype:"error" or a disguised
+  // success+is_error). Tracked separately from failureReason because an empty
+  // error result (the SDK placeholder, result:"") leaves failureReason unset by
+  // design, yet must still block extension.
+  private errorResultReceived = false;
   private failureReason: FailureReason | undefined = undefined;
   private currentSessionId: SessionId | null = null;
+  // Whether this codon attempt observed its first system/init message (the
+  // session was established). Gates retriability of unrecognized crashes: a
+  // process that died before establishing a session is a local setup failure,
+  // not a transient API error. Monotonic within an attempt; reset on a fresh run.
+  private systemMessageReceived = false;
 
   constructor(config: CodonRunnerConfig) {
     super();
@@ -312,11 +330,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     this.logPath = config.logPath;
 
     // Create cost tracker for this codon
-    this.costTracker = new CostTracker(
-      config.codon.model.modelId,
-      config.llmRegistry,
-      config.logger,
-    );
+    this.costTracker = new CostTracker(config.codon.model, config.llmRegistry, config.logger);
 
     // Wire cost tracking: CostTracker events → state transitions + enriched runner events
     this.costTracker.on("costIncremented", (delta) => {
@@ -394,13 +408,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    * - Anthropic models via ClaudeAgentSDKManager
    * - Google models via ShimProcessManager (gemini shim)
    * - OpenAI models via ShimProcessManager (codex shim)
+   * - DeepSeek, Pi, and OpenCode models via ShimProcessManager
    *
    * @param model - The ModelInfo to check
    * @returns true if the model can be executed, false otherwise
    */
   static canRun(model: ModelInfo): boolean {
-    const supportedProviders = ["anthropic", "google", "openai", "pi", "opencode"];
-    return supportedProviders.includes(model.providerId.toLowerCase());
+    return isSupportedCodonProvider(model.providerId);
   }
 
   /**
@@ -510,6 +524,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
 
       // Forward log parser events to our listeners, and track state for extensions
       onSystemMessage: (msg) => {
+        // A system message means the agent process got far enough to start a
+        // session — used to gate crash retriability (see getSystemMessageReceived).
+        this.systemMessageReceived = true;
         // Track session ID from init messages
         if (msg.subtype === "init" && msg.session_id) {
           this.currentSessionId = msg.session_id as SessionId;
@@ -524,10 +541,15 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       },
       onUserMessage: (msg) => this.emit("userMessage", msg),
       onResultMessage: (msg) => {
-        // Track successful completion for post-success SDK error handling
-        // Only set on actual success, not on error results
-        if (msg.subtype === "success") {
+        // Track successful completion for post-success SDK error handling.
+        // The SDK reports some API failures as subtype="success" with
+        // is_error=true (disguised errors) — those are NOT successes, and
+        // treating them as such would route the SDK's subsequent thrown error
+        // through the post-success suppression path, masking the real failure.
+        if (msg.subtype === "success" && !msg.is_error) {
           this.successResultReceived = true;
+        }
+        if (msg.subtype === "success") {
           // Process cost tracking for success results (tokens are spent even on is_error=true)
           this.costTracker.handleResultUsage(msg);
         }
@@ -535,18 +557,27 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         // Track that we received a result message (needed for extension decision)
         this.resultMessageReceived = true;
 
-        // Check for failure reasons that would prevent extension
-        if (msg.subtype === "error") {
-          // Determine failure reason from error type
-          const errorText = String(msg.result || "").toLowerCase();
-          if (errorText.includes("timeout") || errorText.includes("timed out")) {
-            this.failureReason = { type: "timeout", retriable: true };
-          } else if (errorText.includes("rate") || errorText.includes("429")) {
-            this.failureReason = { type: "rate-limit", retriable: true };
-          } else if (errorText.includes("api") || errorText.includes("500")) {
-            this.failureReason = { type: "api-error", retriable: true };
-          } else {
-            this.failureReason = { type: "unknown", retriable: false };
+        // Check for failure reasons that would prevent extension:
+        // explicit error results and disguised errors (success + is_error).
+        //
+        // Only classify when the result carries real text. The SDK strips the
+        // `result` field from `subtype:"error"` messages (see
+        // ClaudeAgentSDKManager.convertSDKMessageToJSONL, which fills `result:""`),
+        // so classifying that empty placeholder always yields the default-retriable
+        // api-error — and because the SDK-crash path prefers `this.failureReason ??
+        // classifyApiErrorText(error.message)`, that placeholder would shadow the
+        // REAL thrown billing/auth/400 error and wrongly retry a permanent failure.
+        // Leaving `failureReason` unset here lets the later thrown error be
+        // classified authoritatively. Disguised errors (success + is_error) keep
+        // their real `result` text, so they still classify correctly.
+        if (msg.subtype === "error" || (msg.subtype === "success" && msg.is_error)) {
+          // Record the error regardless of whether it carries text, so the empty
+          // placeholder still blocks extension even though we leave failureReason
+          // unset for the later thrown error to classify.
+          this.errorResultReceived = true;
+          const resultText = String(msg.result || "");
+          if (resultText) {
+            this.failureReason = classifyApiErrorText(resultText);
           }
         }
 
@@ -623,6 +654,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       this.handleProcessExit(code, isContextExceeded);
     });
 
+    // Only the Claude Agent SDK manager surfaces *API/SDK* crashes through its
+    // `error` event (a rejected queryPromise). ShimProcessManager and
+    // ReplayProcessManager emit `error` solely for LOCAL child-process failures
+    // (missing node/bun, bad cwd, an unexecutable shim) — those carry no API
+    // status and must stay fatal, never get classified as a retriable API crash.
+    const isClaudeAgentSDKManager = processManager instanceof ClaudeAgentSDKManager;
+
     processManager.on("error", (error: Error) => {
       // Handle budget exceeded: process was killed by us due to budget limit.
       // Convert to normal exit so handleCodonComplete can process the budget exceeded state.
@@ -650,9 +688,60 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         );
         // Transform error into normal exit - conversation completed successfully
         this.emit("exit", 0, false, this.extensionCount);
-      } else {
-        // No success result yet - this is a real error, forward it
+      } else if (!isClaudeAgentSDKManager) {
+        // Non-SDK manager (shim/replay): this `error` event is a LOCAL
+        // child-process failure (missing node/bun, bad cwd, unexecutable shim),
+        // not an API crash. classifyApiErrorText would default its unfamiliar
+        // text to retriable and wrongly route it into the exit/retry path — or,
+        // under onFailure:abort, leak an exit(1) that leaves the runtime active
+        // instead of failing the run. Keep it fatal. (Shim *API* errors travel
+        // the exit path and are handled by synthesizeMissingFailureReason in
+        // handleCodonComplete, never this listener.)
         this.emit("error", error);
+      } else {
+        // The SDK process raised an error without a clean success. Two shapes
+        // converge here and both must honor `onFailure: retry`:
+        //   - the subprocess crashed mid-conversation with NO result
+        //     message (e.g. a 5xx/overloaded error that exhausted the SDK's own
+        //     internal retries, or a dropped socket).
+        //   - the SDK first emitted a retriable error result — including
+        //     a disguised `subtype:"success", is_error:true` socket drop — which
+        //     onResultMessage already classified into `this.failureReason`, and
+        //     THEN threw.
+        //
+        // Decide on retriability, not on whether a result arrived: prefer the
+        // reason classified from the result (it carries the real upstream error),
+        // otherwise classify the crash text. Unrecognized text defaults to
+        // retriable (bounded by retryConfig.maxAttempts) per classifyApiErrorText.
+        //
+        // Either way (retriable OR permanent) the failure is an SDK/API outcome,
+        // so route it through the EXIT path with the classified reason rather
+        // than emitting a runner "error": the runtime escalates runner errors to
+        // FATAL shutdown, which never runs handleCodonComplete/resolveFailurePolicy
+        // — skipping codon failed-state recording and overriding a codon
+        // configured `onFailure: "ignore"`. Exiting lets resolveFailurePolicy
+        // decide: retriable+retry → retry, permanent (billing/auth/400) → shutdown
+        // for abort/retry but continue for ignore.
+        //
+        // Gate the thrown-error classification on session establishment: a crash
+        // before the first message, with text matching no known transient API
+        // pattern, is a local setup failure (bad executable, spawn error, bad
+        // cwd) — non-retriable. A prior result-classified reason still wins.
+        const failureReason =
+          this.failureReason ??
+          classifyApiErrorText(error.message, {
+            sessionEstablished: this.getSystemMessageReceived(),
+          });
+        this.failureReason = failureReason;
+        this.config.logger.log(
+          `[CodonRunner] SDK crash classified ${
+            failureReason.retriable ? "retriable" : "permanent"
+          } — routing to exit path for failure policy: ${error.message}`,
+          "error",
+        );
+        // Non-zero exit so handleCodonComplete marks the codon failed and the
+        // runtime consults resolveFailurePolicy with the classified reason.
+        this.emit("exit", 1, false, this.extensionCount);
       }
     });
 
@@ -689,6 +778,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       isInterrupted,
       failureReason: this.failureReason,
       isBudgetExceeded,
+      errorResultReceived: this.errorResultReceived,
     });
 
     // Type narrowing: if shouldExtend is true, extensionConfig must be defined
@@ -742,6 +832,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
 
     // Reset per-extension state
     this.resultMessageReceived = false;
+    this.errorResultReceived = false;
     this.failureReason = undefined;
     this.successResultReceived = false;
 
@@ -813,8 +904,12 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     // Reset extension state at start of new run
     this.extensionCount = 0;
     this.resultMessageReceived = false;
+    this.errorResultReceived = false;
     this.failureReason = undefined;
     this.currentSessionId = null;
+    // Establishment is tracked per attempt: a fresh run starts not-established.
+    // (Not reset in performExtension — an extension continues the same session.)
+    this.systemMessageReceived = false;
 
     this.config.logger.log(
       `CodonRunner: Starting execution of codon ${this.config.codonId}`,
@@ -884,6 +979,37 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    */
   getPid(): number | undefined {
     return this.processManager?.getPid();
+  }
+
+  /**
+   * The classified failure reason for the current attempt, if one was derived
+   * from an error result message or a transient mid-stream crash. The runtime
+   * adopts this on the exit path when it has no result-message-derived reason of
+   * its own, so `onFailure: retry` can act on SDK crashes that never produced a
+   * terminal result.
+   */
+  getFailureReason(): FailureReason | undefined {
+    return this.failureReason;
+  }
+
+  /**
+   * Whether the agent session was established (first system/init message
+   * observed) before any failure. Used to gate the retriability of unrecognized
+   * crashes: a process that dies before establishing a session, with text we
+   * don't recognize as a transient API error, is a local setup failure, not a
+   * transient one.
+   *
+   * ORs the log-parser-fed flag with the SDK manager's synchronous signal: the
+   * SDK emits "error" after cleanup() without force-parsing the log, so the
+   * parser-fed flag can lag a genuine establishment — `getSessionEstablished()`
+   * (derived from the session id captured in the message loop) closes that race.
+   */
+  getSystemMessageReceived(): boolean {
+    return (
+      this.systemMessageReceived ||
+      (this.processManager instanceof ClaudeAgentSDKManager &&
+        this.processManager.getSessionEstablished())
+    );
   }
 
   /**

@@ -32,6 +32,11 @@ export const TIMEOUTS = {
   LOG_PARSER_DELAY_MS: 100, // 100ms delay for log parsing
   CODON_CLEANUP_DELAY_MS: 100, // 100ms delay for codon cleanup
   SELF_TEST_TIMEOUT_MS: process.platform === "win32" ? 60000 : 30000, // 60s on Windows, 30s elsewhere
+  // Backstop for graceful shutdown: if any awaited shutdown step (process kill,
+  // sentinel/telemetry flush, pending state transitions, event-journal drain)
+  // wedges, force-exit the process after this bound so a detected-fatal run can
+  // never hang forever. Generous margin over PROCESS_KILL_GRACE_MS + flushes.
+  SHUTDOWN_WATCHDOG_MS: 30000, // 30 seconds
 } as const;
 
 /** Maximum allowed shimIdleTimeout in seconds */
@@ -832,8 +837,10 @@ export const codonObjectSchema = z.object({
     )
     .optional()
     .describe(
-      "Max seconds between agent events before the shim aborts (idle timeout). " +
-        "Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s).",
+      "Max seconds between agent events before the session aborts (idle timeout). " +
+        "Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, " +
+        "or the built-in default (180s for Anthropic models via the Claude SDK, 120s inside the shims for other providers). " +
+        "An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies.",
     ),
   budget: z
     .object({
@@ -1637,6 +1644,13 @@ export interface HankweaveConfig
   isResuming: boolean;
   /** How data is linked (symlink or copy) */
   linkType: "symlink" | "copy";
+  /**
+   * True when launched with --headless: no interactive TUI/client is driving
+   * the run. Used to decide that a retriable failure under onFailure:"abort"
+   * must fail-and-shutdown rather than park in "stay-active" (which would hang
+   * forever waiting for a client that will never connect).
+   */
+  headless?: boolean;
 
   /** Array of codon configurations to execute */
   codons: CodonConfig[];
@@ -2667,6 +2681,20 @@ export async function validateHank(options: {
             `if subsequent iterations might fail (e.g., trying to copy files to where they already exist).`,
         );
       }
+    }
+
+    // Warn about loop codons that abort on failure (the default).
+    // Inside a long-running loop, a single transient blip (e.g. an idle-timeout
+    // abort or a one-off provider error) will park or terminate the entire run.
+    // Loop-body codons usually want bounded retry or ignore-and-continue instead.
+    if (!isTopLevel && (codon.onFailure === undefined || codon.onFailure === "abort")) {
+      const policy = codon.onFailure === undefined ? "defaults to" : "uses";
+      result.warnings.push(
+        `${codonLabel}: loop codon ${policy} 'onFailure: abort'. ` +
+          `A single transient failure (idle timeout, one-off provider error) on any iteration ` +
+          `will halt the entire loop run. Consider 'onFailure: retry' (with retryConfig for bounded attempts) ` +
+          `or 'onFailure: ignore' to keep the loop progressing across transient blips.`,
+      );
     }
 
     // Increment codon count

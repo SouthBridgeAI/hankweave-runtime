@@ -50,6 +50,13 @@ describe("Model Validator — Passthrough Providers", () => {
       expect(result.modelInfo?.providerId).toBe("pi");
       expect(result.modelInfo?.modelId).toBe("openai/gpt-5.4");
     });
+
+    test("pi/deepseek/deepseek-v4-flash resolves as passthrough", () => {
+      const result = validateModel("pi/deepseek/deepseek-v4-flash", registry);
+      expect(result.valid).toBe(true);
+      expect(result.modelInfo?.providerId).toBe("pi");
+      expect(result.modelInfo?.modelId).toBe("deepseek/deepseek-v4-flash");
+    });
   });
 
   describe("passthrough ModelInfo defaults", () => {
@@ -156,7 +163,7 @@ describe("Model Validator — Passthrough Providers", () => {
   describe("invalid passthrough cases", () => {
     test("unknown prefix doesn't match passthrough", () => {
       const result = validateModel("fakeagent/some-model", registry);
-      // Should NOT be valid (fakeagent is not in PASSTHROUGH_SHIM_PROVIDERS and not in registry)
+      // Should NOT be valid (fakeagent is not a pass-through shim provider and not in registry)
       // It might fuzzy-match to something in the registry, but the providerId won't be "fakeagent"
       if (result.valid && result.modelInfo) {
         expect(result.modelInfo.providerId).not.toBe("fakeagent");
@@ -211,7 +218,11 @@ describe("Model Validator — CodonRunner.canRun for new providers", () => {
     expect(CodonRunner.canRun({ providerId: "openai" })).toBe(true);
   });
 
-  test("canRun rejects unsupported provider", () => {
+  test("canRun rejects direct deepseek provider without a harness shim", () => {
     expect(CodonRunner.canRun({ providerId: "deepseek" })).toBe(false);
+  });
+
+  test("canRun rejects unsupported provider", () => {
+    expect(CodonRunner.canRun({ providerId: "venice" })).toBe(false);
   });
 });

@@ -1,4 +1,6 @@
 import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
+import type { ModelInfo } from "./llm/models-dev-schema.js";
+import { isPassthroughShimProvider } from "./provider-ids.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { TokenUsage } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -56,13 +58,25 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
   };
+  private readonly executableModelId: string | undefined;
+  private readonly pricingModelId: string | undefined;
 
   constructor(
-    private readonly modelId: string | undefined,
+    model: ModelInfo | undefined,
     private readonly llmRegistry: LlmProviderRegistry,
     private readonly logger: Logger,
   ) {
     super();
+    this.executableModelId = model?.modelId;
+    this.pricingModelId = model ? CostTracker.getPricingModelId(model) : undefined;
+  }
+
+  private static getPricingModelId(model: ModelInfo): string {
+    if (isPassthroughShimProvider(model.providerId)) {
+      return model.modelId;
+    }
+
+    return `${model.providerId}/${model.modelId}`;
   }
 
   /**
@@ -80,8 +94,8 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
     // Calculate cost delta using LLM registry
     let costDelta = 0;
 
-    if (this.modelId) {
-      const calculatedCost = this.llmRegistry.calculateCost(this.modelId, {
+    if (this.pricingModelId) {
+      const calculatedCost = this.llmRegistry.calculateCost(this.pricingModelId, {
         inputTokens: tokensDelta.inputTokens,
         outputTokens: tokensDelta.outputTokens,
         cacheReadTokens: tokensDelta.cacheReadTokens,
@@ -91,7 +105,10 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
       if (calculatedCost !== null) {
         costDelta = calculatedCost;
       } else {
-        this.logger.log(`Cannot calculate incremental cost for model: ${this.modelId}`, "debug");
+        this.logger.log(
+          `Cannot calculate incremental cost for model: ${this.pricingModelId}`,
+          "debug",
+        );
       }
     } else {
       this.logger.log("Cannot calculate incremental cost: no model ID in current codon", "debug");
@@ -126,8 +143,8 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
     let finalCost = msg.total_cost_usd;
 
     if (finalCost === undefined) {
-      if (this.modelId) {
-        const calculatedCost = this.llmRegistry.calculateCost(this.modelId, {
+      if (this.pricingModelId) {
+        const calculatedCost = this.llmRegistry.calculateCost(this.pricingModelId, {
           inputTokens: finalTokens.inputTokens,
           outputTokens: finalTokens.outputTokens,
           cacheReadTokens: finalTokens.cacheReadTokens,
@@ -139,7 +156,7 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
         } else {
           // Fall back to accumulated cost if registry lookup fails
           this.logger.log(
-            `Cannot calculate final cost for model: ${this.modelId}, using accumulated cost: $${this.runningCost.toFixed(4)}`,
+            `Cannot calculate final cost for model: ${this.pricingModelId}, using accumulated cost: $${this.runningCost.toFixed(4)}`,
             "debug",
           );
           finalCost = this.runningCost;
@@ -166,7 +183,7 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
       cost: finalCost,
       tokens: finalTokens,
       modelUsage: msg.modelUsage,
-      modelId: this.modelId,
+      modelId: this.executableModelId,
     });
   }
 

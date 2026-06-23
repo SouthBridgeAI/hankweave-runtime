@@ -513,7 +513,18 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     const currentRun = this.getCurrentRun();
     if (!currentRun) return null;
 
-    return currentRun.codons.find((p) => p.codonId === codonId) || null;
+    // Return the LATEST record for this codonId, not the first. A retried codon
+    // appends a new execution record (CodonStarted pushes — see the reducer)
+    // while the failed attempt's record stays in place as terminal history. A
+    // naive find-first would return that stale terminal record, so callers like
+    // handleCodonComplete would see status="failed" (terminal) and early-return
+    // — wedging the run after a retry SUCCEEDS (the running record never
+    // advances to completed). Scanning from the end mirrors the CodonTransitioned
+    // reducer, which also targets the latest record for the codon.
+    for (let i = currentRun.codons.length - 1; i >= 0; i--) {
+      if (currentRun.codons[i].codonId === codonId) return currentRun.codons[i];
+    }
+    return null;
   }
 
   /**

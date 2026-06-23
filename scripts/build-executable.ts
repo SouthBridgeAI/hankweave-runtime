@@ -108,7 +108,7 @@ async function main() {
   const outputFile = path.join(OUTPUT_DIR, outputFileName);
 
   // Each shim gets a unique bundle filename because Bun deduplicates embedded
-  // files by basename — four "index.bundle" entries would collapse to one.
+  // files by basename — multiple "index.bundle" entries would collapse to one.
   const SHIM_NAMES = ["gemini", "codex", "opencode", "pi"] as const;
   const shimBundles: Array<{ name: string; source: string; bundle: string }> =
     SHIM_NAMES.map((name) => ({

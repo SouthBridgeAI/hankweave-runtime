@@ -149,7 +149,15 @@ describe("CodonRunner post-success SDK error handling", () => {
   });
 
   describe("without success result (normal error path)", () => {
-    test("should emit error when no success result was received", async () => {
+    test("permanent failure with no success result -> non-retriable exit, not fatal error", async () => {
+      // No success result -> post-success suppression must NOT apply. With no
+      // result message at all, the crash is classified. A PERMANENT failure
+      // (here, a billing error) is still an SDK/API outcome, so it routes through
+      // the EXIT path carrying a non-retriable failureReason — letting
+      // resolveFailurePolicy decide shutdown vs continue — rather than a fatal
+      // "error" that the runtime would escalate to FATAL shutdown, bypassing the
+      // policy. Transient crashes with no result also route to the exit path —
+      // see tests/unit/codon-runner-transient-crash-retry.test.ts.
       // Use an empty log file (no success result)
       const emptyLogPath = path.join(tempDir, "empty.jsonl");
       await fs.promises.writeFile(emptyLogPath, "");
@@ -177,15 +185,15 @@ describe("CodonRunner post-success SDK error handling", () => {
 
       let exitEmitted = false;
       let errorEmitted = false;
-      let errorMessage: string | undefined;
+      let exitCode: number | undefined;
 
-      runner.on("exit", () => {
+      runner.on("exit", (code) => {
         exitEmitted = true;
+        exitCode = code;
       });
 
-      runner.on("error", (error) => {
+      runner.on("error", () => {
         errorEmitted = true;
-        errorMessage = error.message;
       });
 
       // No log parsing needed - just trigger error directly
@@ -194,50 +202,52 @@ describe("CodonRunner post-success SDK error handling", () => {
         .successResultReceived;
       expect(successReceived).toBe(false);
 
-      // Simulate SDK error without prior success
-      const processManager = (
-        runner as unknown as {
-          processManager: { emit: (event: string, error: Error) => void };
-        }
-      ).processManager;
-      processManager.emit("error", new Error("Real SDK error - no success"));
+      // Simulate a permanent SDK error without prior success
+      const internals = runner as unknown as {
+        processManager: { emit: (event: string, error: Error) => void };
+        failureReason: { retriable: boolean } | undefined;
+      };
+      const permanentError = "API Error: Your credit balance is too low to access the API.";
+      internals.processManager.emit("error", new Error(permanentError));
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      // Verify: error propagated, no exit
-      expect(errorEmitted).toBe(true);
-      expect(errorMessage).toBe("Real SDK error - no success");
-      expect(exitEmitted).toBe(false);
+      // Verify: routed to the exit/failure-policy path with a non-retriable
+      // reason, NOT a fatal runner error.
+      expect(errorEmitted).toBe(false);
+      expect(exitEmitted).toBe(true);
+      expect(exitCode).not.toBe(0);
+      expect(internals.failureReason).toMatchObject({ retriable: false });
     });
   });
 
-  describe("with error result only (conversation failed)", () => {
-    test("should emit error when conversation failed before SDK error", async () => {
-      // Create a log with only error result (conversation failed)
-      const failedLogPath = path.join(tempDir, "failed.jsonl");
-      const failedLog = `${[
+  describe("error result followed by an SDK throw", () => {
+    // The SDK can emit an error RESULT and THEN throw a process-manager error.
+    // onResultMessage classifies the result into `failureReason`; the subsequent
+    // throw must be routed by RETRIABILITY (prefer that classified reason), not
+    // by whether a result arrived — otherwise `onFailure: retry` is bypassed for
+    async function runWithResultThenThrow(resultMessage: Record<string, unknown>) {
+      const logPath = path.join(tempDir, "result-then-throw.jsonl");
+      const log = `${[
         JSON.stringify({
           type: "system",
           subtype: "init",
           session_id: "test-session",
           model: "claude-sonnet-4-5",
           cwd: "/test",
-          tools: ["Read"], // Must have at least one tool
+          tools: ["Read"],
           mcp_servers: [],
           permissionMode: "bypassPermissions",
           apiKeySource: "ANTHROPIC_API_KEY",
         }),
         JSON.stringify({
           type: "result",
-          subtype: "error", // NOT "success"
-          is_error: true,
-          result: "Conversation failed due to some reason",
           num_turns: 5,
           duration_ms: 10000,
-          duration_api_ms: 8000, // Required by schema
+          ...resultMessage,
         }),
-      ].join("\n")}\n`; // Trailing newline like real log files
-      await fs.promises.writeFile(failedLogPath, failedLog);
+      ].join("\n")}\n`;
+      await fs.promises.writeFile(logPath, log);
 
       const codon = createTestCodon({
         id: "test-codon",
@@ -251,53 +261,79 @@ describe("CodonRunner post-success SDK error handling", () => {
         codon,
         codonId: "test-codon" as CodonId,
         executionPath: tempDir,
-        agentRootPath: tempDir, // Use same path for tests
+        agentRootPath: tempDir,
         logger,
         llmRegistry: mockLlmRegistry,
         runId: mockRunId,
         stateManager: mockStateManager,
         budget: createTestBudget(),
-        logPath: failedLogPath,
+        logPath,
         logParsingInterval: 50,
       });
 
-      let exitEmitted = false;
-      let errorEmitted = false;
-
-      runner.on("exit", () => {
-        exitEmitted = true;
+      const events = {
+        exitEmitted: false,
+        errorEmitted: false,
+        exitCode: undefined as number | undefined,
+      };
+      runner.on("exit", (code) => {
+        events.exitEmitted = true;
+        events.exitCode = code;
       });
-
       runner.on("error", () => {
-        errorEmitted = true;
+        events.errorEmitted = true;
       });
 
-      // Start parsing
-      const logParser = (runner as unknown as { logParser: { start: () => void } }).logParser;
-      logParser.start();
+      const internals = runner as unknown as {
+        logParser: { start: () => void; stop: () => void };
+        successResultReceived: boolean;
+        processManager: { emit: (event: string, error: Error) => void };
+      };
+      internals.logParser.start();
       await new Promise((resolve) => setTimeout(resolve, 150));
 
-      // Error result should NOT set successResultReceived
-      const successReceived = (runner as unknown as { successResultReceived: boolean })
-        .successResultReceived;
-      expect(successReceived).toBe(false);
+      // A disguised/error result is never a success.
+      expect(internals.successResultReceived).toBe(false);
 
-      // Simulate SDK error after failed conversation
-      const processManager = (
-        runner as unknown as {
-          processManager: { emit: (event: string, error: Error) => void };
-        }
-      ).processManager;
-      processManager.emit("error", new Error("SDK cleanup error"));
-
+      // SDK throws after emitting the result.
+      internals.processManager.emit("error", new Error("Claude Code process exited with code 1"));
       await new Promise((resolve) => setTimeout(resolve, 50));
+      internals.logParser.stop();
+      return events;
+    }
 
-      // Verify: error propagated (conversation actually failed)
-      expect(errorEmitted).toBe(true);
-      expect(exitEmitted).toBe(false);
+    test("retriable error result then throw -> retriable exit, not fatal", async () => {
+      // The reviewer's exact case: a disguised socket-drop result.
+      const events = await runWithResultThenThrow({
+        subtype: "success",
+        is_error: true,
+        result: "API Error: The socket connection was closed unexpectedly.",
+        duration_api_ms: 8000,
+      });
+      expect(events.errorEmitted).toBe(false);
+      expect(events.exitEmitted).toBe(true);
+      expect(events.exitCode).not.toBe(0);
+    });
 
-      const logParserStop = (runner as unknown as { logParser: { stop: () => void } }).logParser;
-      logParserStop.stop();
+    test("permanent error result then throw -> non-retriable exit routed to failure policy", async () => {
+      const events = await runWithResultThenThrow({
+        subtype: "error",
+        is_error: true,
+        result: "API Error: Your credit balance is too low to access the API.",
+        duration_api_ms: 8000,
+      });
+      // Permanent, but still an SDK/API outcome: route through the exit path with
+      // a non-retriable reason (not a fatal runner error that bypasses the policy).
+      expect(events.errorEmitted).toBe(false);
+      expect(events.exitEmitted).toBe(true);
+      expect(events.exitCode).not.toBe(0);
+      expect(
+        (
+          runner as unknown as {
+            failureReason: { retriable: boolean } | undefined;
+          }
+        ).failureReason,
+      ).toMatchObject({ retriable: false });
     });
   });
 
@@ -398,6 +434,83 @@ describe("CodonRunner post-success SDK error handling", () => {
 
       const logParserStop = (runner as unknown as { logParser: { stop: () => void } }).logParser;
       logParserStop.stop();
+    });
+
+    test("should NOT be set for disguised errors (subtype=success, is_error=true)", async () => {
+      // The SDK reports transport failures as subtype="success" with is_error=true. Treating
+      // those as success routed the SDK's thrown error through the
+      // post-success suppression path, masking the real failure.
+      const disguisedLogPath = path.join(tempDir, "disguised-error.jsonl");
+      const disguisedLog = `${[
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: "test-session",
+          model: "claude-sonnet-4-5",
+          cwd: "/test",
+          tools: ["Read"],
+          mcp_servers: [],
+          permissionMode: "bypassPermissions",
+          apiKeySource: "ANTHROPIC_API_KEY",
+        }),
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: true, // Disguised error: success subtype, error flag set
+          result: "API Error: The socket connection was closed unexpectedly.",
+          num_turns: 1,
+          duration_ms: 5000,
+          duration_api_ms: 4000,
+        }),
+      ].join("\n")}\n`;
+      await fs.promises.writeFile(disguisedLogPath, disguisedLog);
+
+      const codon = createTestCodon({
+        id: "test-codon",
+        name: "Test Codon",
+        promptText: "Test prompt",
+        model: "sonnet",
+        continuationMode: "fresh",
+      });
+
+      runner = new CodonRunner({
+        codon,
+        codonId: "test-codon" as CodonId,
+        executionPath: tempDir,
+        agentRootPath: tempDir, // Use same path for tests
+        logger,
+        llmRegistry: mockLlmRegistry,
+        runId: mockRunId,
+        stateManager: mockStateManager,
+        budget: createTestBudget(),
+        logPath: disguisedLogPath,
+        logParsingInterval: 50,
+      });
+
+      const logParser = (
+        runner as unknown as {
+          logParser: { start: () => void; stop: () => void };
+        }
+      ).logParser;
+      logParser.start();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      logParser.stop();
+
+      // Disguised error must not count as success...
+      const successReceived = (runner as unknown as { successResultReceived: boolean })
+        .successResultReceived;
+      expect(successReceived).toBe(false);
+
+      // ...and must produce a retriable failure reason for the runtime.
+      const failureReason = (
+        runner as unknown as {
+          failureReason: { type: string; retriable: boolean } | undefined;
+        }
+      ).failureReason;
+      expect(failureReason).toMatchObject({
+        type: "api-error",
+        retriable: true,
+      });
     });
 
     test("should reset successResultReceived between extensions", async () => {

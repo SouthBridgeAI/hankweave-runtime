@@ -1137,10 +1137,12 @@ describe("validateHank", () => {
       logger: testLogger,
     });
 
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toContain("Continues from previous loop");
-    expect(result.warnings[0]).toContain("whose last codon");
-    expect(result.warnings[0]).toContain("doesn't checkpoint any files");
+    const continuationWarning = result.warnings.find((w: string) =>
+      w.includes("Continues from previous loop"),
+    );
+    expect(continuationWarning).toBeDefined();
+    expect(continuationWarning).toContain("whose last codon");
+    expect(continuationWarning).toContain("doesn't checkpoint any files");
   });
 
   test("throws on empty command", async () => {
@@ -1405,6 +1407,97 @@ describe("validateHank", () => {
     // Should not throw, but should have warnings
     expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.warnings.some((w: string) => w.includes("allowFailure"))).toBe(true);
+  });
+
+  test("warns when a loop codon defaults to onFailure: abort", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "abort-default-loop",
+        name: "Abort Default Loop",
+        terminateOn: { type: "iterationLimit", limit: 24 },
+        codons: [
+          {
+            id: "loop-body",
+            name: "Loop Body",
+            model: "opus",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+            // No onFailure - defaults to "abort"
+          },
+        ],
+      },
+    ];
+
+    writeHankConfig(configPath, config);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
+
+    const abortWarning = result.warnings.find((w: string) => w.includes("onFailure: abort"));
+    expect(abortWarning).toBeDefined();
+    expect(abortWarning).toContain("defaults to");
+  });
+
+  test("does not warn about abort when loop codon sets onFailure: retry", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        type: "loop",
+        id: "retry-loop",
+        name: "Retry Loop",
+        terminateOn: { type: "iterationLimit", limit: 24 },
+        codons: [
+          {
+            id: "loop-body",
+            name: "Loop Body",
+            model: "opus",
+            continuationMode: "fresh",
+            promptFile: "./prompt.md",
+            onFailure: "retry",
+            retryConfig: { maxAttempts: 3 },
+          },
+        ],
+      },
+    ];
+
+    writeHankConfig(configPath, config);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
+
+    expect(result.warnings.some((w: string) => w.includes("onFailure: abort"))).toBe(false);
+  });
+
+  test("does not warn about abort for a top-level codon", async () => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+
+    const config = [
+      {
+        id: "top-level",
+        name: "Top Level Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+        // No onFailure - defaults to "abort", but top-level codons should not warn
+      },
+    ];
+
+    writeHankConfig(configPath, config);
+    const result = await validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
+
+    expect(result.warnings.some((w: string) => w.includes("onFailure: abort"))).toBe(false);
   });
 
   test("throws when contextExceeded loop has codons with fresh continuationMode", async () => {

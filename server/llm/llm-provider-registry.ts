@@ -467,6 +467,10 @@ export class LlmProviderRegistry {
     // Exact matching first
     if (lowerModel.includes("claude")) return "anthropic";
     if (lowerModel.includes("gemini")) return "google";
+    // DeepSeek models are also resold by aggregators (e.g. poe, venice); the
+    // first-party "deepseek" provider is the canonical home, so prefer it for
+    // any deepseek-named model rather than letting a reseller win the bare id.
+    if (lowerModel.includes("deepseek")) return "deepseek";
     if (
       lowerModel.startsWith("gpt-") ||
       lowerModel.startsWith("o1-") ||
@@ -480,6 +484,7 @@ export class LlmProviderRegistry {
       { term: "claude", provider: "anthropic" },
       { term: "gemini", provider: "google" },
       { term: "gpt", provider: "openai" },
+      { term: "deepseek", provider: "deepseek" },
     ];
 
     for (const { term, provider } of patterns) {

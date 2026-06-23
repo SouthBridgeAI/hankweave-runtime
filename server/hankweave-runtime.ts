@@ -8,6 +8,11 @@ import { CheckpointGit } from "./checkpoint-git.js";
 import { CodonRunner, type ExtensionInfo } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
+import {
+  classifyApiErrorText,
+  resolveFailureAction,
+  synthesizeMissingFailureReason,
+} from "./error-classification.js";
 import { EventJournal } from "./event-journal.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
@@ -166,6 +171,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private codonRunners = new Map<string, CodonRunner>();
   private serverStartTime: Date;
   private isShuttingDown = false;
+  private shutdownWatchdog?: NodeJS.Timeout;
   private isSkippingCodon = false;
   private uploadTrace?: () => void;
 
@@ -2909,22 +2915,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    */
   private setApiErrorFailureReason(msg: ResultMessage, codonId: string): void {
     const errorText = msg.result || msg.error || "Unknown API error";
-    const errorLower = (typeof errorText === "string" ? errorText : "").toLowerCase();
 
-    const isRateLimit = errorLower.includes("rate") || errorLower.includes("429");
-    const isBilling =
-      errorLower.includes("credit") ||
-      errorLower.includes("billing") ||
-      errorLower.includes("insufficient") ||
-      errorLower.includes("quota");
-
-    this.codonFailureReason = {
-      type: isRateLimit ? "rate-limit" : "api-error",
-      retriable: isRateLimit, // Rate limits are retriable, billing/other errors are not
-      message: isBilling
-        ? `API billing/credit error: ${errorText}`
-        : `API error in result: ${errorText}`,
-    };
+    this.codonFailureReason = classifyApiErrorText(
+      typeof errorText === "string" ? errorText : "Unknown API error",
+    );
 
     this.logger.log(
       `Error result message for codon ${codonId}: ${this.codonFailureReason.message}`,
@@ -3160,9 +3154,27 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     const codonConfig = this.currentCodon.codon; // Save codon config before potential cleanup
     const wasSkipped = this.isSkippingCodon;
 
-    // Now get the codon from state manager to ensure we have the latest status
+    // Now get the codon from state manager to ensure we have the latest status.
+    // These early-returns are silent stalls of the completion handler — if the
+    // record is missing or already terminal, the codon will NOT advance from
+    // here. Log both so a wedge (e.g. the ATUS post-retry hang, where a stale
+    // terminal record was fetched while the live retry sat in `running`) is
+    // visible in the server log instead of presenting as silence.
     const currentCodon = this.stateManager.getCodonInCurrentRun(CodonId(codonId));
-    if (!currentCodon || isTerminalCodonStatus(currentCodon.status)) return;
+    if (!currentCodon) {
+      this.logger.log(
+        `[handleCodonComplete] No state record found for codon ${codonId} in current run — returning early (codon will not advance)`,
+        "error",
+      );
+      return;
+    }
+    if (isTerminalCodonStatus(currentCodon.status)) {
+      this.logger.log(
+        `[handleCodonComplete] Codon ${codonId} is already terminal (status=${currentCodon.status}) — returning early without completing (exitCode=${exitCode})`,
+        "info",
+      );
+      return;
+    }
 
     // Get current status before any transitions
     const currentStatus = currentCodon.status;
@@ -3319,6 +3331,31 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       finalStatus = "failed";
     }
 
+    // Derive a failure reason when the codon failed but none was classified from
+    // a result message. The runtime normally sets codonFailureReason from result
+    // messages, but a process can exit FAILED without ever producing one:
+    //  - The Claude Agent SDK crashes mid-stream — CodonRunner classifies the
+    //    crash text and surfaces it via getFailureReason().
+    //  - A shim exits non-zero on an early/pre-init API error with no result
+    //    message at all (gemini/pi/opencode).
+    // Without a reason here the failure would default to {retriable: false} and
+    // silently bypass `onFailure: retry`. Prefer the runner's classified reason
+    // (it carries the real error text); otherwise synthesize a bounded-retriable
+    // backstop, excluding force-stop and context-exceeded.
+    if (finalStatus === "failed" && !this.codonFailureReason) {
+      this.codonFailureReason =
+        runner?.getFailureReason() ??
+        synthesizeMissingFailureReason({
+          isForceStopping: this.isForceStopping,
+          isContextExceeded,
+          exitCode,
+          // A process that exited with no result before establishing a session is
+          // a local setup failure (non-retriable); default true when unknown to
+          // preserve the bounded-retriable backstop.
+          sessionEstablished: runner?.getSystemMessageReceived?.() ?? true,
+        });
+    }
+
     // Create checkpoint BEFORE state transition
     let checkpointSha: string | undefined;
     if (this.checkpointingEnabled) {
@@ -3442,12 +3479,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         success: finalStatus === "completed",
         cost: reportedCost, // Use the authoritative, persisted cost (includes retry costs)
         duration: Date.now() - new Date(currentCodon.startTime).getTime(),
+        // Derived from finalStatus, not the raw exit code: disguised API
+        // errors exit 0, and reporting {type: "success"} for a failed codon
         exitStatus:
-          finalStatus === "skipped"
-            ? { type: "error", code: exitCode }
-            : exitCode === 0
-              ? { type: "success" }
-              : { type: "error", code: exitCode },
+          finalStatus === "completed" ? { type: "success" } : { type: "error", code: exitCode },
         failureReason: finalStatus === "failed" ? this.codonFailureReason : undefined,
         // Mark if this failure will be ignored due to onFailure config
         failureIgnored: willIgnoreFailure ? true : undefined,
@@ -3623,6 +3658,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       });
     }
 
+    // Capture the classified failure context BEFORE cleanup. cleanupCurrentCodon()
+    // (below) nulls this.codonFailureReason/Error, but the failure-policy
+    // resolution and telemetry below still need them — otherwise resolveFailurePolicy
+    // sees "no failure reason", treats every retriable failure as non-retriable, and
+    // `onFailure: "retry"` silently falls back to abort (and `onFailure: "abort"`
+    // shuts down instead of staying active). Covered by
+    // tests/e2e/error-classification-replay-e2e.test.ts.
+    const capturedFailureReason = this.codonFailureReason;
+    const capturedFailureError = this.codonFailureError;
+
     // Clean up - now happens after state is persisted
     // RACE CONDITION FIX: Look up the runner by codonId from the map
     // This ensures we clean up the correct runner even if autoStartNextCodon already started a new codon
@@ -3688,13 +3733,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         const { captureError } = await import("./telemetry/error-tracking.js");
         const { sha256 } = await import("./telemetry/privacy-maps.js");
         const { getMetadata } = await import("./utils.js");
-        const failureType = this.codonFailureReason?.type || "unknown";
-        const failureMsg = this.codonFailureReason?.message || `Codon ${codonId} failed`;
+        const failureType = capturedFailureReason?.type || "unknown";
+        const failureMsg = capturedFailureReason?.message || `Codon ${codonId} failed`;
 
         // Use the original error when available — its stack trace points to where
         // the failure actually happened. Fall back to a synthetic error if we
         // don't have the original (e.g., failures detected from log analysis).
-        const err = this.codonFailureError || new Error(failureMsg);
+        const err = capturedFailureError || new Error(failureMsg);
         err.name = `CodonFailure:${failureType}`;
 
         // Look up codon position from execution plan for correlation
@@ -3724,7 +3769,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       const action = this.resolveFailurePolicy(
         CodonId(codonId),
         codonConfig,
-        this.codonFailureReason,
+        capturedFailureReason,
       );
 
       switch (action) {
@@ -3741,8 +3786,26 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           break;
 
         case "stay-active":
-          // Retriable failure with abort policy - server stays active for manual retry
-          this.logger.log(`Codon failed with retriable error. Server remains active.`);
+          // Retriable failure with abort policy. The intent is to park the
+          // server so an interactive client can issue a manual retry. In
+          // headless mode there is no such client, so parking hangs the
+          // process forever (and any parent process waiting on it). Fail the
+          // run and shut down instead; the shutdown watchdog guarantees exit.
+          if (this.config.headless) {
+            this.logger.log(
+              `Codon ${codonId} failed with retriable error in headless mode (no client to retry) — failing run and shutting down.`,
+            );
+            if (this.currentRunId) {
+              this.stateManager.transition({
+                type: "RunFailed",
+                data: { runId: this.currentRunId },
+              });
+              await this.stateManager.waitForPendingTransitions();
+            }
+            await this.shutdown("codon failure (headless, no client to retry)");
+          } else {
+            this.logger.log(`Codon failed with retriable error. Server remains active.`);
+          }
           break;
 
         case "retry": {
@@ -3887,54 +3950,38 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   ): "shutdown" | "stay-active" | "retry" | "continue" {
     const onFailure = codon.onFailure || "abort";
     const isRetriable = failureReason?.retriable === true;
+    const attempts = this.retryAttempts.get(codonId) || 0;
+    const maxAttempts = codon.retryConfig?.maxAttempts ?? 3;
 
     this.logger.log(
       `Resolving failure policy for codon ${codonId}: onFailure=${onFailure}, retriable=${isRetriable}`,
       "info",
     );
 
-    switch (onFailure) {
-      case "abort":
-        // Preserve existing behavior: retriable errors stay active, non-retriable shutdown
-        return isRetriable ? "stay-active" : "shutdown";
+    const action = resolveFailureAction({
+      onFailure,
+      retriable: isRetriable,
+      attempts,
+      maxAttempts,
+    });
 
-      case "retry": {
-        // Only retry if the error is retriable
-        if (!isRetriable) {
-          this.logger.log(
-            `Codon ${codonId} has onFailure=retry but error is not retriable, falling back to abort`,
-            "info",
-          );
-          return "shutdown";
-        }
-
-        const attempts = this.retryAttempts.get(codonId) || 0;
-        const maxAttempts = codon.retryConfig?.maxAttempts ?? 3;
-
-        if (attempts < maxAttempts) {
-          return "retry";
-        }
-
-        this.logger.log(
-          `Codon ${codonId} exhausted ${maxAttempts} retry attempts, aborting`,
-          "info",
-        );
-        return "shutdown";
-      }
-
-      case "ignore":
-        this.logger.log(
-          `Ignoring failure for codon ${codonId} due to onFailure: 'ignore' configuration`,
-          "info",
-        );
-        return "continue";
-
-      default: {
-        // TypeScript exhaustiveness check
-        const _exhaustive: never = onFailure;
-        return "shutdown";
-      }
+    if (action === "shutdown" && onFailure === "retry") {
+      this.logger.log(
+        isRetriable
+          ? `Codon ${codonId} exhausted ${maxAttempts} retry attempts, aborting`
+          : `Codon ${codonId} has onFailure=retry but error is not retriable (${
+              failureReason?.message || failureReason?.type || "no failure reason"
+            }), falling back to abort`,
+        "info",
+      );
+    } else if (action === "continue") {
+      this.logger.log(
+        `Ignoring failure for codon ${codonId} due to onFailure: 'ignore' configuration`,
+        "info",
+      );
     }
+
+    return action;
   }
 
   /**
@@ -6520,6 +6567,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(`Shutting down server: ${reason}`);
     this.isShuttingDown = true;
 
+    // Arm the force-exit backstop BEFORE any awaited cleanup, so a wedged step
+    // can never leave the process hanging after a fatal condition was detected.
+    if (exitProcess && reason !== "running integration test") {
+      this.armShutdownWatchdog(reason, exitCode);
+    }
+
     // Notify clients that we're shutting down and waiting for the agent process
     this.emit("event", {
       id: EventId(generateId()),
@@ -6690,23 +6743,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // In production, we want to exit the process after shutdown
     // In tests, we don't want to exit to allow other tests to run
     if (exitProcess && reason !== "running integration test") {
-      // Determine exit code based on reason and state manager
-      let finalExitCode = exitCode;
-      if (finalExitCode === undefined) {
-        if (reason === "all codons completed") {
-          // Query state manager for run status (source of truth)
-          const currentRun = this.stateManager.getCurrentRun();
-          finalExitCode =
-            currentRun?.status === "failed" || currentRun?.status === "crashed" ? 1 : 0;
-        } else if (reason === "codon failure") {
-          finalExitCode = 1;
-        } else {
-          // Default to error exit code for unexpected/crash shutdown reasons
-          // Only user-initiated shutdowns are non-failures
-          const gracefulReasons = ["SIGINT", "SIGTERM", "client request"];
-          finalExitCode = gracefulReasons.includes(reason) ? 0 : 1;
-        }
-      }
+      const finalExitCode = this.computeExitCode(reason, exitCode);
 
       this.logger.log(`Shutdown: ${reason} (exit code: ${finalExitCode})`);
 
@@ -6715,10 +6752,59 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       // uploadTrace() prevents double-upload if called multiple times.
       this.uploadTrace?.();
 
+      // Graceful shutdown completed — cancel the watchdog and exit normally.
+      this.clearShutdownWatchdog();
       // Small delay to ensure log is written before process exits
       setTimeout(() => {
         process.exit(finalExitCode);
       }, TIMEOUTS.CODON_CLEANUP_DELAY_MS);
+    }
+  }
+
+  /**
+   * Determine the process exit code for a shutdown reason. Shared by the normal
+   * exit and the shutdown watchdog so a forced exit uses the same code.
+   */
+  private computeExitCode(reason: string, exitCode?: number): number {
+    if (exitCode !== undefined) return exitCode;
+    if (reason === "all codons completed") {
+      // Query state manager for run status (source of truth)
+      const currentRun = this.stateManager.getCurrentRun();
+      return currentRun?.status === "failed" || currentRun?.status === "crashed" ? 1 : 0;
+    }
+    if (reason === "codon failure") return 1;
+    // Default to error exit code for unexpected/crash shutdown reasons.
+    // Only user-initiated shutdowns are non-failures.
+    const gracefulReasons = ["SIGINT", "SIGTERM", "client request"];
+    return gracefulReasons.includes(reason) ? 0 : 1;
+  }
+
+  /**
+   * Arm a backstop timer that force-exits the process if graceful shutdown does
+   * not complete within SHUTDOWN_WATCHDOG_MS. Without it, any single awaited
+   * shutdown step that never resolves (a wedged process kill, an in-flight SDK
+   * stream teardown, a hung sentinel/telemetry flush, or a pending state
+   * transition) would leave a run that already detected a fatal condition
+   * hanging forever instead of exiting. Idempotent and unref'd so it never keeps
+   * the event loop alive on its own.
+   */
+  private armShutdownWatchdog(reason: string, exitCode?: number): void {
+    if (this.shutdownWatchdog) return;
+    const code = this.computeExitCode(reason, exitCode);
+    this.shutdownWatchdog = setTimeout(() => {
+      this.logger.log(
+        `Shutdown watchdog: graceful shutdown exceeded ${TIMEOUTS.SHUTDOWN_WATCHDOG_MS}ms for "${reason}" — forcing exit (code ${code})`,
+        "error",
+      );
+      process.exit(code);
+    }, TIMEOUTS.SHUTDOWN_WATCHDOG_MS);
+    this.shutdownWatchdog.unref?.();
+  }
+
+  private clearShutdownWatchdog(): void {
+    if (this.shutdownWatchdog) {
+      clearTimeout(this.shutdownWatchdog);
+      this.shutdownWatchdog = undefined;
     }
   }
 
@@ -6735,6 +6821,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    */
   async forceShutdown(reason: string, exitProcess = true): Promise<void> {
     this.logger.log(`Force shutting down server: ${reason}`);
+
+    // Arm the backstop here too: forceShutdown still awaits forceKill, which can
+    // wedge on an in-flight SDK stream. forceShutdown always exits with code 1,
+    // but a graceful shutdown() that escalated here may have already armed the
+    // watchdog with a success code (e.g. 0). Clear and re-arm with code 1 so a
+    // wedged force-kill exits 1 — not the stale code, which would misreport a
+    // forced/failed shutdown as success.
+    if (exitProcess && reason !== "running integration test") {
+      this.clearShutdownWatchdog();
+      this.armShutdownWatchdog(reason, 1);
+    }
 
     // Force kill any running process immediately
     if (this.currentCodon) {
@@ -6785,7 +6882,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.uploadTrace?.();
 
     if (exitProcess && reason !== "running integration test") {
-      // Force exit immediately
+      // Force shutdown completed — cancel the watchdog and exit immediately.
+      this.clearShutdownWatchdog();
       setTimeout(() => {
         process.exit(1);
       }, TIMEOUTS.CODON_CLEANUP_DELAY_MS);

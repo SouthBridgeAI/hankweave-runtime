@@ -152,6 +152,26 @@ describe("shouldExtendCodon", () => {
     });
   });
 
+  describe("error result received", () => {
+    test("returns false when an error result was received (empty SDK placeholder)", () => {
+      // An empty subtype:"error" result leaves failureReason unset by design, but
+      // it must still block extension: the codon should fail, not be re-prompted.
+      const params = {
+        ...defaultParams(),
+        exitCode: 0,
+        resultMessageReceived: true,
+        failureReason: undefined as FailureReason | undefined,
+        errorResultReceived: true,
+      };
+      expect(shouldExtendCodon(params)).toBe(false);
+    });
+
+    test("returns true when no error result was received", () => {
+      const params = { ...defaultParams(), errorResultReceived: false };
+      expect(shouldExtendCodon(params)).toBe(true);
+    });
+  });
+
   describe("edge cases", () => {
     test("returns false when exit code 0 but result not received", () => {
       // This can happen if the process exits cleanly but we didn't get the final message

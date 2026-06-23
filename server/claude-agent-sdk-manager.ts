@@ -29,6 +29,17 @@ export class ClaudeExecutableNotFoundError extends Error {
 }
 
 /**
+ * Default stream-inactivity timeout for SDK sessions, in seconds.
+ *
+ * Unlike the shim binaries (which apply their own internal 120s default), the
+ * SDK path historically had NO inactivity bound when shimIdleTimeout was
+ * unset — a hung streaming connection would sit silent until the OS killed
+ * the socket. SDK messages arrive at message granularity (not per token), so 180s of total silence
+ * reliably indicates a dead stream rather than a slow turn.
+ */
+export const DEFAULT_SDK_IDLE_TIMEOUT_SECONDS = 180;
+
+/**
  * Whether lenient ("legacy") Claude auth is enabled via HW_INTERNAL_CLAUDE_LEGACY_AUTH.
  *
  * When enabled, the pre-flight self-test does NOT hard-require ANTHROPIC_API_KEY and instead
@@ -250,11 +261,11 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
     this.syntheticPid = 900000 + Math.floor(Math.random() * 99999);
     this.logger.log(`Generated synthetic PID: ${this.syntheticPid} for SDK session`);
 
-    // Start the query in the background, storing the promise so kill() can await it
-    this.logger.log(`[SPAWN-DEBUG] About to call runQuery`, "debug");
-
-    // Resolve idle timeout: per-codon overrides runtime/hank default
-    const shimIdleTimeout = codon.shimIdleTimeout ?? this.defaultShimIdleTimeout;
+    // Resolve idle timeout: per-codon overrides runtime/hank default, which
+    // overrides the built-in SDK default. Always bounded — a hung stream must
+    // surface as a (retriable) failure instead of hanging indefinitely.
+    const shimIdleTimeout =
+      codon.shimIdleTimeout ?? this.defaultShimIdleTimeout ?? DEFAULT_SDK_IDLE_TIMEOUT_SECONDS;
     this.queryPromise = this.runQuery(promptContent, sdkOptions, codon.id, shimIdleTimeout);
     this.logger.log(`[SPAWN-DEBUG] runQuery called, promise returned`, "debug");
 
@@ -263,11 +274,6 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       this.cleanup();
       this.emit("error", error);
     });
-
-    this.logger.log(
-      `[SPAWN-DEBUG] Returning from spawn(), actualLogPath: ${actualLogPath}`,
-      "debug",
-    );
     return actualLogPath;
   }
 
@@ -417,14 +423,7 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
         this.logger.log(`[SDK-runQuery] Idle timeout enabled: ${shimIdleTimeout}s`, "info");
       }
 
-      let messageCount = 0;
       for await (const message of events) {
-        messageCount++;
-        this.logger.log(
-          `[SDK-runQuery] Received message ${messageCount}: type=${message.type}`,
-          "debug",
-        );
-
         if (this.killed) {
           this.logger.log(`[SDK-runQuery] Killed flag set, breaking loop`, "debug");
           break;
@@ -448,11 +447,6 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
         }
       }
 
-      this.logger.log(
-        `[SDK-runQuery] Message loop completed, received ${messageCount} message(s)`,
-        "info",
-      );
-
       this.logger.log(`[SDK-runQuery] Query complete, calling cleanup and emitting exit`, "info");
       this.cleanup();
       this.emitExit(0);
@@ -462,18 +456,29 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       // the normal exit path (CodonRunner.handleProcessExit → handleCodonComplete).
       // Without this, IdleTimeoutError would re-throw → "error" event → FATAL shutdown.
       if (error instanceof IdleTimeoutError) {
-        this.logger.log(`[SDK-runQuery] ${error.message}`, "error");
+        this.logger.log(`[SDK-runQuery] Error stack: ${toError(error).stack}`, "error");
         // Ensure the underlying SDK query is explicitly aborted so any child process
         // does not linger after idle timeout.
         this.abortController?.abort();
+        // Write an error result to the log (mirroring the shims' final-result
+        // emission) so the runtime classifies this as a retriable timeout and
+        // onFailure: "retry" can fire. Without it, the codon fails with no
+        // failure reason, which resolves as non-retriable.
+        await this.writeSyntheticErrorResult(error.message);
         this.cleanup();
         this.emitExit(1);
         return;
       }
-      this.logger.log(`[SDK-runQuery] CAUGHT ERROR: ${toError(error).message}`, "error");
-      this.logger.log(`[SDK-runQuery] Error stack: ${toError(error).stack}`, "error");
       const errorDetails = this.extractErrorDetails(error as Error, codonId);
       this.logger.log(errorDetails, "error");
+      // Abort the in-flight SDK query so its streaming connection and child
+      // process are torn down deterministically. An error that strikes
+      // mid-stream (e.g. a 401/token-expiry or socket drop during the agent's
+      // streaming turn) otherwise leaves the SDK's child process and stream
+      // in-flight — orphaning the child and wedging subsequent teardown/shutdown.
+      // The idle-timeout path above already aborts for this reason; every error
+      // path must. abort() is idempotent and a no-op once the query has settled.
+      this.abortController?.abort();
       this.cleanup();
       throw error;
     }
@@ -598,6 +603,33 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
   }
 
   /**
+   * Write a synthetic error result message to the log and wait for the write
+   * to flush. Used when the session dies without the SDK emitting a result
+   * (e.g. idle timeout): the log parser picks it up so the runtime gets a
+   * classifiable failure reason. The flush matters — emitExit() synchronously
+   * re-parses the log file, so a buffered write would be invisible to it.
+   */
+  private writeSyntheticErrorResult(errorText: string): Promise<void> {
+    if (!this.logStream || this.logStream.destroyed) {
+      return Promise.resolve();
+    }
+    const resultMessage = {
+      type: "result",
+      subtype: "error",
+      is_error: true,
+      result: errorText,
+      num_turns: 0,
+      duration_ms: 0,
+      duration_api_ms: 0,
+      ...(this.sessionId ? { session_id: this.sessionId } : {}),
+      timestamp: new Date().toISOString(),
+    };
+    return new Promise((resolve) => {
+      this.logStream?.write(`${JSON.stringify(resultMessage)}\n`, () => resolve());
+    });
+  }
+
+  /**
    * Kill the Claude Agent SDK session gracefully.
    * Aborts the query (which triggers SIGTERM on the child via the SDK's abort handler),
    * then waits up to PROCESS_KILL_GRACE_MS for the query to actually complete.
@@ -682,6 +714,18 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
    */
   getSessionId(): string | undefined {
     return this.sessionId;
+  }
+
+  /**
+   * Whether the SDK delivered at least one message (the session id is captured
+   * from the first message). This is a synchronous, race-free establishment
+   * signal: it is set inside the message loop and survives `cleanup()`, so it is
+   * still readable on the error path after a query-promise rejection — unlike the
+   * log-parser-fed flag in CodonRunner, which may not have parsed the init line
+   * yet when the SDK emits "error".
+   */
+  getSessionEstablished(): boolean {
+    return this.sessionId !== undefined;
   }
 
   /**

@@ -16,6 +16,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 
 
+## [0.7.3] - 2026-06-23
+
+### Added
+
+- DeepSeek provider support: `deepseek` is now a first-party provider. DeepSeek exposes an OpenAI-compatible API, so the registry reuses the OpenAI factory pointed at `https://api.deepseek.com` (override with `DEEPSEEK_BASE_URL`), authenticated via `DEEPSEEK_API_KEY`. `languageModel()` is routed to `/chat/completions` (DeepSeek doesn't implement the newer Responses API), so health checks and direct `generateText` calls work. Any `deepseek`-named model resolves to this provider rather than a reseller. The previous custom deepseek shim was removed in favor of routing through pi
+- `--validate` now warns when a loop-body codon aborts on failure (the default `onFailure: "abort"`): a single transient blip on any iteration (idle-timeout abort, one-off provider error) halts the entire loop run, so the warning suggests `onFailure: "retry"` (with `retryConfig`) or `"ignore"` instead
+- Shared API error classifier (`server/error-classification.ts`): single source of truth for whether an API failure is retriable, used by both the runtime's result-message handling and CodonRunner's extension logic
+- Default stream-inactivity timeout (180s) for Claude SDK sessions; previously the SDK path had no inactivity bound when `shimIdleTimeout` was unset, so a hung streaming connection waited until the OS killed the socket
+- `--no-wipe` flag: with `--start-new --force`, preserves the existing `agentRoot/` workspace instead of wiping it, so files injected directly into `agentRoot/` (without going through `data/`) survive a forced fresh start.
+
+### Changed
+- Transient API errors (socket drops, connection resets, 5xx/overloaded, timeouts, rate limits) are now classified retriable, so `onFailure: "retry"` fires on them; unrecognized API error text defaults to retriable (bounded by `retryConfig.maxAttempts`). Auth, invalid-request, billing/credit/quota, and provider usage-limit caps (`GoUsageLimitError`/`FreeUsageLimitError`, "usage limit", "available balance", "out of budget") remain non-retriable so retries don't burn attempts on a depleted plan/balance
+- Explicit rate-limit signals (`429` / `rate_limit`) now take precedence over the broad billing/quota match, so a transient per-minute rate limit whose body also mentions "quota" stays retriable instead of being marked permanent
+- Transient-crash retry is now generalized across all runtimes: a process that exits/crashes without a usable result message (Claude SDK mid-stream crash, or an early/pre-init gemini/pi/opencode shim exit) is given a bounded-retriable backstop reason instead of defaulting to non-retriable, so `onFailure: "retry"` is honored uniformly (cc-500 failure class)
+- Permanent SDK API failures (billing/auth/400) now route through the codon failure policy via the normal exit path rather than an immediate fatal shutdown — so failed-state is recorded and a codon configured `onFailure: "ignore"` continues instead of being force-aborted
+- Idle-timeout aborts now write a synthetic error result to the session log, surfacing as a retriable timeout failure (previously: failed with no failure reason, resolved as non-retriable)
+- In headless mode, a retriable failure under `onFailure: "abort"` now fails and shuts down instead of parking in "stay-active" (no interactive client will ever issue a manual retry, so the run would otherwise hang forever). A new `SHUTDOWN_WATCHDOG_MS` (30s) backstop force-exits the process if any awaited shutdown step (process kill, sentinel/telemetry flush, pending state transitions, event-journal drain) wedges, so a detected-fatal run can never hang indefinitely
+
+### Fixed
+
+- Disguised SDK errors (result `subtype="success"` with `is_error=true`, e.g. transport failures) aborted runs configured with `onFailure: "retry"` without any retry attempt
+- Disguised SDK errors no longer set `successResultReceived`, so the SDK's subsequent thrown error is reported as a real failure instead of being suppressed as a "post-success SDK error"
+- The SDK emitting a retriable error result and *then* throwing is now decided by retriability of the classified reason, not by whether a result arrived, so it routes to the retry path instead of a fatal abort
+- Local shim/replay process failures (missing `node`/`bun`, bad cwd, unexecutable shim) now stay fatal instead of being misclassified as retriable API crashes — only the Claude SDK manager's `error` event carries API/transport crashes
+- `codon.completed` reported `exitStatus: {type: "success"}` for failed codons whose process exited 0 (disguised errors); `exitStatus` is now derived from the codon's final status
+- `--start-new --force` now wipes the existing `agentRoot/` workspace when reusing an execution directory, so stale outputs from a prior run no longer leak into the fresh start. The prior `.hankweave/` is still preserved as a `.hankweave.backup-*`.
+- Run wedged after a codon retry succeeded: `StateManager.getCodonRecord` returned the *first* record for a codon ID, which was the failed attempt's terminal record after a retry appended a new one. Callers like `handleCodonComplete` saw `status: "failed"` and early-returned, so the running record never advanced to completed. It now returns the *latest* record, mirroring the `CodonTransitioned` reducer
+- Cost tracking could not compute cost for prefixed model IDs: `CostTracker` now takes a `ModelInfo` and builds a `providerId/modelId` pricing key (bare model ID for passthrough shim providers like pi/opencode), so registry pricing lookups resolve instead of silently yielding $0
+
+
 ## [0.7.2] - 2026-06-10
 
 ### Added

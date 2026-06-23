@@ -1,6 +1,7 @@
 import { CodonRunner } from "../codon-runner.js";
 import type { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import type { ModelInfo } from "../llm/models-dev-schema.js";
+import { getSupportedCodonProviderIds, isPassthroughShimProvider } from "../provider-ids.js";
 
 /**
  * Result of model validation
@@ -28,13 +29,6 @@ export interface ModelValidationResult {
  * @param providerId - Optional provider ID to narrow the search (e.g., "anthropic", "google")
  * @returns ModelValidationResult with validation outcome
  */
-/**
- * Providers that use shims and support pass-through model IDs.
- * These providers wrap other providers, so any model ID is potentially valid.
- * The shim itself handles model validation at runtime.
- */
-const PASSTHROUGH_SHIM_PROVIDERS = ["pi", "opencode"];
-
 export function validateModel(
   model: string,
   registry: LlmProviderRegistry,
@@ -47,7 +41,7 @@ export function validateModel(
   const slashIndex = model.indexOf("/");
   if (slashIndex > 0) {
     const prefix = model.substring(0, slashIndex).toLowerCase();
-    if (PASSTHROUGH_SHIM_PROVIDERS.includes(prefix)) {
+    if (isPassthroughShimProvider(prefix)) {
       const modelId = model.substring(slashIndex + 1);
 
       // Try to resolve the underlying model from the registry to get real capabilities
@@ -118,12 +112,11 @@ export function validateModel(
   const canRun = CodonRunner.canRun(resolveResult.modelInfo);
 
   if (!canRun) {
-    const supportedProviders = ["anthropic", "google", "openai", "pi", "opencode"];
     const providerName = resolveResult.modelInfo.providerId;
     return {
       valid: false,
       modelInfo: resolveResult.modelInfo,
-      reason: `Model '${model}' uses provider '${providerName}' which is not currently supported. Supported providers: ${supportedProviders.join(", ")}. Please use a model from a supported provider or configure the appropriate shim.`,
+      reason: `Model '${model}' uses provider '${providerName}' which is not currently supported. Supported providers: ${getSupportedCodonProviderIds().join(", ")}. Please use a model from a supported provider or configure the appropriate shim.`,
       matchType: resolveResult.matchType,
     };
   }

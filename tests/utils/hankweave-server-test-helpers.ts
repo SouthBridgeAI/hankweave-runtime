@@ -17,6 +17,7 @@ import {
   type ClientCommand,
   ClientMode,
   type HandshakeResponse,
+  type InfoEvent,
   type ServerEvent,
 } from "../../server/types/types.js";
 import { WebSocket } from "../../server/utils.js";
@@ -296,6 +297,34 @@ export interface LaunchedServer {
    */
   waitForRunToFail: (timeout?: number) => Promise<void>;
   /**
+   * Waits for the runtime to emit the "Retrying codon <id> (attempt N/M)" info
+   * event — i.e. a retriable failure was routed back into a retry. Useful for
+   * retriable failure-policy scenarios where the second replay attempt stalls,
+   * so the run never reaches a terminal state.
+   * @param codonId - The codon ID to wait for a retry of
+   * @param timeoutMs - Timeout in milliseconds (default: 30000)
+   * @returns Promise that resolves with the matching info event
+   * @throws {Error} If timeout is reached
+   */
+  waitForCodonRetry: (codonId: string, timeoutMs?: number) => Promise<ServerEvent>;
+  /**
+   * Returns all "Retrying codon <id> (attempt N/M)" info events seen so far for
+   * the given codon. Empty when no retry was attempted (e.g. permanent failure).
+   * @param codonId - The codon ID to filter retries for
+   */
+  getCodonRetries: (codonId: string) => ServerEvent[];
+  /**
+   * Returns the `codon.completed` event for the given codon, or undefined if it
+   * has not completed yet.
+   * @param codonId - The codon ID to look up
+   */
+  getCodonCompletion: (codonId: string) => CodonCompletedEvent | undefined;
+  /**
+   * True if a `codon.started` event has been seen for the given codon.
+   * @param codonId - The codon ID to check
+   */
+  hasCodonStarted: (codonId: string) => boolean;
+  /**
    * Connects an additional WebSocket client to the server.
    * @param options - Connection options (same as connectHankweaveClient)
    * @returns Promise that resolves with the client setup result
@@ -373,6 +402,20 @@ const TEST_RESULTS_RELATIVE_DIR = "tests/test-results";
 const TEST_AREA_RELATIVE_DIR = "tests/test-area";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * True if `e` is the "Retrying codon <id> (attempt N/M)" info event the runtime
+ * emits when resolveFailurePolicy routes a retriable failure back to a retry.
+ */
+function isCodonRetryInfo(e: ServerEvent, codonId: string): boolean {
+  return (
+    e.type === "info" &&
+    typeof (e as InfoEvent).data.message === "string" &&
+    new RegExp(`Retrying codon ${codonId} \\(attempt \\d+/\\d+\\)`).test(
+      (e as InfoEvent).data.message,
+    )
+  );
+}
 
 /**
  * Launches a Hankweave server for E2E testing with predefined test configuration.
@@ -874,6 +917,29 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     }
   }
 
+  async function waitForCodonRetry(
+    codonId: string,
+    timeoutMs: number = 30_000,
+  ): Promise<ServerEvent> {
+    return waitForEvent("info", timeoutMs, (e) => isCodonRetryInfo(e, codonId));
+  }
+
+  function getCodonRetries(codonId: string): ServerEvent[] {
+    return events.filter((e) => isCodonRetryInfo(e, codonId));
+  }
+
+  function getCodonCompletion(codonId: string): CodonCompletedEvent | undefined {
+    return events.find(
+      (e) => e.type === "codon.completed" && (e as CodonCompletedEvent).data.codonId === codonId,
+    ) as CodonCompletedEvent | undefined;
+  }
+
+  function hasCodonStarted(codonId: string): boolean {
+    return events.some(
+      (e) => e.type === "codon.started" && (e as CodonStartedEvent).data.codonId === codonId,
+    );
+  }
+
   function sendCommand(command: ClientCommand): void {
     if (client.readyState !== WebSocket.OPEN) {
       throw new Error("WebSocket not connected");
@@ -1062,6 +1128,10 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     waitForConnectionClose,
     waitForRunToComplete,
     waitForRunToFail,
+    waitForCodonRetry,
+    getCodonRetries,
+    getCodonCompletion,
+    hasCodonStarted,
     connectClient: connectNewClient,
     disconnect,
     stop,

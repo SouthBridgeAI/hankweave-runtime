@@ -6,6 +6,8 @@ const testAreaPath = path.resolve("tests", "test-area");
 
 async function cleanupTestArea() {
   try {
+    await fs.promises.mkdir(testAreaPath, { recursive: true });
+
     // Get all items in test-area
     const items = await fs.promises.readdir(testAreaPath);
 

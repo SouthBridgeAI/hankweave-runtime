@@ -391,7 +391,7 @@ describe("LlmProviderRegistry", () => {
 
       expect(typeof stats.totalModels).toBe("number");
       expect(stats.totalModels).toBeGreaterThan(0);
-      expect(stats.totalProviders).toBe(4); // anthropic, openai, google, groq
+      expect(stats.totalProviders).toBe(5); // anthropic, openai, google, groq, deepseek
     });
   });
 

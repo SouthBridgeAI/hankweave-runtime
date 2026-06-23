@@ -99,11 +99,11 @@ describe("Provider Fallback Scenarios", () => {
       const originalEnv = captureEnv();
 
       try {
-        // Set up only some providers
+        // Clear ALL provider API keys first, then set up only Anthropic
+        for (const def of PROVIDER_DEFINITIONS) {
+          delete process.env[def.apiKeyEnvVar];
+        }
         process.env.ANTHROPIC_API_KEY = "test-key";
-        delete process.env.OPENAI_API_KEY;
-        delete process.env.GOOGLE_API_KEY;
-        delete process.env.GROQ_API_KEY;
 
         const registry = new LlmProviderRegistry({
           logger: mockLogger,

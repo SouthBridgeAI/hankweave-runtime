@@ -130,6 +130,7 @@ export async function setupExecutionEnvironment(options: {
   skipConfirmation?: boolean; // Skip confirmation prompts (-y flag)
   hankPath?: string; // Path to hank.json for hash tracking
   ignoreDataMismatch?: boolean; // Skip data hash verification on resume
+  noWipe?: boolean; // Preserve existing agentRoot/ on --start-new --force
 }): Promise<ExecutionSetup> {
   const {
     readOnlySourceDataPath,
@@ -141,6 +142,7 @@ export async function setupExecutionEnvironment(options: {
     skipConfirmation = false,
     hankPath,
     ignoreDataMismatch = false,
+    noWipe = false,
   } = options;
 
   // Verify data source exists
@@ -198,11 +200,40 @@ export async function setupExecutionEnvironment(options: {
           // Tier 2: Directory already has Hankweave execution
           if (hasHankweave) {
             if (forceMode) {
-              // Backup existing .hankweave
+              // Backup existing .hankweave (metadata + checkpoint history) so
+              // the prior run stays recoverable.
               const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
               const backupPath = path.join(executionPath, `.hankweave.backup-${timestamp}`);
               await fs.promises.rename(path.join(executionPath, ".hankweave"), backupPath);
               console.log(`📦 Backed up existing execution to: ${backupPath}`);
+
+              // Wipe the prior agentRoot/ so stale outputs from the previous
+              // run can't leak into this fresh start (--start-new promises a
+              // clean workspace). rigArchive/ and the data link are rebuilt
+              // downstream. The .hankweave.backup-* we just created lives at the
+              // execution root, not inside agentRoot/, so it is preserved.
+              //
+              // --no-wipe opts out: the agentRoot/ workspace is kept intact so
+              // files placed there out-of-band (without going through data/)
+              // survive a forced fresh start. The fresh checkpoint store starts
+              // from an empty initial commit and captures the preserved files on
+              // the first codon checkpoint.
+              const staleAgentRoot = path.join(executionPath, "agentRoot");
+              if (noWipe) {
+                if (fs.existsSync(staleAgentRoot)) {
+                  console.log(
+                    `🧷 Preserving existing agent workspace (--no-wipe): ${staleAgentRoot}`,
+                  );
+                }
+              } else if (fs.existsSync(staleAgentRoot)) {
+                console.log(`🗑️  Wiping stale agent workspace: ${staleAgentRoot}`);
+                await fs.promises.rm(staleAgentRoot, {
+                  recursive: true,
+                  force: true,
+                  maxRetries: 3,
+                  retryDelay: 100,
+                });
+              }
             } else {
               throw new Error(
                 `❌ Directory already contains execution state: ${executionPath}/.hankweave\n` +

@@ -59,6 +59,7 @@ const BOOLEAN_FLAGS = new Set([
   "--version",
   "--force",
   "-f",
+  "--no-wipe",
   "--ignore-rig-failures",
   "--attach",
   "--ignore-data-mismatch", // Deprecated: use --force instead
@@ -119,6 +120,7 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   skipConfirmation?: boolean; // -y
   startNew?: boolean; // --start-new, --new, -n
   force?: boolean; // --force, -f
+  noWipe?: boolean; // --no-wipe (preserve agentRoot/ on --start-new --force)
   init?: boolean; // --init
   help?: boolean; // --help, -h
   showVersion?: boolean; // --version
@@ -319,6 +321,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.skipConfirmation = args.includes("-y");
   result.startNew = args.includes("--start-new") || args.includes("--new") || args.includes("-n");
   result.force = args.includes("--force") || args.includes("-f");
+  result.noWipe = args.includes("--no-wipe");
   result.init = args.includes("--init");
   result.help = args.includes("--help") || args.includes("-h");
   result.showVersion = args.includes("--version");

@@ -192,6 +192,7 @@ async function main() {
   const skipConfirmation = cliArgs.skipConfirmation || false;
   const startNew = cliArgs.startNew || false;
   const forceMode = cliArgs.force || false;
+  const noWipe = cliArgs.noWipe || false;
   const initMode = cliArgs.init || false;
   // --ignore-data-mismatch is deprecated, --force now handles this too
   const ignoreDataMismatch = cliArgs.ignoreDataMismatch || false;
@@ -214,6 +215,8 @@ Execution Control:
   -n, --new, --start-new    Start new execution, never resume
                             Use -n -f to overwrite existing state
   -f, --force               Override safety checks (hash mismatch, existing state)
+  --no-wipe                 With --start-new --force, preserve the existing
+                            agentRoot/ workspace instead of wiping it
   -y                        Non-interactive mode, skip confirmation prompts
 
 Output:
@@ -596,6 +599,7 @@ Use --output to copy them elsewhere.
       skipConfirmation,
       hankPath: absoluteConfigPath,
       ignoreDataMismatch: ignoreDataMismatch || !!resolvedConfig.replayDir,
+      noWipe,
     });
   } catch (error) {
     console.error("[ERROR] Execution setup failed!");
@@ -762,6 +766,11 @@ Use --output to copy them elsewhere.
       isResuming: executionSetup.isResuming,
       linkType: executionSetup.linkType,
 
+      // Whether an interactive client is driving the run. In headless mode a
+      // retriable failure under onFailure:"abort" must shut down rather than
+      // park in "stay-active" (no client will ever issue a manual retry).
+      headless: headlessMode,
+
       // Output directory: CLI flag takes precedence, then resolved config
       // If neither is set, outputDirectory remains undefined (outputs stay in execution dir)
       // IMPORTANT: Resolve to absolute path here so downstream code can use it directly
@@ -839,6 +848,7 @@ Use --output to copy them elsewhere.
         headless: headlessMode,
         start_new: startNew,
         force: forceMode,
+        no_wipe: noWipe,
         attach: false,
         ignore_rig_failures: cliArgs.ignoreRigFailures || false,
       },

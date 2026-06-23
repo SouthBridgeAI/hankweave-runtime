@@ -1142,7 +1142,7 @@
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 1800,
-                    "description": "Max seconds between agent events before the shim aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s)."
+                    "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s inside the shims for other providers). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
                   },
                   "budget": {
                     "type": "object",
@@ -2259,7 +2259,7 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1800,
-                          "description": "Max seconds between agent events before the shim aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or shim default (120s)."
+                          "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s inside the shims for other providers). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
                         },
                         "budget": {
                           "type": "object",

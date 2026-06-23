@@ -377,6 +377,92 @@ describe("StateManager", () => {
       expect(state.runs[0].codons[0].status).toBe("completed");
     });
 
+    test("getCodonInCurrentRun returns the LATEST record after a retry (not the stale failed one)", async () => {
+      // Regression a post-retry wedge: a retried codon
+      // appends a SECOND execution record (CodonStarted pushes) while the failed
+      // attempt's record stays terminal. getCodonInCurrentRun must return the
+      // latest (the live retry), not find-first the terminal "failed" record —
+      // otherwise handleCodonComplete sees a terminal status and early-returns,
+      // wedging the run after the retry SUCCEEDS.
+      const runId = RunId("retry-run");
+      const codonId = CodonId("analyze#4");
+
+      stateManager.transition({
+        type: "RunStarted",
+        data: {
+          runId,
+          runFolder: "/test/runs/retry-run",
+          gitBranch: "run-retry-run",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+
+      // Attempt 1: drive to a terminal "failed" record.
+      stateManager.transition({
+        type: "CodonStarted",
+        data: { runId, codonId },
+      });
+      const toFailed: Array<{
+        from: string;
+        to: string;
+        metadata?: Record<string, unknown>;
+      }> = [
+        { from: "preparing", to: "starting" },
+        {
+          from: "starting",
+          to: "initializing",
+          metadata: { claudePid: 1, claudeLogPath: "a.log" },
+        },
+        {
+          from: "initializing",
+          to: "running",
+          metadata: { claudeSessionId: SessionId("s-1") },
+        },
+        {
+          from: "running",
+          to: "failed",
+          metadata: {
+            failedDuring: "running",
+            exitCode: 1,
+            failureReason: {
+              type: "api-error",
+              retriable: true,
+              message: "transient socket drop",
+            },
+          },
+        },
+      ];
+      for (const t of toFailed) {
+        stateManager.transition({
+          type: "CodonTransitioned",
+          data: {
+            runId,
+            codonId,
+            from: t.from as ST.CodonStatus,
+            to: t.to as ST.CodonStatus,
+            metadata: t.metadata,
+          },
+        });
+      }
+
+      // Attempt 2 (the retry): a fresh record is pushed for the SAME codonId.
+      stateManager.transition({
+        type: "CodonStarted",
+        data: { runId, codonId },
+      });
+      await stateManager.waitForPendingTransitions();
+
+      // Two records exist: [failed, preparing]. The helper must return the latest.
+      const records = stateManager.getCurrentRun()?.codons.filter((c) => c.codonId === codonId);
+      expect(records?.length).toBe(2);
+      expect(records?.[0].status).toBe("failed");
+
+      const current = stateManager.getCodonInCurrentRun(codonId);
+      expect(current?.status).toBe("preparing");
+      expect(current?.status).not.toBe("failed");
+    });
+
     test("handles rapid transitions without corruption", async () => {
       // Fire many transitions rapidly
       const runId = RunId("rapid-test");
