@@ -471,6 +471,13 @@ export class LlmProviderRegistry {
     // first-party "deepseek" provider is the canonical home, so prefer it for
     // any deepseek-named model rather than letting a reseller win the bare id.
     if (lowerModel.includes("deepseek")) return "deepseek";
+    // GLM models are made by Zhipu AI (canonical provider id "zhipuai"; "zai"/
+    // "Z.AI" is its international brand) and widely resold across aggregators;
+    // prefer the first-party "zhipuai" provider so a bare "glm-*" id resolves
+    // deterministically instead of to whichever reseller loads last. Runtime
+    // execution still goes through the pi shim's "zai" provider (pi has no
+    // "zhipuai" provider) — see rewriteGlmModel in model-validator.ts.
+    if (lowerModel.startsWith("glm-")) return "zhipuai";
     if (
       lowerModel.startsWith("gpt-") ||
       lowerModel.startsWith("o1-") ||

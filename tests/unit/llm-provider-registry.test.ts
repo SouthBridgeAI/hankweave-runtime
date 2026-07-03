@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { validateModel } from "../../server/config-validation/model-validator.js";
 import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import { Logger } from "../../server/utils.js";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
@@ -487,7 +488,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("anthropic");
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-5");
           expect(result.matchType).toBe("fuzzy");
         }
       });
@@ -610,7 +611,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match the most recent claude sonnet from anthropic
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-5");
           expect(result.modelInfo.providerId).toBe("anthropic");
           expect(result.matchType).toBe("fuzzy");
         }
@@ -638,7 +639,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match based on display name
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-5");
           expect(result.matchType).toBe("fuzzy");
         }
       });
@@ -1558,7 +1559,7 @@ describe("LlmProviderRegistry", () => {
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-5");
         }
       });
     });
@@ -1783,7 +1784,7 @@ describe("LlmProviderRegistry", () => {
         {
           input: "sonnet",
           expectedProvider: "anthropic",
-          expectedModelId: "claude-sonnet-4-6",
+          expectedModelId: "claude-sonnet-5",
         },
         {
           input: "haiku",
@@ -1822,7 +1823,7 @@ describe("LlmProviderRegistry", () => {
       }
     });
 
-    it("should resolve 'sonnet' to claude-sonnet-4-6", () => {
+    it("should resolve 'sonnet' to claude-sonnet-5", () => {
       const result = registry.resolveModel({
         model: "sonnet", // Short name that gets expanded to "claude-sonnet"
       });
@@ -1830,7 +1831,7 @@ describe("LlmProviderRegistry", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.modelInfo.providerId).toBe("anthropic");
-        expect(result.modelInfo.modelId).toBe("claude-sonnet-4-6");
+        expect(result.modelInfo.modelId).toBe("claude-sonnet-5");
         // Should be fuzzy match
         expect(result.matchType).toBe("fuzzy");
       }
@@ -1888,6 +1889,120 @@ describe("LlmProviderRegistry", () => {
         expect(result.modelInfo.providerId).toBe("anthropic");
         expect(result.modelInfo.modelId).toBe("claude-haiku-4-5");
       }
+    });
+  });
+
+  describe("GLM routing and zhipuai preferred provider", () => {
+    beforeEach(() => {
+      registry = LlmProviderRegistry.getInstance({ logger: mockLogger });
+    });
+
+    // Zhipu AI ("zhipuai") is the canonical first-party provider for GLM models
+    // ("zai"/"Z.AI" is its international brand) — a bare "glm-*" id must resolve
+    // to it rather than to whichever reseller loads last.
+    describe("zhipuai is the preferred provider for GLM", () => {
+      it("resolves bare glm-5.2 to the canonical zhipuai provider, not a reseller", () => {
+        const result = registry.resolveModel({ model: "glm-5.2" });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.modelInfo.providerId).toBe("zhipuai");
+          expect(result.modelInfo.modelId).toBe("glm-5.2");
+        }
+      });
+
+      it("resolves bare glm-5.1 to zhipuai", () => {
+        const result = registry.resolveModel({ model: "glm-5.1" });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.modelInfo.providerId).toBe("zhipuai");
+        }
+      });
+    });
+
+    // validateModel rewrites GLM ids to run through the pi shim's native Z.AI
+    // provider (pi/zai/<id>). The GLM id is lowercased because the pi/Z.AI
+    // catalog lookup is case-sensitive.
+    describe("GLM routing through the pi shim's zai provider", () => {
+      it("routes bare glm-5.2 to pi with the zai modelId", () => {
+        const result = validateModel("glm-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(result.matchType).toBe("exact");
+      });
+
+      it("routes bare glm-5.1 to pi/zai", () => {
+        const result = validateModel("glm-5.1", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.1");
+      });
+
+      it("lowercases GLM-5.2 (catalog lookup is case-sensitive)", () => {
+        const result = validateModel("GLM-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+      });
+
+      it("routes the canonical zhipuai/glm-5.2 spelling to pi/zai (pi has no zhipuai provider)", () => {
+        const result = validateModel("zhipuai/glm-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+      });
+
+      it("routes the zai/glm-5.2 (models.dev spelling) to pi/zai", () => {
+        const result = validateModel("zai/glm-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+      });
+
+      it("normalizes the z-ai/glm-5.2 (dashed spelling) to pi/zai", () => {
+        const result = validateModel("z-ai/glm-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+      });
+
+      it("lowercases Z-AI/GLM-5.2", () => {
+        const result = validateModel("Z-AI/GLM-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+      });
+
+      it("leaves an explicit pi/zai/glm-5.2 passthrough verbatim", () => {
+        const result = validateModel("pi/zai/glm-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("pi");
+        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+      });
+
+      it("leaves opencode/glm-5.2 as an opencode passthrough", () => {
+        const result = validateModel("opencode/glm-5.2", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("opencode");
+        expect(result.modelInfo?.modelId).toBe("glm-5.2");
+      });
+
+      it("does not rewrite non-glm models (haiku)", () => {
+        const result = validateModel("haiku", registry);
+        expect(result.valid).toBe(true);
+        expect(result.modelInfo?.providerId).toBe("anthropic");
+      });
+
+      it("does not rewrite a 'glmndalf-9000' word", () => {
+        const result = validateModel("glmndalf-9000", registry);
+        // The bare pattern requires glm to be followed by a digit/./-/slash/end,
+        // so a word like "glmndalf" must not become a pi passthrough.
+        if (result.valid) {
+          expect(result.modelInfo?.providerId).not.toBe("pi");
+        } else {
+          expect(result.valid).toBe(false);
+        }
+      });
     });
   });
 });

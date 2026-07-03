@@ -32,7 +32,7 @@
     "self-test": "node index.js --self-test"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.79.1",
+    "@earendil-works/pi-coding-agent": "^0.80.3",
     "@shims/common": "file:./common"
   },
   "devDependencies": {

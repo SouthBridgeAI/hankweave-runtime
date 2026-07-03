@@ -29,11 +29,46 @@ export interface ModelValidationResult {
  * @param providerId - Optional provider ID to narrow the search (e.g., "anthropic", "google")
  * @returns ModelValidationResult with validation outcome
  */
+/**
+ * GLM models are made by Zhipu AI (canonical registry provider "zhipuai";
+ * "zai"/"Z.AI" is its international brand), neither of which is a natively
+ * runnable codon provider, so they are routed through the pi shim's native
+ * Z.AI provider (`pi/zai/<id>`, authenticated via ZAI_API_KEY). The pi SDK has
+ * no "zhipuai" provider, so the runtime target is always "zai" regardless of
+ * how the model was spelled. Accepts the bare id ("glm-5.2") and
+ * provider-qualified spellings ("zhipuai/glm-5.2", "zai/glm-5.2",
+ * "z-ai/glm-5.2"), rewriting all to "pi/zai/glm-<id>". Strings already carrying
+ * a shim prefix (e.g. "pi/...", "opencode/...") are untouched.
+ *
+ * The GLM id is lowercased because the pi/Z.AI catalog lookup is case-sensitive
+ * and its ids are canonically lowercase — "zai/GLM-5.2" would not resolve.
+ */
+const BARE_GLM_MODEL_PATTERN = /^glm([\d./-]|$)/i;
+
+function rewriteGlmModel(model: string): string {
+  const lower = model.toLowerCase();
+  // Provider-qualified spellings: canonical "zhipuai/glm-...", models.dev
+  // "zai/glm-..." or OpenRouter-style "z-ai/glm-...".
+  if (
+    lower.startsWith("zhipuai/glm") ||
+    lower.startsWith("zai/glm") ||
+    lower.startsWith("z-ai/glm")
+  ) {
+    const glmId = lower.substring(lower.indexOf("/") + 1);
+    return `pi/zai/${glmId}`;
+  }
+  if (BARE_GLM_MODEL_PATTERN.test(model)) {
+    return `pi/zai/${lower}`;
+  }
+  return model;
+}
+
 export function validateModel(
   model: string,
   registry: LlmProviderRegistry,
   providerId?: string,
 ): ModelValidationResult {
+  model = rewriteGlmModel(model);
   // Step 0: Check for pass-through shim providers (e.g., "pi/openai/gpt-5.4")
   // These providers wrap other providers, so the model ID after the prefix
   // is passed directly to the shim. We construct a ModelInfo without requiring

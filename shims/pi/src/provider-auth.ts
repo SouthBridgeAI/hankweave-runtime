@@ -33,6 +33,11 @@ const PROVIDER_CREDENTIALS: Record<string, ProviderCredentialConfig> = {
     apiKeySource: "env",
     runtimeProvider: "openrouter",
   },
+  zai: {
+    envVars: ["ZAI_API_KEY"],
+    apiKeySource: "env",
+    runtimeProvider: "zai",
+  },
 };
 
 function getConfiguredEnvValue(envVars: readonly string[]): string | undefined {
