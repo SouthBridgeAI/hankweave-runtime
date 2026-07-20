@@ -16,6 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 
 
+## [0.7.5] - 2026-07-20
+
+### Added
+- `gpt-5.6` now resolves to `gpt-5.6-sol` via a registry model shortcut, in every spelling: bare (`gpt-5.6`), provider-qualified (`openai/gpt-5.6`), effort-suffixed (`gpt-5.6-high`, `gpt-5.6-xhigh`), and combined (`openai/gpt-5.6-xhigh`). OpenAI ships `gpt-5.6` as sibling variants (`-sol`/`-luna`/`-terra`) and codex has no abstract `gpt-5.6` slug, so any spelling that would strip down to bare `gpt-5.6` at the shim would fail at runtime despite resolving successfully in the registry (the auto-generated effort variants of the abstract record made this reachable). Explicit variant ids (`gpt-5.6-luna`, `gpt-5.6-sol-xhigh`, …) are unaffected. Codex 0.144.6 supports `high`/`xhigh` for all three variants; the shim's no-suffix default remains `high` (codex's own defaults are lower: sol `low`, luna/terra `medium`)
+- Kimi K3 (`kimi-k3`, `moonshotai/kimi-k3`) is automatically routed through the pi shim's OpenRouter provider (`pi/openrouter/moonshotai/kimi-k3`, authenticated via `OPENROUTER_API_KEY`). Bare and Moonshot-org-qualified spellings (`moonshot/…`, `moonshot-ai/…`) are normalized to the OpenRouter-canonical `moonshotai/kimi-k3`; strings already carrying a shim prefix are left untouched
+
+### Changed
+- Updated model data — refreshed `models-dev-data.json` from models.dev (167 providers, 5,517 models). Adds `openai/gpt-5.6`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, `openai/gpt-realtime-2.1`, and `google/gemini-omni-flash-preview`. Drops 12 upstream-removed Anthropic snapshots (`claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`, `claude-opus-4-0`, `claude-sonnet-4-20250514`, …). Updated `llm-provider-registry` unit test expectations accordingly (assertions repointed to `claude-sonnet-4-5-20250929`, which has identical pricing)
+- Updated `@openai/codex-sdk` to 0.144.5 (root and codex shim) and rebuilt the codex shim — required for the `gpt-5.6-*` models, which OpenAI rejects on codex < 0.144 ("requires a newer version of Codex")
+- Updated `@earendil-works/pi-coding-agent` to 0.80.10 and rebuilt the pi shim. 0.80.8 replaced the SDK's synchronous `AuthStorage`/`ModelRegistry` pair with the async `ModelRuntime` facade (`AuthStorage` is no longer exported), so the shim's session setup and env-key injection were migrated to `ModelRuntime.create()` + `setRuntimeApiKey()`
+- Updated `@anthropic-ai/claude-agent-sdk` to 0.3.212, then 0.3.215
+- Updated `@openai/codex-sdk` to 0.144.6 (root); `CODEX_SDK_VERSION` bumped to match, now enforced by a unit test that compares it against the package.json pin so future SDK bumps can't leave it stale
+
+### Fixed
+- `CODEX_SDK_VERSION` in `server/codex-runtime-extractor.ts` was stale at `0.144.1`: compiled binaries extract the embedded codex binary to `~/.hankweave/codex-sdk/<version>/` and skip extraction when that directory's completion marker already exists, so users upgrading a standalone binary silently kept the old codex. Now stamped `0.144.5` to match the shipped SDK
+- `CLAUDE_SDK_VERSION` in `server/claude-runtime-extractor.ts` was stale at `0.3.156` — the same upgrade bug as the codex constant below: users upgrading an already-used standalone binary silently kept the previously extracted Claude native runtime, pairing the new JS SDK with a stale executable. Now stamped `0.3.215` and enforced by a unit test against the package.json pin (same guard as codex)
+- Compiled binaries now embed and extract `codex-code-mode-host` beside the codex binary. Codex ≥ 0.144 spawns this companion V8 runtime as a sibling of its own binary for models whose metadata declares `tool_mode: "code_mode_only"` (the `gpt-5.6-*` variants), so tool calls on those models failed with "failed to spawn code-mode host … No such file or directory" in standalone-binary mode. `needsCodexExtraction()` also checks for the host, so host-less caches from older Hankweave builds re-extract
+
 ## [0.7.4] - 2026-07-03
 
 ### Added

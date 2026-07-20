@@ -59,6 +59,36 @@ describe("Model Validator — Passthrough Providers", () => {
     });
   });
 
+  describe("kimi-k3 routing to OpenRouter via pi shim", () => {
+    test("bare kimi-k3 rewrites to pi/openrouter/moonshotai/kimi-k3", () => {
+      const result = validateModel("kimi-k3", registry);
+      expect(result.valid).toBe(true);
+      expect(result.modelInfo?.providerId).toBe("pi");
+      expect(result.modelInfo?.modelId).toBe("openrouter/moonshotai/kimi-k3");
+    });
+
+    test("moonshotai/kimi-k3 rewrites to pi/openrouter/moonshotai/kimi-k3", () => {
+      const result = validateModel("moonshotai/kimi-k3", registry);
+      expect(result.valid).toBe(true);
+      expect(result.modelInfo?.providerId).toBe("pi");
+      expect(result.modelInfo?.modelId).toBe("openrouter/moonshotai/kimi-k3");
+    });
+
+    test("kimi-k3 rewrite is case-insensitive", () => {
+      const result = validateModel("Kimi-K3", registry);
+      expect(result.valid).toBe(true);
+      expect(result.modelInfo?.providerId).toBe("pi");
+      expect(result.modelInfo?.modelId).toBe("openrouter/moonshotai/kimi-k3");
+    });
+
+    test("an explicit pi/openrouter kimi spelling is left untouched", () => {
+      const result = validateModel("pi/openrouter/moonshotai/kimi-k3", registry);
+      expect(result.valid).toBe(true);
+      expect(result.modelInfo?.providerId).toBe("pi");
+      expect(result.modelInfo?.modelId).toBe("openrouter/moonshotai/kimi-k3");
+    });
+  });
+
   describe("passthrough ModelInfo defaults", () => {
     test("passthrough ModelInfo has expected default fields", () => {
       const result = validateModel("opencode/some-provider/some-model", registry);

@@ -342,7 +342,9 @@ describe("Provider Fallback Scenarios", () => {
 
         // Models should NOT be available with invalid keys (provider is available but unhealthy)
         // The registry marks providers with invalid keys as unhealthy immediately
-        const claudeResult = registry.getProviderForModel("claude-3-haiku-20240307");
+        // Provider-qualified so the lookup can't resolve to another reseller of
+        // the same model that has no key set.
+        const claudeResult = registry.getProviderForModel("anthropic/claude-haiku-4-5-20251001");
 
         // The model won't be available because the provider has an invalid key
         expect(claudeResult.success).toBe(false);

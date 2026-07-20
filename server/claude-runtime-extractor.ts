@@ -27,9 +27,11 @@ import {
   getComponentExtractionDir,
 } from "./runtime-extractor-base.js";
 
-// SDK version — also used for the extraction cache directory name. Keep in sync with the
-// @anthropic-ai/claude-agent-sdk version pinned in package.json.
-export const CLAUDE_SDK_VERSION = "0.3.156";
+// SDK version — also used for the extraction cache directory name. It is the only
+// cache-busting key for the extracted native runtime, so a stale value makes upgraded
+// standalone binaries silently keep the previously extracted executable. Must match the
+// @anthropic-ai/claude-agent-sdk version pinned in package.json (enforced by a unit test).
+export const CLAUDE_SDK_VERSION = "0.3.215";
 
 /**
  * Resolve the platform/arch suffix used by the SDK's native binary packages,

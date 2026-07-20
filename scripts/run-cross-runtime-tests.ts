@@ -39,7 +39,10 @@ for (const file of testFiles) {
 			cmd = `npx tsx ${filePath}`;
 			break;
 		case "deno":
-			cmd = `deno run -A --node-modules-dir --sloppy-imports ${filePath}`;
+			// --minimum-dependency-age=0: Deno 2.9+ refuses npm packages published
+			// within the last 24h by default; our deps are pinned by the lockfile,
+			// so freshly released versions (e.g. @openai/codex-sdk) must still install.
+			cmd = `deno run -A --minimum-dependency-age=0 --node-modules-dir --sloppy-imports ${filePath}`;
 			break;
 		default:
 			throw new Error(`Unknown runtime: ${runtime}`);

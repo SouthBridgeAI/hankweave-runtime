@@ -142,6 +142,31 @@ describe("Codex Runtime Extractor", () => {
     });
   });
 
+  describe("getCodexCodeModeHostName", () => {
+    test("should return correct host name for current platform", () => {
+      const hostName = extractorModule.getCodexCodeModeHostName();
+
+      if (os.platform() === "win32") {
+        expect(hostName).toBe("codex-code-mode-host.exe");
+      } else {
+        expect(hostName).toBe("codex-code-mode-host");
+      }
+    });
+  });
+
+  describe("CODEX_SDK_VERSION", () => {
+    test("should match the @openai/codex-sdk version pinned in package.json", () => {
+      // CODEX_SDK_VERSION is the cache-busting key for the extraction directory.
+      // If it lags behind the pinned SDK version, a compiled binary extracts the
+      // new codex into a stale-versioned directory (or worse, trusts a stale cache).
+      const packageJson = JSON.parse(
+        fs.readFileSync(path.join(import.meta.dir, "../../package.json"), "utf-8"),
+      );
+      const pinned = packageJson.dependencies["@openai/codex-sdk"];
+      expect(extractorModule.CODEX_SDK_VERSION).toBe(pinned);
+    });
+  });
+
   describe("getCodexExtractionDir", () => {
     test("should use default cache directory", () => {
       const result = extractorModule.getCodexExtractionDir();
@@ -327,7 +352,28 @@ describe("Codex Runtime Extractor", () => {
       // Set extraction dir to temp location
       process.env.HANKWEAVE_CACHE_DIR = tempDir;
 
-      // Create both marker and binary with correct version
+      // Create marker, binary, and code-mode host with correct version
+      const extractDir = extractorModule.getCodexExtractionDir();
+      const codexPath = extractorModule.getExtractedCodexPath();
+      const hostPath = path.join(extractDir, extractorModule.getCodexCodeModeHostName());
+
+      fs.mkdirSync(extractDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(extractDir, ".extraction-complete"),
+        extractorModule.CODEX_SDK_VERSION,
+      );
+      createDummyCodexBinary(codexPath);
+      createDummyCodexBinary(hostPath);
+
+      const result = extractorModule.needsCodexExtraction();
+      expect(result).toBe(false);
+    });
+
+    test("should return true if code-mode host is missing", () => {
+      // A cache extracted by an older Hankweave has codex but no code-mode host —
+      // it must be considered stale so the host gets extracted.
+      process.env.HANKWEAVE_CACHE_DIR = tempDir;
+
       const extractDir = extractorModule.getCodexExtractionDir();
       const codexPath = extractorModule.getExtractedCodexPath();
 
@@ -339,7 +385,7 @@ describe("Codex Runtime Extractor", () => {
       createDummyCodexBinary(codexPath);
 
       const result = extractorModule.needsCodexExtraction();
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     test("should return true if marker file is corrupted", () => {
@@ -464,7 +510,7 @@ describe("Codex Runtime Extractor", () => {
       process.env.HANKWEAVE_TEST_IS_COMPILED = "true";
       process.env.HANKWEAVE_CACHE_DIR = tempDir;
 
-      // Create cached binary
+      // Create cached binary and code-mode host
       const extractDir = extractorModule.getCodexExtractionDir();
       const codexPath = extractorModule.getExtractedCodexPath();
 
@@ -474,6 +520,7 @@ describe("Codex Runtime Extractor", () => {
         extractorModule.CODEX_SDK_VERSION,
       );
       createDummyCodexBinary(codexPath);
+      createDummyCodexBinary(path.join(extractDir, extractorModule.getCodexCodeModeHostName()));
 
       const result = await extractorModule.ensureCodexAvailable();
       expect(result.path).toBe(codexPath);
@@ -491,8 +538,9 @@ describe("Codex Runtime Extractor", () => {
       const extractDir = extractorModule.getCodexExtractionDir();
       const codexPath = extractorModule.getExtractedCodexPath();
 
-      // Manually create the binary (simulating extraction)
+      // Manually create the binaries (simulating extraction)
       createDummyCodexBinary(codexPath);
+      createDummyCodexBinary(path.join(extractDir, extractorModule.getCodexCodeModeHostName()));
       fs.writeFileSync(
         path.join(extractDir, ".extraction-complete"),
         extractorModule.CODEX_SDK_VERSION,

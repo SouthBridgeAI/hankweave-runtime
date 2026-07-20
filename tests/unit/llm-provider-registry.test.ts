@@ -36,7 +36,7 @@ describe("LlmProviderRegistry", () => {
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
       // Check that models were loaded
-      const sonnetInfoResult = registry.getModelInfo("claude-3-5-sonnet-20241022");
+      const sonnetInfoResult = registry.getModelInfo("claude-sonnet-4-5-20250929");
       expect(sonnetInfoResult.success).toBe(true);
       if (sonnetInfoResult.success) {
         expect(sonnetInfoResult.info.providerId).toBe("anthropic");
@@ -61,7 +61,7 @@ describe("LlmProviderRegistry", () => {
       expect(missingKeyLogs.length).toBeGreaterThan(0);
 
       // Should not crash when getting provider
-      const providerResult = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+      const providerResult = registry.getProviderForModel("claude-sonnet-4-5-20250929");
       expect(providerResult.success).toBe(false);
       if (providerResult.success === false) {
         expect(providerResult.reason).toBe("provider-unavailable");
@@ -84,7 +84,7 @@ describe("LlmProviderRegistry", () => {
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
       // Check that models have enhanced properties
-      const modelResult = registry.getModelInfo("claude-3-5-sonnet-20241022");
+      const modelResult = registry.getModelInfo("claude-sonnet-4-5-20250929");
       expect(modelResult.success).toBe(true);
       if (modelResult.success) {
         expect(modelResult.info).toHaveProperty("modelId");
@@ -116,15 +116,15 @@ describe("LlmProviderRegistry", () => {
     });
 
     it("should find models by name", () => {
-      const modelResult = registry.getModelInfo("claude-3-5-sonnet-20241022");
+      const modelResult = registry.getModelInfo("claude-sonnet-4-5-20250929");
       expect(modelResult.success).toBe(true);
       if (modelResult.success) {
-        expect(modelResult.info.modelId).toBe("claude-3-5-sonnet-20241022");
+        expect(modelResult.info.modelId).toBe("claude-sonnet-4-5-20250929");
       }
     });
 
     it("should find models by full ID", () => {
-      const modelResult = registry.getModelInfo("anthropic/claude-3-5-sonnet-20241022");
+      const modelResult = registry.getModelInfo("anthropic/claude-sonnet-4-5-20250929");
       expect(modelResult.success).toBe(true);
       if (modelResult.success) {
         expect(modelResult.info.providerId).toBe("anthropic");
@@ -144,7 +144,7 @@ describe("LlmProviderRegistry", () => {
 
     it("should check model availability correctly", () => {
       // Model exists but provider might not be available
-      const isAvailable = registry.isModelAvailable("claude-3-5-sonnet-20241022");
+      const isAvailable = registry.isModelAvailable("claude-sonnet-4-5-20250929");
       // Should be boolean
       expect(typeof isAvailable).toBe("boolean");
     });
@@ -163,7 +163,7 @@ describe("LlmProviderRegistry", () => {
     });
 
     it("should calculate costs correctly", () => {
-      const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+      const cost = registry.calculateCost("claude-sonnet-4-5-20250929", {
         inputTokens: 1000, // 1K input tokens
         outputTokens: 500, // 500 output tokens
       });
@@ -182,7 +182,7 @@ describe("LlmProviderRegistry", () => {
     });
 
     it("should handle zero token counts", () => {
-      const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+      const cost = registry.calculateCost("claude-sonnet-4-5-20250929", {
         inputTokens: 0,
         outputTokens: 0,
       });
@@ -203,9 +203,9 @@ describe("LlmProviderRegistry", () => {
     describe("provider-specific cache token semantics", () => {
       it("should use additive semantics for Anthropic (inputTokens + cacheReadTokens)", () => {
         // Anthropic: inputTokens is fresh only, cacheReadTokens is additive
-        // claude-3-5-sonnet-20241022 pricing:
+        // claude-sonnet-4-5-20250929 pricing:
         //   input: $3.00/M, output: $15.00/M, cache_read: $0.30/M
-        const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+        const cost = registry.calculateCost("claude-sonnet-4-5-20250929", {
           inputTokens: 1000, // 1K fresh input tokens
           outputTokens: 500, // 500 output tokens
           cacheReadTokens: 2000, // 2K cached tokens (additive)
@@ -295,14 +295,14 @@ describe("LlmProviderRegistry", () => {
 
       it("should handle Anthropic with cache tokens correctly", () => {
         // Verify Anthropic still works correctly with cache tokens
-        const cost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+        const cost = registry.calculateCost("claude-sonnet-4-5-20250929", {
           inputTokens: 10000, // Fresh input only
           outputTokens: 2000,
           cacheReadTokens: 50000, // Additive cached tokens
           cacheCreationTokens: 1000,
         });
 
-        // claude-3-5-sonnet-20241022 pricing:
+        // claude-sonnet-4-5-20250929 pricing:
         //   input: $3.00/M, output: $15.00/M, cache_read: $0.30/M, cache_write: $3.75/M
         // Expected: (10000/1M * 3.00) + (2000/1M * 15.00) + (50000/1M * 0.30) + (1000/1M * 3.75)
         // = 0.03 + 0.03 + 0.015 + 0.00375 = 0.07875
@@ -416,7 +416,7 @@ describe("LlmProviderRegistry", () => {
       delete process.env.HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY;
       registry = new LlmProviderRegistry({ logger: mockLogger });
 
-      const providerResult = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+      const providerResult = registry.getProviderForModel("claude-sonnet-4-5-20250929");
       expect(providerResult.success).toBe(false);
       if (providerResult.success === false) {
         expect(providerResult.reason).toBe("provider-unavailable");
@@ -454,13 +454,13 @@ describe("LlmProviderRegistry", () => {
       it("should resolve exact match with provider ID", () => {
         const result = registry.resolveModel({
           providerId: "anthropic",
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("anthropic");
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.matchType).toBe("exact");
         }
       });
@@ -468,12 +468,12 @@ describe("LlmProviderRegistry", () => {
       it("should resolve exact match with full model ID", () => {
         const result = registry.resolveModel({
           providerId: "anthropic",
-          model: "anthropic/claude-3-5-sonnet-20241022",
+          model: "anthropic/claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.modelInfo.providerId).toBe("anthropic");
           expect(result.matchType).toBe("exact");
         }
@@ -510,25 +510,25 @@ describe("LlmProviderRegistry", () => {
     describe("exact matching with provider inference", () => {
       it("should resolve exact match without provider", () => {
         const result = registry.resolveModel({
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("anthropic");
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.matchType).toBe("exact-with-inferred-provider");
         }
       });
 
       it("should prefer anthropic for claude models", () => {
         const result = registry.resolveModel({
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.modelInfo.providerId).toBe("anthropic");
           expect(result.matchType).toBe("exact-with-inferred-provider");
         }
@@ -1201,20 +1201,206 @@ describe("LlmProviderRegistry", () => {
       });
     });
 
+    describe("GPT-5.6 models", () => {
+      beforeEach(() => {
+        registry = new LlmProviderRegistry({ logger: mockLogger });
+      });
+
+      describe("exact matching", () => {
+        it("should resolve the bare gpt-5.6 shortcut to the sol variant", () => {
+          const result = registry.resolveModel({
+            model: "gpt-5.6",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.6-sol");
+            expect(result.matchType).toBe("exact-with-inferred-provider");
+          }
+        });
+
+        it("should resolve each gpt-5.6 variant by exact model ID", () => {
+          for (const modelId of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]) {
+            const result = registry.resolveModel({ model: modelId });
+
+            expect(result.success).toBe(true);
+            if (result.success) {
+              expect(result.modelInfo.providerId).toBe("openai");
+              expect(result.modelInfo.modelId).toBe(modelId);
+              expect(result.matchType).toBe("exact-with-inferred-provider");
+            }
+          }
+        });
+
+        it("should resolve gpt-5.6-luna with explicit provider", () => {
+          const result = registry.resolveModel({
+            providerId: "openai",
+            model: "gpt-5.6-luna",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.6-luna");
+            expect(result.matchType).toBe("exact");
+          }
+        });
+
+        it("should resolve full model ID openai/gpt-5.6 to the sol variant", () => {
+          // Codex has no "gpt-5.6" slug (only -sol/-luna/-terra), so the
+          // provider-qualified spelling must route to sol like the bare one.
+          const result = registry.resolveModel({
+            model: "openai/gpt-5.6",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.6-sol");
+          }
+        });
+      });
+
+      describe("reasoning effort variants", () => {
+        // The registry auto-generates -high/-xhigh variants from every
+        // reasoning-capable OpenAI record — including the abstract gpt-5.6.
+        // The codex shim strips the effort suffix before calling codex, so an
+        // abstract variant like "gpt-5.6-high" would send the nonexistent
+        // "gpt-5.6" slug at runtime. The shortcut must therefore route
+        // effort-suffixed spellings to the sol variant too.
+        it.each(["high", "xhigh"] as const)(
+          "should resolve gpt-5.6-%s to gpt-5.6-sol-%s",
+          (effort) => {
+            const result = registry.resolveModel({ model: `gpt-5.6-${effort}` });
+
+            expect(result.success).toBe(true);
+            if (result.success) {
+              expect(result.modelInfo.providerId).toBe("openai");
+              expect(result.modelInfo.modelId).toBe(`gpt-5.6-sol-${effort}`);
+            }
+          },
+        );
+
+        it.each(["high", "xhigh"] as const)(
+          "should resolve openai/gpt-5.6-%s to gpt-5.6-sol-%s",
+          (effort) => {
+            const result = registry.resolveModel({ model: `openai/gpt-5.6-${effort}` });
+
+            expect(result.success).toBe(true);
+            if (result.success) {
+              expect(result.modelInfo.providerId).toBe("openai");
+              expect(result.modelInfo.modelId).toBe(`gpt-5.6-sol-${effort}`);
+            }
+          },
+        );
+
+        it("should resolve gpt-5.6-xhigh with explicit provider param", () => {
+          const result = registry.resolveModel({
+            providerId: "openai",
+            model: "gpt-5.6-xhigh",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.modelId).toBe("gpt-5.6-sol-xhigh");
+            expect(result.matchType).toBe("exact");
+          }
+        });
+
+        it("should leave effort variants of explicit gpt-5.6 variants untouched", () => {
+          for (const modelId of ["gpt-5.6-sol-high", "gpt-5.6-luna-high", "gpt-5.6-terra-xhigh"]) {
+            const result = registry.resolveModel({ model: modelId });
+
+            expect(result.success).toBe(true);
+            if (result.success) {
+              expect(result.modelInfo.providerId).toBe("openai");
+              expect(result.modelInfo.modelId).toBe(modelId);
+            }
+          }
+        });
+
+        it("should price xhigh variants at 2x the sol base cost", () => {
+          const base = registry.resolveModel({ model: "gpt-5.6-sol" });
+          const xhigh = registry.resolveModel({ model: "gpt-5.6-xhigh" });
+
+          expect(base.success).toBe(true);
+          expect(xhigh.success).toBe(true);
+          if (base.success && xhigh.success) {
+            expect(xhigh.modelInfo.cost?.input).toBe((base.modelInfo.cost?.input ?? 0) * 2);
+            expect(xhigh.modelInfo.cost?.output).toBe((base.modelInfo.cost?.output ?? 0) * 2);
+          }
+        });
+      });
+
+      describe("fuzzy matching", () => {
+        it("should fuzzy match 'gpt 5.6 luna' with spaces", () => {
+          const result = registry.resolveModel({
+            model: "gpt 5.6 luna",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.6-luna");
+            expect(result.matchType).toBe("fuzzy");
+          }
+        });
+
+        it("should match 'GPT-5.6-Terra' (mixed case)", () => {
+          const result = registry.resolveModel({
+            model: "GPT-5.6-Terra",
+          });
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.modelInfo.providerId).toBe("openai");
+            expect(result.modelInfo.modelId).toBe("gpt-5.6-terra");
+          }
+        });
+      });
+
+      describe("model metadata", () => {
+        it("should return model metadata via getModelInfo", () => {
+          const result = registry.getModelInfo("openai/gpt-5.6");
+
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.info.name).toBe("GPT-5.6");
+            expect(result.info.reasoning).toBe(true);
+            expect(result.info.tool_call).toBe(true);
+            expect(result.info.limit.context).toBe(1050000);
+            expect(result.info.limit.output).toBe(128000);
+          }
+        });
+
+        it("should calculate costs for gpt-5.6-luna", () => {
+          const cost = registry.calculateCost("gpt-5.6-luna", {
+            inputTokens: 1000,
+            outputTokens: 500,
+          });
+
+          // gpt-5.6-luna pricing: input $1.00/M, output $6.00/M
+          // Expected: (1000/1M * 1.00) + (500/1M * 6.00) = 0.001 + 0.003 = 0.004
+          expect(cost).toBeCloseTo(0.004, 6);
+        });
+      });
+    });
+
     describe("blocklist handling", () => {
       beforeEach(() => {
         registry = new LlmProviderRegistry({
           logger: mockLogger,
           blockList: {
             providers: ["groq"],
-            models: ["claude-3-5-sonnet-20241022"],
+            models: ["claude-sonnet-4-5-20250929"],
           },
         });
       });
 
       it("should ignore blocklist by default", () => {
         const result = registry.resolveModel({
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         // Should succeed because ignoreBlockList defaults to true
@@ -1223,7 +1409,7 @@ describe("LlmProviderRegistry", () => {
 
       it("should respect blocklist when ignoreBlockList is false", () => {
         const result = registry.resolveModel({
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
           ignoreBlockList: false,
         });
 
@@ -1255,7 +1441,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match a different sonnet variant (not the blocked one)
-          expect(result.modelInfo.modelId).not.toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).not.toBe("claude-sonnet-4-5-20250929");
         }
       });
     });
@@ -1266,13 +1452,13 @@ describe("LlmProviderRegistry", () => {
           logger: mockLogger,
           blockList: {
             providers: ["groq"],
-            models: ["claude-3-5-sonnet-20241022", "gpt-4o-2024-05-13"],
+            models: ["claude-sonnet-4-5-20250929", "gpt-4o-2024-05-13"],
           },
         });
       });
 
       it("should block models in blocklist", () => {
-        const result = registry.getModelInfo("claude-3-5-sonnet-20241022");
+        const result = registry.getModelInfo("claude-sonnet-4-5-20250929");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1281,7 +1467,7 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block models in blocklist (case-insensitive)", () => {
-        const result = registry.getModelInfo("CLAUDE-3-5-SONNET-20241022");
+        const result = registry.getModelInfo("CLAUDE-SONNET-4-5-20250929");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1290,7 +1476,7 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block models with full model ID", () => {
-        const result = registry.getModelInfo("anthropic/claude-3-5-sonnet-20241022");
+        const result = registry.getModelInfo("anthropic/claude-sonnet-4-5-20250929");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1353,7 +1539,7 @@ describe("LlmProviderRegistry", () => {
         });
 
         // Use a model that's unique to anthropic
-        const result = registry.getModelInfo("claude-3-5-sonnet-20241022");
+        const result = registry.getModelInfo("claude-sonnet-4-5-20250929");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1368,13 +1554,13 @@ describe("LlmProviderRegistry", () => {
           logger: mockLogger,
           blockList: {
             providers: ["groq"],
-            models: ["claude-3-5-sonnet-20241022", "gpt-4o-2024-05-13"],
+            models: ["claude-sonnet-4-5-20250929", "gpt-4o-2024-05-13"],
           },
         });
       });
 
       it("should block models in blocklist", () => {
-        const result = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+        const result = registry.getProviderForModel("claude-sonnet-4-5-20250929");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1387,7 +1573,7 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block models in blocklist (case-insensitive)", () => {
-        const result = registry.getProviderForModel("CLAUDE-3-5-SONNET-20241022");
+        const result = registry.getProviderForModel("CLAUDE-SONNET-4-5-20250929");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1396,7 +1582,7 @@ describe("LlmProviderRegistry", () => {
       });
 
       it("should block models with full model ID", () => {
-        const result = registry.getProviderForModel("anthropic/claude-3-5-sonnet-20241022");
+        const result = registry.getProviderForModel("anthropic/claude-sonnet-4-5-20250929");
 
         expect(result.success).toBe(false);
         if (result.success === false) {
@@ -1435,11 +1621,11 @@ describe("LlmProviderRegistry", () => {
         registry = new LlmProviderRegistry({
           logger: mockLogger,
           blockList: {
-            models: ["claude-3-5-sonnet-20241022"],
+            models: ["claude-sonnet-4-5-20250929"],
           },
         });
 
-        const result = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+        const result = registry.getProviderForModel("claude-sonnet-4-5-20250929");
 
         // Should return model-blocked before checking provider availability
         expect(result.success).toBe(false);
@@ -1502,7 +1688,7 @@ describe("LlmProviderRegistry", () => {
         });
 
         // Use a model that's unique to anthropic
-        const blockedResult = registry.getProviderForModel("claude-3-5-sonnet-20241022");
+        const blockedResult = registry.getProviderForModel("claude-sonnet-4-5-20250929");
         expect(blockedResult.success).toBe(false);
         if (blockedResult.success === false) {
           expect(blockedResult.reason).toBe("model-blocked");
@@ -1543,7 +1729,7 @@ describe("LlmProviderRegistry", () => {
       it("should handle invalid provider ID", () => {
         const result = registry.resolveModel({
           providerId: "invalid-provider-xyz",
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(false);
@@ -1567,12 +1753,12 @@ describe("LlmProviderRegistry", () => {
     describe("case insensitive exact matching", () => {
       it("should resolve exact match with uppercase model ID", () => {
         const result = registry.resolveModel({
-          model: "CLAUDE-3-5-SONNET-20241022",
+          model: "CLAUDE-SONNET-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.matchType).toBe("exact-with-inferred-provider");
         }
       });
@@ -1580,12 +1766,12 @@ describe("LlmProviderRegistry", () => {
       it("should resolve exact match with uppercase full provider/model ID", () => {
         const result = registry.resolveModel({
           providerId: "anthropic",
-          model: "ANTHROPIC/CLAUDE-3-5-SONNET-20241022",
+          model: "ANTHROPIC/CLAUDE-SONNET-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.modelInfo.providerId).toBe("anthropic");
           expect(result.matchType).toBe("exact");
         }
@@ -1593,32 +1779,32 @@ describe("LlmProviderRegistry", () => {
 
       it("should preserve original casing in returned ModelInfo", () => {
         const result = registry.resolveModel({
-          model: "CLAUDE-3-5-SONNET-20241022",
+          model: "CLAUDE-SONNET-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
           // The returned modelInfo should have the original casing from the data file
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.modelInfo.providerId).toBe("anthropic");
         }
       });
 
       it("should work with getModelInfo for uppercase IDs", () => {
-        const result = registry.getModelInfo("CLAUDE-3-5-SONNET-20241022");
+        const result = registry.getModelInfo("CLAUDE-SONNET-4-5-20250929");
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.info.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.info.modelId).toBe("claude-sonnet-4-5-20250929");
         }
       });
 
       it("should work with getModelInfo for full uppercase IDs", () => {
-        const result = registry.getModelInfo("ANTHROPIC/CLAUDE-3-5-SONNET-20241022");
+        const result = registry.getModelInfo("ANTHROPIC/CLAUDE-SONNET-4-5-20250929");
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.info.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.info.modelId).toBe("claude-sonnet-4-5-20250929");
         }
       });
     });
@@ -1627,13 +1813,13 @@ describe("LlmProviderRegistry", () => {
       it("should resolve with uppercase provider ID", () => {
         const result = registry.resolveModel({
           providerId: "ANTHROPIC",
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("anthropic");
-          expect(result.modelInfo.modelId).toBe("claude-3-5-sonnet-20241022");
+          expect(result.modelInfo.modelId).toBe("claude-sonnet-4-5-20250929");
           expect(result.matchType).toBe("exact");
         }
       });
@@ -1667,7 +1853,7 @@ describe("LlmProviderRegistry", () => {
       it("should return correct match type for exact matches", () => {
         const result = registry.resolveModel({
           providerId: "anthropic",
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
@@ -1678,7 +1864,7 @@ describe("LlmProviderRegistry", () => {
 
       it("should return correct match type for inferred provider", () => {
         const result = registry.resolveModel({
-          model: "claude-3-5-sonnet-20241022",
+          model: "claude-sonnet-4-5-20250929",
         });
 
         expect(result.success).toBe(true);
@@ -1727,7 +1913,7 @@ describe("LlmProviderRegistry", () => {
 
       // The logger should be from the first config
       // We can verify this by checking that subsequent operations use logger1
-      const modelResult = instance2.getModelInfo("claude-3-5-sonnet-20241022");
+      const modelResult = instance2.getModelInfo("claude-sonnet-4-5-20250929");
       expect(modelResult.success).toBe(true);
 
       // Check that logs contain logger1 prefix (if any were generated)
@@ -1755,7 +1941,7 @@ describe("LlmProviderRegistry", () => {
       const instance1 = LlmProviderRegistry.getInstance({ logger: mockLogger });
 
       // Verify instance works
-      const modelResult = instance1.getModelInfo("claude-3-5-sonnet-20241022");
+      const modelResult = instance1.getModelInfo("claude-sonnet-4-5-20250929");
       expect(modelResult.success).toBe(true);
 
       // Get instance again (simulating different module)
@@ -1763,7 +1949,7 @@ describe("LlmProviderRegistry", () => {
 
       // Should be the same instance and have the same data
       expect(instance2).toBe(instance1);
-      const modelResult2 = instance2.getModelInfo("claude-3-5-sonnet-20241022");
+      const modelResult2 = instance2.getModelInfo("claude-sonnet-4-5-20250929");
       expect(modelResult2.success).toBe(true);
     });
   });

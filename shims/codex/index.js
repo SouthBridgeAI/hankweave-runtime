@@ -1254,7 +1254,7 @@ var package_default = {
     clean: `node -e "const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('index.js',{force:true});"`
   },
   dependencies: {
-    "@openai/codex-sdk": "0.142.4",
+    "@openai/codex-sdk": "0.144.5",
     "@shims/common": "file:./common"
   },
   devDependencies: {

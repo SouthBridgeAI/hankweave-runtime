@@ -9,13 +9,12 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
-  ModelRegistry,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { type ShimArguments, withAdaptiveTimeout } from "@shims/common";
 import { DebugRecorder } from "./debug-recorder.js";
 import {
-  configureAuthStorage,
+  configureModelRuntime,
   formatMissingApiKeyMessage,
   getKnownApiKeyStatus,
   getProviderCredentialStatus,
@@ -221,15 +220,14 @@ export async function preparePiSession(options: {
 }): Promise<PreparedPiSession> {
   const { cwd, args, verbose } = options;
   const sessionDir = getSessionStorageDir(args.debugDir);
-  const authStorage = configureAuthStorage();
-  const modelRegistry = ModelRegistry.create(authStorage);
+  const modelRuntime = await configureModelRuntime();
   const { resolved, provider, modelId } = resolveModelIdentifier(options.model);
 
   if (shouldEnforceProviderCredential(provider) && !getProviderCredentialStatus(provider).available) {
     throw new StartupError(formatMissingApiKeyMessage(provider));
   }
 
-  const resolvedModel = modelRegistry.find(provider, modelId);
+  const resolvedModel = modelRuntime.getModel(provider, modelId);
   if (!resolvedModel) {
     throw new StartupError(
       `Model not found: ${options.model}. Try a provider/model identifier such as anthropic/claude-haiku-4-5.`,
@@ -254,8 +252,7 @@ export async function preparePiSession(options: {
     model: resolvedModel,
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
     sessionManager,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     resourceLoader,
   });
 
@@ -523,10 +520,9 @@ export async function checkPiAvailability(): Promise<{
   availableModels: string[];
 }> {
   try {
-    const authStorage = configureAuthStorage();
-    const modelRegistry = ModelRegistry.create(authStorage);
-    const availableModels = modelRegistry
-      .getAvailable()
+    const modelRuntime = await configureModelRuntime();
+    const availableModels = modelRuntime
+      .getAvailableSnapshot()
       .slice(0, 10)
       .map((model) => `${model.provider}/${model.id}`);
 

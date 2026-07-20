@@ -177,11 +177,12 @@ describe("LLM Provider Health Checks (E2E)", () => {
       expect(stats.totalProviders).toBe(PROVIDER_DEFINITIONS.length);
 
       // Test a few specific models we know exist in the data
-      const claudeHaikuResult = registry.getModelInfo("claude-3-haiku-20240307");
+      // Use provider-specific ID: this model is resold by many providers at different prices
+      const claudeHaikuResult = registry.getModelInfo("anthropic/claude-haiku-4-5-20251001");
       expect(claudeHaikuResult.success).toBe(true);
       if (claudeHaikuResult.success) {
         expect(claudeHaikuResult.info.providerId).toBe("anthropic");
-        expect(claudeHaikuResult.info.cost?.input).toBe(0.25);
+        expect(claudeHaikuResult.info.cost?.input).toBe(1);
       }
 
       // Use provider-specific ID to avoid ambiguity (gpt-4o exists in multiple providers)
@@ -198,20 +199,21 @@ describe("LLM Provider Health Checks (E2E)", () => {
     it("should provide accurate model information", () => {
       const registry = new LlmProviderRegistry({ logger: mockLogger });
 
-      // Test model lookup by short name
-      const claudeHaikuResult = registry.getModelInfo("claude-3-haiku-20240307");
+      // Test model lookup by short name. Many providers resell this model with
+      // differing limits, so only assert on the identity of the resolved model.
+      const claudeHaikuResult = registry.getModelInfo("claude-haiku-4-5-20251001");
       expect(claudeHaikuResult.success).toBe(true);
       if (claudeHaikuResult.success) {
-        expect(claudeHaikuResult.info.modelId).toBe("claude-3-haiku-20240307");
-        expect(claudeHaikuResult.info.limit?.context).toBe(200000);
-        expect(claudeHaikuResult.info.limit?.output).toBe(4096);
+        expect(claudeHaikuResult.info.modelId).toBe("claude-haiku-4-5-20251001");
       }
 
       // Test model lookup by full name
-      const claudeHaikuFullResult = registry.getModelInfo("anthropic/claude-3-haiku-20240307");
+      const claudeHaikuFullResult = registry.getModelInfo("anthropic/claude-haiku-4-5-20251001");
       expect(claudeHaikuFullResult.success).toBe(true);
       if (claudeHaikuFullResult.success) {
-        expect(claudeHaikuFullResult.info.modelId).toBe("claude-3-haiku-20240307");
+        expect(claudeHaikuFullResult.info.modelId).toBe("claude-haiku-4-5-20251001");
+        expect(claudeHaikuFullResult.info.limit?.context).toBe(200000);
+        expect(claudeHaikuFullResult.info.limit?.output).toBe(64000);
       }
 
       // Test non-existent model

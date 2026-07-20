@@ -1,4 +1,4 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 export interface ProviderCredentialStatus {
   available: boolean;
@@ -54,17 +54,21 @@ function hasConfiguredEnvValue(envVars: readonly string[]): boolean {
   return getConfiguredEnvValue(envVars) !== undefined;
 }
 
-export function configureAuthStorage(): AuthStorage {
-  const authStorage = AuthStorage.inMemory();
+export async function configureModelRuntime(): Promise<ModelRuntime> {
+  // pi 0.80.8 replaced the synchronous AuthStorage/ModelRegistry pair with the
+  // async ModelRuntime facade. Runtime API keys are an in-memory overlay on top
+  // of the runtime's credential store, so env-provided keys take precedence over
+  // anything on disk while still letting pi's dynamic provider catalogs refresh.
+  const modelRuntime = await ModelRuntime.create();
 
   for (const config of Object.values(PROVIDER_CREDENTIALS)) {
     const value = getConfiguredEnvValue(config.envVars);
     if (value) {
-      authStorage.setRuntimeApiKey(config.runtimeProvider, value);
+      await modelRuntime.setRuntimeApiKey(config.runtimeProvider, value);
     }
   }
 
-  return authStorage;
+  return modelRuntime;
 }
 
 export function getKnownApiKeyStatus(): Record<string, boolean> {

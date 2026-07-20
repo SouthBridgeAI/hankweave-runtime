@@ -63,12 +63,45 @@ function rewriteGlmModel(model: string): string {
   return model;
 }
 
+/**
+ * Kimi K3 is made by Moonshot AI. It is not a natively runnable codon provider,
+ * so it is routed through the pi shim's OpenRouter provider
+ * (`pi/openrouter/moonshotai/<id>`, authenticated via OPENROUTER_API_KEY).
+ * Accepts the bare id ("kimi-k3") and provider-qualified spellings
+ * ("moonshotai/kimi-k3", "moonshot/kimi-k3", "moonshot-ai/kimi-k3"), rewriting
+ * all to the canonical OpenRouter target under the "moonshotai" org. Strings
+ * already carrying a shim prefix (e.g. "pi/...", "opencode/...") are untouched.
+ *
+ * The id is lowercased because the OpenRouter catalog lookup is case-sensitive
+ * and its ids are canonically lowercase.
+ */
+const BARE_KIMI_MODEL_PATTERN = /^kimi-k3([./-]|$)/i;
+
+function rewriteKimiModel(model: string): string {
+  const lower = model.toLowerCase();
+  // Provider-qualified spellings; normalize any Moonshot org label to the
+  // OpenRouter-canonical "moonshotai".
+  if (
+    lower.startsWith("moonshotai/kimi-k3") ||
+    lower.startsWith("moonshot/kimi-k3") ||
+    lower.startsWith("moonshot-ai/kimi-k3")
+  ) {
+    const kimiId = lower.substring(lower.indexOf("/") + 1);
+    return `pi/openrouter/moonshotai/${kimiId}`;
+  }
+  if (BARE_KIMI_MODEL_PATTERN.test(model)) {
+    return `pi/openrouter/moonshotai/${lower}`;
+  }
+  return model;
+}
+
 export function validateModel(
   model: string,
   registry: LlmProviderRegistry,
   providerId?: string,
 ): ModelValidationResult {
   model = rewriteGlmModel(model);
+  model = rewriteKimiModel(model);
   // Step 0: Check for pass-through shim providers (e.g., "pi/openai/gpt-5.4")
   // These providers wrap other providers, so the model ID after the prefix
   // is passed directly to the shim. We construct a ModelInfo without requiring

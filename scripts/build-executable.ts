@@ -174,6 +174,7 @@ async function main() {
 
     // Build the list of files to embed (use relative paths - they work better with embedding)
     const codexBinaryName = isWindows ? "codex.exe" : "codex";
+    const codexHostName = isWindows ? "codex-code-mode-host.exe" : "codex-code-mode-host";
 
     // codex-sdk v0.135.0+ ships the binary under <triple>/bin/; older versions used <triple>/codex/.
     // Mirror codex-runtime-extractor's resolveCodexBinaryInTripleDir() ordering.
@@ -184,12 +185,19 @@ async function main() {
         path.join(codexTripleDir, "codex", codexBinaryName), // legacy
       ].find((p) => fs.existsSync(p)) ?? path.join(codexTripleDir, "bin", codexBinaryName);
 
+    // Companion code-mode host runtime, shipped beside codex since v0.144.x. Codex spawns
+    // it as a sibling binary for models with tool_mode "code_mode_only" (gpt-5.6 variants),
+    // so it must be embedded and extracted alongside the codex binary.
+    const codexHostPath = path.join(path.dirname(codexBinaryPath), codexHostName);
+
     const filesToEmbed = [
       // Claude Agent SDK native runtime binary (0.3.x: one binary per platform, self-contained —
       // ripgrep/wasm are baked into it, so no separate vendor files are needed).
       claudeBinaryPath,
       // Codex SDK binary (platform-specific, v0.101.0+ uses separate @openai/codex-<platform>-<arch> packages)
       codexBinaryPath,
+      // Codex code-mode host (spawned by codex as a sibling; see codex-runtime-extractor.ts)
+      codexHostPath,
       // Shim files — embedded as .bundle to avoid Bun's .js rebundling
       ...shimBundles.map(({ bundle }) => bundle),
     ];

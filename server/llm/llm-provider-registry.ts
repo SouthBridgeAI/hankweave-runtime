@@ -72,12 +72,68 @@ export class LlmProviderRegistry {
   /**
    * Common shortcuts for model names that map to search patterns.
    * These are expanded before model resolution to improve matching.
+   *
+   * Applied via applyModelShortcuts(), which also matches provider-qualified
+   * forms ("openai/gpt-5.6") and reasoning-effort-suffixed forms
+   * ("gpt-5.6-high") so shortcuts can't be bypassed by qualification.
    */
   private static readonly MODEL_SHORTCUTS: Record<string, string> = {
     opus: "claude-opus",
     sonnet: "claude-sonnet",
     haiku: "claude-haiku",
+    // gpt-5.6 ships as sibling variants (sol/luna/terra); the bare name should
+    // land on the default "sol" variant rather than the abstract gpt-5.6 alias.
+    // Codex has no "gpt-5.6" slug — sending it fails at runtime — so every
+    // spelling that would strip down to bare gpt-5.6 must route to sol.
+    "gpt-5.6": "gpt-5.6-sol",
   };
+
+  /**
+   * Reasoning-effort suffixes auto-generated as model variants for
+   * reasoning-capable OpenAI models (see loadModelsData). The codex shim
+   * strips these suffixes and passes them as model_reasoning_effort.
+   */
+  private static readonly REASONING_EFFORTS = ["high", "xhigh"] as const;
+
+  /**
+   * Expand a model name through MODEL_SHORTCUTS.
+   *
+   * Handles three spellings beyond the exact key:
+   * - Provider-qualified: "openai/gpt-5.6" → "openai/gpt-5.6-sol"
+   * - Effort-suffixed: "gpt-5.6-high" → "gpt-5.6-sol-high" (these variants are
+   *   auto-generated from the abstract record by loadModelsData, so they
+   *   resolve successfully but would fail at runtime otherwise)
+   * - Both: "openai/gpt-5.6-xhigh" → "openai/gpt-5.6-sol-xhigh"
+   *
+   * Returns the input unchanged when no shortcut applies.
+   */
+  private static applyModelShortcuts(model: string): string {
+    const lower = model.toLowerCase();
+
+    const direct = LlmProviderRegistry.MODEL_SHORTCUTS[lower];
+    if (direct) return direct;
+
+    // Provider-qualified: apply the shortcut to the part after the first "/"
+    const slashIndex = lower.indexOf("/");
+    if (slashIndex > 0) {
+      const prefix = lower.substring(0, slashIndex);
+      const rest = lower.substring(slashIndex + 1);
+      const expanded = LlmProviderRegistry.applyModelShortcuts(rest);
+      return expanded === rest ? model : `${prefix}/${expanded}`;
+    }
+
+    // Effort-suffixed: apply the shortcut to the base, keep the suffix
+    for (const effort of LlmProviderRegistry.REASONING_EFFORTS) {
+      const suffix = `-${effort}`;
+      if (lower.endsWith(suffix)) {
+        const base = lower.substring(0, lower.length - suffix.length);
+        const target = LlmProviderRegistry.MODEL_SHORTCUTS[base];
+        if (target) return `${target}${suffix}`;
+      }
+    }
+
+    return model;
+  }
 
   private providers = new Map<string, Provider>();
   private models = new Map<string, ModelInfo>();
@@ -147,7 +203,7 @@ export class LlmProviderRegistry {
       // Auto-generate reasoning effort variants for all reasoning-capable OpenAI models.
       // The codex shim strips the suffix (e.g. "-high") and passes it as model_reasoning_effort.
       // We register these so the registry can resolve and return cost info for them.
-      const REASONING_EFFORTS = ["high", "xhigh"] as const;
+      const REASONING_EFFORTS = LlmProviderRegistry.REASONING_EFFORTS;
       const effortCostMultiplier: Record<string, number> = {
         high: 1,
         xhigh: 2,
@@ -883,11 +939,9 @@ export class LlmProviderRegistry {
     let { providerId, model, ignoreBlockList = true } = input;
     const FUZZY_THRESHOLD = 0.6;
 
-    // Apply shortcuts: expand common short names to search patterns
-    const modelLowercase = model.toLowerCase();
-    if (LlmProviderRegistry.MODEL_SHORTCUTS[modelLowercase]) {
-      model = LlmProviderRegistry.MODEL_SHORTCUTS[modelLowercase];
-    }
+    // Apply shortcuts: expand common short names to search patterns.
+    // Handles bare, provider-qualified, and effort-suffixed spellings.
+    model = LlmProviderRegistry.applyModelShortcuts(model);
 
     // Helper to check if a model is blocked (case-insensitive)
     const isBlocked = (modelInfo: ModelInfo): boolean => {

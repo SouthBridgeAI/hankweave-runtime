@@ -25,8 +25,10 @@ import {
 } from "./runtime-extractor-base.js";
 import { isCompiledExecutable } from "./utils.js";
 
-// Codex SDK version for directory naming
-export const CODEX_SDK_VERSION = "0.135.0";
+// Codex SDK version for directory naming.
+// Must match the @openai/codex-sdk version pinned in package.json — it is the
+// cache-busting key for the extraction directory (verified by a unit test).
+export const CODEX_SDK_VERSION = "0.144.6";
 
 /**
  * Resolve the codex binary within a `vendor/<platform-triple>` directory.
@@ -111,6 +113,18 @@ export function getCodexPlatform(target?: string): CodexPlatform {
  */
 export function getCodexBinaryName(): string {
   return os.platform() === "win32" ? "codex.exe" : "codex";
+}
+
+/**
+ * Get the code-mode host binary filename for the current platform.
+ *
+ * Since codex v0.144.x, models whose metadata declares `tool_mode: "code_mode_only"`
+ * (e.g. the gpt-5.6 variants) execute tool calls through a companion V8 runtime that
+ * codex spawns as a sibling binary (`bin/codex-code-mode-host` next to `bin/codex`).
+ * It must be extracted beside the codex binary or code-mode tool calls fail to spawn.
+ */
+export function getCodexCodeModeHostName(): string {
+  return os.platform() === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host";
 }
 
 /**
@@ -372,7 +386,11 @@ export function locateCodexInNodeModules(): string | null {
 export function needsCodexExtraction(): boolean {
   const extractionDir = getCodexExtractionDir();
   const binaryName = getCodexBinaryName();
-  return needsExtraction(extractionDir, CODEX_SDK_VERSION, ".extraction-complete", [binaryName]);
+  const hostName = getCodexCodeModeHostName();
+  return needsExtraction(extractionDir, CODEX_SDK_VERSION, ".extraction-complete", [
+    binaryName,
+    hostName,
+  ]);
 }
 
 /**
@@ -387,6 +405,7 @@ export function needsCodexExtraction(): boolean {
 export async function extractCodexBinary(): Promise<string> {
   const platform = getCodexPlatform();
   const binaryName = getCodexBinaryName();
+  const hostName = getCodexCodeModeHostName();
 
   // Build file extraction configuration
   const filesToExtract: FileToExtract[] = [
@@ -394,6 +413,14 @@ export async function extractCodexBinary(): Promise<string> {
       // v0.135.0+ ships the binary under <triple>/bin/; older versions used <triple>/codex/
       embeddedPath: `${platform}/bin/${binaryName}`,
       outputPath: binaryName,
+      required: true,
+      makeExecutable: true,
+    },
+    {
+      // Companion code-mode host runtime — codex resolves it as a sibling of its own
+      // binary, so it must land in the same directory (see getCodexCodeModeHostName).
+      embeddedPath: `${platform}/bin/${hostName}`,
+      outputPath: hostName,
       required: true,
       makeExecutable: true,
     },
