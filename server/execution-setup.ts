@@ -5,7 +5,13 @@ import path from "node:path";
 import readline from "node:readline";
 import { DEFAULT_CONFIG } from "./config.js";
 import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
-import { detectRuntime, getMetadata, getRuntimeVersion, isCompiledExecutable } from "./utils.js";
+import {
+  detectRuntime,
+  getManagedExecutionsRoot,
+  getMetadata,
+  getRuntimeVersion,
+  isCompiledExecutable,
+} from "./utils.js";
 
 /**
  * Check if we're in a non-interactive environment (CI, tests, pipes, etc.)
@@ -175,7 +181,7 @@ export async function setupExecutionEnvironment(options: {
     // Explicit execution path provided
 
     // Tier 1: Managed execution directory safety
-    const managedExecBase = path.join(os.homedir(), ".hankweave-executions");
+    const managedExecBase = getManagedExecutionsRoot();
     if (executionPath.startsWith(managedExecBase)) {
       // Allow resuming existing executions (they have .hankweave/execution-meta.json)
       const metaPath = path.join(executionPath, ".hankweave", "execution-meta.json");
@@ -376,7 +382,7 @@ export async function setupExecutionEnvironment(options: {
     }
   } else {
     // Auto-detect or create execution directory
-    const executionRoot = path.join(os.homedir(), ".hankweave-executions");
+    const executionRoot = getManagedExecutionsRoot();
     await fs.promises.mkdir(executionRoot, { recursive: true });
 
     if (startNew) {

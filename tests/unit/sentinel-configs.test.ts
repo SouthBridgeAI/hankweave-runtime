@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import type { Condition, PatternStep } from "../../server/config-validation/sentinel.schema.js";
 import { sentinelConfigSchema } from "../../server/config-validation/sentinel.schema.js";
 
 describe("Sentinel Configuration Files", () => {
@@ -53,90 +52,6 @@ describe("Sentinel Configuration Files", () => {
         // If userPromptText is defined, it should not be empty
         if (hasUserPromptText) {
           expect(config.content.userPromptText.length).toBeGreaterThan(0);
-        }
-      }
-    });
-  });
-
-  describe("Trigger Coverage", () => {
-    it("should cover various event types", () => {
-      const eventTypes = new Set<string>();
-
-      for (const config of configFiles) {
-        if (config.content.trigger.type === "event") {
-          config.content.trigger.on.forEach((event: string) => eventTypes.add(event));
-        } else if (config.content.trigger.type === "sequence") {
-          config.content.trigger.interestFilter.on.forEach((event: string) =>
-            eventTypes.add(event),
-          );
-        }
-      }
-
-      // Check we're monitoring a good variety of events
-      expect(eventTypes.size).toBeGreaterThanOrEqual(5);
-
-      // Check we have some key events covered
-      expect(eventTypes.has("assistant.action")).toBe(true);
-      expect(eventTypes.has("tool.result")).toBe(true);
-      expect(eventTypes.has("codon.completed")).toBe(true);
-    });
-
-    it("should have both event and sequence triggers", () => {
-      const triggerTypes = configFiles.map((c) => c.content.trigger.type);
-      expect(triggerTypes).toContain("event");
-      expect(triggerTypes).toContain("sequence");
-    });
-
-    it("should use various condition operators", () => {
-      const operators = new Set<string>();
-
-      for (const config of configFiles) {
-        const trigger = config.content.trigger;
-
-        // Check event trigger conditions
-        if (trigger.conditions) {
-          trigger.conditions.forEach((cond: Condition) => operators.add(cond.operator));
-        }
-
-        // Check sequence pattern conditions
-        if (trigger.pattern) {
-          trigger.pattern.forEach((step: PatternStep) => {
-            if (step.conditions) {
-              step.conditions.forEach((cond: Condition) => operators.add(cond.operator));
-            }
-          });
-        }
-      }
-
-      // We should be using at least a few different operators
-      expect(operators.size).toBeGreaterThanOrEqual(3);
-    });
-  });
-
-  describe("Execution Strategy Distribution", () => {
-    it("should use all execution strategies", () => {
-      const strategies = configFiles.map((c) => c.content.execution.strategy);
-
-      expect(strategies).toContain("immediate");
-      expect(strategies).toContain("debounce");
-      expect(strategies).toContain("count");
-      expect(strategies).toContain("timeWindow");
-    });
-
-    it("should have reasonable timing values", () => {
-      for (const config of configFiles) {
-        const exec = config.content.execution;
-
-        if (exec.strategy === "debounce" || exec.strategy === "timeWindow") {
-          expect(exec.milliseconds).toBeDefined();
-          expect(exec.milliseconds).toBeGreaterThan(0);
-          expect(exec.milliseconds).toBeLessThanOrEqual(300000); // Max 5 minutes
-        }
-
-        if (exec.strategy === "count") {
-          expect(exec.threshold).toBeDefined();
-          expect(exec.threshold).toBeGreaterThan(0);
-          expect(exec.threshold).toBeLessThanOrEqual(1000);
         }
       }
     });

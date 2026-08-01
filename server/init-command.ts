@@ -41,19 +41,6 @@ const templates: Record<string, string> = {
       ]
     },
     {
-      "id": "analyze-codex",
-      "name": "Analyze Project (Codex)",
-      "model": "gpt-5.5",
-      "continuationMode": "fresh",
-      "promptFile": "./prompts/analyze-codex.md",
-      "checkpointedFiles": ["analysis-codex.md"],
-      "outputFiles": [
-        {
-          "copy": ["analysis-codex.md"]
-        }
-      ]
-    },
-    {
       "id": "analyze-pi",
       "name": "Analyze Project (Pi)",
       "model": "pi/anthropic/claude-haiku-4-5",
@@ -67,15 +54,15 @@ const templates: Record<string, string> = {
       ]
     },
     {
-      "id": "analyze-opencode",
-      "name": "Analyze Project (OpenCode)",
-      "model": "opencode/anthropic/claude-haiku-4-5",
+      "id": "analyze-gpt",
+      "name": "Analyze Project (GPT)",
+      "model": "pi/openai-codex/gpt-5.6-terra",
       "continuationMode": "fresh",
-      "promptFile": "./prompts/analyze-opencode.md",
-      "checkpointedFiles": ["analysis-opencode.md"],
+      "promptFile": "./prompts/analyze-gpt.md",
+      "checkpointedFiles": ["analysis-gpt.md"],
       "outputFiles": [
         {
-          "copy": ["analysis-opencode.md"]
+          "copy": ["analysis-gpt.md"]
         }
       ]
     }
@@ -104,16 +91,6 @@ Your analysis should include:
 
 Please create your analysis in a file called \`analysis-gemini.md\` in the execution directory.`,
 
-  "prompts/analyze-codex.md": `# Project Analysis (Codex)
-
-Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
-
-Your analysis should include:
-
-1. Very brief overview of the files in that directory
-
-**Important:** Please create your analysis in a file called \`analysis-codex.md\` in the execution directory using the \`Write\` tool. Do NOT use PowerShell commands (like Set-Content) on Windows.`,
-
   "prompts/analyze-pi.md": `# Project Analysis (Pi)
 
 Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
@@ -124,7 +101,7 @@ Your analysis should include:
 
 Please create your analysis in a file called \`analysis-pi.md\` in the execution directory.`,
 
-  "prompts/analyze-opencode.md": `# Project Analysis (OpenCode)
+  "prompts/analyze-gpt.md": `# Project Analysis (GPT)
 
 Please analyze the files in the \`read_only_data_source\` directory located in the current working directory and create a comprehensive analysis report.
 
@@ -132,7 +109,7 @@ Your analysis should include:
 
 1. Very brief overview of the files in that directory
 
-Please create your analysis in a file called \`analysis-opencode.md\` in the execution directory.`,
+Please create your analysis in a file called \`analysis-gpt.md\` in the execution directory.`,
 
   "README.md": `# Hank
 
@@ -141,15 +118,20 @@ This hank was initialized with \`hankweave init\`.
 ## Structure
 
 - \`hank.json\` — Workflow definition (codons, models, file tracking)
-- \`prompts/\` — Prompt files for each codon (one per harness: Haiku, Gemini, Codex, Pi, OpenCode)
+- \`prompts/\` — Prompt files for each codon (one per model family: Haiku, Gemini, Pi, GPT)
 - \`data/\` — Sample data files to analyze
 - \`.gitignore\` — Ignore patterns for execution artifacts
+
+## Auth
+
+- The \`haiku\`, \`pi/anthropic/...\`, and \`pi/google/...\` codons need \`ANTHROPIC_API_KEY\` (or a Claude Code login) and \`GEMINI_API_KEY\`.
+- The \`pi/openai-codex/gpt-5.6-terra\` codon runs on a **ChatGPT subscription** (no \`OPENAI_API_KEY\`): the OAuth credential is read from Pi's store at \`~/.pi/agent/auth.json\`. Put it there with \`pi login\` (choose "OpenAI (ChatGPT Plus/Pro)"). No subscription? Delete that codon, or switch its model to a keyed spelling like \`gpt-5.5\` with \`OPENAI_API_KEY\` set.
 
 ## Customization
 
 Edit \`hank.json\` to customize your workflow:
 - Add more codons to the \`hank\` array
-- Change the \`model\` (haiku, sonnet, opus, pi/google/gemini-2.5-flash, gpt-5.5, etc.)
+- Change the \`model\` (haiku, sonnet, opus, pi/google/gemini-2.5-flash, pi/openai-codex/gpt-5.6-terra, etc.)
 - Add \`rigSetup\` to prepare your environment before a codon runs
 - Configure \`checkpointedFiles\` to track files in git checkpoints
 - Use \`overrides\` to suggest runtime settings (model, port, etc.)
@@ -259,9 +241,8 @@ export async function initProject(targetDir: string): Promise<void> {
   console.log("  - hank.json");
   console.log("  - prompts/analyze-haiku.md");
   console.log("  - prompts/analyze-gemini.md");
-  console.log("  - prompts/analyze-codex.md");
   console.log("  - prompts/analyze-pi.md");
-  console.log("  - prompts/analyze-opencode.md");
+  console.log("  - prompts/analyze-gpt.md");
   console.log("  - data/sample1.txt");
   console.log("  - data/sample2.txt");
   console.log("  - data/notes.txt");

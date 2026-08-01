@@ -109,8 +109,10 @@ describe("Replay E2E — plan-gen hank", () => {
       expect(readyEvent).toBeDefined();
 
       // Wait for all codons to complete
+      // Generous per-codon budget: replay pacing varies with machine load and
+      // MAX_REPLAY_DELAY-capped gaps; 5s flaked on slower runs.
       for (const codonId of CODON_IDS) {
-        await server.waitForCodonCompletion(codonId, undefined, 5_000);
+        await server.waitForCodonCompletion(codonId, undefined, 30_000);
       }
       await server.waitForRunToComplete(20_000);
 
@@ -136,5 +138,8 @@ describe("Replay E2E — plan-gen hank", () => {
     } finally {
       await server.stop();
     }
-  }, 60_000); // 1 min
+    // Timestamped replay of this 17-codon fixture legitimately takes ~55s
+    // (MAX_REPLAY_DELAY-capped gaps), which left no headroom for teardown in
+    // the old 60s budget.
+  }, 150_000);
 });

@@ -236,7 +236,7 @@ Server:
   --proxy                   Enable the LLM proxy server (disabled by default)
   --anthropic-base-url <url> Custom Anthropic API base URL
   --idle-timeout <seconds>  Idle timeout for WebSocket and proxy servers (0-255, default: 0)
-  --shim-idle-timeout <seconds>   Shim idle timeout in seconds (default: 120, per-shim)
+  --shim-idle-timeout <seconds>   Harness idle timeout in seconds (default: 120, per-codon)
 
 Other:
   --init                    Initialize a new hank in current directory
@@ -661,7 +661,7 @@ Use --output to copy them elsewhere.
   // Apply HANKWEAVE_*=unset to process.env BEFORE provider initialization.
   // This ensures sentinel providers (which use AI SDK in-process) don't inherit
   // proxy URLs that break health checks. Child process stripping (in
-  // claude-agent-sdk-manager.ts and shim-process-manager.ts) still handles
+  // claude-agent-sdk-manager.ts and pi-sdk-manager.ts) still handles
   // codon agents separately.
   for (const [key, value] of Object.entries(process.env)) {
     if (
@@ -699,6 +699,8 @@ Use --output to copy them elsewhere.
       executionPath: executionSetup.executionPath,
       logger: serverLogger,
       modelOverride: resolvedConfig.model, // Use resolved model from all config layers
+      // Replay never contacts a provider — don't require harness credentials.
+      skipSelfTests: !!resolvedConfig.replayDir,
     });
 
     const { codons, globalSystemPrompt, warnings } = validationResult;

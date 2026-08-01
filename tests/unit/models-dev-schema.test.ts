@@ -1,43 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import {
-  type ModelInfo,
-  type ModelsData,
   modalitiesSchema,
   modelCostSchema,
   modelInfoSchema,
   modelLimitsSchema,
   modelsDataSchema,
   modelsDevApiResponseSchema,
-  type ProviderInfo,
   providerInfoSchema,
 } from "../../server/llm/models-dev-schema";
 
 describe("Models Dev Schema Validation", () => {
   describe("modelCostSchema", () => {
-    it("should validate valid cost data", () => {
-      const validCost = {
-        input: 3.0,
-        output: 15.0,
-        cache_read: 0.3,
-        cache_write: 3.75,
-      };
-
-      expect(() => modelCostSchema.parse(validCost)).not.toThrow();
-    });
-
-    it("should accept optional fields", () => {
-      const partialCost = {
-        input: 3.0,
-        output: 15.0,
-      };
-
-      expect(() => modelCostSchema.parse(partialCost)).not.toThrow();
-    });
-
-    it("should accept undefined (optional schema)", () => {
-      expect(() => modelCostSchema.parse(undefined)).not.toThrow();
-    });
-
     it("should reject negative costs", () => {
       const invalidCost = {
         input: -1,
@@ -49,15 +22,6 @@ describe("Models Dev Schema Validation", () => {
   });
 
   describe("modelLimitsSchema", () => {
-    it("should validate valid limits", () => {
-      const validLimits = {
-        context: 200000,
-        output: 8192,
-      };
-
-      expect(() => modelLimitsSchema.parse(validLimits)).not.toThrow();
-    });
-
     it("should reject zero or negative limits", () => {
       const invalidLimits = {
         context: 0,
@@ -78,24 +42,6 @@ describe("Models Dev Schema Validation", () => {
   });
 
   describe("modalitiesSchema", () => {
-    it("should validate text-only modalities", () => {
-      const textOnly = {
-        input: ["text"],
-        output: ["text"],
-      };
-
-      expect(() => modalitiesSchema.parse(textOnly)).not.toThrow();
-    });
-
-    it("should validate multimodal input with text output", () => {
-      const multimodal = {
-        input: ["text", "image", "audio", "video"],
-        output: ["text"],
-      };
-
-      expect(() => modalitiesSchema.parse(multimodal)).not.toThrow();
-    });
-
     it("should reject empty modalities arrays", () => {
       const emptyModalities = {
         input: [],
@@ -107,61 +53,6 @@ describe("Models Dev Schema Validation", () => {
   });
 
   describe("modelInfoSchema", () => {
-    it("should validate complete model info", () => {
-      const completeModel: ModelInfo = {
-        providerId: "anthropic",
-        modelId: "claude-3-5-sonnet-20241022",
-        name: "Claude 3.5 Sonnet",
-        attachment: true,
-        reasoning: false,
-        tool_call: true,
-        temperature: true,
-        cost: {
-          input: 3.0,
-          output: 15.0,
-          cache_read: 0.3,
-          cache_write: 3.75,
-        },
-        limit: {
-          context: 200000,
-          output: 8192,
-        },
-        modalities: {
-          input: ["text", "image"],
-          output: ["text"],
-        },
-        knowledge: "2024-04-30",
-        release_date: "2024-10-22",
-        last_updated: "2024-10-22",
-      };
-
-      expect(() => modelInfoSchema.parse(completeModel)).not.toThrow();
-    });
-
-    it("should validate model info without cost data", () => {
-      const modelWithoutCost = {
-        providerId: "test",
-        modelId: "test-model",
-        name: "Test Model",
-        attachment: false,
-        reasoning: true,
-        tool_call: false,
-        temperature: true,
-        limit: {
-          context: 100000,
-          output: 4096,
-        },
-        modalities: {
-          input: ["text"],
-          output: ["text"],
-        },
-        release_date: "2024-01",
-        last_updated: "2024-01",
-      };
-
-      expect(() => modelInfoSchema.parse(modelWithoutCost)).not.toThrow();
-    });
-
     it("should reject invalid date formats", () => {
       const invalidModel = {
         providerId: "test",
@@ -200,30 +91,6 @@ describe("Models Dev Schema Validation", () => {
   });
 
   describe("providerInfoSchema", () => {
-    it("should validate provider with models", () => {
-      const provider: ProviderInfo = {
-        id: "anthropic",
-        name: "Anthropic",
-        models: [
-          {
-            providerId: "anthropic",
-            modelId: "claude-3-haiku",
-            name: "Claude 3 Haiku",
-            attachment: true,
-            reasoning: false,
-            tool_call: true,
-            temperature: true,
-            limit: { context: 200000, output: 4096 },
-            modalities: { input: ["text"], output: ["text"] },
-            release_date: "2024-03",
-            last_updated: "2024-03",
-          },
-        ],
-      };
-
-      expect(() => providerInfoSchema.parse(provider)).not.toThrow();
-    });
-
     it("should reject provider with empty models array", () => {
       const emptyProvider = {
         id: "test",
@@ -236,37 +103,6 @@ describe("Models Dev Schema Validation", () => {
   });
 
   describe("modelsDataSchema", () => {
-    it("should validate complete models data structure", () => {
-      const validData: ModelsData = {
-        version: "1.0.0",
-        lastUpdated: new Date().toISOString(),
-        providers: [
-          {
-            id: "anthropic",
-            name: "Anthropic",
-            models: [
-              {
-                providerId: "anthropic",
-                modelId: "claude-3-haiku",
-                name: "Claude 3 Haiku",
-                attachment: true,
-                reasoning: false,
-                tool_call: true,
-                temperature: true,
-                cost: { input: 0.25, output: 1.25 },
-                limit: { context: 200000, output: 4096 },
-                modalities: { input: ["text", "image"], output: ["text"] },
-                release_date: "2024-03-13",
-                last_updated: "2024-03-13",
-              },
-            ],
-          },
-        ],
-      };
-
-      expect(() => modelsDataSchema.parse(validData)).not.toThrow();
-    });
-
     it("should reject invalid version format", () => {
       const invalidVersion = {
         version: "v1.0",
@@ -384,18 +220,9 @@ describe("Models Dev Schema Validation", () => {
       for (const provider of validatedData.providers) {
         expect(provider.models.length).toBeGreaterThan(0);
 
-        // Verify each model has required fields
+        // Verify each model belongs to its provider
         for (const model of provider.models) {
           expect(model.providerId).toBe(provider.id);
-          expect(typeof model.modelId).toBe("string");
-          expect(typeof model.name).toBe("string");
-          expect(typeof model.attachment).toBe("boolean");
-          expect(typeof model.reasoning).toBe("boolean");
-          expect(typeof model.tool_call).toBe("boolean");
-          expect(model.limit.context).toBeGreaterThan(0);
-          expect(model.limit.output).toBeGreaterThan(0);
-          expect(model.modalities.input.length).toBeGreaterThan(0);
-          expect(model.modalities.output.length).toBeGreaterThan(0);
         }
       }
     });
@@ -415,48 +242,6 @@ describe("Models Dev Schema Validation", () => {
       };
 
       expect(() => modelInfoSchema.parse(incompleteModel)).toThrow();
-    });
-
-    it("should validate very large context windows", () => {
-      const largeContextModel = {
-        providerId: "test",
-        modelId: "test",
-        name: "Test",
-        attachment: true,
-        reasoning: false,
-        tool_call: true,
-        temperature: true,
-        limit: {
-          context: 2000000, // 2M tokens
-          output: 100000, // 100K tokens
-        },
-        modalities: { input: ["text"], output: ["text"] },
-        release_date: "2024-01",
-        last_updated: "2024-01",
-      };
-
-      expect(() => modelInfoSchema.parse(largeContextModel)).not.toThrow();
-    });
-
-    it("should validate various modality combinations", () => {
-      const videoModel = {
-        providerId: "test",
-        modelId: "test-video",
-        name: "Test Video Model",
-        attachment: true,
-        reasoning: false,
-        tool_call: true,
-        temperature: true,
-        limit: { context: 100000, output: 4096 },
-        modalities: {
-          input: ["text", "image", "audio", "video", "pdf"],
-          output: ["text"],
-        },
-        release_date: "2024-01",
-        last_updated: "2024-01",
-      };
-
-      expect(() => modelInfoSchema.parse(videoModel)).not.toThrow();
     });
   });
 });

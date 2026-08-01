@@ -18,10 +18,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
-import { generateTestTimestamp, getFreePort, rimrafSimple } from "../utils/test-helpers.js";
+import {
+  generateTestTimestamp,
+  getFreePort,
+  rimrafSimple,
+  waitForCondition,
+} from "../utils/test-helpers.js";
 
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_AREA = path.join(TEST_ROOT, "tests/test-area");
+// Wiring-only suite: no codon ever runs (--no-autostart everywhere), so the
+// config exists purely to satisfy startup validation. The keyless config uses a
+// non-credential-enforced pi passthrough, letting this suite run with zero API
+// keys — which its offline tier now guarantees it gets.
+const KEYLESS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons-keyless.config.json");
 
 describe("--start-new --force wipes agentRoot/", () => {
   const dirsToCleanup: string[] = [];
@@ -47,13 +57,19 @@ describe("--start-new --force wipes agentRoot/", () => {
     // start-then-immediately-stop race.
     const firstServer = await launchHankweave({
       port,
+      configPath: KEYLESS_CONFIG,
       executionDir: execDir,
       extraArgs: ["--no-autostart"],
     });
     try {
       await firstServer.waitForEvent("server.ready", 30_000);
-      // Brief pause so metadata + agentRoot are fully written.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for the scaffolding the rest of the test inspects — the workspace
+      // and its checkpoint store — instead of a blind pause.
+      await waitForCondition(
+        () =>
+          fs.existsSync(path.join(execDir, "agentRoot")) &&
+          fs.existsSync(path.join(execDir, ".hankweave", "checkpoints", ".hankweavecheckpoints")),
+      );
     } finally {
       await firstServer.stop();
     }
@@ -71,13 +87,20 @@ describe("--start-new --force wipes agentRoot/", () => {
     // Step 3: Relaunch the same directory with --start-new --force.
     const freshServer = await launchHankweave({
       port,
+      configPath: KEYLESS_CONFIG,
       executionDir: execDir,
       reuseTestDirectory: true,
       extraArgs: ["--start-new", "--force", "-y", "--no-autostart"],
     });
     try {
       await freshServer.waitForEvent("server.ready", 30_000);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // --start-new --force backs up the old .hankweave/ and builds a fresh
+      // checkpoint store; wait for both before inspecting the directory.
+      await waitForCondition(
+        () =>
+          fs.readdirSync(execDir).some((e) => e.startsWith(".hankweave.backup-")) &&
+          fs.existsSync(path.join(execDir, ".hankweave", "checkpoints", ".hankweavecheckpoints")),
+      );
     } finally {
       await freshServer.stop();
     }
@@ -150,12 +173,18 @@ describe("--start-new --force wipes agentRoot/", () => {
     // Step 1: First run — creates .hankweave/ and agentRoot/ in execDir.
     const firstServer = await launchHankweave({
       port,
+      configPath: KEYLESS_CONFIG,
       executionDir: execDir,
       extraArgs: ["--no-autostart"],
     });
     try {
       await firstServer.waitForEvent("server.ready", 30_000);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for the workspace and its checkpoint store to exist on disk.
+      await waitForCondition(
+        () =>
+          fs.existsSync(path.join(execDir, "agentRoot")) &&
+          fs.existsSync(path.join(execDir, ".hankweave", "checkpoints", ".hankweavecheckpoints")),
+      );
     } finally {
       await firstServer.stop();
     }
@@ -174,13 +203,20 @@ describe("--start-new --force wipes agentRoot/", () => {
     // Step 3: Relaunch with --start-new --force --no-wipe.
     const freshServer = await launchHankweave({
       port,
+      configPath: KEYLESS_CONFIG,
       executionDir: execDir,
       reuseTestDirectory: true,
       extraArgs: ["--start-new", "--force", "--no-wipe", "-y", "--no-autostart"],
     });
     try {
       await freshServer.waitForEvent("server.ready", 30_000);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // --start-new --force still backs up .hankweave/ and rebuilds the
+      // checkpoint store even with --no-wipe; wait for both.
+      await waitForCondition(
+        () =>
+          fs.readdirSync(execDir).some((e) => e.startsWith(".hankweave.backup-")) &&
+          fs.existsSync(path.join(execDir, ".hankweave", "checkpoints", ".hankweavecheckpoints")),
+      );
     } finally {
       await freshServer.stop();
     }

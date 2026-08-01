@@ -60,6 +60,7 @@ export function createTestCodon(codonData: {
   exhaustWithPrompt?: string;
   maxExtensions?: number;
   shimIdleTimeout?: number;
+  budget?: Record<string, unknown>;
 }): Codon {
   ensureRegistryInitialized();
 

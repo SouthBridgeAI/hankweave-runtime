@@ -2,13 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import { CodonId } from "../../server/types/branded-types.js";
 import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
-import type { SentinelConfig } from "../../server/types/sentinel-types.js";
-import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
+import { CodonId } from "../../server/types/branded-types.js";
 import type { HankweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
-import { mockLlmCall } from "../utils/sentinel-test-harness.js";
+import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { Logger } from "../../server/utils.js";
 import { createTypedMockLlmAdapter } from "../utils/mock-llm.js";
 
@@ -49,10 +47,10 @@ describe("Sentinel Templating Integration", () => {
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
-        userPromptFile: "test-prompt.md"
+        userPromptFile: "test-prompt.md",
       };
 
       let llmCallMade = false;
@@ -67,7 +65,7 @@ describe("Sentinel Templating Integration", () => {
         mockLLMCall,
         createMockLogger(),
         sentinelDir,
-        configDir
+        configDir,
       );
 
       const testEvent: ServerEvent = {
@@ -77,8 +75,8 @@ describe("Sentinel Templating Integration", () => {
         data: {
           codonId: CodonId("test-codon"),
           action: "thinking",
-          content: "Test content"
-        }
+          content: "Test content",
+        },
       };
 
       // Trigger the sentinel
@@ -102,10 +100,10 @@ describe("Sentinel Templating Integration", () => {
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
-        userPromptFile: ["prompt-part1.md", "prompt-part2.md"]
+        userPromptFile: ["prompt-part1.md", "prompt-part2.md"],
       };
 
       const mockLLMCall = createTypedMockLlmAdapter("Mock response");
@@ -116,7 +114,7 @@ describe("Sentinel Templating Integration", () => {
         mockLLMCall,
         createMockLogger(),
         sentinelDir,
-        configDir
+        configDir,
       );
 
       expect(sentinel).toBeDefined();
@@ -129,10 +127,10 @@ describe("Sentinel Templating Integration", () => {
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
-        userPromptFile: "nonexistent-file.md"
+        userPromptFile: "nonexistent-file.md",
       };
 
       const mockLLMCall = createTypedMockLlmAdapter("Mock response");
@@ -144,7 +142,7 @@ describe("Sentinel Templating Integration", () => {
           mockLLMCall,
           createMockLogger(),
           sentinelDir,
-          configDir
+          configDir,
         );
       }).toThrow("Failed to load user prompt file");
     });
@@ -156,8 +154,14 @@ describe("Sentinel Templating Integration", () => {
       const systemPromptFile = path.join(configDir, "system.md");
       const userPromptFile = path.join(configDir, "user.md");
 
-      await fs.writeFile(systemPromptFile, "You are analyzing events for codon <%= it.codon.name %>.");
-      await fs.writeFile(userPromptFile, "New events to analyze: <%= it.events.map(e => e.type).join(', ') %>");
+      await fs.writeFile(
+        systemPromptFile,
+        "You are analyzing events for codon <%= it.codon.name %>.",
+      );
+      await fs.writeFile(
+        userPromptFile,
+        "New events to analyze: <%= it.events.map(e => e.type).join(', ') %>",
+      );
 
       const config: SentinelConfig = {
         id: "conversational-sentinel",
@@ -165,7 +169,7 @@ describe("Sentinel Templating Integration", () => {
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
         systemPromptFile: "system.md",
@@ -173,18 +177,18 @@ describe("Sentinel Templating Integration", () => {
         conversational: {
           trimmingStrategy: {
             type: "maxTurns",
-            maxTurns: 3
-          }
-        }
+            maxTurns: 3,
+          },
+        },
       };
 
       let capturedOptions: HankweaveGenerateTextOptions | undefined;
-      const mockLLMCall = async (id: string, options: HankweaveGenerateTextOptions) => {
+      const mockLLMCall = async (_id: string, options: HankweaveGenerateTextOptions) => {
         capturedOptions = options;
         return {
           text: "Assistant response",
           finishReason: "stop" as const,
-          usage: { inputTokens: 100, outputTokens: 20 }
+          usage: { inputTokens: 100, outputTokens: 20 },
         };
       };
 
@@ -194,7 +198,7 @@ describe("Sentinel Templating Integration", () => {
         mockLLMCall,
         createMockLogger(),
         sentinelDir,
-        configDir
+        configDir,
       );
 
       const testEvent: ServerEvent = {
@@ -204,8 +208,8 @@ describe("Sentinel Templating Integration", () => {
         data: {
           codonId: CodonId("test-codon"),
           action: "thinking",
-          content: "Test content"
-        }
+          content: "Test content",
+        },
       };
 
       // Trigger the sentinel
@@ -216,7 +220,9 @@ describe("Sentinel Templating Integration", () => {
       if (capturedOptions) {
         expect(capturedOptions.messages).toHaveLength(2); // system + user
         expect(capturedOptions.messages[0].role).toBe("system");
-        expect(capturedOptions.messages[0].content).toContain("You are analyzing events for codon Conversational Sentinel");
+        expect(capturedOptions.messages[0].content).toContain(
+          "You are analyzing events for codon Conversational Sentinel",
+        );
         expect(capturedOptions.messages[1].role).toBe("user");
         expect(capturedOptions.messages[1].content).toBe("New events to analyze: assistant.action");
       }
@@ -235,7 +241,7 @@ describe("Sentinel Templating Integration", () => {
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
         systemPromptFile: "error-system.md",
@@ -243,10 +249,10 @@ describe("Sentinel Templating Integration", () => {
         conversational: {
           trimmingStrategy: {
             type: "maxTurns",
-            maxTurns: 5
+            maxTurns: 5,
           },
-          continueOnError: true
-        }
+          continueOnError: true,
+        },
       };
 
       let callCount = 0;
@@ -265,7 +271,7 @@ describe("Sentinel Templating Integration", () => {
         mockLLMCall,
         logger,
         sentinelDir,
-        configDir
+        configDir,
       );
 
       const testEvent: ServerEvent = {
@@ -275,8 +281,8 @@ describe("Sentinel Templating Integration", () => {
         data: {
           codonId: CodonId("test-codon"),
           action: "thinking",
-          content: "Test content"
-        }
+          content: "Test content",
+        },
       };
 
       // First trigger - should fail but not crash
@@ -289,12 +295,14 @@ describe("Sentinel Templating Integration", () => {
 
       // Verify error was logged but execution continued
       const logMessages = logger.getLogs();
-      const errorLogs = logMessages.filter(log => log.level === "error");
+      const errorLogs = logMessages.filter((log) => log.level === "error");
       expect(errorLogs.length).toBeGreaterThan(0);
-      expect(errorLogs.some(log => log.message.includes("LLM call failed"))).toBe(true);
+      expect(errorLogs.some((log) => log.message.includes("LLM call failed"))).toBe(true);
 
-      const infoLogs = logMessages.filter(log => log.level === "info");
-      expect(infoLogs.some(log => log.message.includes("Ignoring error as per configuration"))).toBe(true);
+      const infoLogs = logMessages.filter((log) => log.level === "info");
+      expect(
+        infoLogs.some((log) => log.message.includes("Ignoring error as per configuration")),
+      ).toBe(true);
     });
   });
 
@@ -309,10 +317,10 @@ describe("Sentinel Templating Integration", () => {
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
-        userPromptFile: "bad-syntax.md"
+        userPromptFile: "bad-syntax.md",
       };
 
       let llmCallExecuted = false;
@@ -328,7 +336,7 @@ describe("Sentinel Templating Integration", () => {
         mockLLMCall,
         logger,
         sentinelDir,
-        configDir
+        configDir,
       );
 
       const testEvent: ServerEvent = {
@@ -338,8 +346,8 @@ describe("Sentinel Templating Integration", () => {
         data: {
           codonId: CodonId("test-codon"),
           action: "thinking",
-          content: "Test content"
-        }
+          content: "Test content",
+        },
       };
 
       // This should not crash but should log the error
@@ -349,9 +357,9 @@ describe("Sentinel Templating Integration", () => {
       expect(llmCallExecuted).toBe(false);
 
       // Error should be logged
-      const errorLogs = logger.getLogs().filter(log => log.level === "error");
+      const errorLogs = logger.getLogs().filter((log) => log.level === "error");
       expect(errorLogs.length).toBeGreaterThan(0);
-      expect(errorLogs.some(log => log.message.includes("Template rendering failed"))).toBe(true);
+      expect(errorLogs.some((log) => log.message.includes("Template rendering failed"))).toBe(true);
     });
 
     test("handles template runtime errors gracefully", async () => {
@@ -364,10 +372,10 @@ describe("Sentinel Templating Integration", () => {
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
-        userPromptFile: "runtime-error.md"
+        userPromptFile: "runtime-error.md",
       };
 
       let llmCallExecuted = false;
@@ -383,7 +391,7 @@ describe("Sentinel Templating Integration", () => {
         mockLLMCall,
         logger,
         sentinelDir,
-        configDir
+        configDir,
       );
 
       const testEvent: ServerEvent = {
@@ -393,16 +401,16 @@ describe("Sentinel Templating Integration", () => {
         data: {
           codonId: CodonId("test-codon"),
           action: "thinking",
-          content: "Test content"
-        }
+          content: "Test content",
+        },
       };
 
       await sentinel.handleEvent(testEvent);
 
       expect(llmCallExecuted).toBe(false);
 
-      const errorLogs = logger.getLogs().filter(log => log.level === "error");
-      expect(errorLogs.some(log => log.message.includes("Template rendering failed"))).toBe(true);
+      const errorLogs = logger.getLogs().filter((log) => log.level === "error");
+      expect(errorLogs.some((log) => log.message.includes("Template rendering failed"))).toBe(true);
     });
   });
 
@@ -418,11 +426,11 @@ describe("Sentinel Templating Integration", () => {
           model: "sonnet",
           trigger: {
             type: "event",
-            on: ["assistant.action"]
+            on: ["assistant.action"],
           },
           execution: { strategy: "immediate" },
-          userPromptFile: "manager-test.md"
-        }
+          userPromptFile: "manager-test.md",
+        },
       ];
 
       let callCount = 0;
@@ -431,10 +439,10 @@ describe("Sentinel Templating Integration", () => {
         return Promise.resolve("Manager response");
       });
 
-      const manager = new SentinelManager({ 
+      const manager = new SentinelManager({
         logger: createMockLogger(),
         rootDirectory: tempDir,
-        enablePersistence: true 
+        enablePersistence: true,
       });
       await manager.loadSentinelsForCodon(configs, CodonId("test-codon"), {
         llmCallOverride: mockLLMCall,
@@ -452,8 +460,8 @@ describe("Sentinel Templating Integration", () => {
         data: {
           codonId: CodonId("test-codon"),
           action: "thinking",
-          content: "Test content"
-        }
+          content: "Test content",
+        },
       };
 
       await manager.handleEvent(testEvent);
@@ -524,10 +532,10 @@ No tool usage detected.
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["tool.result", "assistant.action"]
+          on: ["tool.result", "assistant.action"],
         },
         execution: { strategy: "immediate" },
-        userPromptFile: "complex-analysis.md"
+        userPromptFile: "complex-analysis.md",
       };
 
       let eventCallCount = 0;
@@ -542,7 +550,7 @@ No tool usage detected.
         mockLLMCall,
         createMockLogger(),
         sentinelDir,
-        configDir
+        configDir,
       );
 
       const complexEvents: ServerEvent[] = [
@@ -555,8 +563,8 @@ No tool usage detected.
             action: "tool_use",
             content: "Using tool: Read",
             toolName: "Read",
-            toolInput: { file_path: "src/index.ts" }
-          }
+            toolInput: { file_path: "src/index.ts" },
+          },
         },
         {
           id: "evt-2",
@@ -570,8 +578,8 @@ No tool usage detected.
             truncated: false,
             originalLength: 100,
             executionTimeMs: 45,
-            isError: false
-          }
+            isError: false,
+          },
         },
         {
           id: "evt-3",
@@ -585,9 +593,9 @@ No tool usage detected.
             truncated: false,
             originalLength: 50,
             executionTimeMs: 25,
-            isError: true
-          }
-        }
+            isError: true,
+          },
+        },
       ];
 
       // Process the events
@@ -611,27 +619,27 @@ No tool usage detected.
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["tool.result"]
+          on: ["tool.result"],
         },
         execution: { strategy: "count", threshold: 2000 }, // Trigger after 2000 events
-        userPromptFile: "event-limit.md"
+        userPromptFile: "event-limit.md",
       };
 
       let capturedPrompt = "";
-      const mockLLMCall = async (id: string, options: HankweaveGenerateTextOptions) => {
+      const mockLLMCall = async (_id: string, options: HankweaveGenerateTextOptions) => {
         // The sentinel always passes HankweaveGenerateTextOptions
         // Extract the user message content from the options
         if (options.messages && options.messages.length > 0) {
           // Get the last message (should be the user message with the rendered template)
           const lastMessage = options.messages[options.messages.length - 1];
-          if (lastMessage && lastMessage.content) {
+          if (lastMessage?.content) {
             capturedPrompt = String(lastMessage.content);
           }
         }
         return {
           text: "Processed",
           finishReason: "stop" as const,
-          usage: { inputTokens: 100, outputTokens: 20 }
+          usage: { inputTokens: 100, outputTokens: 20 },
         };
       };
 
@@ -641,7 +649,7 @@ No tool usage detected.
         mockLLMCall,
         createMockLogger(),
         sentinelDir,
-        configDir
+        configDir,
       );
 
       // Generate 1500 events (more than the 1000 limit)
@@ -658,8 +666,8 @@ No tool usage detected.
             truncated: false,
             originalLength: 50,
             executionTimeMs: 10,
-            isError: false
-          }
+            isError: false,
+          },
         };
         sentinel.handleEvent(event);
       }
@@ -722,10 +730,10 @@ Generated at: <%= it.world.currentTime.toISOString() %>`;
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["tool.result"]
+          on: ["tool.result"],
         },
         execution: { strategy: "count", threshold: 100 },
-        userPromptFile: "large-template.md"
+        userPromptFile: "large-template.md",
       };
 
       let processingTime = 0;
@@ -737,7 +745,7 @@ Generated at: <%= it.world.currentTime.toISOString() %>`;
         mockLLMCall,
         createMockLogger(),
         sentinelDir,
-        configDir
+        configDir,
       );
 
       // Generate 100 tool result events
@@ -755,8 +763,8 @@ Generated at: <%= it.world.currentTime.toISOString() %>`;
             truncated: false,
             originalLength: 50,
             executionTimeMs: Math.floor(Math.random() * 100),
-            isError: i % 10 === 0 // 10% error rate
-          }
+            isError: i % 10 === 0, // 10% error rate
+          },
         };
         sentinel.handleEvent(event);
       }
@@ -821,10 +829,10 @@ const failedTools = toolEvents.filter(t => t.data.isError);
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["file.updated", "tool.result", "assistant.action"]
+          on: ["file.updated", "tool.result", "assistant.action"],
         },
         execution: { strategy: "debounce", milliseconds: 2000 },
-        userPromptFile: "narrator.md"
+        userPromptFile: "narrator.md",
       };
 
       let llmCallMade = false;
@@ -839,7 +847,7 @@ const failedTools = toolEvents.filter(t => t.data.isError);
         mockLLMCall,
         createMockLogger(),
         sentinelDir,
-        configDir
+        configDir,
       );
 
       // Send a variety of events
@@ -852,8 +860,8 @@ const failedTools = toolEvents.filter(t => t.data.isError);
             path: "src/index.ts",
             filename: "index.ts",
             content: "const app = express();",
-            action: "modified"
-          }
+            action: "modified",
+          },
         },
         {
           id: "evt-tool-1",
@@ -867,8 +875,8 @@ const failedTools = toolEvents.filter(t => t.data.isError);
             truncated: false,
             originalLength: 100,
             executionTimeMs: 45,
-            isError: false
-          }
+            isError: false,
+          },
         },
         {
           id: "evt-action-1",
@@ -877,9 +885,9 @@ const failedTools = toolEvents.filter(t => t.data.isError);
           data: {
             codonId: CodonId("narrative-codon"),
             action: "thinking",
-            content: "Analyzing the codebase..."
-          }
-        }
+            content: "Analyzing the codebase...",
+          },
+        },
       ];
 
       // Send events quickly
@@ -900,7 +908,10 @@ const failedTools = toolEvents.filter(t => t.data.isError);
       const userPromptFile = path.join(configDir, "recovery-user.md");
 
       await fs.writeFile(systemPromptFile, "You are a resilient assistant.");
-      await fs.writeFile(userPromptFile, "Process these events: <%= JSON.stringify(it.events.map(e => e.type)) %>");
+      await fs.writeFile(
+        userPromptFile,
+        "Process these events: <%= JSON.stringify(it.events.map(e => e.type)) %>",
+      );
 
       const config: SentinelConfig = {
         id: "recovery-sentinel",
@@ -908,7 +919,7 @@ const failedTools = toolEvents.filter(t => t.data.isError);
         model: "anthropic/claude-3-5-sonnet-20241022",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: { strategy: "immediate" },
         systemPromptFile: "recovery-system.md",
@@ -916,10 +927,10 @@ const failedTools = toolEvents.filter(t => t.data.isError);
         conversational: {
           trimmingStrategy: {
             type: "maxTurns",
-            maxTurns: 5
+            maxTurns: 5,
           },
-          continueOnError: true
-        }
+          continueOnError: true,
+        },
       };
 
       let callCount = 0;
@@ -943,7 +954,7 @@ const failedTools = toolEvents.filter(t => t.data.isError);
         mockLLMCall,
         logger,
         sentinelDir,
-        configDir
+        configDir,
       );
 
       const testEvent: ServerEvent = {
@@ -953,15 +964,15 @@ const failedTools = toolEvents.filter(t => t.data.isError);
         data: {
           codonId: CodonId("recovery-codon"),
           action: "thinking",
-          content: "Test recovery"
-        }
+          content: "Test recovery",
+        },
       };
 
       // Send multiple events to trigger multiple calls
       for (let i = 0; i < 4; i++) {
         const event = {
           ...testEvent,
-          id: `evt-recovery-${i}`
+          id: `evt-recovery-${i}`,
         };
         await sentinel.handleEvent(event);
       }
@@ -971,8 +982,12 @@ const failedTools = toolEvents.filter(t => t.data.isError);
 
       // Verify error recovery logging
       const logs = logger.getLogs();
-      const errorLogs = logs.filter(log => log.level === "error" && log.message.includes("LLM call failed"));
-      const recoveryLogs = logs.filter(log => log.level === "info" && log.message.includes("Ignoring error"));
+      const errorLogs = logs.filter(
+        (log) => log.level === "error" && log.message.includes("LLM call failed"),
+      );
+      const recoveryLogs = logs.filter(
+        (log) => log.level === "info" && log.message.includes("Ignoring error"),
+      );
 
       expect(errorLogs.length).toBe(2); // First two calls failed
       expect(recoveryLogs.length).toBe(2); // Both errors were handled gracefully
@@ -998,7 +1013,7 @@ class MockLogger extends Logger {
     this.logs.push({
       level,
       message,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
   }
 

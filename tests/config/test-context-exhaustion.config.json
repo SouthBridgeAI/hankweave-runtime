@@ -1,46 +1,61 @@
 {
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
   "hank": [
     {
       "id": "initial-setup",
-      "name": "Initial Setup Codon",
-      "promptText": "Create a directory called 'large_content' in <%PROJECT_DIR%> if it doesn't exist. Then create an empty file at <%PROJECT_DIR%>/large_content/setup_complete.txt with the text 'Setup complete'.",
+      "name": "Initial Setup",
+      "promptText": "List the files in <%PROJECT_DIR%>/corpus and reply with only the number of files present and the name of the first one. Do not read their contents yet.",
       "model": "haiku",
       "continuationMode": "fresh",
-      "description": "Setup for context exhaustion test",
-      "checkpointedFiles": ["large_content/**/*"],
-      "appendSystemPromptFile": ["./noTodosPrompt.md"],
+      "description": "Rig generates the ingestion corpus deterministically; the codon just verifies it landed. Context is then filled by READING it — input/cache tokens are ~10x faster and cheaper per context-token than asking the model to WRITE essays, which is what kept the old shape of this test from ever reaching the window inside its timeout.",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "mkdir -p large_content && bun -e 'const fs=require(\"fs\");fs.mkdirSync(\"corpus\",{recursive:true});for(let f=1;f<=10;f++){let out=\"\";for(let i=0;i<1200;i++){const n=f*100000+i;out+=`Entry ${n}: alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu checksum-${(n*7919)%997} tail-${n%13}\\n`;}fs.writeFileSync(`corpus/part-${f}.txt`,out);}'",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "checkpointedFiles": [
+        "large_content/**/*"
+      ],
+      "appendSystemPromptFile": [
+        "./noTodosPrompt.md"
+      ],
       "outputFiles": []
     },
     {
       "type": "loop",
       "id": "context-exhaustion-loop",
       "name": "Context Exhaustion Loop",
-      "description": "Loop that generates massive amounts of content to exhaust context",
+      "description": "Each iteration ingests one corpus file (~50k tokens) into the continued session until the window blows. Compaction is default-OFF (intermediates/55), so the boundary arrives as the provider's real overflow rejection; terminateOn contextExceeded must then COMPLETE the loop.",
       "terminateOn": {
         "type": "contextExceeded"
       },
+      "budget": {
+        "maxTimeSeconds": 900
+      },
       "codons": [
         {
-          "id": "generate-content",
-          "name": "Generate Large Content",
-          "promptText": "Generate a VERY LONG detailed analysis (at least 45000 words) about a random topic and save it to <%PROJECT_DIR%>/large_content/content_<TIMESTAMP>.md. Include extensive code examples, detailed explanations, and comprehensive documentation. Make each iteration completely different with unique content.",
+          "id": "ingest-content",
+          "name": "Ingest Corpus File",
+          "promptText": "Read the single next unread file from <%PROJECT_DIR%>/corpus/ using the Read tool. The files are part-1.txt through part-10.txt; on your first iteration read part-1.txt, next part-2.txt, and so on in order — you can tell which you have already read from the conversation so far. Read the ENTIRE file in one Read call (it is under 2000 lines). Then reply with ONLY the file name you read and the first and last Entry numbers it contains. Do not summarize, do not write files, do not read more than one file.",
           "model": "haiku",
           "continuationMode": "continue-previous",
-          "description": "Generate massive content",
-          "checkpointedFiles": ["large_content/**/*"],
-          "appendSystemPromptFile": ["./noTodosPrompt.md"],
-          "outputFiles": []
-        },
-        {
-          "id": "analyze-content",
-          "name": "Analyze Content",
-          "promptText": "Read ALL the content files in <%PROJECT_DIR%>/large_content/ and write a comprehensive 23000+ word analysis comparing them all. Save your analysis to <%PROJECT_DIR%>/large_content/analysis_<TIMESTAMP>.md. Reference specific details from each file.",
-          "model": "haiku",
-          "continuationMode": "continue-previous",
-          "description": "Analyze all accumulated content",
-          "checkpointedFiles": ["large_content/**/*"],
-          "appendSystemPromptFile": ["./noTodosPrompt.md"],
-          "outputFiles": []
+          "description": "Ingest one corpus file into the session",
+          "checkpointedFiles": [
+            "large_content/**/*"
+          ],
+          "appendSystemPromptFile": [
+            "./noTodosPrompt.md"
+          ],
+          "outputFiles": [],
+          "onFailure": "retry",
+          "retryConfig": {
+            "maxAttempts": 3,
+            "delayMs": 10000
+          }
         }
       ]
     },
@@ -50,9 +65,13 @@
       "promptText": "Create a summary file at <%PROJECT_DIR%>/large_content/final_summary.txt with the text 'Loop completed due to context exceeded. Final codon executed successfully.'",
       "model": "haiku",
       "continuationMode": "fresh",
-      "description": "Final codon to verify workflow continues",
-      "checkpointedFiles": ["large_content/**/*"],
-      "appendSystemPromptFile": ["./noTodosPrompt.md"],
+      "description": "Runs after the loop terminates on context exceeded",
+      "checkpointedFiles": [
+        "large_content/**/*"
+      ],
+      "appendSystemPromptFile": [
+        "./noTodosPrompt.md"
+      ],
       "outputFiles": []
     }
   ]

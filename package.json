@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -50,9 +50,15 @@
     "fetch-models": "bun scripts/fetch-models-dev.ts",
     "server": "bun server/index.ts",
     "server:headless": "bun server/index.ts --headless",
-    "test": "bun tests/utils/check-test-ready.ts && bun test tests/unit tests/integration tests/e2e/happy-path-e2e.test.ts tests/e2e/rollback-improved-1-e2e.test.ts && bun tests/unit/cleanup-after-tests.ts",
-    "test:long": "LONG_TESTS=true bun test tests/long-running",
-    "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit && bun tests/unit/cleanup-after-tests.ts",
+    "test": "bun scripts/test-suite.ts && bun tests/unit/cleanup-after-tests.ts",
+    "test:help": "bun scripts/test-suite.ts --help",
+    "test:list": "bun scripts/test-suite.ts --list --tier all",
+    "test:all": "bun scripts/test-suite.ts --tier all",
+    "test:live": "bun scripts/test-suite.ts --tier e2e-live",
+    "test:heavy": "bun scripts/test-suite.ts --tier e2e-heavy",
+    "test:ci": "bun scripts/test-suite.ts --retries 1",
+    "test:long": "bun scripts/test-suite.ts --tier e2e-marathon",
+    "test:unit": "bun tests/unit/cleanup-after-tests.ts && bun test tests/unit tests/utils && bun tests/unit/cleanup-after-tests.ts",
     "test:integration": "bun test tests/integration",
     "test:e2e:check": "bun tests/utils/check-test-ready.ts",
     "test:e2e:init": "bun scripts/e2e/init.ts normal",
@@ -66,7 +72,6 @@
     "cleanup": "echo 'Error: --cleanup requires --config' && exit 1",
     "cleanup:example": "bun server/index.ts --cleanup --config=hank.json",
     "cleanup:force": "bun server/index.ts --cleanup --config=hank.json -y",
-    "test:shims": "bun scripts/test-shims.ts",
     "test:cross-runtime:bun": "bun scripts/run-cross-runtime-tests.ts bun",
     "test:cross-runtime:node": "bun scripts/run-cross-runtime-tests.ts node",
     "test:cross-runtime:deno": "bun scripts/run-cross-runtime-tests.ts deno",
@@ -79,11 +84,9 @@
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "tsx": "^4.19.0",
+    "typescript": "^7.0.2",
     "verdaccio": "^6.2.4",
     "zod-to-json-schema": "^3.25.1"
-  },
-  "peerDependencies": {
-    "typescript": "^5.9.2"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.5",
@@ -92,7 +95,8 @@
     "@ai-sdk/openai": "^2.0.18",
     "@anthropic-ai/claude-agent-sdk": "0.3.215",
     "@clack/prompts": "^1.0.0",
-    "@openai/codex-sdk": "0.144.6",
+    "@earendil-works/pi-ai": "^0.80.10",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
     "ai": "^5.0.15",
     "crossws": "^0.4.1",
     "eta": "^3.5.0",

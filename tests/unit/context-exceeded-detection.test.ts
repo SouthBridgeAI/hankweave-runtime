@@ -197,6 +197,110 @@ describe("Context Exceeded Detection", () => {
 
       expect(isContextExceeded(msg)).toBe(false);
     });
+
+    // Input-overflow shapes, as OBSERVED from each harness against local mocks
+    // (see the *-context-exceeded-mock integration tests and intermediates/54).
+    test("detects the Claude SDK's normalized input-overflow result", () => {
+      const msg = {
+        type: "result",
+        subtype: "error",
+        is_error: true,
+        duration_ms: 2000,
+        duration_api_ms: 1800,
+        num_turns: 1,
+        result: "Prompt is too long",
+        session_id: "session-input-overflow",
+      } as ClaudeLogMessage;
+
+      expect(isContextExceeded(msg)).toBe(true);
+    });
+
+    test("detects pi's pass-through context_length_exceeded body", () => {
+      const msg = {
+        type: "result",
+        subtype: "error",
+        is_error: true,
+        duration_ms: 2000,
+        duration_api_ms: 1800,
+        num_turns: 1,
+        result:
+          '400: {"message":"This model\'s maximum context length is 128000 tokens. However, your messages resulted in 131111 tokens. Please reduce the length of the messages.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}',
+        session_id: "session-pi-overflow",
+      } as ClaudeLogMessage;
+
+      expect(isContextExceeded(msg)).toBe(true);
+    });
+
+    test("detects a worded maximum-context-length error without the code", () => {
+      const msg = {
+        type: "result",
+        subtype: "error",
+        is_error: true,
+        duration_ms: 2000,
+        duration_api_ms: 1800,
+        num_turns: 1,
+        result: "The request exceeds the maximum context length of this model.",
+        session_id: "session-worded-overflow",
+      } as ClaudeLogMessage;
+
+      expect(isContextExceeded(msg)).toBe(true);
+    });
+
+    test("does not detect input-overflow wording when is_error is false", () => {
+      const msg = {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 2000,
+        duration_api_ms: 1800,
+        num_turns: 1,
+        result: "Prompt is too long",
+        session_id: "session-not-error",
+      } as ClaudeLogMessage;
+
+      expect(isContextExceeded(msg)).toBe(false);
+    });
+  });
+
+  describe("Pattern 3: compact_boundary system message", () => {
+    // Modern SDKs auto-compact instead of surfacing the overflow error
+    // (observed live: haiku compacted at pre_tokens=204k of a 200k window and
+    // the loop ran forever). The auto boundary IS the exhaustion moment.
+    test("detects an auto compaction boundary", () => {
+      const msg = {
+        type: "system",
+        subtype: "compact_boundary",
+        session_id: "8e97cdae-7385-4d7e-bbad-8510b19a90ec",
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 204564,
+          post_tokens: 23900,
+        },
+      } as ClaudeLogMessage;
+
+      expect(isContextExceeded(msg)).toBe(true);
+    });
+
+    test("detects a boundary without metadata (never drop the signal)", () => {
+      const msg = {
+        type: "system",
+        subtype: "compact_boundary",
+        session_id: "session-no-metadata",
+      } as ClaudeLogMessage;
+
+      expect(isContextExceeded(msg)).toBe(true);
+    });
+
+    test("does not detect a manual /compact", () => {
+      const msg = {
+        type: "system",
+        subtype: "compact_boundary",
+        session_id: "session-manual",
+        compact_metadata: { trigger: "manual" },
+      } as ClaudeLogMessage;
+
+      expect(isContextExceeded(msg)).toBe(false);
+    });
   });
 
   describe("General message type handling", () => {

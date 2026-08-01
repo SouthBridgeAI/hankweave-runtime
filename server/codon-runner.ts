@@ -1,6 +1,5 @@
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Budget } from "./budget.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
@@ -9,14 +8,9 @@ import { CostTracker } from "./cost-tracker.js";
 import { classifyApiErrorText } from "./error-classification.js";
 import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
+import { PiSdkManager } from "./pi-sdk-manager.js";
 import { isSupportedCodonProvider } from "./provider-ids.js";
 import { ReplayProcessManager } from "./replay-process-manager.js";
-import { ShimProcessManager } from "./shim-process-manager.js";
-import {
-  extractShimFiles,
-  getExtractedShimPath,
-  needsShimExtraction,
-} from "./shim-runtime-extractor.js";
 import type { StateManager } from "./state-manager.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { CodonId, RunId, SessionId } from "./types/branded-types.js";
@@ -27,74 +21,10 @@ import type {
   SystemMessage,
   UserMessage,
 } from "./types/claude-session-schema.js";
-import type { Codon, ShimSelfTestResult, TokenUsage } from "./types/types.js";
-import { getRuntimeCommand, isCompiledExecutable, type Logger } from "./utils.js";
-
-/**
- * Helper function to resolve shim path correctly for all execution contexts.
- *
- * Execution contexts:
- * 1. Source (development):
- *    - Current file is in server/codon-runner.ts
- *    - Shims are at shims/{provider}/index.js (project root)
- *    - Need to go up one level: ../shims/{provider}/index.js
- *
- * 2. Bundled NPX package (npx @southbridgeai/hankweave):
- *    - Current file is in dist/index.js (bundled)
- *    - Shims are at dist/shims/{provider}/index.js
- *    - Need to use same directory: ./shims/{provider}/index.js
- *
- * 3. Compiled executable (hankweave binary):
- *    - Shims are embedded in the executable
- *    - Extract to ~/.hankweave/shims/<version>/
- *    - Return path to extracted shim
- *
- * @param currentFilePath - Path to current file (from import.meta.url)
- * @param providerId - Provider ID (e.g., "google", "openai")
- * @returns Absolute path to the shim
- * @throws Error if shims are not available
- */
-async function resolveShimPath(currentFilePath: string, providerId: string): Promise<string> {
-  type ShimName = "gemini" | "codex" | "pi" | "opencode";
-
-  // Map provider ID to shim name
-  const shimNameMap: Record<string, ShimName> = {
-    google: "gemini",
-    openai: "codex",
-    pi: "pi",
-    opencode: "opencode",
-  };
-
-  const shimName = shimNameMap[providerId.toLowerCase()];
-  if (!shimName) {
-    throw new Error(`No shim available for provider: ${providerId}`);
-  }
-
-  // Check if running from compiled executable
-  if (isCompiledExecutable()) {
-    // Extract shims if needed
-    if (needsShimExtraction(shimName)) {
-      await extractShimFiles();
-    }
-
-    // Return path to extracted shim
-    return getExtractedShimPath(shimName);
-  }
-
-  const currentDir = path.dirname(currentFilePath);
-
-  // Check if we're running from dist (bundled NPX) or server (source)
-  // When bundled, currentDir will contain '/dist'
-  // When source, currentDir will contain '/server'
-  const isRunningFromDist = currentDir.includes("/dist") || currentDir.includes("\\dist");
-
-  if (isRunningFromDist) {
-    // Running from dist/index.js -> shims are at dist/shims/
-    return path.resolve(currentDir, `shims/${shimName}/index.js`);
-  }
-  // Running from server/codon-runner.ts -> shims are at ../shims/
-  return path.resolve(currentDir, `../shims/${shimName}/index.js`);
-}
+import { APITimeoutError } from "./types/error-types.js";
+import type { ClaudeLogMessage, Codon, ShimSelfTestResult, TokenUsage } from "./types/types.js";
+import { isSyntheticTimeout } from "./types/types.js";
+import type { Logger } from "./utils.js";
 
 /**
  * Information about an extension, passed to the onExtension callback
@@ -115,6 +45,12 @@ export interface CodonRunnerEvents extends Record<string, unknown[]> {
   // Process lifecycle - extensionCount is the final count when codon truly completes
   exit: [code: number, contextExceeded: boolean, extensionCount: number];
   error: [error: Error];
+
+  // Live-display only: emitted when the runner classifies a failure from an
+  // error result or a timeout. The runtime forwards it as a non-fatal error
+  // event and stores nothing — the authoritative record is getOutcome(). SDK
+  // crashes do NOT emit this; their failure surfaces via codon.completed.
+  codonFailure: [data: { reason: FailureReason; error?: Error }];
 
   // Log parser events (forwarded with specific types)
   systemMessage: [msg: SystemMessage];
@@ -218,7 +154,7 @@ export type CodonRunnerConfig = CodonRunnerConfigWithoutExtension | CodonRunnerC
  *
  * Responsibilities:
  * - Create and manage ClaudeLogParser for this codon
- * - Create and manage ShimProcessManager for this codon
+ * - Create and manage the process manager (Claude SDK / Pi SDK / replay) for this codon
  * - Forward events from parser and process manager
  * - Provide clean lifecycle: construct → run → cleanup
  *
@@ -230,6 +166,32 @@ export type CodonRunnerConfig = CodonRunnerConfigWithoutExtension | CodonRunnerC
  * Shared with the runtime's failure-policy machinery (see event-schemas.ts).
  */
 type FailureReason = import("./types/types.js").FailureReason;
+
+/**
+ * The per-attempt outcome of a codon execution, read once by the runtime in
+ * handleCodonComplete. CodonRunner owns "what happened"; the runtime owns
+ * "what to do" (final status, failure policy, state transitions). All fields
+ * are final by the time the runner emits `exit`.
+ */
+export interface CodonOutcome {
+  /** A terminal result message was parsed for the current attempt */
+  resultReceived: boolean;
+  /** The result was a genuine success (subtype:"success" with is_error:false) */
+  success: boolean;
+  /**
+   * The result was an error (subtype:"error" or disguised success+is_error).
+   * Tracked separately from failureReason because the SDK's empty error
+   * placeholder (result:"") contributes no classifiable text, so it derives to
+   * no failureReason — yet must still count as an error result.
+   */
+  errorResultReceived: boolean;
+  /** Classified failure, if any (error result text, timeout, or crash) */
+  failureReason?: FailureReason;
+  /** The Error behind failureReason (e.g. APITimeoutError) — for telemetry stacks */
+  failureError?: Error;
+  /** Whether the agent session was ever established this attempt */
+  sessionEstablished: boolean;
+}
 
 /**
  * Determines whether a codon should extend based on exit conditions.
@@ -258,10 +220,9 @@ export function shouldExtendCodon(params: {
   // Cannot extend if no extension config
   if (!params.extensionConfig) return false;
 
-  // Cannot extend if the result was an error. An empty subtype:"error" result is
-  // the SDK placeholder (result:""); it intentionally leaves failureReason unset
-  // so a later thrown error can be classified authoritatively, but it must still
-  // block extension — the codon should fail, not be re-prompted.
+  // Cannot extend if the result was an error — including the SDK's empty
+  // placeholder (result:""), which derives no failureReason but must still
+  // fail the codon rather than re-prompt it.
   if (params.errorResultReceived) return false;
 
   // Cannot extend if interrupted (user skip/force-stop)
@@ -289,12 +250,67 @@ export function shouldExtendCodon(params: {
   return true;
 }
 
+/**
+ * Derive the attempt's failure classification from raw evidence — the single
+ * classification site for everything CodonRunner observes. Handlers record
+ * evidence only, never a verdict, so the outcome is a pure function of what
+ * happened and cannot depend on which handler wrote first (empty result text
+ * — the SDK placeholder — simply contributes no evidence).
+ *
+ * Priority (first match wins):
+ * 1. Non-empty error-result text — the real upstream error, which beats the
+ *    (often less specific) thrown crash text. The typed APITimeoutError rides
+ *    along when present; otherwise the crash Error is attached for telemetry.
+ * 2. A runner-initiated assistant-message timeout (the session hung and was
+ *    torn down; no result will ever arrive).
+ * 3. The thrown SDK crash error, gated on session establishment: unrecognized
+ *    crash text before the first message is a local setup failure.
+ * 4. No evidence → undefined (the runtime synthesizes a backstop).
+ */
+export function deriveAttemptFailure(evidence: {
+  /** Raw text of the last error-shaped result ("" for none or the SDK placeholder) */
+  errorResultText: string;
+  /** Typed APITimeoutError built from the CLI's exact timeout result text */
+  resultTimeoutError?: Error;
+  /** Typed APITimeoutError from a runner-initiated assistant-timeout teardown */
+  assistantTimeoutError?: Error;
+  /** The error the SDK process manager raised (crash / post-result throw) */
+  crashError?: Error;
+  sessionEstablished: boolean;
+}): { reason: FailureReason; error?: Error } | undefined {
+  if (evidence.errorResultText) {
+    return {
+      reason: classifyApiErrorText(evidence.errorResultText),
+      error: evidence.resultTimeoutError ?? evidence.crashError,
+    };
+  }
+  if (evidence.assistantTimeoutError) {
+    return {
+      reason: {
+        type: "timeout",
+        retriable: true,
+        message: "API Error: Request timed out.",
+      },
+      error: evidence.assistantTimeoutError,
+    };
+  }
+  if (evidence.crashError) {
+    return {
+      reason: classifyApiErrorText(evidence.crashError.message, {
+        sessionEstablished: evidence.sessionEstablished,
+      }),
+      error: evidence.crashError,
+    };
+  }
+  return undefined;
+}
+
 export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private readonly config: CodonRunnerConfig;
   private readonly logParser: ClaudeLogParser;
   // CostTracker: "how much did this cost?" — computes cost from raw API usage via LLM registry
   private readonly costTracker: CostTracker;
-  private processManager: ShimProcessManager | ClaudeAgentSDKManager | ReplayProcessManager;
+  private processManager: ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager;
   private readonly logPath: string;
   private readonly budgetExceededListener: (data: {
     codonId: string;
@@ -310,11 +326,17 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private extensionCount = 0;
   private resultMessageReceived = false;
   // Whether the received result was an error (subtype:"error" or a disguised
-  // success+is_error). Tracked separately from failureReason because an empty
-  // error result (the SDK placeholder, result:"") leaves failureReason unset by
-  // design, yet must still block extension.
+  // success+is_error). Tracked separately from the failure evidence below
+  // because an empty error result (the SDK placeholder, result:"") carries no
+  // classifiable text, yet must still block extension.
   private errorResultReceived = false;
-  private failureReason: FailureReason | undefined = undefined;
+  // Failure EVIDENCE, never a verdict: classification happens exclusively in
+  // deriveAttemptFailure at read time. Do not add a stored FailureReason field
+  // back — write-ordering shadow bugs are exactly what this shape eliminates.
+  private errorResultText = "";
+  private resultTimeoutError: Error | undefined = undefined;
+  private assistantTimeoutError: Error | undefined = undefined;
+  private crashError: Error | undefined = undefined;
   private currentSessionId: SessionId | null = null;
   // Whether this codon attempt observed its first system/init message (the
   // session was established). Gates retriability of unrecognized crashes: a
@@ -405,10 +427,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    * Check if a model can be run by CodonRunner.
    *
    * CodonRunner supports:
-   * - Anthropic models via ClaudeAgentSDKManager
-   * - Google models via ShimProcessManager (gemini shim)
-   * - OpenAI models via ShimProcessManager (codex shim)
-   * - DeepSeek, Pi, and OpenCode models via ShimProcessManager
+   * - Anthropic models via ClaudeAgentSDKManager (in-process Claude SDK)
+   * - Everything else via PiSdkManager (in-process Pi coding agent); model
+   *   validation rewrites google/openai/GLM/Kimi/etc. spellings to pi/...
    *
    * @param model - The ModelInfo to check
    * @returns true if the model can be executed, false otherwise
@@ -465,25 +486,21 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
 
         result = await manager.runSelfTest();
       } else {
-        // Use Shim Process Manager for non-Anthropic models
+        // Use the in-process Pi SDK manager for non-Anthropic models
         logger.log(
-          `Testing shim for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+          `Testing Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
           "info",
         );
 
-        const __filename = fileURLToPath(import.meta.url);
-        const shimPath = await resolveShimPath(__filename, modelInfo.providerId);
-
         // For self-tests, use executionPath as agentRootPath (temporary directory, no nested structure)
-        const manager = new ShimProcessManager(
+        const manager = new PiSdkManager(
           executionPath,
           executionPath, // Self-tests don't need the full nested structure
           logger,
           tempLogParser,
-          anthropicBaseUrl,
         );
 
-        result = await manager.runSelfTest(getRuntimeCommand(shimPath), modelInfo.providerId);
+        result = await manager.runSelfTest(modelInfo.modelId);
       }
 
       // Log results
@@ -537,6 +554,11 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         if (msg.message.usage) {
           this.costTracker.handleAssistantUsage(msg.message.usage);
         }
+        // Timeout messages are classified and torn down, not forwarded (no
+        // assistant.action event is emitted for timeout text).
+        if (this.detectAssistantTimeout(msg)) {
+          return;
+        }
         this.emit("assistantMessage", msg);
       },
       onUserMessage: (msg) => this.emit("userMessage", msg),
@@ -557,27 +579,45 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         // Track that we received a result message (needed for extension decision)
         this.resultMessageReceived = true;
 
-        // Check for failure reasons that would prevent extension:
+        // Record failure EVIDENCE (no verdict — see deriveAttemptFailure) for
         // explicit error results and disguised errors (success + is_error).
-        //
-        // Only classify when the result carries real text. The SDK strips the
-        // `result` field from `subtype:"error"` messages (see
-        // ClaudeAgentSDKManager.convertSDKMessageToJSONL, which fills `result:""`),
-        // so classifying that empty placeholder always yields the default-retriable
-        // api-error — and because the SDK-crash path prefers `this.failureReason ??
-        // classifyApiErrorText(error.message)`, that placeholder would shadow the
-        // REAL thrown billing/auth/400 error and wrongly retry a permanent failure.
-        // Leaving `failureReason` unset here lets the later thrown error be
-        // classified authoritatively. Disguised errors (success + is_error) keep
-        // their real `result` text, so they still classify correctly.
+        // The SDK strips `result` from `subtype:"error"` messages
+        // (ClaudeAgentSDKManager.convertSDKMessageToJSONL fills `result:""`);
+        // that placeholder records an empty string, which derivation ignores so
+        // the SDK's subsequently THROWN error classifies authoritatively.
         if (msg.subtype === "error" || (msg.subtype === "success" && msg.is_error)) {
-          // Record the error regardless of whether it carries text, so the empty
-          // placeholder still blocks extension even though we leave failureReason
-          // unset for the later thrown error to classify.
+          // Recorded even without text, so the empty placeholder still blocks
+          // extension.
           this.errorResultReceived = true;
-          const resultText = String(msg.result || "");
+          // Some passthrough shapes carry the real text in an `error` field
+          // alongside an empty `result`; without the fallback a permanent
+          // billing/auth error there would fall to the retriable backstop.
+          const passthroughError = (msg as { error?: unknown }).error;
+          const resultText =
+            String(msg.result || "") ||
+            (typeof passthroughError === "string" ? passthroughError : "");
+          this.errorResultText = resultText;
           if (resultText) {
-            this.failureReason = classifyApiErrorText(resultText);
+            // Classified locally ONLY for the live codonFailure display event;
+            // the authoritative classification happens in deriveAttemptFailure.
+            const reason = classifyApiErrorText(resultText);
+            // Only the Claude CLI's exact timeout text gets the typed
+            // APITimeoutError (whose message is Claude-specific). Other
+            // timeout-classified results (e.g. the Pi agent's idle timeout)
+            // keep their real provider text in reason.message and carry no
+            // Error here.
+            let failureError: Error | undefined;
+            if (reason.type === "timeout" && resultText === "API Error: Request timed out.") {
+              failureError = new APITimeoutError(this.config.codonId as string, {
+                message: resultText,
+                timestamp: new Date().toISOString(),
+                is_error: msg.is_error,
+                duration_ms: msg.duration_ms,
+                duration_api_ms: msg.duration_api_ms,
+              });
+              this.resultTimeoutError = failureError;
+            }
+            this.emit("codonFailure", { reason, error: failureError });
           }
         }
 
@@ -587,13 +627,63 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
+   * Detect an API timeout surfaced through an ASSISTANT message. Two shapes:
+   * the CLI's synthetic message (model "<synthetic>", string content) and a
+   * plain text content item reading exactly "API Error: Request timed out."
+   *
+   * On detection: record the APITimeoutError, emit codonFailure for live
+   * display, and tear the process down — the session is hung mid-request and
+   * will never produce a result. Returns true when the message was a timeout
+   * (caller suppresses forwarding).
+   */
+  private detectAssistantTimeout(msg: AssistantMessage): boolean {
+    const synthetic = isSyntheticTimeout(msg as ClaudeLogMessage);
+    let textTimeout = false;
+    if (!synthetic) {
+      // Content may be a plain string (the schema allows both shapes); a
+      // string-content timeout must match too.
+      const content = msg.message.content;
+      const items = Array.isArray(content) ? content : [{ type: "text" as const, text: content }];
+      textTimeout = items.some(
+        (item) =>
+          "text" in item && item.type === "text" && item.text === "API Error: Request timed out.",
+      );
+    }
+    if (!synthetic && !textTimeout) return false;
+
+    this.config.logger.log(
+      `[CodonRunner] API timeout detected in ${synthetic ? "synthetic" : "assistant"} message for codon ${this.config.codonId}`,
+      "error",
+    );
+
+    const timeoutError = new APITimeoutError(this.config.codonId as string, {
+      message: "API Error: Request timed out.",
+      timestamp: new Date().toISOString(),
+      ...(synthetic ? { synthetic: true } : {}),
+    });
+    this.assistantTimeoutError = timeoutError;
+    // errorResultReceived stays false: no RESULT message arrived — the timeout
+    // evidence derives a failureReason, which alone blocks extension in
+    // shouldExtendCodon.
+    this.emit("codonFailure", {
+      reason: { type: "timeout", retriable: true, message: "API Error: Request timed out." },
+      error: timeoutError,
+    });
+
+    this.kill().catch((err) => {
+      this.config.logger.log(
+        `[CodonRunner] Failed to kill timed-out process for codon ${this.config.codonId}: ${err}`,
+        "error",
+      );
+    });
+    return true;
+  }
+
+  /**
    * Create process manager (SDK, Shim, or Replay) based on model type with event forwarding
    */
-  private createProcessManager():
-    | ShimProcessManager
-    | ClaudeAgentSDKManager
-    | ReplayProcessManager {
-    let processManager: ShimProcessManager | ClaudeAgentSDKManager | ReplayProcessManager;
+  private createProcessManager(): ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager {
+    let processManager: ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager;
 
     // Replay mode: use ReplayProcessManager instead of real process managers
     if (this.config.replayConfig) {
@@ -629,21 +719,26 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           this.config.globalSystemPrompt ?? null,
           this.config.shimIdleTimeout,
         );
-      } else {
-        // Use Shim for non-Anthropic models (e.g., Gemini)
+      } else if (modelInfo.providerId.toLowerCase() === "pi") {
+        // Everything non-Anthropic runs on the IN-PROCESS Pi SDK — like the
+        // Claude SDK, not as a child shim. Model validation has already
+        // rewritten google/openai/GLM/Kimi/opencode spellings to pi/...
         this.config.logger.log(
-          `Using shim for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+          `Using in-process Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
           "info",
         );
 
-        processManager = new ShimProcessManager(
+        processManager = new PiSdkManager(
           this.config.executionPath,
           this.config.agentRootPath,
           this.config.logger,
           this.logParser,
-          this.config.anthropicBaseUrl,
           this.config.globalSystemPrompt ?? null,
           this.config.shimIdleTimeout,
+        );
+      } else {
+        throw new Error(
+          `No process manager available for provider: ${modelInfo.providerId} (model: ${modelInfo.modelId})`,
         );
       }
     }
@@ -654,12 +749,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       this.handleProcessExit(code, isContextExceeded);
     });
 
-    // Only the Claude Agent SDK manager surfaces *API/SDK* crashes through its
-    // `error` event (a rejected queryPromise). ShimProcessManager and
-    // ReplayProcessManager emit `error` solely for LOCAL child-process failures
-    // (missing node/bun, bad cwd, an unexecutable shim) — those carry no API
-    // status and must stay fatal, never get classified as a retriable API crash.
-    const isClaudeAgentSDKManager = processManager instanceof ClaudeAgentSDKManager;
+    // The in-process SDK managers (Claude Agent SDK, Pi SDK) surface *API/SDK*
+    // crashes through their `error` event (a rejected query/run promise).
+    // ReplayProcessManager emits `error` solely for LOCAL failures — those
+    // carry no API status and must stay fatal, never get classified as a
+    // retriable API crash.
+    const isInProcessSdkManager =
+      processManager instanceof ClaudeAgentSDKManager || processManager instanceof PiSdkManager;
 
     processManager.on("error", (error: Error) => {
       // Handle budget exceeded: process was killed by us due to budget limit.
@@ -688,60 +784,38 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         );
         // Transform error into normal exit - conversation completed successfully
         this.emit("exit", 0, false, this.extensionCount);
-      } else if (!isClaudeAgentSDKManager) {
-        // Non-SDK manager (shim/replay): this `error` event is a LOCAL
-        // child-process failure (missing node/bun, bad cwd, unexecutable shim),
-        // not an API crash. classifyApiErrorText would default its unfamiliar
-        // text to retriable and wrongly route it into the exit/retry path — or,
-        // under onFailure:abort, leak an exit(1) that leaves the runtime active
-        // instead of failing the run. Keep it fatal. (Shim *API* errors travel
-        // the exit path and are handled by synthesizeMissingFailureReason in
-        // handleCodonComplete, never this listener.)
+      } else if (!isInProcessSdkManager) {
+        // Non-SDK manager (replay): this `error` event is a LOCAL failure
+        // (missing source log, bad cwd), not an API crash.
+        // classifyApiErrorText would default its unfamiliar text to retriable
+        // and wrongly route it into the exit/retry path — or, under
+        // onFailure:abort, leak an exit(1) that leaves the runtime active
+        // instead of failing the run. Keep it fatal.
         this.emit("error", error);
       } else {
-        // The SDK process raised an error without a clean success. Two shapes
-        // converge here and both must honor `onFailure: retry`:
-        //   - the subprocess crashed mid-conversation with NO result
-        //     message (e.g. a 5xx/overloaded error that exhausted the SDK's own
-        //     internal retries, or a dropped socket).
-        //   - the SDK first emitted a retriable error result — including
-        //     a disguised `subtype:"success", is_error:true` socket drop — which
-        //     onResultMessage already classified into `this.failureReason`, and
-        //     THEN threw.
-        //
-        // Decide on retriability, not on whether a result arrived: prefer the
-        // reason classified from the result (it carries the real upstream error),
-        // otherwise classify the crash text. Unrecognized text defaults to
-        // retriable (bounded by retryConfig.maxAttempts) per classifyApiErrorText.
-        //
-        // Either way (retriable OR permanent) the failure is an SDK/API outcome,
-        // so route it through the EXIT path with the classified reason rather
-        // than emitting a runner "error": the runtime escalates runner errors to
-        // FATAL shutdown, which never runs handleCodonComplete/resolveFailurePolicy
-        // — skipping codon failed-state recording and overriding a codon
-        // configured `onFailure: "ignore"`. Exiting lets resolveFailurePolicy
-        // decide: retriable+retry → retry, permanent (billing/auth/400) → shutdown
-        // for abort/retry but continue for ignore.
-        //
-        // Gate the thrown-error classification on session establishment: a crash
-        // before the first message, with text matching no known transient API
-        // pattern, is a local setup failure (bad executable, spawn error, bad
-        // cwd) — non-retriable. A prior result-classified reason still wins.
-        const failureReason =
-          this.failureReason ??
-          classifyApiErrorText(error.message, {
-            sessionEstablished: this.getSystemMessageReceived(),
-          });
-        this.failureReason = failureReason;
+        // An SDK/API crash without a clean success (mid-conversation crash
+        // with no result, or an error result followed by a throw). Record the
+        // thrown error as evidence and route through the EXIT path — never a
+        // runner "error", which the runtime escalates to FATAL shutdown,
+        // bypassing handleCodonComplete and the failure policy entirely.
+        // Exiting with the classified reason lets the policy decide:
+        // retriable+retry → retry, permanent → shutdown for abort/retry,
+        // continue for ignore.
+        this.crashError = error;
+        const derived = this.deriveFailure();
         this.config.logger.log(
           `[CodonRunner] SDK crash classified ${
-            failureReason.retriable ? "retriable" : "permanent"
+            derived?.reason.retriable ? "retriable" : "permanent"
           } — routing to exit path for failure policy: ${error.message}`,
           "error",
         );
-        // Non-zero exit so handleCodonComplete marks the codon failed and the
-        // runtime consults resolveFailurePolicy with the classified reason.
-        this.emit("exit", 1, false, this.extensionCount);
+        // Context-exceeded detection must ride along: the Claude SDK surfaces
+        // input overflow as an error result and THEN throws, so this is the
+        // only exit path that error takes — the manager's own emitExit() never
+        // runs. Passing `false` here would fail a `terminateOn:
+        // contextExceeded` loop instead of terminating it. Pinned by
+        // tests/integration/claude-sdk-context-exceeded-mock.test.ts.
+        this.emit("exit", 1, processManager.detectContextExceeded(), this.extensionCount);
       }
     });
 
@@ -776,7 +850,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       extensionConfig: this.config.extensionConfig,
       extensionCount: this.extensionCount,
       isInterrupted,
-      failureReason: this.failureReason,
+      failureReason: this.deriveFailure()?.reason,
       isBudgetExceeded,
       errorResultReceived: this.errorResultReceived,
     });
@@ -833,7 +907,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     // Reset per-extension state
     this.resultMessageReceived = false;
     this.errorResultReceived = false;
-    this.failureReason = undefined;
+    this.errorResultText = "";
+    this.resultTimeoutError = undefined;
+    this.assistantTimeoutError = undefined;
+    this.crashError = undefined;
     this.successResultReceived = false;
 
     // Keep log parser running (don't stop/restart to avoid re-parsing entire log)
@@ -845,7 +922,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
 
   /**
    * Spawn the underlying process manager using a unified adapter.
-   * ShimProcessManager requires a runtime command array; SDK/Replay do not.
+   * All managers (SDK, Pi, Replay) share the same spawn signature.
    */
   private async spawnCodonProcess(
     sessionToResume: SessionId | null,
@@ -854,20 +931,6 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       exhaustionPrompt?: string;
     },
   ): Promise<void> {
-    if (this.processManager instanceof ShimProcessManager) {
-      const __filename = fileURLToPath(import.meta.url);
-      const shimPath = await resolveShimPath(__filename, this.config.codon.model.providerId);
-
-      await this.processManager.spawn(
-        getRuntimeCommand(shimPath),
-        this.config.codon,
-        sessionToResume,
-        options,
-      );
-      return;
-    }
-
-    // ReplayProcessManager and ClaudeAgentSDKManager share this signature
     await this.processManager.spawn(this.config.codon, sessionToResume, options);
   }
 
@@ -905,7 +968,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     this.extensionCount = 0;
     this.resultMessageReceived = false;
     this.errorResultReceived = false;
-    this.failureReason = undefined;
+    this.errorResultText = "";
+    this.resultTimeoutError = undefined;
+    this.assistantTimeoutError = undefined;
+    this.crashError = undefined;
     this.currentSessionId = null;
     // Establishment is tracked per attempt: a fresh run starts not-established.
     // (Not reset in performExtension — an extension continues the same session.)
@@ -982,34 +1048,77 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
-   * The classified failure reason for the current attempt, if one was derived
-   * from an error result message or a transient mid-stream crash. The runtime
-   * adopts this on the exit path when it has no result-message-derived reason of
-   * its own, so `onFailure: retry` can act on SDK crashes that never produced a
-   * terminal result.
+   * Classify the current attempt's failure evidence. Pure over the recorded
+   * evidence, so every caller gets the same answer for the same evidence.
    */
-  getFailureReason(): FailureReason | undefined {
-    return this.failureReason;
+  private deriveFailure(): { reason: FailureReason; error?: Error } | undefined {
+    return deriveAttemptFailure({
+      errorResultText: this.errorResultText,
+      resultTimeoutError: this.resultTimeoutError,
+      assistantTimeoutError: this.assistantTimeoutError,
+      crashError: this.crashError,
+      sessionEstablished: this.getSystemMessageReceived(),
+    });
+  }
+
+  /**
+   * The per-attempt outcome (see CodonOutcome), read once by the runtime in
+   * handleCodonComplete. All evidence is recorded before an exit can be
+   * emitted, so this is final by the time `exit` fires.
+   */
+  getOutcome(): CodonOutcome {
+    const derived = this.deriveFailure();
+    return {
+      resultReceived: this.resultMessageReceived,
+      success: this.successResultReceived,
+      errorResultReceived: this.errorResultReceived,
+      failureReason: derived?.reason,
+      failureError: derived?.error,
+      sessionEstablished: this.getSystemMessageReceived(),
+    };
   }
 
   /**
    * Whether the agent session was established (first system/init message
-   * observed) before any failure. Used to gate the retriability of unrecognized
-   * crashes: a process that dies before establishing a session, with text we
-   * don't recognize as a transient API error, is a local setup failure, not a
-   * transient one.
+   * observed). Gates the retriability of unrecognized crashes: dying before
+   * establishment is a local setup failure.
    *
-   * ORs the log-parser-fed flag with the SDK manager's synchronous signal: the
-   * SDK emits "error" after cleanup() without force-parsing the log, so the
-   * parser-fed flag can lag a genuine establishment — `getSessionEstablished()`
-   * (derived from the session id captured in the message loop) closes that race.
+   * ORs the log-parser-fed flag with the SDK managers' synchronous
+   * `getSessionEstablished()`: both SDKs emit "error" without force-parsing
+   * the log, so the parser-fed flag can lag a genuine establishment and
+   * misclassify an established-session crash as a permanent pre-session
+   * failure, skipping onFailure: "retry".
    */
   getSystemMessageReceived(): boolean {
     return (
       this.systemMessageReceived ||
-      (this.processManager instanceof ClaudeAgentSDKManager &&
+      ((this.processManager instanceof ClaudeAgentSDKManager ||
+        this.processManager instanceof PiSdkManager) &&
         this.processManager.getSessionEstablished())
     );
+  }
+
+  /**
+   * Whether this attempt's result message has been parsed out of the log.
+   *
+   * Used by `handleCodonComplete` to decide when the parser has genuinely
+   * caught up: on every exit path `emitExit` force-parses the log before the
+   * exit event fires, so this is normally already true when the runtime's
+   * completion handler runs — the exception is a result line still buffered in
+   * the manager's write stream at that moment, which the next `parseLog()`
+   * picks up.
+   */
+  hasResultMessage(): boolean {
+    return this.resultMessageReceived;
+  }
+
+  /**
+   * Synchronously re-parse the codon log from the parser's last position.
+   * Idempotent and cheap; exists so the completion path can drain the log on
+   * demand instead of sleeping for a poll interval.
+   */
+  parseLog(): void {
+    this.logParser.parseNow();
   }
 
   /**

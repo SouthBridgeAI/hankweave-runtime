@@ -62,9 +62,7 @@ describe("Runtime: headless stay-active must shut down, not hang", () => {
 
   beforeEach(() => {
     fs.mkdirSync(path.resolve("tests", "test-area"), { recursive: true });
-    execDir = fs.mkdtempSync(
-      path.resolve("tests", "test-area", "rt-headless-stayactive-"),
-    );
+    execDir = fs.mkdtempSync(path.resolve("tests", "test-area", "rt-headless-stayactive-"));
     fs.mkdirSync(path.join(execDir, ".hankweave", "logs"), { recursive: true });
     fs.mkdirSync(path.join(execDir, ".hankweave", "events"), {
       recursive: true,

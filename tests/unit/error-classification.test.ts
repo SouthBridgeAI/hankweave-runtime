@@ -29,6 +29,31 @@ describe("classifyApiErrorText", () => {
         expectedType: "api-error",
       },
       {
+        // The embedded Pi agent's wording when it cannot reach a provider —
+        // the exact text a Gemini codon produced during a live network outage
+        // (2026-07-26, e2e-happy-path). Must classify as a transport fault,
+        // not fall to the session-gated unknown bucket.
+        name: "pi 'unable to connect' provider failure",
+        text: "Unable to connect. Is the computer able to access the url?",
+        expectedType: "api-error",
+      },
+      {
+        // undici's generic network error under Bun/Node.
+        name: "fetch failed",
+        text: "TypeError: fetch failed",
+        expectedType: "api-error",
+      },
+      {
+        name: "DNS ENOTFOUND",
+        text: "getaddrinfo ENOTFOUND generativelanguage.googleapis.com",
+        expectedType: "api-error",
+      },
+      {
+        name: "DNS EAI_AGAIN",
+        text: "getaddrinfo EAI_AGAIN api.anthropic.com",
+        expectedType: "api-error",
+      },
+      {
         name: "500 internal server error",
         text: "API Error: 500 Internal Server Error",
         expectedType: "api-error",
@@ -138,6 +163,14 @@ describe("classifyApiErrorText", () => {
         text: "API Error: 400 invalid_request_error",
       },
       {
+        // The Claude SDK's normalization of Anthropic's input-overflow 400 —
+        // the status code is stripped, so the wording itself must classify.
+        // Retrying an over-long prompt fails identically. (In a terminateOn:
+        // contextExceeded loop the completion path preempts this entirely.)
+        name: "prompt is too long (input overflow, permanent)",
+        text: "Prompt is too long",
+      },
+      {
         name: "invalid request text",
         text: "Invalid request: missing required field",
       },
@@ -219,6 +252,20 @@ describe("classifyApiErrorText session-established gating", () => {
     ).toMatchObject({ retriable: true });
     expect(
       classifyApiErrorText("API Error: 429 Too Many Requests", {
+        sessionEstablished: false,
+      }),
+    ).toMatchObject({ retriable: true });
+    // A network outage at codon start fails BEFORE the session establishes.
+    // Connection failures are transient regardless of session state — without
+    // an explicit transport match, these would fall to the gated unknown
+    // bucket and be classified permanent, silently bypassing onFailure:"retry".
+    expect(
+      classifyApiErrorText("Unable to connect. Is the computer able to access the url?", {
+        sessionEstablished: false,
+      }),
+    ).toMatchObject({ retriable: true });
+    expect(
+      classifyApiErrorText("TypeError: fetch failed", {
         sessionEstablished: false,
       }),
     ).toMatchObject({ retriable: true });

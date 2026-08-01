@@ -1,26 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { SentinelConfigLoader } from "../../server/sentinels/sentinel-config-loader.js";
 import type { CodonSentinelEntry } from "../../server/types/types.js";
 
 describe("SentinelConfigLoader", () => {
-  const testDataDir = path.join(process.cwd(), "tests/test-data/sentinel-configs");
+  let testDataDir: string;
   let loader: SentinelConfigLoader;
 
   beforeEach(() => {
     loader = new SentinelConfigLoader();
-    // Ensure test data directory exists
-    if (!fs.existsSync(testDataDir)) {
-      fs.mkdirSync(testDataDir, { recursive: true });
-    }
+    // Per-run isolated directory — the test must never create or delete
+    // anything inside the checked-in tests/test-data tree.
+    testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-sentinel-configs-"));
   });
 
   afterEach(() => {
-    // Clean up test files
-    if (fs.existsSync(testDataDir)) {
-      fs.rmSync(testDataDir, { recursive: true, force: true });
-    }
+    fs.rmSync(testDataDir, { recursive: true, force: true });
   });
 
   describe("File-based loading", () => {

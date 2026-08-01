@@ -5,7 +5,7 @@ import type { ValidationResult } from "./config.js";
 import { DEFAULT_CONFIG, ensureSchemaUrl, validateHank } from "./config.js";
 import { hashDataSource } from "./data-hasher.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
-import { formatEnvVarForDisplay, Logger } from "./utils.js";
+import { formatEnvVarForDisplay, getManagedExecutionsRoot, Logger } from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
 import { renderBudgetResolutionTable } from "./validate-budget.js";
 
@@ -38,7 +38,7 @@ function determinePaths(options: {
     };
   } else if (options.startNew) {
     // Would create new directory in managed executions
-    const executionRoot = path.join(os.homedir(), ".hankweave-executions");
+    const executionRoot = getManagedExecutionsRoot();
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 6);
     const dirName = `${timestamp}-${random}-${options.dataHash.substring(0, 6)}`;
@@ -51,7 +51,7 @@ function determinePaths(options: {
   } else {
     // Would search for existing or create new
     // For validation, we generate a synthetic path since we don't want to search the filesystem
-    const executionRoot = path.join(os.homedir(), ".hankweave-executions");
+    const executionRoot = getManagedExecutionsRoot();
     const dirName = `validation-${options.dataHash.substring(0, 6)}`;
     const execPath = path.join(executionRoot, dirName);
     return {

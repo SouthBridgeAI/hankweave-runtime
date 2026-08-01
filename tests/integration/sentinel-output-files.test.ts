@@ -3,15 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
-import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { CodonId } from "../../server/types/branded-types.js";
-import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import type {
   HankweaveGenerateObjectOptions,
   HankweaveGenerateObjectResult,
   HankweaveGenerateTextOptions,
   HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
+import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 
 describe("Sentinel Output Files - Integration Tests", () => {
   let testDir: string;
@@ -70,10 +69,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       await manager.initialize();
 
       let callCount = 0;
-      const mockLlm = async (
-        id: string,
-        options: HankweaveGenerateTextOptions,
-      ) => {
+      const mockLlm = async (_id: string, _options: HankweaveGenerateTextOptions) => {
         callCount++;
         return {
           text: `Summary ${callCount}`,
@@ -243,9 +239,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         codon1File = path.join(autoDir, files[0]);
 
         // Verify Codon 1 output
-        expect(fs.readFileSync(codon1File, "utf-8")).toBe(
-          "\n---\nCodon 1 completed\n",
-        );
+        expect(fs.readFileSync(codon1File, "utf-8")).toBe("\n---\nCodon 1 completed\n");
       }
 
       // Simulate Codon 2 with different auto-generated file
@@ -275,9 +269,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
 
         // Codon 1 file still exists (persistence)
         expect(fs.existsSync(codon1File)).toBe(true);
-        expect(fs.readFileSync(codon1File, "utf-8")).toBe(
-          "\n---\nCodon 1 completed\n",
-        );
+        expect(fs.readFileSync(codon1File, "utf-8")).toBe("\n---\nCodon 1 completed\n");
 
         // Codon 2 has its own file
         const autoDir = path.join(
@@ -292,7 +284,8 @@ describe("Sentinel Output Files - Integration Tests", () => {
 
         const codon2File = files.find((f) => f.includes("codon-2"));
         expect(codon2File).toBeDefined();
-        expect(fs.readFileSync(path.join(autoDir, codon2File!), "utf-8")).toBe(
+        if (!codon2File) throw new Error("codon-2 file not found");
+        expect(fs.readFileSync(path.join(autoDir, codon2File), "utf-8")).toBe(
           "\n---\nCodon 2 completed\n",
         );
       }
@@ -421,13 +414,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       expect(narratorFiles[0]).toEndWith(".md");
 
       // Verify structured sentinel output
-      const metricsDir = path.join(
-        executionPath,
-        ".hankweave",
-        "sentinels",
-        "outputs",
-        "metrics",
-      );
+      const metricsDir = path.join(executionPath, ".hankweave", "sentinels", "outputs", "metrics");
       expect(fs.existsSync(metricsDir)).toBe(true);
       const metricsFiles = fs.readdirSync(metricsDir);
       expect(metricsFiles.length).toBe(1);
@@ -674,11 +661,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
 
       await manager.completeAllWork();
 
-      const expectedPath = path.join(
-        agentRoot,
-        "sentinel-notes",
-        "analysis.md",
-      );
+      const expectedPath = path.join(agentRoot, "sentinel-notes", "analysis.md");
       expect(fs.existsSync(expectedPath)).toBe(true);
       const content = fs.readFileSync(expectedPath, "utf-8");
       expect(content).toContain("Agent-visible output");
@@ -700,10 +683,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
       const manager = new SentinelManager({ enablePersistence: false });
       await manager.initialize();
 
-      const outputPathsMap = new Map<
-        string,
-        { logFile?: string; lastValueFile?: string }
-      >();
+      const outputPathsMap = new Map<string, { logFile?: string; lastValueFile?: string }>();
       outputPathsMap.set("override-test", { logFile: "codon-override.md" });
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {

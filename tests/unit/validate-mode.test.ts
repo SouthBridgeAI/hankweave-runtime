@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getManagedExecutionsRoot } from "../../server/utils.js";
 
 /**
  * Tests for validation mode behavior.
@@ -13,7 +14,26 @@ import path from "node:path";
 describe("Validation Mode - No Directory Creation", () => {
   const TEST_BASE_DIR = path.join(os.tmpdir(), "hankweave-validate-mode-test");
   const DATA_SOURCE_DIR = path.join(TEST_BASE_DIR, "data-source");
-  const EXEC_ROOT = path.join(os.homedir(), ".hankweave-executions");
+  // The real ~/.hankweave-executions is machine-global state: other suites and
+  // servers on this box add/remove entries mid-test, breaking the whole-set
+  // equality assertions below. The code under test resolves the root via
+  // getManagedExecutionsRoot() at call time, so point it at a per-file temp
+  // dir through HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR.
+  const EXEC_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-validate-mode-root-"));
+  const savedExecBaseDir = process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR;
+
+  beforeAll(() => {
+    process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR = EXEC_ROOT;
+  });
+
+  afterAll(() => {
+    if (savedExecBaseDir === undefined) {
+      delete process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR;
+    } else {
+      process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR = savedExecBaseDir;
+    }
+    fs.rmSync(EXEC_ROOT, { recursive: true, force: true });
+  });
 
   // Track what directories existed before each test
   let existingExecDirs: string[] = [];
@@ -104,7 +124,7 @@ describe("Validation Mode - No Directory Creation", () => {
       expect(dataHash).toBeTruthy();
 
       // 3. Would determine paths (but not create them)
-      const executionRoot = path.join(os.homedir(), ".hankweave-executions");
+      const executionRoot = getManagedExecutionsRoot();
       const timestamp = Date.now();
       const random = Math.random().toString(36).substring(2, 6);
       const dirName = `${timestamp}-${random}-${dataHash.substring(0, 6)}`;

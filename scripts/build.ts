@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Build script for hankweave npm package
  *
@@ -6,11 +7,10 @@
  * 1. Bundles server/index.ts and all dependencies (main CLI)
  * 2. Builds public export entry points (schemas, types) for library consumers
  * 3. Generates .d.ts declaration files for the exports
- * 4. Copies shims to dist
  */
 
-import { mkdir, rm, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 const distDir = join(import.meta.dir, "..", "dist");
@@ -42,12 +42,18 @@ async function build() {
     external: [
       // Keep AI SDK packages external - they have their own dependencies
       "@anthropic-ai/claude-agent-sdk",
-      "@openai/codex-sdk",
       "ai",
       "@ai-sdk/anthropic",
       "@ai-sdk/google",
       "@ai-sdk/groq",
       "@ai-sdk/openai",
+      // The embedded Pi agent and its transitive undici must stay external:
+      // inlined undici defeats Bun's built-in undici interception and calls
+      // node:worker_threads.markAsUncloneable (absent in Bun ≤1.3 / Node <22.10)
+      // at CacheStorage construction → crash in the bundled dist.
+      "@earendil-works/pi-coding-agent",
+      "@earendil-works/pi-ai",
+      "undici",
       // crossws and srvx will bring their platform-specific implementations
       "crossws",
       "srvx",
@@ -81,41 +87,6 @@ async function build() {
     // chmod fails on Windows, which is expected
   }
 
-  // Copy shims directory to dist (excluding build artifacts)
-  console.log("📋 Copying shims directory...");
-  const shimsSource = join(import.meta.dir, "..", "shims");
-  const shimsTarget = join(distDir, "shims");
-
-  const SHIM_EXCLUDE = new Set([
-    "node_modules",
-    "src",
-    "tests",
-    "docs",
-    "bun.lock",
-    "tsconfig.json",
-    "rebuild.sh",
-    // The shim's own `dist/index.js` is a build artifact identical to the
-    // top-level `index.js` we actually run; copying it doubles the bundle
-    // size (the pi shim alone is ~11.6MB).
-    "dist",
-  ]);
-
-  if (existsSync(shimsSource)) {
-    await cp(shimsSource, shimsTarget, {
-      recursive: true,
-      filter: (source) => {
-        const parts = source
-          .replace(shimsSource, "")
-          .split("/")
-          .filter(Boolean);
-        return !parts.some((part) => SHIM_EXCLUDE.has(part));
-      },
-    });
-    console.log(`✅ Copied shims to ${shimsTarget}`);
-  } else {
-    console.warn("⚠️  Warning: shims directory not found at", shimsSource);
-  }
-
   // Build public export entry points (schemas, types) for library consumers.
   // These are separate from the main CLI bundle — unbundled ESM modules
   // that consumers import via the package.json "exports" field.
@@ -147,13 +118,10 @@ async function build() {
   // Generate .d.ts declaration files for the exports.
   // Uses tsconfig.exports.json which targets only the public API surface.
   console.log("🔤 Generating type declarations...");
-  const tscResult = Bun.spawnSync(
-    ["bun", "run", "tsc", "--project", "tsconfig.exports.json"],
-    {
-      cwd: join(import.meta.dir, ".."),
-      stdio: ["inherit", "pipe", "pipe"],
-    },
-  );
+  const tscResult = Bun.spawnSync(["bun", "run", "tsc", "--project", "tsconfig.exports.json"], {
+    cwd: join(import.meta.dir, ".."),
+    stdio: ["inherit", "pipe", "pipe"],
+  });
 
   if (tscResult.exitCode !== 0) {
     const stderr = tscResult.stderr.toString();

@@ -35,6 +35,52 @@ export async function getFreePort(): Promise<number> {
   });
 }
 
+/**
+ * Polls `predicate` until it returns true or `timeoutMs` elapses, reporting
+ * which happened. A throwing predicate counts as "not satisfied yet", so
+ * callers can probe files that may not exist on the first tick.
+ *
+ * Use this instead of a fixed sleep whenever a test waits on a filesystem or
+ * process side effect that has no event to await. Callers keep their own
+ * assertion, so a timeout still surfaces as the real expectation failure.
+ */
+export async function waitForCondition(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 10_000,
+  intervalMs = 50,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      if (await predicate()) return true;
+    } catch {
+      // Not satisfiable yet (e.g. the file being probed does not exist)
+    }
+    if (Date.now() >= deadline) return false;
+    await sleep(Math.min(intervalMs, deadline - Date.now()));
+  }
+}
+
+/**
+ * Waits until `port` can be bound again — i.e. the previous listener's socket
+ * has actually been released. Relaunching a server on the same port right after
+ * the old process dies otherwise races the OS and fails with EADDRINUSE.
+ */
+export async function waitForPortFree(port: number, timeoutMs = 15_000): Promise<boolean> {
+  return waitForCondition(
+    () => {
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      const probe = createServer();
+      probe.unref();
+      probe.once("error", () => resolve(false));
+      probe.listen(port, () => probe.close(() => resolve(true)));
+      return promise;
+    },
+    timeoutMs,
+    100,
+  );
+}
+
 // -------------
 // Colors for terminal output
 // -------------
@@ -194,13 +240,30 @@ export class TestWSClient {
       maxRetries?: number;
       retryDelay?: number;
       timeout?: number;
+      /**
+       * Request journal backfill in the handshake. For FRESH launches (empty
+       * journal) this closes the autostart-vs-handshake race: a codon.started
+       * broadcast before this client's handshake lands is replayed in the
+       * handshake response instead of being lost. Do NOT set it when
+       * connecting to replays of checked-in fixtures — those journals carry
+       * the recording's own events and backfill would double-deliver them.
+       */
+      sendPreviousEvents?: boolean;
     } = {},
   ): Promise<void> {
     const {
       performHandshake = true,
       mode = ClientMode.READANDWRITE,
-      maxRetries = 30,
-      retryDelay = 2000,
+      sendPreviousEvents = false,
+      // 120 × 250ms ≈ a 30s retry budget at 8× finer granularity than the old
+      // 30 × 2000ms. The old defaults added up to 60s+ — *longer than the 30s
+      // bun-test timeout of every caller* — so the loop could never exhaust:
+      // a dead server and a slow boot were indistinguishable, and the failure
+      // was always the useless "this test timed out" instead of this method's
+      // own diagnostic. Each failed attempt also burned a hard 2s, ~4s per
+      // llm-proxy run even when everything was healthy.
+      maxRetries = 120,
+      retryDelay = 250,
       timeout = 10000,
     } = options;
 
@@ -209,7 +272,7 @@ export class TestWSClient {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`${colors.gray}Connection attempt ${attempt}/${maxRetries}...${colors.reset}`);
-        await this.connect(port, { performHandshake, mode, timeout });
+        await this.connect(port, { performHandshake, mode, timeout, sendPreviousEvents });
         return; // Success!
       } catch (error) {
         lastError = error as Error;
@@ -233,9 +296,16 @@ export class TestWSClient {
       performHandshake?: boolean;
       mode?: ClientMode;
       timeout?: number;
+      /** See connectWithRetry — journal backfill in the handshake. */
+      sendPreviousEvents?: boolean;
     } = {},
   ): Promise<void> {
-    const { performHandshake = true, mode = ClientMode.READANDWRITE, timeout = 10000 } = options;
+    const {
+      performHandshake = true,
+      mode = ClientMode.READANDWRITE,
+      timeout = 10000,
+      sendPreviousEvents = false,
+    } = options;
 
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
@@ -249,7 +319,7 @@ export class TestWSClient {
         console.log(`${colors.green}✓ Connected to WebSocket server${colors.reset}`);
 
         if (performHandshake) {
-          this.performHandshake(mode)
+          this.performHandshake(mode, sendPreviousEvents)
             .then(() => {
               clearTimeout(timeoutId);
               resolve();
@@ -326,7 +396,7 @@ export class TestWSClient {
     });
   }
 
-  private async performHandshake(mode: ClientMode): Promise<void> {
+  private async performHandshake(mode: ClientMode, sendPreviousEvents = false): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error("Handshake timeout"));
@@ -359,7 +429,7 @@ export class TestWSClient {
       // Send handshake request
       const handshakeRequest: HandshakeRequest = {
         type: "handshake",
-        data: { mode },
+        data: { mode, ...(sendPreviousEvents ? { sendPreviousEvents } : {}) },
       };
 
       if (this.ws) {
@@ -388,11 +458,16 @@ export class TestWSClient {
       `${colors.green}✓ Handshake complete - Client ID: ${this.clientId}, Mode: ${this.grantedMode}${colors.reset}`,
     );
 
-    // Add any event history to our events array
+    // Add any event history to our events array. Dedupe by event id: an event
+    // can arrive live AND again in the handshake backfill (the runtime sets
+    // handshakeComplete before it reads the journal), and double-pushing
+    // would double every `getEvents().filter(...).length` count downstream.
     if (response.data.eventHistory && response.data.eventHistory.length > 0) {
-      this.events.push(...response.data.eventHistory);
+      const seen = new Set(this.events.map((e) => e.id));
+      const fresh = response.data.eventHistory.filter((e) => !seen.has(e.id));
+      this.events.unshift(...fresh);
       console.log(
-        `${colors.gray}Received ${response.data.eventHistory.length} historical events${colors.reset}`,
+        `${colors.gray}Received ${response.data.eventHistory.length} historical events (${fresh.length} new)${colors.reset}`,
       );
     }
   }
@@ -429,17 +504,19 @@ export class TestWSClient {
     if (onlyAfterTimestamp) {
       // Option 3: Only return events after the specified timestamp
       existing = this.events.find((e) => {
-        const matchesType = type === "*" || e.type === type;
-        const isAfterTimestamp = e.timestamp > onlyAfterTimestamp;
-        const passesFilter = !filter || filter(e);
-        return matchesType && isAfterTimestamp && passesFilter;
+        // Type gate FIRST: a filter written for one event type must never be
+        // fed other types. This scan used to evaluate the filter on every
+        // buffered event, so `(e as InfoEvent).data.message.includes(...)`
+        // exploded on the first non-info event in the buffer.
+        if (type !== "*" && e.type !== type) return false;
+        if (e.timestamp <= onlyAfterTimestamp) return false;
+        return !filter || filter(e);
       });
     } else {
       // Original behavior with optional filter (Option 2)
       existing = this.events.find((e) => {
-        const matchesType = type === "*" || e.type === type;
-        const passesFilter = !filter || filter(e);
-        return matchesType && passesFilter;
+        if (type !== "*" && e.type !== type) return false;
+        return !filter || filter(e);
       });
     }
 
@@ -762,6 +839,11 @@ export interface TestServerConfig {
     args: string[]; // e.g., ["hankweave"], ["dlx", "hankweave"]
   };
   env?: Record<string, string>; // Optional custom environment variables (merged with process.env)
+  // Keys DELETED from the child env after merging. Blanking with "" is not
+  // enough for existence-based detectors (CI, GITHUB_ACTIONS, DO_NOT_TRACK):
+  // telemetry treats a set-but-empty var as set. Mirrors launchHankweave.
+  unsetEnv?: string[];
+  extraArgs?: string[]; // Additional CLI args appended verbatim (mirrors launchHankweave)
 }
 
 export function startServer(config: TestServerConfig): ChildProcess {
@@ -820,6 +902,10 @@ export function startServer(config: TestServerConfig): ChildProcess {
     args.push("--no-autostart");
   }
 
+  if (config.extraArgs) {
+    args.push(...config.extraArgs);
+  }
+
   console.log(`${colors.gray}Command: ${command} ${args.join(" ")}${colors.reset}`);
 
   // Merge custom environment variables with process.env
@@ -827,6 +913,9 @@ export function startServer(config: TestServerConfig): ChildProcess {
     ...process.env,
     ...(config.env || {}),
   } as Record<string, string>;
+  for (const key of config.unsetEnv ?? []) {
+    delete env[key];
+  }
 
   // On Windows, package manager commands (npx, bunx, pnpm) are .cmd files
   // and need to be spawned with shell=true
@@ -992,8 +1081,27 @@ function copyDirectoryRecursive(src: string, dest: string): void {
 // -------------
 // Timestamp Generation
 // -------------
+
+/** Monotonic within a process; the pid disambiguates across processes. */
+let timestampCounter = 0;
+
+/**
+ * A unique, sortable, human-navigable name fragment for a test directory.
+ *
+ * Every caller uses this to build a directory — `execution-${ts}`,
+ * `basic-server-${ts}`, and so on. It used to be second-resolution ISO with no
+ * entropy, so any two launches inside the same wall-clock second landed on the
+ * same execution directory and shared a `state.json` and a lock file.
+ * `budget.test.ts` alone calls `launchHankweave()` 18 times, back to back.
+ *
+ * The ISO prefix is kept because these directories get browsed by hand; the
+ * pid-and-counter suffix is what actually makes the name unique, including
+ * across the separate `bun test` processes the suite runner spawns.
+ */
 export function generateTestTimestamp(): string {
-  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5); // YYYY-MM-DDTHH-mm-ss
+  const iso = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5); // YYYY-MM-DDTHH-mm-ss
+  timestampCounter += 1;
+  return `${iso}-${process.pid.toString(36)}${timestampCounter.toString(36)}`;
 }
 
 // -------------

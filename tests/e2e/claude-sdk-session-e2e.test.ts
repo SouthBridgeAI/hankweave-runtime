@@ -5,6 +5,7 @@ import { ClaudeAgentSDKManager } from "../../server/claude-agent-sdk-manager.js"
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
 import { Logger } from "../../server/utils.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
+import { generateTestTimestamp } from "../utils/test-helpers.js";
 
 describe("ClaudeAgentSDKManager Integration Test", () => {
   let tempDir: string;
@@ -14,11 +15,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
   beforeAll(async () => {
     // Create temp directory for test
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-sdk-integration-${Date.now()}`,
-    );
+    tempDir = path.resolve("tests", "test-area", `temp-sdk-integration-${generateTestTimestamp()}`);
     executionPath = path.join(tempDir, "execution");
     await fs.promises.mkdir(executionPath, { recursive: true });
 
@@ -44,9 +41,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       } catch (err: unknown) {
         const code = (err as NodeJS.ErrnoException)?.code;
         if (code !== "EBUSY" && code !== "EPERM") {
-          console.error(
-            `\n⚠️ Could not clean up test directory: ${(err as Error)?.message}`,
-          );
+          console.error(`\n⚠️ Could not clean up test directory: ${(err as Error)?.message}`);
           return;
         }
 
@@ -162,9 +157,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
       manager2.on("exit", (code, contextExceeded) => {
         clearTimeout(timeout);
-        console.log(
-          `    ✓ Continuation session completed (exit code: ${code})`,
-        );
+        console.log(`    ✓ Continuation session completed (exit code: ${code})`);
         if (contextExceeded) {
           console.log("    ⚠️  Context exceeded");
         }
@@ -193,8 +186,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     // event and rejects on "error") and produced a valid UUID session ID. We intentionally do
     // NOT assert the IDs are equal or distinct.
     console.log("\n  Step 3: Verifying continuation session ID...");
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     expect(continuationSessionId).toMatch(uuidRegex);
     console.log("    ✓ Continuation produced a valid session ID");
     console.log(`      First:        ${firstSessionId}`);
@@ -203,9 +195,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     // Cleanup second manager
     logParser2.stop();
 
-    console.log(
-      "\n✅ Test passed: Continuation session produces a valid session ID\n",
-    );
+    console.log("\n✅ Test passed: Continuation session produces a valid session ID\n");
   }, 120000); // 2 minute timeout for the whole test
 
   test("fresh session creates different session ID", async () => {
@@ -323,9 +313,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
 
     logParser2.stop();
 
-    console.log(
-      "\n✅ Test passed: Fresh session creates different session ID\n",
-    );
+    console.log("\n✅ Test passed: Fresh session creates different session ID\n");
   }, 120000); // 2 minute timeout for the whole test
 
   test("SDK self-test via ClaudeAgentSDKManager", async () => {
@@ -342,12 +330,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     });
 
     // Create Claude Agent SDK Manager
-    const manager = new ClaudeAgentSDKManager(
-      executionPath,
-      executionPath,
-      logger,
-      logParser,
-    );
+    const manager = new ClaudeAgentSDKManager(executionPath, executionPath, logger, logParser);
 
     console.log("\n  Running self-test...");
 
@@ -355,9 +338,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     const result = await manager.runSelfTest();
 
     console.log(`    ✓ Self-test completed`);
-    console.log(
-      `      Overall: ${result.overall.passed ? "PASSED" : "FAILED"}`,
-    );
+    console.log(`      Overall: ${result.overall.passed ? "PASSED" : "FAILED"}`);
     console.log(`      Message: ${result.overall.message}`);
 
     // Verify result structure
@@ -371,9 +352,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
     expect(result.agent).toBeDefined();
     expect(result.agent.name).toBe("claude-agent-sdk");
     expect(typeof result.agent.found).toBe("boolean");
-    console.log(
-      `    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`,
-    );
+    console.log(`    ✓ Agent: ${result.agent.name} (found: ${result.agent.found})`);
 
     expect(result.checks).toBeDefined();
     expect(Array.isArray(result.checks)).toBe(true);
@@ -385,9 +364,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       expect(check.name).toBeDefined();
       expect(typeof check.passed).toBe("boolean");
       expect(check.message).toBeDefined();
-      console.log(
-        `      - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`,
-      );
+      console.log(`      - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`);
     }
 
     expect(result.overall).toBeDefined();
@@ -431,8 +408,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       id: "timeout-test",
       name: "Timeout Test",
       // Give Claude a task that will take longer than 1 second
-      promptText:
-        "Write a detailed 500-word essay about the history of computing.",
+      promptText: "Write a detailed 500-word essay about the history of computing.",
       model: "sonnet",
       continuationMode: "fresh",
     });

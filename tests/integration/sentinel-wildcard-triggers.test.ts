@@ -1,21 +1,17 @@
-import { describe, it, expect, beforeAll, afterEach } from "bun:test";
-import * as path from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
+import * as path from "node:path";
+import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { CodonId } from "../../server/types/branded-types.js";
-import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
+import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { Logger } from "../../server/utils.js";
 import { createTypedMockLlmAdapter } from "../utils/mock-llm.js";
 
 // Mock events for testing
-const createMockEvent = (
-  type: ServerEvent["type"],
-  id?: string,
-): ServerEvent => {
+const createMockEvent = (type: ServerEvent["type"], id?: string): ServerEvent => {
   const baseId = id || `event-${Date.now()}-${Math.random()}`;
   const timestamp = new Date().toISOString();
 
@@ -153,16 +149,14 @@ class TestLogger extends Logger {
   hasLog(pattern: string | RegExp, level?: string): boolean {
     return this.logs.some((log) => {
       const messageMatches =
-        typeof pattern === "string"
-          ? log.message.includes(pattern)
-          : pattern.test(log.message);
+        typeof pattern === "string" ? log.message.includes(pattern) : pattern.test(log.message);
       const levelMatches = level ? log.level === level : true;
       return messageMatches && levelMatches;
     });
   }
 
   // Event tracker for compatibility with global tracking system
-  trackEvents = (sentinelId: string, events: ServerEvent[]) => {
+  trackEvents = (_sentinelId: string, events: ServerEvent[]) => {
     this.trackedEvents = events;
   };
 
@@ -178,10 +172,7 @@ class TestLogger extends Logger {
   });
 }
 
-const TEMP_SENTINEL_DIR = path.resolve(
-  process.cwd(),
-  "tests/test-area/temp-sentinels-wildcard",
-);
+const TEMP_SENTINEL_DIR = path.resolve(process.cwd(), "tests/test-area/temp-sentinels-wildcard");
 
 beforeAll(() => {
   if (!fs.existsSync(TEMP_SENTINEL_DIR)) {
@@ -348,11 +339,7 @@ describe("Wildcard Event Trigger Tests", () => {
         trigger: {
           type: "sequence",
           interestFilter: { on: ["*"] },
-          pattern: [
-            { type: "assistant.action" },
-            { type: "*" },
-            { type: "tool.result" },
-          ],
+          pattern: [{ type: "assistant.action" }, { type: "*" }, { type: "tool.result" }],
         },
         execution: { strategy: "immediate" },
         userPromptText: "Sequence matched: {{events.length}} events",
@@ -437,11 +424,7 @@ describe("Wildcard Event Trigger Tests", () => {
         trigger: {
           type: "sequence",
           interestFilter: { on: ["*"] },
-          pattern: [
-            { type: "assistant.action" },
-            { type: "*" },
-            { type: "tool.result" },
-          ],
+          pattern: [{ type: "assistant.action" }, { type: "*" }, { type: "tool.result" }],
           options: { consecutive: false },
         },
         execution: { strategy: "immediate" },
@@ -484,9 +467,7 @@ describe("Wildcard Event Trigger Tests", () => {
         trigger: {
           type: "event",
           on: ["*"],
-          conditions: [
-            { operator: "equals", path: "codonId", value: "test-codon" },
-          ],
+          conditions: [{ operator: "equals", path: "codonId", value: "test-codon" }],
         },
         execution: { strategy: "immediate" },
         userPromptText: "Event with codonId: {{events.length}}",

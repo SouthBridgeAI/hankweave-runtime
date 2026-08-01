@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,28 @@ describe("Execution Setup - startNew flag", () => {
   const TEST_BASE_DIR = path.join(os.tmpdir(), "hankweave-execution-setup-test");
   const DATA_SOURCE_DIR = path.join(TEST_BASE_DIR, "data-source");
   const EXECUTION_DIR = path.join(TEST_BASE_DIR, "execution");
+
+  // The real ~/.hankweave-executions is machine-global state, and the
+  // auto-detect tests below create and scan executions in it.
+  // setupExecutionEnvironment resolves that root via getManagedExecutionsRoot()
+  // at call time, so point it at a per-file temp dir through
+  // HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR: tests see only their own executions
+  // and never touch (or get broken by) the real ones.
+  const EXEC_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-execution-setup-root-"));
+  const savedExecBaseDir = process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR;
+
+  beforeAll(() => {
+    process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR = EXEC_ROOT;
+  });
+
+  afterAll(() => {
+    if (savedExecBaseDir === undefined) {
+      delete process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR;
+    } else {
+      process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR = savedExecBaseDir;
+    }
+    fs.rmSync(EXEC_ROOT, { recursive: true, force: true });
+  });
 
   beforeEach(async () => {
     // Create test directories
@@ -36,8 +58,8 @@ describe("Execution Setup - startNew flag", () => {
     // Clean up test directories
     await rimrafSimple(TEST_BASE_DIR);
 
-    // Also clean up any executions created in ~/.hankweave-executions
-    const executionRoot = path.join(os.homedir(), ".hankweave-executions");
+    // Also clean up any executions created in the managed executions root
+    const executionRoot = EXEC_ROOT;
     if (fs.existsSync(executionRoot) && dataHash) {
       const dirs = await fs.promises.readdir(executionRoot);
       // Only clean up test executions (those with our test data hash)
@@ -342,13 +364,7 @@ describe("Execution Setup - startNew flag", () => {
 
   describe("nested execution prevention", () => {
     it("should prevent creating execution inside another execution directory", async () => {
-      const nestedPath = path.join(
-        os.homedir(),
-        ".hankweave-executions",
-        "existing-exec",
-        "data",
-        "nested",
-      );
+      const nestedPath = path.join(EXEC_ROOT, "existing-exec", "data", "nested");
       await fs.promises.mkdir(nestedPath, { recursive: true });
 
       // Tier 1 safety: ~/.hankweave-executions/ is reserved for auto-managed executions
@@ -360,7 +376,7 @@ describe("Execution Setup - startNew flag", () => {
       ).rejects.toThrow(/reserved for auto-managed executions/);
 
       // Clean up
-      await rimrafSimple(path.join(os.homedir(), ".hankweave-executions", "existing-exec"));
+      await rimrafSimple(path.join(EXEC_ROOT, "existing-exec"));
     });
 
     it("should prevent using data source as execution directory", async () => {
@@ -534,7 +550,7 @@ describe("Execution Setup - startNew flag", () => {
       const { hashDataSource } = await import("../../server/data-hasher.js");
       const dataHash = await hashDataSource(DATA_SOURCE_DIR, 30000);
 
-      const executionRoot = path.join(os.homedir(), ".hankweave-executions");
+      const executionRoot = EXEC_ROOT;
 
       // Create older execution
       const olderDir = path.join(executionRoot, `1000000-old-${dataHash.substring(0, 6)}`);

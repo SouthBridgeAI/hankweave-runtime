@@ -39,8 +39,10 @@ export class WebSocketLogReader {
         try {
           const entry = JSON.parse(line) as WebSocketLogEntry;
           this.entries.push(entry);
-        } catch (error) {
-          console.error(`Failed to parse log line: ${line}`, error);
+        } catch {
+          console.error(
+            `Skipping unparseable log line (${line.length} bytes): ${line.slice(0, 60)}`,
+          );
         }
       }
     }
@@ -67,8 +69,10 @@ export class WebSocketLogReader {
         try {
           const entry = JSON.parse(line) as WebSocketLogEntry;
           this.entries.push(entry);
-        } catch (error) {
-          console.error(`Failed to parse log line: ${line}`, error);
+        } catch {
+          console.error(
+            `Skipping unparseable log line (${line.length} bytes): ${line.slice(0, 60)}`,
+          );
         }
       }
     }
@@ -234,8 +238,10 @@ export class WebSocketLogReader {
         try {
           const entry = JSON.parse(line) as WebSocketLogEntry;
           await callback(entry);
-        } catch (error) {
-          console.error(`Failed to parse log line: ${line}`, error);
+        } catch {
+          console.error(
+            `Skipping unparseable log line (${line.length} bytes): ${line.slice(0, 60)}`,
+          );
         }
       }
     }

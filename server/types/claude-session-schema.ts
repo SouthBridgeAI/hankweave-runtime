@@ -38,10 +38,18 @@ const apiKeySourceSchema = z.string().min(1);
 /**
  * System Message Schema
  *
- * Appears at the beginning of each session to initialize the Claude Code environment.
- * Contains session metadata, tool configuration, and working directory information.
+ * Two variants share `type: "system"`:
+ * - `init` appears at the beginning of each session with session metadata,
+ *   tool configuration, and working directory information.
+ * - `compact_boundary` marks the SDK compacting the conversation because the
+ *   context window filled (`compact_metadata.trigger: "auto"`) or the user ran
+ *   /compact (`"manual"`). The runtime treats an auto boundary as the
+ *   context-exceeded signal for `terminateOn: {type: "contextExceeded"}` —
+ *   modern SDKs compact instead of surfacing the overflow error, so this
+ *   message IS the moment the window genuinely ran out (see isContextExceeded
+ *   in types.ts and intermediates/54-context-exceeded-testing/plan.md).
  */
-export const systemMessageSchema = z
+export const systemInitMessageSchema = z
   .object({
     type: z.literal("system"),
     subtype: z.literal("init"),
@@ -68,6 +76,32 @@ export const systemMessageSchema = z
     apiKeySource: apiKeySourceSchema,
   })
   .passthrough();
+
+/** Observed shape (SDK 0.3.215): trigger, pre/post token counts, durations. */
+export const compactBoundaryMessageSchema = z
+  .object({
+    type: z.literal("system"),
+    subtype: z.literal("compact_boundary"),
+
+    // Present in observed messages; optional so a future omission cannot make
+    // the parser silently drop the exhaustion signal.
+    session_id: z.string().optional(),
+
+    compact_metadata: z
+      .object({
+        trigger: z.string(),
+        pre_tokens: z.number().optional(),
+        post_tokens: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const systemMessageSchema = z.discriminatedUnion("subtype", [
+  systemInitMessageSchema,
+  compactBoundaryMessageSchema,
+]);
 
 /**
  * Tool Use Content Schema

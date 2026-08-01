@@ -34,9 +34,12 @@ import {
   ClientMode,
   colors,
   generateTestTimestamp,
+  getFreePort,
   startServer,
   type TestServerConfig,
   TestWSClient,
+  waitForCodonStatus,
+  waitForCondition,
 } from "../utils/test-helpers.js";
 
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -49,7 +52,7 @@ const TEST_TIMESTAMP = generateTestTimestamp();
 
 describe("Sentinel Integration: With Sentinels", () => {
   const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `sentinel-enabled-${TEST_TIMESTAMP}`);
-  const TEST_PORT = 7824;
+  let TEST_PORT: number;
 
   let serverProcess: ChildProcess | null = null;
   let client: TestWSClient | null = null;
@@ -159,6 +162,11 @@ describe("Sentinel Integration: With Sentinels", () => {
       fs.mkdirSync(TEST_RUN_DIR, { recursive: true });
     }
 
+    // Port taken LAST, immediately before the server binds it: getFreePort is
+    // a handle, not a reservation, and the ~120 lines of fs setup above used
+    // to sit inside the window — the widest port race left in the tree.
+    TEST_PORT = await getFreePort();
+
     // Start server with noAutostart so we can connect before codon starts
     // This ensures we capture sentinel.loaded events
     const serverConfig: TestServerConfig = {
@@ -225,8 +233,11 @@ describe("Sentinel Integration: With Sentinels", () => {
     expect((codonComplete as CodonCompletedEvent).data.success).toBe(true);
     console.log(`${colors.green}✓ Codon completed${colors.reset}`);
 
-    // Wait for sentinel work to complete (queue draining, outputs written)
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // Sentinel work drains asynchronously after the codon completes; the runtime
+    // announces the end of it with an info event.
+    await client.waitForEvent("info", 60_000, (e) =>
+      (e as InfoEvent).data.message.includes("Sentinel work completed"),
+    );
 
     // Request server shutdown to trigger sentinel unload events
     console.log(`${colors.blue}Requesting server shutdown...${colors.reset}`);
@@ -236,8 +247,13 @@ describe("Sentinel Integration: With Sentinels", () => {
       data: { reason: "test-complete" },
     });
 
-    // Wait for server to process shutdown and emit unload events
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // Shutdown unloads every sentinel (those not already unloaded on codon
+    // completion); wait for all three rather than a fixed delay.
+    await waitForCondition(
+      // `>=`: a codon retry duplicates unload events; 3 is the floor.
+      () => (client?.getEventsByType("sentinel.unloaded").length ?? 0) >= 3,
+      30_000,
+    );
 
     // Capture events for subsequent tests
     events = client.getEvents();
@@ -253,9 +269,12 @@ describe("Sentinel Integration: With Sentinels", () => {
         (e) => e.type === "sentinel.loaded",
       ) as SentinelLoadedEvent[];
 
-      expect(loadedEvents.length).toBe(3);
+      // `>=` + dedupe, not `===`: a codon retry reloads sentinels and
+      // duplicates loaded events. The exact executed-sentinel record is
+      // asserted from state.json in "State Persistence" below.
+      expect(loadedEvents.length).toBeGreaterThanOrEqual(3);
 
-      const ids = loadedEvents.map((e) => e.data.sentinelId).sort();
+      const ids = [...new Set(loadedEvents.map((e) => e.data.sentinelId))].sort();
       expect(ids).toEqual(["conv-narrator", "entity-tracker", "text-narrator"]);
 
       // Verify each has correct metadata
@@ -274,7 +293,9 @@ describe("Sentinel Integration: With Sentinels", () => {
         (e) => e.type === "sentinel.unloaded",
       ) as SentinelUnloadedEvent[];
 
-      expect(unloadedEvents.length).toBe(3);
+      // `>=`: a codon retry unloads/reloads sentinels, duplicating unload
+      // events (the capture gate in the first test already waits for >= 3).
+      expect(unloadedEvents.length).toBeGreaterThanOrEqual(3);
 
       for (const event of unloadedEvents) {
         // Unload reason could be either codon-complete or shutdown depending on timing
@@ -328,6 +349,9 @@ describe("Sentinel Integration: With Sentinels", () => {
       if (completingTransition) {
         const transitionData = completingTransition.data.transition.data as Record<string, unknown>;
         const metadata = transitionData.metadata as Record<string, unknown> | undefined;
+        // Exact is safe: sentinelCount is server-computed metadata inside a
+        // single transition event (currentCodonSentinels.size), not a count
+        // of received events.
         expect(metadata?.sentinelCount).toBe(3);
         expect(metadata?.sentinelIds).toEqual(
           expect.arrayContaining(["text-narrator", "entity-tracker", "conv-narrator"]),
@@ -585,7 +609,7 @@ describe("Sentinel Integration: With Sentinels", () => {
 
 describe("Sentinel Integration: Zero Sentinels", () => {
   const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `sentinel-zero-${TEST_TIMESTAMP}`);
-  const TEST_PORT = 7825; // Different port from first suite
+  let TEST_PORT: number;
 
   let serverProcess: ChildProcess | null = null;
   let client: TestWSClient | null = null;
@@ -593,6 +617,9 @@ describe("Sentinel Integration: Zero Sentinels", () => {
   let events: ServerEvent[] = [];
 
   beforeAll(async () => {
+    // See suite 1: never hardcode ports.
+    TEST_PORT = await getFreePort();
+
     // Create test area
     const testDir = path.join(TEST_ROOT, "tests/test-area/sentinel-zero-test");
     if (fs.existsSync(testDir)) {
@@ -649,14 +676,15 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     console.log(`${colors.blue}Starting server without sentinels...${colors.reset}`);
     serverProcess = startServer(serverConfig);
 
-    // Wait for server to start
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Connect client
+    // Connect as soon as the server accepts connections instead of guessing a
+    // startup delay.
     client = new TestWSClient();
-    await client.connect(TEST_PORT, {
+    await client.connectWithRetry(TEST_PORT, {
       performHandshake: true,
       mode: ClientMode.READANDWRITE,
+      maxRetries: 30,
+      retryDelay: 500,
+      timeout: 10000,
     });
 
     // Get server ready event - this is all beforeAll does now
@@ -689,8 +717,21 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     expect((codonComplete as CodonCompletedEvent).data.success).toBe(true);
     console.log(`${colors.green}✓ Codon completed${colors.reset}`);
 
-    // Short wait for any final events
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // The completion transition and the state.json write land just after
+    // codon.completed; wait for both instead of a fixed delay.
+    await client.waitForEvent("state.transition", 30_000, (e) => {
+      const transition = e as StateTransitionEvent;
+      const transitionData = transition.data.transition.data as Record<string, unknown>;
+      return (
+        transition.data.transitionType === "CodonTransitioned" &&
+        transitionData?.from === "running" &&
+        transitionData?.to === "completed" &&
+        transition.data.codonId === "zero-sen-codon"
+      );
+    });
+    if (executionPath) {
+      await waitForCodonStatus(executionPath, "zero-sen-codon", "completed", 30_000);
+    }
 
     // Capture events for subsequent tests
     events = client.getEvents();

@@ -3,11 +3,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import {
-  ServerLaunchError,
-  launchHankweave,
-} from "../utils/hankweave-server-test-helpers.js";
+import { launchHankweave, ServerLaunchError } from "../utils/hankweave-server-test-helpers.js";
 import { getFreePort } from "../utils/test-helpers.js";
 
 const tempDirs: string[] = [];
@@ -79,82 +75,66 @@ async function expectValidationError(
 }
 
 describe("budget preflight validation errors", () => {
-  it(
-    "rejects shares summing to more than 1.0",
-    async () => {
-      const err = await expectValidationError({
-        overrides: {
-          budget: {
-            maxDollars: 10,
-            allocation: "proportional",
-            shares: { a: 0.6, b: 0.6 },
-          },
+  it("rejects shares summing to more than 1.0", async () => {
+    const err = await expectValidationError({
+      overrides: {
+        budget: {
+          maxDollars: 10,
+          allocation: "proportional",
+          shares: { a: 0.6, b: 0.6 },
         },
-        hank: BASE_CODONS,
-      });
+      },
+      hank: BASE_CODONS,
+    });
 
-      expect(err.exitCode).toBe(1);
-      expect(err.stderr).toContain("must sum to at most 1.0");
-    },
-    60_000,
-  );
+    expect(err.exitCode).toBe(1);
+    expect(err.stderr).toContain("must sum to at most 1.0");
+  }, 60_000);
 
-  it(
-    "rejects shares referencing unknown child IDs",
-    async () => {
-      const err = await expectValidationError({
-        overrides: {
-          budget: {
-            maxDollars: 10,
-            allocation: "proportional",
-            shares: { nonexistent: 0.5 },
-          },
+  it("rejects shares referencing unknown child IDs", async () => {
+    const err = await expectValidationError({
+      overrides: {
+        budget: {
+          maxDollars: 10,
+          allocation: "proportional",
+          shares: { nonexistent: 0.5 },
         },
-        hank: BASE_CODONS,
-      });
+      },
+      hank: BASE_CODONS,
+    });
 
-      expect(err.exitCode).toBe(1);
-      expect(err.stderr).toContain("unknown child IDs");
-    },
-    60_000,
-  );
+    expect(err.exitCode).toBe(1);
+    expect(err.stderr).toContain("unknown child IDs");
+  }, 60_000);
 
-  it(
-    "rejects shares without proportional allocation",
-    async () => {
-      const err = await expectValidationError({
-        overrides: {
-          budget: {
-            maxDollars: 10,
-            shares: { a: 0.5 },
-          },
+  it("rejects shares without proportional allocation", async () => {
+    const err = await expectValidationError({
+      overrides: {
+        budget: {
+          maxDollars: 10,
+          shares: { a: 0.5 },
         },
-        hank: BASE_CODONS,
-      });
+      },
+      hank: BASE_CODONS,
+    });
 
-      expect(err.exitCode).toBe(1);
-      expect(err.stderr).toContain("requires allocation mode");
-    },
-    60_000,
-  );
+    expect(err.exitCode).toBe(1);
+    expect(err.stderr).toContain("requires allocation mode");
+  }, 60_000);
 
-  it(
-    "rejects proportional allocation without maxDollars",
-    async () => {
-      const err = await expectValidationError({
-        overrides: {
-          budget: {
-            allocation: "proportional",
-          },
+  it("rejects proportional allocation without maxDollars", async () => {
+    const err = await expectValidationError({
+      overrides: {
+        budget: {
+          allocation: "proportional",
         },
-        hank: BASE_CODONS,
-      });
+      },
+      hank: BASE_CODONS,
+    });
 
-      expect(err.exitCode).toBe(1);
-      expect(err.stderr).toContain("requires budget.maxDollars");
-    },
-    60_000,
-  );
+    expect(err.exitCode).toBe(1);
+    expect(err.stderr).toContain("requires budget.maxDollars");
+  }, 60_000);
 
   // TODO: No validation exists yet for codons with budget.maxDollars whose model
   // can't be priced. The check needs to be implemented in config.ts first.

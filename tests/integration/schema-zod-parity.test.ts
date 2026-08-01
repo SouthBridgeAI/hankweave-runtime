@@ -1,13 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import Ajv, { type ValidateFunction } from "ajv";
-import addFormats from "ajv-formats";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-  codonObjectSchema,
-  hankFileAuthoringSchema,
-  hankFileSchema,
-} from "../../server/config";
+import Ajv, { type ValidateFunction } from "ajv";
+import addFormats from "ajv-formats";
+import { codonObjectSchema, hankFileAuthoringSchema, hankFileSchema } from "../../server/config";
 
 describe("JSON Schema and Zod Parity", () => {
   let ajv: Ajv;
@@ -17,9 +13,7 @@ describe("JSON Schema and Zod Parity", () => {
     ajv = new Ajv({ allErrors: true, strict: false });
     addFormats(ajv);
 
-    const schema = JSON.parse(
-      fs.readFileSync(path.resolve("schemas/hank.schema.json"), "utf-8"),
-    );
+    const schema = JSON.parse(fs.readFileSync(path.resolve("schemas/hank.schema.json"), "utf-8"));
     jsonSchemaValidate = ajv.compile(schema);
   });
 
@@ -178,9 +172,7 @@ describe("Schema validates documentation examples", () => {
     ajv = new Ajv({ allErrors: true, strict: false });
     addFormats(ajv);
 
-    const schema = JSON.parse(
-      fs.readFileSync(path.resolve("schemas/hank.schema.json"), "utf-8"),
-    );
+    const schema = JSON.parse(fs.readFileSync(path.resolve("schemas/hank.schema.json"), "utf-8"));
     validate = ajv.compile(schema);
   });
 

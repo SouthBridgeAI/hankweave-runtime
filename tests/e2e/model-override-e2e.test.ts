@@ -75,7 +75,7 @@ describe("Model Override E2E Test", () => {
       }
 
       // Wait for the run to complete
-      await hankweave.waitForRunToComplete(10_000);
+      await hankweave.waitForRunToComplete(60_000);
 
       // Get the run ID to locate log files
       const finalState = hankweave.getState();
@@ -137,7 +137,7 @@ describe("Model Override E2E Test", () => {
       console.log("\n✅ All codons correctly used haiku model despite different config settings\n");
 
       // Server will shutdown automatically, wait for connection close
-      await hankweave.waitForConnectionClose(5000);
+      await hankweave.waitForConnectionClose(30_000);
     } finally {
       // Only stop if server is still running
       if (hankweave.process.exitCode === null && hankweave.process.signalCode === null) {

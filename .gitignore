@@ -19,6 +19,7 @@ releases/
 
 tests/test-area
 tests/test-results
+.test-runs
 
 hankweave-results
 .hankweave
@@ -211,4 +212,7 @@ verdaccio.pid
 .npmrc.verdaccio
 
 # Test area for new models pulled from models.dev
-new-models-dev 
+new-models-dev
+
+# superbench workspace (runs/, logs/, downloaded benchmark data — see .claude/skills/bench)
+.bench-ws/ 

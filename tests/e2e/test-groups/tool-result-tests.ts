@@ -82,9 +82,9 @@ export function runToolResultTests(testState: TestState): void {
     ) as ToolResultEvent[];
 
     for (const event of toolResultEvents) {
-      // Execution time should be reasonable (not negative, not too long)
+      // Execution time must be non-negative; no upper bound — tool runtime is
+      // workload-dependent and the harness timeout owns overall duration.
       expect(event.data.executionTimeMs).toBeGreaterThanOrEqual(0);
-      expect(event.data.executionTimeMs).toBeLessThan(30000); // Less than 30 seconds
     }
   });
 

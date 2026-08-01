@@ -10,14 +10,7 @@ import { type TelemetryConfig, telemetryConfigSchema } from "./telemetry/telemet
 import { CodonId } from "./types/branded-types.js";
 import type { AllocationMode, OnExceededPolicy } from "./types/budget-types.js";
 import type { ModelName, SelfTestFailureCategory, ShimSelfTestResult } from "./types/types.js";
-import {
-  deepMerge,
-  getMetadata,
-  type Logger,
-  MIN_PI_NODE,
-  PiRuntimeError,
-  rmSyncWithRetry,
-} from "./utils.js";
+import { deepMerge, getMetadata, type Logger, rmSyncWithRetry } from "./utils.js";
 
 // Get version from package metadata
 const PACKAGE_VERSION = getMetadata().version;
@@ -805,11 +798,27 @@ export const codonObjectSchema = z.object({
         .max(60000)
         .optional()
         .default(1000)
-        .describe("Delay between retries in milliseconds (0-60000, default: 1000)"),
+        .describe(
+          "Base delay before the first retry, in milliseconds (0-60000, default: 1000). " +
+            "Subsequent retries back off exponentially (delayMs * 2^attempts), capped by maxDelayMs.",
+        ),
+      maxDelayMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(600000)
+        .optional()
+        .default(60000)
+        .describe(
+          "Upper bound on any single retry wait, in milliseconds (0-600000, default: 60000). " +
+            "Caps both the exponential backoff and a provider-supplied Retry-After.",
+        ),
     })
     .optional()
     .describe(
       "Configuration for retry behavior. Only used when onFailure is 'retry'. " +
+        "Delays grow exponentially from delayMs and are capped at maxDelayMs; when the " +
+        "provider supplies a Retry-After hint, that value is used instead of the computed backoff. " +
         "Note: Retry counters are in-memory only - if the server restarts mid-retry, " +
         "the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore.",
     ),
@@ -827,6 +836,16 @@ export const codonObjectSchema = z.object({
     .describe(
       "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops.",
     ),
+  autoCompact: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether the harness may auto-compact (summarize/trim) the session when the context window fills. " +
+        "Default: false — compaction is disabled, the provider's context-overflow error surfaces instead, " +
+        "plain codons fail at the window, and 'terminateOn: contextExceeded' loops terminate on the real boundary. " +
+        "Set true to absorb the boundary: the harness compacts, emits a compact_boundary event (which is the " +
+        "contextExceeded signal), and work continues on the compacted session.",
+    ),
   shimIdleTimeout: z
     .number()
     .int()
@@ -839,7 +858,7 @@ export const codonObjectSchema = z.object({
     .describe(
       "Max seconds between agent events before the session aborts (idle timeout). " +
         "Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, " +
-        "or the built-in default (180s for Anthropic models via the Claude SDK, 120s inside the shims for other providers). " +
+        "or the built-in default (180s for Anthropic models via the Claude SDK, 120s for other providers via the embedded Pi SDK). " +
         "An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies.",
     ),
   budget: z
@@ -1688,6 +1707,8 @@ export const DEFAULT_CONFIG: Omit<
   version: PACKAGE_VERSION,
   // Note: outputDirectory is now undefined by default
   // Outputs stay in the agent workspace ({executionPath}/agentRoot) unless explicitly configured
+  // Informational only — nothing consumes this field. The actual root is resolved
+  // at call time by getManagedExecutionsRoot() in utils.ts (env var HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR).
   executionBaseDir: path.join(os.homedir(), ".hankweave-executions"),
   lockFile: ".hankweave/runtime.lock",
   socketLogFile: ".hankweave/logs/websocket.log",
@@ -2462,10 +2483,7 @@ export function classifyInBandSelfTest(result: ShimSelfTestResult): SelfTestFail
 export function buildSelfTestGuidance(categories: Set<SelfTestFailureCategory>): string {
   const lines: string[] = [];
   if (categories.has("launch")) {
-    lines.push(
-      "The harness failed to start. See the captured output above; if this is the " +
-        `pi harness, ensure Node.js ≥ ${MIN_PI_NODE} is on your PATH (pi cannot run under Bun).`,
-    );
+    lines.push("The harness failed to start. See the captured output above.");
   }
   if (categories.has("binary-missing")) {
     lines.push(
@@ -2520,8 +2538,14 @@ export async function validateHank(options: {
   executionPath: string;
   logger: Logger;
   modelOverride?: string;
+  /**
+   * Skip the per-model harness self-tests (SDK availability + credentials).
+   * Used in replay mode: replay never contacts a provider, so requiring API
+   * keys for every model in the hank would make replays non-hermetic.
+   */
+  skipSelfTests?: boolean;
 }): Promise<ValidationResult> {
-  const { configPath, executionPath, logger, modelOverride } = options;
+  const { configPath, executionPath, logger, modelOverride, skipSelfTests } = options;
 
   // Load hank file first to get requirements
   const hankFile = loadHankFile({ hankPath: configPath, modelOverride });
@@ -2955,7 +2979,9 @@ export async function validateHank(options: {
   }
 
   // Run self-tests for each unique model
-  if (uniqueModels.size > 0) {
+  if (skipSelfTests) {
+    logger.log("Skipping model self-tests (replay mode: no provider calls are made)");
+  } else if (uniqueModels.size > 0) {
     result.shimSelfTests = [];
 
     for (const [modelId, modelInfo] of uniqueModels) {
@@ -3003,8 +3029,7 @@ export async function validateHank(options: {
         );
       } catch (error) {
         // An exception here means the harness never produced a result — it failed
-        // to LAUNCH (spawn/module-load crash, or the pi Node-version preflight).
-        // The PiRuntimeError message is already actionable; use it verbatim.
+        // to LAUNCH (module-load or SDK-initialization crash).
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         logger.log(`Self-test error for ${modelInfo.name}: ${errorMessage}`, "error");
@@ -3022,10 +3047,7 @@ export async function validateHank(options: {
             checks: [],
             overall: {
               passed: false,
-              message:
-                error instanceof PiRuntimeError && error.diagnostics
-                  ? `${errorMessage} (node ${error.diagnostics.nodeVersion ?? "?"} at ${error.diagnostics.nodePath ?? "?"})`
-                  : errorMessage,
+              message: errorMessage,
             },
           },
         });

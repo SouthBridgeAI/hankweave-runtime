@@ -56,7 +56,10 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
   },
   {
     id: "google",
-    apiKeyEnvVar: "GOOGLE_API_KEY",
+    // GEMINI_API_KEY is the standard var for the Gemini API (Google AI Studio)
+    // and the embedded pi runtime's native spelling. The legacy GOOGLE_API_KEY
+    // alias was removed — one name across sentinels, wizard, and pi.
+    apiKeyEnvVar: "GEMINI_API_KEY",
     createProvider: (apiKey) =>
       createGoogleGenerativeAI({
         apiKey,

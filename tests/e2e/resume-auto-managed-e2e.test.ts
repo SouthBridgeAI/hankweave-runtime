@@ -9,33 +9,42 @@
  * shown by the TUI guaranteed to fail.
  *
  */
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServerReadyEvent } from "../../server/schemas/event-schemas.js";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
-import { generateTestTimestamp, getFreePort, rimrafSimple } from "../utils/test-helpers.js";
+import {
+  generateTestTimestamp,
+  getFreePort,
+  rimrafSimple,
+  waitForCondition,
+} from "../utils/test-helpers.js";
 
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_AREA = path.join(TEST_ROOT, "tests/test-area");
-const MANAGED_EXEC_BASE = path.join(os.homedir(), ".hankweave-executions");
+// Fake managed executions root (set in beforeAll). The suite tests managed-space
+// guard rails, which need *a* managed root — not the developer's real
+// ~/.hankweave-executions. Every launched server gets the same root via
+// HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR in its env.
+let MANAGED_EXEC_BASE: string;
 const TEST_PREFIX = "__test-eng198-";
 
 describe("ENG-198: Resume auto-managed executions", () => {
   const managedDirsToCleanup: string[] = [];
   const normalDirsToCleanup: string[] = [];
 
-  // Clean up stale test dirs from previous interrupted runs
   beforeAll(async () => {
-    if (!fs.existsSync(MANAGED_EXEC_BASE)) return;
-    const entries = await fs.promises.readdir(MANAGED_EXEC_BASE);
-    for (const entry of entries) {
-      if (entry.startsWith(TEST_PREFIX)) {
-        await rimrafSimple(path.join(MANAGED_EXEC_BASE, entry));
-      }
-    }
+    // Fresh fake root per run — nothing stale to clean, nothing real to touch.
+    MANAGED_EXEC_BASE = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), "hankweave-eng198-managed-"),
+    );
+  });
+
+  afterAll(async () => {
+    if (MANAGED_EXEC_BASE) await rimrafSimple(MANAGED_EXEC_BASE);
   });
 
   afterEach(async () => {
@@ -76,12 +85,16 @@ describe("ENG-198: Resume auto-managed executions", () => {
       port,
       configPath,
       executionDir: normalExecDir,
+      env: { HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR: MANAGED_EXEC_BASE },
     });
 
     try {
       await firstServer.waitForEvent("server.ready", 30_000);
-      // Brief pause to ensure metadata is fully written
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // The copy below is only a valid execution once metadata is on disk, so
+      // wait for the file the next step asserts on.
+      await waitForCondition(() =>
+        fs.existsSync(path.join(normalExecDir, ".hankweave", "execution-meta.json")),
+      );
     } finally {
       await firstServer.stop();
     }
@@ -111,6 +124,7 @@ describe("ENG-198: Resume auto-managed executions", () => {
       configPath,
       executionDir: managedExecDir,
       reuseTestDirectory: true,
+      env: { HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR: MANAGED_EXEC_BASE },
     });
 
     try {
@@ -154,6 +168,7 @@ describe("ENG-198: Resume auto-managed executions", () => {
         port,
         executionDir: newExecDir,
         reuseTestDirectory: true,
+        env: { HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR: MANAGED_EXEC_BASE },
       }),
     ).rejects.toThrow();
   }, 30_000);
@@ -167,6 +182,14 @@ describe("ENG-198: Resume auto-managed executions", () => {
 
     const testTimestamp = generateTestTimestamp();
     const port = await getFreePort();
+    // Use single-codon haiku config, like the resume test above — the default
+    // config's codon-3 is gemini, and this suite declares only ANTHROPIC_API_KEY
+    // (under key enforcement the default config cannot even pass the startup
+    // self-test here).
+    const configPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../config/test-resume-after-kill.config.json",
+    );
 
     // Step 1: Create a valid execution in normal test area
     const normalExecDir = path.join(TEST_AREA, `eng198-startnew-source-${testTimestamp}`);
@@ -174,12 +197,17 @@ describe("ENG-198: Resume auto-managed executions", () => {
 
     const firstServer = await launchHankweave({
       port,
+      configPath,
       executionDir: normalExecDir,
+      env: { HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR: MANAGED_EXEC_BASE },
     });
 
     try {
       await firstServer.waitForEvent("server.ready", 30_000);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // The managed-space copy below needs the execution metadata on disk.
+      await waitForCondition(() =>
+        fs.existsSync(path.join(normalExecDir, ".hankweave", "execution-meta.json")),
+      );
     } finally {
       await firstServer.stop();
     }
@@ -195,9 +223,11 @@ describe("ENG-198: Resume auto-managed executions", () => {
     // Step 3: Launch with --start-new --force in managed space
     const freshServer = await launchHankweave({
       port,
+      configPath,
       executionDir: managedExecDir,
       reuseTestDirectory: true,
       extraArgs: ["--start-new", "--force", "-y"],
+      env: { HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR: MANAGED_EXEC_BASE },
     });
 
     try {
@@ -226,6 +256,7 @@ describe("ENG-198: Resume auto-managed executions", () => {
         port,
         executionDir: MANAGED_EXEC_BASE,
         reuseTestDirectory: true,
+        env: { HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR: MANAGED_EXEC_BASE },
       }),
     ).rejects.toThrow();
   }, 30_000);

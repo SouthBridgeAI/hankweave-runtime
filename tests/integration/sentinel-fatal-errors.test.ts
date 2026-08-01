@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeAll, afterEach } from "bun:test";
-import * as path from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
+import * as path from "node:path";
+import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { SentinelFatalError } from "../../server/sentinels/sentinel-fatal-error.js";
+import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import { CodonId } from "../../server/types/branded-types.js";
-import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
 import type { HankweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
+import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { Logger } from "../../server/utils.js";
 import { createTypedMockLlmAdapter } from "../utils/mock-llm.js";
 
@@ -35,18 +35,17 @@ class TestLogger extends Logger {
   }
 
   hasLog(pattern: string | RegExp, level?: string): boolean {
-    return this.logs.some(log => {
-      const messageMatches = typeof pattern === 'string'
-        ? log.message.includes(pattern)
-        : pattern.test(log.message);
+    return this.logs.some((log) => {
+      const messageMatches =
+        typeof pattern === "string" ? log.message.includes(pattern) : pattern.test(log.message);
       const levelMatches = level ? log.level === level : true;
       return messageMatches && levelMatches;
     });
   }
 
   getLogsContaining(pattern: string | RegExp): Array<{ message: string; level: string }> {
-    return this.logs.filter(log => {
-      return typeof pattern === 'string'
+    return this.logs.filter((log) => {
+      return typeof pattern === "string"
         ? log.message.includes(pattern)
         : pattern.test(log.message);
     });
@@ -71,7 +70,6 @@ afterEach(async () => {
 });
 
 describe("Sentinel Fatal Error Handling", () => {
-
   describe("Configuration Fatal Errors", () => {
     it("should throw fatal error for conversational sentinel without system prompt", () => {
       const logger = new TestLogger();
@@ -85,8 +83,8 @@ describe("Sentinel Fatal Error Handling", () => {
         execution: { strategy: "immediate" },
         userPromptText: "Test",
         conversational: {
-          trimmingStrategy: { type: "maxTurns", maxTurns: 5 }
-        }
+          trimmingStrategy: { type: "maxTurns", maxTurns: 5 },
+        },
         // Missing systemPromptText/systemPromptFile
       };
 
@@ -96,7 +94,7 @@ describe("Sentinel Fatal Error Handling", () => {
           CodonId("test-codon"),
           createTypedMockLlmAdapter("mock"),
           logger,
-          TEMP_SENTINEL_DIR
+          TEMP_SENTINEL_DIR,
         );
       }).toThrow(SentinelFatalError);
     });
@@ -105,7 +103,11 @@ describe("Sentinel Fatal Error Handling", () => {
   describe("SentinelManager Unloading Logic", () => {
     it("should unload sentinels with template fatal errors", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       // Create a failing LLM function that simulates template errors
       const fatalLlmCall = createTypedMockLlmAdapter(() => {
@@ -118,7 +120,7 @@ describe("Sentinel Fatal Error Handling", () => {
         model: "sonnet",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
-        userPromptText: "Test prompt"
+        userPromptText: "Test prompt",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -134,7 +136,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       await manager.handleEvent(mockEvent);
@@ -148,7 +150,11 @@ describe("Sentinel Fatal Error Handling", () => {
 
     it("should respect continueOnError for conversational sentinels with LLM errors", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       // LLM that throws regular errors (not fatal)
       const failingLlmCall = createTypedMockLlmAdapter(() => {
@@ -166,8 +172,8 @@ describe("Sentinel Fatal Error Handling", () => {
         userPromptText: "Test prompt",
         conversational: {
           trimmingStrategy: { type: "maxTurns", maxTurns: 5 },
-          continueOnError: true
-        }
+          continueOnError: true,
+        },
       };
 
       await manager.loadSentinelsForCodon([configContinue], CodonId("test-codon"), {
@@ -178,7 +184,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       await manager.handleEvent(mockEvent);
@@ -186,12 +192,18 @@ describe("Sentinel Fatal Error Handling", () => {
 
       // Should NOT unload because continueOnError: true handles regular LLM errors
       expect(manager.getSentinelCount()).toBe(1);
-      expect(logger.hasLog("Ignoring error as per configuration and continuing conversation")).toBe(true);
+      expect(logger.hasLog("Ignoring error as per configuration and continuing conversation")).toBe(
+        true,
+      );
     });
 
     it("should unload conversational sentinels when continueOnError is false", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       // LLM that throws corruption error
       const corruptionLlmCall = createTypedMockLlmAdapter(() => {
@@ -208,9 +220,9 @@ describe("Sentinel Fatal Error Handling", () => {
         systemPromptText: "System prompt",
         userPromptText: "Test prompt",
         conversational: {
-          trimmingStrategy: { type: "maxTurns", maxTurns: 5 }
+          trimmingStrategy: { type: "maxTurns", maxTurns: 5 },
           // continueOnError defaults to false
-        }
+        },
       };
 
       await manager.loadSentinelsForCodon([configNoContinue], CodonId("test-codon"), {
@@ -221,7 +233,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       await manager.handleEvent(mockEvent);
@@ -234,7 +246,11 @@ describe("Sentinel Fatal Error Handling", () => {
 
     it("should unload non-conversational sentinels after consecutive failures", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       let callCount = 0;
       // LLM that always fails for regular errors
@@ -249,7 +265,7 @@ describe("Sentinel Fatal Error Handling", () => {
         model: "sonnet",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
-        userPromptText: "Test prompt"
+        userPromptText: "Test prompt",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -260,7 +276,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       // Send events to trigger 3 consecutive failures
@@ -278,12 +294,20 @@ describe("Sentinel Fatal Error Handling", () => {
 
       // Should unload after 3 consecutive failures
       expect(manager.getSentinelCount()).toBe(0);
-      expect(logger.hasLog("Unloading non-conversational sentinel failing-sentinel after 3 consecutive failures")).toBe(true);
+      expect(
+        logger.hasLog(
+          "Unloading non-conversational sentinel failing-sentinel after 3 consecutive failures",
+        ),
+      ).toBe(true);
     });
 
     it("should reset failure count on successful execution", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       let callCount = 0;
       // LLM that fails twice then succeeds
@@ -301,7 +325,7 @@ describe("Sentinel Fatal Error Handling", () => {
         model: "sonnet",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
-        userPromptText: "Test prompt"
+        userPromptText: "Test prompt",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -312,7 +336,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       // Send events: fail, fail, succeed
@@ -328,11 +352,20 @@ describe("Sentinel Fatal Error Handling", () => {
 
     it("should never unload for resource errors", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       // LLM that throws resource error
       const resourceErrorLlmCall = createTypedMockLlmAdapter(() => {
-        throw new SentinelFatalError("test", "Cannot access history file - permission denied", "resource", false);
+        throw new SentinelFatalError(
+          "test",
+          "Cannot access history file - permission denied",
+          "resource",
+          false,
+        );
       });
 
       const config: SentinelConfig = {
@@ -341,7 +374,7 @@ describe("Sentinel Fatal Error Handling", () => {
         model: "sonnet",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
-        userPromptText: "Test prompt"
+        userPromptText: "Test prompt",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -352,7 +385,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       await manager.handleEvent(mockEvent);
@@ -373,14 +406,23 @@ describe("Sentinel Fatal Error Handling", () => {
         { errorType: "template", shouldUnload: true, reason: "will recur on every execution" },
         { errorType: "configuration", shouldUnload: true, reason: "will recur on every execution" },
         { errorType: "resource", shouldUnload: false, reason: "are often transient" },
-        { errorType: "corruption", shouldUnload: false, reason: "Keeping sentinel" }
+        { errorType: "corruption", shouldUnload: false, reason: "Keeping sentinel" },
       ] as const;
 
       for (const testCase of testCases) {
-        const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+        const manager = new SentinelManager({
+          logger,
+          enablePersistence: true,
+          rootDirectory: TEMP_SENTINEL_DIR,
+        });
 
         const errorLlmCall = createTypedMockLlmAdapter(() => {
-          throw new SentinelFatalError("test", `Test ${testCase.errorType} error`, testCase.errorType, false);
+          throw new SentinelFatalError(
+            "test",
+            `Test ${testCase.errorType} error`,
+            testCase.errorType,
+            false,
+          );
         });
 
         const config: SentinelConfig = {
@@ -389,7 +431,7 @@ describe("Sentinel Fatal Error Handling", () => {
           model: "sonnet",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
-          userPromptText: "Test prompt"
+          userPromptText: "Test prompt",
         };
 
         await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -402,7 +444,7 @@ describe("Sentinel Fatal Error Handling", () => {
           id: "test-event",
           timestamp: new Date().toISOString(),
           type: "assistant.action",
-          data: { codonId: "test-codon", action: "message", content: "test" }
+          data: { codonId: "test-codon", action: "message", content: "test" },
         };
 
         await manager.handleEvent(mockEvent);
@@ -422,7 +464,11 @@ describe("Sentinel Fatal Error Handling", () => {
   describe("Explicit shouldUnload Override", () => {
     it("should respect explicit shouldUnload=true regardless of error type", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       // Resource error that explicitly requests unloading
       const explicitUnloadLlmCall = createTypedMockLlmAdapter(() => {
@@ -435,7 +481,7 @@ describe("Sentinel Fatal Error Handling", () => {
         model: "sonnet",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
-        userPromptText: "Test prompt"
+        userPromptText: "Test prompt",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -446,7 +492,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       await manager.handleEvent(mockEvent);
@@ -461,7 +507,11 @@ describe("Sentinel Fatal Error Handling", () => {
   describe("Multiple Sentinels with Mixed Errors", () => {
     it("should handle mixed success and failure scenarios correctly", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ logger, enablePersistence: true, rootDirectory: TEMP_SENTINEL_DIR });
+      const manager = new SentinelManager({
+        logger,
+        enablePersistence: true,
+        rootDirectory: TEMP_SENTINEL_DIR,
+      });
 
       // Three sentinels: one succeeds, one has template error, one has resource error
       const mixedLlmCall = (id: string, options: HankweaveGenerateTextOptions) => {
@@ -488,7 +538,7 @@ describe("Sentinel Fatal Error Handling", () => {
           model: "sonnet",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
-          userPromptText: "Success"
+          userPromptText: "Success",
         },
         {
           id: "template-error",
@@ -496,7 +546,7 @@ describe("Sentinel Fatal Error Handling", () => {
           model: "sonnet",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
-          userPromptText: "Template Error"
+          userPromptText: "Template Error",
         },
         {
           id: "resource-error",
@@ -504,8 +554,8 @@ describe("Sentinel Fatal Error Handling", () => {
           model: "sonnet",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
-          userPromptText: "Resource Error"
-        }
+          userPromptText: "Resource Error",
+        },
       ];
 
       await manager.loadSentinelsForCodon(configs, CodonId("test-codon"), {
@@ -519,7 +569,7 @@ describe("Sentinel Fatal Error Handling", () => {
         id: "test-event",
         timestamp: new Date().toISOString(),
         type: "assistant.action",
-        data: { codonId: "test-codon", action: "message", content: "test" }
+        data: { codonId: "test-codon", action: "message", content: "test" },
       };
 
       await manager.handleEvent(mockEvent);

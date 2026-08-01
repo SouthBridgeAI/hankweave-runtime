@@ -273,7 +273,7 @@ export type SelfTestFailureCategory = "launch" | "auth" | "binary-missing" | "ch
  * Each check verifies a specific aspect of the environment setup.
  */
 export interface ShimSelfTestCheck {
-  /** Name of the check (e.g., "gemini_cli_found", "api_key") */
+  /** Name of the check (e.g., "sdk_installed", "api_key") */
   name: string;
   /** Whether this check passed */
   passed: boolean;
@@ -288,14 +288,14 @@ export interface ShimSelfTestCheck {
 export interface ShimSelfTestResult {
   /** Information about the shim itself */
   shim: {
-    /** Name of the shim (e.g., "gemini-cli-shim") */
+    /** Name of the harness manager (e.g., "pi-sdk-manager") */
     name: string;
     /** Version of the shim */
     version: string;
   };
   /** Information about the underlying agent/CLI */
   agent: {
-    /** Name of the agent (e.g., "gemini-cli") */
+    /** Name of the agent (e.g., "pi-coding-agent") */
     name: string;
     /** Version of the agent (or "unknown" if not found) */
     version: string;
@@ -351,8 +351,23 @@ export function isSyntheticTimeout(msg: ClaudeLogMessage): msg is SyntheticTimeo
 /**
  * Type guard to check if a log message indicates a context exceeded error.
  * Detects two patterns:
- * - Pattern 1: Synthetic assistant message with "API Error: terminated" or output token maximum exceeded
- * - Pattern 2: Result message with "exceeded the...output token maximum"
+ * - Pattern 1: Synthetic assistant message with "API Error: terminated" or
+ *   output token maximum exceeded
+ * - Pattern 2: Error result message carrying a context-exhaustion signal —
+ *   output-token overflow OR input-context overflow.
+ *
+ * The input-overflow texts are the shapes each harness was OBSERVED to deliver
+ * when the provider rejects an over-long prompt (probed against local mocks, see
+ * intermediates/54-context-exceeded-testing/plan.md and the two
+ * *-context-exceeded-mock integration tests):
+ * - Claude Agent SDK normalizes Anthropic's 400 to a result reading
+ *   "Prompt is too long".
+ * - The embedded Pi agent passes OpenAI-compatible bodies through verbatim:
+ *   `400: {"message":"This model's maximum context length is ...",
+ *   "code":"context_length_exceeded"}`.
+ *
+ * Matching is gated on `is_error === true`: result texts on that path are
+ * harness error reports, never model prose, so substring matching is safe.
  */
 export function isContextExceeded(msg: ClaudeLogMessage): boolean {
   // Pattern 1: Synthetic assistant message with context exceeded indicators
@@ -373,15 +388,30 @@ export function isContextExceeded(msg: ClaudeLogMessage): boolean {
     }
   }
 
-  // Pattern 2: Result message with output token limit exceeded
+  // Pattern 2: Error result message with an exhaustion signal (output-token
+  // overflow, or the observed input-overflow shapes from either harness).
   if (msg.type === "result") {
     const resultMsg = msg as ResultMessage;
+    if (resultMsg.is_error !== true || typeof resultMsg.result !== "string") {
+      return false;
+    }
+    const lower = resultMsg.result.toLowerCase();
     return (
-      resultMsg.is_error === true &&
-      typeof resultMsg.result === "string" &&
-      resultMsg.result.includes("exceeded the") &&
-      resultMsg.result.includes("output token maximum")
+      (lower.includes("exceeded the") && lower.includes("output token maximum")) ||
+      lower.includes("prompt is too long") ||
+      lower.includes("context_length_exceeded") ||
+      lower.includes("maximum context length")
     );
+  }
+
+  // Pattern 3: The harness compacted the session because the context window
+  // filled. Modern SDKs never surface the overflow error mid-session — they
+  // auto-compact and keep going (observed live: haiku at pre_tokens=204k of a
+  // 200k window emitted compact_boundary and the loop ran forever). The auto
+  // boundary IS the moment context ran out; a manual /compact is a user
+  // action, not exhaustion, and is excluded.
+  if (msg.type === "system" && msg.subtype === "compact_boundary") {
+    return msg.compact_metadata?.trigger !== "manual";
   }
 
   return false;

@@ -20,6 +20,14 @@ const failureReasonSchema = z.object({
   retriable: z.boolean(),
   message: z.string().optional(),
   sentinelRefs: z.array(z.string()).optional(), // Which sentinels failed (for sentinel-load-failure)
+  /**
+   * How long the provider asked us to wait before retrying, in milliseconds,
+   * when its error carried an explicit hint (a Retry-After header value, a
+   * "retry after 30s" phrasing, etc). Parsed by classifyApiErrorText and
+   * consumed by computeRetryDelayMs, which prefers it over computed backoff —
+   * the provider knows its own limit window better than we can guess.
+   */
+  retryAfterMs: z.number().optional(),
 });
 
 // Budget exceeded data schema (currency + limit + used)

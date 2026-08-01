@@ -1,12 +1,6 @@
-export const PASSTHROUGH_SHIM_PROVIDER_IDS = ["pi", "opencode"] as const;
+export const PASSTHROUGH_SHIM_PROVIDER_IDS = ["pi"] as const;
 
-export const SUPPORTED_CODON_PROVIDER_IDS = [
-  "anthropic",
-  "google",
-  "openai",
-  "pi",
-  "opencode",
-] as const;
+export const SUPPORTED_CODON_PROVIDER_IDS = ["anthropic", "pi"] as const;
 
 const passthroughShimProviderSet = new Set<string>(PASSTHROUGH_SHIM_PROVIDER_IDS);
 const supportedCodonProviderSet = new Set<string>(SUPPORTED_CODON_PROVIDER_IDS);

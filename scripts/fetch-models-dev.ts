@@ -1,17 +1,17 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
-  modelsDevApiResponseSchema,
-  modelsDataSchema,
-  type ModelsData,
   type ModelInfo,
+  type ModelsData,
+  type ModelsDevApiResponse,
+  modelsDataSchema,
+  modelsDevApiResponseSchema,
   type ProviderInfo,
-  type ModelsDevApiResponse
-} from '../server/llm/models-dev-schema';
-import fs from 'fs/promises';
-import path from 'path';
+} from "../server/llm/models-dev-schema";
 
-const MODELS_DEV_URL = 'https://models.dev/api.json';
-const OUTPUT_PATH = path.join(process.cwd(), 'server/llm/models-dev-data.json');
-const BACKUP_PATH = path.join(process.cwd(), 'server/llm/models-dev-data.backup.json');
+const MODELS_DEV_URL = "https://models.dev/api.json";
+const OUTPUT_PATH = path.join(process.cwd(), "server/llm/models-dev-data.json");
+const BACKUP_PATH = path.join(process.cwd(), "server/llm/models-dev-data.backup.json");
 
 // Remove the filter - we'll keep all providers in the data for fun!
 // Only providers with SDK support will actually be used at runtime
@@ -19,7 +19,7 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1 second
 
 async function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchWithRetry(url: string, retries = MAX_RETRIES): Promise<Response> {
@@ -42,13 +42,13 @@ async function fetchWithRetry(url: string, retries = MAX_RETRIES): Promise<Respo
       }
 
       // Exponential backoff
-      const delay = RETRY_DELAY * Math.pow(2, attempt - 1);
+      const delay = RETRY_DELAY * 2 ** (attempt - 1);
       console.log(`Retrying in ${delay}ms...`);
       await sleep(delay);
     }
   }
 
-  throw new Error('All retry attempts failed');
+  throw new Error("All retry attempts failed");
 }
 
 function transformRawData(apiResponse: ModelsDevApiResponse): ProviderInfo[] {
@@ -64,7 +64,9 @@ function transformRawData(apiResponse: ModelsDevApiResponse): ProviderInfo[] {
       try {
         // Skip models with invalid limits (0 or negative values)
         if (modelData.limit.context <= 0 || modelData.limit.output <= 0) {
-          console.warn(`Skipping ${providerId}/${modelId}: Invalid limits (context: ${modelData.limit.context}, output: ${modelData.limit.output})`);
+          console.warn(
+            `Skipping ${providerId}/${modelId}: Invalid limits (context: ${modelData.limit.context}, output: ${modelData.limit.output})`,
+          );
           continue;
         }
 
@@ -113,25 +115,25 @@ function transformRawData(apiResponse: ModelsDevApiResponse): ProviderInfo[] {
 async function backupExistingData(): Promise<void> {
   try {
     await fs.access(OUTPUT_PATH);
-    const existingData = await fs.readFile(OUTPUT_PATH, 'utf-8');
+    const existingData = await fs.readFile(OUTPUT_PATH, "utf-8");
     await fs.writeFile(BACKUP_PATH, existingData);
-    console.log('✓ Backed up existing data');
-  } catch (error: any) {
+    console.log("✓ Backed up existing data");
+  } catch (error) {
     // No existing file or backup failed - not critical
-    if (error.code !== 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn('Warning: Failed to backup existing data:', errorMessage);
+      console.warn("Warning: Failed to backup existing data:", errorMessage);
     }
   }
 }
 
 async function restoreFromBackup(): Promise<void> {
   try {
-    const backupData = await fs.readFile(BACKUP_PATH, 'utf-8');
+    const backupData = await fs.readFile(BACKUP_PATH, "utf-8");
     await fs.writeFile(OUTPUT_PATH, backupData);
-    console.log('✓ Restored from backup');
+    console.log("✓ Restored from backup");
   } catch (error) {
-    console.error('✗ No backup available or restore failed');
+    console.error("✗ No backup available or restore failed");
     throw error;
   }
 }
@@ -142,10 +144,10 @@ async function ensureDirectoryExists(): Promise<void> {
 }
 
 async function fetchModelsData(): Promise<void> {
-  console.log('🚀 Starting models.dev data fetch...');
+  console.log("🚀 Starting models.dev data fetch...");
   console.log(`API URL: ${MODELS_DEV_URL}`);
   console.log(`Output: ${OUTPUT_PATH}`);
-  console.log('Fetching ALL providers (no filter applied)');
+  console.log("Fetching ALL providers (no filter applied)");
   console.log();
 
   try {
@@ -159,71 +161,73 @@ async function fetchModelsData(): Promise<void> {
     const response = await fetchWithRetry(MODELS_DEV_URL);
     const rawData = await response.json();
 
-    console.log('✓ Successfully fetched raw data from models.dev');
+    console.log("✓ Successfully fetched raw data from models.dev");
 
     // Validate the raw API response structure
-    console.log('📋 Validating API response structure...');
+    console.log("📋 Validating API response structure...");
     const validatedApiResponse = modelsDevApiResponseSchema.parse(rawData);
-    console.log('✓ API response structure is valid');
+    console.log("✓ API response structure is valid");
 
     // Transform the data to our internal format
-    console.log('🔄 Transforming data to internal format...');
+    console.log("🔄 Transforming data to internal format...");
     const providers = transformRawData(validatedApiResponse);
 
     const transformedData: ModelsData = {
-      version: '1.0.0',
+      version: "1.0.0",
       lastUpdated: new Date().toISOString(),
       providers,
     };
 
     // Validate our transformed data against our schema
-    console.log('📋 Validating transformed data...');
+    console.log("📋 Validating transformed data...");
     const validatedData = modelsDataSchema.parse(transformedData);
-    console.log('✓ Transformed data is valid');
+    console.log("✓ Transformed data is valid");
 
     // Write the new data
-    console.log('💾 Writing data to file...');
-    await fs.writeFile(
-      OUTPUT_PATH,
-      JSON.stringify(validatedData, null, 2)
-    );
+    console.log("💾 Writing data to file...");
+    await fs.writeFile(OUTPUT_PATH, JSON.stringify(validatedData, null, 2));
 
     // Verify the written file can be loaded and validated
-    console.log('🔍 Verifying written file...');
-    const verification = await fs.readFile(OUTPUT_PATH, 'utf-8');
+    console.log("🔍 Verifying written file...");
+    const verification = await fs.readFile(OUTPUT_PATH, "utf-8");
     const verifiedData = modelsDataSchema.parse(JSON.parse(verification));
 
     // Success summary
-    const totalModels = verifiedData.providers.reduce((sum, provider) => sum + provider.models.length, 0);
+    const totalModels = verifiedData.providers.reduce(
+      (sum, provider) => sum + provider.models.length,
+      0,
+    );
     console.log();
-    console.log('🎉 Success!');
+    console.log("🎉 Success!");
     console.log(`📊 Downloaded data for ${verifiedData.providers.length} providers`);
     console.log(`🤖 Total models: ${totalModels}`);
     console.log(`📁 Saved to: ${OUTPUT_PATH}`);
 
     // Show provider summary
-    console.log('\n📋 Provider Summary:');
+    console.log("\n📋 Provider Summary:");
     for (const provider of verifiedData.providers) {
       console.log(`  • ${provider.name}: ${provider.models.length} models`);
     }
-
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('\n❌ Failed to fetch models data:', errorMessage);
+    console.error("\n❌ Failed to fetch models data:", errorMessage);
 
-    if (error instanceof Error && error.name === 'ZodError') {
-      console.error('\n🔍 Validation errors:');
-      (error as any).errors.forEach((err: any, index: number) => {
-        console.error(`  ${index + 1}. Path: ${err.path.join('.')} - ${err.message}`);
+    if (error instanceof Error && error.name === "ZodError") {
+      console.error("\n🔍 Validation errors:");
+      const zodError = error as unknown as {
+        errors: Array<{ path: Array<string | number>; message: string }>;
+      };
+      zodError.errors.forEach((err, index) => {
+        console.error(`  ${index + 1}. Path: ${err.path.join(".")} - ${err.message}`);
       });
     }
 
     // Try to restore from backup
-    console.log('\n🔄 Attempting to restore from backup...');
+    console.log("\n🔄 Attempting to restore from backup...");
     try {
       await restoreFromBackup();
-    } catch (backupError) {
-      console.error('Backup restoration also failed');
+    } catch {
+      console.error("Backup restoration also failed");
     }
 
     process.exit(1);
@@ -253,7 +257,7 @@ Note: This script fetches ALL providers from models.dev.
 }
 
 // Handle command line arguments
-if (process.argv.includes('--help') || process.argv.includes('-h')) {
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
   showHelp();
   process.exit(0);
 }
@@ -261,7 +265,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 // Run if called directly
 if (import.meta.main) {
   fetchModelsData().catch((error) => {
-    console.error('Unhandled error:', error);
+    console.error("Unhandled error:", error);
     process.exit(1);
   });
 }

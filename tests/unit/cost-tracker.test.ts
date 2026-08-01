@@ -134,13 +134,13 @@ describe("CostTracker", () => {
   test("uses underlying model ID for pass-through shim providers", () => {
     const { registry, calls } = createRegistry({
       "anthropic/claude-haiku-4-5": 0.789,
-      "opencode/anthropic/claude-haiku-4-5": 9.999,
+      "pi/anthropic/claude-haiku-4-5": 9.999,
     });
     const tracker = new CostTracker(
       createModel({
-        providerId: "opencode",
+        providerId: "pi",
         modelId: "anthropic/claude-haiku-4-5",
-        name: "opencode: anthropic/claude-haiku-4-5",
+        name: "pi: anthropic/claude-haiku-4-5",
       }),
       registry,
       createLogger(),

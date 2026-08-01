@@ -5,14 +5,28 @@ import type { ClaudeLogParser } from "./claude-log-parser.js";
 import type { Codon } from "./types/types.js";
 import type { Logger } from "./utils.js";
 
-/** Maximum inter-message delay during replay (ms). Caps gaps from long tool executions. */
-const MAX_REPLAY_DELAY_MS = 5000;
+/**
+ * Maximum inter-message delay during replay (ms), capping gaps that came from
+ * long tool executions in the original run.
+ *
+ * Replay paces itself off the recorded timestamps so a replayed run *feels*
+ * like the original, which is useful when watching one. It is pure cost when
+ * something is only reading the output: a single recorded codon log carries
+ * 80–450 seconds of gaps even after this cap, and none of it affects what the
+ * runtime produces. `HANKWEAVE_REPLAY_MAX_DELAY_MS` collapses the pacing for
+ * callers that want replay's other promise — fast, deterministic reproduction —
+ * without the wait. The test suite sets it; the default is unchanged.
+ */
+const MAX_REPLAY_DELAY_MS = (() => {
+  const raw = Number.parseInt(process.env.HANKWEAVE_REPLAY_MAX_DELAY_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 5000;
+})();
 
 /**
  * ReplayProcessManager replays a previously recorded JSONL log file
  * instead of making real LLM API calls.
  *
- * It implements the same interface as ClaudeAgentSDKManager and ShimProcessManager,
+ * It implements the same interface as ClaudeAgentSDKManager and PiSdkManager,
  * writing source JSONL lines progressively to the target log file so that
  * ClaudeLogParser can pick them up via its normal polling mechanism.
  *

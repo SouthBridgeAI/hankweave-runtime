@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
-import { CodonId } from "../../server/types/branded-types.js";
-import type { SentinelConfig } from "../../server/types/sentinel-types.js";
+import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import { EventId } from "../../server/types/branded-types.js";
+import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
+import { CodonId, EventId } from "../../server/types/branded-types.js";
+import type { HankweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
+import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { createMockLlm } from "../utils/mock-llm.js";
 import { createMockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
-import type { HankweaveGenerateObjectOptions } from "../../server/types/llm-call-types.js";
 
 describe("Structured Output Integration", () => {
   let testDir: string;
@@ -25,7 +25,7 @@ describe("Structured Output Integration", () => {
 
     manager = new SentinelManager({
       enablePersistence: false, // Memory-only for tests
-      providerRegistry: mockRegistry as any, // Cast to satisfy types
+      providerRegistry: mockRegistry as unknown as LlmProviderRegistry, // Mock mimics the registry surface the manager uses
     });
     await manager.initialize();
 
@@ -50,7 +50,7 @@ describe("Structured Output Integration", () => {
       execution: { strategy: "immediate" },
       userPromptText: "Extract data",
       structuredOutput: {
-        schemaStr: 'z.object({ name: z.string(), count: z.number() })',
+        schemaStr: "z.object({ name: z.string(), count: z.number() })",
         output: "object",
       },
     };
@@ -58,7 +58,8 @@ describe("Structured Output Integration", () => {
     const mockLlm = createMockLlm();
 
     // Create adapter with sentinelId parameter
-    const mockTextCall = async (_id: string, opts: any) => mockLlm.generateText(opts);
+    const mockTextCall = async (_id: string, opts: HankweaveGenerateTextOptions) =>
+      mockLlm.generateText(opts);
 
     await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
       llmCallOverride: mockTextCall,
@@ -93,13 +94,14 @@ describe("Structured Output Integration", () => {
       execution: { strategy: "immediate" },
       userPromptText: "List items",
       structuredOutput: {
-        schemaStr: 'z.object({ item: z.string() })',
+        schemaStr: "z.object({ item: z.string() })",
         output: "array",
       },
     };
 
     const mockLlm = createMockLlm();
-    const mockTextCall = async (_id: string, opts: any) => mockLlm.generateText(opts);
+    const mockTextCall = async (_id: string, opts: HankweaveGenerateTextOptions) =>
+      mockLlm.generateText(opts);
 
     await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
       llmCallOverride: mockTextCall,
@@ -143,7 +145,8 @@ describe("Structured Output Integration", () => {
     };
 
     const mockLlm = createMockLlm();
-    const mockTextCall = async (_id: string, opts: any) => mockLlm.generateText(opts);
+    const mockTextCall = async (_id: string, opts: HankweaveGenerateTextOptions) =>
+      mockLlm.generateText(opts);
 
     await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
       llmCallOverride: mockTextCall,
@@ -182,18 +185,19 @@ describe("Structured Output Integration", () => {
         trimmingStrategy: { type: "maxTurns", maxTurns: 10 },
       },
       structuredOutput: {
-        schemaStr: 'z.object({ filesChanged: z.number() })',
+        schemaStr: "z.object({ filesChanged: z.number() })",
         output: "object",
       },
     };
 
     const mockLlm = createMockLlm();
-    const mockTextCall = async (_id: string, opts: any) => mockLlm.generateText(opts);
+    const mockTextCall = async (_id: string, opts: HankweaveGenerateTextOptions) =>
+      mockLlm.generateText(opts);
 
     await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
       llmCallOverride: mockTextCall,
       configDirectory: testDir,
-      onExecute: (id: string, events: any) => {
+      onExecute: (id: string, events: ServerEvent[]) => {
         executionLog.push({ id, events });
       },
     });
@@ -242,13 +246,14 @@ describe("Structured Output Integration", () => {
       execution: { strategy: "immediate" },
       userPromptText: "Test",
       structuredOutput: {
-        schemaStr: 'z.object({ x: z.string() })',
+        schemaStr: "z.object({ x: z.string() })",
         output: "object",
       },
     };
 
     const mockLlm = createMockLlm();
-    const mockTextCall = async (_id: string, opts: any) => mockLlm.generateText(opts);
+    const mockTextCall = async (_id: string, opts: HankweaveGenerateTextOptions) =>
+      mockLlm.generateText(opts);
 
     // With mock LLM, this will load successfully
     // Real provider registry would check tool_call capability
@@ -268,13 +273,14 @@ describe("Structured Output Integration", () => {
       execution: { strategy: "immediate" },
       userPromptText: "Extract",
       structuredOutput: {
-        schemaStr: 'z.object({ value: z.number() })',
+        schemaStr: "z.object({ value: z.number() })",
         output: "object",
       },
     };
 
     const mockLlm = createMockLlm();
-    const mockTextCall = async (_id: string, opts: any) => mockLlm.generateText(opts);
+    const mockTextCall = async (_id: string, opts: HankweaveGenerateTextOptions) =>
+      mockLlm.generateText(opts);
 
     await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
       llmCallOverride: mockTextCall,

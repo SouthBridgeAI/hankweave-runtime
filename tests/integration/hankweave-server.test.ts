@@ -10,24 +10,15 @@ import {
   type ServerEvent,
   serverEventSchema,
 } from "../../server/schemas/event-schemas.js";
+import { ClientMode, connectHankweaveClient } from "../utils/hankweave-server-test-helpers.js";
 import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
-import {
-  ClientMode,
-  connectHankweaveClient,
-} from "../utils/hankweave-server-test-helpers.js";
 
 // Test configuration similar to e2e tests
-const TEST_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../..",
-);
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_AREA_DIR = path.join(TEST_ROOT, "tests/test-area");
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
-const CODONS_CONFIG = path.join(
-  TEST_ROOT,
-  "tests/config/test-codons.config.json",
-);
+const CODONS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons.config.json");
 
 // Create a minimal config
 let serverPort = 0;
@@ -35,10 +26,7 @@ let serverUrl = "";
 
 // Generate timestamp for this test run
 const TEST_TIMESTAMP = generateTestTimestamp();
-const TEST_RUN_DIR = path.join(
-  TEST_RESULTS_DIR,
-  `server-integration-${TEST_TIMESTAMP}`,
-);
+const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `server-integration-${TEST_TIMESTAMP}`);
 
 /**
  * Helper function to parse and validate server events using Zod schema.
@@ -49,7 +37,7 @@ function parseServerEvent(data: string) {
 }
 
 describe("HankweaveRuntime", () => {
-  let server: HankweaveRuntime;
+  let server: HankweaveRuntime | null = null;
   let executionDir: string;
   // Track all WebSocket clients created during tests for automatic cleanup
   const testClients: WebSocket[] = [];
@@ -68,9 +56,6 @@ describe("HankweaveRuntime", () => {
   }
 
   beforeEach(async () => {
-    // Get a free port for this test
-    serverPort = await getFreePort();
-    serverUrl = `ws://localhost:${serverPort}`;
     fs.mkdirSync(TEST_AREA_DIR, { recursive: true });
     executionDir = fs.mkdtempSync(path.join(TEST_AREA_DIR, "hankweave-server-integration-"));
 
@@ -112,6 +97,12 @@ describe("HankweaveRuntime", () => {
       }
     }
 
+    // Port taken LAST, right before HankweaveRuntime binds it — this hook runs
+    // ~18 times per file, and every fs write above used to sit inside the
+    // handle-to-listen window (getFreePort is not a reservation).
+    serverPort = await getFreePort();
+    serverUrl = `ws://localhost:${serverPort}`;
+
     server = new HankweaveRuntime({
       autostart: false,
       port: serverPort,
@@ -121,7 +112,7 @@ describe("HankweaveRuntime", () => {
       rigArchivePath: path.join(executionDir, "rigArchive"),
       dataPathInExecutionDir: dataDir,
       readOnlySourceDataPath: dataDir,
-      dataHash: "test-hash-" + TEST_TIMESTAMP,
+      dataHash: `test-hash-${TEST_TIMESTAMP}`,
       isNewExecution: true,
       isResuming: false,
       linkType: "symlink",
@@ -152,7 +143,7 @@ describe("HankweaveRuntime", () => {
         if (client.readyState === WebSocket.OPEN) {
           client.close();
         }
-      } catch (error) {
+      } catch {
         // Ignore errors when closing clients
       }
     }
@@ -165,10 +156,7 @@ describe("HankweaveRuntime", () => {
         await server.shutdown("test cleanup", false);
       } catch (error) {
         // Server might already be shut down from a test
-        console.log(
-          "Server already shut down or error during shutdown:",
-          error,
-        );
+        console.log("Server already shut down or error during shutdown:", error);
       }
     }
     // Note: We keep the test results for debugging, but clean up execution directory
@@ -204,16 +192,15 @@ describe("HankweaveRuntime", () => {
 
   it("supports handshake protocol with different modes", async () => {
     // Connect clients with different modes
-    const { client: client1, clientId: clientId1 } =
-      await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
-    const { client: client2, clientId: clientId2 } =
-      await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
-    const { client: client3, clientId: clientId3 } =
-      await connectAndRegisterClient(serverUrl, { mode: ClientMode.READONLY });
+    const { client: client1, clientId: clientId1 } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READANDWRITE,
+    });
+    const { client: client2, clientId: clientId2 } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READANDWRITE,
+    });
+    const { client: client3, clientId: clientId3 } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READONLY,
+    });
 
     // Verify client IDs are defined
     expect(clientId1).toBeDefined();
@@ -260,10 +247,9 @@ describe("HankweaveRuntime", () => {
 
   it("responds to ping.broadcast command to all clients", async () => {
     // Connect and handshake clients
-    const { client: client1, clientId: client1Id } =
-      await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READANDWRITE,
-      });
+    const { client: client1, clientId: client1Id } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READANDWRITE,
+    });
     const { client: client2 } = await connectAndRegisterClient(serverUrl, {
       mode: ClientMode.READONLY,
     });
@@ -322,9 +308,7 @@ describe("HankweaveRuntime", () => {
     const clientIds = clientSetups.map((setup) => setup.clientId);
 
     // Test 1: Regular ping from client 0 - only client 0 should receive response
-    const pingPromise = new Promise<
-      Array<{ clientIndex: number; data: PongEvent }>
-    >((resolve) => {
+    const pingPromise = new Promise<Array<{ clientIndex: number; data: PongEvent }>>((resolve) => {
       let responseCount = 0;
       const responses: Array<{ clientIndex: number; data: PongEvent }> = [];
 
@@ -362,30 +346,30 @@ describe("HankweaveRuntime", () => {
     expect(pingResponses[0].data.data.clientId).toBeUndefined(); // Regular ping doesn't include clientId
 
     // Test 2: Broadcast ping from client 1 - all clients should receive response
-    const broadcastPromise = new Promise<
-      Array<{ clientIndex: number; data: PongEvent }>
-    >((resolve) => {
-      let responseCount = 0;
-      const responses: Array<{ clientIndex: number; data: PongEvent }> = [];
+    const broadcastPromise = new Promise<Array<{ clientIndex: number; data: PongEvent }>>(
+      (resolve) => {
+        let responseCount = 0;
+        const responses: Array<{ clientIndex: number; data: PongEvent }> = [];
 
-      clients.forEach((client, index) => {
-        client.onmessage = (event: MessageEvent) => {
-          const data = parseServerEvent(event.data);
-          if (data.type === "pong") {
-            responses.push({ clientIndex: index, data });
-            responseCount++;
+        clients.forEach((client, index) => {
+          client.onmessage = (event: MessageEvent) => {
+            const data = parseServerEvent(event.data);
+            if (data.type === "pong") {
+              responses.push({ clientIndex: index, data });
+              responseCount++;
 
-            // For broadcast, all clients should get response
-            if (responseCount >= 3) {
-              resolve(responses);
+              // For broadcast, all clients should get response
+              if (responseCount >= 3) {
+                resolve(responses);
+              }
             }
-          }
-        };
-      });
+          };
+        });
 
-      // Set timeout to ensure we're not waiting forever
-      setTimeout(() => resolve(responses), 1000);
-    });
+        // Set timeout to ensure we're not waiting forever
+        setTimeout(() => resolve(responses), 1000);
+      },
+    );
 
     clients[1].send(
       JSON.stringify({
@@ -408,12 +392,9 @@ describe("HankweaveRuntime", () => {
 
   it("sends no event history by default", async () => {
     // Connect client without requesting event history
-    const { client, handshakeResponse } = await connectAndRegisterClient(
-      serverUrl,
-      {
-        mode: ClientMode.READONLY,
-      },
-    );
+    const { handshakeResponse } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READONLY,
+    });
 
     // Verify handshake response
     expect(handshakeResponse?.type).toBe("handshake.response");
@@ -423,13 +404,10 @@ describe("HankweaveRuntime", () => {
 
   it("sends no event history when sendPreviousEvents is false", async () => {
     // Connect client explicitly not requesting event history
-    const { client, handshakeResponse } = await connectAndRegisterClient(
-      serverUrl,
-      {
-        mode: ClientMode.READONLY,
-        sendPreviousEvents: false,
-      },
-    );
+    const { handshakeResponse } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READONLY,
+      sendPreviousEvents: false,
+    });
 
     // Verify handshake response
     expect(handshakeResponse?.type).toBe("handshake.response");
@@ -462,11 +440,10 @@ describe("HankweaveRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Now connect a second client requesting event history
-    const { client: secondClient, handshakeResponse } =
-      await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-        sendPreviousEvents: true,
-      });
+    const { handshakeResponse } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READONLY,
+      sendPreviousEvents: true,
+    });
 
     // Verify handshake response contains event history
     expect(handshakeResponse?.type).toBe("handshake.response");
@@ -483,9 +460,7 @@ describe("HankweaveRuntime", () => {
     }
 
     // Look for specific event types we expect
-    const eventTypes = (handshakeResponse?.data.eventHistory ?? []).map(
-      (e: any) => e.type,
-    );
+    const eventTypes = (handshakeResponse?.data.eventHistory ?? []).map((e) => e.type);
     // server.ready is a connection state event and not journaled, so it won't be in history
     expect(eventTypes).not.toContain("server.ready");
     // pong is a connection state event and not journaled, so it won't be in history
@@ -511,18 +486,16 @@ describe("HankweaveRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Connect one client without event history
-    const { client: client1, handshakeResponse: response1 } =
-      await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-        sendPreviousEvents: false,
-      });
+    const { handshakeResponse: response1 } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READONLY,
+      sendPreviousEvents: false,
+    });
 
     // Connect another client with event history
-    const { client: client2, handshakeResponse: response2 } =
-      await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-        sendPreviousEvents: true,
-      });
+    const { handshakeResponse: response2 } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READONLY,
+      sendPreviousEvents: true,
+    });
 
     // First client should have no history
     expect(response1?.data.eventHistory).toHaveLength(0);
@@ -567,11 +540,10 @@ describe("HankweaveRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Connect client requesting full history
-    const { client: historyClient, handshakeResponse } =
-      await connectAndRegisterClient(serverUrl, {
-        mode: ClientMode.READONLY,
-        sendPreviousEvents: true,
-      });
+    const { handshakeResponse } = await connectAndRegisterClient(serverUrl, {
+      mode: ClientMode.READONLY,
+      sendPreviousEvents: true,
+    });
 
     const eventHistory = handshakeResponse?.data.eventHistory ?? [];
     expect(eventHistory.length).toBeGreaterThan(0);
@@ -646,14 +618,14 @@ describe("HankweaveRuntime", () => {
         mode: ClientMode.READANDWRITE,
         timeout: 2000,
       });
-    } catch (error) {
+    } catch {
       connectionFailed = true;
     }
 
     expect(connectionFailed).toBe(true);
 
     // Mark server as null so afterEach doesn't try to shut it down again
-    server = null as any;
+    server = null;
   });
 
   it("shuts down when force_shutdown command is sent", async () => {
@@ -685,14 +657,14 @@ describe("HankweaveRuntime", () => {
         mode: ClientMode.READANDWRITE,
         timeout: 2000,
       });
-    } catch (error) {
+    } catch {
       connectionFailed = true;
     }
 
     expect(connectionFailed).toBe(true);
 
     // Mark server as null so afterEach doesn't try to shut it down again
-    server = null as any;
+    server = null;
   });
 
   it("graceful shutdown escalates to force on second call", async () => {
@@ -715,6 +687,7 @@ describe("HankweaveRuntime", () => {
     };
 
     // Call shutdown directly (first call — graceful)
+    if (!server) throw new Error("server not initialized");
     // Use exitProcess: false so we don't exit the test runner
     const shutdownPromise = server.shutdown("test graceful", false);
 
@@ -723,7 +696,8 @@ describe("HankweaveRuntime", () => {
 
     // Check that an info event was emitted about waiting for agent exit
     const infoEvents = receivedEvents.filter(
-      (e) => e.type === "info" && (e.data as { message?: string })?.message?.includes("Shutting down"),
+      (e) =>
+        e.type === "info" && (e.data as { message?: string })?.message?.includes("Shutting down"),
     );
     expect(infoEvents.length).toBeGreaterThanOrEqual(1);
 
@@ -731,7 +705,7 @@ describe("HankweaveRuntime", () => {
     await shutdownPromise;
 
     // Mark server as null so afterEach doesn't try to shut it down again
-    server = null as any;
+    server = null;
   });
 
   describe("History Sync", () => {
@@ -858,18 +832,12 @@ describe("HankweaveRuntime", () => {
     it("only delivers history.batch to the requesting client", async () => {
       await generatePingEvents(3);
 
-      const { client: readonlyClient } = await connectAndRegisterClient(
-        serverUrl,
-        {
-          mode: ClientMode.READONLY,
-        },
-      );
-      const { client: secondClient } = await connectAndRegisterClient(
-        serverUrl,
-        {
-          mode: ClientMode.READANDWRITE,
-        },
-      );
+      const { client: readonlyClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+      const { client: secondClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
 
       const secondClientMessages: ServerEvent[] = [];
       secondClient.onmessage = (event: MessageEvent) => {
@@ -880,9 +848,7 @@ describe("HankweaveRuntime", () => {
       expect(batches.length).toBeGreaterThan(0);
 
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(
-        secondClientMessages.some((msg) => msg.type === "history.batch"),
-      ).toBe(false);
+      expect(secondClientMessages.some((msg) => msg.type === "history.batch")).toBe(false);
     });
   });
   describe("Client Permissions", () => {
@@ -912,7 +878,8 @@ describe("HankweaveRuntime", () => {
 
       const pongResponse = await pongPromise;
       expect(pongResponse).not.toBeNull();
-      expect(pongResponse!.type).toBe("pong");
+      if (!pongResponse) throw new Error("pongResponse is null");
+      expect(pongResponse.type).toBe("pong");
     });
 
     it("readonly client cannot execute state-modifying commands (ping.broadcast)", async () => {
@@ -941,9 +908,10 @@ describe("HankweaveRuntime", () => {
 
       const errorResponse = await errorPromise;
       expect(errorResponse).not.toBeNull();
-      expect(errorResponse!.type).toBe("error");
-      expect(errorResponse!.data.message).toContain("read-only mode");
-      expect(errorResponse!.data.code).toBe("INSUFFICIENT_PERMISSIONS");
+      if (!errorResponse) throw new Error("errorResponse is null");
+      expect(errorResponse.type).toBe("error");
+      expect(errorResponse.data.message).toContain("read-only mode");
+      expect(errorResponse.data.code).toBe("INSUFFICIENT_PERMISSIONS");
     });
 
     it("readandwrite client can execute state-modifying commands (ping.broadcast)", async () => {
@@ -952,28 +920,21 @@ describe("HankweaveRuntime", () => {
       });
 
       // Set up message listener - ping.broadcast won't return a direct response, but shouldn't error
-      const responsePromise = new Promise<ErrorEvent | { accepted: boolean }>(
-        (resolve) => {
-          const messages: Array<ErrorEvent> = [];
-          client.onmessage = (event: MessageEvent) => {
-            const data = parseServerEvent(event.data);
-            if (data.type === "error") {
-              messages.push(data);
-              resolve(data);
-            }
-          };
-          // Resolve after timeout if no error (command accepted)
-          setTimeout(
-            () =>
-              resolve(
-                messages.length > 0
-                  ? messages[messages.length - 1]
-                  : { accepted: true },
-              ),
-            2000,
-          );
-        },
-      );
+      const responsePromise = new Promise<ErrorEvent | { accepted: boolean }>((resolve) => {
+        const messages: Array<ErrorEvent> = [];
+        client.onmessage = (event: MessageEvent) => {
+          const data = parseServerEvent(event.data);
+          if (data.type === "error") {
+            messages.push(data);
+            resolve(data);
+          }
+        };
+        // Resolve after timeout if no error (command accepted)
+        setTimeout(
+          () => resolve(messages.length > 0 ? messages[messages.length - 1] : { accepted: true }),
+          2000,
+        );
+      });
 
       // Send ping.broadcast command (state-modifying)
       client.send(
@@ -1022,24 +983,15 @@ describe("HankweaveRuntime", () => {
 
     it("permission errors are sent only to the offending client, not broadcast", async () => {
       // Connect multiple clients
-      const { client: readonlyClient } = await connectAndRegisterClient(
-        serverUrl,
-        {
-          mode: ClientMode.READONLY,
-        },
-      );
-      const { client: readwriteClient1 } = await connectAndRegisterClient(
-        serverUrl,
-        {
-          mode: ClientMode.READANDWRITE,
-        },
-      );
-      const { client: readwriteClient2 } = await connectAndRegisterClient(
-        serverUrl,
-        {
-          mode: ClientMode.READANDWRITE,
-        },
-      );
+      const { client: readonlyClient } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READONLY,
+      });
+      const { client: readwriteClient1 } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
+      const { client: readwriteClient2 } = await connectAndRegisterClient(serverUrl, {
+        mode: ClientMode.READANDWRITE,
+      });
 
       // Track messages received by each client
       const readonlyMessages: ServerEvent[] = [];
@@ -1093,12 +1045,8 @@ describe("HankweaveRuntime", () => {
       expect(readonlyErrors[0].data.code).toBe("INSUFFICIENT_PERMISSIONS");
 
       // Other clients should NOT have received the error
-      const readwrite1Errors = readwriteMessages1.filter(
-        (m) => m.type === "error",
-      );
-      const readwrite2Errors = readwriteMessages2.filter(
-        (m) => m.type === "error",
-      );
+      const readwrite1Errors = readwriteMessages1.filter((m) => m.type === "error");
+      const readwrite2Errors = readwriteMessages2.filter((m) => m.type === "error");
 
       expect(readwrite1Errors.length).toBe(0);
       expect(readwrite2Errors.length).toBe(0);

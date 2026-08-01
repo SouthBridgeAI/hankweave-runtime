@@ -42,8 +42,7 @@ export function runSentinelIntegrationTests(testState: TestState): void {
   describe("Lifecycle Events", () => {
     it("should emit sentinel.loaded, .output, and .unloaded events for each sentinel", () => {
       if (!testState.events || testState.events.length === 0) {
-        console.log("⚠️ No events captured");
-        return;
+        throw new Error("No events captured — the E2E run never produced any server events");
       }
 
       const loadedEvents = testState.events.filter(
@@ -103,14 +102,12 @@ export function runSentinelIntegrationTests(testState: TestState): void {
 
     it("should show sentinel information in the persisted state", async () => {
       if (!testState.executionPath) {
-        console.log("⚠️ No execution path");
-        return;
+        throw new Error("testState.executionPath is unset — the E2E run never started");
       }
 
       const statePath = path.join(testState.executionPath, ".hankweave/state.json");
       if (!fs.existsSync(statePath)) {
-        console.log("⚠️ No state.json found");
-        return;
+        throw new Error(`state.json not found at ${statePath} — state was never persisted`);
       }
 
       const state: HankweaveState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
@@ -165,18 +162,22 @@ export function runSentinelIntegrationTests(testState: TestState): void {
   describe("Output Files", () => {
     it("should generate a human-readable test run narrative file", async () => {
       if (!testState.executionPath) {
-        console.log("⚠️ No execution path");
-        return;
+        throw new Error("testState.executionPath is unset — the E2E run never started");
       }
 
+      // Sentinel outputs land under the sentinel's ID: test-narrator
+      // (tests/config/sentinel-triggers/test-narrator.sentinel.json). This
+      // path said "test-sentinel" for as long as the missing-dir guard was a
+      // silent `return` — the test had never actually verified anything.
       const narratorOutputDir = path.join(
         testState.executionPath,
-        ".hankweave/sentinels/outputs/test-sentinel",
+        ".hankweave/sentinels/outputs/test-narrator",
       );
 
       if (!fs.existsSync(narratorOutputDir)) {
-        console.log("⚠️ No narrator output directory");
-        return;
+        throw new Error(
+          `Narrator output directory missing at ${narratorOutputDir} — the test-narrator sentinel never wrote its narrative`,
+        );
       }
 
       // Find any .md files (auto-generated with timestamps)
@@ -207,8 +208,7 @@ export function runSentinelIntegrationTests(testState: TestState): void {
 
     it("should generate structured cost analysis data as NDJSON", async () => {
       if (!testState.executionPath) {
-        console.log("⚠️ No execution path");
-        return;
+        throw new Error("testState.executionPath is unset — the E2E run never started");
       }
 
       const costAnalystOutputDir = path.join(
@@ -217,8 +217,9 @@ export function runSentinelIntegrationTests(testState: TestState): void {
       );
 
       if (!fs.existsSync(costAnalystOutputDir)) {
-        console.log("⚠️ No cost-analyst output directory");
-        return;
+        throw new Error(
+          `Cost-analyst output directory missing at ${costAnalystOutputDir} — the cost-analyst sentinel never wrote its NDJSON`,
+        );
       }
 
       // Find any .ndjson files
@@ -256,8 +257,7 @@ export function runSentinelIntegrationTests(testState: TestState): void {
 
     it("should generate code review feedback for Codon 3", async () => {
       if (!testState.executionPath) {
-        console.log("⚠️ No execution path");
-        return;
+        throw new Error("testState.executionPath is unset — the E2E run never started");
       }
 
       const qaBotOutputDir = path.join(
@@ -266,8 +266,9 @@ export function runSentinelIntegrationTests(testState: TestState): void {
       );
 
       if (!fs.existsSync(qaBotOutputDir)) {
-        console.log("⚠️ No qa-bot output directory");
-        return;
+        throw new Error(
+          `QA-bot output directory missing at ${qaBotOutputDir} — the qa-bot sentinel never wrote its review`,
+        );
       }
 
       // Find any .md files
@@ -310,13 +311,12 @@ export function runSentinelIntegrationTests(testState: TestState): void {
   describe("Cost Tracking", () => {
     it("should track sentinel costs separately from codon costs", async () => {
       if (!testState.executionPath) {
-        console.log("⚠️ No execution path");
-        return;
+        throw new Error("testState.executionPath is unset — the E2E run never started");
       }
 
       const statePath = path.join(testState.executionPath, ".hankweave/state.json");
       if (!fs.existsSync(statePath)) {
-        return;
+        throw new Error(`state.json not found at ${statePath} — state was never persisted`);
       }
 
       const state: HankweaveState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));

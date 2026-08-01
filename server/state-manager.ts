@@ -2,8 +2,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { CheckpointGit } from "./checkpoint-git.js";
+import { normalizeLegacyProviderModelInfo } from "./config-validation/model-validator.js";
 import { type ExecutionCodonEntry, ExecutionPlanner } from "./execution-planner.js";
 import { analyzeExecutionThread, type ExecutionThread } from "./execution-thread.js";
+import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { MetadataValidationError, validateTransitionMetadata } from "./state-transition-guards.js";
 import { type StateManagerEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { type CodonId, CodonId as CodonIdConstructor, type RunId } from "./types/branded-types.js";
@@ -131,6 +133,24 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     parsedState: ST.HankweaveState,
     source: "primary" | "backup",
   ): void {
+    // Continuation runs reuse this plan verbatim (no re-validation), so codons
+    // persisted by a pre-upgrade version with providerId google/openai/opencode
+    // must be migrated to the pi passthrough or CodonRunner refuses them.
+    for (const entry of parsedState.executionPlan) {
+      const normalized = normalizeLegacyProviderModelInfo(
+        entry.codon.model,
+        LlmProviderRegistry.getInstance(),
+      );
+      if (normalized !== entry.codon.model) {
+        this.logger.log(
+          `Migrated legacy provider model for codon ${entry.codonId}: ` +
+            `${entry.codon.model.providerId}/${entry.codon.model.modelId} -> ` +
+            `${normalized.providerId}/${normalized.modelId}`,
+        );
+        entry.codon.model = normalized;
+      }
+    }
+
     this.state = parsedState;
     this.rebuildCostCache();
 

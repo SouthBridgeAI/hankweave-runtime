@@ -21,7 +21,7 @@ import {
   type ServerEvent,
 } from "../../server/types/types.js";
 import { WebSocket } from "../../server/utils.js";
-import { generateTestTimestamp, setupTestDirectory } from "./test-helpers.js";
+import { generateTestTimestamp, getFreePort, setupTestDirectory } from "./test-helpers.js";
 
 // -------------
 // Error Types
@@ -179,15 +179,39 @@ export interface LaunchServerOptions {
   env?: NodeJS.ProcessEnv;
   /** Prefix for server log messages (default: "[hankweave-server]") */
   logPrefix?: string;
-  /** Server WebSocket port (default: 8889) */
-  port?: number;
+  /**
+   * Server WebSocket port. REQUIRED: a fallback constant here means two
+   * concurrent suites that both omit `port` silently share one number — and
+   * `connectWithRetry` against the wrong server SUCCEEDS. Take a fresh
+   * `getFreePort()` immediately before calling.
+   */
+  port: number;
   /** WebSocket connection timeout in milliseconds (default: 10000) */
   websocketConnectTimeoutMs?: number;
   /** Number of WebSocket connection attempts (default: calculated from timeout) */
   websocketConnectAttempts?: number;
   /** Reuse test directory from previous run without recreating it (default: false) */
   reuseTestDirectory?: boolean;
-  /** Request previous events from the server in handshake (default: false) */
+  /**
+   * Request event history in the handshake (default: `false`).
+   *
+   * Turn this on for any test that counts events from the *start* of a run. The
+   * server only broadcasts to clients that have completed a handshake, and
+   * autostart routinely wins that race — in `--headless` it always does, since
+   * the run begins the moment the socket binds, with zero clients attached. The
+   * client then never learns codon 1 started. Measured on a replay fixture: 3 of
+   * 5 runs in TUI mode, 5 of 5 headless.
+   *
+   * **Not safe as a blanket default, and deliberately not one.** `--replay`
+   * copies the whole source execution directory, `.hankweave/events/` included,
+   * so a checked-in fixture arrives carrying the original recording's journal —
+   * `tests/fixtures/plan-gen-execution` ships 6467 events and 17 `codon.started`.
+   * Backfill would hand a replay client those foreign events alongside the live
+   * ones. Only enable this against a fixture built by `buildReplayFixture`,
+   * which starts with an empty journal.
+   *
+   * Backfill is capped at `handshakeHistoryLimit` (50 events).
+   */
   sendPreviousEvents?: boolean;
   /** Number of ping events to generate after server is ready (default: 0) */
   generatePingEvents?: number;
@@ -206,6 +230,15 @@ export interface LaunchServerOptions {
   replayDir?: string;
   /** Additional CLI args to append to the server command */
   extraArgs?: string[];
+  /**
+   * Environment variables to remove from the child's environment entirely.
+   *
+   * `env` can only ever *set* a value, and some checks in the runtime key off a
+   * variable merely existing (CI detection, for one). Blanking those to `""`
+   * leaves them defined and the check still fires, so a test that needs a
+   * variable genuinely absent has to say so here.
+   */
+  unsetEnv?: string[];
 }
 
 /**
@@ -393,9 +426,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_CWD = path.resolve(__dirname, "../..");
 const DEFAULT_LOG_PREFIX = "[hankweave-server]";
-const DEFAULT_PORT = 8889;
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 60_000; // 60 seconds to allow for slow self-tests on Windows
-const DEFAULT_WEBSOCKET_CONNECT_DELAY_MS = 250;
+// Boot-poll granularity. At 250ms, 36 boots per free-tier run wasted ~4.5s in
+// pure quantization (interval/2 per boot) and hid boot-latency variance behind
+// the rounding; 50ms costs a few extra no-op connect attempts and nothing else.
+const DEFAULT_WEBSOCKET_CONNECT_DELAY_MS = 50;
 const TEST_CONFIG_RELATIVE_PATH = "tests/config/test-codons.config.json";
 const TEST_DATA_RELATIVE_PATH = "tests/config/poem_guides.txt";
 const TEST_RESULTS_RELATIVE_DIR = "tests/test-results";
@@ -464,19 +499,26 @@ function isCodonRetryInfo(e: ServerEvent, codonId: string): boolean {
  * const execDir = server.executionDir; // Save for reuse
  * await server.kill();
  *
- * // Relaunch with same execution directory
+ * // Relaunch with same execution directory (fresh port, taken immediately
+ * // before the launch — getFreePort is a handle, not a reservation)
  * const server2 = await launchHankweave({
+ *   port: await getFreePort(),
  *   executionDir: execDir,
  *   reuseTestDirectory: true,
  * });
  * ```
  */
-export async function launchHankweave(options: LaunchServerOptions = {}): Promise<LaunchedServer> {
+export async function launchHankweave(options: LaunchServerOptions): Promise<LaunchedServer> {
   const cwd = options.cwd ? path.resolve(options.cwd) : DEFAULT_CWD;
   // Always show costs in tests to aid debugging when inspecting TUI output
-  const env = { ...process.env, HANKWEAVE_RUNTIME_SHOW_COSTS: "1", ...options.env };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HANKWEAVE_RUNTIME_SHOW_COSTS: "1",
+    ...options.env,
+  };
+  for (const key of options.unsetEnv ?? []) delete env[key];
   const logPrefix = options.logPrefix ?? DEFAULT_LOG_PREFIX;
-  const port = options.port ?? DEFAULT_PORT;
+  const port = options.port;
   const websocketTimeout =
     options.websocketConnectTimeoutMs ?? DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
   const websocketAttempts =
@@ -515,133 +557,176 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
     });
   }
 
-  // Determine command and args - priority: binary > commandOverride > default bun
-  let command: string;
-  let spawnArgs: string[];
-  let needsShell = false;
+  // ── Spawn + connect, with bounded bind-retry ─────────────────────────
+  // getFreePort() is a handle, not a reservation: the window between its
+  // close() and this server's listen() belongs to nobody, and under the
+  // runner's parallel default (~80 boots per sweep, 4 suites at once) the
+  // collision is a WHEN, not an IF — first observed live as "Is port 52631
+  // in use?" killing an e2e-budget boot. Port-last discipline narrows the
+  // window; this loop absorbs what discipline cannot: a bind failure gets a
+  // FRESH port and a clean respawn, bounded so a genuinely wedged port
+  // range still fails loudly.
+  const BIND_RETRY_ATTEMPTS = 3;
+  const isBindFailure = (err: unknown): err is ServerLaunchError =>
+    err instanceof ServerLaunchError && /Is port \d+ in use\?/.test(err.stderr);
 
-  // Use space-separated syntax (not --flag=value which is deprecated)
-  // Skip --execution when --replay is set (replay mode auto-copies the execution dir)
-  const serverArgs = [
-    "--config",
-    configPath,
-    "--data",
-    dataSourcePath,
-    ...(options.replayDir ? [] : ["--execution", executionDir]),
-    "--port",
-    String(port),
-    ...(options.replayDir ? ["--replay", path.resolve(cwd, options.replayDir)] : []),
-    ...(options.extraArgs ?? []),
-  ];
-
-  if (options.commandOverride) {
-    // Use command override (binary, npx, bunx, pnpm dlx, etc.)
-    command = options.commandOverride.command;
-    spawnArgs = [...options.commandOverride.args, ...serverArgs];
-    // On Windows, package managers need shell=true (but not binaries)
-    needsShell = process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
-  } else {
-    // Default: Use bun with source files
-    const serverEntry = path.resolve(DEFAULT_CWD, "server/index.ts");
-    command = "bun";
-    spawnArgs = [serverEntry, ...serverArgs];
-  }
-
-  const child = spawn(command, spawnArgs, {
-    cwd,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: needsShell,
-  });
-
-  child.stdout?.on("data", (data) => {
-    const text = data.toString();
-    text
-      .split(/\r?\n/)
-      .filter(
-        (line: string, index: number, lines: string[]) =>
-          line.length > 0 || index < lines.length - 1,
-      )
-      .forEach((line: string) => {
-        console.log(`${logPrefix} ${line}`);
-      });
-  });
-
-  let stderrBuffer = "";
-  child.stderr?.on("data", (data) => {
-    const text = data.toString();
-    stderrBuffer += text;
-    text
-      .split(/\r?\n/)
-      .filter(
-        (line: string, index: number, lines: string[]) =>
-          line.length > 0 || index < lines.length - 1,
-      )
-      .forEach((line: string) => {
-        console.error(`${logPrefix} ${line}`);
-      });
-  });
-
-  await once(child, "spawn");
-
-  // Connect and perform handshake using setupClient
-  const serverUrl = `ws://localhost:${port}`;
-  let lastError: unknown;
-  let attempt = 0;
-  let serverExited = false;
+  let activePort = port;
+  let child: ReturnType<typeof spawn>;
   let clientSetup: ClientSetupResult | null = null;
+  let stderrBuffer = "";
+  let serverUrl = "";
 
-  child.once("exit", () => {
-    serverExited = true;
-  });
+  for (let bindAttempt = 1; ; bindAttempt++) {
+    // Determine command and args - priority: binary > commandOverride > default bun
+    let command: string;
+    let spawnArgs: string[];
+    let needsShell = false;
 
-  while (attempt < websocketAttempts) {
-    if (serverExited || child.exitCode !== null || child.signalCode !== null) {
-      throw new ServerLaunchError(
-        "Server exited before WebSocket connection could be established",
-        child.exitCode,
-        stderrBuffer,
-      );
+    // Use space-separated syntax (not --flag=value which is deprecated)
+    // Skip --execution when --replay is set (replay mode auto-copies the execution dir)
+    const serverArgs = [
+      "--config",
+      configPath,
+      "--data",
+      dataSourcePath,
+      ...(options.replayDir ? [] : ["--execution", executionDir]),
+      "--port",
+      String(activePort),
+      ...(options.replayDir ? ["--replay", path.resolve(cwd, options.replayDir)] : []),
+      ...(options.extraArgs ?? []),
+    ];
+
+    if (options.commandOverride) {
+      // Use command override (binary, npx, bunx, pnpm dlx, etc.)
+      command = options.commandOverride.command;
+      spawnArgs = [...options.commandOverride.args, ...serverArgs];
+      // On Windows, package managers need shell=true (but not binaries)
+      needsShell = process.platform === "win32" && ["npx", "bunx", "pnpm", "npm"].includes(command);
+    } else {
+      // Default: Use bun with source files
+      const serverEntry = path.resolve(DEFAULT_CWD, "server/index.ts");
+      command = "bun";
+      spawnArgs = [serverEntry, ...serverArgs];
     }
+
+    child = spawn(command, spawnArgs, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: needsShell,
+    });
+
+    child.stdout?.on("data", (data) => {
+      const text = data.toString();
+      text
+        .split(/\r?\n/)
+        .filter(
+          (line: string, index: number, lines: string[]) =>
+            line.length > 0 || index < lines.length - 1,
+        )
+        .forEach((line: string) => {
+          console.log(`${logPrefix} ${line}`);
+        });
+    });
+
+    stderrBuffer = "";
+    child.stderr?.on("data", (data) => {
+      const text = data.toString();
+      stderrBuffer += text;
+      text
+        .split(/\r?\n/)
+        .filter(
+          (line: string, index: number, lines: string[]) =>
+            line.length > 0 || index < lines.length - 1,
+        )
+        .forEach((line: string) => {
+          console.error(`${logPrefix} ${line}`);
+        });
+    });
+
+    await once(child, "spawn");
+
+    // Connect and perform handshake using setupClient
+    serverUrl = `ws://localhost:${activePort}`;
+    let lastError: unknown;
+    let attempt = 0;
+    let serverExited = false;
+    clientSetup = null;
+
+    child.once("exit", () => {
+      serverExited = true;
+    });
 
     try {
-      clientSetup = await connectHankweaveClient(serverUrl, {
-        performHandshake: true,
-        mode: ClientMode.READANDWRITE,
-        timeout: 5000,
-        sendPreviousEvents: options.sendPreviousEvents,
-      });
-      console.log(`${logPrefix} WebSocket connected on port ${port}`);
-      break;
-    } catch (error) {
-      lastError = error;
-      if (clientSetup?.client) {
-        clientSetup.client.close();
+      while (attempt < websocketAttempts) {
+        if (serverExited || child.exitCode !== null || child.signalCode !== null) {
+          throw new ServerLaunchError(
+            "Server exited before WebSocket connection could be established",
+            child.exitCode,
+            stderrBuffer,
+          );
+        }
+
+        try {
+          clientSetup = await connectHankweaveClient(serverUrl, {
+            performHandshake: true,
+            mode: ClientMode.READANDWRITE,
+            timeout: 5000,
+            sendPreviousEvents: options.sendPreviousEvents,
+          });
+          console.log(`${logPrefix} WebSocket connected on port ${activePort}`);
+          break;
+        } catch (error) {
+          lastError = error;
+          if (clientSetup?.client) {
+            clientSetup.client.close();
+          }
+          attempt += 1;
+
+          if (attempt >= websocketAttempts) break;
+
+          // At 50ms granularity a per-attempt line is pure noise — log once a second.
+          if (attempt === 1 || attempt % 20 === 0) {
+            console.log(
+              `${logPrefix} Waiting for WebSocket connection (attempt ${
+                attempt + 1
+              }/${websocketAttempts})`,
+            );
+          }
+
+          await sleep(DEFAULT_WEBSOCKET_CONNECT_DELAY_MS);
+        }
       }
-      attempt += 1;
 
-      if (attempt >= websocketAttempts) break;
-
-      console.log(
-        `${logPrefix} Waiting for WebSocket connection (attempt ${
-          attempt + 1
-        }/${websocketAttempts})`,
-      );
-
-      await sleep(DEFAULT_WEBSOCKET_CONNECT_DELAY_MS);
+      if (!clientSetup) {
+        const errorMessage =
+          lastError instanceof Error
+            ? lastError.message
+            : lastError
+              ? String(lastError)
+              : "Unknown error";
+        // Include the server's stderr tail: when this throw happens inside a
+        // beforeAll hook, bun's junit records only `(unnamed)` with a bodyless
+        // <failure/> — this message is the only diagnostic that survives. A
+        // 120.6s double-failure once produced four junit rows with no clue at all.
+        const stderrTail = stderrBuffer.split("\n").slice(-15).join("\n").trim();
+        throw new Error(
+          `Failed to connect to Hankweave server WebSocket on port ${activePort} after ${websocketAttempts} attempts: ${errorMessage}` +
+            (stderrTail ? `\nServer stderr (tail):\n${stderrTail}` : ""),
+        );
+      }
+      break; // connected — leave the bind-retry loop
+    } catch (error) {
+      if (isBindFailure(error) && bindAttempt < BIND_RETRY_ATTEMPTS) {
+        console.log(
+          `${logPrefix} Port ${activePort} was taken inside the bind window ` +
+            `(attempt ${bindAttempt}/${BIND_RETRY_ATTEMPTS}) — retrying on a fresh port`,
+        );
+        activePort = await getFreePort();
+        continue;
+      }
+      throw error;
     }
-  }
-
-  if (!clientSetup) {
-    const errorMessage =
-      lastError instanceof Error
-        ? lastError.message
-        : lastError
-          ? String(lastError)
-          : "Unknown error";
-    throw new Error(
-      `Failed to connect to Hankweave server WebSocket on port ${port} after ${websocketAttempts} attempts: ${errorMessage}`,
-    );
   }
 
   const { client, clientId, handshakeResponse } = clientSetup;
@@ -865,10 +950,20 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
         type: string;
         data?: { runId: string; transitionType?: string };
       };
+      if (event.data?.transitionType !== "RunCompleted") return false;
       // XX: cannot use currentRunId here because it is likely null at this point as
-      // we are looking for the RunCompleted event
-      const latestRunId = getState().runs[0]?.runId;
-      return event.data?.transitionType === "RunCompleted" && event.data?.runId === latestRunId;
+      // we are looking for the RunCompleted event.
+      // The predicate can fire while the server is still BOOTING (state.json
+      // not yet written — seen under the runner's 4-way concurrency, where a
+      // slow boot let the first poll outrun the file). A missing/unreadable
+      // state file simply means "no run has completed yet", never an error.
+      let latestRunId: string | undefined;
+      try {
+        latestRunId = getState().runs[0]?.runId;
+      } catch {
+        return false;
+      }
+      return event.data?.runId === latestRunId;
     });
 
     // Verify the run actually completed successfully by checking state
@@ -894,10 +989,16 @@ export async function launchHankweave(options: LaunchServerOptions = {}): Promis
         type: string;
         data?: { runId: string; transitionType?: string };
       };
-      // XX: cannot use currentRunId here because it is likely null at this point as
-      // we are looking for the RunFailed event
-      const latestRunId = getState().runs[0]?.runId;
-      return event.data?.transitionType === "RunFailed" && event.data?.runId === latestRunId;
+      if (event.data?.transitionType !== "RunFailed") return false;
+      // Same early-boot tolerance as waitForRunToComplete: a state.transition
+      // can arrive over the socket before state.json's first write.
+      let latestRunId: string | undefined;
+      try {
+        latestRunId = getState().runs[0]?.runId;
+      } catch {
+        return false;
+      }
+      return event.data?.runId === latestRunId;
     });
 
     // Verify the run actually failed by checking state

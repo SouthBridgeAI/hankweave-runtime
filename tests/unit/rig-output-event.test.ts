@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  rigOutputEventDataSchema,
-  serverEventDataSchemas,
-} from "../../server/schemas/event-schemas";
+import { rigOutputEventDataSchema } from "../../server/schemas/event-schemas";
 
 describe("rig.output event", () => {
   test("schema validates a well-formed stdout event", () => {
@@ -57,10 +54,5 @@ describe("rig.output event", () => {
     };
     const result = rigOutputEventDataSchema.safeParse(data);
     expect(result.success).toBe(false);
-  });
-
-  test("rig.output is registered in serverEventDataSchemas", () => {
-    expect(serverEventDataSchemas["rig.output"]).toBeDefined();
-    expect(serverEventDataSchemas["rig.output"]).toBe(rigOutputEventDataSchema);
   });
 });

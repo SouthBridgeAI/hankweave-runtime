@@ -7,7 +7,6 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServerReadyEvent } from "../../server/schemas/event-schemas.js";
-import type { HankweaveState } from "../../server/types/state-types.js";
 import {
   type BinarySetup,
   cleanupBinary,
@@ -38,21 +37,6 @@ const GENERATED_HANK_TEST_TIMEOUT_MS = INIT_RUN_TIMEOUT_MS;
 // npx/package manager modes need more time: npx must download and install all dependencies
 // through the Verdaccio proxy before running the init command
 const INIT_CREATE_TIMEOUT_MS = needsVerdaccio() ? 5 * 60_000 : 3 * 60_000;
-
-/**
- * Helper function to verify a codon completed successfully by checking state.
- * Used as fallback on Windows when file output might be blocked by policy.
- */
-function verifyCodonCompleted(state: HankweaveState, codonId: string): boolean {
-  if (state.runs.length === 0) {
-    return false;
-  }
-
-  const lastRun = state.runs[0]; // Most recent run (runs are newest-first)
-  const codon = lastRun.codons.find((c) => c.codonId === codonId);
-
-  return codon?.status === "completed";
-}
 
 // Verdaccio setup state (for package manager testing)
 let verdaccioSetup: VerdaccioSetup | null = null;
@@ -228,9 +212,8 @@ describe("init command e2e", () => {
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "hank.json"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-haiku.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gemini.md"))).toBe(true);
-      expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-codex.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-pi.md"))).toBe(true);
-      expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-opencode.md"))).toBe(true);
+      expect(fs.existsSync(path.join(INIT_TEST_DIR, "prompts/analyze-gpt.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "README.md"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample1.txt"))).toBe(true);
       expect(fs.existsSync(path.join(INIT_TEST_DIR, "data/sample2.txt"))).toBe(true);
@@ -243,16 +226,16 @@ describe("init command e2e", () => {
       expect(hankConfig).toHaveProperty("meta");
       expect(hankConfig).toHaveProperty("hank");
       expect(Array.isArray(hankConfig.hank)).toBe(true);
-      expect(hankConfig.hank.length).toBe(5);
+      expect(hankConfig.hank.length).toBe(4);
 
-      // Verify first codon has required fields
+      // Verify first codon (haiku via the Claude SDK) has required fields
       const firstCodon = hankConfig.hank[0];
       expect(firstCodon).toHaveProperty("id");
       expect(firstCodon).toHaveProperty("name");
       expect(firstCodon).toHaveProperty("model");
       expect(firstCodon).toHaveProperty("continuationMode");
 
-      // Verify second codon has required fields
+      // Verify second codon (gemini via the embedded Pi agent) has required fields
       const secondCodon = hankConfig.hank[1];
       expect(secondCodon).toHaveProperty("id");
       expect(secondCodon).toHaveProperty("name");
@@ -260,28 +243,13 @@ describe("init command e2e", () => {
       expect(secondCodon).toHaveProperty("continuationMode");
       expect(secondCodon.model).toBe("pi/google/gemini-2.5-flash");
 
-      // Verify third codon has required fields
+      // Verify third codon (explicit pi passthrough) has required fields
       const thirdCodon = hankConfig.hank[2];
       expect(thirdCodon).toHaveProperty("id");
       expect(thirdCodon).toHaveProperty("name");
       expect(thirdCodon).toHaveProperty("model");
       expect(thirdCodon).toHaveProperty("continuationMode");
-
-      // Verify fourth codon (pi) has required fields
-      const fourthCodon = hankConfig.hank[3];
-      expect(fourthCodon).toHaveProperty("id");
-      expect(fourthCodon).toHaveProperty("name");
-      expect(fourthCodon).toHaveProperty("model");
-      expect(fourthCodon).toHaveProperty("continuationMode");
-      expect(fourthCodon.model).toBe("pi/anthropic/claude-haiku-4-5");
-
-      // Verify fifth codon (opencode) has required fields
-      const fifthCodon = hankConfig.hank[4];
-      expect(fifthCodon).toHaveProperty("id");
-      expect(fifthCodon).toHaveProperty("name");
-      expect(fifthCodon).toHaveProperty("model");
-      expect(fifthCodon).toHaveProperty("continuationMode");
-      expect(fifthCodon.model).toBe("opencode/anthropic/claude-haiku-4-5");
+      expect(thirdCodon.model).toBe("pi/anthropic/claude-haiku-4-5");
     },
     INIT_CREATE_TIMEOUT_MS,
   );
@@ -367,29 +335,14 @@ describe("init command e2e", () => {
         const analysisGeminiFile = path.join(agentRootPath, "analysis-gemini.md");
         expect(fs.existsSync(analysisGeminiFile)).toBe(true);
 
-        const analysisCodexFile = path.join(agentRootPath, "analysis-codex.md");
+        // Pi analysis file (in-process embedded Pi agent, no binary needed)
         const analysisPiFile = path.join(agentRootPath, "analysis-pi.md");
-
-        // On Windows, PowerShell write commands may be blocked by test policy
-        // Verify codon completion instead of file output as a fallback
-        if (isWindows && !fs.existsSync(analysisCodexFile)) {
-          console.log(
-            "[Windows] analysis-codex.md not found - verifying codon completion instead (PowerShell blocked by policy)",
-          );
-          const state = server.getState();
-          const codexCompleted = verifyCodonCompleted(state, "analyze-codex");
-          expect(codexCompleted).toBe(true);
-        } else {
-          // File exists (or not on Windows) - perform normal checks
-          expect(fs.existsSync(analysisCodexFile)).toBe(true);
-        }
-
-        // Pi analysis file (uses SDK-embedded shim, no binary needed)
         expect(fs.existsSync(analysisPiFile)).toBe(true);
 
-        // OpenCode analysis file
-        const analysisOpencodeFile = path.join(agentRootPath, "analysis-opencode.md");
-        expect(fs.existsSync(analysisOpencodeFile)).toBe(true);
+        // GPT analysis file (pi/openai-codex — ChatGPT subscription via pi's
+        // credential store; CI provisions it from CODEX_AUTH_JSON)
+        const analysisGptFile = path.join(agentRootPath, "analysis-gpt.md");
+        expect(fs.existsSync(analysisGptFile)).toBe(true);
 
         // Verify analysis files have content
         const analysisHaikuContent = fs.readFileSync(analysisHaikuFile, "utf-8");
@@ -398,46 +351,37 @@ describe("init command e2e", () => {
         const analysisGeminiContent = fs.readFileSync(analysisGeminiFile, "utf-8");
         expect(analysisGeminiContent.length).toBeGreaterThan(0);
 
-        // Only check codex content if file exists (may not on Windows if blocked)
-        if (fs.existsSync(analysisCodexFile)) {
-          const analysisCodexContent = fs.readFileSync(analysisCodexFile, "utf-8");
-          expect(analysisCodexContent.length).toBeGreaterThan(0);
-        }
-
         // Verify pi analysis file has content
         const analysisPiContent = fs.readFileSync(analysisPiFile, "utf-8");
         expect(analysisPiContent.length).toBeGreaterThan(0);
 
-        // Verify opencode analysis file has content
-        const analysisOpencodeContent = fs.readFileSync(analysisOpencodeFile, "utf-8");
-        expect(analysisOpencodeContent.length).toBeGreaterThan(0);
+        // Verify gpt analysis file has content
+        const analysisGptContent = fs.readFileSync(analysisGptFile, "utf-8");
+        expect(analysisGptContent.length).toBeGreaterThan(0);
 
-        // Verify shim debug logs were created in shared directory
-        const shimDebugDir = path.join(INIT_TEST_DIR, ".hankweave/logs/shim-debug");
-        expect(fs.existsSync(shimDebugDir)).toBe(true);
+        // Verify the in-process Pi agent persisted its session transcripts.
+        // Only when a codon actually ran on Pi: HANKWEAVE_RUNTIME_MODEL
+        // overrides EVERY codon's model (scripts/e2e/test-new-models.ts uses it
+        // for new-model smoke runs), and an anthropic/ override routes all
+        // codons — including analyze-pi — through the Claude SDK, so no Pi
+        // session ever exists.
+        const runtimeModelOverride = process.env.HANKWEAVE_RUNTIME_MODEL ?? "";
+        const allCodonsOnClaudeSdk = runtimeModelOverride.toLowerCase().startsWith("anthropic/");
+        if (!allCodonsOnClaudeSdk) {
+          const piSessionsDir = path.join(INIT_TEST_DIR, ".hankweave/logs/pi-sessions");
+          expect(fs.existsSync(piSessionsDir)).toBe(true);
 
-        // Check that debug files exist (sessions and raw logs are stored here)
-        const debugFiles = fs.readdirSync(shimDebugDir);
+          const piSessionFiles = fs
+            .readdirSync(piSessionsDir)
+            .filter((file) => file.endsWith(".jsonl"));
+          expect(piSessionFiles.length).toBeGreaterThan(0);
 
-        // Should have raw event logs (.raw.jsonl files)
-        const rawJsonlFiles = debugFiles.filter((file) => file.endsWith(".raw.jsonl"));
-        expect(rawJsonlFiles.length).toBeGreaterThan(0);
-
-        // Should have raw log files (.raw.log files)
-        const rawLogFiles = debugFiles.filter((file) => file.endsWith(".raw.log"));
-        expect(rawLogFiles.length).toBeGreaterThan(0);
-
-        // Should have a sessions directory
-        const sessionsDir = path.join(shimDebugDir, "sessions");
-        expect(fs.existsSync(sessionsDir)).toBe(true);
-
-        // Verify at least one .raw.jsonl file has content (agent events)
-        if (rawJsonlFiles.length > 0) {
-          const jsonlPath = path.join(shimDebugDir, rawJsonlFiles[0]);
-          const jsonlContent = fs.readFileSync(jsonlPath, "utf-8");
-          expect(jsonlContent.length).toBeGreaterThan(0);
-          // Should contain at least one JSON line (init event)
-          expect(jsonlContent.split("\n").filter((line) => line.trim()).length).toBeGreaterThan(0);
+          // Verify at least one session transcript has content (agent events)
+          const sessionPath = path.join(piSessionsDir, piSessionFiles[0]);
+          const sessionContent = fs.readFileSync(sessionPath, "utf-8");
+          expect(sessionContent.split("\n").filter((line) => line.trim()).length).toBeGreaterThan(
+            0,
+          );
         }
 
         // Verify execution metadata contains environment info

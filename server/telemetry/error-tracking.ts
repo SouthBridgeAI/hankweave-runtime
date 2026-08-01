@@ -25,7 +25,7 @@ const SENSITIVE_PATTERNS = [
   // API keys and tokens
   /(?:sk-|key-|token-|Bearer\s+)[a-zA-Z0-9_-]{10,}/g,
   // Environment variable values (KEY=VALUE patterns)
-  /(?:API_KEY|SECRET|TOKEN|PASSWORD|ANTHROPIC_API_KEY|OPENAI_API_KEY|GOOGLE_API_KEY)=\S+/gi,
+  /(?:API_KEY|SECRET|TOKEN|PASSWORD|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY)=\S+/gi,
   // Absolute paths that might reveal project structure
   /\/[^\s:]+\.(json|md|txt|yaml|yml)/g,
 ];

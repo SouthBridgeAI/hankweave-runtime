@@ -149,14 +149,12 @@ export async function runWelcomeWizard(): Promise<void> {
       [
         warmYellow("No agent harnesses are fully configured yet."),
         "",
-        slate("You need at least one agent harness (") +
+        slate("You need either ") +
           white("Claude Code") +
-          slate(", ") +
-          white("Codex") +
-          slate(", or ") +
-          white("Gemini CLI") +
-          slate(")"),
-        slate("and its corresponding API key to run hanks."),
+          slate(" with an Anthropic API key, or an ") +
+          white("OpenAI / Google API key") +
+          slate(""),
+        slate("for the embedded Pi agent, to run hanks."),
         "",
         slate("The quickest path: install ") +
           amberBold("Claude Code") +

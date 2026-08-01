@@ -15,32 +15,25 @@ const TEST_DIR = path.resolve("tests", "test-area", "telemetry-early-exit");
 const PROJECT_ROOT = path.resolve(import.meta.dir, "../..");
 
 function spawnCli(args: string[], cwd: string) {
-  return Bun.spawn(
-    ["bun", path.join(PROJECT_ROOT, "server/index.ts"), ...args],
-    {
-      cwd,
-      env: {
-        ...process.env,
-        HANKWEAVE_TELEMETRY_DEBUG: "1",
-        // Clear env vars that would independently disable telemetry,
-        // so we're testing file-based opt-out specifically
-        DO_NOT_TRACK: undefined,
-        HANKWEAVE_TELEMETRY: undefined,
-      },
-      stdout: "pipe",
-      stderr: "pipe",
+  return Bun.spawn(["bun", path.join(PROJECT_ROOT, "server/index.ts"), ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      HANKWEAVE_TELEMETRY_DEBUG: "1",
+      // Clear env vars that would independently disable telemetry,
+      // so we're testing file-based opt-out specifically
+      DO_NOT_TRACK: undefined,
+      HANKWEAVE_TELEMETRY: undefined,
     },
-  );
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 }
 
 async function getOutput(proc: ReturnType<typeof Bun.spawn>) {
   const exitCode = await proc.exited;
-  const stdout = proc.stdout
-    ? await new Response(proc.stdout as ReadableStream).text()
-    : "";
-  const stderr = proc.stderr
-    ? await new Response(proc.stderr as ReadableStream).text()
-    : "";
+  const stdout = proc.stdout ? await new Response(proc.stdout as ReadableStream).text() : "";
+  const stderr = proc.stderr ? await new Response(proc.stderr as ReadableStream).text() : "";
   return { exitCode, combined: stdout + stderr };
 }
 

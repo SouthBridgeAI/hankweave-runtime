@@ -1,31 +1,26 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
 import type { FileNode } from "../../server/types/types";
 import {
   AppMetadata,
   buildFileTree,
-  checkPiNodeRuntime,
-  compareVersions,
   copyFiles,
   escapeShellArg,
   formatEnvVarForDisplay,
   getMetadata,
-  getRuntimeCommand,
   IdleTimeoutError,
   isSensitiveEnvKey,
   Logger,
-  MIN_PI_NODE,
   maskSecretValue,
-  PiRuntimeError,
-  parseNodeVersion,
   renameWithRetry,
   serve,
   WebSocket,
   withIdleTimeout,
 } from "../../server/utils";
-import { getFreePort } from "../utils/test-helpers.js";
+import { getFreePort, waitForCondition } from "../utils/test-helpers.js";
 
 describe("Test Environment", () => {
   test("NODE_ENV is set to 'test' during Bun test runs", () => {
@@ -525,6 +520,25 @@ describe("copyFiles with overwrite option", () => {
   });
 });
 
+/**
+ * True once a TCP connection to `port` is accepted. `serve()` returns before
+ * the underlying adapter has necessarily finished binding, so these tests probe
+ * the socket instead of guessing with a fixed delay.
+ */
+function canConnect(port: number): Promise<boolean> {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const socket = net.connect({ port, host: "127.0.0.1" });
+  socket.once("connect", () => {
+    socket.destroy();
+    resolve(true);
+  });
+  socket.once("error", () => {
+    socket.destroy();
+    resolve(false);
+  });
+  return promise;
+}
+
 describe("serve", () => {
   test("creates HTTP server that responds to requests", async () => {
     const testPort = await getFreePort();
@@ -539,8 +553,8 @@ describe("serve", () => {
       },
     });
 
-    // Give server time to start
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait until the listener accepts connections
+    await waitForCondition(() => canConnect(testPort));
 
     try {
       // Make request to server
@@ -567,8 +581,8 @@ describe("serve", () => {
       },
     });
 
-    // Give server time to start
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait until the listener accepts connections
+    await waitForCondition(() => canConnect(testPort));
 
     try {
       const response = await fetch(`http://localhost:${testPort}/`);
@@ -586,8 +600,8 @@ describe("serve", () => {
       fetch: async () => new Response("OK"),
     });
 
-    // Give server time to start
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait until the listener accepts connections
+    await waitForCondition(() => canConnect(testPort));
 
     // Verify server is running
     const response = await fetch(`http://localhost:${testPort}/`);
@@ -596,8 +610,8 @@ describe("serve", () => {
     // Stop the server
     server.stop();
 
-    // Give server time to stop
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait until the listener stops accepting connections
+    await waitForCondition(async () => !(await canConnect(testPort)));
 
     // Verify server is no longer accepting connections
     try {
@@ -631,8 +645,8 @@ describe("serve", () => {
       },
     });
 
-    // Give server time to start
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait until the listener accepts connections
+    await waitForCondition(() => canConnect(testPort));
 
     try {
       // Create WebSocket client
@@ -661,8 +675,8 @@ describe("serve", () => {
       // Close connection
       ws.close();
 
-      // Wait for close to be processed
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Wait for the close handler to run
+      await waitForCondition(() => connections.size === 0);
 
       expect(connections.size).toBe(0);
     } finally {
@@ -684,8 +698,8 @@ describe("serve", () => {
       },
     });
 
-    // Give server time to start
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait until the listener accepts connections
+    await waitForCondition(() => canConnect(testPort));
 
     try {
       // Make multiple concurrent requests
@@ -727,7 +741,7 @@ describe("serve", () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForCondition(() => canConnect(testPort));
 
     try {
       const ws = new WebSocket(`ws://localhost:${testPort}`);
@@ -738,8 +752,8 @@ describe("serve", () => {
         setTimeout(() => reject(new Error("Connection timeout")), 5000);
       });
 
-      // Give open handler time to execute
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Wait for the open handler to run
+      await waitForCondition(() => capturedData !== null);
 
       expect(capturedData).not.toBeNull();
       // biome-ignore lint/style/noNonNullAssertion: checked not null above
@@ -790,7 +804,7 @@ describe("serve", () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForCondition(() => canConnect(testPort));
 
     try {
       const ws = new WebSocket(`ws://localhost:${testPort}`);
@@ -871,7 +885,7 @@ describe("serve", () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForCondition(() => canConnect(testPort));
 
     try {
       const ws = new WebSocket(`ws://localhost:${testPort}`);
@@ -1452,82 +1466,6 @@ describe("withIdleTimeout", () => {
     // Give the fire-and-forget return() a tick to execute
     await new Promise((r) => setTimeout(r, 10));
     expect(returnCalled).toBe(true);
-  });
-});
-
-describe("getRuntimeCommand pi-shim detection", () => {
-  // The pi shim must always run under Node (its bundled undici is incompatible with Bun).
-  // Detection is by the immediate parent directory being `pi`, which must hold across the
-  // source layout and the extracted binary layout (which inserts a <version> dir).
-  test("forces Node for the pi shim in source layout (shims/pi/index.js)", () => {
-    const p = path.join("shims", "pi", "index.js");
-    expect(getRuntimeCommand(p)).toEqual(["node", p]);
-  });
-
-  test("forces Node for the pi shim in extracted binary layout (shims/<version>/pi/index.js)", () => {
-    const p = path.join("/tmp", ".hankweave", "shims", "0.6.2", "pi", "index.js");
-    expect(getRuntimeCommand(p)).toEqual(["node", p]);
-  });
-
-  test("does not force Node for a non-pi shim in the versioned layout", () => {
-    // `gemini` must NOT be pi-detected; under the Bun test runtime it resolves to bun.
-    const p = path.join("/tmp", ".hankweave", "shims", "0.6.2", "gemini", "index.js");
-    const cmd = getRuntimeCommand(p);
-    expect(cmd[0]).not.toBe("node");
-    expect(cmd[cmd.length - 1]).toBe(p);
-  });
-});
-
-describe("pi Node-version preflight", () => {
-  test("parseNodeVersion handles plain, v-prefixed, and prerelease strings", () => {
-    expect(parseNodeVersion("22.19.0")).toEqual([22, 19, 0]);
-    expect(parseNodeVersion("v22.19.0")).toEqual([22, 19, 0]);
-    expect(parseNodeVersion("v24.3.1-nightly20260101")).toEqual([24, 3, 1]);
-    expect(parseNodeVersion("not-a-version")).toBeNull();
-    expect(parseNodeVersion("")).toBeNull();
-  });
-
-  test("compareVersions orders by major, minor, then patch", () => {
-    expect(compareVersions([22, 18, 0], [22, 19, 0])).toBe(-1);
-    expect(compareVersions([22, 19, 0], [22, 19, 0])).toBe(0);
-    expect(compareVersions([24, 0, 0], [22, 19, 0])).toBe(1);
-    expect(compareVersions([22, 19, 1], [22, 19, 0])).toBe(1);
-  });
-
-  test("MIN_PI_NODE matches the engines floor declared in the shim", () => {
-    expect(MIN_PI_NODE).toBe("22.19.0");
-  });
-
-  test("missing node throws an actionable PiRuntimeError", () => {
-    const err = checkPiNodeRuntime({ found: false }, "");
-    expect(err).toBeInstanceOf(PiRuntimeError);
-    expect(err?.message).toContain("No `node` was found");
-    expect(err?.message).toContain(MIN_PI_NODE);
-  });
-
-  test("too-old node throws with the detected version and path", () => {
-    const err = checkPiNodeRuntime({ found: true, path: "/usr/local/bin/node" }, "v18.20.4");
-    expect(err).toBeInstanceOf(PiRuntimeError);
-    expect(err?.message).toContain("v18.20.4");
-    expect(err?.message).toContain("/usr/local/bin/node");
-    expect(err?.diagnostics).toEqual({
-      nodePath: "/usr/local/bin/node",
-      nodeVersion: "v18.20.4",
-    });
-  });
-
-  test("exact minimum and newer node are accepted", () => {
-    expect(checkPiNodeRuntime({ found: true, path: "/n" }, "v22.19.0")).toBeNull();
-    expect(checkPiNodeRuntime({ found: true, path: "/n" }, "v24.0.0")).toBeNull();
-  });
-
-  test("a minor below the floor is rejected", () => {
-    const err = checkPiNodeRuntime({ found: true, path: "/n" }, "v22.18.0");
-    expect(err).toBeInstanceOf(PiRuntimeError);
-  });
-
-  test("unparseable version fails open (does not block startup)", () => {
-    expect(checkPiNodeRuntime({ found: true, path: "/n" }, "garbage")).toBeNull();
   });
 });
 

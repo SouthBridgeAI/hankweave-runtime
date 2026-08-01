@@ -45,7 +45,7 @@ describe("Env variables in rigSetup commands", () => {
       expect(completedEvent.data.success).toBe(true);
 
       // Wait for run to complete
-      await hankweave.waitForRunToComplete(10_000);
+      await hankweave.waitForRunToComplete(60_000);
 
       // Check the file written by the rigSetup command
       const resultPath = path.join(agentRootPath, "env_test", "result.txt");

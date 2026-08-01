@@ -15,7 +15,24 @@ interface ReplayManifest {
   state: HankweaveState;
 }
 
-const DEFAULT_REPLAY_SPEED = 5;
+/**
+ * Milliseconds between replayed log lines when the recording carries no usable
+ * timestamps.
+ *
+ * `HANKWEAVE_REPLAY_MAX_DELAY_MS` only caps *timestamp-derived* gaps, so it does
+ * nothing for a recording whose timestamps were stripped or never written — and
+ * that is most of them. Those replays run at this floor instead, which is where
+ * the bulk of offline suite time actually goes: at 5ms a line, a 17-codon
+ * plan-gen fixture spends minutes doing nothing but `setTimeout`.
+ *
+ * Real runs never read this (replay is a test/debug path), so lowering it in a
+ * suite trades away only fidelity to the original run's *pacing*, never its
+ * content or ordering.
+ */
+const DEFAULT_REPLAY_SPEED = (() => {
+  const raw = Number.parseInt(process.env.HANKWEAVE_REPLAY_SPEED_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 5;
+})();
 
 /**
  * Load and validate a replay execution directory.

@@ -1836,6 +1836,8 @@ describe("Budget - watchdog timer", () => {
     const ct = createMockCostTracker();
     budget.trackCodon("a" as CodonId, c, ct);
     budget.completeCodon("a" as CodonId, 0);
+    // Negative assertion: there is no event to await, so the only way to prove
+    // the watchdog was cleared is to outlast a full tick of its 1s setInterval.
     await new Promise((r) => setTimeout(r, 1100));
     expect(events.length).toBe(0);
   });

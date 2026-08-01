@@ -83,15 +83,16 @@ export class LlmProviderRegistry {
     haiku: "claude-haiku",
     // gpt-5.6 ships as sibling variants (sol/luna/terra); the bare name should
     // land on the default "sol" variant rather than the abstract gpt-5.6 alias.
-    // Codex has no "gpt-5.6" slug — sending it fails at runtime — so every
+    // Provider catalogs have no abstract "gpt-5.6" slug (only the sibling
+    // -sol/-luna/-terra variants) — sending it fails at runtime — so every
     // spelling that would strip down to bare gpt-5.6 must route to sol.
     "gpt-5.6": "gpt-5.6-sol",
   };
 
   /**
    * Reasoning-effort suffixes auto-generated as model variants for
-   * reasoning-capable OpenAI models (see loadModelsData). The codex shim
-   * strips these suffixes and passes them as model_reasoning_effort.
+   * reasoning-capable OpenAI models (see loadModelsData). PiSdkManager
+   * strips these suffixes and passes them as pi's thinkingLevel.
    */
   private static readonly REASONING_EFFORTS = ["high", "xhigh"] as const;
 
@@ -201,7 +202,7 @@ export class LlmProviderRegistry {
       const allProviders = [...validatedData.providers, ...customModels.providers];
 
       // Auto-generate reasoning effort variants for all reasoning-capable OpenAI models.
-      // The codex shim strips the suffix (e.g. "-high") and passes it as model_reasoning_effort.
+      // PiSdkManager strips the suffix (e.g. "-high") and passes it as pi's thinkingLevel.
       // We register these so the registry can resolve and return cost info for them.
       const REASONING_EFFORTS = LlmProviderRegistry.REASONING_EFFORTS;
       const effortCostMultiplier: Record<string, number> = {
@@ -534,6 +535,10 @@ export class LlmProviderRegistry {
     // execution still goes through the pi shim's "zai" provider (pi has no
     // "zhipuai" provider) — see rewriteGlmModel in model-validator.ts.
     if (lowerModel.startsWith("glm-")) return "zhipuai";
+    // Kimi models are Moonshot AI's and widely resold; prefer the first-party
+    // "moonshotai" provider so bare "kimi-*" ids resolve deterministically.
+    // (Execution routes them through openrouter — see model-validator.ts.)
+    if (lowerModel.startsWith("kimi")) return "moonshotai";
     if (
       lowerModel.startsWith("gpt-") ||
       lowerModel.startsWith("o1-") ||

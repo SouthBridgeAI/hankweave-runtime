@@ -33,6 +33,16 @@ const CI_EXISTENCE_VARS = [
 ] as const;
 
 /**
+ * Every variable `isCI()` consults.
+ *
+ * Exported so a test that needs telemetry genuinely enabled can strip all of
+ * them from a child process's environment. Blanking them to `""` is not enough
+ * — the existence-based ones only check for `!== undefined` — and hardcoding
+ * the list in a test means it silently stops working the day this one grows.
+ */
+export const CI_DETECTION_ENV_VARS: readonly string[] = [...CI_VALUE_VARS, ...CI_EXISTENCE_VARS];
+
+/**
  * Detect if we're running in a CI environment.
  */
 export function isCI(): boolean {

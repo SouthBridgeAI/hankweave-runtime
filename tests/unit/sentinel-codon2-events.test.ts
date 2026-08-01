@@ -195,55 +195,6 @@ describe("Sentinel Event Emission", () => {
 
       sentinel.destroy();
     });
-
-    // SKIPPED: Passes on Bun 1.3.8 (local) but fails deterministically on Bun 1.3.9 (CI)
-    // with Received: 1 even when reportToWebsocket.triggers is explicitly false.
-    // Production code is correct (line 379 of sentinel.ts guards with === true).
-    // Suspected Bun 1.3.9 test isolation issue — revisit when CI upgrades Bun.
-    it.skip("should NOT emit sentinel.triggered when triggers=false (explicit)", async () => {
-      const capturedEvents: SentinelEvent[] = [];
-
-      const sentinel = new Sentinel(
-        {
-          id: "no-triggered",
-          name: "No Triggered",
-          model: "mockmodel",
-          trigger: { type: "event", on: ["info"] },
-          execution: { strategy: "immediate" },
-          userPromptText: "Test",
-          reportToWebsocket: { triggers: false },
-        },
-        CodonId("test-codon"),
-        mockLLM.generateText,
-        undefined,
-        undefined,
-        undefined,
-        new Date(),
-        undefined,
-        undefined,
-        undefined,
-        testDir,
-        undefined, // agentRootPath
-        undefined, // outputPaths
-        (event) => capturedEvents.push(event),
-      );
-
-      await sentinel.handleEvent({
-        id: EventId("test-1"),
-        timestamp: new Date().toISOString(),
-        type: "info",
-        data: { message: "test" },
-      });
-
-      // Wait for all sentinel work to complete (deterministic, no flaky timeouts)
-      await sentinel.completeAllWork();
-
-      const triggeredEvents = capturedEvents.filter((e) => e.type === "sentinel.triggered");
-
-      expect(triggeredEvents.length).toBe(0); // Should be OFF with explicit triggers: false
-
-      sentinel.destroy();
-    });
   });
 
   describe("sentinel.error events", () => {

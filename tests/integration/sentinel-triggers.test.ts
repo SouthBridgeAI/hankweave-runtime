@@ -1,13 +1,8 @@
-import { describe, it, expect, beforeAll } from "bun:test";
-import * as path from "node:path";
+import { beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
-import {
-  runSentinelTest,
-  countEventType,
-  createTestLog
-} from "../utils/sentinel-test-harness.js";
+import * as path from "node:path";
 import { sentinelConfigSchema } from "../../server/config-validation/sentinel.schema.js";
-import type { ServerEvent } from "../../server/schemas/event-schemas.js";
+import { countEventType, createTestLog, runSentinelTest } from "../utils/sentinel-test-harness.js";
 
 // --- Test Setup ---
 const TEST_LOG_DIR = path.resolve(process.cwd(), "tests/test-data/websocket-logs");
@@ -17,7 +12,7 @@ const TEMP_LOG_DIR = path.resolve(process.cwd(), "tests/test-area/temp-logs");
 // Helper to load a Sentinel config from our test files
 function loadSentinelConfig(fileName: string) {
   const filePath = path.join(SENTINEL_CONFIGS_DIR, fileName);
-  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const fileContent = fs.readFileSync(filePath, "utf-8");
   const config = JSON.parse(fileContent);
   // Validate it before using to catch schema errors
   return sentinelConfigSchema.parse(config);
@@ -33,7 +28,6 @@ beforeAll(() => {
 // --- The Tests ---
 
 describe("Sentinel Trigger Integration Tests", () => {
-
   describe("Event Triggers", () => {
     it("should trigger narrator sentinel with debounce strategy", async () => {
       // Use one of the existing logs
@@ -110,9 +104,9 @@ describe("Sentinel Trigger Integration Tests", () => {
             path: `file${i}.txt`,
             filename: `file${i}.txt`,
             content: `content ${i}`,
-            action: "modified" as const
+            action: "modified" as const,
           },
-          delayMs: 50
+          delayMs: 50,
         });
       }
       createTestLog(testLogPath, fileEvents);
@@ -131,7 +125,7 @@ describe("Sentinel Trigger Integration Tests", () => {
       if (firstCall) {
         const [_, events] = firstCall;
         expect(events.length).toBe(5);
-        expect(events.every(e => e.type === "file.updated")).toBe(true);
+        expect(events.every((e) => e.type === "file.updated")).toBe(true);
       }
 
       // Second batch should also have 5 events
@@ -156,9 +150,21 @@ describe("Sentinel Trigger Integration Tests", () => {
       const testLogPath = path.join(TEMP_LOG_DIR, "error-sequence.jsonl");
       createTestLog(testLogPath, [
         { type: "tool.result", data: { isError: false, toolName: "test" } },
-        { type: "tool.result", data: { isError: true, toolName: "test", error: "Error 1" }, delayMs: 100 },
-        { type: "tool.result", data: { isError: true, toolName: "test", error: "Error 2" }, delayMs: 100 },
-        { type: "tool.result", data: { isError: true, toolName: "test", error: "Error 3" }, delayMs: 100 },
+        {
+          type: "tool.result",
+          data: { isError: true, toolName: "test", error: "Error 1" },
+          delayMs: 100,
+        },
+        {
+          type: "tool.result",
+          data: { isError: true, toolName: "test", error: "Error 2" },
+          delayMs: 100,
+        },
+        {
+          type: "tool.result",
+          data: { isError: true, toolName: "test", error: "Error 3" },
+          delayMs: 100,
+        },
         { type: "tool.result", data: { isError: false, toolName: "test" }, delayMs: 100 },
       ]);
 
@@ -173,7 +179,7 @@ describe("Sentinel Trigger Integration Tests", () => {
         const [sentinelId, events] = call;
         expect(sentinelId).toBe("error-detector");
         expect(events.length).toBe(3);
-        expect(events.every(e => e.type === "tool.result" && e.data.isError === true)).toBe(true);
+        expect(events.every((e) => e.type === "tool.result" && e.data.isError === true)).toBe(true);
       }
     });
 
@@ -217,35 +223,35 @@ describe("Sentinel Trigger Integration Tests", () => {
           data: {
             action: "tool_use",
             toolName: "Bash",
-            toolInput: { command: "python script.py" }
-          }
+            toolInput: { command: "python script.py" },
+          },
         },
         {
           type: "assistant.action",
           data: {
             action: "tool_use",
             toolName: "Bash",
-            toolInput: { command: "ls -la" }
+            toolInput: { command: "ls -la" },
           },
-          delayMs: 100
+          delayMs: 100,
         },
         {
           type: "assistant.action",
           data: {
             action: "tool_use",
             toolName: "Write",
-            toolInput: { path: "test.py", content: "print('hello')" }
+            toolInput: { path: "test.py", content: "print('hello')" },
           },
-          delayMs: 100
+          delayMs: 100,
         },
         {
           type: "assistant.action",
           data: {
             action: "tool_use",
             toolName: "Bash",
-            toolInput: { command: "python3 test.py" }
+            toolInput: { command: "python3 test.py" },
           },
-          delayMs: 100
+          delayMs: 100,
         },
       ]);
 
@@ -265,7 +271,7 @@ describe("Sentinel Trigger Integration Tests", () => {
           const event = events[0];
           // Type assertion for assistant.action event data
           if (event.type === "assistant.action") {
-            const data = event.data as any;
+            const data = event.data;
             expect(data.action).toBe("tool_use");
             expect(data.toolName).toBe("Bash");
           }
@@ -285,7 +291,7 @@ describe("Sentinel Trigger Integration Tests", () => {
         events.push({
           type: "assistant.action",
           data: { action: "thinking", content: `Thought ${i}` },
-          delayMs: 1500 // 1.5s between events
+          delayMs: 1500, // 1.5s between events
         });
       }
 
@@ -293,13 +299,13 @@ describe("Sentinel Trigger Integration Tests", () => {
       events.push({
         type: "codon.started",
         data: { codonId: "test" },
-        delayMs: 3000 // Jump to ~10.5s
+        delayMs: 3000, // Jump to ~10.5s
       });
       for (let i = 0; i < 3; i++) {
         events.push({
           type: "tool.result",
           data: { toolName: `tool${i}` },
-          delayMs: 2000
+          delayMs: 2000,
         });
       }
 
@@ -307,7 +313,7 @@ describe("Sentinel Trigger Integration Tests", () => {
       events.push({
         type: "codon.completed",
         data: { codonId: "test" },
-        delayMs: 4000 // Jump to ~20.5s
+        delayMs: 4000, // Jump to ~20.5s
       });
 
       createTestLog(testLogPath, events);
@@ -326,7 +332,7 @@ describe("Sentinel Trigger Integration Tests", () => {
         expect(sentinelId).toBe("time-window-summary");
         expect(events.length).toBeGreaterThan(0);
         // Should have collected multiple event types
-        const eventTypes = new Set(events.map(e => e.type));
+        const eventTypes = new Set(events.map((e) => e.type));
         expect(eventTypes.size).toBeGreaterThan(1);
       }
     });
@@ -339,10 +345,37 @@ describe("Sentinel Trigger Integration Tests", () => {
       createTestLog(testLogPath, [
         { type: "codon.started", data: { codonId: "test" } },
         { type: "assistant.action", data: { action: "thinking" }, delayMs: 100 },
-        { type: "file.updated", data: { path: "file1.txt", filename: "file1.txt", content: "content1", action: "created" }, delayMs: 100 },
-        { type: "file.updated", data: { path: "file2.txt", filename: "file2.txt", content: "content2", action: "modified" }, delayMs: 100 },
+        {
+          type: "file.updated",
+          data: {
+            path: "file1.txt",
+            filename: "file1.txt",
+            content: "content1",
+            action: "created",
+          },
+          delayMs: 100,
+        },
+        {
+          type: "file.updated",
+          data: {
+            path: "file2.txt",
+            filename: "file2.txt",
+            content: "content2",
+            action: "modified",
+          },
+          delayMs: 100,
+        },
         { type: "tool.result", data: { toolName: "test" }, delayMs: 100 },
-        { type: "file.updated", data: { path: "file3.txt", filename: "file3.txt", content: "content3", action: "modified" }, delayMs: 100 },
+        {
+          type: "file.updated",
+          data: {
+            path: "file3.txt",
+            filename: "file3.txt",
+            content: "content3",
+            action: "modified",
+          },
+          delayMs: 100,
+        },
         { type: "codon.completed", data: { codonId: "test" }, delayMs: 100 },
       ]);
 
@@ -354,14 +387,14 @@ describe("Sentinel Trigger Integration Tests", () => {
       const mock = await runSentinelTest(testLogPath, [
         narratorConfig,
         fileMonitorConfig,
-        codonSummaryConfig
+        codonSummaryConfig,
       ]);
 
       // All sentinels should have triggered
       expect(mock.toHaveBeenCalled()).toBe(true);
 
       // Check that different sentinels were called
-      const sentinelIds = new Set(mock.calls.map(call => call.sentinelId));
+      const sentinelIds = new Set(mock.calls.map((call) => call.sentinelId));
       expect(sentinelIds.size).toBeGreaterThan(1);
     });
   });

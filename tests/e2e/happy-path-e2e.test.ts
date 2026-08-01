@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 import { afterAll, describe, expect, it } from "bun:test";
-import type { ChildProcess } from "node:child_process";
+import { type ChildProcess, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CI_DETECTION_ENV_VARS } from "../../server/telemetry/telemetry-config.js";
 import {
   type CleanupIntegrationResult,
   executeTestCleanup,
@@ -301,7 +302,12 @@ async function setupAndRunCodons(): Promise<void> {
     };
   }
 
-  // Enable telemetry debug mode so events are written to JSONL for verification
+  // Enable telemetry debug mode so events are written to JSONL for verification.
+  // CI/DO_NOT_TRACK/HANKWEAVE_TELEMETRY must be UNSET, not blanked: the
+  // detectors are existence-based, so `CI: ""` still reads as "in CI" —
+  // which is exactly how these 12 assertions failed on their first GitHub
+  // runner execution while passing on every local machine (same bug class
+  // as the loop-telemetry test, fixed the same way).
   const telemetryCacheDir = path.join(TEST_RUN_DIR, "telemetry-cache");
   fs.mkdirSync(telemetryCacheDir, { recursive: true });
   testState.telemetryJsonlPath = path.join(telemetryCacheDir, "telemetry-debug.jsonl");
@@ -309,10 +315,8 @@ async function setupAndRunCodons(): Promise<void> {
     ...serverConfig.env,
     HANKWEAVE_TELEMETRY_DEBUG: "1",
     HANKWEAVE_CACHE_DIR: telemetryCacheDir,
-    DO_NOT_TRACK: "",
-    HANKWEAVE_TELEMETRY: "",
-    CI: "", // Clear CI flag (Cursor sets CI=1 which disables telemetry)
   };
+  serverConfig.unsetEnv = [...CI_DETECTION_ENV_VARS, "DO_NOT_TRACK", "HANKWEAVE_TELEMETRY"];
 
   // Start server with execution isolation
   testState.serverProcess = startServer(serverConfig);
@@ -322,6 +326,12 @@ async function setupAndRunCodons(): Promise<void> {
   await testState.client.connectWithRetry(serverConfig.port, {
     maxRetries: 30, // 30 retries * 2s = 60s max wait
     retryDelay: 2000, // 2 seconds between retries
+    // This is a FRESH launch (empty journal): autostart races this handshake,
+    // and codon-1's codon.started can broadcast before the client is
+    // registered — measured killing the whole suite in beforeAll under the
+    // runner's 4-way concurrency. Backfill replays it in the handshake
+    // response (safe here precisely because the journal starts empty).
+    sendPreviousEvents: true,
   });
 
   // Wait for initial events
@@ -570,66 +580,49 @@ async function validateCheckpointSystem(): Promise<void> {
   };
 
   if (testState.checkpointValidation.gitDirExists) {
-    const { execSync } = await import("node:child_process");
+    // No try/catch around the git calls: a failure here means the checkpoint
+    // repo is broken, and swallowing it only produces confusing empty-array
+    // failures in the tests that consume this data. Let the real error surface.
+    const gitEnv = {
+      ...process.env,
+      GIT_DIR: gitDir,
+      GIT_WORK_TREE: testState.executionPath,
+    };
 
-    try {
-      // Get commit messages
-      const gitLog = execSync("git log --pretty=format:%s", {
-        cwd: testState.executionPath,
-        env: {
-          ...process.env,
-          GIT_DIR: gitDir,
-          GIT_WORK_TREE: testState.executionPath,
-        },
-        encoding: "utf-8",
-      });
-      testState.checkpointValidation.commitMessages = gitLog
-        .trim()
-        .split("\n")
-        .filter((msg) => msg);
-    } catch (error) {
-      console.error(`Git log failed: ${error}`);
-    }
+    // Get commit messages
+    const gitLog = execSync("git log --pretty=format:%s", {
+      cwd: testState.executionPath,
+      env: gitEnv,
+      encoding: "utf-8",
+    });
+    testState.checkpointValidation.commitMessages = gitLog
+      .trim()
+      .split("\n")
+      .filter((msg) => msg);
 
-    try {
-      // Get branches
-      const gitBranches = execSync("git branch", {
-        cwd: testState.executionPath,
-        env: {
-          ...process.env,
-          GIT_DIR: gitDir,
-          GIT_WORK_TREE: testState.executionPath,
-        },
-        encoding: "utf-8",
-      });
-      testState.checkpointValidation.branches = gitBranches
-        .trim()
-        .split("\n")
-        .map((b) => b.trim());
-    } catch (error) {
-      console.error(`Git branch failed: ${error}`);
-    }
+    // Get branches
+    const gitBranches = execSync("git branch", {
+      cwd: testState.executionPath,
+      env: gitEnv,
+      encoding: "utf-8",
+    });
+    testState.checkpointValidation.branches = gitBranches
+      .trim()
+      .split("\n")
+      .map((b) => b.trim());
 
-    try {
-      // Get tracked files - but exclude read_only_data_source directory
-      const gitFiles = execSync("git ls-files", {
-        cwd: testState.executionPath,
-        env: {
-          ...process.env,
-          GIT_DIR: gitDir,
-          GIT_WORK_TREE: testState.executionPath,
-        },
-        encoding: "utf-8",
-      });
-      testState.checkpointValidation.checkpointedFiles = gitFiles.trim()
-        ? gitFiles
-            .trim()
-            .split("\n")
-            .filter((f) => f && !f.startsWith("read_only_data_source/"))
-        : [];
-    } catch (error) {
-      console.error(`Git ls-files failed: ${error}`);
-    }
+    // Get tracked files - but exclude read_only_data_source directory
+    const gitFiles = execSync("git ls-files", {
+      cwd: testState.executionPath,
+      env: gitEnv,
+      encoding: "utf-8",
+    });
+    testState.checkpointValidation.checkpointedFiles = gitFiles.trim()
+      ? gitFiles
+          .trim()
+          .split("\n")
+          .filter((f) => f && !f.startsWith("read_only_data_source/"))
+      : [];
   }
 
   console.log(`${colors.green}✓ Checkpoint validation complete${colors.reset}`);

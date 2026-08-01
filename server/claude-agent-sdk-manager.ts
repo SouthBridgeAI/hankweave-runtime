@@ -290,6 +290,14 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       permissionMode: "bypassPermissions",
       abortController: this.abortController,
       settingSources: ["user"],
+      // Flag-settings layer (highest user-controlled priority): pin compaction
+      // regardless of the user's ~/.claude/settings.json. Default OFF — the
+      // CLI then surfaces context overflow as a terminal "Prompt is too long"
+      // error result (isContextExceeded Pattern 2) instead of compacting and
+      // retrying. With autoCompact: true the CLI compacts reactively on the
+      // provider's overflow 400, emits compact_boundary (Pattern 3), and
+      // retries. Measured on CLI 2.1.215 — see intermediates/55.
+      settings: { autoCompactEnabled: codon.autoCompact === true },
     };
 
     // Use custom Claude Code executable path if provided

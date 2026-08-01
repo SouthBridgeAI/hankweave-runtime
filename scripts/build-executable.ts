@@ -21,13 +21,8 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import {
-  getClaudeBinaryName,
-  getClaudePackageDir,
-} from "../server/claude-runtime-extractor.js";
-import { getCodexPlatform } from "../server/codex-runtime-extractor.js";
+import { getClaudeBinaryName, getClaudePackageDir } from "../server/claude-runtime-extractor.js";
 
 // Configuration
 const ENTRY_POINT = "server/index.ts";
@@ -46,24 +41,6 @@ function resolveClaudePackageDir(target?: string): string {
   const muslVariant = `${base}-musl`;
   if (fs.existsSync(muslVariant)) return muslVariant;
   return base; // primary path; the caller's existence check reports a clear error
-}
-
-// Get the platform-specific codex package directory name
-// In codex-sdk v0.101.0+, binaries are in @openai/codex-<platform>-<arch>/vendor/
-function getCodexPackageDir(target?: string): string {
-  let platform: string;
-  let arch: string;
-
-  if (target) {
-    [platform, arch] = target.split("-");
-    // Map 'windows' to 'win32' to match npm package naming
-    if (platform === "windows") platform = "win32";
-  } else {
-    platform = os.platform() === "win32" ? "win32" : os.platform();
-    arch = os.arch() === "arm64" ? "arm64" : "x64";
-  }
-
-  return `node_modules/@openai/codex-${platform}-${arch}`;
 }
 
 // Get Bun target string
@@ -102,20 +79,8 @@ async function main() {
   // Determine output filename (in releases directory)
   const isWindows = target?.startsWith("windows");
   const outputFileName =
-    isWindows && !outputBase.endsWith(".exe")
-      ? `${outputBase}.exe`
-      : outputBase;
+    isWindows && !outputBase.endsWith(".exe") ? `${outputBase}.exe` : outputBase;
   const outputFile = path.join(OUTPUT_DIR, outputFileName);
-
-  // Each shim gets a unique bundle filename because Bun deduplicates embedded
-  // files by basename — multiple "index.bundle" entries would collapse to one.
-  const SHIM_NAMES = ["gemini", "codex", "opencode", "pi"] as const;
-  const shimBundles: Array<{ name: string; source: string; bundle: string }> =
-    SHIM_NAMES.map((name) => ({
-      name,
-      source: path.join("shims", name, "index.js"),
-      bundle: path.join("shims", `${name}.bundle`),
-    }));
 
   try {
     console.log("🔨 Building Hankweave standalone executable\n");
@@ -145,61 +110,16 @@ async function main() {
       process.exit(1);
     }
 
-    const codexPackageDir = getCodexPackageDir(target);
-    if (!fs.existsSync(codexPackageDir)) {
-      console.error(
-        `❌ Codex platform package not found at ${codexPackageDir}`,
-      );
-      console.error(
-        "   Run 'bun install' first. For cross-compilation, ensure the target platform package is available.",
-      );
-      process.exit(1);
-    }
-
-    // Determine codex platform
-    const codexPlatform = getCodexPlatform(target);
     console.log(`📦 Target: ${target || "current platform"}`);
     console.log(`📦 Claude binary: ${claudeBinaryPath}`);
-    console.log(`📦 Codex platform: ${codexPlatform}`);
 
-    // Copy shim .js files to .bundle to avoid Bun treating them as entry points.
-    // Bun has special handling for .js files that prevents them from being embedded properly —
-    // it rebundles them instead of preserving the raw bytes, which truncates large bundles.
-    // (The Claude and Codex native binaries are raw bytes, so they're embedded directly.)
-    console.log(`\n📋 Preparing shim .js files for embedding as .bundle...`);
-    for (const { source, bundle } of shimBundles) {
-      fs.copyFileSync(source, bundle);
-      console.log(`   ✓ ${source} → ${bundle}`);
-    }
-
-    // Build the list of files to embed (use relative paths - they work better with embedding)
-    const codexBinaryName = isWindows ? "codex.exe" : "codex";
-    const codexHostName = isWindows ? "codex-code-mode-host.exe" : "codex-code-mode-host";
-
-    // codex-sdk v0.135.0+ ships the binary under <triple>/bin/; older versions used <triple>/codex/.
-    // Mirror codex-runtime-extractor's resolveCodexBinaryInTripleDir() ordering.
-    const codexTripleDir = path.join(codexPackageDir, "vendor", codexPlatform);
-    const codexBinaryPath =
-      [
-        path.join(codexTripleDir, "bin", codexBinaryName), // v0.135.0+
-        path.join(codexTripleDir, "codex", codexBinaryName), // legacy
-      ].find((p) => fs.existsSync(p)) ?? path.join(codexTripleDir, "bin", codexBinaryName);
-
-    // Companion code-mode host runtime, shipped beside codex since v0.144.x. Codex spawns
-    // it as a sibling binary for models with tool_mode "code_mode_only" (gpt-5.6 variants),
-    // so it must be embedded and extracted alongside the codex binary.
-    const codexHostPath = path.join(path.dirname(codexBinaryPath), codexHostName);
-
+    // The Pi coding agent is a plain JS dependency bundled directly into the
+    // executable by `bun build --compile` (Bun's compile target serves its own
+    // undici, so no extraction or embedding is needed).
     const filesToEmbed = [
       // Claude Agent SDK native runtime binary (0.3.x: one binary per platform, self-contained —
       // ripgrep/wasm are baked into it, so no separate vendor files are needed).
       claudeBinaryPath,
-      // Codex SDK binary (platform-specific, v0.101.0+ uses separate @openai/codex-<platform>-<arch> packages)
-      codexBinaryPath,
-      // Codex code-mode host (spawned by codex as a sibling; see codex-runtime-extractor.ts)
-      codexHostPath,
-      // Shim files — embedded as .bundle to avoid Bun's .js rebundling
-      ...shimBundles.map(({ bundle }) => bundle),
     ];
 
     // Verify all files exist
@@ -269,16 +189,12 @@ async function main() {
 
     // Verify output exists
     if (!fs.existsSync(outputFile)) {
-      throw new Error(
-        `Build appeared to succeed but output file not found: ${outputFile}`,
-      );
+      throw new Error(`Build appeared to succeed but output file not found: ${outputFile}`);
     }
 
     const outputSize = fs.statSync(outputFile).size;
     console.log(`✅ Build complete!`);
-    console.log(
-      `📄 Output: ${outputFile} (${(outputSize / 1024 / 1024).toFixed(2)} MB)`,
-    );
+    console.log(`📄 Output: ${outputFile} (${(outputSize / 1024 / 1024).toFixed(2)} MB)`);
 
     // Make executable on Unix
     if (!isWindows) {
@@ -290,17 +206,6 @@ async function main() {
   } catch (error) {
     console.error(`\n❌ Build failed: ${(error as Error).message}`);
     process.exit(1);
-  } finally {
-    // Clean up temporary shim .bundle files
-    const bundleFiles = shimBundles.map(({ bundle }) => bundle);
-    for (const bundleFile of bundleFiles) {
-      if (fs.existsSync(bundleFile)) {
-        fs.unlinkSync(bundleFile);
-      }
-    }
-    console.log(
-      `\n🧹 Cleaned up ${bundleFiles.length} temporary .bundle files`,
-    );
   }
 }
 

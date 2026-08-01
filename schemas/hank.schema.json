@@ -1122,11 +1122,18 @@
                         "minimum": 0,
                         "maximum": 60000,
                         "default": 1000,
-                        "description": "Delay between retries in milliseconds (0-60000, default: 1000)"
+                        "description": "Base delay before the first retry, in milliseconds (0-60000, default: 1000). Subsequent retries back off exponentially (delayMs * 2^attempts), capped by maxDelayMs."
+                      },
+                      "maxDelayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 600000,
+                        "default": 60000,
+                        "description": "Upper bound on any single retry wait, in milliseconds (0-600000, default: 60000). Caps both the exponential backoff and a provider-supplied Retry-After."
                       }
                     },
                     "additionalProperties": false,
-                    "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
+                    "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Delays grow exponentially from delayMs and are capped at maxDelayMs; when the provider supplies a Retry-After hint, that value is used instead of the computed backoff. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
                   },
                   "exhaustWithPrompt": {
                     "type": "string",
@@ -1138,11 +1145,15 @@
                     "default": 100,
                     "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
                   },
+                  "autoCompact": {
+                    "type": "boolean",
+                    "description": "Whether the harness may auto-compact (summarize/trim) the session when the context window fills. Default: false — compaction is disabled, the provider's context-overflow error surfaces instead, plain codons fail at the window, and 'terminateOn: contextExceeded' loops terminate on the real boundary. Set true to absorb the boundary: the harness compacts, emits a compact_boundary event (which is the contextExceeded signal), and work continues on the compacted session."
+                  },
                   "shimIdleTimeout": {
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 1800,
-                    "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s inside the shims for other providers). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
+                    "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s for other providers via the embedded Pi SDK). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
                   },
                   "budget": {
                     "type": "object",
@@ -2239,11 +2250,18 @@
                               "minimum": 0,
                               "maximum": 60000,
                               "default": 1000,
-                              "description": "Delay between retries in milliseconds (0-60000, default: 1000)"
+                              "description": "Base delay before the first retry, in milliseconds (0-60000, default: 1000). Subsequent retries back off exponentially (delayMs * 2^attempts), capped by maxDelayMs."
+                            },
+                            "maxDelayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 600000,
+                              "default": 60000,
+                              "description": "Upper bound on any single retry wait, in milliseconds (0-600000, default: 60000). Caps both the exponential backoff and a provider-supplied Retry-After."
                             }
                           },
                           "additionalProperties": false,
-                          "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
+                          "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Delays grow exponentially from delayMs and are capped at maxDelayMs; when the provider supplies a Retry-After hint, that value is used instead of the computed backoff. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
                         },
                         "exhaustWithPrompt": {
                           "type": "string",
@@ -2255,11 +2273,15 @@
                           "default": 100,
                           "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
                         },
+                        "autoCompact": {
+                          "type": "boolean",
+                          "description": "Whether the harness may auto-compact (summarize/trim) the session when the context window fills. Default: false — compaction is disabled, the provider's context-overflow error surfaces instead, plain codons fail at the window, and 'terminateOn: contextExceeded' loops terminate on the real boundary. Set true to absorb the boundary: the harness compacts, emits a compact_boundary event (which is the contextExceeded signal), and work continues on the compacted session."
+                        },
                         "shimIdleTimeout": {
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1800,
-                          "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s inside the shims for other providers). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
+                          "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s for other providers via the embedded Pi SDK). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
                         },
                         "budget": {
                           "type": "object",

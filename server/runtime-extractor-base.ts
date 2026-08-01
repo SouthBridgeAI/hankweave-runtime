@@ -3,9 +3,7 @@
  *
  * Shared utilities for extracting embedded runtime files (binaries, SDKs, shims)
  * from compiled executables. This module provides common functionality used by:
- * - codex-runtime-extractor.ts (Codex binary extraction)
  * - claude-runtime-extractor.ts (Claude SDK files extraction)
- * - shim-runtime-extractor.ts (Shim files extraction)
  *
  * Key Concepts:
  * - Embedded files: Files bundled into the executable using Bun's --embed flag
@@ -37,7 +35,7 @@ export interface FileToExtract {
  * Configuration for extracting a component's files
  */
 export interface ExtractionConfig {
-  /** Human-readable component name (e.g., "Codex", "Claude SDK") */
+  /** Human-readable component name (e.g., "Claude SDK") */
   componentName: string;
   /** Version string for cache directory naming */
   version: string;
@@ -178,9 +176,9 @@ export function getExtractionBaseDir(): string {
 /**
  * Get the extraction directory for a specific component and version.
  *
- * @param componentName - Component identifier (e.g., "codex-sdk", "claude-sdk", "shims")
+ * @param componentName - Component identifier (e.g., "claude-sdk")
  * @param version - Version string for directory naming
- * @returns Full path to extraction directory (e.g., ~/.hankweave/codex-sdk/0.87.0/)
+ * @returns Full path to extraction directory (e.g., ~/.hankweave/claude-sdk/0.3.215/)
  */
 export function getComponentExtractionDir(componentName: string, version: string): string {
   return path.join(getExtractionBaseDir(), componentName, version);

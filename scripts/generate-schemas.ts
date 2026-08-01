@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Generate JSON Schemas from Zod schemas.
  * Run with: bun scripts/generate-schemas.ts
@@ -9,9 +10,9 @@
  * - sentinel config files
  */
 
-import Ajv from "ajv";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import Ajv from "ajv";
 import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { hankFileAuthoringSchema, runtimeConfigSchema } from "../server/config.js";

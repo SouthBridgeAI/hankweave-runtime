@@ -1,26 +1,24 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
+    "module": "preserve",
     "lib": ["ES2022"],
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "allowJs": true,
     "noEmit": true,
-    "types": ["bun-types"]
+    "types": ["bun"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": [
     "node_modules",
+    "shims/**/*",
     ".logs/**/*",
     "intermediates/**/*",
     "learning/**/*",
-    "tests/test-area/**/*",
-    "shims/**/*",
-    "dist/shims/**/*"
+    "tests/test-area/**/*"
   ]
 }

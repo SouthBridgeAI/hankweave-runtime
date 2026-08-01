@@ -124,9 +124,42 @@ export function runDualIdSystemTests(testState: TestState) {
       }
     });
 
-    // Each codon should have exactly one unique session ID
-    codonSessionIds.forEach((sessionIds, _codonId) => {
-      expect(sessionIds.size).toBe(1);
+    // Retries are recorded in the stream as "Retrying codon <id> (attempt
+    // N/M)" info events; each retry attempt legitimately starts a fresh
+    // session, so exactly-one only holds for codons that were never retried.
+    const retriedCodons = new Set<string>();
+    for (const event of testState.events) {
+      if (event.type === "info") {
+        const match = (event.data.message || "").match(
+          /Retrying codon ([\w#-]+) \(attempt \d+\/\d+\)/i,
+        );
+        if (match) {
+          retriedCodons.add(match[1]);
+        }
+      }
+    }
+
+    // Authoritative final session per codon: the last state snapshot.
+    const lastSnapshot = [...testState.events].reverse().find((e) => e.type === "state.snapshot");
+
+    codonSessionIds.forEach((sessionIds, codonId) => {
+      if (!retriedCodons.has(codonId)) {
+        // No retry recorded: exactly one session for this codon.
+        expect(sessionIds.size).toBe(1);
+        return;
+      }
+
+      // Retried: one session per attempt. Require at least one, and that the
+      // final session recorded in state is among the ones we observed.
+      expect(sessionIds.size).toBeGreaterThanOrEqual(1);
+      if (lastSnapshot?.type === "state.snapshot") {
+        const finalSessionId = lastSnapshot.data.completedCodons.find(
+          (c) => c.codonId === codonId,
+        )?.claudeSessionId;
+        if (finalSessionId) {
+          expect(sessionIds.has(finalSessionId)).toBe(true);
+        }
+      }
     });
   });
 

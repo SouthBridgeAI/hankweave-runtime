@@ -9,34 +9,9 @@ import type {
   RollbackCompletedEvent,
 } from "../../server/types/types.js";
 import { connectHankweaveClient, launchHankweave } from "../utils/hankweave-server-test-helpers.js";
-import { getFreePort } from "../utils/test-helpers.js";
+import { getFreePort, waitForCondition, waitForPortFree } from "../utils/test-helpers.js";
 
 describe("hankweave server", () => {
-  it("starts and stops when asked to", async () => {
-    const port = await getFreePort();
-    console.log(`DEBUG: Launching with dynamic port ${port}`);
-    const hankweave = await launchHankweave({ port });
-
-    expect(hankweave.hasLockFile()).toBeTrue();
-
-    const codonOne = CodonId("codon-1");
-
-    try {
-      await hankweave.waitForEvent("server.ready");
-      const codon1Started = (await hankweave.waitForCodonStart(codonOne)) as CodonStartedEvent;
-      const codon1Completed = (await hankweave.waitForCodonCompletion(
-        codonOne,
-        codon1Started.timestamp,
-      )) as CodonCompletedEvent;
-
-      expect(codon1Completed.data.codonId).toBe(codonOne);
-    } finally {
-      await hankweave.stop();
-    }
-
-    expect(hankweave.process.exitCode !== null || hankweave.process.signalCode !== null).toBeTrue();
-  }, 120_000);
-
   it("recovers from server STOP and resumes from where it stopped", async () => {
     // testing a case of "gracious" interruption
     const port = await getFreePort();
@@ -50,6 +25,11 @@ describe("hankweave server", () => {
     try {
       // Wait for hankweave to be ready
       await hankweave.waitForEvent("server.ready");
+
+      // Boot half of the start/stop contract (folded from the deleted
+      // smoke test): a healthy launch owns the runtime lock. The release
+      // half is asserted after stop() below.
+      expect(hankweave.hasLockFile()).toBeTrue();
 
       // Wait for codon 1 to start
       const codon1Started = (await hankweave.waitForCodonStart(codonOne)) as CodonStartedEvent;
@@ -65,8 +45,10 @@ describe("hankweave server", () => {
 
       // stop the server
       await hankweave.stop();
-      // Small delay before reconnecting
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      // Graceful shutdown clears the lock file and releases the port; wait for
+      // both before relaunching on the same port.
+      await waitForCondition(() => !hankweave.hasLockFile());
+      await waitForPortFree(port);
 
       expect(hankweave.hasLockFile()).toBeFalse();
 
@@ -139,8 +121,9 @@ describe("hankweave server", () => {
         hankweave.process.exitCode !== null || hankweave.process.signalCode !== null,
       ).toBeTrue();
 
-      // Small delay before reconnecting
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      // SIGKILL leaves the lock file behind (asserted below), so the only thing
+      // left to wait on is the OS releasing the port for the relaunch.
+      await waitForPortFree(port);
 
       // lock file should be lingering after crash
       expect(hankweave.hasLockFile()).toBeTrue();
@@ -205,8 +188,9 @@ describe("hankweave server", () => {
         hankweave.process.exitCode !== null || hankweave.process.signalCode !== null,
       ).toBeTrue();
 
-      // Small delay before reconnecting
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      // SIGKILL leaves the lock file behind (asserted below), so the only thing
+      // left to wait on is the OS releasing the port for the relaunch.
+      await waitForPortFree(port);
 
       // Lock file should be lingering after crash
       expect(hankweave.hasLockFile()).toBeTrue();

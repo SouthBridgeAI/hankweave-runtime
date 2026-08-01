@@ -63,7 +63,7 @@ describe("Provider Fallback Scenarios", () => {
         // Set up exactly 3 providers
         process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
         process.env.OPENAI_API_KEY = "test-openai-key";
-        process.env.GOOGLE_API_KEY = "test-google-key";
+        process.env.GEMINI_API_KEY = "test-google-key";
         // GROQ_API_KEY is intentionally not set
 
         const registry = new LlmProviderRegistry({ logger: mockLogger });

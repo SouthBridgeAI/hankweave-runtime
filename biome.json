@@ -4,9 +4,12 @@
     "includes": [
       "server/**/*",
       "!server/llm/*.json",
-      "tests/e2e/**/*",
-      "tests/utils/**/*",
-      "tests/unit/**/*",
+      "scripts/**/*.ts",
+      "tests/e2e/**/*.ts",
+      "tests/integration/**/*.ts",
+      "tests/utils/**/*.ts",
+      "tests/unit/**/*.ts",
+      "tests/*.ts",
       "types/**/*"
     ]
   },

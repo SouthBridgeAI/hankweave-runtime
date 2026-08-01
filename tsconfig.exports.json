@@ -1,6 +1,10 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    // TypeScript 7 defaults rootDir to "./" instead of inferring the common
+    // source directory, so it must be pinned to server/ — otherwise declarations
+    // land at dist/server/exports/*.d.ts and the package "exports" map breaks.
+    "rootDir": "./server",
     "noEmit": false,
     "declaration": true,
     "emitDeclarationOnly": true,

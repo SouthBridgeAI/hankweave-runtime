@@ -117,6 +117,8 @@
         }
       ],
       "continuationMode": "fresh",
+      "onFailure": "retry",
+      "retryConfig": { "maxAttempts": 3, "delayMs": 10000 },
       "description": "Convert poems to code",
       "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "checkpointedFiles": [

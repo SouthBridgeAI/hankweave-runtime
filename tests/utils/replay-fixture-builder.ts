@@ -99,6 +99,54 @@ export function assistantTextLine(text: string, opts: { sessionId: string }): Lo
   };
 }
 
+/**
+ * A synthetic assistant line matching `isContextExceeded()` Pattern 1
+ * (server/types/types.ts): model `<synthetic>`, exactly one text block. Pass
+ * either `"API Error: terminated"` or an "exceeded the ... output token
+ * maximum" text. Used truncated (no result line after it) — that is the shape
+ * the Agent SDK leaves behind when a session dies on context exhaustion, and
+ * `BaseProcessManager.emitExit()` scans for it on every exit path, replay
+ * included.
+ */
+export function syntheticContextExceededLine(text: string, opts: { sessionId: string }): LogLine {
+  return {
+    type: "assistant",
+    message: {
+      model: "<synthetic>",
+      id: "msg_replayfixturesynth000",
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text }],
+      stop_reason: null,
+      usage: { input_tokens: 3, output_tokens: 5 },
+    },
+    session_id: opts.sessionId,
+  };
+}
+
+/**
+ * A `compact_boundary` system line matching `isContextExceeded()` Pattern 3:
+ * the SDK compacted the session because the window filled. This is the
+ * PRIMARY real-world exhaustion shape on modern SDKs (they compact instead of
+ * erroring) — the codon then finishes its work normally, and the flag riding
+ * the exit event terminates a `terminateOn: contextExceeded` loop.
+ */
+export function compactBoundaryLine(opts: {
+  sessionId: string;
+  trigger?: "auto" | "manual";
+}): LogLine {
+  return {
+    type: "system",
+    subtype: "compact_boundary",
+    session_id: opts.sessionId,
+    compact_metadata: {
+      trigger: opts.trigger ?? "auto",
+      pre_tokens: 204564,
+      post_tokens: 23900,
+    },
+  };
+}
+
 /** A successful `result` line — drives the codon to "completed". */
 export function successResultLine(text = "Done.", opts?: { sessionId?: string }): LogLine {
   return {
@@ -157,6 +205,15 @@ export function buildReplayFixture(opts: {
   runId?: string;
   /** Override the temp root (default os.tmpdir()). */
   tmpRoot?: string;
+  /**
+   * Full hank.json override (the object written verbatim). Use when the run
+   * shape needs constructs the flat codon list cannot express — loops with
+   * `terminateOn`, post-loop codons, etc. `codons` then supplies only the
+   * replay LOGS: each spec's `id` must match either the runtime codon id
+   * (`gen#0`) or the base codon id (`gen` — Replay.resolveCodonConfig falls
+   * back to it), or replay will refuse to start.
+   */
+  hank?: Record<string, unknown>;
 }): BuiltReplayFixture {
   const runId = opts.runId ?? `replay-${process.pid}-${counter()}`;
   const execDir = fs.mkdtempSync(path.join(opts.tmpRoot ?? os.tmpdir(), "hw-replay-fixture-"));
@@ -223,8 +280,8 @@ export function buildReplayFixture(opts: {
     ),
   );
 
-  // hank.json from the codon specs.
-  const hank = {
+  // hank.json: explicit override, or generated from the codon specs.
+  const hank = opts.hank ?? {
     hank: opts.codons.map((c) => ({
       id: c.id,
       name: c.name ?? c.id,

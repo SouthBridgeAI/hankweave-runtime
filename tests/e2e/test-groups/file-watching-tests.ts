@@ -98,26 +98,19 @@ export function runFileWatchingTests(testState: TestState) {
   test("Codon 1 file events match *.txt watch pattern", () => {
     const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
 
-    // Look for .txt file events that could be from Codon 1
-    // Allow some time buffer after codon completion for file watcher delays
-    const codon1Start = testState.codon1Started?.timestamp;
-    const codon1End = testState.codon1Completed?.timestamp;
-    const bufferTime = 30000; // 30 seconds buffer for file watcher delays
-
-    const codon1RelatedEvents = fileUpdateEvents.filter((e) => {
+    // Codon 1 writes notes/favorite_poem.txt (tests/config/codon1Prompt1.md).
+    // Assert the *.txt watcher reported that specific path rather than "any
+    // .txt event inside a 30s wall-clock window around Codon 1" — the window
+    // match passed on unrelated .txt files and flaked on watcher latency.
+    const poemEvents = fileUpdateEvents.filter((e) => {
       const fileEvent = e as FileUpdatedEvent;
-      if (!fileEvent.data?.path?.endsWith(".txt")) return false;
-      if (!codon1Start || !codon1End) return false;
-
-      const timestamp = new Date(e.timestamp).getTime();
-      const startTime = new Date(codon1Start).getTime();
-      const endTime = new Date(codon1End).getTime() + bufferTime;
-
-      return timestamp >= startTime && timestamp <= endTime;
+      return (
+        fileEvent.data?.path === "notes/favorite_poem.txt" ||
+        fileEvent.data?.path === "./notes/favorite_poem.txt"
+      );
     });
 
-    // We should have at least one .txt file event around Codon 1 time
-    expect(codon1RelatedEvents.length).toBeGreaterThan(0);
+    expect(poemEvents.length).toBeGreaterThan(0);
   });
 
   test("no TypeScript file events before Codon 3", () => {

@@ -23,20 +23,6 @@ function getRootDefinition(schema: Record<string, unknown>): Record<string, unkn
 describe("JSON Schema Generation", () => {
   const schemaDir = path.join(import.meta.dir, "../../schemas");
 
-  describe("Schema file existence", () => {
-    test("hank.schema.json exists", () => {
-      expect(fs.existsSync(path.join(schemaDir, "hank.schema.json"))).toBe(true);
-    });
-
-    test("hankweave.schema.json exists", () => {
-      expect(fs.existsSync(path.join(schemaDir, "hankweave.schema.json"))).toBe(true);
-    });
-
-    test("sentinel.schema.json exists", () => {
-      expect(fs.existsSync(path.join(schemaDir, "sentinel.schema.json"))).toBe(true);
-    });
-  });
-
   describe("Schema validity", () => {
     test("hank.schema.json is valid JSON Schema draft-07", () => {
       const ajv = createAjv();

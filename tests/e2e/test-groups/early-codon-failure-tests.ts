@@ -13,30 +13,6 @@ interface TestState {
  * In these cases, we should NOT see codon.started events since there's no session ID.
  */
 export function runEarlyCodonFailureTests(testState: TestState) {
-  test("codons that fail before Claude init should not emit codon.started events", () => {
-    // This test would need to be run in a specific failure scenario
-    // For now, we document the expected behavior
-
-    // If we detect a codon that failed very quickly (< 1 second)
-    const codonCompletedEvents = testState.events.filter((e) => e.type === "codon.completed");
-
-    codonCompletedEvents.forEach((event) => {
-      if (event.type === "codon.completed" && !event.data.success && event.data.duration < 1000) {
-        // For very quick failures, check if there was a codon.started event
-        const codonStarted = testState.events.find(
-          (e) => e.type === "codon.started" && e.data.codonId === event.data.codonId,
-        );
-
-        // If the codon failed very quickly, it might not have a codon.started event
-        // This is expected behavior with the new dual ID system
-        if (!codonStarted) {
-          // This is OK - codon failed before Claude could send init
-          expect(codonStarted).toBeUndefined();
-        }
-      }
-    });
-  });
-
   test("error events should be properly emitted even without session IDs", () => {
     // All error events should have required fields
     testState.errorEvents.forEach((error) => {

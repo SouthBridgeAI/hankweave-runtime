@@ -101,12 +101,19 @@ export async function setupBinary(projectRoot: string): Promise<BinarySetup> {
   console.log(`📦 Binary name: ${binaryName}`);
   console.log(`📦 Output path: ${binaryPath}`);
 
-  // Clean up ~/.hankweave directory to ensure fresh state for each test run
+  // Clean up ~/.hankweave to ensure fresh state for each test run. This wipes
+  // REAL user state, so it requires explicit opt-in (CI sets the flag).
   const hankweaveDir = path.join(os.homedir(), ".hankweave");
-  if (fs.existsSync(hankweaveDir)) {
-    console.log(`\n🧹 Removing ~/.hankweave directory...`);
-    fs.rmSync(hankweaveDir, { recursive: true, force: true });
-    console.log(`${colors.green}✓ Cleaned up ~/.hankweave${colors.reset}`);
+  if (process.env.HANKWEAVE_TEST_ALLOW_HOME_WIPE === "1") {
+    if (fs.existsSync(hankweaveDir)) {
+      console.log(`\n🧹 Removing ~/.hankweave directory...`);
+      fs.rmSync(hankweaveDir, { recursive: true, force: true });
+      console.log(`${colors.green}✓ Cleaned up ~/.hankweave${colors.reset}`);
+    }
+  } else if (fs.existsSync(hankweaveDir)) {
+    console.log(
+      `${colors.yellow}⚠ Skipping wipe of ${hankweaveDir}: set HANKWEAVE_TEST_ALLOW_HOME_WIPE=1 to allow the fresh-state wipe${colors.reset}`,
+    );
   }
 
   // Remove old test binary if it exists

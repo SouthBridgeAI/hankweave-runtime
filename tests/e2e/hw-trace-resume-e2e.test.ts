@@ -3,7 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { CodonId } from "../../server/types/branded-types.js";
 import type { CodonStartedEvent, RollbackCompletedEvent } from "../../server/types/types.js";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
-import { getFreePort } from "../utils/test-helpers.js";
+import { getFreePort, waitForCondition, waitForPortFree } from "../utils/test-helpers.js";
 
 const traceEnv = {
   HANKWEAVE_TRACE_LANGFUSE: "1",
@@ -23,6 +23,9 @@ describe("hw-trace kill/resume lifecycle", () => {
     });
 
     const execDir = hankweave.executionDir;
+    // Both runs append to the same server.log, so count upload markers rather
+    // than checking for their presence.
+    const traceUploadCount = () => hankweave.serverLogFile().split("> Uploading trace:").length - 1;
 
     try {
       await hankweave.waitForEvent("server.ready");
@@ -36,7 +39,11 @@ describe("hw-trace kill/resume lifecycle", () => {
       await hankweave.waitForCodonStart(codonTwo, codon1Started.timestamp, 90_000);
       await hankweave.kill(60_000, "SIGTERM");
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // SIGTERM shuts down gracefully: the lock file is cleared and the trace is
+      // uploaded on the way out. Wait for both, then for the port to be free so
+      // the resume below can rebind it.
+      await waitForCondition(() => !hankweave.hasLockFile() && traceUploadCount() >= 1, 30_000);
+      await waitForPortFree(port);
 
       // Graceful shutdown cleans up the lock file
       expect(hankweave.hasLockFile()).toBeFalse();
@@ -70,7 +77,8 @@ describe("hw-trace kill/resume lifecycle", () => {
       // Graceful stop: shutdown() calls uploadTrace() before process.exit()
       await hankweave.stop(60_000);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // The resumed run's shutdown uploads a second trace into the same log.
+      await waitForCondition(() => traceUploadCount() >= 2, 30_000);
 
       const secondLogs = hankweave.serverLogFile();
       expect(secondLogs).toContain("--- hankweave-trace config ---");

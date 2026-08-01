@@ -1,18 +1,17 @@
-import { describe, it, expect, beforeAll, afterEach } from "bun:test";
-import * as path from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
+import * as path from "node:path";
 import { sentinelConfigSchema } from "../../server/config-validation/sentinel.schema.js";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
-import { Sentinel } from "../../server/sentinels/sentinel.js";
 import { HistoryManager } from "../../server/sentinels/history-manager.js";
+import { Sentinel } from "../../server/sentinels/sentinel.js";
+import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import { CodonId } from "../../server/types/branded-types.js";
-import type { SentinelConfig } from "../../server/types/sentinel-types.js";
-import type { HankweaveModelMessage } from "../../server/types/input-ai-types.js";
 import type {
   HankweaveGenerateTextOptions,
   HankweaveGenerateTextResult,
 } from "../../server/types/llm-call-types.js";
+import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { Logger } from "../../server/utils.js";
 import { createMockLlm } from "../utils/mock-llm.js";
 
@@ -23,7 +22,7 @@ const TEMP_SENTINEL_DIR = path.resolve(process.cwd(), "tests/test-area/temp-sent
 // Helper to load a Sentinel config from our test files
 function loadSentinelConfig(fileName: string) {
   const filePath = path.join(SENTINEL_CONFIGS_DIR, fileName);
-  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const fileContent = fs.readFileSync(filePath, "utf-8");
   const config = JSON.parse(fileContent);
   // Validate it before using to catch schema errors
   return sentinelConfigSchema.parse(config);
@@ -46,18 +45,17 @@ class TestLogger extends Logger {
   }
 
   hasLog(pattern: string | RegExp, level?: string): boolean {
-    return this.logs.some(log => {
-      const messageMatches = typeof pattern === 'string'
-        ? log.message.includes(pattern)
-        : pattern.test(log.message);
+    return this.logs.some((log) => {
+      const messageMatches =
+        typeof pattern === "string" ? log.message.includes(pattern) : pattern.test(log.message);
       const levelMatches = level ? log.level === level : true;
       return messageMatches && levelMatches;
     });
   }
 
   getLogsContaining(pattern: string | RegExp): Array<{ message: string; level: string }> {
-    return this.logs.filter(log => {
-      return typeof pattern === 'string'
+    return this.logs.filter((log) => {
+      return typeof pattern === "string"
         ? log.message.includes(pattern)
         : pattern.test(log.message);
     });
@@ -68,8 +66,13 @@ class TestLogger extends Logger {
 const mockLlmProvider = createMockLlm();
 
 // Helper function to create an LLM adapter for sentinels
-function createLlmAdapter(callTracker?: Array<{ id: string; options: HankweaveGenerateTextOptions }>) {
-  return async (id: string, options: HankweaveGenerateTextOptions): Promise<HankweaveGenerateTextResult> => {
+function createLlmAdapter(
+  callTracker?: Array<{ id: string; options: HankweaveGenerateTextOptions }>,
+) {
+  return async (
+    id: string,
+    options: HankweaveGenerateTextOptions,
+  ): Promise<HankweaveGenerateTextResult> => {
     // Track the call if a tracker is provided
     if (callTracker) {
       callTracker.push({ id, options });
@@ -99,7 +102,6 @@ afterEach(async () => {
 });
 
 describe("Conversational Sentinel Integration Tests", () => {
-
   describe("Conversational Configuration", () => {
     it("should load conversational configuration correctly", () => {
       const config = loadSentinelConfig("conversational-narrator.json");
@@ -121,12 +123,12 @@ describe("Conversational Sentinel Integration Tests", () => {
         execution: { strategy: "immediate" },
         userPromptText: "Test prompt",
         conversational: {
-          trimmingStrategy: { type: "maxTurns", maxTurns: 5 }
-        }
+          trimmingStrategy: { type: "maxTurns", maxTurns: 5 },
+        },
       };
 
       expect(() => sentinelConfigSchema.parse(invalidConfig)).toThrow(
-        /Conversational sentinels require a system prompt/
+        /Conversational sentinels require a system prompt/,
       );
     });
   });
@@ -142,7 +144,7 @@ describe("Conversational Sentinel Integration Tests", () => {
         CodonId("test-codon"),
         createLlmAdapter(),
         logger,
-        TEMP_SENTINEL_DIR
+        TEMP_SENTINEL_DIR,
       );
 
       // Check that HistoryManager was created
@@ -163,7 +165,7 @@ describe("Conversational Sentinel Integration Tests", () => {
         CodonId("test-codon"),
         createLlmAdapter(),
         logger,
-        TEMP_SENTINEL_DIR
+        TEMP_SENTINEL_DIR,
       );
 
       // Check that HistoryManager was NOT created
@@ -188,7 +190,13 @@ describe("Conversational Sentinel Integration Tests", () => {
       const mockLlm = createLlmAdapter(llmCalls);
 
       // Create first sentinel instance
-      const sentinel1 = new Sentinel(config, CodonId("test-codon"), mockLlm, logger, testSentinelDir);
+      const sentinel1 = new Sentinel(
+        config,
+        CodonId("test-codon"),
+        mockLlm,
+        logger,
+        testSentinelDir,
+      );
       const historyManager1 = sentinel1.getHistoryManager();
       expect(historyManager1).toBeDefined();
 
@@ -198,13 +206,22 @@ describe("Conversational Sentinel Integration Tests", () => {
       }
 
       // Check that history was saved (with codon-scoped naming)
-      const historyPath = path.join(testSentinelDir, "conversational-narrator-codon-test-codon.json");
-      await new Promise(resolve => setTimeout(resolve, 100)); // Give time for async save
+      const historyPath = path.join(
+        testSentinelDir,
+        "conversational-narrator-codon-test-codon.json",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 100)); // Give time for async save
       expect(fs.existsSync(historyPath)).toBe(true);
 
       // Create second sentinel instance (simulating server restart)
       logger.clear();
-      const sentinel2 = new Sentinel(config, CodonId("test-codon"), mockLlm, logger, testSentinelDir);
+      const sentinel2 = new Sentinel(
+        config,
+        CodonId("test-codon"),
+        mockLlm,
+        logger,
+        testSentinelDir,
+      );
       const historyManager2 = sentinel2.getHistoryManager();
       expect(historyManager2).toBeDefined();
 
@@ -224,10 +241,10 @@ describe("Conversational Sentinel Integration Tests", () => {
   describe("Directory Management", () => {
     it("should create sentinel directory when loading conversational sentinels", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ 
-        logger, 
+      const manager = new SentinelManager({
+        logger,
         enablePersistence: true,
-        rootDirectory: TEMP_SENTINEL_DIR 
+        rootDirectory: TEMP_SENTINEL_DIR,
       });
 
       const config = loadSentinelConfig("conversational-narrator.json");
@@ -242,10 +259,10 @@ describe("Conversational Sentinel Integration Tests", () => {
 
     it("should handle memory-only mode when persistence is disabled", async () => {
       const logger = new TestLogger();
-      const manager = new SentinelManager({ 
-        logger, 
+      const manager = new SentinelManager({
+        logger,
         enablePersistence: false,
-        rootDirectory: TEMP_SENTINEL_DIR 
+        rootDirectory: TEMP_SENTINEL_DIR,
       }); // Disable persistence
 
       const config = loadSentinelConfig("conversational-narrator.json");
@@ -266,7 +283,7 @@ describe("Conversational Sentinel Integration Tests", () => {
 
       // Override config for testing with smaller maxTurns
       config.conversational = {
-        trimmingStrategy: { type: "maxTurns", maxTurns: 2 }
+        trimmingStrategy: { type: "maxTurns", maxTurns: 2 },
       };
 
       const sentinel = new Sentinel(
@@ -274,7 +291,7 @@ describe("Conversational Sentinel Integration Tests", () => {
         CodonId("test-codon"),
         createLlmAdapter(),
         logger,
-        TEMP_SENTINEL_DIR
+        TEMP_SENTINEL_DIR,
       );
 
       const historyManager = sentinel.getHistoryManager();
@@ -310,8 +327,8 @@ describe("Conversational Sentinel Integration Tests", () => {
         systemPromptText: "System",
         userPromptText: "User",
         conversational: {
-          trimmingStrategy: { type: "maxTokens", maxTokens: 10 } // ~40 chars
-        }
+          trimmingStrategy: { type: "maxTokens", maxTokens: 10 }, // ~40 chars
+        },
       };
 
       const validatedConfig = sentinelConfigSchema.parse(config);
@@ -321,7 +338,7 @@ describe("Conversational Sentinel Integration Tests", () => {
         CodonId("test-codon"),
         createLlmAdapter(),
         logger,
-        TEMP_SENTINEL_DIR
+        TEMP_SENTINEL_DIR,
       );
 
       const historyManager = sentinel.getHistoryManager();
@@ -330,7 +347,7 @@ describe("Conversational Sentinel Integration Tests", () => {
         // First pair total ~24 tokens (96 chars)
         await historyManager.addMessagePair(
           "This is a very long message that will exceed token limits",
-          "Another very long response message"
+          "Another very long response message",
         );
         // Last pair total ~3 tokens (10 chars)
         await historyManager.addMessagePair("Short", "Brief");
@@ -363,7 +380,7 @@ describe("Conversational Sentinel Integration Tests", () => {
         CodonId("test-codon"),
         createLlmAdapter(),
         logger,
-        TEMP_SENTINEL_DIR
+        TEMP_SENTINEL_DIR,
       );
 
       const historyManager = sentinel.getHistoryManager();
@@ -397,7 +414,7 @@ describe("Conversational Sentinel Integration Tests", () => {
         CodonId("test-codon"),
         createLlmAdapter(),
         logger,
-        TEMP_SENTINEL_DIR
+        TEMP_SENTINEL_DIR,
       );
 
       // Check initialization logs

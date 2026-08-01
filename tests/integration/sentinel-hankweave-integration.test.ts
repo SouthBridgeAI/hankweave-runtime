@@ -2,15 +2,26 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { SentinelEvent, SentinelOutputEvent } from "../../server/schemas/event-schemas.js";
+import { SentinelConfigLoader } from "../../server/sentinels/sentinel-config-loader.js";
+import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
+import { CodonId, EventId } from "../../server/types/branded-types.js";
+import type {
+  HankweaveGenerateObjectOptions,
+  HankweaveGenerateTextOptions,
+} from "../../server/types/llm-call-types.js";
+import type { SentinelConfig } from "../../server/types/sentinel-types.js";
+import type { CodonSentinelEntry } from "../../server/types/types.js";
 import { createMockLlm } from "../utils/mock-llm.js";
-import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 
 const mockLlmProvider = createMockLlm();
 
 // Adapter to match expected signature
 const mockLLM = {
-  generateText: async (id: string, options: any) => mockLlmProvider.generateText(options),
-  generateObject: async (id: string, options: any) => mockLlmProvider.generateObject(options),
+  generateText: async (_id: string, options: HankweaveGenerateTextOptions) =>
+    mockLlmProvider.generateText(options),
+  generateObject: async (_id: string, options: HankweaveGenerateObjectOptions) =>
+    mockLlmProvider.generateObject(options),
 };
 
 /**
@@ -34,28 +45,15 @@ describe("Sentinel HankweaveServer Integration", () => {
     }
   });
 
-  describe("Event Routing", () => {
-    it("should route sentinel events correctly", async () => {
-      // HankweaveServer integration with sentinels is covered by:
-      // - existing E2E tests (happy-path, sentinel-llm)
-      // - SentinelManager tests (below)
-      // This is a complex integration test that would need full server isolation
-      expect(true).toBe(true);
-    });
-  });
-
   describe("State Persistence", () => {
     it("should track sentinel state in SentinelManager", async () => {
-      const { SentinelManager } = await import("../../server/sentinels/sentinel-manager.js");
-      const { CodonId } = await import("../../server/types/branded-types.js");
-
       const manager = new SentinelManager({
         enablePersistence: false,
       });
 
       await manager.initialize();
 
-      const config: any = {
+      const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test",
         trigger: { type: "event", on: ["info"] },
@@ -86,16 +84,13 @@ describe("Sentinel HankweaveServer Integration", () => {
 
   describe("Cost Tracking", () => {
     it("should track sentinel costs separately from codon costs", async () => {
-      const { SentinelManager } = await import("../../server/sentinels/sentinel-manager.js");
-      const { CodonId } = await import("../../server/types/branded-types.js");
-
       const manager = new SentinelManager({
         enablePersistence: false,
       });
 
       await manager.initialize();
 
-      const config: any = {
+      const config: SentinelConfig = {
         id: "cost-tracker",
         name: "Cost Tracker",
         trigger: { type: "event", on: ["info"] },
@@ -122,16 +117,13 @@ describe("Sentinel HankweaveServer Integration", () => {
 
   describe("Graceful Shutdown", () => {
     it("should complete all sentinel work before shutdown", async () => {
-      const { SentinelManager } = await import("../../server/sentinels/sentinel-manager.js");
-      const { CodonId } = await import("../../server/types/branded-types.js");
-
       const manager = new SentinelManager({
         enablePersistence: false,
       });
 
       await manager.initialize();
 
-      const config: any = {
+      const config: SentinelConfig = {
         id: "shutdown-test",
         name: "Shutdown Test",
         trigger: { type: "event", on: ["*"] },
@@ -150,7 +142,7 @@ describe("Sentinel HankweaveServer Integration", () => {
       // Add some events
       for (let i = 0; i < 5; i++) {
         await manager.handleEvent({
-          id: `event-${i}` as any,
+          id: EventId(`event-${i}`),
           timestamp: new Date().toISOString(),
           type: "info",
           data: { message: "test" },
@@ -167,26 +159,26 @@ describe("Sentinel HankweaveServer Integration", () => {
 
   describe("Configuration Loading", () => {
     it("should handle wrapper pattern correctly", async () => {
-      const { SentinelConfigLoader } = await import("../../server/sentinels/sentinel-config-loader.js");
-
       const loader = new SentinelConfigLoader();
 
-      const entries: any = [{
-        sentinelConfig: {
-          id: "inline-test",
-          name: "Inline Test",
-          trigger: { type: "event", on: ["info"] },
-          execution: { strategy: "immediate" },
-          userPromptText: "test",
-          model: "mock/model",
-        },
-        settings: {
-          failCodonIfNotLoaded: true,
-          outputPaths: {
-            logFile: "custom.md",
+      const entries: CodonSentinelEntry[] = [
+        {
+          sentinelConfig: {
+            id: "inline-test",
+            name: "Inline Test",
+            trigger: { type: "event", on: ["info"] },
+            execution: { strategy: "immediate" },
+            userPromptText: "test",
+            model: "mock/model",
+          },
+          settings: {
+            failCodonIfNotLoaded: true,
+            outputPaths: {
+              logFile: "custom.md",
+            },
           },
         },
-      }];
+      ];
 
       const result = loader.loadConfigsForCodon(entries, "test-codon", testDir);
 
@@ -200,21 +192,18 @@ describe("Sentinel HankweaveServer Integration", () => {
 
   describe("Event Emission", () => {
     it("should set event callback and route sentinel events", async () => {
-      const { SentinelManager } = await import("../../server/sentinels/sentinel-manager.js");
-      const { CodonId } = await import("../../server/types/branded-types.js");
-
       const manager = new SentinelManager({
         enablePersistence: false,
       });
 
-      const capturedEvents: any[] = [];
+      const capturedEvents: SentinelEvent[] = [];
       manager.setEventCallback((event) => {
         capturedEvents.push(event);
       });
 
       await manager.initialize();
 
-      const config: any = {
+      const config: SentinelConfig = {
         id: "event-test",
         name: "Event Test",
         trigger: { type: "event", on: ["info"] },
@@ -236,7 +225,7 @@ describe("Sentinel HankweaveServer Integration", () => {
 
       // Trigger the sentinel
       await manager.handleEvent({
-        id: "test-event" as any,
+        id: EventId("test-event"),
         timestamp: new Date().toISOString(),
         type: "info",
         data: { message: "test" },
@@ -246,7 +235,9 @@ describe("Sentinel HankweaveServer Integration", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Should have sentinel.output events at minimum
-      const outputEvents = capturedEvents.filter((e) => e.type === "sentinel.output");
+      const outputEvents = capturedEvents.filter(
+        (e): e is SentinelOutputEvent => e.type === "sentinel.output",
+      );
 
       expect(outputEvents.length).toBeGreaterThan(0);
 

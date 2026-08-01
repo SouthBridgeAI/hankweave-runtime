@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { getManagedExecutionsRoot } from "./utils.js";
 
 /**
  * Generate a hash for a single file based on its content and metadata
@@ -138,7 +138,7 @@ export async function hashDataDirectory(
  * Find existing execution directories for a data hash
  */
 export async function findExecutionDirs(dataHash: string): Promise<string[]> {
-  const executionRoot = path.join(os.homedir(), ".hankweave-executions");
+  const executionRoot = getManagedExecutionsRoot();
   if (!fs.existsSync(executionRoot)) return [];
 
   const dirs: string[] = [];

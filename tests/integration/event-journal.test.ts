@@ -51,16 +51,14 @@ describe("EventJournal with FileEventStorage", () => {
     const sampleEvent = createInfoEvent(0);
     sampleEventBytes = Buffer.byteLength(JSON.stringify(sampleEvent)) + 1;
     expectedTotalEvents = Math.ceil(TARGET_BYTES / sampleEventBytes);
-    lastEventId = `info-event-${(expectedTotalEvents - 1)
-      .toString()
-      .padStart(10, "0")}`;
+    lastEventId = `info-event-${(expectedTotalEvents - 1).toString().padStart(10, "0")}`;
 
     await storage.appendMany(
       (function* (): Generator<ServerEvent> {
         for (let i = 0; i < expectedTotalEvents; i++) {
           yield createInfoEvent(i);
         }
-      })()
+      })(),
     );
 
     eventsFilePath = join(tempDir, "events.jsonl");
@@ -78,9 +76,7 @@ describe("EventJournal with FileEventStorage", () => {
 
   it("provides access to the underlying transport and serves recent history", async () => {
     const limit = 5;
-    const { events, hasMore, totalEvents } = await journal.getMostRecentEvents(
-      limit
-    );
+    const { events, hasMore, totalEvents } = await journal.getMostRecentEvents(limit);
     expect(totalEvents).toBe(expectedTotalEvents);
     expect(events).toHaveLength(Math.min(limit, expectedTotalEvents));
     expect(await journal.getTotalEvents()).toBe(expectedTotalEvents);
@@ -127,8 +123,6 @@ describe("EventJournal with FileEventStorage", () => {
       destination.once("finish", resolve);
     });
 
-    expect(await computeFileHash(destinationPath)).toBe(
-      await computeFileHash(eventsFilePath)
-    );
+    expect(await computeFileHash(destinationPath)).toBe(await computeFileHash(eventsFilePath));
   }, 10000);
 });

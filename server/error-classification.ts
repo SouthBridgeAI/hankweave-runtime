@@ -1,9 +1,7 @@
 import type { FailureReason } from "./types/types.js";
 
 /**
- * Pure decision core of the runtime's failure policy
- * (HankweaveRuntime.resolveFailurePolicy delegates here; extracted for unit
- * testing, mirroring shouldExtendCodon in codon-runner.ts).
+ * Pure decision core of the failure policy.
  *
  * - abort: retriable errors leave the server active for manual retry,
  *   permanent ones shut the run down.
@@ -29,28 +27,143 @@ export function resolveFailureAction(params: {
 }
 
 /**
- * Classify API error text into a FailureReason with a retriability verdict.
+ * Upper bound on any single retry wait (computed backoff or provider
+ * Retry-After): a long hint must not silently park an unattended run — better
+ * to retry early and fail fast than to look hung.
+ */
+export const MAX_RETRY_DELAY_MS = 60_000;
+
+/**
+ * Largest Retry-After we treat as a real hint rather than noise. Values above
+ * this are ignored entirely (rather than clamped) because a multi-hour window
+ * means the run is not going to succeed within its retry budget anyway, and
+ * clamping would misrepresent the provider's answer as "wait a minute".
+ */
+const MAX_PLAUSIBLE_RETRY_AFTER_MS = 3_600_000;
+
+/**
+ * Extract a provider-supplied retry delay from error text, in milliseconds.
+ * No single form is canonical across providers, so this matches the common
+ * surface shapes: header/JSON style (`retry-after: 30`, `"retry_after": 30`),
+ * worded forms (`retry after 60s`, `try again in 2 minutes`), and millisecond
+ * units (`retry after 500ms`).
  *
- * This is the single source of truth for deciding whether an API-level error
- * is transient (worth retrying under onFailure: "retry") or permanent.
- * Both the runtime's result-message handling and CodonRunner's extension
- * logic must use this — divergent heuristics in those two places previously
- * caused transient socket drops to abort runs that were configured to retry
+ * Bare header/JSON values are seconds (RFC 9110 delay-seconds), but only when
+ * no word follows on the same line: an untranslated unit ("2 hours", "500
+ * centiseconds") must yield NO hint rather than read the digits as seconds.
+ * HTTP-date Retry-After is deliberately not parsed (needs a clock comparison;
+ * a misparse is worse than falling back to backoff).
  *
- * Classification policy:
- * - Billing/credit/quota and auth errors are permanent: retrying burns
- *   attempts on a hopeless request.
- * - Invalid-request (400) errors are permanent: the same request will fail
- *   the same way.
- * - Transport faults (socket closed/reset, connection errors), timeouts,
- *   rate limits, and server-side errors (5xx, overloaded) are transient.
- * - Unrecognized error text defaults to RETRIABLE: retries are bounded by
- *   retryConfig.maxAttempts, so a wrong "retriable" costs one extra attempt,
- *   while a wrong "non-retriable" kills the whole run. This default is gated on
- *   `opts.sessionEstablished`: when the caller knows no session was ever
- *   established (the process failed before its first message), unrecognized text
- *   is a local setup failure and is classified NON-retriable instead. The known
- *   transient/permanent patterns above are unaffected by the gate.
+ * Returns undefined when no plausible hint is present.
+ */
+export function parseRetryAfterMs(text: string): number | undefined {
+  if (typeof text !== "string" || text.length === 0) return undefined;
+  const lower = text.toLowerCase();
+
+  // Ordered most-specific first: a unit-bearing match ("retry after 500ms")
+  // must win over the bare-seconds header form, which would otherwise read
+  // the same digits as 500 seconds.
+  const patterns: Array<{ re: RegExp; unitMs: number }> = [
+    // Key-suffixed millisecond forms (`retry-after-ms: 30000`, `retryAfterMs:
+    // 30000` lowercased): the unit lives in the KEY, so none of the
+    // value-suffixed patterns below can match them.
+    { re: /retry[-_ ]?after[-_ ]?ms["'\s:]*(\d+(?:\.\d+)?)(?![.\d]|[,:/-]\d)/, unitMs: 1 },
+    {
+      re: /retry[-_ ]?after["'\s:]*(\d+(?:\.\d+)?)\s*(?:ms|msecs?|milliseconds?)\b/,
+      unitMs: 1,
+    },
+    { re: /retry[-_ ]?after["'\s:]*(\d+(?:\.\d+)?)\s*(?:s|sec|secs|seconds?)\b/, unitMs: 1000 },
+    { re: /retry[-_ ]?after["'\s:]*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minutes?)\b/, unitMs: 60_000 },
+    // Bare header/JSON value with no unit — delay-seconds per RFC 9110. The
+    // trailing-word lookahead is same-line only ([ \t], not \s) so a following
+    // header line in a multi-line dump doesn't disqualify a legitimate bare
+    // value. The (?![.\d]) guard forces the capture to be the WHOLE number:
+    // without it, rejecting "30h" backtracks to capture "3" with "0"
+    // satisfying the not-a-letter check. [,:/-]\d rejects digits that continue
+    // a larger token — "1,000" (thousands), "07:30" (clock time), "2026-07-30"
+    // and "07/30" (dates) — whose leading group is not a duration; a separator
+    // NOT followed by a digit (`"retry_after": 30, "code": ...`) stays valid.
+    {
+      re: /retry[-_ ]?after["'\s:]+(\d+(?:\.\d+)?)(?![.\d]|[,:/-]\d)(?![ \t]*[a-z])/,
+      unitMs: 1000,
+    },
+    // Worded forms: "retry in 30s", "try again in 2 minutes", "wait 500ms".
+    {
+      re: /(?:retry|try again|wait)(?:\s+\w+){0,3}?\s+(\d+(?:\.\d+)?)\s*(?:ms|msecs?|milliseconds?)\b/,
+      unitMs: 1,
+    },
+    {
+      re: /(?:retry|try again|wait)(?:\s+\w+){0,3}?\s+(\d+(?:\.\d+)?)\s*(?:s|sec|secs|seconds?)\b/,
+      unitMs: 1000,
+    },
+    {
+      re: /(?:retry|try again|wait)(?:\s+\w+){0,3}?\s+(\d+(?:\.\d+)?)\s*(?:m|min|mins|minutes?)\b/,
+      unitMs: 60_000,
+    },
+  ];
+
+  for (const { re, unitMs } of patterns) {
+    const match = re.exec(lower);
+    if (!match?.[1]) continue;
+    const value = Number.parseFloat(match[1]);
+    if (!Number.isFinite(value) || value < 0) continue;
+    const ms = Math.round(value * unitMs);
+    // 0 is a legitimate "retry immediately"; only implausibly long waits are
+    // discarded (see MAX_PLAUSIBLE_RETRY_AFTER_MS).
+    if (ms > MAX_PLAUSIBLE_RETRY_AFTER_MS) return undefined;
+    return ms;
+  }
+
+  return undefined;
+}
+
+/**
+ * Compute how long to wait before a retry attempt.
+ *
+ * A provider-supplied Retry-After wins outright (it reflects the actual limit
+ * window; backoff is a guess); otherwise exponential backoff
+ * (`baseDelayMs * 2^attempts`). Both paths are clamped to maxDelayMs. No
+ * random jitter: codons run sequentially within a run, so there is no
+ * self-contended thundering herd, and a deterministic delay keeps retry
+ * timing reproducible.
+ *
+ * @param attempts Retries already made (0 on the first retry).
+ */
+export function computeRetryDelayMs(params: {
+  baseDelayMs: number;
+  attempts: number;
+  retryAfterMs?: number;
+  maxDelayMs?: number;
+}): number {
+  const maxDelayMs = params.maxDelayMs ?? MAX_RETRY_DELAY_MS;
+  const clamp = (ms: number): number => Math.max(0, Math.min(ms, maxDelayMs));
+
+  if (params.retryAfterMs !== undefined && Number.isFinite(params.retryAfterMs)) {
+    return clamp(params.retryAfterMs);
+  }
+
+  const base = Number.isFinite(params.baseDelayMs) ? Math.max(0, params.baseDelayMs) : 0;
+  const attempts = Number.isFinite(params.attempts) ? Math.max(0, Math.floor(params.attempts)) : 0;
+  // Cap the exponent before multiplying so a large attempts value cannot
+  // overflow to Infinity on the way to the clamp.
+  const factor = 2 ** Math.min(attempts, 30);
+  return clamp(base * factor);
+}
+
+/**
+ * Classify API error text into a FailureReason with a retriability verdict —
+ * the single source of truth for transient vs permanent.
+ *
+ * Policy:
+ * - Billing/credit/quota, auth, and invalid-request (400) errors are
+ *   permanent: retrying burns attempts on a hopeless request.
+ * - Transport faults, timeouts, rate limits, and server-side errors (5xx,
+ *   overloaded) are transient.
+ * - Unrecognized text defaults to RETRIABLE (bounded by maxAttempts: a wrong
+ *   "retriable" costs one extra attempt, a wrong "non-retriable" kills the
+ *   run) — unless `opts.sessionEstablished` is false, in which case it is a
+ *   local setup failure and NON-retriable. The known patterns above are
+ *   unaffected by the gate.
  */
 export function classifyApiErrorText(
   text: string,
@@ -66,14 +179,18 @@ export function classifyApiErrorText(
   // inside larger numbers (e.g. "after 2400s" must not match 400).
   const hasCode = (code: string): boolean => new RegExp(`\\b${code}\\b`).test(lower);
 
+  // Attached to every RETRIABLE verdict below; permanent verdicts omit it
+  // (no retry to schedule). Text is the ONLY source: neither in-process SDK
+  // surfaces structured Retry-After headers at this boundary. If one ever
+  // does, add an explicit override here rather than scraping them into text.
+  const retryAfterMs = parseRetryAfterMs(errorText);
+
   // --- Permanent failures (checked first: most specific signals) ---
 
-  // Explicit rate-limit signals win over the broad billing/quota match below.
-  // A 429/rate_limit_error that also mentions a per-minute "quota" (e.g.
-  // "429 rate_limit_error: quota exceeded, retry after 60s") is a TRANSIENT rate
-  // limit, not exhausted billing. Only the WORDED forms short-circuit here; a
-  // bare "429" stays ambiguous and is resolved after the billing check, because
-  // OpenAI returns 429 for permanent insufficient_quota too.
+  // Worded rate-limit signals win over the billing/quota match below: a
+  // rate_limit_error that also mentions "quota" is a TRANSIENT rate limit, not
+  // exhausted billing. A bare "429" stays ambiguous until after the billing
+  // check (OpenAI returns 429 for permanent insufficient_quota too).
   const hasExplicitRateLimit =
     lower.includes("rate limit") || lower.includes("rate_limit") || lower.includes("rate-limit");
   if (hasExplicitRateLimit) {
@@ -81,15 +198,14 @@ export function classifyApiErrorText(
       type: "rate-limit",
       retriable: true,
       message: `API rate limit: ${errorText}`,
+      retryAfterMs,
     };
   }
 
-  // Billing/credit/quota AND provider usage-limit caps are permanent: retrying
-  // burns attempts on a hopeless request. The usage-limit phrasings come from
-  // the non-Anthropic shims we drive (e.g. pi/opencode surface
-  // `GoUsageLimitError`, `FreeUsageLimitError`, "Monthly usage limit reached",
-  // "out of budget", "available balance"). Without these, our default-retriable
-  // policy would keep retrying a depleted plan/balance until maxAttempts.
+  // Billing/credit/quota and provider usage-limit caps are permanent. The
+  // usage-limit phrasings come from the non-Anthropic providers the embedded
+  // Pi agent drives ("Monthly usage limit reached", "out of budget",
+  // "available balance", camelCase *UsageLimitError names).
   const isBilling =
     lower.includes("credit") ||
     lower.includes("billing") ||
@@ -107,18 +223,16 @@ export function classifyApiErrorText(
     };
   }
 
-  // Checked before the numeric status-code branches below (auth's 401/403,
-  // invalid-request's 400). A message that says "timeout"/"timed out" is a
-  // transient timeout even when it embeds a standalone duration like
-  // "Request timed out after 400 seconds" — that bare "400" would otherwise
-  // word-match hasCode("400") and be misclassified as a permanent invalid
-  // request (and "401"/"403" durations as auth), bypassing onFailure:"retry".
+  // Checked before the numeric status-code branches: "Request timed out after
+  // 400 seconds" must classify as a timeout, not word-match hasCode("400")
+  // into a permanent invalid request (or "401"/"403" durations into auth).
   const isTimeout = lower.includes("timeout") || lower.includes("timed out");
   if (isTimeout) {
     return {
       type: "timeout",
       retriable: true,
       message: errorText,
+      retryAfterMs,
     };
   }
 
@@ -138,8 +252,15 @@ export function classifyApiErrorText(
     };
   }
 
+  // "prompt is too long" is the Claude SDK's normalization of Anthropic's
+  // input-overflow 400 (status code stripped from the surfaced text). In a
+  // `terminateOn: contextExceeded` loop this never applies: the
+  // context-exceeded completion path preempts failure classification.
   const isInvalidRequest =
-    lower.includes("invalid_request") || lower.includes("invalid request") || hasCode("400");
+    lower.includes("invalid_request") ||
+    lower.includes("invalid request") ||
+    lower.includes("prompt is too long") ||
+    hasCode("400");
   if (isInvalidRequest) {
     return {
       type: "api-error",
@@ -150,26 +271,33 @@ export function classifyApiErrorText(
 
   // --- Transient failures ---
 
-  // Bare "429" with no worded rate-limit signal and no billing/quota text above:
-  // a plain "Too Many Requests" that is transient. (Worded rate limits already
-  // short-circuited before the billing check; quota-429 was caught as billing.)
+  // Bare "429" that survived the billing/quota check above: a plain
+  // "Too Many Requests", transient.
   if (hasCode("429")) {
     return {
       type: "rate-limit",
       retriable: true,
       message: `API rate limit: ${errorText}`,
+      retryAfterMs,
     };
   }
 
-  // Transport faults (socket/connection drops, resets, stream terminations) are
-  // transient. Matched explicitly — rather than via the fallback below — so they
-  // stay retriable even when no session was established (see the gated fallback).
+  // Transport faults are transient. Matched explicitly — not via the fallback
+  // below — so they stay retriable even when no session was established: a
+  // network outage at codon start is not a local setup failure. "unable to
+  // connect" is the Pi agent's wording for a failed provider connection;
+  // "fetch failed" is undici's generic network error.
   const isTransport =
     lower.includes("socket") ||
     lower.includes("econnreset") ||
     lower.includes("econnrefused") ||
+    lower.includes("econnaborted") ||
     lower.includes("epipe") ||
     lower.includes("etimedout") ||
+    lower.includes("enotfound") ||
+    lower.includes("eai_again") ||
+    lower.includes("unable to connect") ||
+    lower.includes("fetch failed") ||
     lower.includes("connection reset") ||
     lower.includes("connection closed") ||
     lower.includes("connection error") ||
@@ -180,10 +308,11 @@ export function classifyApiErrorText(
       type: "api-error",
       retriable: true,
       message: `API transport error: ${errorText}`,
+      retryAfterMs,
     };
   }
 
-  // Server-side 5xx / overloaded errors are transient. Also matched explicitly so
+  // Server-side 5xx / overloaded errors are transient; matched explicitly so
   // they survive the session-established gate on the fallback.
   const isServerError =
     hasCode("500") ||
@@ -200,17 +329,14 @@ export function classifyApiErrorText(
       type: "api-error",
       retriable: true,
       message: `API server error: ${errorText}`,
+      retryAfterMs,
     };
   }
 
-  // Unrecognized error text. Default is RETRIABLE (bounded by maxAttempts), BUT
-  // gated on session establishment: if no session was ever established
-  // (sessionEstablished === false), the process died before exchanging its first
-  // message and the text matched none of the known transient API signals above —
-  // that is a local setup/process failure (bad executable, spawn error, bad cwd,
-  // shim resume-resolution failure), which retrying cannot fix. Classify it
-  // NON-retriable. When a session WAS established (default), keep the retriable
-  // policy: a mid-conversation crash with unfamiliar text is plausibly transient.
+  // Unrecognized error text: retriable by default, but a process that died
+  // before its first message with text matching no known transient signal is a
+  // local setup failure (bad executable, spawn error, bad cwd) that retrying
+  // cannot fix.
   if (sessionEstablished === false) {
     return {
       type: "api-error",
@@ -222,35 +348,20 @@ export function classifyApiErrorText(
     type: "api-error",
     retriable: true,
     message: `API error in result: ${errorText}`,
+    retryAfterMs,
   };
 }
 
 /**
- * Synthesize a failure reason for a codon that ended in a FAILED state without
- * any classified reason of its own (no error result message, no transient-crash
- * classification from the runner).
+ * Synthesize a failure reason for a codon that ended FAILED without any
+ * classified reason of its own (process exited with no result and no crash
+ * text). Retriability follows classifyApiErrorText's session-establishment
+ * gate: established → plausibly transient, RETRIABLE; never established →
+ * local setup failure, NON-retriable (defaults to established when unknown).
  *
- * This is the single convergence point for every process manager when a process
- * exits without reporting a usable outcome:
- *  - An early/pre-init shim exit on an API error returns a non-zero code with no
- *    result message (gemini shim.ts:593 `!systemEmitted`; pi index.ts:452;
- *    opencode shim.ts:462/486 and binary/arg-resolution failures).
- *  - The Claude Agent SDK or any child process can crash without a terminal
- *    result.
- *
- * Retriability is gated on session establishment (`sessionEstablished`):
- *  - established then exited with no result → plausibly transient, RETRIABLE
- *    (bounded by retryConfig.maxAttempts), mirroring classifyApiErrorText's
- *    policy for unrecognized errors.
- *  - never established (the process exited before its first message) → a local
- *    setup/binary/resume-resolution failure that retrying cannot fix →
- *    NON-retriable. Defaults to true so callers that don't supply the signal
- *    keep the original retriable behavior.
- *
- * Returns undefined (no synthesis — preserve the existing non-retriable default)
- * when the failure is intentional or owned by another mechanism:
- *  - force-stop: the user asked to stop; retrying would fight that intent.
- *  - context-exceeded: the loop/termination logic owns this outcome, not retry.
+ * Returns undefined when the failure is owned by another mechanism:
+ * force-stop (retrying would fight the user's intent) and context-exceeded
+ * (the loop/termination logic owns that outcome).
  */
 export function synthesizeMissingFailureReason(params: {
   isForceStopping: boolean;

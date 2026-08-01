@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync, mkdtempSync, readFileSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  startServer,
   cleanupTest,
-  TestWSClient,
-  TestServerConfig,
   getFreePort,
+  startServer,
+  type TestServerConfig,
+  TestWSClient,
 } from "../utils/test-helpers.js";
-import type { ChildProcess } from "node:child_process";
 
 let configPath: string | undefined;
 
@@ -38,9 +38,10 @@ const waitForFileToContain = async (
 
 const runTests = async (
   config: TestServerConfig,
-  tests: (executionDir?: string, proxyPort?: number) => Promise<void>
+  tests: (executionDir?: string, proxyPort?: number) => Promise<void>,
 ) => {
-  const tempDir = path.dirname(configPath!);
+  if (!configPath) throw new Error("configPath not initialized");
+  const tempDir = path.dirname(configPath);
   let serverProcess: ChildProcess | null = null;
   let client: TestWSClient | null = null;
 
@@ -71,16 +72,14 @@ const runTests = async (
 
     try {
       const match = readFileSync(serverLogPath, "utf-8").match(
-        /\[STDOUT\] Created execution directory: (.+)/
+        /\[STDOUT\] Created execution directory: (.+)/,
       );
       if (match) {
         executionDir = match[1].trim();
         console.log(`✓ Found execution directory: ${executionDir}`);
       }
     } catch (error) {
-      console.log(
-        `⚠ Could not parse server.log for execution directory: ${error}`
-      );
+      console.log(`⚠ Could not parse server.log for execution directory: ${error}`);
     }
 
     await tests(executionDir, proxyPort);
@@ -112,7 +111,13 @@ describe("LLM proxy", () => {
               id: "codon-1-analysis",
               name: "Codon 1: Initial Analysis",
               promptFile: "prompts/1-analyze.md",
-              model: "sonnet",
+              // These tests assert proxy wiring (health endpoint, --without-proxy)
+              // and never run a codon — but the startup self-test still demands
+              // credentials for every *credential-enforced* model in the config.
+              // A pi passthrough with an unenforced provider passes all three
+              // static checks with no keys at all, which is what keeps this
+              // suite honest in the keyless integration tier.
+              model: "pi/proxytest/never-invoked",
               continuationMode: "fresh",
               checkpointedFiles: ["src/**/*.ts", "analysis.md"],
             },
@@ -120,15 +125,15 @@ describe("LLM proxy", () => {
               id: "codon-2-implementation",
               name: "Codon 2: Implementation",
               promptFile: "prompts/2-implement.md",
-              model: "sonnet",
+              model: "pi/proxytest/never-invoked",
               continuationMode: "continue-previous",
               checkpointedFiles: ["src/**/*.ts"],
             },
           ],
         },
         null,
-        2
-      )
+        2,
+      ),
     );
 
     // Create prompts directory
@@ -138,88 +143,97 @@ describe("LLM proxy", () => {
     // Create prompt files
     writeFileSync(
       path.join(promptsDir, "1-analyze.md"),
-      "Please analyze the TypeScript files in the `src/` directory. Identify areas for improvement in terms of code structure, clarity, and potential bugs. Write your findings to a new file named `analysis.md`."
+      "Please analyze the TypeScript files in the `src/` directory. Identify areas for improvement in terms of code structure, clarity, and potential bugs. Write your findings to a new file named `analysis.md`.",
     );
 
     writeFileSync(
       path.join(promptsDir, "2-implement.md"),
-      "Based on our previous discussion and the contents of `analysis.md`, please implement the suggested improvements directly into the source files."
+      "Based on our previous discussion and the contents of `analysis.md`, please implement the suggested improvements directly into the source files.",
     );
   });
 
   test("health check responds when proxy enabled", async (done) => {
     expect(configPath).toBeDefined();
+    if (!configPath) throw new Error("configPath not initialized");
 
-    const tempDir = path.dirname(configPath!);
+    const tempDir = path.dirname(configPath);
     const port = await getFreePort();
 
     await runTests(
       {
         testRunDir: tempDir,
-        configFile: configPath!,
+        configFile: configPath,
         port,
         testMode: "integration",
         cwd: tempDir,
         proxy: true, // Proxy is off by default, enable it for this test
+        // The suite asserts proxy wiring only; without this, the server
+        // autostarts codon-1 the moment it boots — which is how these tests
+        // spent real Sonnet money on every CI push for months.
+        noAutostart: true,
+        // Point the proxy's upstream at a dead local port. The middleware
+        // assertion below needs a request on the API path, and this guarantees
+        // it terminates on this machine instead of reaching api.anthropic.com.
+        extraArgs: ["--anthropic-base-url", "http://127.0.0.1:1"],
       },
       async (executionDir, proxyPort) => {
         expect(executionDir).toBeDefined();
         expect(proxyPort).toBeDefined();
+        if (!executionDir) throw new Error("executionDir not reported by server");
 
         // Check that proxy is running on the reported port
-        const healthResponse = await fetch(
-          `http://localhost:${proxyPort}/health`
-        );
+        const healthResponse = await fetch(`http://localhost:${proxyPort}/health`);
         expect(healthResponse.ok).toBe(true);
         expect(await healthResponse.text()).toBe("Hankweave Proxy OK");
 
+        // `/health` short-circuits before the middleware, so it alone proves
+        // nothing about the request pipeline. Send one request down the API
+        // path — the middleware logs it before attempting the (dead) upstream
+        // forward, which is all this assertion needs. Historically this line
+        // was satisfied by a real autostarted Sonnet codon's API traffic.
+        await fetch(`http://localhost:${proxyPort}/v1/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ probe: true }),
+        }).catch(() => {
+          // The upstream is intentionally unreachable; delivery is irrelevant.
+        });
+
         // Check if server log contains the logging middleware message
-        const logPath = path.join(
-          executionDir!,
-          ".hankweave/logs/server.log"
-        );
-        await waitForFileToContain(
-          logPath,
-          "[LOGGING-MIDDLEWARE] Received request"
-        );
+        const logPath = path.join(executionDir, ".hankweave/logs/server.log");
+        await waitForFileToContain(logPath, "[LOGGING-MIDDLEWARE] Received request");
 
         done();
-      }
+      },
     );
   }, 30000);
 
   test("does not run proxy when withoutProxy is true", async (done) => {
     expect(configPath).toBeDefined();
+    if (!configPath) throw new Error("configPath not initialized");
 
-    const tempDir = path.dirname(configPath!);
+    const tempDir = path.dirname(configPath);
     const port = await getFreePort();
     await runTests(
       {
         testRunDir: tempDir,
-        configFile: configPath!,
+        configFile: configPath,
         port,
         testMode: "integration",
         cwd: tempDir,
         withoutProxy: true,
+        noAutostart: true,
       },
       async (_executionDir, proxyPort) => {
-        // Verify proxy port is not reported when proxy is disabled
+        // The server.ready payload is the contract: no proxyPort means the
+        // runtime never started a proxy. The old socket probe on `port + 1`
+        // raced concurrent suites — the runtime prefers server-port+1 for its
+        // proxy, but getFreePort never reserved that adjacent port, so any
+        // parallel test could legitimately be listening there.
         expect(proxyPort).toBeUndefined();
 
-        // Check that proxy is NOT running on (server port + 1)
-        try {
-          await fetch(`http://localhost:${port + 1}/health`);
-          // If we get here, the proxy is running when it shouldn't be
-          expect.unreachable(
-            "Proxy should not be running when withoutProxy is true"
-          );
-        } catch (error) {
-          // This is expected - the proxy should not be running
-          expect(error).toBeDefined();
-
-          done();
-        }
-      }
+        done();
+      },
     );
   }, 30000);
 });

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { CheckpointGit } from "../../server/checkpoint-git";
 import { Logger } from "../../server/utils";
@@ -22,9 +23,13 @@ describe("CheckpointGit", () => {
   });
 
   beforeEach(async () => {
-    // Create a temporary directory for testing with absolute path
-    tempDir = path.resolve("tests", "test-area", `temp-test-checkpoint-${Date.now()}`);
-    await fs.promises.mkdir(tempDir, { recursive: true });
+    // Real git repos in the OS tmpdir, NOT tests/test-area: this repo lives
+    // in a Dropbox-synced tree, and the sync daemon touching .git internals
+    // mid-commit made commit() return null across 25 tests in one parallel
+    // sweep. os.tmpdir() is never synced. (test-area also carries a
+    // com.dropbox.ignored xattr now, but tmpdir makes these tests safe on
+    // any synced checkout, not just this machine.)
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-checkpoint-test-"));
 
     // Create a mock logger
     const logPath = path.join(tempDir, "test.log");
@@ -528,12 +533,8 @@ describe("CheckpointGit", () => {
   });
 
   test("initialize migrates legacy .git directory to .hankweavecheckpoints", async () => {
-    // Use existing test pattern with test-area directory
-    const migrationTempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-migration-${Date.now()}`,
-    );
+    // tmpdir, not test-area — see the beforeEach note on synced folders.
+    const migrationTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-migration-test-"));
     const checkpointPath = path.join(migrationTempDir, ".hankweave", "checkpoints");
 
     try {
@@ -568,11 +569,7 @@ describe("CheckpointGit", () => {
   });
 
   test("checkpoint directory is not detected as git submodule when committed", async () => {
-    const submoduleTempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-test-submodule-${Date.now()}`,
-    );
+    const submoduleTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-submodule-test-"));
 
     try {
       await fs.promises.mkdir(submoduleTempDir, { recursive: true });

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "meta": {
+    "name": "keyless-wiring-test",
+    "version": "1.0.0",
+    "description": "For suites that assert server wiring and never run a codon. The pi passthrough provider below is not credential-enforced, so the startup self-test passes with no API keys in the environment — which is what lets these suites live in the keyless offline tier. Never autostart a run against this config: the model does not exist."
+  },
+  "hank": [
+    {
+      "id": "codon-1",
+      "name": "Codon 1: Never Invoked",
+      "promptText": "This codon must never run. If you are reading this, a wiring-only test autostarted its config.",
+      "model": "pi/keylesstest/never-invoked",
+      "continuationMode": "fresh",
+      "checkpointedFiles": ["notes/*.txt"]
+    },
+    {
+      "id": "codon-2",
+      "name": "Codon 2: Never Invoked",
+      "promptText": "This codon must never run either.",
+      "model": "pi/keylesstest/never-invoked",
+      "continuationMode": "continue-previous",
+      "checkpointedFiles": ["notes/*.txt"]
+    }
+  ]
+}

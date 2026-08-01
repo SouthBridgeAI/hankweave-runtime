@@ -1,12 +1,9 @@
-import { describe, it, expect, beforeAll } from "bun:test";
-import * as path from "node:path";
+import { beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
-import {
-  runSentinelTest,
-  createTestLog
-} from "../utils/sentinel-test-harness.js";
+import * as path from "node:path";
 import { sentinelConfigSchema } from "../../server/config-validation/sentinel.schema.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
+import { createTestLog, runSentinelTest } from "../utils/sentinel-test-harness.js";
 
 const TEMP_LOG_DIR = path.resolve(process.cwd(), "tests/test-area/temp-logs");
 const SENTINEL_CONFIGS_DIR = path.resolve(process.cwd(), "tests/config/sentinel-triggers");
@@ -14,7 +11,7 @@ const SENTINEL_CONFIGS_DIR = path.resolve(process.cwd(), "tests/config/sentinel-
 // Helper to load a Sentinel config from our test files
 function loadSentinelConfig(fileName: string) {
   const filePath = path.join(SENTINEL_CONFIGS_DIR, fileName);
-  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const fileContent = fs.readFileSync(filePath, "utf-8");
   const config = JSON.parse(fileContent);
   return sentinelConfigSchema.parse(config);
 }
@@ -28,13 +25,13 @@ function createSentinelConfig(partial: Partial<SentinelConfig>): SentinelConfig 
     trigger: {
       type: "event",
       on: ["info"],
-      conditions: []
+      conditions: [],
     },
     execution: {
-      strategy: "immediate"
+      strategy: "immediate",
     },
     userPromptText: "Test: {{events}}",
-    ...partial
+    ...partial,
   };
   return sentinelConfigSchema.parse(base);
 }
@@ -47,7 +44,6 @@ beforeAll(() => {
 });
 
 describe("Sentinel Edge Cases and Properties", () => {
-
   describe("Empty and No-Match Scenarios", () => {
     it("should handle empty log files gracefully", async () => {
       const testLogPath = path.join(TEMP_LOG_DIR, "empty.jsonl");
@@ -87,10 +83,8 @@ describe("Sentinel Edge Cases and Properties", () => {
         trigger: {
           type: "event",
           on: ["assistant.action"],
-          conditions: [
-            { operator: "equals", path: "action", value: "nonexistent" }
-          ]
-        }
+          conditions: [{ operator: "equals", path: "action", value: "nonexistent" }],
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -101,20 +95,18 @@ describe("Sentinel Edge Cases and Properties", () => {
   describe("Debounce Edge Cases", () => {
     it("should handle single event with debounce", async () => {
       const testLogPath = path.join(TEMP_LOG_DIR, "single-debounce.jsonl");
-      createTestLog(testLogPath, [
-        { type: "assistant.action", data: { action: "thinking" } }
-      ]);
+      createTestLog(testLogPath, [{ type: "assistant.action", data: { action: "thinking" } }]);
 
       const config = createSentinelConfig({
         id: "single-debounce",
         trigger: {
           type: "event",
-          on: ["assistant.action"]
+          on: ["assistant.action"],
         },
         execution: {
           strategy: "debounce",
-          milliseconds: 100
-        }
+          milliseconds: 100,
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -142,12 +134,12 @@ describe("Sentinel Edge Cases and Properties", () => {
         id: "rapid-debounce",
         trigger: {
           type: "event",
-          on: ["info"]
+          on: ["info"],
         },
         execution: {
           strategy: "debounce",
-          milliseconds: 500
-        }
+          milliseconds: 500,
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -241,12 +233,12 @@ describe("Sentinel Edge Cases and Properties", () => {
         id: "exact-count",
         trigger: {
           type: "event",
-          on: ["info"]
+          on: ["info"],
         },
         execution: {
           strategy: "count",
-          threshold: 5
-        }
+          threshold: 5,
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -272,12 +264,12 @@ describe("Sentinel Edge Cases and Properties", () => {
         id: "below-count",
         trigger: {
           type: "event",
-          on: ["info"]
+          on: ["info"],
         },
         execution: {
           strategy: "count",
-          threshold: 5
-        }
+          threshold: 5,
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -307,10 +299,8 @@ describe("Sentinel Edge Cases and Properties", () => {
         trigger: {
           type: "event",
           on: ["assistant.action"],
-          conditions: [
-            { operator: "notEquals", path: "action", value: "thinking" }
-          ]
-        }
+          conditions: [{ operator: "notEquals", path: "action", value: "thinking" }],
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -333,10 +323,8 @@ describe("Sentinel Edge Cases and Properties", () => {
         trigger: {
           type: "event",
           on: ["tool.result"],
-          conditions: [
-            { operator: "notIn", path: "toolName", value: ["Write", "Read", "Delete"] }
-          ]
-        }
+          conditions: [{ operator: "notIn", path: "toolName", value: ["Write", "Read", "Delete"] }],
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -347,7 +335,7 @@ describe("Sentinel Edge Cases and Properties", () => {
       if (call) {
         const [_, events] = call;
         if (events[0].type === "tool.result") {
-          const data = events[0].data as any;
+          const data = events[0].data;
           expect(data.toolName).toBe("Bash");
         }
       }
@@ -367,10 +355,8 @@ describe("Sentinel Edge Cases and Properties", () => {
         trigger: {
           type: "event",
           on: ["token.usage"],
-          conditions: [
-            { operator: "greaterThan", path: "totalCost", value: 0.4 }
-          ]
-        }
+          conditions: [{ operator: "greaterThan", path: "totalCost", value: 0.4 }],
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -393,10 +379,8 @@ describe("Sentinel Edge Cases and Properties", () => {
         trigger: {
           type: "event",
           on: ["info"],
-          conditions: [
-            { operator: "matches", path: "message", value: ".*codon-\\d+.*" }
-          ]
-        }
+          conditions: [{ operator: "matches", path: "message", value: ".*codon-\\d+.*" }],
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -410,19 +394,20 @@ describe("Sentinel Edge Cases and Properties", () => {
     it("should handle malformed log entries gracefully", async () => {
       const testLogPath = path.join(TEMP_LOG_DIR, "malformed.jsonl");
       // Mix valid and invalid entries
-      fs.writeFileSync(testLogPath,
+      fs.writeFileSync(
+        testLogPath,
         '{"direction":"out","loggedAt":"2024-01-01T00:00:00Z","message":{"type":"info","id":"1","timestamp":"2024-01-01T00:00:00Z","data":{"message":"valid"}}}\n' +
-        'not json at all\n' +
-        '{"invalid": "structure"}\n' +
-        '{"direction":"out","loggedAt":"2024-01-01T00:00:01Z","message":{"type":"info","id":"2","timestamp":"2024-01-01T00:00:01Z","data":{"message":"also valid"}}}\n'
+          "not json at all\n" +
+          '{"invalid": "structure"}\n' +
+          '{"direction":"out","loggedAt":"2024-01-01T00:00:01Z","message":{"type":"info","id":"2","timestamp":"2024-01-01T00:00:01Z","data":{"message":"also valid"}}}\n',
       );
 
       const config = createSentinelConfig({
         id: "malformed-test",
         trigger: {
           type: "event",
-          on: ["info"]
-        }
+          on: ["info"],
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -435,7 +420,10 @@ describe("Sentinel Edge Cases and Properties", () => {
       const testLogPath = path.join(TEMP_LOG_DIR, "missing-fields.jsonl");
       createTestLog(testLogPath, [
         { type: "assistant.action", data: { action: "thinking", content: "test" } },
-        { type: "assistant.action", data: { action: "tool_use", content: "test", toolName: "Bash" } },
+        {
+          type: "assistant.action",
+          data: { action: "tool_use", content: "test", toolName: "Bash" },
+        },
         // toolInput is optional and missing
       ]);
 
@@ -444,10 +432,8 @@ describe("Sentinel Edge Cases and Properties", () => {
         trigger: {
           type: "event",
           on: ["assistant.action"],
-          conditions: [
-            { operator: "equals", path: "action", value: "tool_use" }
-          ]
-        }
+          conditions: [{ operator: "equals", path: "action", value: "tool_use" }],
+        },
       });
 
       const mock = await runSentinelTest(testLogPath, [config]);
@@ -468,9 +454,9 @@ describe("Sentinel Edge Cases and Properties", () => {
           type: "tool.result",
           data: {
             isError: i % 10 === 0, // Every 10th is an error
-            toolName: `tool-${i}`
+            toolName: `tool-${i}`,
           },
-          delayMs: 1
+          delayMs: 1,
         });
       }
 
@@ -478,7 +464,7 @@ describe("Sentinel Edge Cases and Properties", () => {
       events.push(
         { type: "tool.result", data: { isError: true, toolName: "final-1" }, delayMs: 1 },
         { type: "tool.result", data: { isError: true, toolName: "final-2" }, delayMs: 1 },
-        { type: "tool.result", data: { isError: true, toolName: "final-3" }, delayMs: 1 }
+        { type: "tool.result", data: { isError: true, toolName: "final-3" }, delayMs: 1 },
       );
 
       createTestLog(testLogPath, events);
@@ -490,10 +476,14 @@ describe("Sentinel Edge Cases and Properties", () => {
       const lastCall = mock.calls[mock.calls.length - 1];
       if (lastCall) {
         const events = lastCall.eventsOrMessages;
-        if (events[0].type === "tool.result" && events[1].type === "tool.result" && events[2].type === "tool.result") {
-          const data0 = events[0].data as any;
-          const data1 = events[1].data as any;
-          const data2 = events[2].data as any;
+        if (
+          events[0].type === "tool.result" &&
+          events[1].type === "tool.result" &&
+          events[2].type === "tool.result"
+        ) {
+          const data0 = events[0].data;
+          const data1 = events[1].data;
+          const data2 = events[2].data;
           expect(data0.toolName).toBe("final-1");
           expect(data1.toolName).toBe("final-2");
           expect(data2.toolName).toBe("final-3");

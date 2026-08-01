@@ -531,7 +531,10 @@ export class BasicTUI {
             `${COLORS.dim}  ${SYMBOLS.arrow} Recent file: ${event.data.recentFileAccess.path}${COLORS.reset}`,
           );
         }
-        if (this.showCosts) {
+        // totalCost can be null on early snapshots (before any codon has
+        // reported usage) — this line crashed the event handler with
+        // "null is not an object" in every replay run that snapshots at boot.
+        if (this.showCosts && typeof event.data.totalCost === "number") {
           console.log(
             `  ${SYMBOLS.arrow} Total cost: ${
               COLORS.yellow

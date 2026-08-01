@@ -8,11 +8,17 @@
  * The SDK `query` is mocked at the module level BEFORE the manager is imported
  * (via top-level await + dynamic import) so the manager binds to the stub.
  */
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { afterAll, describe, expect, mock, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import * as realSdk from "@anthropic-ai/claude-agent-sdk";
 import { ClaudeLogParser } from "../../server/claude-log-parser";
 import { Logger } from "../../server/utils";
+
+// Snapshot the real SDK exports BEFORE mock.module patches the module in
+// place (the spread copies the current values; the namespace object itself is
+// mutated by the mock).
+const realSdkExports = { ...realSdk };
 
 // A generator that establishes a session (one system/init message) and then
 // throws mid-stream, mirroring a token expiry during the agent's streaming turn.
@@ -26,6 +32,14 @@ function failingMidStreamQuery() {
 mock.module("@anthropic-ai/claude-agent-sdk", () => ({
   query: () => failingMidStreamQuery(),
 }));
+
+afterAll(() => {
+  // bun's mock.module is process-global and persists across test FILES in the
+  // same run: without this restore, every later test importing the SDK (e.g.
+  // the ClaudeAgentSDKManager integration suite) gets the always-throwing
+  // query and fails with this file's "sess-midstream"/401 stub.
+  mock.module("@anthropic-ai/claude-agent-sdk", () => realSdkExports);
+});
 
 const { ClaudeAgentSDKManager } = await import("../../server/claude-agent-sdk-manager");
 

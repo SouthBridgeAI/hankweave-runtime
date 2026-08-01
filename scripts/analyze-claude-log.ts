@@ -1,10 +1,15 @@
 #!/usr/bin/env bun
 
 import fs from "node:fs";
-import path from "node:path";
+import type { z } from "zod";
+import type {
+  AssistantMessage,
+  LogMessage,
+  ResultMessage,
+  SystemMessage,
+  UserMessage,
+} from "../server/types/claude-session-schema.js";
 import { logMessageSchema } from "../server/types/claude-session-schema.js";
-import type { LogMessage, AssistantMessage, SystemMessage, UserMessage, ResultMessage } from "../server/types/claude-session-schema.js";
-import { z } from "zod";
 
 // Color codes for terminal output
 const colors = {
@@ -49,17 +54,19 @@ function printUsage() {
   console.log("  --show-errors      Show validation errors inline");
   console.log("  --export-report    Export detailed validation report");
   console.log("  --verbose          Show all message details");
-  console.log("\nExample: bun scripts/analyze-claude-log.ts path/to/claude.log --limit 10 --show-errors");
+  console.log(
+    "\nExample: bun scripts/analyze-claude-log.ts path/to/claude.log --limit 10 --show-errors",
+  );
 }
 
 function truncateText(text: string, maxLength = 200): string {
   if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength - 3) + "...";
+  return `${text.substring(0, maxLength - 3)}...`;
 }
 
 function parseLogFile(filePath: string): ParseResult[] {
   const content = fs.readFileSync(filePath, "utf-8");
-  const lines = content.split("\n").filter(line => line.trim());
+  const lines = content.split("\n").filter((line) => line.trim());
 
   return lines.map((line, index) => {
     try {
@@ -71,27 +78,29 @@ function parseLogFile(filePath: string): ParseResult[] {
           lineNumber: index + 1,
           success: true,
           message: result.data,
-          rawLine: line
+          rawLine: line,
         };
       } else {
         return {
           lineNumber: index + 1,
           success: false,
           errors: result.error.issues,
-          rawLine: line
+          rawLine: line,
         };
       }
-    } catch (error) {
+    } catch {
       return {
         lineNumber: index + 1,
         success: false,
-        errors: [{
-          path: [],
-          message: "Invalid JSON",
-          code: "custom" as const,
-          fatal: false
-        } as z.ZodIssue],
-        rawLine: line
+        errors: [
+          {
+            path: [],
+            message: "Invalid JSON",
+            code: "custom" as const,
+            fatal: false,
+          } as z.ZodIssue,
+        ],
+        rawLine: line,
       };
     }
   });
@@ -99,13 +108,13 @@ function parseLogFile(filePath: string): ParseResult[] {
 
 function printStatistics(results: ParseResult[]) {
   const total = results.length;
-  const successful = results.filter(r => r.success).length;
-  const failed = results.filter(r => !r.success).length;
+  const successful = results.filter((r) => r.success).length;
+  const failed = results.filter((r) => !r.success).length;
 
   const messageTypes: Record<string, number> = {};
   const toolIdFormats = { claude: 0, nonClaude: 0 };
 
-  results.forEach(result => {
+  results.forEach((result) => {
     if (result.success && result.message) {
       messageTypes[result.message.type] = (messageTypes[result.message.type] || 0) + 1;
 
@@ -113,7 +122,7 @@ function printStatistics(results: ParseResult[]) {
       if (result.message.type === "assistant") {
         const assistMsg = result.message as AssistantMessage;
         if (Array.isArray(assistMsg.message.content)) {
-          assistMsg.message.content.forEach(content => {
+          assistMsg.message.content.forEach((content) => {
             if (content.type === "tool_use") {
               if (content.id.startsWith("toolu_")) {
                 toolIdFormats.claude++;
@@ -130,8 +139,12 @@ function printStatistics(results: ParseResult[]) {
   console.log(`\n${colors.bright}=== Log File Statistics ===${colors.reset}`);
   console.log(`${colors.bright}Parse Results:${colors.reset}`);
   console.log(`  Total lines: ${colors.cyan}${total}${colors.reset}`);
-  console.log(`  Successfully parsed: ${colors.green}${successful}${colors.reset} (${((successful / total) * 100).toFixed(1)}%)`);
-  console.log(`  Failed to parse: ${colors.red}${failed}${colors.reset} (${((failed / total) * 100).toFixed(1)}%)`);
+  console.log(
+    `  Successfully parsed: ${colors.green}${successful}${colors.reset} (${((successful / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  Failed to parse: ${colors.red}${failed}${colors.reset} (${((failed / total) * 100).toFixed(1)}%)`,
+  );
 
   console.log(`\n${colors.bright}Message Types:${colors.reset}`);
   Object.entries(messageTypes).forEach(([type, count]) => {
@@ -146,6 +159,12 @@ function printStatistics(results: ParseResult[]) {
 }
 
 function printSystemMessage(msg: SystemMessage) {
+  if (msg.subtype !== "init") {
+    console.log(
+      `${colors.bgBlue}${colors.white} SYSTEM ${msg.subtype.toUpperCase()} ${colors.reset}`,
+    );
+    return;
+  }
   console.log(`${colors.bgBlue}${colors.white} SYSTEM INIT ${colors.reset}`);
   console.log(`  Session ID: ${colors.cyan}${msg.session_id}${colors.reset}`);
   console.log(`  Model: ${colors.cyan}${msg.model}${colors.reset}`);
@@ -160,22 +179,30 @@ function printAssistantMessage(msg: AssistantMessage, verbose: boolean) {
 
   if (msg.message.usage) {
     const usage = msg.message.usage;
-    console.log(`  Tokens: ${colors.dim}in:${usage.input_tokens} out:${usage.output_tokens}${colors.reset}`);
+    console.log(
+      `  Tokens: ${colors.dim}in:${usage.input_tokens} out:${usage.output_tokens}${colors.reset}`,
+    );
   }
 
   if (Array.isArray(msg.message.content)) {
-    msg.message.content.forEach(content => {
+    msg.message.content.forEach((content) => {
       if (content.type === "text") {
         const text = verbose ? content.text : truncateText(content.text, 150);
         console.log(`  ${colors.bright}Text:${colors.reset} ${text}`);
       } else if (content.type === "tool_use") {
-        console.log(`  ${colors.magenta}Tool Use:${colors.reset} ${content.name} (ID: ${colors.dim}${content.id}${colors.reset})`);
+        console.log(
+          `  ${colors.magenta}Tool Use:${colors.reset} ${content.name} (ID: ${colors.dim}${content.id}${colors.reset})`,
+        );
         if (verbose && content.input) {
-          console.log(`    Input: ${colors.dim}${JSON.stringify(content.input, null, 2).split('\n').join('\n    ')}${colors.reset}`);
+          console.log(
+            `    Input: ${colors.dim}${JSON.stringify(content.input, null, 2).split("\n").join("\n    ")}${colors.reset}`,
+          );
         }
       } else if (content.type === "thinking") {
         const thinking = verbose ? content.thinking : truncateText(content.thinking, 100);
-        console.log(`  ${colors.yellow}Thinking:${colors.reset} ${colors.dim}${thinking}${colors.reset}`);
+        console.log(
+          `  ${colors.yellow}Thinking:${colors.reset} ${colors.dim}${thinking}${colors.reset}`,
+        );
       }
     });
   } else if (typeof msg.message.content === "string") {
@@ -188,14 +215,17 @@ function printUserMessage(msg: UserMessage, verbose: boolean) {
   console.log(`${colors.bgYellow}${colors.white} USER ${colors.reset}`);
 
   if (Array.isArray(msg.message.content)) {
-    msg.message.content.forEach(content => {
+    msg.message.content.forEach((content) => {
       if (content.type === "text") {
         const text = verbose ? content.text : truncateText(content.text, 150);
         console.log(`  ${colors.bright}Text:${colors.reset} ${text}`);
       } else if (content.type === "tool_result") {
         console.log(`  ${colors.magenta}Tool Result:${colors.reset} ${content.tool_use_id}`);
         if (verbose) {
-          const resultStr = typeof content.content === "string" ? content.content : JSON.stringify(content.content, null, 2);
+          const resultStr =
+            typeof content.content === "string"
+              ? content.content
+              : JSON.stringify(content.content, null, 2);
           console.log(`    Result: ${colors.dim}${truncateText(resultStr, 300)}${colors.reset}`);
         }
       }
@@ -209,7 +239,9 @@ function printUserMessage(msg: UserMessage, verbose: boolean) {
 function printResultMessage(msg: ResultMessage) {
   const bgColor = msg.is_error ? colors.bgRed : colors.bgGreen;
   console.log(`${bgColor}${colors.white} RESULT: ${msg.subtype.toUpperCase()} ${colors.reset}`);
-  console.log(`  Duration: ${colors.cyan}${msg.duration_ms}ms${colors.reset} (API: ${msg.duration_api_ms}ms)`);
+  console.log(
+    `  Duration: ${colors.cyan}${msg.duration_ms}ms${colors.reset} (API: ${msg.duration_api_ms}ms)`,
+  );
   console.log(`  Turns: ${colors.cyan}${msg.num_turns}${colors.reset}`);
 
   if (msg.total_cost_usd !== undefined) {
@@ -229,7 +261,7 @@ function printMessage(result: ParseResult, options: Options) {
   if (!result.success) {
     console.log(`${colors.bgRed}${colors.white} PARSE ERROR ${colors.reset}`);
     if (options.showErrors && result.errors) {
-      result.errors.forEach(error => {
+      result.errors.forEach((error) => {
         console.log(`  ${colors.red}${error.path.join(".")}: ${error.message}${colors.reset}`);
       });
     }
@@ -255,35 +287,39 @@ function printMessage(result: ParseResult, options: Options) {
 }
 
 function exportValidationReport(filePath: string, results: ParseResult[]) {
-  const reportPath = filePath + ".analysis-report.json";
+  const reportPath = `${filePath}.analysis-report.json`;
 
   const report = {
     summary: {
       file: filePath,
       timestamp: new Date().toISOString(),
       totalLines: results.length,
-      validLines: results.filter(r => r.success).length,
-      invalidLines: results.filter(r => !r.success).length,
-      successRate: ((results.filter(r => r.success).length / results.length) * 100).toFixed(2) + "%"
+      validLines: results.filter((r) => r.success).length,
+      invalidLines: results.filter((r) => !r.success).length,
+      successRate: `${((results.filter((r) => r.success).length / results.length) * 100).toFixed(2)}%`,
     },
     errors: results
-      .filter(r => !r.success)
-      .map(r => ({
+      .filter((r) => !r.success)
+      .map((r) => ({
         line: r.lineNumber,
-        errors: r.errors?.map(e => ({
+        errors: r.errors?.map((e) => ({
           path: e.path.join("."),
           message: e.message,
-          code: e.code
+          code: e.code,
         })),
-        sample: truncateText(r.rawLine, 200)
+        sample: truncateText(r.rawLine, 200),
       })),
     messageTypeCounts: results
-      .filter(r => r.success && r.message)
-      .reduce((acc, r) => {
-        const type = r.message!.type;
-        acc[type] = (acc[type] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>)
+      .filter((r) => r.success && r.message)
+      .reduce(
+        (acc, r) => {
+          if (r.message) {
+            acc[r.message.type] = (acc[r.message.type] || 0) + 1;
+          }
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
   };
 
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
@@ -311,7 +347,7 @@ if (import.meta.main) {
     limit: undefined,
     showErrors: args.includes("--show-errors"),
     exportReport: args.includes("--export-report"),
-    verbose: args.includes("--verbose")
+    verbose: args.includes("--verbose"),
   };
 
   const limitIndex = args.indexOf("--limit");
@@ -339,12 +375,13 @@ if (import.meta.main) {
     console.log(`\n${colors.bright}=== Message Details ===${colors.reset}`);
     console.log(`Showing ${messagesToShow.length} of ${results.length} messages\n`);
 
-    messagesToShow.forEach(result => printMessage(result, options));
+    messagesToShow.forEach((result) => printMessage(result, options));
 
     if (options.limit && results.length > options.limit) {
-      console.log(`\n${colors.dim}... ${results.length - options.limit} more messages not shown${colors.reset}`);
+      console.log(
+        `\n${colors.dim}... ${results.length - options.limit} more messages not shown${colors.reset}`,
+      );
     }
-
   } catch (error) {
     console.error(`${colors.red}Error analyzing log file: ${error}${colors.reset}`);
     process.exit(1);

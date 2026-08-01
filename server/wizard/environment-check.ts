@@ -1,17 +1,15 @@
 /**
  * Environment Check
  *
- * Detects installed agent harnesses (Claude Code, Codex, Gemini CLI)
- * and API keys needed to run hanks.
+ * Detects the Claude Code harness and the API keys needed to run hanks.
+ * Non-Anthropic models run on the embedded Pi coding agent (in-process),
+ * which only needs the provider API keys — nothing to install.
  * Also provides credit validation via lightweight API calls.
  */
 
-import { execSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { detectClaudeExecutable, isLegacyClaudeAuthEnabled } from "../claude-agent-sdk-manager.js";
 import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
+import { resolveProviderApiKey } from "../pi-sdk-manager.js";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -39,58 +37,8 @@ export interface EnvironmentResult {
   canRunHanks: boolean;
   /** Human-readable summary of what they can run */
   summary: string;
-  /** The best available harness for the demo (claude > codex, no gemini) */
-  bestHarness: "claude" | "codex" | null;
-}
-
-// ── Harness Detection ─────────────────────────────────────────
-
-function detectCodexCli(): boolean {
-  // Check standard paths
-  const possiblePaths = [
-    path.join(os.homedir(), ".npm-global/bin/codex"),
-    "/usr/local/bin/codex",
-    "/opt/homebrew/bin/codex",
-  ];
-
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return true;
-  }
-
-  // Fall back to `which`
-  try {
-    const result = execSync("which codex", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-    return !!result;
-  } catch {
-    return false;
-  }
-}
-
-function detectGeminiCli(): boolean {
-  // Check standard paths
-  const possiblePaths = [
-    path.join(os.homedir(), ".npm-global/bin/gemini"),
-    "/usr/local/bin/gemini",
-    "/opt/homebrew/bin/gemini",
-  ];
-
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return true;
-  }
-
-  // Fall back to `which`
-  try {
-    const result = execSync("which gemini", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-    return !!result;
-  } catch {
-    return false;
-  }
+  /** The best available harness for the demo (claude > pi) */
+  bestHarness: "claude" | "pi" | null;
 }
 
 // ── API Key Detection ─────────────────────────────────────────
@@ -102,25 +50,14 @@ function hasAnthropicAuth(): boolean {
 }
 
 function hasOpenAiAuth(): boolean {
-  // Direct API key
-  if (process.env.OPENAI_API_KEY) return true;
-  // Codex CLI auth.json
-  const codexAuthPath = path.join(os.homedir(), ".codex", "auth.json");
-  if (fs.existsSync(codexAuthPath)) {
-    try {
-      const content = fs.readFileSync(codexAuthPath, "utf-8");
-      const auth = JSON.parse(content);
-      // The auth file should have some token/key
-      if (auth && (auth.token || auth.api_key || auth.access_token)) return true;
-    } catch {
-      // Malformed auth file - treat as not found
-    }
-  }
-  return false;
+  return !!process.env.OPENAI_API_KEY;
 }
 
 function hasGoogleAuth(): boolean {
-  return !!process.env.GOOGLE_API_KEY;
+  // GEMINI_API_KEY — the same resolution the embedded pi runtime uses, so
+  // "found" here means the exact key value credit validation and the demo
+  // session will use exists.
+  return !!resolveProviderApiKey("google");
 }
 
 // ── Main Check Function ───────────────────────────────────────
@@ -129,10 +66,9 @@ function hasGoogleAuth(): boolean {
  * Run all environment checks and return the results.
  */
 export function checkEnvironment(): EnvironmentResult {
-  // Detect harnesses
+  // Detect harnesses. The Pi coding agent is embedded in hankweave itself, so
+  // it is always available — non-Anthropic models only need an API key.
   const claudeFound = detectClaudeExecutable() !== null;
-  const codexFound = detectCodexCli();
-  const geminiFound = detectGeminiCli();
 
   const harnesses: HarnessStatus[] = [
     {
@@ -142,16 +78,9 @@ export function checkEnvironment(): EnvironmentResult {
       helpLink: claudeFound ? undefined : "https://docs.anthropic.com/en/docs/claude-code",
     },
     {
-      name: "Codex",
-      found: codexFound,
-      detail: codexFound ? "found" : "not found",
-      helpLink: codexFound ? undefined : "npm i -g @openai/codex",
-    },
-    {
-      name: "Gemini CLI",
-      found: geminiFound,
-      detail: geminiFound ? "found" : "not found",
-      helpLink: geminiFound ? undefined : "https://github.com/google-gemini/gemini-cli",
+      name: "Pi coding agent",
+      found: true,
+      detail: "embedded",
     },
   ];
 
@@ -175,24 +104,25 @@ export function checkEnvironment(): EnvironmentResult {
     },
     {
       name: "Google",
-      envVar: "GOOGLE_API_KEY",
+      envVar: "GEMINI_API_KEY",
       found: googleFound,
       helpLink: googleFound ? undefined : "https://aistudio.google.com/app/apikey",
     },
   ];
 
-  // Determine what they can run
+  // Determine what they can run. OpenAI/Google models run on the embedded Pi
+  // agent, so an API key alone is enough.
   const canClaude = claudeFound && anthropicFound;
-  const canCodex = codexFound && openaiFound;
-  const canGemini = geminiFound && googleFound;
-  const canRunHanks = canClaude || canCodex || canGemini;
+  const canOpenai = openaiFound;
+  const canGoogle = googleFound;
+  const canRunHanks = canClaude || canOpenai || canGoogle;
 
   // Build summary
   let summary: string;
   const readyParts: string[] = [];
   if (canClaude) readyParts.push("Claude");
-  if (canCodex) readyParts.push("Codex");
-  if (canGemini) readyParts.push("Gemini");
+  if (canOpenai) readyParts.push("OpenAI");
+  if (canGoogle) readyParts.push("Gemini");
 
   if (readyParts.length > 0) {
     summary = `You're ready to run ${readyParts.join(" and ")}-based hanks.`;
@@ -200,10 +130,10 @@ export function checkEnvironment(): EnvironmentResult {
     summary = "No agent harnesses are fully configured yet.";
   }
 
-  // Best harness for demo: claude > codex, no gemini
-  let bestHarness: "claude" | "codex" | null = null;
+  // Best harness for demo: claude > pi
+  let bestHarness: "claude" | "pi" | null = null;
   if (canClaude) bestHarness = "claude";
-  else if (canCodex) bestHarness = "codex";
+  else if (canOpenai || canGoogle) bestHarness = "pi";
 
   return {
     harnesses,
@@ -219,7 +149,8 @@ export function checkEnvironment(): EnvironmentResult {
 /**
  * Fallback model configuration for running the demo hank.
  * The demo hank uses "haiku" (Anthropic). When the user doesn't have
- * Anthropic credentials, we override with -m to use an available provider.
+ * Anthropic credentials, we override with -m to use an available provider
+ * (routed through the embedded Pi agent).
  *
  * Fallback order: Anthropic (haiku) > OpenAI (gpt-5.2) > Google (gemini-2.5-flash)
  */
@@ -239,25 +170,25 @@ export interface DemoModelChoice {
  * @returns DemoModelChoice, or null if no provider is available
  */
 export function getDemoModelChoice(env: EnvironmentResult): DemoModelChoice | null {
-  const canClaude = env.harnesses[0]?.found && env.apiKeys[0]?.found;
-  const canCodex = env.harnesses[1]?.found && env.apiKeys[1]?.found;
-  const canGemini = env.harnesses[2]?.found && env.apiKeys[2]?.found;
+  const keyFound = (name: string) => env.apiKeys.some((k) => k.name === name && k.found);
+  const claudeHarnessFound = env.harnesses.some((h) => h.name === "Claude Code" && h.found);
 
-  if (canClaude) {
+  // OpenAI/Google demos run on the embedded Pi agent — the API key is enough.
+  if (claudeHarnessFound && keyFound("Anthropic")) {
     return {
       providerName: "Claude",
       modelOverride: undefined, // Demo hank already uses haiku
       provider: "anthropic",
     };
   }
-  if (canCodex) {
+  if (keyFound("OpenAI")) {
     return {
-      providerName: "Codex",
+      providerName: "OpenAI",
       modelOverride: "gpt-5.2",
       provider: "openai",
     };
   }
-  if (canGemini) {
+  if (keyFound("Google")) {
     return {
       providerName: "Gemini",
       modelOverride: "gemini-2.5-flash",
@@ -342,8 +273,11 @@ export async function validateApiCredits(
     } else if (provider === "google") {
       const modelId = registry.findCheapestModel("google") ?? "gemini-2.5-flash";
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
+      // @ai-sdk/google's own env default is GOOGLE_GENERATIVE_AI_API_KEY, so
+      // the key must be passed explicitly — use the same resolved value
+      // hasGoogleAuth() detected.
       const google = createGoogleGenerativeAI({
-        apiKey: process.env.GOOGLE_API_KEY,
+        apiKey: resolveProviderApiKey("google"),
       });
       await generateText({
         model: google(modelId),

@@ -5,7 +5,12 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServerReadyEvent } from "../../server/schemas/event-schemas.js";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
-import { generateTestTimestamp, getFreePort } from "../utils/test-helpers.js";
+import {
+  generateTestTimestamp,
+  getFreePort,
+  waitForCondition,
+  waitForPortFree,
+} from "../utils/test-helpers.js";
 
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_AREA = path.join(TEST_ROOT, "tests/test-area");
@@ -48,11 +53,28 @@ describe("--ignore-data-mismatch relink behavior", () => {
     });
 
     try {
-      await firstServer.waitForEvent("server.ready", 30_000);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const firstReadyEvent = (await firstServer.waitForEvent(
+        "server.ready",
+        30_000,
+      )) as ServerReadyEvent;
+      // The relink under test only matters once the first run has linked its own
+      // data source, so wait for that link rather than guessing at a delay.
+      await waitForCondition(() =>
+        fs.existsSync(
+          path.join(
+            firstReadyEvent.data.agentRootPath,
+            "read_only_data_source",
+            path.basename(dataPathA),
+          ),
+        ),
+      );
     } finally {
       await firstServer.stop();
     }
+
+    // Relaunching on the same port right after stop() races the OS releasing
+    // the first server's listener socket (EADDRINUSE); wait until it rebinds.
+    expect(await waitForPortFree(port)).toBe(true);
 
     const secondServer = await launchHankweave({
       port,
@@ -77,7 +99,6 @@ describe("--ignore-data-mismatch relink behavior", () => {
       const linkedContents = fs.readFileSync(linkedDataPath, "utf-8").trim();
 
       expect(linkedContents).toBe("bravo");
-      await new Promise((resolve) => setTimeout(resolve, 500));
     } finally {
       await secondServer.stop();
     }

@@ -32,17 +32,17 @@ const mode = (process.argv[2] || "normal") as TestMode;
 
 const validModes: TestMode[] = ["normal", "npx", "bunx", "binary"];
 if (!validModes.includes(mode)) {
-	console.error(`Error: Invalid mode '${mode}'`);
-	console.error(`Valid modes: ${validModes.join(", ")}`);
-	process.exit(1);
+  console.error(`Error: Invalid mode '${mode}'`);
+  console.error(`Valid modes: ${validModes.join(", ")}`);
+  process.exit(1);
 }
 
 // Display header
 const modeDisplay: Record<TestMode, string> = {
-	normal: "Normal Mode (Source)",
-	npx: "NPX Mode (Verdaccio)",
-	bunx: "Bunx Mode (Verdaccio)",
-	binary: "Binary Mode (Compiled)",
+  normal: "Normal Mode (Source)",
+  npx: "NPX Mode (Verdaccio)",
+  bunx: "Bunx Mode (Verdaccio)",
+  binary: "Binary Mode (Compiled)",
 };
 
 console.log("╔════════════════════════════════════════════════════════════╗");
@@ -53,27 +53,26 @@ console.log("╚═════════════════════�
 const testEnv = { ...process.env };
 
 switch (mode) {
-	case "npx":
-		testEnv.HANKWEAVE_TEST_USE_NPX = "1";
-		break;
-	case "bunx":
-		testEnv.HANKWEAVE_TEST_USE_BUNX = "1";
-		break;
-	case "binary":
-		testEnv.HANKWEAVE_TEST_USE_BINARY = "1";
-		break;
-	case "normal":
-	default:
-		// No special env vars needed for normal mode
-		break;
+  case "npx":
+    testEnv.HANKWEAVE_TEST_USE_NPX = "1";
+    break;
+  case "bunx":
+    testEnv.HANKWEAVE_TEST_USE_BUNX = "1";
+    break;
+  case "binary":
+    testEnv.HANKWEAVE_TEST_USE_BINARY = "1";
+    break;
+  default:
+    // No special env vars needed for normal mode
+    break;
 }
 
 // Run the test using bun test
 const proc = spawn("bun", ["test", TEST_FILE], {
-	stdio: "inherit",
-	env: testEnv,
+  stdio: "inherit",
+  env: testEnv,
 });
 
 proc.on("close", (code) => {
-	process.exit(code || 0);
+  process.exit(code || 0);
 });

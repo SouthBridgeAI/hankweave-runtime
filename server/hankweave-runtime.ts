@@ -8,17 +8,14 @@ import { CheckpointGit } from "./checkpoint-git.js";
 import { CodonRunner, type ExtensionInfo } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
-import {
-  classifyApiErrorText,
-  resolveFailureAction,
-  synthesizeMissingFailureReason,
-} from "./error-classification.js";
+import { synthesizeMissingFailureReason } from "./error-classification.js";
 import { EventJournal } from "./event-journal.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { ProxyRunner } from "./llm-proxy.js";
 import { Replay } from "./replay.js";
+import { RetryCoordinator } from "./retry-coordinator.js";
 // Import event types from new schema file
 import type {
   AssistantActionEvent,
@@ -74,7 +71,6 @@ import {
 import type { ToolInputMap, ToolName } from "./types/tool-types.js";
 import type {
   CheckpointInfo,
-  ClaudeLogMessage,
   ClientData,
   Codon,
   CodonConfig,
@@ -86,7 +82,7 @@ import type {
   ShellCommand,
 } from "./types/types.js";
 // Import remaining types from old file
-import { ClientMode, isSyntheticTimeout } from "./types/types.js";
+import { ClientMode } from "./types/types.js";
 import {
   assertNever,
   buildFileTree,
@@ -200,15 +196,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    *  JSON-serializable. Used by error tracking to send real stack traces. */
   private codonFailureError?: Error;
   private isForceStopping = false;
-  private resultMessageReceived = false;
-  private resultMessageSuccess = false; // True only when subtype === "success"
 
-  // Retry tracking for onFailure: "retry" policy
-  // NOTE: These counters are in-memory only. If the server restarts mid-retry,
-  // the counter is lost and the codon remains in failed state. Users can
-  // manually retry via checkpoint restore. This is acceptable for transient
-  // failures (the target of auto-retry) which won't persist across restarts.
-  private retryAttempts = new Map<string, number>(); // codonId -> attempt count
+  // Failure-policy decisions and retry bookkeeping (see RetryCoordinator for
+  // the in-memory-counter caveats); the runtime performs the effects.
+  private readonly retryCoordinator = new RetryCoordinator((message) =>
+    this.logger.log(message, "info"),
+  );
   private budget: Budget | null = null;
 
   // Rollback state
@@ -1881,9 +1874,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           } as ErrorEvent);
 
           // Apply failure policy
-          const action = this.resolveFailurePolicy(codonId, codon, this.codonFailureReason);
+          const decision = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
 
-          if (action === "continue") {
+          if (decision.action === "continue") {
             // Emit codon.completed event with failureIgnored flag
             // (Early failure paths don't go through handleCodonComplete)
             this.emit("event", {
@@ -1927,39 +1920,34 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             return;
           }
 
-          if (action === "retry") {
+          if (decision.action === "retry") {
             // Rig setup failures with retry policy - retry the codon
             // (rig setup will run again since we're not skipping)
-            const attempts = this.retryAttempts.get(codonId) || 0;
-            const maxAttempts = codon.retryConfig?.maxAttempts ?? 3;
-            const delayMs = codon.retryConfig?.delayMs ?? 1000;
+            const { attempt, maxAttempts, delayBeforeThisAttemptMs } = decision;
+            this.retryCoordinator.recordAttempt(codonId);
 
-            if (attempts < maxAttempts) {
-              this.retryAttempts.set(codonId, attempts + 1);
+            this.emit("event", {
+              id: EventId(generateId()),
+              timestamp: new Date().toISOString(),
+              type: "info",
+              data: {
+                message: `Retrying codon ${codonId} after rig setup failure (attempt ${attempt}/${maxAttempts}) in ${delayBeforeThisAttemptMs}ms`,
+              },
+            } as InfoEvent);
 
-              this.emit("event", {
-                id: EventId(generateId()),
-                timestamp: new Date().toISOString(),
-                type: "info",
-                data: {
-                  message: `Retrying codon ${codonId} after rig setup failure (attempt ${attempts + 1}/${maxAttempts})`,
-                },
-              } as InfoEvent);
+            this.cleanupCurrentCodon();
+            await this.delay(delayBeforeThisAttemptMs);
 
-              this.cleanupCurrentCodon();
-              await this.delay(delayMs);
-
-              // Check if shutdown was requested during delay
-              if (this.isShuttingDown) {
-                this.logger.log(`Server shutting down, skipping retry for ${codonId}`);
-                return;
-              }
-
-              // Don't skip rig setup on retry - that's what failed!
-              // Pass isAutoRetry=true to prevent creating a new run
-              await this.startCodon(codonId, false, true);
+            // Check if shutdown was requested during delay
+            if (this.isShuttingDown) {
+              this.logger.log(`Server shutting down, skipping retry for ${codonId}`);
               return;
             }
+
+            // Don't skip rig setup on retry - that's what failed!
+            // Pass isAutoRetry=true to prevent creating a new run
+            await this.startCodon(codonId, false, true);
+            return;
           }
 
           // Fall through to original error handling for shutdown cases
@@ -2065,7 +2053,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       } as ErrorEvent);
 
       // Apply failure policy (sentinel failures respect codon onFailure config)
-      const action = this.resolveFailurePolicy(codonId, codon, this.codonFailureReason);
+      const { action } = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
 
       if (action === "continue") {
         // Emit codon.completed event with failureIgnored flag
@@ -2254,7 +2242,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         } as ErrorEvent);
 
         // Apply failure policy
-        const action = this.resolveFailurePolicy(codonId, codon, this.codonFailureReason);
+        const { action } = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
 
         if (action === "continue") {
           // Emit codon.completed event with failureIgnored flag
@@ -2449,7 +2437,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         anthropicBaseUrl: this.proxyRunner?.proxyUrl,
         logPath,
         globalSystemPrompt: this.config.globalSystemPrompt,
-        // Wiring: CLI --shim-idle-timeout → resolveSettings → serverConfig → here → CodonRunner → ShimProcessManager / ClaudeAgentSDKManager
+        // Wiring: CLI --shim-idle-timeout → resolveSettings → serverConfig → here → CodonRunner → ClaudeAgentSDKManager / PiSdkManager
         shimIdleTimeout: this.config.shimIdleTimeout,
         // Budget is always initialized in startNewRun() before any codon execution
         budget: this.budget as Budget,
@@ -2609,6 +2597,28 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.handleError(error, `Process for codon ${codonId}`, ErrorSeverity.FATAL);
     });
 
+    // Live display of failures the runner classifies (error results, timeouts).
+    // Forward as a non-fatal error event; nothing is stored — the authoritative
+    // outcome is read via runner.getOutcome() in handleCodonComplete.
+    runner.on("codonFailure", ({ reason, error }) => {
+      this.logger.log(`Codon ${codonId} failure classified: ${reason.message}`, "error");
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "error",
+        data: {
+          // APITimeoutError carries the legacy display message + timing context
+          message: error instanceof APITimeoutError ? error.message : reason.message,
+          codon: codonId,
+          fatal: false,
+          severity: error instanceof APITimeoutError ? error.severity : ErrorSeverity.CODON,
+          ...(error instanceof APITimeoutError && {
+            context: JSON.stringify(error.context),
+          }),
+        },
+      } as ErrorEvent);
+    });
+
     // Log parser events (forwarded through runner)
     runner.on("systemMessage", (msg: SystemMessage) => {
       this.handleSystemMessage(msg, codonId);
@@ -2748,50 +2758,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       });
     }
 
-    // Use type guard to check for synthetic timeout messages
-    if (isSyntheticTimeout(msg as ClaudeLogMessage)) {
-      this.logger.log(`API timeout detected in synthetic message for codon ${codonId}`, "error");
-
-      const timeoutError = new APITimeoutError(codonId, {
-        message: "API Error: Request timed out.",
-        timestamp: new Date().toISOString(),
-        synthetic: true,
-      });
-
-      // Set failure reason
-      this.codonFailureError = timeoutError;
-      this.codonFailureReason = {
-        type: "timeout",
-        retriable: true,
-        message: "API Error: Request timed out.",
-      };
-
-      // Send error event
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: timeoutError.message,
-          codon: codonId,
-          fatal: false,
-          severity: timeoutError.severity,
-          context: JSON.stringify(timeoutError.context),
-        },
-      } as ErrorEvent);
-
-      // Runner will handle the cleanup
-      if (this.currentCodon) {
-        const runner = this.codonRunners.get(this.currentCodon.codonId);
-        if (runner) {
-          runner.kill();
-        }
-      }
-
-      return; // Stop processing
-    }
-
-    // Cost tracking is handled by CostTracker (via setupCodonRunnerEventHandlers subscriptions)
+    // Presentation-only: timeout detection lives in
+    // CodonRunner.detectAssistantTimeout, and cost tracking in CostTracker.
 
     const content = msg.message.content;
     const contentArray = Array.isArray(content)
@@ -2801,49 +2769,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     for (const item of contentArray) {
       if ("text" in item && item.type === "text") {
         const textItem = item as TextContent;
-
-        // Check for API timeout error
-        if (textItem.text === "API Error: Request timed out.") {
-          this.logger.log(`API timeout detected in codon ${codonId}`, "error");
-
-          // Immediately handle the timeout error
-          const timeoutError = new APITimeoutError(codonId, {
-            message: textItem.text,
-            timestamp: new Date().toISOString(),
-          });
-
-          // Set failure reason
-          this.codonFailureError = timeoutError;
-          this.codonFailureReason = {
-            type: "timeout",
-            retriable: true,
-            message: "API Error: Request timed out.",
-          };
-
-          // Send error event
-          this.emit("event", {
-            id: EventId(generateId()),
-            timestamp: new Date().toISOString(),
-            type: "error",
-            data: {
-              message: timeoutError.message,
-              codon: codonId,
-              fatal: false,
-              severity: timeoutError.severity,
-              context: JSON.stringify(timeoutError.context),
-            },
-          } as ErrorEvent);
-
-          // Runner will handle the cleanup
-          if (this.currentCodon) {
-            const runner = this.codonRunners.get(this.currentCodon.codonId);
-            if (runner) {
-              runner.kill();
-            }
-          }
-
-          return; // Stop processing further messages
-        }
 
         this.emit("event", {
           id: EventId(generateId()),
@@ -2908,103 +2833,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  /**
-   * Classify an API error from a result message and set codonFailureReason.
-   * Handles both explicit error subtypes and the Claude SDK's disguised errors
-   * (subtype="success" with is_error=true, e.g., insufficient credits).
-   */
-  private setApiErrorFailureReason(msg: ResultMessage, codonId: string): void {
-    const errorText = msg.result || msg.error || "Unknown API error";
-
-    this.codonFailureReason = classifyApiErrorText(
-      typeof errorText === "string" ? errorText : "Unknown API error",
-    );
-
-    this.logger.log(
-      `Error result message for codon ${codonId}: ${this.codonFailureReason.message}`,
-      "error",
-    );
-
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "error",
-      data: {
-        message: this.codonFailureReason.message,
-        codon: codonId,
-        fatal: false,
-        severity: ErrorSeverity.CODON,
-      },
-    } as ErrorEvent);
-  }
-
   private handleResultMessage(msg: ResultMessage, codonId: string): void {
+    // Presentation-only: result classification lives in CodonRunner (read at
+    // completion via getOutcome(); the client-facing error event comes from
+    // the forwarded codonFailure event).
     this.logger.log(`Codon ${codonId} result message received: ${msg.subtype}`);
 
-    // Mark that we received a result message
-    this.resultMessageReceived = true;
-
-    // Check for API timeout in result (can be error subtype OR success with is_error=true)
-    if (msg.result === "API Error: Request timed out." && msg.is_error) {
-      this.logger.log(`API timeout detected in result message for codon ${codonId}`, "error");
-
-      const timeoutError = new APITimeoutError(codonId, {
-        message: msg.result,
-        timestamp: new Date().toISOString(),
-        is_error: msg.is_error,
-        duration_ms: msg.duration_ms,
-        duration_api_ms: msg.duration_api_ms,
-      });
-
-      // Set failure reason
-      this.codonFailureError = timeoutError;
-      this.codonFailureReason = {
-        type: "timeout",
-        retriable: true,
-        message: "API Error: Request timed out.",
-      };
-
-      // Send error event
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: timeoutError.message,
-          codon: codonId,
-          fatal: false,
-          severity: timeoutError.severity,
-          context: JSON.stringify(timeoutError.context),
-        },
-      } as ErrorEvent);
-    } else if (msg.subtype === "error" && !this.codonFailureReason) {
-      // Non-timeout error result — set a failure reason so this codon won't be marked as "completed".
-      // Common causes: insufficient credits, billing errors, API errors.
-      // The Claude SDK may swallow the real error message (anthropics/claude-agent-sdk-python#437),
-      // so we capture what we can from the result.
-      this.setApiErrorFailureReason(msg, codonId);
-    }
-
-    // The Claude SDK has a known behavior where it returns subtype="success" with is_error=true
-    // for API-level failures like insufficient credits. The result text contains the error message
-    // (e.g., "Credit balance is too low") but the subtype is misleadingly "success".
-    // We MUST check is_error to distinguish real success from these disguised failures.
     if (msg.subtype === "success" && !msg.is_error) {
-      this.resultMessageSuccess = true;
       this.logger.log(`Codon ${codonId} completed successfully`);
     } else if (msg.subtype === "success" && msg.is_error) {
-      // Disguised error: subtype="success" but is_error=true.
-      // Known case: Claude SDK returns this for credit/billing failures.
       this.logger.log(
         `Codon ${codonId} received result subtype="success" with is_error=true — treating as failure. Result: ${msg.result || "(empty)"}`,
         "error",
       );
-      if (!this.codonFailureReason) {
-        this.setApiErrorFailureReason(msg, codonId);
-      }
     }
-
-    // Cost tracking for success results is handled by CostTracker (via setupCodonRunnerEventHandlers subscriptions)
   }
 
   private handleUserMessage(msg: UserMessage, _codonId: string): void {
@@ -3179,8 +3021,37 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Get current status before any transitions
     const currentStatus = currentCodon.status;
 
-    // Wait for 2x the log parsing interval to ensure log parser catches up with final messages
-    await new Promise((resolve) => setTimeout(resolve, this.config.logParsingInterval * 2));
+    // Drain the log parser instead of sleeping for it.
+    //
+    // This used to be `await sleep(logParsingInterval * 2)` — a 2-second flat
+    // tax on every codon completion at the production default, and ~35% of the
+    // offline test tier's wall time. The sleep was a guess with both failure
+    // modes: usually the parser is ALREADY caught up (every exit path runs
+    // `emitExit` → `parseNow()` synchronously before the exit event fires), so
+    // the wait bought nothing; and when the final result line was still
+    // buffered in the manager's write stream, a fixed wait could still be too
+    // short on a loaded machine — the "Timeout waiting for state.transition"
+    // flake was exactly that.
+    //
+    // Now: re-parse on demand and stop the moment the result message is in.
+    // The old sleep duration survives only as the ceiling, for exits that
+    // legitimately have no result message (crashes, kills).
+    {
+      const drainDeadline = Date.now() + this.config.logParsingInterval * 2;
+      runner?.parseLog();
+      while (runner && !runner.hasResultMessage() && Date.now() < drainDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        runner.parseLog();
+      }
+    }
+
+    // The parse above only QUEUES state transitions (running → completing and
+    // the cost updates). The old sleep incidentally gave the queue time to
+    // apply; without this the final transition below can read a stale
+    // `running` and be rejected as `running → completed`. Wait for the queue
+    // explicitly — that, plus the drained parser, is the entire condition the
+    // old sleep was approximating.
+    await this.stateManager.waitForPendingTransitions();
 
     // Re-fetch the specific codon after potential transition to completing
     const updatedCodon = this.stateManager.getCodonInCurrentRun(CodonId(codonId));
@@ -3270,12 +3141,22 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       );
     }
 
+    // The runner owns "what happened" this attempt — read it once. Null-safe:
+    // shim early-exits can complete without a runner in the map.
+    const outcome = runner?.getOutcome();
+
     // Determine final status based on the actual codon outcome
-    // Priority order: force stop > explicit skip > budget exceeded > success result > error result > context exceeded (conditional) > exit code
+    // Priority order: force stop > explicit skip > budget exceeded > success result >
+    // acceptable context exceeded > error result > exit code
     let finalStatus: CodonStatus;
+    // True when a failure's reason originates in the runtime (force-stop,
+    // budget) rather than from the attempt itself — those reasons must not be
+    // overwritten by the runner-outcome adoption below.
+    let failureReasonOwnedByRuntime = false;
 
     if (this.isForceStopping) {
       finalStatus = "failed";
+      failureReasonOwnedByRuntime = true;
     } else if (wasSkipped) {
       // User explicitly requested skip — honour intent even if the agent
       // managed to emit a result message before SIGTERM took effect.
@@ -3284,6 +3165,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       const onExceeded = this.budget.getEffectiveLimits(codonId).onExceeded ?? "complete";
       if (onExceeded === "fail") {
         finalStatus = "failed";
+        failureReasonOwnedByRuntime = true;
         this.codonFailureReason = {
           type: "unknown" as const,
           retriable: false,
@@ -3300,19 +3182,19 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           message: `Codon ${onExceeded === "fail" ? "failed" : "completed"} (budget limit reached: ${this.budget.getExceededInfo(codonId)?.message || "unknown"})`,
         },
       } as InfoEvent);
-    } else if (exitCode === 0 && this.resultMessageSuccess) {
+    } else if (exitCode === 0 && outcome?.success) {
       finalStatus = "completed"; // Success result message with exit 0 = completed
-    } else if (exitCode === 0 && this.resultMessageReceived && !this.resultMessageSuccess) {
-      // Got a result message but it wasn't "success" (e.g., error subtype).
-      // This catches API errors like insufficient credits that the SDK reports
-      // as exit code 0 with an error result.
-      finalStatus = "failed";
-      this.logger.log(
-        `Codon ${codonId} received error result message with exit code 0 — marking as failed`,
-        "error",
-      );
     } else if (isContextExceeded && this.stateManager.isContextExceededAcceptable(codonId)) {
-      // Context exceeded in a loop that terminates on context exceeded = completed
+      // Context exceeded in a loop that terminates on context exceeded = completed.
+      //
+      // Checked BEFORE the exit-0-error-result branch below: input-overflow
+      // signals arrive as ERROR results ("Prompt is too long" from the Claude
+      // SDK, context_length_exceeded through pi — see isContextExceeded), and
+      // in replay the process exits 0 after writing them. With the old order
+      // those completions were shadowed into failures on the exit-0 path while
+      // the live path (SDK throws → exit 1) completed — a live/replay
+      // divergence. Non-context error results (billing, auth, …) don't match
+      // isContextExceeded and still fail below.
       finalStatus = "completed";
 
       // Emit info event for clarity
@@ -3324,6 +3206,15 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           message: `Codon completed successfully due to context exceeded (loop termination condition met)`,
         },
       } as InfoEvent);
+    } else if (exitCode === 0 && outcome?.resultReceived && !outcome.success) {
+      // Got a result message but it wasn't "success" (e.g., error subtype).
+      // This catches API errors like insufficient credits that the SDK reports
+      // as exit code 0 with an error result.
+      finalStatus = "failed";
+      this.logger.log(
+        `Codon ${codonId} received error result message with exit code 0 — marking as failed`,
+        "error",
+      );
     } else if (exitCode !== 0) {
       finalStatus = "failed"; // Non-zero exit = failed
     } else {
@@ -3331,20 +3222,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       finalStatus = "failed";
     }
 
-    // Derive a failure reason when the codon failed but none was classified from
-    // a result message. The runtime normally sets codonFailureReason from result
-    // messages, but a process can exit FAILED without ever producing one:
-    //  - The Claude Agent SDK crashes mid-stream — CodonRunner classifies the
-    //    crash text and surfaces it via getFailureReason().
-    //  - A shim exits non-zero on an early/pre-init API error with no result
-    //    message at all (gemini/pi/opencode).
-    // Without a reason here the failure would default to {retriable: false} and
-    // silently bypass `onFailure: retry`. Prefer the runner's classified reason
-    // (it carries the real error text); otherwise synthesize a bounded-retriable
-    // backstop, excluding force-stop and context-exceeded.
-    if (finalStatus === "failed" && !this.codonFailureReason) {
+    // Adopt the runner's classification for every runner-attributable failure.
+    // Unconditional (no `!this.codonFailureReason` guard): the runner is the
+    // single writer for attempt-derived reasons, so nothing can shadow its
+    // classification. Runtime-owned reasons (force-stop, budget) are excluded
+    // via failureReasonOwnedByRuntime. When the runner has no reason (shim
+    // early-exit, or an exit with no result and no crash text), synthesize a
+    // bounded-retriable backstop.
+    if (finalStatus === "failed" && !failureReasonOwnedByRuntime) {
       this.codonFailureReason =
-        runner?.getFailureReason() ??
+        outcome?.failureReason ??
         synthesizeMissingFailureReason({
           isForceStopping: this.isForceStopping,
           isContextExceeded,
@@ -3352,8 +3239,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           // A process that exited with no result before establishing a session is
           // a local setup failure (non-retriable); default true when unknown to
           // preserve the bounded-retriable backstop.
-          sessionEstablished: runner?.getSystemMessageReceived?.() ?? true,
+          sessionEstablished: outcome?.sessionEstablished ?? true,
         });
+      // Keep the runner's Error for telemetry stacks (e.g. APITimeoutError).
+      this.codonFailureError = outcome?.failureError ?? this.codonFailureError;
     }
 
     // Create checkpoint BEFORE state transition
@@ -3370,7 +3259,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         const commitInfo = await this.createCheckpoint({
           status: checkpointType,
           codonId: codonId,
-          codonName: this.currentCodon?.codon.name || codonId,
+          codonName: codonConfig.name || codonId,
           runId: this.currentRunId || RunId("unknown"),
           timestamp: new Date().toISOString(),
           duration: Date.now() - new Date(currentCodon.startTime).getTime(),
@@ -3410,7 +3299,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           to: finalStatus,
           metadata: {
             exitCode,
-            resultMessageReceived: this.resultMessageReceived,
+            resultMessageReceived: outcome?.resultReceived ?? false,
             checkpointSha: checkpointSha || "", // Ensure we always have a string
             contextExceeded: isContextExceeded,
             extensionCount,
@@ -3467,8 +3356,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     const reportedCost = finalStatus === "skipped" ? 0 : finalCost + accumulatedRetryCost;
 
     // Determine if this failure will be ignored (for event reporting)
-    const willIgnoreFailure =
-      finalStatus === "failed" && this.currentCodon?.codon.onFailure === "ignore";
+    const willIgnoreFailure = finalStatus === "failed" && codonConfig.onFailure === "ignore";
 
     this.emit("event", {
       id: EventId(generateId()),
@@ -3535,18 +3423,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Copy outputs to external directory only if outputDirectory is configured
     // If outputDirectory is undefined, outputs stay in the agent workspace ({executionPath}/agentRoot)
-    if (
-      finalStatus === "completed" &&
-      this.currentCodon.codon.outputFiles &&
-      this.config.outputDirectory
-    ) {
-      for (const [groupIndex, outItem] of this.currentCodon.codon.outputFiles.entries()) {
+    if (finalStatus === "completed" && codonConfig.outputFiles && this.config.outputDirectory) {
+      for (const [groupIndex, outItem] of codonConfig.outputFiles.entries()) {
         let beforeCopySuccess = false;
         try {
           if (outItem.beforeCopy && outItem.beforeCopy.length > 0) {
             this.logger.log(
               `Running ${outItem.beforeCopy.length} beforeCopy command(s) for codon ${
-                this.currentCodon.codon.id
+                codonConfig.id
               } (group ${groupIndex + 1})`,
             );
 
@@ -3556,12 +3440,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
                   outItem.beforeCopy.length
                 }: ${command.command.run}`,
               );
-              await this.runCommand(command, undefined, this.currentCodon?.codon.env);
+              await this.runCommand(command, undefined, codonConfig.env);
             }
 
             this.logger.log(
               `Completed all beforeCopy commands for codon ${
-                this.currentCodon.codon.id
+                codonConfig.id
               } (group ${groupIndex + 1})`,
             );
           }
@@ -3614,10 +3498,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Execute archiveOnSuccess if configured (after outputFiles, before loop expansion)
-    if (finalStatus === "completed" && this.currentCodon?.codon.archiveOnSuccess) {
+    if (finalStatus === "completed" && codonConfig.archiveOnSuccess) {
       const loopCtx = currentCodon.loopContext;
       await this.executeArchiveRigs(
-        this.currentCodon.codon.archiveOnSuccess,
+        codonConfig.archiveOnSuccess,
         codonId,
         checkpointSha || "orphan", // Use 'orphan' if no checkpoint (shouldn't happen for completed)
         loopCtx ? { loopId: loopCtx.loopId, iteration: loopCtx.iteration } : undefined,
@@ -3711,7 +3595,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Handle next steps
     if ((finalStatus === "completed" || finalStatus === "skipped") && !this.isShuttingDown) {
       // Clear retry counters for this codon (cost was already included in event emission)
-      this.retryAttempts.delete(codonId);
+      this.retryCoordinator.reset(codonId);
 
       if (this.config.autostart) {
         await this.autoStartNextCodon();
@@ -3766,13 +3650,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         // Silent fail - error tracking should never impact runtime
       }
 
-      const action = this.resolveFailurePolicy(
-        CodonId(codonId),
-        codonConfig,
-        capturedFailureReason,
-      );
+      const decision = this.retryCoordinator.decide(codonId, codonConfig, capturedFailureReason);
 
-      switch (action) {
+      switch (decision.action) {
         case "shutdown":
           // Non-retriable failure or exhausted retries - fail the run and shutdown
           if (this.currentRunId) {
@@ -3809,19 +3689,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           break;
 
         case "retry": {
-          const attempts = this.retryAttempts.get(codonId) || 0;
-          const maxAttempts = codonConfig.retryConfig?.maxAttempts ?? 3;
-          const delayMs = codonConfig.retryConfig?.delayMs ?? 1000;
+          const { attempt, maxAttempts, delayBeforeThisAttemptMs } = decision;
 
           // Accumulate cost from this failed attempt before retrying
           // Note: this.currentCodon is already cleaned up at this point, use finalCost from state
           const currentCost = finalCost;
           this.budget?.accumulateRetryCost(codonId, currentCost);
 
-          this.retryAttempts.set(codonId, attempts + 1);
+          this.retryCoordinator.recordAttempt(codonId);
 
           this.logger.log(
-            `Retry ${attempts + 1}/${maxAttempts} for codon ${codonId} in ${delayMs}ms`,
+            `Retry ${attempt}/${maxAttempts} for codon ${codonId} in ${delayBeforeThisAttemptMs}ms`,
           );
 
           // Emit info event about the retry
@@ -3830,11 +3708,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             timestamp: new Date().toISOString(),
             type: "info",
             data: {
-              message: `Retrying codon ${codonId} (attempt ${attempts + 1}/${maxAttempts})`,
+              message: `Retrying codon ${codonId} (attempt ${attempt}/${maxAttempts})`,
             },
           } as InfoEvent);
 
-          await this.delay(delayMs);
+          await this.delay(delayBeforeThisAttemptMs);
 
           // Check if server is shutting down before retrying
           // (User may have requested shutdown during the delay period)
@@ -3854,7 +3732,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
         case "continue": {
           // Clear retry counters for this codon
-          this.retryAttempts.delete(codonId);
+          this.retryCoordinator.reset(codonId);
 
           // Emit info event about the ignored failure
           this.emit("event", {
@@ -3933,56 +3811,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   // -------------
   // Failure Policy Helpers
   // -------------
-
-  /**
-   * Determine how to proceed after a codon failure based on its onFailure configuration.
-   * This is the single source of truth for failure policy decisions.
-   *
-   * @param codonId The ID of the failed codon
-   * @param codon The codon configuration
-   * @param failureReason The reason for the failure (may be undefined)
-   * @returns 'shutdown' | 'stay-active' | 'retry' | 'continue' indicating the action to take
-   */
-  private resolveFailurePolicy(
-    codonId: CodonId,
-    codon: Codon,
-    failureReason: FailureReason | undefined,
-  ): "shutdown" | "stay-active" | "retry" | "continue" {
-    const onFailure = codon.onFailure || "abort";
-    const isRetriable = failureReason?.retriable === true;
-    const attempts = this.retryAttempts.get(codonId) || 0;
-    const maxAttempts = codon.retryConfig?.maxAttempts ?? 3;
-
-    this.logger.log(
-      `Resolving failure policy for codon ${codonId}: onFailure=${onFailure}, retriable=${isRetriable}`,
-      "info",
-    );
-
-    const action = resolveFailureAction({
-      onFailure,
-      retriable: isRetriable,
-      attempts,
-      maxAttempts,
-    });
-
-    if (action === "shutdown" && onFailure === "retry") {
-      this.logger.log(
-        isRetriable
-          ? `Codon ${codonId} exhausted ${maxAttempts} retry attempts, aborting`
-          : `Codon ${codonId} has onFailure=retry but error is not retriable (${
-              failureReason?.message || failureReason?.type || "no failure reason"
-            }), falling back to abort`,
-        "info",
-      );
-    } else if (action === "continue") {
-      this.logger.log(
-        `Ignoring failure for codon ${codonId} due to onFailure: 'ignore' configuration`,
-        "info",
-      );
-    }
-
-    return action;
-  }
+  // Policy decisions and retry bookkeeping live in RetryCoordinator; the
+  // runtime keeps only the effects (emitting, delaying, respawning the codon).
 
   /**
    * Simple delay helper for retry timing.
@@ -6074,8 +5904,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.codonFailureError = undefined;
     this.isForceStopping = false;
     this.isSkippingCodon = false; // Reset skip flag after codon completion
-    this.resultMessageReceived = false; // Reset result message flag
-    this.resultMessageSuccess = false; // Reset success flag
 
     // Clear any pending tool uses
     this.pendingToolUses.clear();
