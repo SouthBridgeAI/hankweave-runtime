@@ -437,3 +437,138 @@ describe("synthesizeMissingFailureReason", () => {
     ).toMatchObject({ retriable: true });
   });
 });
+
+describe("classifyApiErrorText — AWS Bedrock failures are permanent with remediation", () => {
+  const cases: Array<{ name: string; text: string; remedyMentions: string }> = [
+    {
+      name: "AccessDeniedException (model/region access)",
+      text: "AccessDeniedException: You don't have access to the model with the specified model ID.",
+      remedyMentions: "IAM policy",
+    },
+    {
+      name: "UnrecognizedClientException (bad credentials)",
+      text: "UnrecognizedClientException: The security token included in the request is invalid.",
+      remedyMentions: "AWS_BEARER_TOKEN_BEDROCK",
+    },
+    {
+      name: "ExpiredTokenException (stale SSO session)",
+      text: "ExpiredTokenException: The security token included in the request is expired",
+      remedyMentions: "aws sso login",
+    },
+    {
+      name: "invalid/missing Identity Center session (SSO wording, no ExpiredTokenException)",
+      text: "The SSO session token associated with profile=acme was not found or is invalid",
+      remedyMentions: "aws sso login",
+    },
+    {
+      name: "missing credentials entirely",
+      text: "Could not load credentials from any providers",
+      remedyMentions: "AWS_BEARER_TOKEN_BEDROCK",
+    },
+    {
+      name: "pi applyAuth gate (no AWS env markers on the pi route)",
+      text: "Provider is not configured: amazon-bedrock",
+      remedyMentions: "AWS_BEARER_TOKEN_BEDROCK",
+    },
+    {
+      name: "bare on-demand id needs an inference profile",
+      text: "ValidationException: Invocation of model ID anthropic.claude-haiku-4-5-20251001-v1:0 with on-demand throughput isn't supported. Retry your request with the ID or ARN of an inference profile that contains this model.",
+      remedyMentions: "us.",
+    },
+    {
+      name: "ResourceNotFoundException (wrong region)",
+      text: "ResourceNotFoundException: The provided model identifier is invalid.",
+      remedyMentions: "AWS_REGION",
+    },
+    {
+      name: "wrong region surfaced through pi's ValidationException prefix",
+      text: "Validation error: The provided model identifier is invalid.",
+      remedyMentions: "AWS_REGION",
+    },
+    {
+      name: "InvalidSignatureException (wrong secret key)",
+      text: "InvalidSignatureException: The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method.",
+      remedyMentions: "AWS_SECRET_ACCESS_KEY",
+    },
+    {
+      name: "SignatureDoesNotMatch wording without the exception name",
+      text: "The request signature we calculated does not match the signature you provided.",
+      remedyMentions: "AWS_SECRET_ACCESS_KEY",
+    },
+    {
+      name: "STS assume-role denial (bare AccessDenied, no status)",
+      text: "AccessDenied: User: arn:aws:iam::123456789012:user/dev is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::123456789012:role/bedrock-invoke",
+      remedyMentions: "role_arn",
+    },
+    {
+      name: "AccessDeniedException on sts:AssumeRole still gets the role remedy",
+      text: "AccessDeniedException: not authorized to perform: sts:AssumeRole",
+      remedyMentions: "trust",
+    },
+  ];
+
+  for (const { name, text, remedyMentions } of cases) {
+    test(`${name} → non-retriable with actionable message`, () => {
+      const result = classifyApiErrorText(text, { sessionEstablished: true });
+      expect(result.retriable).toBe(false);
+      expect(result.type).toBe("api-error");
+      expect(result.message).toContain(remedyMentions);
+    });
+  }
+
+  test("a 'timed out' error mentioning bedrock still classifies as timeout, not permanent", () => {
+    const result = classifyApiErrorText(
+      "Request to bedrock-runtime.us-east-1.amazonaws.com timed out after 60 seconds",
+      { sessionEstablished: true },
+    );
+    expect(result.type).toBe("timeout");
+    expect(result.retriable).toBe(true);
+  });
+
+  test("Bedrock ThrottlingException stays transient (rate limiting, not auth)", () => {
+    const result = classifyApiErrorText(
+      "ThrottlingException: Too many requests, please wait before trying again.",
+      { sessionEstablished: true },
+    );
+    expect(result.retriable).toBe(true);
+  });
+
+  test("signature error carrying AWS's canonical-string dump stays permanent despite embedded 'timeout' header text", () => {
+    // Real shape from a live run: AWS appends the full canonical request to
+    // SignatureDoesNotMatch, and its header lines include
+    // "x-stainless-timeout:600" — which must NOT flip the classification to a
+    // retriable timeout (it did: 4 wasted attempts on a hopeless secret).
+    const text = [
+      "Failed to authenticate. API Error: 403 The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.",
+      "",
+      "The Canonical String for this request should have been",
+      "'POST",
+      "/model/us.anthropic.claude-haiku-4-5-20251001-v1%3A0/invoke-with-response-stream",
+      "host:bedrock-runtime.us-east-1.amazonaws.com",
+      "x-stainless-timeout:600",
+      "'",
+    ].join("\n");
+    const result = classifyApiErrorText(text, { sessionEstablished: true });
+    expect(result.retriable).toBe(false);
+    expect(result.type).toBe("api-error");
+    expect(result.message).toContain("AWS_SECRET_ACCESS_KEY");
+  });
+
+  test("pi's bare Validation error prefix is a permanent invalid request (DeepSeek-R1 no tool use)", () => {
+    const result = classifyApiErrorText("Validation error: This model doesn't support tool use.", {
+      sessionEstablished: true,
+    });
+    expect(result.retriable).toBe(false);
+    expect(result.type).toBe("api-error");
+    expect(result.message).toContain("invalid request");
+  });
+
+  test("ValidationException without a 400 in the text is a permanent invalid request", () => {
+    const result = classifyApiErrorText(
+      "ValidationException: The value at inferenceConfig.maxTokens is invalid.",
+      { sessionEstablished: true },
+    );
+    expect(result.retriable).toBe(false);
+    expect(result.type).toBe("api-error");
+  });
+});

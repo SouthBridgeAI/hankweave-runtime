@@ -517,6 +517,80 @@ describe("configureModelRuntime runtime key injection", () => {
 });
 
 /**
+ * Bedrock preflight: pi refuses amazon-bedrock requests when its auth
+ * resolution finds no credential ("Provider is not configured"), so the
+ * self-test must run that same resolution instead of taking the generic
+ * unenforced-provider pass and deferring the failure to the first invoke.
+ * PI_CODING_AGENT_DIR isolates pi's credential store from the developer's
+ * real ~/.pi; the AWS env markers are cleared so only what each test sets is
+ * visible.
+ */
+describe("PiSdkManager runSelfTest Bedrock credential preflight", () => {
+  const AWS_MARKERS = [
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_PROFILE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+  ];
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of [...AWS_MARKERS, "PI_CODING_AGENT_DIR"]) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    process.env.PI_CODING_AGENT_DIR = path.join(tempDir, "pi-agent-dir");
+  });
+
+  afterEach(() => {
+    for (const key of [...AWS_MARKERS, "PI_CODING_AGENT_DIR"]) {
+      if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key];
+      else delete process.env[key];
+    }
+  });
+
+  function makeManager(): PiSdkManager {
+    logParser = new ClaudeLogParser({
+      logPath: path.join(tempDir, "self-test.jsonl"),
+      codonId: "bedrock-preflight-test",
+      parsingInterval: 100,
+    });
+    return new PiSdkManager(tempDir, tempDir, logger, logParser);
+  }
+
+  test("no AWS credentials → authentication check fails with remediation", async () => {
+    const result = await makeManager().runSelfTest("amazon-bedrock/deepseek.v3.2");
+
+    const auth = result.checks.find((check) => check.name === "authentication");
+    expect(auth).toBeDefined();
+    expect(auth?.passed).toBe(false);
+    expect(auth?.message).toContain("AWS_BEARER_TOKEN_BEDROCK");
+    expect(result.overall.passed).toBe(false);
+  }, 20000);
+
+  test("bearer token present → authentication passes and names the source", async () => {
+    process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token";
+
+    const result = await makeManager().runSelfTest("amazon-bedrock/deepseek.v3.2");
+
+    const auth = result.checks.find((check) => check.name === "authentication");
+    expect(auth?.passed).toBe(true);
+    expect(auth?.message).toContain("AWS_BEARER_TOKEN_BEDROCK");
+  }, 20000);
+
+  test("non-Bedrock unenforced provider keeps the generic pass", async () => {
+    const result = await makeManager().runSelfTest("deepseek/deepseek-chat");
+
+    const auth = result.checks.find((check) => check.name === "authentication");
+    expect(auth?.passed).toBe(true);
+    expect(auth?.message).toContain("not credential-enforced");
+  }, 20000);
+});
+
+/**
  * Pi setup failures (missing credential, unresolvable model) must NOT escape
  * spawn() as exceptions: CodonRunner.run() would rethrow them as an
  * initialization error, which the runtime records as non-retriable and

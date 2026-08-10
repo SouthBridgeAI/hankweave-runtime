@@ -1,7 +1,11 @@
 import { CodonRunner } from "../codon-runner.js";
 import type { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import type { ModelInfo } from "../llm/models-dev-schema.js";
-import { getSupportedCodonProviderIds, isPassthroughShimProvider } from "../provider-ids.js";
+import {
+  getSupportedCodonProviderIds,
+  isPassthroughShimProvider,
+  runsOnClaudeAgentSdk,
+} from "../provider-ids.js";
 
 /**
  * Result of model validation
@@ -98,7 +102,9 @@ export function normalizeLegacyProviderModelInfo(
   registry?: LlmProviderRegistry,
 ): ModelInfo {
   const provider = modelInfo.providerId.toLowerCase();
-  if (provider === "anthropic" || provider === "pi") {
+  // Agent-SDK-routed plans (anthropic, and Anthropic-on-Bedrock — same rule
+  // as fresh validation in Step 2 below) and pi plans stay as persisted.
+  if (provider === "pi" || runsOnClaudeAgentSdk(provider, modelInfo.modelId)) {
     return modelInfo;
   }
   if (provider === "opencode") {
@@ -122,8 +128,10 @@ export function normalizeLegacyProviderModelInfo(
 /**
  * Validates a model string against the LLM registry and the runnable harnesses.
  *
- * The rule: models that resolve to the "anthropic" provider run natively on
- * the Claude Agent SDK; everything else is wrapped as a pi passthrough
+ * The rule: models that resolve to the "anthropic" provider — and Anthropic
+ * models hosted on Amazon Bedrock ("amazon-bedrock/…anthropic.claude-…") —
+ * run natively on the Claude Agent SDK; everything else is wrapped as a pi
+ * passthrough
  * (providerId "pi", modelId "<provider>/<canonical-id>", underlying
  * capabilities/cost kept — CostTracker prices passthrough models by that
  * "provider/model" modelId). The wrap happens AFTER registry resolution — not
@@ -238,13 +246,15 @@ export function validateModel(
     };
   }
 
-  // Step 2: Anthropic models run natively on the Claude Agent SDK; everything
-  // else runs through the embedded pi runtime.
+  // Step 2: Anthropic models run natively on the Claude Agent SDK — including
+  // Anthropic models hosted on Amazon Bedrock (the Agent SDK's Bedrock mode);
+  // "pi/amazon-bedrock/…" stays available as the explicit pi override.
+  // Everything else, non-Anthropic Bedrock models included, runs through the
+  // embedded pi runtime.
   const resolvedInfo = resolveResult.modelInfo;
-  const modelInfo =
-    resolvedInfo.providerId.toLowerCase() === "anthropic"
-      ? resolvedInfo
-      : wrapAsPiModelInfo(resolvedInfo, toPiTarget(resolvedInfo.providerId, resolvedInfo.modelId));
+  const modelInfo = runsOnClaudeAgentSdk(resolvedInfo.providerId, resolvedInfo.modelId)
+    ? resolvedInfo
+    : wrapAsPiModelInfo(resolvedInfo, toPiTarget(resolvedInfo.providerId, resolvedInfo.modelId));
 
   // Step 3: Check if CodonRunner can execute this model
   const canRun = CodonRunner.canRun(modelInfo);

@@ -35,10 +35,12 @@ describe("Provider Fallback Scenarios", () => {
         const registry = new LlmProviderRegistry({ logger: mockLogger });
         const statuses = registry.getProviderStatus();
 
-        // All providers should be unavailable
+        // All providers should be unavailable. API-key providers report
+        // "No API key"; amazon-bedrock reports its credential-chain message
+        // ("No credentials found ...") since it accepts more than one env var.
         for (const [_id, status] of statuses) {
           expect(status.status).toBe("not-configured");
-          expect(status.error).toContain("No API key");
+          expect(status.error).toMatch(/No API key|No credentials found/);
         }
 
         // No models should be available

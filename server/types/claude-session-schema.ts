@@ -113,9 +113,10 @@ export const toolUseContentSchema = z.object({
   type: z.literal("tool_use"),
 
   // Unique identifier for this tool use
-  // - Claude format: toolu_[alphanumeric]
+  // - Claude format: toolu_[alphanumeric]; hosted platforms infix a provider
+  //   tag (Bedrock: toolu_bdrk_…, Vertex: toolu_vrtx_…), hence the underscore
   // - Non-Claude models (e.g., Qwen): call_[hex string]
-  id: z.string().regex(/^(toolu_[a-zA-Z0-9]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
+  id: z.string().regex(/^(toolu_[a-zA-Z0-9_]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
 
   // Name of the tool being invoked
   name: toolNameSchema,
@@ -153,11 +154,12 @@ export const toolResultContentSchema = z.object({
   type: z.literal("tool_result"),
 
   // ID of the tool use this result corresponds to
-  // - Claude format: toolu_[alphanumeric]
+  // - Claude format: toolu_[alphanumeric]; hosted platforms infix a provider
+  //   tag (Bedrock: toolu_bdrk_…, Vertex: toolu_vrtx_…), hence the underscore
   // - Non-Claude models (e.g., Qwen): call_[hex string]
   tool_use_id: z
     .string()
-    .regex(/^(toolu_[a-zA-Z0-9]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
+    .regex(/^(toolu_[a-zA-Z0-9_]+|call_[a-fA-F0-9]+)$/, "Invalid tool use ID format"),
 
   // Result content from tool execution (can be string, object, or array of content items)
   content: z.union([
@@ -193,11 +195,16 @@ export const assistantMessageSchema = z.object({
   type: z.literal("assistant"),
 
   message: z.object({
-    // Message identifier - normal messages use msg_ prefix, synthetic messages may use UUID
+    // Message identifier - normal messages use msg_ prefix, synthetic messages
+    // may use UUID. Hosted platforms infix a provider tag (Bedrock:
+    // msg_bdrk_…, Vertex: msg_vrtx_…), hence the underscore in the msg_ body —
+    // without it every Bedrock assistant message fails validation, is silently
+    // dropped by the log parser, and no assistant.action/tool.result events
+    // (or the sentinels triggered by them) ever fire on the Bedrock path.
     id: z
       .string()
       .regex(
-        /^(msg_[a-zA-Z0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
+        /^(msg_[a-zA-Z0-9_]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
         "Invalid message ID format",
       ),
 

@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { setBedrockProviderModule } from "@earendil-works/pi-ai/api/bedrock-converse-stream.lazy";
+import { bedrockProviderModule } from "@earendil-works/pi-ai/bedrock-provider";
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { findEnvKeys } from "@earendil-works/pi-ai/compat";
 import {
@@ -30,6 +32,7 @@ import {
   serializeToolResultContent,
 } from "./pi-translation.js";
 import { PromptBuilder } from "./prompt-builder.js";
+import { AMAZON_BEDROCK_PROVIDER_ID } from "./provider-ids.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import { IdleTimeoutError, type Logger, toError } from "./utils.js";
 
@@ -42,6 +45,15 @@ import { IdleTimeoutError, type Logger, toError } from "./utils.js";
 // failed". Static registration embeds the flows in every build shape; with
 // node_modules present it is a no-op difference (same modules, loaded eagerly).
 registerBunOAuthFlows();
+
+// Same trap, Bedrock edition: pi-ai loads its amazon-bedrock implementation
+// through the identical variable-specifier lazy import (to keep the Node-only
+// AWS SDK out of browser bundles), so in the compiled binary every
+// amazon-bedrock/* request would fail to load its provider while source runs
+// work. pi-ai ships the "./bedrock-provider" subpath exactly for this —
+// register the statically imported module; with node_modules present the
+// override is the same module the lazy path would load.
+setBedrockProviderModule(bedrockProviderModule);
 
 /** Pi tools the in-process session is allowed to use. */
 const PI_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -869,8 +881,9 @@ export class PiSdkManager extends BaseProcessManager {
     });
 
     // Check 2: model runtime can be constructed (provider catalogs load).
+    let runtime: ModelRuntime | undefined;
     try {
-      await configureModelRuntime(effectiveEnv);
+      runtime = await configureModelRuntime(effectiveEnv);
       checks.push({
         name: "model_runtime",
         passed: true,
@@ -896,6 +909,25 @@ export class PiSdkManager extends BaseProcessManager {
           message: available
             ? `Credentials configured for provider '${provider}'`
             : `Missing API key for provider '${provider}'. Set ${credentialConfig.envVars.join(" or ")}.`,
+        });
+      } else if (provider.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID && runtime) {
+        // pi refuses Bedrock requests outright when its auth resolution finds
+        // nothing ("Provider is not configured: amazon-bedrock"), so run that
+        // same resolution now instead of passing preflight and failing at
+        // first invoke. checkAuth covers pi's credential store plus its
+        // ambient env markers — NOT on-disk config files or IMDS, which pi's
+        // bedrock provider does not consult.
+        const auth = await runtime.checkAuth(AMAZON_BEDROCK_PROVIDER_ID).catch(() => undefined);
+        checks.push({
+          name: "authentication",
+          passed: auth !== undefined,
+          message: auth
+            ? `Bedrock: AWS credentials via ${auth.source ?? "pi credential store"}`
+            : "No AWS credentials visible to pi for Bedrock. Quickest: set " +
+              "AWS_BEARER_TOKEN_BEDROCK (AWS Console → Bedrock → API keys → long-term key). " +
+              "Enterprise: set AWS_PROFILE after `aws sso login`, or AWS_ACCESS_KEY_ID + " +
+              "AWS_SECRET_ACCESS_KEY. Also set AWS_REGION. An on-disk default profile or " +
+              "instance role alone is not detected on this route.",
         });
       } else {
         checks.push({

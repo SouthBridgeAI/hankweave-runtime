@@ -9,7 +9,11 @@ import { classifyApiErrorText } from "./error-classification.js";
 import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { PiSdkManager } from "./pi-sdk-manager.js";
-import { isSupportedCodonProvider } from "./provider-ids.js";
+import {
+  AMAZON_BEDROCK_PROVIDER_ID,
+  isPassthroughShimProvider,
+  runsOnClaudeAgentSdk,
+} from "./provider-ids.js";
 import { ReplayProcessManager } from "./replay-process-manager.js";
 import type { StateManager } from "./state-manager.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
@@ -435,7 +439,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    * @returns true if the model can be executed, false otherwise
    */
   static canRun(model: ModelInfo): boolean {
-    return isSupportedCodonProvider(model.providerId);
+    return (
+      runsOnClaudeAgentSdk(model.providerId, model.modelId) ||
+      isPassthroughShimProvider(model.providerId)
+    );
   }
 
   /**
@@ -454,7 +461,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     logger: Logger,
     anthropicBaseUrl?: string,
   ): Promise<ShimSelfTestResult> {
-    const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
+    const isAnthropicModel = runsOnClaudeAgentSdk(modelInfo.providerId, modelInfo.modelId);
 
     // Create temporary log parser (required by managers)
     const tempLogParserPath = path.join(os.tmpdir(), `self-test-parser-${Date.now()}.jsonl`);
@@ -482,6 +489,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           logger,
           tempLogParser,
           anthropicBaseUrl,
+          undefined,
+          undefined,
+          modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
         );
 
         result = await manager.runSelfTest();
@@ -701,10 +711,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       );
     } else {
       const modelInfo = this.config.codon.model;
-      const isAnthropicModel = modelInfo.providerId.toLowerCase() === "anthropic";
+      const isAnthropicModel = runsOnClaudeAgentSdk(modelInfo.providerId, modelInfo.modelId);
 
       if (isAnthropicModel) {
-        // Use Claude Agent SDK for Anthropic models
+        // Use Claude Agent SDK for Anthropic models (Bedrock-hosted included)
         this.config.logger.log(
           `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
           "info",
@@ -718,6 +728,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           this.config.anthropicBaseUrl,
           this.config.globalSystemPrompt ?? null,
           this.config.shimIdleTimeout,
+          modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
         );
       } else if (modelInfo.providerId.toLowerCase() === "pi") {
         // Everything non-Anthropic runs on the IN-PROCESS Pi SDK — like the

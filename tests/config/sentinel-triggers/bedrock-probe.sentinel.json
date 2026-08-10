@@ -1,0 +1,19 @@
+{
+  "id": "bedrock-probe",
+  "name": "Bedrock Sentinel Probe",
+  "description": "Proves a Bedrock-hosted sentinel model fires during a hank: the sentinel LLM call goes through the AI SDK amazon-bedrock provider — a third code path independent of both codon runtimes.",
+  "model": "amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "trigger": {
+    "type": "event",
+    "on": ["assistant.action", "tool.result"]
+  },
+  "execution": {
+    "strategy": "debounce",
+    "milliseconds": 2000
+  },
+  "systemPromptText": "You observe an AI coding agent's event stream. Answer with a single short sentence.",
+  "userPromptText": "State in one short sentence how many events occurred.\n\nEvents:\n<%= JSON.stringify(it.events, null, 2) %>",
+  "output": {
+    "file": "bedrock-probe.log"
+  }
+}

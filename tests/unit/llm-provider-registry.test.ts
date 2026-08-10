@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { validateModel } from "../../server/config-validation/model-validator.js";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
+import {
+  isModelAccessDenialError,
+  LlmProviderRegistry,
+} from "../../server/llm/llm-provider-registry.js";
 import { Logger } from "../../server/utils.js";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
 import { createMockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
@@ -413,7 +416,7 @@ describe("LlmProviderRegistry", () => {
 
       expect(typeof stats.totalModels).toBe("number");
       expect(stats.totalModels).toBeGreaterThan(0);
-      expect(stats.totalProviders).toBe(5); // anthropic, openai, google, groq, deepseek
+      expect(stats.totalProviders).toBe(6); // anthropic, openai, google, groq, deepseek, amazon-bedrock
     });
   });
 
@@ -1137,9 +1140,9 @@ describe("LlmProviderRegistry", () => {
             outputTokens: 500,
           });
 
-          // gpt-5.6-luna pricing: input $1.00/M, output $6.00/M
-          // Expected: (1000/1M * 1.00) + (500/1M * 6.00) = 0.001 + 0.003 = 0.004
-          expect(cost).toBeCloseTo(0.004, 6);
+          // gpt-5.6-luna pricing: input $0.20/M, output $1.20/M
+          // Expected: (1000/1M * 0.20) + (500/1M * 1.20) = 0.0002 + 0.0006 = 0.0008
+          expect(cost).toBeCloseTo(0.0008, 6);
         });
       });
     });
@@ -1980,5 +1983,168 @@ describe("MockLlmProviderRegistry", () => {
     const statuses = await mockRegistry.performHealthChecks();
     expect(statuses).toBeInstanceOf(Map);
     expect(statuses.size).toBe(4);
+  });
+});
+
+/**
+ * amazon-bedrock is the one provider authenticated by a credential chain
+ * instead of a single API key: availability must follow the chain (bearer
+ * token, key pair, profile/credentials files) and the not-configured error
+ * must say the chain was consulted — not "missing API key".
+ */
+describe("LlmProviderRegistry — amazon-bedrock availability", () => {
+  const AWS_ENV_KEYS = [
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "HANKWEAVE_SENTINEL_AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_PROFILE",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_CONFIG_FILE",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+  ];
+  let originalEnv: Record<string, string | undefined>;
+  let awsDir: string;
+  const logger = new Logger("/tmp/test.log");
+  logger.log = () => {};
+
+  beforeEach(() => {
+    originalEnv = captureEnv();
+    for (const key of AWS_ENV_KEYS) delete process.env[key];
+    // Point the file-backed sources at an empty temp dir so the developer's
+    // real ~/.aws never decides these assertions.
+    awsDir = require("node:fs").mkdtempSync(
+      require("node:path").join(require("node:os").tmpdir(), "bedrock-registry-test-"),
+    );
+    process.env.AWS_SHARED_CREDENTIALS_FILE = require("node:path").join(awsDir, "credentials");
+    process.env.AWS_CONFIG_FILE = require("node:path").join(awsDir, "config");
+    LlmProviderRegistry.resetInstance();
+  });
+
+  afterEach(() => {
+    restoreEnv(originalEnv);
+    require("node:fs").rmSync(awsDir, { recursive: true, force: true });
+    LlmProviderRegistry.resetInstance();
+  });
+
+  const bedrockStatus = (registry: LlmProviderRegistry) =>
+    registry.getProviderStatus().get("amazon-bedrock");
+
+  it("is not-configured with no credential source, and names the accepted sources", () => {
+    const registry = new LlmProviderRegistry({ logger });
+    const status = bedrockStatus(registry);
+    expect(status?.status).toBe("not-configured");
+    if (status?.status === "not-configured") {
+      expect(status.error).toContain("AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY");
+      expect(status.error).toContain("not sentinels");
+    }
+  });
+
+  it("is available with AWS_BEARER_TOKEN_BEDROCK", () => {
+    process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token";
+    const registry = new LlmProviderRegistry({ logger });
+    expect(bedrockStatus(registry)?.status).toBe("available");
+  });
+
+  it("is available with an explicit env key pair", () => {
+    process.env.AWS_ACCESS_KEY_ID = "AKIATEST";
+    process.env.AWS_SECRET_ACCESS_KEY = "testsecret";
+    const registry = new LlmProviderRegistry({ logger });
+    expect(bedrockStatus(registry)?.status).toBe("available");
+  });
+
+  it("is NOT available via a credentials-file profile — codon-only source (dependency-trim asymmetry)", () => {
+    // Sentinels deliberately skip the file/SSO/container chain: resolving it
+    // needs @aws-sdk/credential-providers (~6MB transitive tree), which is
+    // kept out of the bundle. Codons on this machine still run Bedrock fine.
+    require("node:fs").writeFileSync(
+      process.env.AWS_SHARED_CREDENTIALS_FILE as string,
+      "[default]\naws_access_key_id = AKIATEST\naws_secret_access_key = testsecret\n",
+    );
+    const registry = new LlmProviderRegistry({ logger });
+    expect(bedrockStatus(registry)?.status).toBe("not-configured");
+  });
+
+  it("honors the HANKWEAVE_SENTINEL_ bearer override", () => {
+    process.env.HANKWEAVE_SENTINEL_AWS_BEARER_TOKEN_BEDROCK = "override-token";
+    const registry = new LlmProviderRegistry({ logger });
+    expect(bedrockStatus(registry)?.status).toBe("available");
+  });
+
+  it("resolves the bedrock haiku inference profile and its health-check model", () => {
+    process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token";
+    const registry = new LlmProviderRegistry({ logger });
+    const info = registry.getModelInfo(
+      "amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    );
+    expect(info.success).toBe(true);
+    if (info.success) {
+      expect(info.info.providerId).toBe("amazon-bedrock");
+      expect(info.info.cost).toBeDefined();
+    }
+    expect(registry.getHealthCheckModel("amazon-bedrock")).toBe(
+      "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    );
+  });
+
+  it("health-check candidates follow the configured region's geo profile", () => {
+    process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token";
+
+    const candidatesFor = (region?: string) => {
+      if (region) process.env.AWS_REGION = region;
+      else delete process.env.AWS_REGION;
+      LlmProviderRegistry.resetInstance();
+      const registry = new LlmProviderRegistry({ logger });
+      return registry.getHealthCheckModelCandidates("amazon-bedrock");
+    };
+
+    // No region → default (us-east-1) → us. profile, global. as fall-through
+    expect(candidatesFor()[0]).toBe("us.anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(candidatesFor("eu-west-1").slice(0, 2)).toEqual([
+      "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    ]);
+    expect(candidatesFor("ap-northeast-1")[0]).toBe("jp.anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(candidatesFor("ap-southeast-2")[0]).toBe("au.anthropic.claude-haiku-4-5-20251001-v1:0");
+    // No geo-specific Anthropic profile → global. leads
+    expect(candidatesFor("ap-south-1")[0]).toBe("global.anthropic.claude-haiku-4-5-20251001-v1:0");
+    // GovCloud partition: us-gov. only — commercial us. and global. aren't
+    // callable from it, and the candidate survives registry filtering even
+    // though models.dev carries no us-gov. ids
+    const govCandidates = candidatesFor("us-gov-east-1");
+    expect(govCandidates[0]).toBe("us-gov.anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(govCandidates).not.toContain("us.anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(govCandidates).not.toContain("global.anthropic.claude-haiku-4-5-20251001-v1:0");
+  });
+
+  it("classifies Bedrock's per-model access denial, not IAM invoke denials", () => {
+    expect(
+      isModelAccessDenialError(
+        new Error("You don't have access to the model with the specified model ID."),
+      ),
+    ).toBe(true);
+    // AI SDK APICallError carries the service message in responseBody
+    const apiError = Object.assign(new Error("Forbidden"), {
+      responseBody:
+        '{"message":"You don\'t have access to the model with the specified model ID."}',
+    });
+    expect(isModelAccessDenialError(apiError)).toBe(true);
+    expect(
+      isModelAccessDenialError(
+        new Error(
+          "User: arn:aws:iam::123:user/x is not authorized to perform: bedrock:InvokeModel",
+        ),
+      ),
+    ).toBe(false);
+    expect(isModelAccessDenialError(new Error("The security token included is invalid"))).toBe(
+      false,
+    );
   });
 });

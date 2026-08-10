@@ -316,6 +316,19 @@ export interface LaunchedServer {
    */
   waitForConnectionClose: (timeout?: number) => Promise<void>;
   /**
+   * Waits for the server process to exit WITHOUT sending it any signal, and
+   * returns how it exited. Use when the process's own exit code is the value
+   * under test (e.g. headless runs that must exit non-zero on failure) —
+   * `stop()`/`kill()` terminate the process themselves, so their exit codes
+   * reflect the signal, not the server's verdict.
+   * @param timeoutMs - Timeout in milliseconds (default: 120000)
+   * @throws {Error} If the process is still running after the timeout
+   */
+  waitForExit: (timeoutMs?: number) => Promise<{
+    exitCode: number | null;
+    signalCode: NodeJS.Signals | null;
+  }>;
+  /**
    * Waits for the current run to complete.
    * @param timeout - Timeout in milliseconds (default: 120000)
    * @returns Promise that resolves when the run completes
@@ -1061,22 +1074,27 @@ export async function launchHankweave(options: LaunchServerOptions): Promise<Lau
     return connectHankweaveClient(serverUrl, options);
   }
 
-  async function waitForExit(timeoutMs: number): Promise<void> {
-    if (child.exitCode !== null || child.signalCode !== null) return;
+  async function waitForExit(timeoutMs = 120_000): Promise<{
+    exitCode: number | null;
+    signalCode: NodeJS.Signals | null;
+  }> {
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          child.removeListener("exit", onExit);
+          reject(new Error(`Server did not exit within ${timeoutMs}ms`));
+        }, timeoutMs);
 
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        child.removeListener("exit", onExit);
-        reject(new Error(`Server did not exit within ${timeoutMs}ms`));
-      }, timeoutMs);
+        const onExit = () => {
+          clearTimeout(timer);
+          resolve();
+        };
 
-      const onExit = () => {
-        clearTimeout(timer);
-        resolve();
-      };
+        child.once("exit", onExit);
+      });
+    }
 
-      child.once("exit", onExit);
-    });
+    return { exitCode: child.exitCode, signalCode: child.signalCode };
   }
 
   async function stop(timeoutMs = 10_000): Promise<void> {
@@ -1227,6 +1245,7 @@ export async function launchHankweave(options: LaunchServerOptions): Promise<Lau
     waitForCodonStart,
     waitForCodonCompletion,
     waitForConnectionClose,
+    waitForExit,
     waitForRunToComplete,
     waitForRunToFail,
     waitForCodonRetry,

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "meta": {
+    "name": "bedrock-auth-acceptance",
+    "version": "1.0.0",
+    "description": "Acceptance hank for AWS Bedrock support: one run exercises both runtimes and both model families. Codon 1 (Anthropic-on-Bedrock, unprefixed) must run on the Claude Agent SDK in Bedrock mode; codon 2 is the explicit pi/ override of the same model; codon 3 (DeepSeek on Bedrock) always runs on pi. Prompts are deliberately trivial — the suite verifies auth and routing, not model capability. DeepSeek is deepseek.v3.2, NOT us.deepseek.r1-v1:0: R1 on Bedrock rejects toolConfig outright (400 'This model doesn't support tool use'), so it can never serve a coding-agent codon."
+  },
+  "hank": [
+    {
+      "id": "haiku-agent-sdk",
+      "name": "Haiku on Bedrock via Claude Agent SDK",
+      "promptText": "Create the file <%PROJECT_DIR%>/haiku-agent-sdk.txt containing exactly the word OK. Do nothing else.",
+      "model": "amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "continuationMode": "fresh",
+      "checkpointedFiles": ["*.txt"],
+      "sentinels": [{ "sentinelConfig": "./sentinel-triggers/bedrock-probe.sentinel.json" }]
+    },
+    {
+      "id": "haiku-pi",
+      "name": "Haiku on Bedrock via explicit pi override",
+      "promptText": "Create the file <%PROJECT_DIR%>/haiku-pi.txt containing exactly the word OK. Do nothing else.",
+      "model": "pi/amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "continuationMode": "fresh",
+      "checkpointedFiles": ["*.txt"]
+    },
+    {
+      "id": "deepseek-pi",
+      "name": "DeepSeek V3.2 on Bedrock via pi",
+      "promptText": "Use the write tool to create the file <%PROJECT_DIR%>/deepseek-pi.txt containing exactly the word OK. One tool call, nothing else.",
+      "model": "amazon-bedrock/deepseek.v3.2",
+      "continuationMode": "fresh",
+      "checkpointedFiles": ["*.txt"]
+    }
+  ]
+}

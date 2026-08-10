@@ -67,6 +67,7 @@ import {
   getCodonCost,
   getCodonTokens,
   isTerminalCodonStatus,
+  type Run,
 } from "./types/state-types.js";
 import type { ToolInputMap, ToolName } from "./types/tool-types.js";
 import type {
@@ -3492,7 +3493,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             new Error(`Copy group ${groupIndex} failed with: ${String(error)}`),
             beforeCopySuccess ? "codonOutputCopyFiles" : "codonOutputBeforeCopy",
           );
-          // Continue to next output group
+          // An output-stage failure (beforeCopy validator or copy) must fail
+          // the run. handleError at OPERATION severity only logs and notifies;
+          // without the transition + shutdown below the runtime proceeds to
+          // the "all codons completed" shutdown and exits 0 despite the
+          // failure. Fail fast: don't run remaining output groups.
+          if (this.currentRunId) {
+            this.stateManager.transition({
+              type: "RunFailed",
+              data: { runId: this.currentRunId },
+            });
+            await this.stateManager.waitForPendingTransitions();
+          }
+          await this.shutdown("codon failure");
+          return;
         }
       }
     }
@@ -6571,7 +6585,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // In production, we want to exit the process after shutdown
     // In tests, we don't want to exit to allow other tests to run
     if (exitProcess && reason !== "running integration test") {
-      const finalExitCode = this.computeExitCode(reason, exitCode);
+      // Pass the pre-transition run snapshot: by this point RunCompleted/
+      // RunFailed has cleared currentRunId, so getCurrentRun() inside
+      // computeExitCode returns null and would report success for a run that
+      // was already marked failed/crashed.
+      const finalExitCode = this.computeExitCode(reason, exitCode, runForTelemetry);
 
       this.logger.log(`Shutdown: ${reason} (exit code: ${finalExitCode})`);
 
@@ -6593,11 +6611,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * Determine the process exit code for a shutdown reason. Shared by the normal
    * exit and the shutdown watchdog so a forced exit uses the same code.
    */
-  private computeExitCode(reason: string, exitCode?: number): number {
+  private computeExitCode(reason: string, exitCode?: number, runSnapshot?: Run | null): number {
     if (exitCode !== undefined) return exitCode;
     if (reason === "all codons completed") {
-      // Query state manager for run status (source of truth)
-      const currentRun = this.stateManager.getCurrentRun();
+      // Query state manager for run status (source of truth). After the
+      // terminal RunCompleted/RunFailed transition currentRunId is cleared and
+      // getCurrentRun() returns null, so fall back to the snapshot captured
+      // in shutdown() before that transition.
+      const currentRun = this.stateManager.getCurrentRun() ?? runSnapshot;
       return currentRun?.status === "failed" || currentRun?.status === "crashed" ? 1 : 0;
     }
     if (reason === "codon failure") return 1;

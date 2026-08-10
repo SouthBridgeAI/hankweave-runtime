@@ -544,5 +544,60 @@ describe("Claude Log Parser", () => {
         expect(resultMessage.duration_ms).toBeGreaterThan(0);
       }
     });
+
+    test("parses Bedrock-prefixed message and tool-use IDs (msg_bdrk_/toolu_bdrk_)", () => {
+      // Anthropic on Bedrock infixes a provider tag into every id
+      // (msg_bdrk_…, toolu_bdrk_…). These failed the id regexes and were
+      // silently dropped, so a Bedrock-run codon emitted no
+      // assistant.action/tool.result events and its sentinels never fired.
+      const bedrockLog = [
+        {
+          type: "assistant",
+          message: {
+            id: "msg_bdrk_01Rvxvjes7tNwoLSqyffG1yj",
+            type: "message",
+            role: "assistant",
+            model: "claude-haiku-4-5-20251001",
+            content: [
+              { type: "thinking", thinking: "Plan the queries." },
+              {
+                type: "tool_use",
+                id: "toolu_bdrk_012ZprveDJEeKEp3KB5UpfVr",
+                name: "Bash",
+                input: { command: "ls" },
+              },
+            ],
+            stop_reason: "tool_use",
+            stop_sequence: null,
+          },
+          session_id: "93d7da59-b99f-41f6-b24f-e34a63557c2f",
+        },
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_bdrk_012ZprveDJEeKEp3KB5UpfVr",
+                content: "answer.txt",
+              },
+            ],
+          },
+          session_id: "93d7da59-b99f-41f6-b24f-e34a63557c2f",
+        },
+      ];
+      const bedrockLogPath = path.join(testDir, "bedrock-ids.jsonl");
+      fs.writeFileSync(bedrockLogPath, `${bedrockLog.map((m) => JSON.stringify(m)).join("\n")}\n`);
+
+      const parser = new ClaudeLogParser({
+        logPath: bedrockLogPath,
+        codonId: "bedrock-test",
+        parsingInterval: 50,
+      });
+
+      const messages = parser.getAllMessages();
+      expect(messages.map((m) => m.type)).toEqual(["assistant", "user"]);
+    });
   });
 });

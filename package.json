@@ -1,6 +1,6 @@
 {
   "name": "hankweave",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Orchestration runtime for antibrittle agentic workflows",
   "author": {
     "name": "Southbridge AI",
@@ -89,14 +89,15 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^2.0.5",
+    "@ai-sdk/amazon-bedrock": "^3",
+    "@ai-sdk/anthropic": "^2.0.94",
     "@ai-sdk/google": "^2.0.7",
     "@ai-sdk/groq": "^2.0.11",
     "@ai-sdk/openai": "^2.0.18",
-    "@anthropic-ai/claude-agent-sdk": "0.3.215",
+    "@anthropic-ai/claude-agent-sdk": "0.3.224",
     "@clack/prompts": "^1.0.0",
-    "@earendil-works/pi-ai": "^0.80.10",
-    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
     "ai": "^5.0.15",
     "crossws": "^0.4.1",
     "eta": "^3.5.0",
@@ -108,5 +109,10 @@
     "simple-git": "^3.28.0",
     "srvx": "^0.10.0",
     "zod": "^3.25.74"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SouthBridgeAI/hankweave-runtime.git"
+  },
+  "license": "Apache-2.0"
 }

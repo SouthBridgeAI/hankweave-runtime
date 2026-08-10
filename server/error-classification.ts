@@ -151,6 +151,119 @@ export function computeRetryDelayMs(params: {
 }
 
 /**
+ * AWS Bedrock failures that are permanent and operator-fixable, matched on
+ * AWS's error names / SDK wordings (all AWS-idiomatic strings — collision
+ * risk with other providers' error text is negligible). Remediation text is
+ * appended to the classified message; AWS retired the console "Model access"
+ * page (serverless models auto-enable on first invoke), so access problems
+ * are IAM/SCP, the Anthropic use-case form, or Marketplace first-invoke.
+ */
+const BEDROCK_PERMANENT_FAILURES: Array<{
+  matches: (lower: string) => boolean;
+  remedy: string;
+}> = [
+  {
+    // STS role assumption denied: often surfaced as bare "AccessDenied" (no
+    // "Exception" suffix), e.g. "AccessDenied: User arn:… is not authorized
+    // to perform: sts:AssumeRole on resource …" — no 403 in the text. Listed
+    // before the generic AccessDeniedException matcher so an assume-role
+    // denial gets the role remedy, not the model-access one.
+    matches: (l) =>
+      l.includes("sts:assumerole") && (l.includes("accessdenied") || l.includes("not authorized")),
+    remedy:
+      "The configured role can't be assumed. Check the profile's role_arn, the role's trust " +
+      "policy (does it trust your source identity?), and any external_id/MFA requirement.",
+  },
+  {
+    matches: (l) => l.includes("accessdeniedexception"),
+    remedy:
+      "AWS credentials can't invoke this model in this region. Check: (a) IAM policy / SCP " +
+      "restrictions — cross-region 'us.' inference profiles need invoke permission on the " +
+      "profile AND its underlying foundation models (simplest: allow bedrock:InvokeModel* on " +
+      "Resource '*' for this principal); (b) first-time Anthropic use requires the use-case " +
+      "form — open the model once in the Bedrock console playground; (c) Marketplace-served " +
+      "models need one first invoke by a user with AWS Marketplace permissions.",
+  },
+  {
+    matches: (l) =>
+      l.includes("unrecognizedclientexception") ||
+      l.includes("security token included in the request is invalid"),
+    remedy:
+      "AWS credentials are invalid. Check AWS_BEARER_TOKEN_BEDROCK / AWS_ACCESS_KEY_ID + " +
+      "AWS_SECRET_ACCESS_KEY. Bedrock short-term API keys expire — generate a long-term key " +
+      "(AWS Console → Bedrock → API keys).",
+  },
+  {
+    // SigV4 signing failures surface the exception name or the SDK's stable
+    // wording, with no HTTP status attached by pi.
+    matches: (l) =>
+      l.includes("invalidsignatureexception") ||
+      l.includes("signaturedoesnotmatch") ||
+      l.includes("signature we calculated does not match"),
+    remedy:
+      "Request signing failed — AWS_SECRET_ACCESS_KEY doesn't match AWS_ACCESS_KEY_ID (typo, " +
+      "stale copy, or wrong account), or the system clock is badly skewed. Re-copy the secret " +
+      "for this access key or generate a fresh key pair.",
+  },
+  {
+    matches: (l) => l.includes("expiredtokenexception"),
+    remedy:
+      "AWS session credentials expired. Re-run `aws sso login --profile <profile>` (or " +
+      "refresh your temporary credentials).",
+  },
+  {
+    // Identity Center cache problems don't surface as ExpiredTokenException:
+    // the SDK/CLI report "The SSO session token associated with profile=… was
+    // not found or is invalid" (or "…has expired or is otherwise invalid").
+    matches: (l) =>
+      l.includes("sso session") &&
+      (l.includes("not found") || l.includes("invalid") || l.includes("expired")),
+    remedy:
+      "The AWS SSO session for this profile is missing or expired. Re-run " +
+      "`aws sso login --profile <profile>` to refresh the Identity Center token cache.",
+  },
+  {
+    matches: (l) =>
+      l.includes("could not load credentials") || l.includes("unable to locate credentials"),
+    remedy:
+      "No AWS credentials found. Quickest: set AWS_BEARER_TOKEN_BEDROCK (AWS Console → " +
+      "Bedrock → API keys → long-term key). Enterprise: set AWS_PROFILE after `aws sso " +
+      "login`, or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Also set AWS_REGION.",
+  },
+  {
+    // pi-ai's applyAuth gate: thrown before any request when none of pi's
+    // recognized AWS env markers is present. pi does not probe on-disk config
+    // files or IMDS, so an env marker is required on the pi route.
+    matches: (l) => l.includes("provider is not configured: amazon-bedrock"),
+    remedy:
+      "No AWS credentials visible to the embedded pi runtime. Set AWS_BEARER_TOKEN_BEDROCK " +
+      "(AWS Console → Bedrock → API keys → long-term key), AWS_PROFILE after `aws sso login`, " +
+      "or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Also set AWS_REGION. An on-disk default " +
+      "profile or instance role alone is not detected on this route.",
+  },
+  {
+    matches: (l) => /on-demand throughput isn.t supported/.test(l),
+    remedy:
+      "This model needs an inference profile on Bedrock. Prefix the model id with your " +
+      "region group's cross-region profile prefix — 'us.', 'eu.', 'jp.', 'au.', or " +
+      "'us-gov.' (e.g. amazon-bedrock/us.anthropic.claude-…) — or use a 'global.' profile " +
+      "where available.",
+  },
+  {
+    // AWS reports a wrong-region model as ResourceNotFoundException on some
+    // paths and as ValidationException on others; pi surfaces the latter as
+    // "Validation error: The provided model identifier is invalid" with no
+    // exception name or HTTP status, so match the stable AWS wording too.
+    matches: (l) =>
+      l.includes("resourcenotfoundexception") ||
+      l.includes("the provided model identifier is invalid"),
+    remedy:
+      "Model not found in this region. Set AWS_REGION to a region that serves it, or use " +
+      "the 'global.' inference profile id.",
+  },
+];
+
+/**
  * Classify API error text into a FailureReason with a retriability verdict —
  * the single source of truth for transient vs permanent.
  *
@@ -223,6 +336,27 @@ export function classifyApiErrorText(
     };
   }
 
+  // --- AWS Bedrock auth/access failures (pi's bedrock provider and the Agent
+  // SDK's CLAUDE_CODE_USE_BEDROCK path both surface AWS's error names). These
+  // carry no HTTP status code in the surfaced text, so without explicit
+  // patterns they fall through to the transient fallback and get retried —
+  // the worst outcome for problems only the operator can fix. Permanent, each
+  // with a remediation hint (the fixes live in the AWS console/CLI, not here).
+  // Checked BEFORE the timeout branch: AWS signature errors append the full
+  // canonical request dump, whose header lines (x-stainless-timeout:600)
+  // otherwise substring-match "timeout" and flip a permanently broken
+  // credential chain into a retriable timeout. The matchers are specific
+  // AWS wordings a genuine timeout message never contains.
+  for (const { matches, remedy } of BEDROCK_PERMANENT_FAILURES) {
+    if (matches(lower)) {
+      return {
+        type: "api-error",
+        retriable: false,
+        message: `Bedrock auth/access error: ${errorText} — ${remedy}`,
+      };
+    }
+  }
+
   // Checked before the numeric status-code branches: "Request timed out after
   // 400 seconds" must classify as a timeout, not word-match hasCode("400")
   // into a permanent invalid request (or "401"/"403" durations into auth).
@@ -256,9 +390,15 @@ export function classifyApiErrorText(
   // input-overflow 400 (status code stripped from the surfaced text). In a
   // `terminateOn: contextExceeded` loop this never applies: the
   // context-exceeded completion path preempts failure classification.
+  // "ValidationException" / pi's "Validation error:" prefix are the request-
+  // shape rejections Bedrock surfaces without a 400 in the text (e.g.
+  // DeepSeek-R1's "Validation error: This model doesn't support tool use") —
+  // permanently invalid requests that a retry can never fix.
   const isInvalidRequest =
     lower.includes("invalid_request") ||
     lower.includes("invalid request") ||
+    lower.includes("validationexception") ||
+    lower.includes("validation error:") ||
     lower.includes("prompt is too long") ||
     hasCode("400");
   if (isInvalidRequest) {

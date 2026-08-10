@@ -341,8 +341,12 @@ export class SentinelManager {
         // Check if model is a full model ID (contains "/")
         const isFullModelId = config.model?.includes("/");
 
-        // Only check provider availability if NOT using override
-        if (!useOverride && hasRealProviders && isFullModelId) {
+        // Only check provider availability if NOT using override. Deliberately
+        // not gated on hasRealProviders: with zero available providers a
+        // full-model-id sentinel must be skipped here like any other
+        // unavailable-provider case — loading it anyway would create its
+        // output files and then fail every trigger at call time.
+        if (!useOverride && this.providerRegistry && isFullModelId) {
           this.logger?.log(
             `Checking availability of model ${config.model} for sentinel ${config.id}`,
             "debug",

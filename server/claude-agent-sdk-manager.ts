@@ -3,6 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  BEDROCK_DEFAULT_REGION,
+  defaultProfileDefinesRegion,
+  describeAmbientAwsCredentialSource,
+  detectInstanceMetadataCredentials,
+} from "./aws-credentials.js";
 import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import {
@@ -96,9 +102,92 @@ export function detectClaudeExecutable(): string | null {
 }
 
 /**
+ * The settings tiers the Agent SDK child actually loads: the user settings
+ * file (CLAUDE_CONFIG_DIR override honored) — the SDK runs with
+ * settingSources: ["user"] — plus managed (enterprise policy/MDM) settings,
+ * which the CLI always applies regardless of settingSources, from a fixed
+ * per-platform location. Project settings are excluded by settingSources, so
+ * they aren't consulted here either.
+ */
+function claudeSettingsFilePaths(): string[] {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+  const managedSettingsPath =
+    process.platform === "darwin"
+      ? "/Library/Application Support/ClaudeCode/managed-settings.json"
+      : process.platform === "win32"
+        ? path.join(
+            process.env.ProgramData || "C:\\ProgramData",
+            "ClaudeCode",
+            "managed-settings.json",
+          )
+        : "/etc/claude-code/managed-settings.json";
+  return [path.join(configDir, "settings.json"), managedSettingsPath];
+}
+
+/**
+ * Whether the Claude CLI's own settings define an Agent-managed AWS
+ * credential helper (awsAuthRefresh / awsCredentialExport). With one
+ * configured, the CLI fetches or refreshes Bedrock credentials itself, so
+ * no ambient credential source exists for preflight to see. Consults the
+ * same settings cascade the SDK child resolves (user + managed), so an
+ * enterprise-supplied helper doesn't fail preflight on a machine with no
+ * ambient credentials. `settingsFiles` is a test seam.
+ */
+export function claudeSettingsDefineAwsCredentialHelpers(
+  settingsFiles: string[] = claudeSettingsFilePaths(),
+): boolean {
+  return settingsFiles.some((file) => {
+    try {
+      const settings = JSON.parse(fs.readFileSync(file, "utf-8"));
+      return Boolean(settings?.awsAuthRefresh || settings?.awsCredentialExport);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * Manages Claude Agent SDK lifecycle, mimicking the ClaudeProcessManager API.
  * Handles log stream creation and converts SDK messages to JSONL format.
  */
+/**
+ * AWS variables handed to the Agent SDK subprocess in Bedrock mode only —
+ * every credential source of the standard AWS chain (bearer token, key pair,
+ * profile/SSO, ECS container creds, IRSA web identity) plus region and config
+ * locations. Enumerated, not a prefix rule: non-Bedrock codons must see a
+ * byte-identical environment to before Bedrock support existed.
+ */
+const BEDROCK_AWS_ENV_VARS = [
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_PROFILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_CONFIG_FILE",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+  // EKS Pod Identity (and any token-protected full-URI endpoint) needs the
+  // authorization token alongside the URI, or the subprocess can't fetch creds.
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AWS_ROLE_ARN",
+  "AWS_ROLE_SESSION_NAME",
+  "AWS_EC2_METADATA_DISABLED",
+  // Custom/IPv6 IMDS endpoints: the child's SDK chain must target the same
+  // metadata endpoint the preflight probe resolved.
+  "AWS_EC2_METADATA_SERVICE_ENDPOINT",
+  "AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE",
+  "AWS_CA_BUNDLE",
+] as const;
+
+// Moved to aws-credentials.ts so the sentinel provider registry shares the
+// same detection; re-exported to keep this module's public surface stable.
+export { BEDROCK_DEFAULT_REGION, describeAmbientAwsCredentialSource };
+
 export class ClaudeAgentSDKManager extends BaseProcessManager {
   private abortController: AbortController | undefined;
   private logStream: fs.WriteStream | undefined;
@@ -116,6 +205,12 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
     private anthropicBaseUrl?: string,
     private globalSystemPrompt?: string | null,
     private defaultShimIdleTimeout?: number,
+    /**
+     * Amazon Bedrock mode: run the Agent SDK against Bedrock-hosted Anthropic
+     * models (CLAUDE_CODE_USE_BEDROCK=1 + AWS credentials from the ambient
+     * environment) instead of the Anthropic API.
+     */
+    private bedrockMode: boolean = false,
   ) {
     super(logger, logParser);
     this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
@@ -384,11 +479,98 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseUrl}`);
     }
 
+    // Bedrock mode: point the SDK at Amazon Bedrock and hand it the AWS
+    // credential chain from the ambient environment. Bedrock-only — no other
+    // codon's environment changes.
+    if (this.bedrockMode) {
+      options.env.CLAUDE_CODE_USE_BEDROCK = "1";
+      for (const key of BEDROCK_AWS_ENV_VARS) {
+        // AWS settings are ambient-only (same rule as the codon.env filter
+        // below): the HANKWEAVE_ pass-through above may have inserted a
+        // stripped HANKWEAVE_AWS_* alias, which pi ignores and preflight never
+        // saw — honoring it would silently switch the child's account/region.
+        if (key in options.env) {
+          this.logger.log(`Ignoring HANKWEAVE_${key}: Bedrock AWS settings are ambient-only`);
+          delete options.env[key];
+        }
+        if (process.env[key]) {
+          options.env[key] = process.env[key];
+        }
+      }
+      // These models ran in-process through pi (full ambient env) before the
+      // Agent SDK became their default route — don't regress proxy-only
+      // networks where Bedrock is unreachable without HTTP(S)_PROXY or
+      // ALL_PROXY (the catch-all some deployments use exclusively).
+      // NODE_EXTRA_CA_CERTS rides along: a corporate proxy that intercepts
+      // TLS trusts its private CA through it, and without forwarding it the
+      // child fails TLS on every Bedrock request the proxy vars point it at.
+      for (const key of [
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+      ]) {
+        const value = process.env[key] ?? process.env[key.toLowerCase()];
+        if (value) {
+          options.env[key] = value;
+        }
+      }
+      if (!options.env.AWS_REGION && !options.env.AWS_DEFAULT_REGION) {
+        if (options.env.AWS_PROFILE) {
+          // Mirror pi-ai: with a profile configured, leave the region unset so
+          // the CLI (≥2.1.172) resolves it from the profile's config instead
+          // of our fallback pinning us-east-1 over it.
+          this.logger.log(
+            `AWS_REGION not set — resolving region from AWS_PROFILE "${options.env.AWS_PROFILE}" (falls back to ${BEDROCK_DEFAULT_REGION}).`,
+          );
+        } else if (defaultProfileDefinesRegion()) {
+          // Same rule as AWS_PROFILE: region resolution is independent of the
+          // credential source — the SDK reads [default]'s region even when
+          // credentials come from an env key pair, ECS, or IMDS — and an env
+          // AWS_REGION would outrank it, so leave it for the CLI to resolve.
+          this.logger.log(
+            `AWS_REGION not set — resolving region from the default AWS profile (falls back to ${BEDROCK_DEFAULT_REGION}).`,
+          );
+        } else {
+          options.env.AWS_REGION = BEDROCK_DEFAULT_REGION;
+          this.logger.log(
+            `AWS_REGION not set — defaulting to ${BEDROCK_DEFAULT_REGION}. Set AWS_REGION if your Bedrock model access is elsewhere.`,
+          );
+        }
+      }
+      this.logger.log(
+        `Bedrock mode: CLAUDE_CODE_USE_BEDROCK=1, region ${
+          options.env.AWS_REGION ??
+          options.env.AWS_DEFAULT_REGION ??
+          `resolved via AWS_PROFILE ${options.env.AWS_PROFILE}`
+        }`,
+      );
+    }
+
     // Add codon-specific environment variables from config
     // These will override any existing variables with the same name
     if (codon.env) {
       this.logger.log("Applying codon-specific environment variables...");
-      Object.assign(options.env, codon.env);
+      let codonEnv = codon.env;
+      if (this.bedrockMode) {
+        // AWS credentials are ambient-only: the pi route ignores these same
+        // keys in codon.env, so honoring them here would let a harness switch
+        // silently change the AWS account/region or disable Bedrock.
+        const reserved = new Set<string>([...BEDROCK_AWS_ENV_VARS, "CLAUDE_CODE_USE_BEDROCK"]);
+        codonEnv = Object.fromEntries(
+          Object.entries(codonEnv).filter(([key]) => {
+            if (reserved.has(key)) {
+              this.logger.log(
+                `Ignoring codon env var ${key}: Bedrock AWS settings are ambient-only`,
+              );
+              return false;
+            }
+            return true;
+          }),
+        );
+      }
+      Object.assign(options.env, codonEnv);
     }
 
     return options;
@@ -834,22 +1016,71 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       }
     }
 
-    // Check 3: Verify authentication. The Agent SDK authenticates via ANTHROPIC_API_KEY
-    // (OAuth tokens are no longer supported by the SDK). When HW_INTERNAL_CLAUDE_LEGACY_AUTH
-    // is set, run in lenient mode: don't hard-require ANTHROPIC_API_KEY and instead trust the
-    // SDK to resolve credentials itself (e.g. a local `claude login` in the OS keychain).
-    const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
-    const legacyAuth = isLegacyClaudeAuthEnabled();
+    // Check 3: Verify authentication. In Bedrock mode the SDK authenticates
+    // via the AWS credential chain (CLAUDE_CODE_USE_BEDROCK) — check that some
+    // credential source is visible; validity is proven at first invoke, whose
+    // errors carry mapped remediation messages. Otherwise the Agent SDK
+    // authenticates via ANTHROPIC_API_KEY (OAuth tokens are no longer
+    // supported). When HW_INTERNAL_CLAUDE_LEGACY_AUTH is set, run in lenient
+    // mode: don't hard-require ANTHROPIC_API_KEY and instead trust the SDK to
+    // resolve credentials itself (e.g. a local `claude login` in the keychain).
+    if (this.bedrockMode) {
+      // Agent-managed authentication modes first: with
+      // CLAUDE_CODE_SKIP_BEDROCK_AUTH the operator points the CLI at a
+      // gateway (ANTHROPIC_BEDROCK_BASE_URL) that holds the credentials, and
+      // with awsAuthRefresh/awsCredentialExport in Claude settings the CLI
+      // fetches its own — in both, no ambient credential source exists by
+      // design, and both variables/settings reach the child, so preflight
+      // must not block what the child can authenticate. Then static ambient
+      // sources; finally probe the instance metadata service so EC2/ECS
+      // instance roles — invisible to any env/file check — still pass.
+      let source: string | null = null;
+      const skipAuth = process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH;
+      if (skipAuth && skipAuth !== "0" && skipAuth.toLowerCase() !== "false") {
+        source = "CLAUDE_CODE_SKIP_BEDROCK_AUTH (gateway-managed auth)";
+      }
+      if (source === null) source = describeAmbientAwsCredentialSource();
+      if (source === null && claudeSettingsDefineAwsCredentialHelpers()) {
+        source = "awsAuthRefresh/awsCredentialExport (Claude settings)";
+      }
+      if (source === null && (await detectInstanceMetadataCredentials())) {
+        source = "instance metadata service (IMDS)";
+      }
+      const explicitRegion = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
+      const regionFromProfile =
+        !explicitRegion && (!!process.env.AWS_PROFILE || defaultProfileDefinesRegion());
+      const region =
+        explicitRegion ??
+        (process.env.AWS_PROFILE
+          ? `from AWS_PROFILE "${process.env.AWS_PROFILE}"`
+          : regionFromProfile
+            ? "from the default AWS profile"
+            : BEDROCK_DEFAULT_REGION);
+      checks.push({
+        name: "authentication",
+        passed: source !== null,
+        message: source
+          ? `Bedrock mode: AWS credentials via ${source}, region ${region}${
+              explicitRegion || regionFromProfile ? "" : " (AWS_REGION not set — defaulting)"
+            }`
+          : "No AWS credentials found for Bedrock. Quickest: set AWS_BEARER_TOKEN_BEDROCK " +
+            "(AWS Console → Bedrock → API keys → long-term key). Enterprise: set AWS_PROFILE " +
+            "after `aws sso login`, or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Also set AWS_REGION.",
+      });
+    } else {
+      const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+      const legacyAuth = isLegacyClaudeAuthEnabled();
 
-    checks.push({
-      name: "authentication",
-      passed: hasApiKey || legacyAuth,
-      message: hasApiKey
-        ? "Authentication configured via ANTHROPIC_API_KEY"
-        : legacyAuth
-          ? "ANTHROPIC_API_KEY not set; HW_INTERNAL_CLAUDE_LEGACY_AUTH enabled — trusting local Claude Code login"
-          : "No authentication found (set ANTHROPIC_API_KEY)",
-    });
+      checks.push({
+        name: "authentication",
+        passed: hasApiKey || legacyAuth,
+        message: hasApiKey
+          ? "Authentication configured via ANTHROPIC_API_KEY"
+          : legacyAuth
+            ? "ANTHROPIC_API_KEY not set; HW_INTERNAL_CLAUDE_LEGACY_AUTH enabled — trusting local Claude Code login"
+            : "No authentication found (set ANTHROPIC_API_KEY)",
+      });
+    }
 
     // Check 4: Verify custom base URL if set
     if (this.anthropicBaseUrl) {

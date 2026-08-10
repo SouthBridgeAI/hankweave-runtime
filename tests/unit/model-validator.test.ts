@@ -510,3 +510,60 @@ describe("Model Validator — CodonRunner.canRun for new providers", () => {
     expect(CodonRunner.canRun({ providerId: "venice" })).toBe(false);
   });
 });
+
+describe("Model Validator — Amazon Bedrock routing", () => {
+  const { CodonRunner } = require("../../server/codon-runner");
+  const BEDROCK_HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+  const BEDROCK_DEEPSEEK = "us.deepseek.r1-v1:0";
+
+  test("Anthropic-on-Bedrock stays on the Agent SDK (provider amazon-bedrock)", () => {
+    const result = validateModel(`amazon-bedrock/${BEDROCK_HAIKU}`, registry);
+    expect(result.valid).toBe(true);
+    expect(result.modelInfo?.providerId).toBe("amazon-bedrock");
+    expect(result.modelInfo?.modelId).toBe(BEDROCK_HAIKU);
+  });
+
+  test("Anthropic-on-Bedrock carries registry cost through for the tracker", () => {
+    const result = validateModel(`amazon-bedrock/${BEDROCK_HAIKU}`, registry);
+    expect(result.valid).toBe(true);
+    // CostTracker prices non-pi providers by "<providerId>/<modelId>", which
+    // must match the registry's amazon-bedrock index entry.
+    expect(result.modelInfo?.cost?.input).toBe(1);
+    expect(result.modelInfo?.cost?.output).toBe(5);
+  });
+
+  test("explicit pi/ prefix overrides Anthropic-on-Bedrock onto pi", () => {
+    const result = validateModel(`pi/amazon-bedrock/${BEDROCK_HAIKU}`, registry);
+    expect(result.valid).toBe(true);
+    expect(result.modelInfo?.providerId).toBe("pi");
+    expect(result.modelInfo?.modelId).toBe(`amazon-bedrock/${BEDROCK_HAIKU}`);
+  });
+
+  test("non-Anthropic Bedrock models wrap onto pi", () => {
+    const result = validateModel(`amazon-bedrock/${BEDROCK_DEEPSEEK}`, registry);
+    expect(result.valid).toBe(true);
+    expect(result.modelInfo?.providerId).toBe("pi");
+    expect(result.modelInfo?.modelId).toBe(`amazon-bedrock/${BEDROCK_DEEPSEEK}`);
+  });
+
+  test("canRun accepts amazon-bedrock only for Anthropic-family model ids", () => {
+    expect(CodonRunner.canRun({ providerId: "amazon-bedrock", modelId: BEDROCK_HAIKU })).toBe(true);
+    expect(CodonRunner.canRun({ providerId: "amazon-bedrock", modelId: BEDROCK_DEEPSEEK })).toBe(
+      false,
+    );
+  });
+
+  test("persisted Anthropic-on-Bedrock plans survive resume un-wrapped", () => {
+    const persisted = makeModelInfo("amazon-bedrock", BEDROCK_HAIKU);
+    const normalized = normalizeLegacyProviderModelInfo(persisted, registry);
+    expect(normalized.providerId).toBe("amazon-bedrock");
+    expect(normalized.modelId).toBe(BEDROCK_HAIKU);
+  });
+
+  test("persisted non-Anthropic Bedrock plans normalize onto pi", () => {
+    const persisted = makeModelInfo("amazon-bedrock", BEDROCK_DEEPSEEK);
+    const normalized = normalizeLegacyProviderModelInfo(persisted, registry);
+    expect(normalized.providerId).toBe("pi");
+    expect(normalized.modelId).toBe(`amazon-bedrock/${BEDROCK_DEEPSEEK}`);
+  });
+});

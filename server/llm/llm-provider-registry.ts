@@ -59,6 +59,23 @@ export interface BlockList {
   models?: string[]; // Block specific model IDs
 }
 
+/**
+ * Bedrock's per-model access denial ("You don't have access to the model
+ * with the specified model ID") — distinct from an IAM-level
+ * bedrock:InvokeModel denial, which names the action instead. Reaching this
+ * error proves the credential chain, request signing, and endpoint all work;
+ * only console-granted model access is missing for the probed model.
+ */
+export function isModelAccessDenialError(error: unknown): boolean {
+  const parts: string[] = [String(error)];
+  if (error && typeof error === "object") {
+    const { responseBody, cause } = error as { responseBody?: unknown; cause?: unknown };
+    if (typeof responseBody === "string") parts.push(responseBody);
+    if (cause) parts.push(String(cause));
+  }
+  return parts.some((part) => /don't have access to the model/i.test(part));
+}
+
 export interface LlmProviderRegistryConfig {
   logger?: Logger;
   healthCheckTimeout?: number; // ms, default 5000
@@ -376,30 +393,52 @@ export class LlmProviderRegistry {
   }
 
   /**
-   * Get the best model for a health check.
-   * Tries provider-configured preferred models first (stable, non-preview IDs),
-   * then falls back to findCheapestModel.
+   * Registry-known health check candidates for a provider, in preference
+   * order: provider-configured preferred models (stable, non-preview IDs;
+   * possibly environment-dependent via the function form) first, then the
+   * findCheapestModel fallback. The health check tries them in order — a
+   * region- or account-specific failure on one candidate must not condemn
+   * the provider when a sibling profile works.
    */
-  public getHealthCheckModel(providerId: string): string | undefined {
+  public getHealthCheckModelCandidates(providerId: string): string[] {
     const def = PROVIDER_DEFINITIONS.find((d) => d.id.toLowerCase() === providerId.toLowerCase());
 
+    const candidates: string[] = [];
     if (def?.healthCheckModels) {
-      for (const modelId of def.healthCheckModels) {
-        if (this.models.has(modelId.toLowerCase())) {
-          this.logger?.log(
-            `Using preferred health check model ${modelId} for ${providerId}`,
-            "debug",
-          );
-          return modelId;
+      // Function-form lists encode environment knowledge the registry data
+      // may lack (amazon-bedrock: partition-specific profiles like us-gov.
+      // are absent from models.dev), so their candidates survive unfiltered —
+      // the health check only needs an id the provider factory can probe.
+      const environmentDependent = typeof def.healthCheckModels === "function";
+      const preferred =
+        typeof def.healthCheckModels === "function"
+          ? def.healthCheckModels()
+          : def.healthCheckModels;
+      for (const modelId of preferred) {
+        if (environmentDependent || this.models.has(modelId.toLowerCase())) {
+          candidates.push(modelId);
         }
       }
-      this.logger?.log(
-        `No preferred health check models found for ${providerId}, falling back to cheapest`,
-        "debug",
-      );
+      if (candidates.length === 0) {
+        this.logger?.log(
+          `No preferred health check models found for ${providerId}, falling back to cheapest`,
+          "debug",
+        );
+      }
     }
 
-    return this.findCheapestModel(providerId);
+    const cheapest = this.findCheapestModel(providerId);
+    if (cheapest && !candidates.some((c) => c.toLowerCase() === cheapest.toLowerCase())) {
+      candidates.push(cheapest);
+    }
+    return candidates;
+  }
+
+  /**
+   * Get the best model for a health check (first candidate).
+   */
+  public getHealthCheckModel(providerId: string): string | undefined {
+    return this.getHealthCheckModelCandidates(providerId)[0];
   }
 
   private initializeProviders(): void {
@@ -408,11 +447,26 @@ export class LlmProviderRegistry {
       const sentinelEnvVar = `HANKWEAVE_SENTINEL_${def.apiKeyEnvVar}`;
       const apiKey = process.env[sentinelEnvVar] || process.env[def.apiKeyEnvVar];
 
-      if (!apiKey) {
+      // Which credential source makes this provider available: the single-key
+      // env var when set, else the provider's ambient credential chain
+      // (amazon-bedrock — key pair, profile, container creds, …) when it
+      // detects one.
+      let credentialSource = apiKey
+        ? process.env[sentinelEnvVar]
+          ? sentinelEnvVar
+          : def.apiKeyEnvVar
+        : undefined;
+      if (!credentialSource && def.detectAmbientCredentials) {
+        credentialSource = def.detectAmbientCredentials() ?? undefined;
+      }
+
+      if (!credentialSource) {
         const status: ProviderStatus = {
           status: "not-configured",
           id: def.id,
-          error: `No API key found (checked: ${sentinelEnvVar}, ${def.apiKeyEnvVar})`,
+          error: def.detectAmbientCredentials
+            ? `No credentials found (checked: ${sentinelEnvVar}, ${def.apiKeyEnvVar}, and ambient detection${def.credentialsHelp ? ` — ${def.credentialsHelp}` : ""})`
+            : `No API key found (checked: ${sentinelEnvVar}, ${def.apiKeyEnvVar})`,
         };
         // Store with normalized (lowercase) provider ID for case-insensitive lookup
         this.providerStatus.set(def.id.toLowerCase(), status);
@@ -420,11 +474,8 @@ export class LlmProviderRegistry {
         continue;
       }
 
-      // Log which env var was used (helpful for debugging)
-      const usedEnvVar = process.env[sentinelEnvVar] ? sentinelEnvVar : def.apiKeyEnvVar;
-
       try {
-        const provider = def.createProvider(apiKey);
+        const provider = def.createProvider(apiKey ?? "");
         // Store with normalized (lowercase) provider ID for case-insensitive lookup
         this.providers.set(def.id.toLowerCase(), provider);
         const status: ProviderStatus = {
@@ -433,7 +484,7 @@ export class LlmProviderRegistry {
           healthy: false, // Will be updated by health check
         };
         this.providerStatus.set(def.id.toLowerCase(), status);
-        this.logger?.log(`Provider ${def.id}: Initialized (using ${usedEnvVar})`, "info");
+        this.logger?.log(`Provider ${def.id}: Initialized (using ${credentialSource})`, "info");
       } catch (error) {
         const status: ProviderStatus = {
           status: "failed",
@@ -765,9 +816,9 @@ export class LlmProviderRegistry {
         return;
       }
 
-      const testModel = this.getHealthCheckModel(id);
+      const candidates = this.getHealthCheckModelCandidates(id);
 
-      if (!testModel) {
+      if (candidates.length === 0) {
         this.logger?.log(`No models found for provider ${id}, marking as unhealthy`, "error");
         const updatedStatus: ProviderStatus = {
           ...status,
@@ -779,51 +830,72 @@ export class LlmProviderRegistry {
         return;
       }
 
-      this.logger?.log(`Using ${testModel} for ${id} health check`, "debug");
+      let healthy = false;
+      let lastError: unknown;
+      for (const testModel of candidates) {
+        this.logger?.log(`Using ${testModel} for ${id} health check`, "debug");
 
-      try {
-        // Create a timeout promise
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Health check timeout")), this.healthCheckTimeout);
-        });
-
-        // Race the health check against timeout
-        const model = provider.languageModel(testModel);
-        const result = await Promise.race([
-          generateText({
+        // Abort on timeout instead of racing a bare timer: a raced timeout
+        // leaves the request in flight, so the candidate loop would start the
+        // fallback while the first billable call still runs — and a slow
+        // provider would keep receiving work after its status was returned.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.healthCheckTimeout);
+        try {
+          const model = provider.languageModel(testModel);
+          const result = await generateText({
             model,
             messages: [{ role: "user", content: "Hi" }],
             maxOutputTokens: 16, // Minimum required by most providers
             temperature: 0,
-          }),
-          timeoutPromise,
-        ]);
+            abortSignal: controller.signal,
+          });
 
-        // Log the actual response from the model (fun!)
-        this.logger?.log(
-          `Provider ${id} health check response: "${result.text.substring(
-            0,
-            50,
-          )}${result.text.length > 50 ? "..." : ""}"`,
-          "debug",
-        );
+          // Log the actual response from the model (fun!)
+          this.logger?.log(
+            `Provider ${id} health check response: "${result.text.substring(
+              0,
+              50,
+            )}${result.text.length > 50 ? "..." : ""}"`,
+            "debug",
+          );
 
-        const updatedStatus: ProviderStatus = {
-          ...status,
-          healthy: true,
-          error: undefined,
-          lastChecked: new Date(),
-        };
-        this.providerStatus.set(id, updatedStatus);
-        this.logger?.log(`Provider ${id}: Health check passed`, "debug");
-      } catch (error) {
-        const updatedStatus: ProviderStatus = {
-          ...status,
-          healthy: false,
-          error: `Health check failed: ${error}`,
-          lastChecked: new Date(),
-        };
-        this.providerStatus.set(id, updatedStatus);
+          healthy = true;
+          this.logger?.log(`Provider ${id}: Health check passed`, "debug");
+          break;
+        } catch (error) {
+          // A per-model access denial proves credentials, signing, and the
+          // endpoint all work — only console-granted model access differs,
+          // which is per model anyway and surfaces properly at a sentinel's
+          // own first call. Don't condemn the whole provider for it.
+          if (isModelAccessDenialError(error)) {
+            healthy = true;
+            this.logger?.log(
+              `Provider ${id}: Health check model ${testModel} not enabled for this account, but the denial proves credentials work — marking healthy`,
+              "info",
+            );
+            break;
+          }
+          lastError = controller.signal.aborted ? new Error("Health check timeout") : error;
+          this.logger?.log(
+            `Provider ${id}: Health check with ${testModel} failed: ${lastError}`,
+            "debug",
+          );
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
+
+      const updatedStatus: ProviderStatus = healthy
+        ? { ...status, healthy: true, error: undefined, lastChecked: new Date() }
+        : {
+            ...status,
+            healthy: false,
+            error: `Health check failed: ${lastError}`,
+            lastChecked: new Date(),
+          };
+      this.providerStatus.set(id, updatedStatus);
+      if (!healthy) {
         this.logger?.log(`Provider ${id}: ${updatedStatus.error}`, "error");
       }
     });

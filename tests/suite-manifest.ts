@@ -124,6 +124,16 @@ export const PROVIDER_KEY_ENV_VARS = [
   "DEEPSEEK_API_KEY",
   "OPENROUTER_API_KEY",
   "ZAI_API_KEY",
+  // Amazon Bedrock (pi's amazon-bedrock provider + the Agent SDK's
+  // CLAUDE_CODE_USE_BEDROCK mode). AWS_REGION is not listed: it selects a
+  // region but cannot buy a call on its own. BEDROCK_API_KEY is not read by
+  // product code, but the bedrock-auth suite maps it to
+  // AWS_BEARER_TOKEN_BEDROCK — scrub it like the real thing.
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_PROFILE",
+  "BEDROCK_API_KEY",
 ] as const;
 
 const ANTHROPIC = ["ANTHROPIC_API_KEY"];
@@ -339,8 +349,26 @@ export const SUITES: SuiteSpec[] = [
     estSeconds: 1,
     estCostUsd: 0,
   },
-
   // ── e2e-live ────────────────────────────────────────────────────────
+  {
+    id: "e2e-output-copy-exit",
+    tier: "e2e-live",
+    files: ["tests/e2e/output-copy-exit-code-e2e.test.ts"],
+    description:
+      "Headless process exit codes when outputFiles beforeCopy fails vs passes — real CLI, " +
+      "live haiku codon.",
+    failureMeans:
+      "An output-stage failure no longer fails the headless run: a beforeCopy/copy error " +
+      "stopped exiting 1 (the run silently reads as green), or a passing run stopped exiting 0. " +
+      "Look at the outputFiles catch in handleCodonComplete and computeExitCode's run-status " +
+      "fallback in shutdown().",
+    suspects: ["server/hankweave-runtime.ts"],
+    needsEnv: ANTHROPIC,
+    perTestTimeoutMs: 300_000,
+    suiteTimeoutSeconds: 900,
+    estSeconds: 60,
+    estCostUsd: 0.01,
+  },
   {
     id: "e2e-server",
     tier: "e2e-live",
@@ -605,6 +633,40 @@ export const SUITES: SuiteSpec[] = [
     suiteTimeoutSeconds: 600,
     estSeconds: 15,
     estCostUsd: 0.005,
+  },
+  {
+    id: "e2e-bedrock-auth",
+    tier: "e2e-live",
+    files: ["tests/e2e/bedrock-auth-e2e.test.ts"],
+    description:
+      "AWS Bedrock acceptance matrix: the 3-codon bedrock hank (haiku via Agent SDK, haiku " +
+      "via pi/ override, DeepSeek V3.2 via pi) under each auth scheme — key pair, AWS_PROFILE " +
+      "(derived), bearer token — plus a no-credentials negative control. Scheme cells " +
+      "self-skip when their source credential is absent.",
+    failureMeans:
+      "A Bedrock auth scheme or runtime routing broke. Check WHICH cell: one scheme failing " +
+      "with the others green points at that credential path (or an expired/rotated key); the " +
+      "agent-sdk codon alone failing points at the CLAUDE_CODE_USE_BEDROCK env passthrough or " +
+      "routing carve-out; pi codons alone at the pi bedrock provider registration; the " +
+      "negative control PASSING means credential isolation leaked and every green cell is " +
+      "meaningless.",
+    suspects: [
+      "server/config-validation/model-validator.ts",
+      "server/claude-agent-sdk-manager.ts",
+      "server/pi-sdk-manager.ts",
+      "server/error-classification.ts",
+    ],
+    // Cells self-skip on missing creds; nothing is hard-required.
+    optionalEnv: [
+      "AWS_BEARER_TOKEN_BEDROCK",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "BEDROCK_API_KEY",
+    ],
+    perTestTimeoutMs: 900_000,
+    suiteTimeoutSeconds: 3600,
+    estSeconds: 420,
+    estCostUsd: 0.3,
   },
   {
     id: "e2e-init-command",

@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 
 
+## [0.9.0] - 2026-08-10
+
+### Added
+- **AWS Bedrock support** — target any Bedrock-hosted model as `amazon-bedrock/<inference-profile-id>` in hank.json or via model overrides (e.g. `amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0`, `amazon-bedrock/deepseek.v3.2`). Anthropic models on Bedrock run natively on the Claude Code harness, with `pi/amazon-bedrock/…` as the explicit Pi override; non-Anthropic Bedrock models run on Pi. Credentials come ambiently from the standard AWS environment — `AWS_BEARER_TOKEN_BEDROCK` (long-term Bedrock API key), or the SigV4 chain (`AWS_PROFILE`/SSO, key pair, ECS/EKS Pod Identity, IRSA; EC2 instance roles work for Anthropic models on the Claude Code harness only — Pi-routed Bedrock models need an explicit env credential) — plus `AWS_REGION` (defaults to `us-east-1` with a warning). Bedrock auth/access failures (`AccessDeniedException`, expired SSO sessions, invalid tokens, missing credentials, on-demand-vs-inference-profile mistakes, wrong region) now classify as permanent instead of being retried, each with a remediation hint.
+
+- **Sentinels on AWS Bedrock** — sentinel `model` fields now accept Bedrock-hosted models (`amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0`), running through the AI SDK's `amazon-bedrock` provider. Sentinel auth is explicit-env only: `AWS_BEARER_TOKEN_BEDROCK` (also overridable as `HANKWEAVE_SENTINEL_AWS_BEARER_TOKEN_BEDROCK`) or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ `AWS_SESSION_TOKEN`), with `AWS_REGION` defaulting to `us-east-1`. Profile/SSO, container credentials, IRSA, and IMDS remain codon-only — supporting them for sentinels would bundle `@aws-sdk/credential-providers` (~6 MB transitive) for what two env vars cover. On chain-only machines Bedrock codons run normally while Bedrock-modeled sentinels are skipped at load with a message naming the accepted sources (see the README FAQ).
+
+### Changed
+- **The public `hankweave` npm package is now published with trusted publishing (OIDC) and carries provenance** — the public repo's release workflow authenticates to npm with a short-lived GitHub OIDC token minted by `id-token: write` instead of a long-lived `NPM_TOKEN`, and because both the repo and the package are public, npm generates a [provenance attestation](https://docs.npmjs.com/generating-provenance-statements) automatically: every published tarball is now cryptographically linked to the commit and workflow run that built it, verifiable with `npm audit signatures`. Trusted publishing needs npm ≥ 11.5.1, so the publish job moves from Node 20 to Node 24, and `permissions` moves from the workflow to each job so `create-release` keeps the `contents: write` it needs to attach binaries
+- **The public package declares `repository` and `license`** — `hankweave` shipped with neither, so `npm view hankweave` reported `license: null` despite the Apache-2.0 `LICENSE.md` in every tarball. `repository.url` is now `git+https://github.com/SouthBridgeAI/hankweave-runtime.git`, which npm requires and verifies case-sensitively against the provenance attestation, and `license` is `Apache-2.0`
+- Updated model data — refreshed `models-dev-data.json` from models.dev. No new OpenAI/Anthropic/Google models; drops the upstream-retired `anthropic/claude-opus-4-1` (and its dated snapshot), and `gpt-5.6-luna` is repriced from $1.00/$6.00 to $0.20/$1.20 per M tokens. Updated `llm-provider-registry` cost test expectations accordingly
+- Updated `@anthropic-ai/claude-agent-sdk` to 0.3.224 and the pi packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`) to 0.84.1; `CLAUDE_SDK_VERSION` bumped in lockstep (the extraction cache key, enforced by unit test)
+
+### Fixed
+- **A failing `outputFiles` `beforeCopy`/`copy` command now fails the run** — previously the failure was only logged and emitted at OPERATION severity, the runtime continued to the "all codons completed" shutdown, and the headless process exited 0 despite the validator failure. The catch now transitions the run to failed and shuts down with exit code 1, failing fast instead of continuing to the next output group. Also fixed the exit-code computation reading run state after the terminal transition had already cleared it, which made any run marked failed/crashed before shutdown read back as success; proven by a live e2e (`tests/e2e/output-copy-exit-code-e2e.test.ts`)
+
 ## [0.8.0] - 2026-07-31
 
 ### Added

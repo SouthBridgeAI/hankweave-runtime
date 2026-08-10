@@ -5,14 +5,14 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-
 jobs:
   publish-npm:
     name: Publish to npm
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # mints the OIDC token npm exchanges for a publish token
     outputs:
       pkg_version: ${{ steps.pkg-info.outputs.version }}
 
@@ -25,11 +25,32 @@ jobs:
         with:
           bun-version: latest
 
+      # No `registry-url` on purpose. With it set, setup-node writes
+      # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into the runner's
+      # .npmrc; with no token in the environment that expands to an empty
+      # string, which has been reported to mask or short-circuit the OIDC
+      # exchange (npm/documentation#1960). We don't need it — npm already
+      # defaults to registry.npmjs.org, which is where this publishes.
+      #
+      # Node 24 for npm >= 11.5.1 (Node 22.x still ships npm 10.x, which has no
+      # OIDC support at all).
       - name: Setup Node.js for npm publish
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '24'
+
+      # Fail with a legible message rather than an opaque ENEEDAUTH if the
+      # toolchain ever regresses below the trusted-publishing floor.
+      - name: Verify npm supports trusted publishing
+        run: |
+          NPM_VERSION="$(npm --version)"
+          REQUIRED=11.5.1
+          echo "node $(node --version), npm ${NPM_VERSION}"
+          if [ "$(printf '%s\n%s\n' "$REQUIRED" "$NPM_VERSION" | sort -V | head -1)" != "$REQUIRED" ]; then
+            echo "Error: npm ${NPM_VERSION} is older than ${REQUIRED} — trusted publishing (OIDC) will not be attempted"
+            exit 1
+          fi
+          echo "✓ npm ${NPM_VERSION} supports trusted publishing"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -60,26 +81,52 @@ jobs:
       - name: Verify package.json is configured for public release
         run: |
           PKG_NAME=$(node -p 'require("./package.json").name')
+          PKG_REPO=$(node -p 'require("./package.json").repository?.url ?? ""')
+          PKG_LICENSE=$(node -p 'require("./package.json").license ?? ""')
+          EXPECTED_REPO="git+https://github.com/${GITHUB_REPOSITORY}.git"
           if [ "$PKG_NAME" != "hankweave" ]; then
             echo "Error: package.json name is '$PKG_NAME', expected 'hankweave'"
             echo "The sync workflow should have transformed package.json"
             exit 1
           fi
+          # npm verifies the provenance attestation against repository.url and
+          # rejects the publish with a 422 on any mismatch, case included.
+          # Checked here so a transform regression fails with a readable message
+          # instead of a registry error after the build has already run.
+          if [ "$PKG_REPO" != "$EXPECTED_REPO" ]; then
+            echo "Error: package.json repository.url is '$PKG_REPO', expected '$EXPECTED_REPO'"
+            echo "See transformPackageJson in the private repo's scripts/sync-public.ts"
+            exit 1
+          fi
+          if [ -z "$PKG_LICENSE" ]; then
+            echo "Error: package.json has no license field"
+            exit 1
+          fi
           echo "✓ package.json configured correctly:"
-          echo "  name: $PKG_NAME"
+          echo "  name:       $PKG_NAME"
+          echo "  repository: $PKG_REPO"
+          echo "  license:    $PKG_LICENSE"
 
       - name: Build
         run: bun run build
 
+      # Trusted publishing: npm authenticates with the GitHub OIDC token minted
+      # by `id-token: write` and exchanges it for a short-lived publish token.
+      # There is no NPM_TOKEN. Provenance is generated automatically because the
+      # repo and the package are both public, so no --provenance flag is needed.
+      #
+      # --loglevel verbose surfaces npm's `oidc` diagnostics; without it a failed
+      # token exchange is invisible and only shows up as ENEEDAUTH. Safe to drop
+      # once this path has a few clean releases behind it.
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --access public --loglevel verbose
 
   build-executables:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    permissions:
+      contents: read
 
     strategy:
       fail-fast: false
@@ -145,6 +192,8 @@ jobs:
     needs: [build-executables]  # Only depends on binaries - release even if npm fails
     if: always() && needs.build-executables.result == 'success'
     timeout-minutes: 10
+    permissions:
+      contents: write # attaches binaries to the GitHub release
 
     steps:
       - name: Checkout code
