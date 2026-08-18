@@ -126,6 +126,40 @@
           "additionalProperties": false,
           "description": "Architect's overrides (optional)"
         },
+        "requirements": {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Environment variables that must be set for this hank to run"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Requirements that must be met for this hank to run (optional)"
+        },
+        "globalSystemPromptFile": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          ],
+          "description": "Global system prompt file(s) applied to all codons. Must be relative path(s) inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+        },
+        "globalSystemPromptText": {
+          "type": "string",
+          "description": "Global system prompt text applied to all codons"
+        },
         "hank": {
           "type": "array",
           "items": {
@@ -152,16 +186,18 @@
                   "promptFile": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       },
                       {
                         "type": "array",
                         "items": {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         }
                       }
                     ],
-                    "description": "Path to a file containing the prompt (mutually exclusive with promptText)"
+                    "description": "Path to a file containing the prompt (mutually exclusive with promptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                   },
                   "promptText": {
                     "type": "string",
@@ -170,16 +206,18 @@
                   "appendSystemPromptFile": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       },
                       {
                         "type": "array",
                         "items": {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         }
                       }
                     ],
-                    "description": "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText)"
+                    "description": "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                   },
                   "appendSystemPromptText": {
                     "type": "string",
@@ -216,12 +254,12 @@
                                 "from": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "description": "Source path (relative to config file or absolute)"
+                                  "description": "Source path, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                                 },
                                 "to": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "description": "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: '../templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: '../templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: '../config.json', to: 'src/config.json' → copies file; from: '../config.json', to: 'src/settings.json' → copies file with rename"
+                                  "description": "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: 'templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: 'templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: 'templates/config.json', to: 'src/config.json' → copies file; from: 'templates/config.json', to: 'src/settings.json' → copies file with rename"
                                 }
                               },
                               "required": [
@@ -377,7 +415,9 @@
                         "sentinelConfig": {
                           "anyOf": [
                             {
-                              "type": "string"
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Path to a sentinel config file, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                             },
                             {
                               "type": "object",
@@ -828,15 +868,18 @@
                                 "systemPromptFile": {
                                   "anyOf": [
                                     {
-                                      "type": "string"
+                                      "type": "string",
+                                      "minLength": 1
                                     },
                                     {
                                       "type": "array",
                                       "items": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "minLength": 1
                                       }
                                     }
-                                  ]
+                                  ],
+                                  "description": "System prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
                                 },
                                 "systemPromptText": {
                                   "type": "string"
@@ -844,15 +887,18 @@
                                 "userPromptFile": {
                                   "anyOf": [
                                     {
-                                      "type": "string"
+                                      "type": "string",
+                                      "minLength": 1
                                     },
                                     {
                                       "type": "array",
                                       "items": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "minLength": 1
                                       }
                                     }
-                                  ]
+                                  ],
+                                  "description": "User prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
                                 },
                                 "userPromptText": {
                                   "type": "string"
@@ -966,10 +1012,13 @@
                                       ]
                                     },
                                     "schemaStr": {
-                                      "type": "string"
+                                      "type": "string",
+                                      "description": "Inline Zod schema code"
                                     },
                                     "schemaFile": {
-                                      "type": "string"
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "description": "Path to a Zod schema file, relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
                                     },
                                     "enumValues": {
                                       "type": "array",
@@ -1280,16 +1329,18 @@
                         "promptFile": {
                           "anyOf": [
                             {
-                              "type": "string"
+                              "type": "string",
+                              "minLength": 1
                             },
                             {
                               "type": "array",
                               "items": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               }
                             }
                           ],
-                          "description": "Path to a file containing the prompt (mutually exclusive with promptText)"
+                          "description": "Path to a file containing the prompt (mutually exclusive with promptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                         },
                         "promptText": {
                           "type": "string",
@@ -1298,16 +1349,18 @@
                         "appendSystemPromptFile": {
                           "anyOf": [
                             {
-                              "type": "string"
+                              "type": "string",
+                              "minLength": 1
                             },
                             {
                               "type": "array",
                               "items": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               }
                             }
                           ],
-                          "description": "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText)"
+                          "description": "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                         },
                         "appendSystemPromptText": {
                           "type": "string",
@@ -1344,12 +1397,12 @@
                                       "from": {
                                         "type": "string",
                                         "minLength": 1,
-                                        "description": "Source path (relative to config file or absolute)"
+                                        "description": "Source path, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                                       },
                                       "to": {
                                         "type": "string",
                                         "minLength": 1,
-                                        "description": "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: '../templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: '../templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: '../config.json', to: 'src/config.json' → copies file; from: '../config.json', to: 'src/settings.json' → copies file with rename"
+                                        "description": "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: 'templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: 'templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: 'templates/config.json', to: 'src/config.json' → copies file; from: 'templates/config.json', to: 'src/settings.json' → copies file with rename"
                                       }
                                     },
                                     "required": [
@@ -1505,7 +1558,9 @@
                               "sentinelConfig": {
                                 "anyOf": [
                                   {
-                                    "type": "string"
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Path to a sentinel config file, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
                                   },
                                   {
                                     "type": "object",
@@ -1956,15 +2011,18 @@
                                       "systemPromptFile": {
                                         "anyOf": [
                                           {
-                                            "type": "string"
+                                            "type": "string",
+                                            "minLength": 1
                                           },
                                           {
                                             "type": "array",
                                             "items": {
-                                              "type": "string"
+                                              "type": "string",
+                                              "minLength": 1
                                             }
                                           }
-                                        ]
+                                        ],
+                                        "description": "System prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
                                       },
                                       "systemPromptText": {
                                         "type": "string"
@@ -1972,15 +2030,18 @@
                                       "userPromptFile": {
                                         "anyOf": [
                                           {
-                                            "type": "string"
+                                            "type": "string",
+                                            "minLength": 1
                                           },
                                           {
                                             "type": "array",
                                             "items": {
-                                              "type": "string"
+                                              "type": "string",
+                                              "minLength": 1
                                             }
                                           }
-                                        ]
+                                        ],
+                                        "description": "User prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
                                       },
                                       "userPromptText": {
                                         "type": "string"
@@ -2094,10 +2155,13 @@
                                             ]
                                           },
                                           "schemaStr": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "Inline Zod schema code"
                                           },
                                           "schemaFile": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "description": "Path to a Zod schema file, relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
                                           },
                                           "enumValues": {
                                             "type": "array",

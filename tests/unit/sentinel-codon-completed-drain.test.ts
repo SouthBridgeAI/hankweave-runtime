@@ -3,9 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { SentinelConfig } from "../../server/config-validation/sentinel.schema.js";
-import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import type { CodonId } from "../../server/types/branded-types.js";
 import { EventId } from "../../server/types/branded-types.js";
 import type {
@@ -14,7 +12,7 @@ import type {
 } from "../../server/types/llm-call-types.js";
 import { Logger } from "../../server/utils.js";
 import { createMockLlm } from "../utils/mock-llm.js";
-import { MockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
+import { createTestSentinelManager } from "../utils/sentinel-test-harness.js";
 
 /**
  * Tests for the second drain fix: ensuring sentinels watching codon.completed
@@ -88,10 +86,8 @@ describe("Sentinel codon.completed drain", () => {
   }
 
   test("immediate sentinel watching codon.completed fires after second drain", async () => {
-    const manager = new SentinelManager({
+    const manager = createTestSentinelManager({
       logger,
-      enablePersistence: false,
-      providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
     });
 
     const executionCalls: Array<{ id: string; events: ServerEvent[] }> = [];
@@ -133,10 +129,8 @@ describe("Sentinel codon.completed drain", () => {
   });
 
   test("debounce sentinel watching codon.completed fires after second drain", async () => {
-    const manager = new SentinelManager({
+    const manager = createTestSentinelManager({
       logger,
-      enablePersistence: false,
-      providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
     });
 
     const executionCalls: Array<{ id: string; events: ServerEvent[] }> = [];
@@ -175,10 +169,8 @@ describe("Sentinel codon.completed drain", () => {
   });
 
   test("count sentinel watching codon.completed (threshold=1) fires after second drain", async () => {
-    const manager = new SentinelManager({
+    const manager = createTestSentinelManager({
       logger,
-      enablePersistence: false,
-      providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
     });
 
     const executionCalls: Array<{ id: string; events: ServerEvent[] }> = [];
@@ -216,10 +208,8 @@ describe("Sentinel codon.completed drain", () => {
   });
 
   test("sentinel watching both file.updated and codon.completed processes both", async () => {
-    const manager = new SentinelManager({
+    const manager = createTestSentinelManager({
       logger,
-      enablePersistence: false,
-      providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
     });
 
     const executionCalls: Array<{ id: string; events: ServerEvent[] }> = [];
@@ -271,10 +261,8 @@ describe("Sentinel codon.completed drain", () => {
   });
 
   test("multiple sentinels watching codon.completed all fire during second drain", async () => {
-    const manager = new SentinelManager({
+    const manager = createTestSentinelManager({
       logger,
-      enablePersistence: false,
-      providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
     });
 
     const executionCalls: Array<{ id: string; events: ServerEvent[] }> = [];
@@ -328,10 +316,8 @@ describe("Sentinel codon.completed drain", () => {
     // This test demonstrates the bug that the fix addresses.
     // Without the second completeAllWork(), the sentinel is destroyed
     // with the codon.completed trigger still queued.
-    const manager = new SentinelManager({
+    const manager = createTestSentinelManager({
       logger,
-      enablePersistence: false,
-      providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
     });
 
     const executionCalls: Array<{ id: string; events: ServerEvent[] }> = [];

@@ -113,11 +113,12 @@ describe("LLM proxy", () => {
               promptFile: "prompts/1-analyze.md",
               // These tests assert proxy wiring (health endpoint, --without-proxy)
               // and never run a codon — but the startup self-test still demands
-              // credentials for every *credential-enforced* model in the config.
-              // A pi passthrough with an unenforced provider passes all three
-              // static checks with no keys at all, which is what keeps this
-              // suite honest in the keyless integration tier.
-              model: "pi/proxytest/never-invoked",
+              // credentials for every *credential-enforced* model in the config
+              // AND (since the pi-catalog preflight) that the model exists in
+              // pi's catalog. A real catalog model on an unenforced provider
+              // passes every static check with no keys at all, which is what
+              // keeps this suite honest in the keyless integration tier.
+              model: "pi/deepseek/deepseek-v4-flash",
               continuationMode: "fresh",
               checkpointedFiles: ["src/**/*.ts", "analysis.md"],
             },
@@ -125,7 +126,7 @@ describe("LLM proxy", () => {
               id: "codon-2-implementation",
               name: "Codon 2: Implementation",
               promptFile: "prompts/2-implement.md",
-              model: "pi/proxytest/never-invoked",
+              model: "pi/deepseek/deepseek-v4-flash",
               continuationMode: "continue-previous",
               checkpointedFiles: ["src/**/*.ts"],
             },

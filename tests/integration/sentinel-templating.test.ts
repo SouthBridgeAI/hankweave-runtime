@@ -17,7 +17,8 @@ describe("Sentinel Templating Integration", () => {
 
   beforeEach(async () => {
     // Create temporary directories for testing
-    tempDir = path.join("tests", "test-area", "templating-test");
+    // Absolute: sentinel file refs resolve against configDir with no cwd fallback
+    tempDir = path.resolve("tests", "test-area", "templating-test");
     configDir = path.join(tempDir, "config");
     sentinelDir = path.join(tempDir, "sentinels");
 

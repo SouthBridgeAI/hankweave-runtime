@@ -67,11 +67,12 @@ describe("Sentinel Integration: With Sentinels", () => {
     }
     fs.mkdirSync(testDir, { recursive: true });
 
-    const configDir = path.join(testDir, "config");
+    // The hank file lives at the testDir root so prompts/ and sentinels/ are
+    // INSIDE the hank dir and refs can be plain relative paths (strict hank
+    // refs forbid absolute spellings and paths that leave the hank dir).
     const promptsDir = path.join(testDir, "prompts");
     const sentinelsDir = path.join(testDir, "sentinels");
 
-    fs.mkdirSync(configDir, { recursive: true });
     fs.mkdirSync(promptsDir, { recursive: true });
     fs.mkdirSync(sentinelsDir, { recursive: true });
 
@@ -142,19 +143,19 @@ describe("Sentinel Integration: With Sentinels", () => {
       {
         id: "sentinel-test-codon",
         name: "Sentinel Integration Test",
-        promptFile: path.join(promptsDir, "codon1.md"),
+        promptFile: "prompts/codon1.md",
         model: "sonnet",
         continuationMode: "fresh",
         checkpointedFiles: ["*.txt"],
         sentinels: [
-          { sentinelConfig: path.join(sentinelsDir, "text-narrator.json") },
-          { sentinelConfig: path.join(sentinelsDir, "entity-tracker.json") },
-          { sentinelConfig: path.join(sentinelsDir, "conv-narrator.json") },
+          { sentinelConfig: "sentinels/text-narrator.json" },
+          { sentinelConfig: "sentinels/entity-tracker.json" },
+          { sentinelConfig: "sentinels/conv-narrator.json" },
         ],
       },
     ];
 
-    const codonConfigPath = path.join(configDir, "codons.json");
+    const codonConfigPath = path.join(testDir, "codons.json");
     fs.writeFileSync(codonConfigPath, JSON.stringify({ hank: codonsConfig }, null, 2));
 
     // Ensure test run directory exists
@@ -627,10 +628,9 @@ describe("Sentinel Integration: Zero Sentinels", () => {
     }
     fs.mkdirSync(testDir, { recursive: true });
 
-    const configDir = path.join(testDir, "config");
+    // See suite 1: hank file at the testDir root, refs relative and in-dir.
     const promptsDir = path.join(testDir, "prompts");
 
-    fs.mkdirSync(configDir, { recursive: true });
     fs.mkdirSync(promptsDir, { recursive: true });
 
     // Create data file
@@ -645,7 +645,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
       {
         id: "zero-sen-codon",
         name: "Codon Without Sentinels",
-        promptFile: path.join(promptsDir, "codon1.md"),
+        promptFile: "prompts/codon1.md",
         model: "sonnet",
         continuationMode: "fresh",
         checkpointedFiles: ["*.txt"],
@@ -653,7 +653,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
       },
     ];
 
-    const codonConfigPath = path.join(configDir, "codons.json");
+    const codonConfigPath = path.join(testDir, "codons.json");
     fs.writeFileSync(codonConfigPath, JSON.stringify({ hank: codonsConfig }, null, 2));
 
     // Ensure test run directory exists

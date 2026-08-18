@@ -3,8 +3,6 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { SentinelConfig } from "../../server/config-validation/sentinel.schema.js";
-import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import type { CodonId } from "../../server/types/branded-types.js";
 import type {
   HankweaveGenerateTextOptions,
@@ -13,6 +11,7 @@ import type {
 import { Logger } from "../../server/utils.js";
 import { createMockLlm } from "../utils/mock-llm.js";
 import { MockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
+import { createTestSentinelManager } from "../utils/sentinel-test-harness.js";
 
 // Mock logger for testing
 class MockLogger extends Logger {
@@ -48,10 +47,8 @@ describe("SentinelManager - Large Tasks", () => {
 
   describe("Shutdown Cleanup (Task 1)", () => {
     test("should destroy all sentinels on shutdown", async () => {
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
       });
 
       const mockLlm = createMockLlm();
@@ -100,10 +97,8 @@ describe("SentinelManager - Large Tasks", () => {
     });
 
     test("should clear all internal maps on shutdown", async () => {
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
       });
 
       const mockLlm = createMockLlm();
@@ -137,10 +132,8 @@ describe("SentinelManager - Large Tasks", () => {
     });
 
     test("should handle errors during sentinel destruction gracefully", async () => {
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: new MockLlmProviderRegistry() as unknown as LlmProviderRegistry,
       });
 
       const mockLlm = createMockLlm();
@@ -179,10 +172,9 @@ describe("SentinelManager - Large Tasks", () => {
       mockRegistry.setProviderAvailable("anthropic", true);
       mockRegistry.setProviderHealth("anthropic", true);
 
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: mockRegistry as unknown as LlmProviderRegistry,
+        providerRegistry: mockRegistry,
         waitForHealthChecks: true, // Ensure providers ready
       });
 
@@ -232,10 +224,9 @@ describe("SentinelManager - Large Tasks", () => {
       mockRegistry.setProviderAvailable("anthropic", true);
       mockRegistry.setProviderHealth("anthropic", true);
 
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: mockRegistry as unknown as LlmProviderRegistry,
+        providerRegistry: mockRegistry,
         waitForHealthChecks: true,
       });
 
@@ -248,10 +239,9 @@ describe("SentinelManager - Large Tasks", () => {
     test("should support immediate mode (no grace period)", async () => {
       const mockRegistry = new MockLlmProviderRegistry();
 
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: mockRegistry as unknown as LlmProviderRegistry,
+        providerRegistry: mockRegistry,
         // No waitForHealthChecks, no gracePeriod = immediate mode
       });
 
@@ -265,10 +255,9 @@ describe("SentinelManager - Large Tasks", () => {
     test("should support grace period mode", async () => {
       const mockRegistry = new MockLlmProviderRegistry();
 
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: mockRegistry as unknown as LlmProviderRegistry,
+        providerRegistry: mockRegistry,
         healthCheckGracePeriodMs: 100, // 100ms grace period
       });
 
@@ -291,10 +280,9 @@ describe("SentinelManager - Large Tasks", () => {
     test("should support full wait mode", async () => {
       const mockRegistry = new MockLlmProviderRegistry();
 
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: mockRegistry as unknown as LlmProviderRegistry,
+        providerRegistry: mockRegistry,
         waitForHealthChecks: true, // Full wait mode
       });
 
@@ -310,10 +298,9 @@ describe("SentinelManager - Large Tasks", () => {
     test("should complete grace period even if health checks take longer", async () => {
       const mockRegistry = new MockLlmProviderRegistry();
 
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: mockRegistry as unknown as LlmProviderRegistry,
+        providerRegistry: mockRegistry,
         healthCheckGracePeriodMs: 50, // Short grace period
       });
 
@@ -336,10 +323,9 @@ describe("SentinelManager - Large Tasks", () => {
       mockRegistry.setProviderAvailable("anthropic", true);
       mockRegistry.setProviderHealth("anthropic", true);
 
-      const manager = new SentinelManager({
+      const manager = createTestSentinelManager({
         logger,
-        enablePersistence: false,
-        providerRegistry: mockRegistry as unknown as LlmProviderRegistry,
+        providerRegistry: mockRegistry,
         healthCheckGracePeriodMs: 100, // Grace period enabled (not full wait)
       });
 

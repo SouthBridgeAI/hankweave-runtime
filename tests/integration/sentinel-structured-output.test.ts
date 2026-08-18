@@ -2,14 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
+import type { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import { CodonId, EventId } from "../../server/types/branded-types.js";
 import type { HankweaveGenerateTextOptions } from "../../server/types/llm-call-types.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { createMockLlm } from "../utils/mock-llm.js";
-import { createMockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
+import { createTestSentinelManager, fileUpdatedEvent } from "../utils/sentinel-test-harness.js";
 
 describe("Structured Output Integration", () => {
   let testDir: string;
@@ -20,13 +19,7 @@ describe("Structured Output Integration", () => {
     testDir = path.join(tmpdir(), `test-structured-int-${Date.now()}`);
     await fs.mkdir(testDir, { recursive: true });
 
-    // Create mock provider registry
-    const mockRegistry = createMockLlmProviderRegistry();
-
-    manager = new SentinelManager({
-      enablePersistence: false, // Memory-only for tests
-      providerRegistry: mockRegistry as unknown as LlmProviderRegistry, // Mock mimics the registry surface the manager uses
-    });
+    manager = createTestSentinelManager();
     await manager.initialize();
 
     executionLog = [];
@@ -66,19 +59,7 @@ describe("Structured Output Integration", () => {
       onExecute: (id, events) => executionLog.push({ id, events }),
     });
 
-    const event: ServerEvent = {
-      id: EventId("test"),
-      timestamp: new Date().toISOString(),
-      type: "file.updated",
-      data: {
-        path: "test.txt",
-        filename: "test.txt",
-        content: "content",
-        action: "created",
-      },
-    };
-
-    await manager.handleEvent(event);
+    await manager.handleEvent(fileUpdatedEvent());
     await manager.completeAllWork();
 
     expect(executionLog.length).toBe(1);
@@ -203,32 +184,12 @@ describe("Structured Output Integration", () => {
     });
 
     // Send 2 events to create 2 conversation turns
-    const event1: ServerEvent = {
-      id: EventId("test1"),
-      timestamp: new Date().toISOString(),
-      type: "file.updated",
-      data: {
-        path: "test1.txt",
-        filename: "test1.txt",
-        content: "content1",
-        action: "created",
-      },
-    };
-
-    const event2: ServerEvent = {
-      id: EventId("test2"),
-      timestamp: new Date().toISOString(),
-      type: "file.updated",
-      data: {
-        path: "test2.txt",
-        filename: "test2.txt",
-        content: "content2",
-        action: "created",
-      },
-    };
-
-    await manager.handleEvent(event1);
-    await manager.handleEvent(event2);
+    await manager.handleEvent(
+      fileUpdatedEvent({ path: "test1.txt", filename: "test1.txt", content: "content1" }),
+    );
+    await manager.handleEvent(
+      fileUpdatedEvent({ path: "test2.txt", filename: "test2.txt", content: "content2" }),
+    );
     await manager.completeAllWork();
 
     expect(executionLog.length).toBe(2);
@@ -286,19 +247,7 @@ describe("Structured Output Integration", () => {
       llmCallOverride: mockTextCall,
     });
 
-    const event: ServerEvent = {
-      id: EventId("test"),
-      timestamp: new Date().toISOString(),
-      type: "file.updated",
-      data: {
-        path: "test.txt",
-        filename: "test.txt",
-        content: "content",
-        action: "created",
-      },
-    };
-
-    await manager.handleEvent(event);
+    await manager.handleEvent(fileUpdatedEvent());
     await manager.completeAllWork();
 
     // Cost tracking verified via sentinel internal tracking

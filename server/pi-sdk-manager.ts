@@ -32,7 +32,7 @@ import {
   serializeToolResultContent,
 } from "./pi-translation.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { AMAZON_BEDROCK_PROVIDER_ID } from "./provider-ids.js";
+import { AMAZON_BEDROCK_PROVIDER_ID, toPiTarget } from "./provider-ids.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import { IdleTimeoutError, type Logger, toError } from "./utils.js";
 
@@ -266,6 +266,48 @@ export function resolveModelIdentifier(input: string): {
 }
 
 /**
+ * The exact catalog gate spawn applies to a pi route: direct lookup, then the
+ * reasoning-effort fallback. "<id>-high"/"-xhigh" are registry constructs, not
+ * catalog ids — resolve the base model and carry the effort as pi's
+ * thinkingLevel (the removed codex shim did the same via
+ * model_reasoning_effort). Unsuffixed OpenAI models default to high reasoning:
+ * pi's default is medium, and migrated hanks expect the shim's high.
+ *
+ * Shared by spawn and the self-test's model_catalog check so the two can never
+ * disagree: pi's catalog is a static vendored snapshot plus
+ * ~/.pi/agent/models.json, so a miss at self-test time is deterministically a
+ * miss at launch.
+ */
+export function lookupPiModel(
+  runtime: ModelRuntime,
+  provider: string,
+  modelId: string,
+): { model: ReturnType<ModelRuntime["getModel"]>; thinkingLevel?: "high" | "xhigh" } {
+  let model = runtime.getModel(provider, modelId);
+  let thinkingLevel: "high" | "xhigh" | undefined;
+  if (!model) {
+    const effortMatch = /^(.*)-(xhigh|high)$/.exec(modelId);
+    if (effortMatch) {
+      const base = runtime.getModel(provider, effortMatch[1]);
+      if (base) {
+        model = base;
+        thinkingLevel = effortMatch[2] as "high" | "xhigh";
+      }
+    }
+  }
+  if (!thinkingLevel && provider === "openai") thinkingLevel = "high";
+  return { model, thinkingLevel };
+}
+
+/** Cap a catalog id list for an error message: sorted, first 12, "+N more". */
+function formatCatalogSample(ids: readonly string[]): string {
+  const sorted = [...ids].sort();
+  const shown = sorted.slice(0, 12);
+  const rest = sorted.length - shown.length;
+  return shown.join(", ") + (rest > 0 ? ` (+${rest} more)` : "");
+}
+
+/**
  * In-process Pi coding-agent manager. The Pi SDK is a Bun-compatible JS module,
  * so we run it inside the hankweave process — exactly like ClaudeAgentSDKManager
  * runs the Claude SDK — instead of spawning a shim child and talking JSONL over
@@ -379,7 +421,13 @@ export class PiSdkManager extends BaseProcessManager {
     // the error-result/exit(1) path — instead of thrown, so the codon's
     // onFailure policy applies (a throw from spawn() escalates as a runner
     // initialization exception that bypasses resolveFailurePolicy).
-    const { provider, modelId, resolved } = resolveModelIdentifier(codon.model.modelId);
+    // The pi routing string ("<provider>/<model>", aliases + OpenRouter
+    // re-routing applied) is derived HERE from the model's real identity —
+    // late-bound, never persisted — so routing-rule changes apply to resumed
+    // plans too.
+    const { provider, modelId, resolved } = resolveModelIdentifier(
+      toPiTarget(codon.model.providerId, codon.model.modelId),
+    );
     const credentialConfig = PROVIDER_CREDENTIALS[provider.toLowerCase()];
     let session: AgentSession;
     try {
@@ -389,27 +437,11 @@ export class PiSdkManager extends BaseProcessManager {
         );
       }
       const modelRuntime = await configureModelRuntime(effectiveEnv);
-      let resolvedModel = modelRuntime.getModel(provider, modelId);
-      // Reasoning-effort variants ("<id>-high"/"<id>-xhigh") are registry
-      // constructs, not catalog ids — resolve the base model and carry the
-      // effort as pi's thinkingLevel (the codex shim used to do the same via
-      // model_reasoning_effort).
-      let thinkingLevel: "high" | "xhigh" | undefined;
-      if (!resolvedModel) {
-        const effortMatch = /^(.*)-(xhigh|high)$/.exec(modelId);
-        if (effortMatch) {
-          const base = modelRuntime.getModel(provider, effortMatch[1]);
-          if (base) {
-            resolvedModel = base;
-            thinkingLevel = effortMatch[2] as "high" | "xhigh";
-          }
-        }
-      }
-      // The removed codex shim defaulted unsuffixed OpenAI models to high
-      // reasoning; pi's default is medium. Preserve high for migrated hanks.
-      if (!thinkingLevel && provider === "openai") {
-        thinkingLevel = "high";
-      }
+      const { model: resolvedModel, thinkingLevel } = lookupPiModel(
+        modelRuntime,
+        provider,
+        modelId,
+      );
       if (!resolvedModel) {
         throw new Error(
           `Pi model not found: ${codon.model.modelId} (provider=${provider}, model=${modelId})`,
@@ -899,7 +931,7 @@ export class PiSdkManager extends BaseProcessManager {
 
     // Check 3: credentials for the target provider (when known).
     if (modelId) {
-      const { provider } = resolveModelIdentifier(modelId);
+      const { provider, modelId: targetModelId } = resolveModelIdentifier(modelId);
       const credentialConfig = PROVIDER_CREDENTIALS[provider.toLowerCase()];
       if (credentialConfig) {
         const available = !!getConfiguredEnvValue(credentialConfig.envVars, effectiveEnv);
@@ -935,6 +967,29 @@ export class PiSdkManager extends BaseProcessManager {
           passed: true,
           message: `Provider '${provider}' not credential-enforced; pi resolves credentials itself`,
         });
+      }
+
+      // Check 4: the target model exists in pi's catalog — the same gate spawn
+      // applies (lookupPiModel), run at startup so a catalog miss surfaces at
+      // config load instead of after earlier codons have already run and spent
+      // money. Stage 1 of validation is the registry (identity/capabilities in
+      // validateModel); this is stage 2, against the catalog that actually
+      // decides pi runnability.
+      if (runtime) {
+        const { model } = lookupPiModel(runtime, provider, targetModelId);
+        let message: string;
+        if (model) {
+          message = `Model '${provider}/${targetModelId}' found in pi's catalog`;
+        } else {
+          const available = runtime.getModels(provider).map((m) => m.id);
+          message =
+            available.length > 0
+              ? `Pi model not found: ${provider}/${targetModelId}. ` +
+                `Available '${provider}' models: ${formatCatalogSample(available)}`
+              : `Unknown pi provider '${provider}'. ` +
+                `Known providers: ${formatCatalogSample(runtime.getProviders().map((p) => p.id))}`;
+        }
+        checks.push({ name: "model_catalog", passed: model !== undefined, message });
       }
     }
 

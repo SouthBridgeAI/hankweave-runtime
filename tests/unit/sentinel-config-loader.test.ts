@@ -21,7 +21,7 @@ describe("SentinelConfigLoader", () => {
   });
 
   describe("File-based loading", () => {
-    test("loads sentinel config from absolute file path", () => {
+    test("loads sentinel config from a hank-relative file path", () => {
       // Create test config file
       const testConfig = {
         id: "test-sentinel",
@@ -36,7 +36,8 @@ describe("SentinelConfigLoader", () => {
 
       const entries: CodonSentinelEntry[] = [
         {
-          sentinelConfig: configPath,
+          // Strict hank refs: entry refs must be relative and in-dir
+          sentinelConfig: "test.json",
         },
       ];
 
@@ -115,7 +116,7 @@ describe("SentinelConfigLoader", () => {
 
       const entries: CodonSentinelEntry[] = [
         {
-          sentinelConfig: configPath,
+          sentinelConfig: "test.json",
         },
         {
           sentinelConfig: {
@@ -151,7 +152,7 @@ describe("SentinelConfigLoader", () => {
       const configPath = path.join(testDataDir, "cached.json");
       fs.writeFileSync(configPath, JSON.stringify(testConfig));
 
-      const entries: CodonSentinelEntry[] = [{ sentinelConfig: configPath }];
+      const entries: CodonSentinelEntry[] = [{ sentinelConfig: "cached.json" }];
 
       const result1 = loader.loadConfigsForCodon(entries, "codon-1", testDataDir);
 
@@ -171,7 +172,7 @@ describe("SentinelConfigLoader", () => {
       const configPath = path.join(testDataDir, "cached.json");
       fs.writeFileSync(configPath, JSON.stringify(testConfig));
 
-      const entries: CodonSentinelEntry[] = [{ sentinelConfig: configPath }];
+      const entries: CodonSentinelEntry[] = [{ sentinelConfig: "cached.json" }];
 
       // First load
       loader.loadConfigsForCodon(entries, "codon-1", testDataDir);
@@ -198,7 +199,7 @@ describe("SentinelConfigLoader", () => {
       const configPath = path.join(testDataDir, "cached.json");
       fs.writeFileSync(configPath, JSON.stringify(testConfig));
 
-      const entries: CodonSentinelEntry[] = [{ sentinelConfig: configPath }];
+      const entries: CodonSentinelEntry[] = [{ sentinelConfig: "cached.json" }];
 
       // First load
       loader.loadConfigsForCodon(entries, "codon-1", testDataDir);
@@ -347,7 +348,7 @@ describe("SentinelConfigLoader", () => {
 
       const entries: CodonSentinelEntry[] = [
         {
-          sentinelConfig: configPath,
+          sentinelConfig: "invalid.json",
         },
       ];
 
@@ -356,6 +357,34 @@ describe("SentinelConfigLoader", () => {
       expect(result.configs.length).toBe(0);
       expect(result.errors.length).toBe(1);
       expect(result.errors[0].error).toContain("JSON");
+    });
+
+    test.skipIf(process.platform === "win32")("a FIFO config file is rejected, not read", () => {
+      // Loading runs at codon startup even when validation only warned, so
+      // the loader itself must reject non-regular files before reading them.
+      const { execSync, spawn } =
+        require("node:child_process") as typeof import("node:child_process");
+      const fifoPath = path.join(testDataDir, "pipe.json");
+      execSync(`mkfifo ${JSON.stringify(fifoPath)}`);
+      // Background writer: on regression the read connects to it and this
+      // test fails on the message assertion instead of hanging in readFileSync.
+      const writer = spawn("sh", ["-c", `printf %s '{}' > ${JSON.stringify(fifoPath)}`], {
+        stdio: "ignore",
+      });
+      try {
+        // Relative ref: an absolute spelling would be rejected by the
+        // strict-ref gate (R1) before the regular-file guard ever runs.
+        const result = loader.loadConfigsForCodon(
+          [{ sentinelConfig: "pipe.json" }],
+          "test-codon",
+          testDataDir,
+        );
+        expect(result.configs.length).toBe(0);
+        expect(result.errors.length).toBe(1);
+        expect(result.errors[0].error).toContain("is not a regular file");
+      } finally {
+        writer.kill("SIGKILL");
+      }
     });
 
     test("Zod validation error returns clear message", () => {
@@ -369,7 +398,7 @@ describe("SentinelConfigLoader", () => {
 
       const entries: CodonSentinelEntry[] = [
         {
-          sentinelConfig: configPath,
+          sentinelConfig: "invalid-schema.json",
         },
       ];
 
@@ -425,7 +454,7 @@ describe("SentinelConfigLoader", () => {
 
       const entries: CodonSentinelEntry[] = [
         {
-          sentinelConfig: configPath,
+          sentinelConfig: "valid.json",
         },
         {
           sentinelConfig: "./nonexistent.json",
@@ -475,7 +504,7 @@ describe("SentinelConfigLoader", () => {
       const configPath = path.join(subdir, "test.json");
       fs.writeFileSync(configPath, JSON.stringify(testConfig));
 
-      const entries: CodonSentinelEntry[] = [{ sentinelConfig: configPath }];
+      const entries: CodonSentinelEntry[] = [{ sentinelConfig: "subdir/test.json" }];
 
       const result = loader.loadConfigsForCodon(entries, "test-codon", testDataDir);
 
@@ -509,6 +538,134 @@ describe("SentinelConfigLoader", () => {
 
       expect(result.configs.length).toBe(0);
       expect(result.errors.length).toBe(0);
+    });
+  });
+
+  describe("Strict ref policy (spec 63)", () => {
+    const baseSentinel = {
+      id: "policy-sentinel",
+      name: "Policy Sentinel",
+      model: "anthropic/claude-3-5-haiku-20241022",
+      trigger: { type: "event", on: ["assistant.action"] },
+      execution: { strategy: "immediate" },
+      userPromptText: "Test",
+    };
+
+    test("an absolute entry ref lands in errors[] with the configured fatality", () => {
+      const configPath = path.join(testDataDir, "abs.json");
+      fs.writeFileSync(configPath, JSON.stringify(baseSentinel));
+
+      const result = loader.loadConfigsForCodon(
+        [{ sentinelConfig: configPath, settings: { failCodonIfNotLoaded: true } }],
+        "test-codon",
+        testDataDir,
+      );
+
+      expect(result.configs.length).toBe(0);
+      expect(result.errors.length).toBe(1);
+      expect(result.errors[0].fatal).toBe(true);
+      expect(result.errors[0].error).toContain("is an absolute or drive-qualified path");
+    });
+
+    test("an escaping entry ref is rejected, non-fatally by default", () => {
+      const result = loader.loadConfigsForCodon(
+        [{ sentinelConfig: "../outside/check.json" }],
+        "test-codon",
+        testDataDir,
+      );
+
+      expect(result.configs.length).toBe(0);
+      expect(result.errors.length).toBe(1);
+      expect(result.errors[0].fatal).toBe(false);
+      expect(result.errors[0].error).toContain("resolves outside the hank directory");
+    });
+
+    test("a file config's own escaping ref is rejected with its field name", () => {
+      fs.mkdirSync(path.join(testDataDir, "sentinels"));
+      fs.writeFileSync(
+        path.join(testDataDir, "sentinels", "leaky.json"),
+        JSON.stringify({ ...baseSentinel, systemPromptFile: "../../leak.md" }),
+      );
+
+      const result = loader.loadConfigsForCodon(
+        [{ sentinelConfig: "sentinels/leaky.json" }],
+        "test-codon",
+        testDataDir,
+      );
+
+      expect(result.configs.length).toBe(0);
+      expect(result.errors.length).toBe(1);
+      expect(result.errors[0].error).toContain(
+        'systemPromptFile: "../../leak.md" resolves outside the hank directory',
+      );
+    });
+
+    test("a file config's ../ ref that climbs back inside the hank stays legal", () => {
+      // The legality guarantee: sentinels/check.json -> ../prompts/ok.md
+      fs.mkdirSync(path.join(testDataDir, "sentinels"));
+      fs.mkdirSync(path.join(testDataDir, "prompts"));
+      fs.writeFileSync(path.join(testDataDir, "prompts", "ok.md"), "ok");
+      fs.writeFileSync(
+        path.join(testDataDir, "sentinels", "check.json"),
+        JSON.stringify({ ...baseSentinel, systemPromptFile: "../prompts/ok.md" }),
+      );
+
+      const result = loader.loadConfigsForCodon(
+        [{ sentinelConfig: "sentinels/check.json" }],
+        "test-codon",
+        testDataDir,
+      );
+
+      expect(result.errors).toEqual([]);
+      expect(result.configs.length).toBe(1);
+      expect(result.configs[0].configDirectory).toBe(path.join(testDataDir, "sentinels"));
+    });
+
+    test.skipIf(process.platform === "win32")(
+      "own-ref policy re-runs on cache hits (disk changed between codons)",
+      () => {
+        fs.mkdirSync(path.join(testDataDir, "prompts"));
+        fs.writeFileSync(path.join(testDataDir, "prompts", "p.md"), "ok");
+        fs.writeFileSync(
+          path.join(testDataDir, "check.json"),
+          JSON.stringify({ ...baseSentinel, systemPromptFile: "prompts/p.md" }),
+        );
+
+        const entries: CodonSentinelEntry[] = [{ sentinelConfig: "check.json" }];
+        const first = loader.loadConfigsForCodon(entries, "codon-1", testDataDir);
+        expect(first.errors).toEqual([]);
+
+        // Swap the prompt for a symlink between codons; the cached parsed
+        // config must not skip policy.
+        fs.unlinkSync(path.join(testDataDir, "prompts", "p.md"));
+        fs.writeFileSync(path.join(testDataDir, "real.md"), "elsewhere");
+        fs.symlinkSync(
+          path.join(testDataDir, "real.md"),
+          path.join(testDataDir, "prompts", "p.md"),
+        );
+
+        const second = loader.loadConfigsForCodon(entries, "codon-2", testDataDir);
+        expect(second.configs.length).toBe(0);
+        expect(second.errors.length).toBe(1);
+        expect(second.errors[0].error).toContain("passes through a symlink");
+      },
+    );
+
+    test.skipIf(process.platform === "win32")("a symlinked entry ref is rejected", () => {
+      fs.writeFileSync(path.join(testDataDir, "real-config.json"), JSON.stringify(baseSentinel));
+      fs.symlinkSync(
+        path.join(testDataDir, "real-config.json"),
+        path.join(testDataDir, "linked.json"),
+      );
+
+      const result = loader.loadConfigsForCodon(
+        [{ sentinelConfig: "linked.json" }],
+        "test-codon",
+        testDataDir,
+      );
+
+      expect(result.configs.length).toBe(0);
+      expect(result.errors[0].error).toContain("passes through a symlink");
     });
   });
 });

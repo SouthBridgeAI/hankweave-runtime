@@ -1,9 +1,13 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
-import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
-import { CodonId } from "../../server/types/branded-types.js";
+import {
+  SentinelManager,
+  type SentinelManagerOptions,
+} from "../../server/sentinels/sentinel-manager.js";
+import { CodonId, EventId } from "../../server/types/branded-types.js";
 import type {
   HankweaveGenerateTextOptions,
   HankweaveGenerateTextResult,
@@ -12,6 +16,50 @@ import type { SentinelConfig } from "../../server/types/sentinel-types.js";
 import { WebSocketLogReader } from "../../server/websocket-log-reader.js";
 import "../types/global-test-types.js";
 import { createMockLlm } from "./mock-llm.js";
+import { createMockLlmProviderRegistry } from "./mock-llm-provider-registry.js";
+
+/**
+ * A SentinelManager wired the way sentinel tests want it by default: no
+ * persistence and a mock provider registry. Every constructor option can be
+ * overridden; pass `providerRegistry` un-cast — this helper owns the single
+ * cast from the mock's surface to the registry type the manager expects.
+ */
+export function createTestSentinelManager(
+  overrides: Omit<SentinelManagerOptions, "providerRegistry"> & { providerRegistry?: unknown } = {},
+): SentinelManager {
+  const { providerRegistry, ...rest } = overrides;
+  return new SentinelManager({
+    enablePersistence: false,
+    providerRegistry: (providerRegistry ?? createMockLlmProviderRegistry()) as LlmProviderRegistry,
+    ...rest,
+  });
+}
+
+type FileUpdatedEvent = Extract<ServerEvent, { type: "file.updated" }>;
+
+let fileUpdatedEventCounter = 0;
+
+/**
+ * The file.updated ServerEvent sentinel tests trigger on, with the usual
+ * placeholder data. Override the id or any data field as needed.
+ */
+export function fileUpdatedEvent(
+  overrides: Partial<FileUpdatedEvent["data"]> & { id?: string } = {},
+): ServerEvent {
+  const { id, ...data } = overrides;
+  return {
+    id: EventId(id ?? `evt-file-updated-${++fileUpdatedEventCounter}`),
+    timestamp: new Date().toISOString(),
+    type: "file.updated",
+    data: {
+      path: "test.txt",
+      filename: "test.txt",
+      content: "content",
+      action: "created",
+      ...data,
+    },
+  };
+}
 
 /**
  * Enhanced mock implementation that properly tracks original events.

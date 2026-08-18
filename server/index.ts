@@ -10,6 +10,7 @@ import { parseCliArgs, showDeprecationWarnings } from "./cli-parser.js";
 import { ensureSchemaUrl, resolveSettings, validateHank } from "./config.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
+import { checkRegularFile } from "./fs-guards.js";
 import { HankweaveRuntime } from "./hankweave-runtime.js";
 import { initProject } from "./init-command.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
@@ -43,6 +44,29 @@ import { runWelcomeWizard } from "./wizard/welcome-wizard.js";
 // -------------
 
 /**
+ * Read the raw telemetry section of hankweave.json in the given directory.
+ *
+ * Deliberately bypasses the validating loader: resolveSettings strips the
+ * telemetry field (HankweaveConfig omits it), and telemetry must never block
+ * startup on a broken config. Never throws — any problem (missing file,
+ * non-regular file such as a FIFO that would block readFileSync, bad JSON)
+ * yields undefined.
+ */
+function readFileTelemetryConfig(dir: string): Parameters<typeof resolveTelemetryConfig>[0] {
+  try {
+    const runtimeConfigPath = path.join(dir, "hankweave.json");
+    if (checkRegularFile(runtimeConfigPath, { read: false })) {
+      return undefined;
+    }
+    const raw = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf-8"));
+    return raw?.telemetry;
+  } catch {
+    // Silent fail - config is optional
+    return undefined;
+  }
+}
+
+/**
  * Fire-and-forget CLI telemetry event.
  * Used in early-exit paths (--init, --validate, --cleanup, --help)
  * where the full telemetry system isn't initialized.
@@ -55,19 +79,7 @@ async function sendCliTelemetry(
   properties: Record<string, unknown>,
 ): Promise<void> {
   try {
-    // Read telemetry config from hankweave.json if present (same as full runtime path)
-    let fileTelemetryConfig: Parameters<typeof resolveTelemetryConfig>[0];
-    try {
-      const runtimeConfigPath = path.join(process.cwd(), "hankweave.json");
-      if (fs.existsSync(runtimeConfigPath)) {
-        const raw = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf-8"));
-        fileTelemetryConfig = raw?.telemetry;
-      }
-    } catch {
-      // Silent fail - config is optional
-    }
-
-    const telemetryConfig = resolveTelemetryConfig(fileTelemetryConfig);
+    const telemetryConfig = resolveTelemetryConfig(readFileTelemetryConfig(process.cwd()));
     if (!telemetryConfig.enabled) return;
     const clientId = await getOrCreateClientId();
     const collector = new TelemetryCollector(telemetryConfig, clientId, false);
@@ -819,20 +831,9 @@ Use --output to copy them elsewhere.
       }
     }
 
-    // Initialize telemetry
-    // Note: telemetry config is loaded directly from hankweave.json (not through resolveSettings,
-    // which strips it since HankweaveConfig omits the telemetry field)
-    let fileTelemetryConfig: import("./telemetry/telemetry-types.js").TelemetryConfig | undefined;
-    try {
-      const runtimeConfigPath = path.join(originalCwd, "hankweave.json");
-      if (fs.existsSync(runtimeConfigPath)) {
-        const raw = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf-8"));
-        fileTelemetryConfig = raw?.telemetry;
-      }
-    } catch {
-      // Silent fail - telemetry config is optional
-    }
-    const telemetryConfig = resolveTelemetryConfig(fileTelemetryConfig);
+    // Initialize telemetry (readFileTelemetryConfig bypasses resolveSettings,
+    // which strips the telemetry field)
+    const telemetryConfig = resolveTelemetryConfig(readFileTelemetryConfig(originalCwd));
 
     // Show first-run notice (one-time, even if telemetry is disabled)
     await showFirstRunNotice(telemetryConfig);

@@ -11,8 +11,9 @@ import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { PiSdkManager } from "./pi-sdk-manager.js";
 import {
   AMAZON_BEDROCK_PROVIDER_ID,
-  isPassthroughShimProvider,
-  runsOnClaudeAgentSdk,
+  CLAUDE_AGENT_SDK_HARNESS,
+  selectHarness,
+  toPiTarget,
 } from "./provider-ids.js";
 import { ReplayProcessManager } from "./replay-process-manager.js";
 import type { StateManager } from "./state-manager.js";
@@ -432,17 +433,16 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    *
    * CodonRunner supports:
    * - Anthropic models via ClaudeAgentSDKManager (in-process Claude SDK)
-   * - Everything else via PiSdkManager (in-process Pi coding agent); model
-   *   validation rewrites google/openai/GLM/Kimi/etc. spellings to pi/...
+   * - Everything else via PiSdkManager (in-process Pi coding agent)
+   *
+   * selectHarness covers the whole model space (pi is the universal fallback),
+   * so every registry-resolvable model is runnable.
    *
    * @param model - The ModelInfo to check
    * @returns true if the model can be executed, false otherwise
    */
   static canRun(model: ModelInfo): boolean {
-    return (
-      runsOnClaudeAgentSdk(model.providerId, model.modelId) ||
-      isPassthroughShimProvider(model.providerId)
-    );
+    return Boolean(selectHarness(model));
   }
 
   /**
@@ -461,7 +461,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     logger: Logger,
     anthropicBaseUrl?: string,
   ): Promise<ShimSelfTestResult> {
-    const isAnthropicModel = runsOnClaudeAgentSdk(modelInfo.providerId, modelInfo.modelId);
+    const harness = selectHarness(modelInfo);
 
     // Create temporary log parser (required by managers)
     const tempLogParserPath = path.join(os.tmpdir(), `self-test-parser-${Date.now()}.jsonl`);
@@ -475,7 +475,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     try {
       let result: ShimSelfTestResult;
 
-      if (isAnthropicModel) {
+      if (harness === CLAUDE_AGENT_SDK_HARNESS) {
         // Use Claude Agent SDK Manager for Anthropic models
         logger.log(
           `Testing Claude Agent SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
@@ -510,7 +510,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           tempLogParser,
         );
 
-        result = await manager.runSelfTest(modelInfo.modelId);
+        // Pass the dispatch-derived pi routing string — the stored modelId no
+        // longer carries a provider prefix.
+        result = await manager.runSelfTest(toPiTarget(modelInfo.providerId, modelInfo.modelId));
       }
 
       // Log results
@@ -711,9 +713,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       );
     } else {
       const modelInfo = this.config.codon.model;
-      const isAnthropicModel = runsOnClaudeAgentSdk(modelInfo.providerId, modelInfo.modelId);
+      const harness = selectHarness(modelInfo);
 
-      if (isAnthropicModel) {
+      if (harness === CLAUDE_AGENT_SDK_HARNESS) {
         // Use Claude Agent SDK for Anthropic models (Bedrock-hosted included)
         this.config.logger.log(
           `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
@@ -730,10 +732,11 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           this.config.shimIdleTimeout,
           modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
         );
-      } else if (modelInfo.providerId.toLowerCase() === "pi") {
-        // Everything non-Anthropic runs on the IN-PROCESS Pi SDK — like the
-        // Claude SDK, not as a child shim. Model validation has already
-        // rewritten google/openai/GLM/Kimi/opencode spellings to pi/...
+      } else {
+        // Everything non-Anthropic (and explicit pi overrides) runs on the
+        // IN-PROCESS Pi SDK — like the Claude SDK, not as a child shim. The
+        // pi routing string is derived inside PiSdkManager from the real
+        // (providerId, modelId) at launch.
         this.config.logger.log(
           `Using in-process Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
           "info",
@@ -746,10 +749,6 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           this.logParser,
           this.config.globalSystemPrompt ?? null,
           this.config.shimIdleTimeout,
-        );
-      } else {
-        throw new Error(
-          `No process manager available for provider: ${modelInfo.providerId} (model: ${modelInfo.modelId})`,
         );
       }
     }

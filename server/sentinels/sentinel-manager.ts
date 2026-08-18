@@ -264,6 +264,8 @@ export class SentinelManager {
     codonId: CodonId,
     options: {
       configDirectory?: string;
+      configDirectories?: Map<string, string>; // Per-sentinel config directory by config id; wins over configDirectory
+      hankDirectory?: string; // Containment anchor for strict-ref checks (the hank/codon-config dir)
       runStartTime?: Date;
       executionPath?: string;
       agentRootPath?: string; // For sentinel output path resolution
@@ -282,6 +284,8 @@ export class SentinelManager {
     // Destructure options for cleaner code
     const {
       configDirectory,
+      configDirectories,
+      hankDirectory,
       runStartTime,
       executionPath,
       agentRootPath,
@@ -557,7 +561,7 @@ export class SentinelManager {
           llmCallFn,
           this.logger,
           this.sentinelDir, // Pass directory (may be undefined)
-          configDirectory, // For resolving relative prompt file paths
+          configDirectories?.get(config.id) ?? configDirectory, // For resolving relative prompt file paths
           runStartTime, // Start time of the current run
           onExecute, // Pass callback
           modelCost, // Pass cost per million tokens
@@ -566,6 +570,7 @@ export class SentinelManager {
           agentRootPath, // For sentinel output path resolution
           sentinelOutputPaths, // outputPaths from codon config (if provided)
           this.eventCallback, // Sentinel 2: Pass event callback for event emission
+          hankDirectory, // Containment anchor for strict-ref checks at prompt/schema load
         );
 
         // Only add to collections after successful creation

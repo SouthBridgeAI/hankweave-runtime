@@ -3,9 +3,25 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { validateModel } from "./config-validation/model-validator.js";
-import { codonSentinelEntrySchema } from "./config-validation/sentinel.schema.js";
+import { hankRefFieldSchema, hankRefStringSchema } from "./config-validation/ref-schema.js";
+import {
+  codonSentinelEntrySchema,
+  sentinelConfigSchema,
+} from "./config-validation/sentinel.schema.js";
+import { checkRegularFile } from "./fs-guards.js";
+import {
+  codonOwnRefs,
+  normalizeRefField,
+  refViolationMessage,
+  resolveRef,
+  sentinelOwnRefs,
+  validateCopyTree,
+  validateRef,
+  vetAndReadRef,
+} from "./hank-refs.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
+import { selectHarness } from "./provider-ids.js";
 import { type TelemetryConfig, telemetryConfigSchema } from "./telemetry/telemetry-types.js";
 import { CodonId } from "./types/branded-types.js";
 import type { AllocationMode, OnExceededPolicy } from "./types/budget-types.js";
@@ -255,15 +271,14 @@ export const rigSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("copy").describe("Type of setup operation"),
     copy: z.object({
-      from: z
-        .string()
-        .min(1, "Source path cannot be empty")
-        .describe("Source path (relative to config file or absolute)"),
+      from: hankRefStringSchema("copy.from").describe(
+        "Source path, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
+      ),
       to: z
         .string()
         .min(1, "Target path cannot be empty")
         .describe(
-          "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: '../templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: '../templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: '../config.json', to: 'src/config.json' → copies file; from: '../config.json', to: 'src/settings.json' → copies file with rename",
+          "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: 'templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: 'templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: 'templates/config.json', to: 'src/config.json' → copies file; from: 'templates/config.json', to: 'src/settings.json' → copies file with rename",
         ),
     }),
     allowFailure: z
@@ -692,19 +707,19 @@ export const codonObjectSchema = z.object({
       "Codon name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
     )
     .describe("Human-readable name displayed in UI and logs"),
-  promptFile: z
-    .union([z.string(), z.array(z.string())])
+  promptFile: hankRefFieldSchema("promptFile")
     .optional()
-    .describe("Path to a file containing the prompt (mutually exclusive with promptText)"),
+    .describe(
+      "Path to a file containing the prompt (mutually exclusive with promptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
+    ),
   promptText: z
     .string()
     .optional()
     .describe("Inline prompt text (mutually exclusive with promptFile)"),
-  appendSystemPromptFile: z
-    .union([z.string(), z.array(z.string())])
+  appendSystemPromptFile: hankRefFieldSchema("appendSystemPromptFile")
     .optional()
     .describe(
-      "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText)",
+      "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
     ),
   appendSystemPromptText: z
     .string()
@@ -1315,6 +1330,25 @@ export const hankRequirementsSchema = z.object({
  * Uses codonConfigArraySchemaWithDetailedErrors for better validation errors
  * when codon fields have typos or unrecognized fields.
  */
+// Root fields shared verbatim between the runtime root (hankFileSchema) and
+// the authoring root (hankFileAuthoringSchema): the published hank.schema.json
+// is generated from the AUTHORING root, so a field defined only on the runtime
+// root would silently vanish from the published contract.
+const sharedHankRootFields = {
+  requirements: hankRequirementsSchema
+    .optional()
+    .describe("Requirements that must be met for this hank to run (optional)"),
+  globalSystemPromptFile: hankRefFieldSchema("globalSystemPromptFile")
+    .optional()
+    .describe(
+      "Global system prompt file(s) applied to all codons. Must be relative path(s) inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
+    ),
+  globalSystemPromptText: z
+    .string()
+    .optional()
+    .describe("Global system prompt text applied to all codons"),
+};
+
 export const hankFileSchema = z
   .object({
     $schema: z.string().optional().describe("JSON Schema URL for editor autocomplete support"),
@@ -1322,17 +1356,7 @@ export const hankFileSchema = z
     overrides: hankOverridesSchema
       .optional()
       .describe("Architect's overrides for optimal execution (optional)"),
-    requirements: hankRequirementsSchema
-      .optional()
-      .describe("Requirements that must be met for this hank to run (optional)"),
-    globalSystemPromptFile: z
-      .union([z.string(), z.array(z.string())])
-      .optional()
-      .describe("Global system prompt file(s) applied to all codons (relative to hank file)"),
-    globalSystemPromptText: z
-      .string()
-      .optional()
-      .describe("Global system prompt text applied to all codons"),
+    ...sharedHankRootFields,
     hank: codonConfigArraySchemaWithDetailedErrors.describe(
       "The immutable logic sequence (required)",
     ),
@@ -1419,12 +1443,16 @@ export const hankFileAuthoringSchema = z
     $schema: z.string().optional().describe("JSON Schema URL for editor support"),
     meta: hankMetaSchema.optional().describe("Metadata for sharing/indexing (optional)"),
     overrides: hankOverridesSchema.optional().describe("Architect's overrides (optional)"),
+    ...sharedHankRootFields,
     hank: z
       .array(codonConfigAuthoringSchema)
       .min(1)
       .describe("The immutable logic sequence (required)"),
   })
-  .strict();
+  .strict()
+  .refine((data) => !(data.globalSystemPromptFile && data.globalSystemPromptText), {
+    message: "Cannot specify both globalSystemPromptFile and globalSystemPromptText",
+  });
 
 /**
  * Schema for runtime configuration (hankweave.json)
@@ -1743,6 +1771,11 @@ export const HANK_SCHEMA_URL = "https://unpkg.com/hankweave@latest/schemas/hank.
  * @returns true if $schema was added, false if it already existed
  */
 export function ensureSchemaUrl(hankPath: string): boolean {
+  // Same "silently skip" treatment as the catch below, but checked up front:
+  // reading a FIFO would block forever instead of throwing.
+  if (checkRegularFile(hankPath, { read: false })) {
+    return false;
+  }
   try {
     const content = fs.readFileSync(hankPath, "utf-8");
     const rawConfig = JSON.parse(content);
@@ -1780,6 +1813,14 @@ export function loadHankFile(options: {
   hankPath: string;
   modelOverride?: string;
 }): z.infer<typeof hankFileSchema> {
+  const problem = checkRegularFile(options.hankPath, { read: false });
+  if (problem) {
+    throw new Error(
+      problem.kind === "missing"
+        ? `Hank file not found: ${options.hankPath}`
+        : `Hank file ${problem.phrase}: ${options.hankPath}`,
+    );
+  }
   try {
     const { hankPath, modelOverride } = options;
     const content = fs.readFileSync(hankPath, "utf-8");
@@ -1849,8 +1890,12 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
   const configPath = runtimeConfigPath || path.join(process.cwd(), "hankweave.json");
 
   // If file doesn't exist, return empty object (runtime config is optional)
-  if (!fs.existsSync(configPath)) {
+  const problem = checkRegularFile(configPath, { read: false });
+  if (problem?.kind === "missing") {
     return {};
+  }
+  if (problem) {
+    throw new Error(`Failed to load runtime config from ${configPath}: ${problem.phrase}`);
   }
 
   try {
@@ -2090,29 +2135,44 @@ export function loadGlobalSystemPrompt(
   }
 
   if (hankFile.globalSystemPromptFile) {
-    const files = Array.isArray(hankFile.globalSystemPromptFile)
-      ? hankFile.globalSystemPromptFile
-      : [hankFile.globalSystemPromptFile];
+    const files = normalizeRefField(hankFile.globalSystemPromptFile);
 
     const parts: string[] = [];
     for (const file of files) {
-      const absolutePath = path.isAbsolute(file) ? file : path.resolve(hankDir, file);
-      try {
-        parts.push(fs.readFileSync(absolutePath, "utf-8"));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          throw new Error(
-            `Global system prompt file not found: ${absolutePath}\n` +
-              `  (configured via globalSystemPromptFile in hank.json)`,
-          );
-        }
-        throw error;
-      }
+      parts.push(
+        vetAndReadRef(file, hankDir, hankDir, {
+          what: "Global system prompt file",
+          context: "configured via globalSystemPromptFile in hank.json",
+        }).text,
+      );
     }
     return parts.join("\n\n");
   }
 
   return null;
+}
+
+/**
+ * Enumerate every actual codon in a hank with the breadcrumb label error
+ * messages use. Loops nest exactly one level (the schema's loop.codons holds
+ * plain codons), so this is a flat enumeration, not a recursion — a loop
+ * itself is never yielded, only its codons, each labeled with its loop.
+ */
+function* codonsWithContext(
+  configs: CodonConfig[],
+): Generator<{ codon: Exclude<CodonConfig, { type: "loop" }>; context: string }> {
+  for (const [index, config] of configs.entries()) {
+    if (config.type === "loop") {
+      for (const [codonIndex, codon] of config.codons.entries()) {
+        yield {
+          codon,
+          context: `Loop '${config.id}' > Codon ${codonIndex + 1} (${codon.id})`,
+        };
+      }
+    } else {
+      yield { codon: config, context: `Codon ${index + 1} (${config.id})` };
+    }
+  }
 }
 
 /**
@@ -2137,8 +2197,42 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
     const hankFile = loadHankFile({ hankPath: configPath, modelOverride });
     const rawCodons = hankFile.hank;
 
-    // Resolve relative paths for promptFile and appendSystemPromptFile
-    const configDir = path.dirname(configPath);
+    // Resolve relative paths for promptFile and appendSystemPromptFile.
+    // resolveRef requires an absolute base, so anchor a relative configPath
+    // to cwd once here (path.resolve did the same implicitly before).
+    const configDir = path.dirname(path.resolve(configPath));
+
+    // Strict-ref preflight (spec 63 §3b): validate every authored ref BEFORE
+    // any resolution and before the existence walk below — that walk READS
+    // files, and a forbidden path must be rejected without ever being
+    // touched. Three passes with three jobs, in a load-bearing order:
+    // policy on raw strings (here), then resolution
+    // (resolveCodonOrLoopPaths), then existence probes (validateCodonOrLoop).
+    // Violations are collected, not thrown one at a time, so a broken hank
+    // reports every bad ref at once.
+    const preflightViolations: string[] = [];
+    for (const { codon, context } of codonsWithContext(rawCodons as CodonConfig[])) {
+      for (const { field, raw, scanTree } of codonOwnRefs(codon)) {
+        if (raw === "") continue; // surfaces as its own error downstream
+        const vetted = validateRef(raw, configDir, configDir);
+        if (typeof vetted !== "string") {
+          preflightViolations.push(`${context}: ${field} ${refViolationMessage(vetted)}`);
+          continue;
+        }
+        // Only scan inside a copy tree once the ref itself is legal — a
+        // forbidden ref must be rejected without its target being walked
+        // (validateCopyTree's ValidatedRef parameter enforces the order).
+        if (scanTree) {
+          const treeViolation = validateCopyTree(vetted, configDir);
+          if (treeViolation) {
+            preflightViolations.push(`${context}: ${field} ${refViolationMessage(treeViolation)}`);
+          }
+        }
+      }
+    }
+    if (preflightViolations.length > 0) {
+      throw new Error(`Codon configuration validation failed:\n${preflightViolations.join("\n")}`);
+    }
 
     /**
      * Recursively resolve paths in a codon configuration.
@@ -2157,29 +2251,18 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
       // It's a codon - resolve its paths
       const resolved = { ...config };
 
-      // Handle promptFile - can be string or array
+      // Handle promptFile - can be string or array (keep scalar/array shape)
       if (resolved.promptFile) {
-        if (Array.isArray(resolved.promptFile)) {
-          resolved.promptFile = resolved.promptFile.map((file: string) =>
-            path.isAbsolute(file) ? file : path.resolve(configDir, file),
-          );
-        } else if (!path.isAbsolute(resolved.promptFile)) {
-          resolved.promptFile = path.resolve(configDir, resolved.promptFile);
-        }
+        resolved.promptFile = Array.isArray(resolved.promptFile)
+          ? resolved.promptFile.map((file: string) => resolveRef(file, configDir))
+          : resolveRef(resolved.promptFile, configDir);
       }
 
-      // Handle appendSystemPromptFile - can be string or array
+      // Handle appendSystemPromptFile - can be string or array (keep scalar/array shape)
       if (resolved.appendSystemPromptFile) {
-        if (Array.isArray(resolved.appendSystemPromptFile)) {
-          resolved.appendSystemPromptFile = resolved.appendSystemPromptFile.map((file: string) =>
-            path.isAbsolute(file) ? file : path.resolve(configDir, file),
-          );
-        } else if (!path.isAbsolute(resolved.appendSystemPromptFile)) {
-          resolved.appendSystemPromptFile = path.resolve(
-            configDir,
-            resolved.appendSystemPromptFile,
-          );
-        }
+        resolved.appendSystemPromptFile = Array.isArray(resolved.appendSystemPromptFile)
+          ? resolved.appendSystemPromptFile.map((file: string) => resolveRef(file, configDir))
+          : resolveRef(resolved.appendSystemPromptFile, configDir);
       }
 
       // Handle rigSetup - resolve paths for copy operations
@@ -2189,9 +2272,7 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
             return {
               ...item,
               copy: {
-                from: path.isAbsolute(item.copy.from)
-                  ? item.copy.from
-                  : path.resolve(configDir, item.copy.from),
+                from: resolveRef(item.copy.from, configDir),
                 to: item.copy.to, // Keep 'to' as relative to projectPath
               },
             };
@@ -2234,56 +2315,46 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
       }
 
       // It's a codon - validate it
-      // Validate promptFile existence and readability
-      if (config.promptFile) {
-        const promptFiles = Array.isArray(config.promptFile)
-          ? config.promptFile
-          : [config.promptFile];
-        for (const file of promptFiles) {
-          if (!fs.existsSync(file)) {
-            validationErrors.push(`${context}: promptFile "${file}" does not exist`);
-          } else {
-            try {
-              fs.readFileSync(file, "utf-8");
-            } catch (error) {
-              validationErrors.push(
-                `${context}: promptFile "${file}" is not readable: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              );
-            }
-          }
-        }
-      }
-
-      // Validate appendSystemPromptFile existence and readability
-      if (config.appendSystemPromptFile) {
-        const systemPromptFiles = Array.isArray(config.appendSystemPromptFile)
-          ? config.appendSystemPromptFile
-          : [config.appendSystemPromptFile];
-        for (const file of systemPromptFiles) {
-          if (!fs.existsSync(file)) {
-            validationErrors.push(`${context}: appendSystemPromptFile "${file}" does not exist`);
-          } else {
-            try {
-              fs.readFileSync(file, "utf-8");
-            } catch (error) {
-              validationErrors.push(
-                `${context}: appendSystemPromptFile "${file}" is not readable: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              );
-            }
+      // Validate prompt file fields: each entry must be a readable regular file
+      const promptFileFields = [
+        ["promptFile", config.promptFile],
+        ["appendSystemPromptFile", config.appendSystemPromptFile],
+      ] as const;
+      for (const [field, value] of promptFileFields) {
+        for (const file of normalizeRefField(value)) {
+          const problem = checkRegularFile(file);
+          if (problem) {
+            validationErrors.push(`${context}: ${field} "${file}" ${problem.phrase}`);
           }
         }
       }
 
       // Validate rigSetup items
       if (config.rigSetup) {
+        const hankDir = path.resolve(path.dirname(configPath));
         for (const [itemIndex, item] of config.rigSetup.entries()) {
           if (item.type === "copy" && item.copy) {
-            // Check if source exists
-            if (!fs.existsSync(item.copy.from)) {
+            // copy.from is already resolved against the config dir, so lexical
+            // spellings of the hank dir ("." or "sub/..") compare equal; the
+            // realpath comparison additionally catches symlinks back to it.
+            let isHankDirItself = path.resolve(item.copy.from) === hankDir;
+            if (!isHankDirItself) {
+              try {
+                isHankDirItself = fs.realpathSync(item.copy.from) === fs.realpathSync(hankDir);
+              } catch {
+                // Unresolvable path: leave it to the existence check below.
+              }
+            }
+            if (isHankDirItself) {
+              // Copying the whole hank dir sweeps hank.json, prompts, and
+              // any pack/runtime artifacts sitting next to it into the rig;
+              // it also cannot be represented faithfully in a packed bundle.
+              validationErrors.push(
+                `${context}, rig setup item ${itemIndex + 1}: copy source "${
+                  item.copy.from
+                }" is the hank directory itself; move the files into a subdirectory and copy that`,
+              );
+            } else if (!fs.existsSync(item.copy.from)) {
               validationErrors.push(
                 `${context}, rig setup item ${itemIndex + 1}: source path "${
                   item.copy.from
@@ -2297,7 +2368,7 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
       // Validate sentinels
       if (config.sentinels && config.sentinels.length > 0) {
         const seenSentinelIds = new Set<string>();
-        const configDir = path.dirname(configPath);
+        const configDir = path.dirname(path.resolve(configPath));
 
         for (const [sentIndex, entry] of config.sentinels.entries()) {
           const entryLabel = `Codon ${index + 1} (${config.id}), sentinel ${sentIndex + 1}`;
@@ -2306,21 +2377,32 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
           let sentinelConfig: unknown;
           if (typeof entry.sentinelConfig === "string") {
             // File reference - resolve and load
-            const resolvedPath = path.isAbsolute(entry.sentinelConfig)
-              ? entry.sentinelConfig
-              : path.resolve(configDir, entry.sentinelConfig);
-
-            if (!fs.existsSync(resolvedPath)) {
+            if (entry.sentinelConfig === "") {
               const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
               validationErrors.push(
-                `${entryLabel}: Sentinel config file not found: ${entry.sentinelConfig} [${severity}]`,
+                `${entryLabel}: Sentinel config file reference is empty [${severity}]`,
+              );
+              continue;
+            }
+            const resolvedPath = resolveRef(entry.sentinelConfig, configDir);
+
+            const problem = checkRegularFile(resolvedPath, { read: false });
+            if (problem) {
+              const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
+              validationErrors.push(
+                problem.kind === "missing"
+                  ? `${entryLabel}: Sentinel config file not found: ${entry.sentinelConfig} [${severity}]`
+                  : `${entryLabel}: Sentinel config ${entry.sentinelConfig} ${problem.phrase} [${severity}]`,
               );
               continue; // Skip further validation for this sentinel
             }
 
+            let parsedJson: unknown;
             try {
-              const content = fs.readFileSync(resolvedPath, "utf-8");
-              sentinelConfig = JSON.parse(content);
+              const content = vetAndReadRef(entry.sentinelConfig, configDir, configDir, {
+                what: "Sentinel config file",
+              }).text;
+              parsedJson = JSON.parse(content);
             } catch (error) {
               const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
               const errorMsg = error instanceof Error ? error.message : String(error);
@@ -2329,8 +2411,50 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
               );
               continue;
             }
+
+            // Schema-validate BEFORE extracting refs, so ref extraction runs
+            // on a known shape instead of poking at unvalidated JSON.
+            const parsed = sentinelConfigSchema.safeParse(parsedJson);
+            if (!parsed.success) {
+              const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
+              const issues = parsed.error.issues
+                .map((i) => `${i.path.join(".")}: ${i.message}`)
+                .join("; ");
+              validationErrors.push(
+                `${entryLabel}: Invalid sentinel config ${entry.sentinelConfig}: ${issues} [${severity}]`,
+              );
+              continue;
+            }
+            sentinelConfig = parsed.data;
+
+            // Strict-ref policy for the config's OWN refs. Anchor rule
+            // (mirrored in SentinelConfigLoader.loadConfigsForCodon): a
+            // file-based config's refs resolve from the config file's own
+            // directory; the hank dir stays the containment anchor.
+            const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
+            const ownRefBase = path.dirname(resolvedPath);
+            for (const { field, raw } of sentinelOwnRefs(parsed.data)) {
+              const violation = validateRef(raw, ownRefBase, configDir);
+              if (typeof violation !== "string") {
+                validationErrors.push(
+                  `${entryLabel}: ${field} ${refViolationMessage(violation)} [${severity}]`,
+                );
+              }
+            }
           } else {
-            // Inline config
+            // Inline config: refs anchor at the hank dir (mirrored in
+            // SentinelConfigLoader.loadConfigsForCodon). The schema already
+            // rejected non-portable and escaping spellings for inline
+            // configs; this catches symlinks (R3), which need the filesystem.
+            const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
+            for (const { field, raw } of sentinelOwnRefs(entry.sentinelConfig)) {
+              const violation = validateRef(raw, configDir, configDir);
+              if (typeof violation !== "string") {
+                validationErrors.push(
+                  `${entryLabel}: ${field} ${refViolationMessage(violation)} [${severity}]`,
+                );
+              }
+            }
             sentinelConfig = entry.sentinelConfig;
           }
 
@@ -2968,8 +3092,13 @@ export async function validateHank(options: {
         collectModelsRecursive(codon);
       }
     } else {
-      // Codon: add model to map (using modelId as key for uniqueness)
-      uniqueModels.set(config.model.modelId, config.model);
+      // Codon: add model to map, keyed by the full identity that determines
+      // its self-test — harness + provider + model. Keying on modelId alone
+      // would collapse an explicit pi-override spelling with the same model's
+      // default (claude-agent-sdk) codon and silently skip one of the two
+      // self-tests.
+      const model = config.model;
+      uniqueModels.set(`${selectHarness(model)}:${model.providerId}/${model.modelId}`, model);
     }
   }
 
@@ -2984,7 +3113,8 @@ export async function validateHank(options: {
   } else if (uniqueModels.size > 0) {
     result.shimSelfTests = [];
 
-    for (const [modelId, modelInfo] of uniqueModels) {
+    for (const modelInfo of uniqueModels.values()) {
+      const modelId = modelInfo.modelId;
       logger.log(
         `Running self-test for model: ${modelInfo.name} (${modelInfo.providerId}/${modelId})`,
       );

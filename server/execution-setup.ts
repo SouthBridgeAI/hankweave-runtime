@@ -5,6 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { DEFAULT_CONFIG } from "./config.js";
 import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
+import { checkRegularFile } from "./fs-guards.js";
 import {
   detectRuntime,
   getManagedExecutionsRoot,
@@ -170,11 +171,19 @@ export async function setupExecutionEnvironment(options: {
   let configChanged = false;
   let relinkDataSource = false;
 
-  // Calculate hank hash if path provided
+  // Calculate hank hash if path provided. This read happens before hank
+  // validation (resolveSettings swallows loader errors), so it must reject
+  // non-regular files itself — reading a FIFO here would block forever.
   let hankHash: string | undefined;
-  if (hankPath && fs.existsSync(hankPath)) {
-    const hankContent = await fs.promises.readFile(hankPath, "utf-8");
-    hankHash = crypto.createHash("sha256").update(hankContent).digest("hex");
+  if (hankPath) {
+    const problem = checkRegularFile(hankPath, { read: false });
+    if (problem?.kind === "irregular") {
+      throw new Error(`Hank file ${problem.phrase}: ${hankPath}`);
+    }
+    if (!problem) {
+      const hankContent = await fs.promises.readFile(hankPath, "utf-8");
+      hankHash = crypto.createHash("sha256").update(hankContent).digest("hex");
+    }
   }
 
   if (executionPath) {

@@ -3,8 +3,10 @@ import type { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import type { ModelInfo } from "../llm/models-dev-schema.js";
 import {
   getSupportedCodonProviderIds,
+  inferPiProviderForBareId,
   isPassthroughShimProvider,
-  runsOnClaudeAgentSdk,
+  normalizePiProviderId,
+  PI_HARNESS,
 } from "../provider-ids.js";
 
 /**
@@ -22,57 +24,6 @@ export interface ModelValidationResult {
 }
 
 /**
- * Registry provider id → pi provider id, only where the names differ.
- * Zhipu AI's canonical registry id is "zhipuai" (with "z-ai" as the
- * OpenRouter-style spelling), but pi only carries its international "Z.AI"
- * brand ("zai", authenticated via ZAI_API_KEY). Moonshot appears as
- * "moonshot"/"moonshot-ai" in some catalogs; pi and models.dev use
- * "moonshotai".
- */
-const PI_PROVIDER_ALIASES: Record<string, string> = {
-  zhipuai: "zai",
-  "z-ai": "zai",
-  moonshot: "moonshotai",
-  "moonshot-ai": "moonshotai",
-};
-
-/**
- * Providers routed through pi's openrouter provider (org-prefixed model ids,
- * authenticated via OPENROUTER_API_KEY) instead of their own pi provider: we
- * don't carry their first-party API keys.
- */
-const OPENROUTER_ROUTED_PROVIDERS = new Set(["moonshotai"]);
-
-/** Resolve a provider id to the id pi knows it by (alias-aware, lowercased). */
-function normalizePiProviderId(providerId: string): string {
-  const lower = providerId.toLowerCase();
-  return PI_PROVIDER_ALIASES[lower] ?? lower;
-}
-
-/**
- * Map a registry-resolved (provider, model) pair onto the model string pi's
- * runtime routes ("<provider>/<model>"). No catalog check happens here — the
- * mapping is optimistic, and a model pi genuinely can't serve fails at runtime
- * with its own clear "Pi model not found" / missing-key error.
- */
-function toPiTarget(providerId: string, modelId: string): string {
-  const provider = normalizePiProviderId(providerId);
-  if (OPENROUTER_ROUTED_PROVIDERS.has(provider)) {
-    return `openrouter/${provider}/${modelId}`;
-  }
-  return `${provider}/${modelId}`;
-}
-
-function wrapAsPiModelInfo(modelInfo: ModelInfo, piModelId: string): ModelInfo {
-  return {
-    ...modelInfo,
-    providerId: "pi",
-    modelId: piModelId,
-    name: `pi: ${piModelId}`,
-  };
-}
-
-/**
  * Normalize the provider segment of a qualified spelling to the id the
  * registry and pi both know ("zhipuai/glm-5.2" and "z-ai/glm-5.2" → "zai/…",
  * "moonshot/kimi-k3" → "moonshotai/…"). Leaves everything else untouched.
@@ -86,64 +37,89 @@ function aliasQualifiedProvider(model: string): string {
 }
 
 /**
- * Normalize a ModelInfo persisted by a pre-reorg execution. The removed
- * gemini/codex/opencode shims stored providerId "google"/"openai"/"opencode"
- * in the executionPlan, and continuation runs restore that plan verbatim
- * without re-running model validation — so without this migration,
- * CodonRunner.createProcessManager (which now accepts only anthropic and pi)
- * rejects the pending codon with "No process manager available". Non-anthropic
- * providers wrap as the pi passthrough exactly like fresh validation does;
- * bare opencode short spellings ("glm-5.2") need the registry to find their
- * provider, so they route through validateModel when one is supplied.
- * Already-normalized entries are returned unchanged.
+ * Normalize a ModelInfo persisted by a pre-upgrade execution. Continuation
+ * runs restore the executionPlan verbatim without re-running model validation,
+ * so retired encodings must be migrated here:
+ *
+ * - Migration #1/#2: the removed gemini/codex/opencode shims stored providerId
+ *   "google"/"openai"/"opencode". Real provider ids are now natively runnable
+ *   (harness selection is late-bound), so only "opencode" still needs work —
+ *   bare opencode short spellings ("glm-5.2") need the registry to find their
+ *   provider, so they route through validateModel when one is supplied.
+ * - Migration #3 (final): the retired "pi" pseudo-provider encoding
+ *   (providerId "pi", modelId "<provider>/<model>") reverse-maps to the real
+ *   provider by splitting on the first slash. Legacy entries are treated as
+ *   routing-derived, not user-forced, so no harnessOverride is set — a legacy
+ *   plan that explicitly forced an Anthropic model onto pi re-routes to the
+ *   Agent SDK on resume (release-noted). "openrouter/…" modelIds map to
+ *   provider "openrouter" verbatim; dispatch-time toPiTarget routes them
+ *   unchanged.
+ *
+ * Already-normalized entries are returned unchanged. Because harness selection
+ * is now computed at dispatch from the real provider id, no future routing
+ * change requires another migration here.
  */
 export function normalizeLegacyProviderModelInfo(
   modelInfo: ModelInfo,
   registry?: LlmProviderRegistry,
 ): ModelInfo {
   const provider = modelInfo.providerId.toLowerCase();
-  // Agent-SDK-routed plans (anthropic, and Anthropic-on-Bedrock — same rule
-  // as fresh validation in Step 2 below) and pi plans stay as persisted.
-  if (provider === "pi" || runsOnClaudeAgentSdk(provider, modelInfo.modelId)) {
-    return modelInfo;
-  }
   if (provider === "opencode") {
     const raw = modelInfo.modelId;
     if (!raw.includes("/") && registry) {
       const result = validateModel(`pi/${raw}`, registry);
-      if (result.valid && result.modelInfo?.providerId === "pi") {
+      if (result.valid && result.modelInfo) {
         return {
           ...modelInfo,
-          providerId: "pi",
+          providerId: result.modelInfo.providerId,
           modelId: result.modelInfo.modelId,
           name: result.modelInfo.name,
+          ...(result.modelInfo.harnessOverride
+            ? { harnessOverride: result.modelInfo.harnessOverride }
+            : {}),
         };
       }
     }
-    return { ...modelInfo, providerId: "pi", modelId: raw, name: `pi: ${raw}` };
+    // Fall through to the pi reverse-mapping below with the same modelId shape
+    // the old opencode migration produced.
+    return normalizeLegacyProviderModelInfo({ ...modelInfo, providerId: PI_HARNESS }, registry);
   }
-  return wrapAsPiModelInfo(modelInfo, toPiTarget(provider, modelInfo.modelId));
+  // The retired pseudo-provider encoding spelled the pi harness id in the
+  // provider field — the same string the passthrough-shim prefix uses.
+  if (isPassthroughShimProvider(provider)) {
+    const raw = modelInfo.modelId;
+    const slash = raw.indexOf("/");
+    if (slash > 0) {
+      return {
+        ...modelInfo,
+        providerId: raw.substring(0, slash).toLowerCase(),
+        modelId: raw.substring(slash + 1),
+        name: raw,
+      };
+    }
+    // Bare ids (old opencode-fallback shape): infer the provider the way pi's
+    // own router would have at runtime.
+    return { ...modelInfo, providerId: inferPiProviderForBareId(raw), name: raw };
+  }
+  return modelInfo;
 }
 
 /**
  * Validates a model string against the LLM registry and the runnable harnesses.
  *
- * The rule: models that resolve to the "anthropic" provider — and Anthropic
- * models hosted on Amazon Bedrock ("amazon-bedrock/…anthropic.claude-…") —
- * run natively on the Claude Agent SDK; everything else is wrapped as a pi
- * passthrough
- * (providerId "pi", modelId "<provider>/<canonical-id>", underlying
- * capabilities/cost kept — CostTracker prices passthrough models by that
- * "provider/model" modelId). The wrap happens AFTER registry resolution — not
- * as a string rewrite — so fuzzy matching and canonical model-id normalization
- * (e.g. gpt-5.6 spelling routing) still happen. Validation fails only when the
- * registry doesn't know the model at all.
+ * The returned ModelInfo always carries the model's REAL identity: providerId
+ * is the registry provider ("anthropic", "openai", "amazon-bedrock", …) and
+ * modelId the canonical registry id. Which harness executes the codon (Claude
+ * Agent SDK vs. embedded pi) is NOT decided here — CodonRunner late-binds it
+ * at dispatch via selectHarness(), so persisted plans never encode a routing
+ * decision. Validation fails only when the registry doesn't know the model at
+ * all.
  *
- * Explicit "pi/<provider>/<model>" spellings are trusted verbatim as an escape
- * hatch (capabilities are inherited from the registry when the underlying
- * model is known); a bare id after "pi/" is qualified with the provider the
- * registry resolves, because pi routes "provider/model" strings and would
- * default a bare id to anthropic.
+ * Explicit "pi/<provider>/<model>" spellings are the escape hatch that forces
+ * the pi harness: they set harnessOverride: "pi" (capabilities are inherited
+ * from the registry when the underlying model is known); a bare id after
+ * "pi/" gets its provider from the registry, because pi routes
+ * "provider/model" strings and would default a bare id to anthropic.
  *
  * @param model - The model string to validate (e.g., "sonnet", "deepseek-v4-pro")
  * @param registry - The LlmProviderRegistry instance to use for resolution
@@ -184,21 +160,48 @@ export function validateModel(
       const underlying = registry.resolveModel({ model: rest, ignoreBlockList: true });
 
       let passthroughModelInfo: ModelInfo;
-      if (underlying.success) {
-        // A bare id after the prefix ("pi/deepseek-v4-pro") must come out
-        // provider-qualified — pi routes "provider/model" strings and defaults
-        // bare non-gemini/gpt ids to anthropic, so the raw id would target the
-        // wrong provider at runtime.
-        const modelId = rest.includes("/")
-          ? rest
-          : toPiTarget(underlying.modelInfo.providerId, underlying.modelInfo.modelId);
-        passthroughModelInfo = wrapAsPiModelInfo(underlying.modelInfo, modelId);
-      } else {
-        // Fallback: model not in registry, use generic defaults
+      const restSlash = rest.indexOf("/");
+      if (restSlash > 0) {
+        // Provider-qualified spelling ("pi/openai/gpt-x", "pi/openrouter/…"):
+        // the user's provider/model split is trusted verbatim as the identity;
+        // the registry only contributes capabilities/cost when it knows the
+        // model. Dispatch-time toPiTarget re-derives the pi route from it.
+        const qualifiedProvider = normalizePiProviderId(rest.substring(0, restSlash));
+        const qualifiedModelId = rest.substring(restSlash + 1);
+        const base: ModelInfo = underlying.success
+          ? underlying.modelInfo
+          : {
+              providerId: qualifiedProvider,
+              modelId: qualifiedModelId,
+              name: `${qualifiedProvider}/${qualifiedModelId}`,
+              attachment: false,
+              reasoning: true,
+              tool_call: true,
+              cost: undefined,
+              limit: { context: 200000, output: 64000 },
+              modalities: { input: ["text"], output: ["text"] },
+              release_date: "2025-01-01",
+              last_updated: "2025-01-01",
+            };
         passthroughModelInfo = {
-          providerId: prefix,
+          ...base,
+          providerId: qualifiedProvider,
+          modelId: qualifiedModelId,
+          harnessOverride: PI_HARNESS,
+        };
+      } else if (underlying.success) {
+        // Bare id the registry knows ("pi/deepseek-v4-pro"): the registry
+        // supplies the real provider; only the harness override is added.
+        passthroughModelInfo = { ...underlying.modelInfo, harnessOverride: PI_HARNESS };
+      } else {
+        // Bare id not in the registry: infer the provider the way pi's own
+        // router would (it defaults bare non-gemini/gpt ids to anthropic).
+        const inferredProvider = inferPiProviderForBareId(rest);
+        passthroughModelInfo = {
+          providerId: inferredProvider,
           modelId: rest,
-          name: `${prefix}: ${rest}`,
+          name: `${inferredProvider}/${rest}`,
+          harnessOverride: PI_HARNESS,
           attachment: false,
           reasoning: true,
           tool_call: true,
@@ -246,15 +249,12 @@ export function validateModel(
     };
   }
 
-  // Step 2: Anthropic models run natively on the Claude Agent SDK — including
-  // Anthropic models hosted on Amazon Bedrock (the Agent SDK's Bedrock mode);
+  // Step 2: the registry-resolved ModelInfo is returned as-is — real provider,
+  // canonical model id. Harness selection (Claude Agent SDK for Anthropic
+  // models incl. Anthropic-on-Bedrock, embedded pi for everything else) is
+  // late-bound at dispatch by CodonRunner via selectHarness();
   // "pi/amazon-bedrock/…" stays available as the explicit pi override.
-  // Everything else, non-Anthropic Bedrock models included, runs through the
-  // embedded pi runtime.
-  const resolvedInfo = resolveResult.modelInfo;
-  const modelInfo = runsOnClaudeAgentSdk(resolvedInfo.providerId, resolvedInfo.modelId)
-    ? resolvedInfo
-    : wrapAsPiModelInfo(resolvedInfo, toPiTarget(resolvedInfo.providerId, resolvedInfo.modelId));
+  const modelInfo = resolveResult.modelInfo;
 
   // Step 3: Check if CodonRunner can execute this model
   const canRun = CodonRunner.canRun(modelInfo);

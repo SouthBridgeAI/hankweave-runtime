@@ -121,27 +121,20 @@ describe("Authoring schema consistency", () => {
     });
   }
 
-  // Test that hank file structure is consistent
-  test("hankFileAuthoringSchema matches hankFileSchema structure", () => {
-    const testConfig = {
-      meta: { name: "Test", version: "1.0.0" },
-      hank: [
-        {
-          id: "test",
-          name: "Test",
-          model: "sonnet",
-          continuationMode: "fresh",
-          promptText: "test",
-        },
-      ],
+  // Root-property parity: the published hank.schema.json is generated from
+  // the AUTHORING root, so any field defined only on the runtime root would
+  // silently vanish from the published contract (this happened to
+  // globalSystemPromptFile/globalSystemPromptText/requirements once).
+  test("runtime and authoring hank roots expose the same properties", () => {
+    const rootShape = (schema: unknown): string[] => {
+      // Unwrap .refine()/.superRefine() wrappers (ZodEffects) down to the object.
+      let s = schema as { _def?: { typeName?: string; schema?: unknown }; shape?: object };
+      while (s?._def?.typeName === "ZodEffects") {
+        s = s._def.schema as typeof s;
+      }
+      return Object.keys(s.shape as object).sort();
     };
-
-    // Both should accept the same structure
-    const authoringResult = hankFileAuthoringSchema.safeParse(testConfig);
-    const runtimeResult = hankFileSchema.safeParse(testConfig);
-
-    expect(authoringResult.success).toBe(true);
-    expect(runtimeResult.success).toBe(true);
+    expect(rootShape(hankFileAuthoringSchema)).toEqual(rootShape(hankFileSchema));
   });
 
   // Authoring schema should explicitly allow $schema

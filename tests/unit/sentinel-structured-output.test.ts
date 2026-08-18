@@ -95,7 +95,9 @@ describe("Structured Output - Schema Loading", () => {
       execution: { strategy: "immediate" },
       userPromptText: "Test",
       structuredOutput: {
-        schemaFile: schemaPath,
+        // Relative to configDirectory (testDir below): strict refs reject
+        // absolute spellings even when constructed directly.
+        schemaFile: "test-schema.ts",
         output: "object",
       },
     };

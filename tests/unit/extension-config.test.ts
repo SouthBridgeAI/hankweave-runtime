@@ -42,11 +42,11 @@ describe("Extension Configuration", () => {
     fs.writeFileSync(configPath, JSON.stringify(hankFile, null, 2));
   };
 
-  // Helper to create a prompt file
+  // Helper to create a prompt file. Returns the hank-relative name: strict
+  // hank refs must be relative paths inside the hank dir (= tempDir here).
   const createPromptFile = (name: string, content: string) => {
-    const filePath = path.join(tempDir, name);
-    fs.writeFileSync(filePath, content);
-    return filePath;
+    fs.writeFileSync(path.join(tempDir, name), content);
+    return name;
   };
 
   describe("exhaustWithPrompt validation", () => {

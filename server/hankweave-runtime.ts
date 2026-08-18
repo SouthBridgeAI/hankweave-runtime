@@ -5717,15 +5717,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       "info",
     );
 
-    // Use config loader to parse and validate
-    // Use configPath if available, otherwise fall back to cwd
-    const codonConfigDir = this.config.configPath
-      ? path.dirname(this.config.configPath)
+    // Relative sentinel config paths like "sentinels/check.json" are resolved
+    // from the folder hank.json lives in. path.resolve makes that folder
+    // absolute in case hank.json itself was given as a relative path — the
+    // loader (via hank-refs) rejects relative base dirs. If there is no
+    // configPath, the configured cwd is used instead.
+    const hankDirectory = this.config.configPath
+      ? path.dirname(path.resolve(this.config.configPath))
       : this.config.cwd;
     const loadResult = this.sentinelConfigLoader.loadConfigsForCodon(
       codon.sentinels,
       codon.id,
-      codonConfigDir,
+      hankDirectory,
     );
 
     if (loadResult.errors.length > 0) {
@@ -5769,11 +5772,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         return config;
       });
 
-      const configDirs = loadResult.configs.map((lc) => lc.configDirectory);
-
+      // Each sentinel resolves its file refs against its own config's directory
+      const configDirectories = new Map<string, string>();
       // Build output paths map from codon-level settings
       const outputPathsMap = new Map<string, { logFile?: string; lastValueFile?: string }>();
       for (const lc of loadResult.configs) {
+        configDirectories.set(lc.config.id, lc.configDirectory);
         if (lc.outputPaths) {
           outputPathsMap.set(lc.config.id, lc.outputPaths);
         }
@@ -5784,7 +5788,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         configs,
         runtimeCodonId,
         {
-          configDirectory: configDirs[0],
+          configDirectories,
+          hankDirectory, // Containment anchor for the sentinels' own strict-ref checks
           runStartTime: new Date(),
           executionPath: this.config.executionPath,
           agentRootPath: this.config.agentRootPath, // For sentinel output path resolution

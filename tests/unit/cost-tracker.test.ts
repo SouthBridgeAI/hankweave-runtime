@@ -131,16 +131,19 @@ describe("CostTracker", () => {
     expect(final?.modelId).toBe("vendor/model");
   });
 
-  test("uses underlying model ID for pass-through shim providers", () => {
+  test("prices pi-harness models by the same provider-qualified key", () => {
+    // A model forced onto the pi harness carries its real identity; pricing
+    // uses the identical "<provider>/<model>" key as agent-sdk models.
     const { registry, calls } = createRegistry({
       "anthropic/claude-haiku-4-5": 0.789,
       "pi/anthropic/claude-haiku-4-5": 9.999,
     });
     const tracker = new CostTracker(
       createModel({
-        providerId: "pi",
-        modelId: "anthropic/claude-haiku-4-5",
-        name: "pi: anthropic/claude-haiku-4-5",
+        providerId: "anthropic",
+        modelId: "claude-haiku-4-5",
+        name: "Claude Haiku 4.5",
+        harnessOverride: "pi",
       }),
       registry,
       createLogger(),
@@ -160,19 +163,19 @@ describe("CostTracker", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].modelName).toBe("anthropic/claude-haiku-4-5");
     expect(final?.cost).toBe(0.789);
-    expect(final?.modelId).toBe("anthropic/claude-haiku-4-5");
+    expect(final?.modelId).toBe("claude-haiku-4-5");
   });
 
-  test("uses bare underlying model ID for pass-through shim providers without an embedded provider", () => {
+  test("prices routing-derived pi models by their real provider key", () => {
     const { registry, calls } = createRegistry({
-      "gpt-4o": 0.321,
-      "pi/gpt-4o": 9.999,
+      "openai/gpt-4o": 0.321,
+      "gpt-4o": 9.999,
     });
     const tracker = new CostTracker(
       createModel({
-        providerId: "pi",
+        providerId: "openai",
         modelId: "gpt-4o",
-        name: "pi: gpt-4o",
+        name: "GPT-4o",
       }),
       registry,
       createLogger(),
@@ -188,7 +191,7 @@ describe("CostTracker", () => {
     });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].modelName).toBe("gpt-4o");
+    expect(calls[0].modelName).toBe("openai/gpt-4o");
     expect(delta?.cost).toBe(0.321);
   });
 

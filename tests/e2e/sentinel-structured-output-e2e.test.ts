@@ -54,7 +54,8 @@ describe("Structured Output E2E (Real Providers)", () => {
     };
 
     // Create temporary directories
-    tempDir = path.join("tests", "test-area", "structured-output-e2e");
+    // Absolute: sentinel file refs resolve against configDir with no cwd fallback
+    tempDir = path.resolve("tests", "test-area", "structured-output-e2e");
     configDir = path.join(tempDir, "config");
     await fs.mkdir(tempDir, { recursive: true });
     await fs.mkdir(configDir, { recursive: true });

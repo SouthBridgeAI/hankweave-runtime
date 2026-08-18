@@ -132,9 +132,22 @@ describe("LLM Provider Health Checks (E2E)", () => {
       const originalEnv = captureEnv();
 
       try {
-        // Clear all provider API keys first
+        // Clear all provider API keys first. amazon-bedrock's availability
+        // also derives from the ambient AWS credential chain markers (not a
+        // single apiKeyEnvVar), so clear those too — otherwise a developer
+        // shell with AWS keys makes Bedrock "available" and the
+        // not-configured assertions below fail.
         for (const def of PROVIDER_DEFINITIONS) {
           delete process.env[def.apiKeyEnvVar];
+        }
+        for (const awsVar of [
+          "AWS_ACCESS_KEY_ID",
+          "AWS_SECRET_ACCESS_KEY",
+          "AWS_SESSION_TOKEN",
+          "AWS_BEARER_TOKEN_BEDROCK",
+          "AWS_PROFILE",
+        ]) {
+          delete process.env[awsVar];
         }
 
         // Test with first provider from list

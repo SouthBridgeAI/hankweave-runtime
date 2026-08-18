@@ -5,6 +5,7 @@ import * as codonRunnerModule from "../../server/codon-runner.js";
 import {
   buildSelfTestGuidance,
   classifyInBandSelfTest,
+  ensureSchemaUrl,
   formatFailedSelfTest,
   loadCodonSequence,
   loadHankFile,
@@ -2878,8 +2879,9 @@ describe("loadCodonSequence", () => {
   });
 
   test("applies model override to codons inside loops", () => {
-    const promptPath = path.join(tempDir, "prompt.md");
-    createTestFile(promptPath, "Test prompt");
+    // Hank-relative ref: strict refs forbid absolute spellings.
+    const promptPath = "prompt.md";
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
 
     const loopConfig = [
       {
@@ -3058,6 +3060,39 @@ describe("loadCodonSequence", () => {
 
     writeHankConfig(configPath, invalidRigConfig);
     expect(() => loadCodonSequence({ configPath })).toThrow();
+  });
+
+  test("rejects rig copy.from pointing at the hank directory itself", () => {
+    const config = [
+      {
+        id: "test-codon",
+        name: "Test Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptText: "Test prompt",
+        rigSetup: [{ type: "copy", copy: { from: ".", to: "workspace" } }],
+      },
+    ];
+
+    writeHankConfig(configPath, config);
+    expect(() => loadCodonSequence({ configPath })).toThrow(/hank directory itself/);
+  });
+
+  test("rejects rig copy.from spellings that normalize to the hank directory", () => {
+    fs.mkdirSync(path.join(tempDir, "sub"), { recursive: true });
+    const config = [
+      {
+        id: "test-codon",
+        name: "Test Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptText: "Test prompt",
+        rigSetup: [{ type: "copy", copy: { from: "sub/..", to: "workspace" } }],
+      },
+    ];
+
+    writeHankConfig(configPath, config);
+    expect(() => loadCodonSequence({ configPath })).toThrow(/hank directory itself/);
   });
 
   test("throws on non-existent prompt files", () => {
@@ -4038,3 +4073,447 @@ describe("formatFailedSelfTest", () => {
     expect(out).not.toContain("•");
   });
 });
+
+describe("strict hank ref schema rejections (spec 63)", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-strict-refs-schema-test");
+  const configPath = path.join(tempDir, "hank.json");
+
+  beforeEach(() => {
+    cleanup(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => cleanup(tempDir));
+
+  const codonWith = (extra: Record<string, unknown>) => [
+    {
+      id: "c1",
+      name: "C1",
+      model: "sonnet",
+      continuationMode: "fresh",
+      promptText: "t",
+      ...extra,
+    },
+  ];
+
+  const expectLoadError = (codons: unknown[], fragment: string) => {
+    writeHankConfig(configPath, codons);
+    expect(() => loadCodonSequence({ configPath })).toThrow(fragment);
+  };
+
+  // Messages assert on the stable first clause shared with
+  // refViolationMessage; the schema layer omits the resolved-path detail.
+  test("absolute promptFile is rejected with the shared message prefix", () => {
+    expectLoadError(
+      codonWith({ promptText: undefined, promptFile: "/abs/path.md" }),
+      'promptFile: "/abs/path.md" is an absolute or drive-qualified path',
+    );
+  });
+
+  test("backslash spelling is rejected identically on every platform", () => {
+    expectLoadError(
+      codonWith({ promptText: undefined, promptFile: "..\\win\\x.md" }),
+      "contains a backslash",
+    );
+  });
+
+  test("drive-relative spelling is rejected", () => {
+    expectLoadError(
+      codonWith({ rigSetup: [{ type: "copy", copy: { from: "C:secrets", to: "x" } }] }),
+      'copy.from: "C:secrets" is an absolute or drive-qualified path',
+    );
+  });
+
+  test("escaping promptFile array element is rejected with its index", () => {
+    createTestFile(path.join(tempDir, "ok.md"), "ok");
+    expectLoadError(
+      codonWith({ promptText: undefined, promptFile: ["ok.md", "../outside.md"] }),
+      'promptFile.1: "../outside.md" resolves outside the hank directory',
+    );
+  });
+
+  test("empty-string scalar promptFile is a schema error, not silently absent", () => {
+    expectLoadError(
+      codonWith({ promptFile: "" }),
+      "promptFile cannot be an empty string; omit the field instead",
+    );
+  });
+
+  test("escaping string sentinelConfig is rejected", () => {
+    expectLoadError(
+      codonWith({ sentinels: [{ sentinelConfig: "../outside/check.json" }] }),
+      'sentinelConfig: "../outside/check.json" resolves outside the hank directory',
+    );
+  });
+
+  test("an INLINE sentinel config's own escaping ref is rejected at the wrapper", () => {
+    expectLoadError(
+      codonWith({
+        sentinels: [
+          {
+            sentinelConfig: {
+              id: "s1",
+              name: "S1",
+              model: "anthropic/claude-haiku-4-5",
+              trigger: { type: "event", on: ["assistant.action"] },
+              execution: { strategy: "immediate" },
+              userPromptText: "u",
+              systemPromptFile: "../../leak.md",
+            },
+          },
+        ],
+      }),
+      'systemPromptFile: "../../leak.md" resolves outside the hank directory',
+    );
+  });
+
+  test("a FILE-based sentinel config's own ../ ref back inside the hank stays legal", () => {
+    // The legality guarantee: from sentinels/, ../prompts/ok.md resolves back
+    // inside the hank and must load cleanly end to end.
+    createTestFile(path.join(tempDir, "prompts", "ok.md"), "prompt body");
+    createTestFile(
+      path.join(tempDir, "sentinels", "check.json"),
+      JSON.stringify({
+        id: "back-inside",
+        name: "Back Inside",
+        model: "anthropic/claude-haiku-4-5",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "u",
+        systemPromptFile: "../prompts/ok.md",
+      }),
+    );
+    writeHankConfig(
+      configPath,
+      codonWith({ sentinels: [{ sentinelConfig: "sentinels/check.json" }] }),
+    );
+    expect(() => loadCodonSequence({ configPath })).not.toThrow();
+  });
+});
+
+describe("strict hank ref runtime enforcement (spec 63)", () => {
+  const tempDir = path.resolve("tests", "test-area", "temp-strict-refs-runtime-test");
+  const configPath = path.join(tempDir, "hank.json");
+
+  beforeEach(() => {
+    cleanup(tempDir);
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => cleanup(tempDir));
+
+  const codonWith = (extra: Record<string, unknown>) => [
+    {
+      id: "c1",
+      name: "C1",
+      model: "sonnet",
+      continuationMode: "fresh",
+      promptText: "t",
+      ...extra,
+    },
+  ];
+
+  describe.skipIf(process.platform === "win32")("preflight symlink rejection", () => {
+    test("a symlinked promptFile is rejected by the preflight, with codon context", () => {
+      createTestFile(path.join(tempDir, "real.md"), "content");
+      fs.symlinkSync(path.join(tempDir, "real.md"), path.join(tempDir, "linked.md"));
+      writeHankConfig(configPath, codonWith({ promptText: undefined, promptFile: "linked.md" }));
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /Codon 1 \(c1\): promptFile "linked\.md" passes through a symlink/,
+      );
+    });
+
+    test("a symlinked copy.from inside a loop is rejected with the loop context", () => {
+      fs.mkdirSync(path.join(tempDir, "real-dir"));
+      fs.symlinkSync(path.join(tempDir, "real-dir"), path.join(tempDir, "linked-dir"));
+      writeHankConfig(configPath, [
+        {
+          type: "loop",
+          id: "l1",
+          name: "L1",
+          terminateOn: { type: "iterationLimit", limit: 1 },
+          codons: codonWith({
+            rigSetup: [{ type: "copy", copy: { from: "linked-dir", to: "x" } }],
+          }),
+        },
+      ]);
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /Loop 'l1' > Codon 1 \(c1\): copy.from "linked-dir" passes through a symlink/,
+      );
+    });
+
+    test("a forbidden ref is rejected WITHOUT the existence walk probing it", () => {
+      // The preflight throws before the walk that readFileSync's paths runs:
+      // a symlinked promptFile pointing at a MISSING target must surface as a
+      // symlink violation, not as the walk's missing-file error.
+      fs.symlinkSync(path.join(tempDir, "nowhere.md"), path.join(tempDir, "dangling.md"));
+      writeHankConfig(configPath, codonWith({ promptText: undefined, promptFile: "dangling.md" }));
+      expect(() => loadCodonSequence({ configPath })).toThrow(/passes through a symlink/);
+    });
+  });
+
+  // Spec 63 amendment: the preflight also scans INSIDE copy.from directory
+  // trees, so a hank that would refuse to pack (nested symlink, FIFO) refuses
+  // to load too — no "runs locally but won't pack" split.
+  describe.skipIf(process.platform === "win32")("copy.from tree entry rejection", () => {
+    const copyCodon = () =>
+      codonWith({ rigSetup: [{ type: "copy", copy: { from: "tree", to: "x" } }] });
+
+    test("a symlink nested inside a copy.from tree is rejected at load", () => {
+      createTestFile(path.join(tempDir, "tree", "sub", "real.md"), "content");
+      fs.symlinkSync(
+        path.join(tempDir, "tree", "sub", "real.md"),
+        path.join(tempDir, "tree", "sub", "link.md"),
+      );
+      writeHankConfig(configPath, copyCodon());
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /copy.from "tree" contains a symlink at ".*link\.md"/,
+      );
+    });
+
+    test("a DANGLING symlink nested inside a copy.from tree is rejected the same way", () => {
+      createTestFile(path.join(tempDir, "tree", "keep.md"), "content");
+      fs.symlinkSync(path.join(tempDir, "nowhere.md"), path.join(tempDir, "tree", "gone.md"));
+      writeHankConfig(configPath, copyCodon());
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /copy.from "tree" contains a symlink at ".*gone\.md"/,
+      );
+    });
+
+    test("a FIFO nested inside a copy.from tree is rejected at load", () => {
+      createTestFile(path.join(tempDir, "tree", "keep.md"), "content");
+      require("node:child_process").execSync(
+        `mkfifo ${JSON.stringify(path.join(tempDir, "tree", "pipe"))}`,
+      );
+      writeHankConfig(configPath, copyCodon());
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /copy.from "tree" contains a non-regular file at ".*pipe"/,
+      );
+    });
+
+    test("a FIFO named DIRECTLY as copy.from is rejected at load", () => {
+      // Not nested inside a tree — the ref itself is the special file. The
+      // existence check alone would pass it, and the runtime copy would
+      // hand a FIFO to cp.
+      require("node:child_process").execSync(
+        `mkfifo ${JSON.stringify(path.join(tempDir, "pipe-root"))}`,
+      );
+      writeHankConfig(
+        configPath,
+        codonWith({ rigSetup: [{ type: "copy", copy: { from: "pipe-root", to: "x" } }] }),
+      );
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /"pipe-root" contains a non-regular file/,
+      );
+    });
+
+    test("a clean nested tree loads fine, and a symlink-free FILE copy.from still works", () => {
+      createTestFile(path.join(tempDir, "tree", "sub", "a.md"), "a");
+      createTestFile(path.join(tempDir, "tree", "b.md"), "b");
+      writeHankConfig(configPath, copyCodon());
+      expect(() => loadCodonSequence({ configPath })).not.toThrow();
+
+      createTestFile(path.join(tempDir, "single.md"), "s");
+      writeHankConfig(
+        configPath,
+        codonWith({ rigSetup: [{ type: "copy", copy: { from: "single.md", to: "x" } }] }),
+      );
+      expect(() => loadCodonSequence({ configPath })).not.toThrow();
+    });
+  });
+
+  test("a FILE-based sentinel config's own escaping ref fails static validation", () => {
+    createTestFile(
+      path.join(tempDir, "sentinels", "leaky.json"),
+      JSON.stringify({
+        id: "leaky",
+        name: "Leaky",
+        model: "anthropic/claude-haiku-4-5",
+        trigger: { type: "event", on: ["assistant.action"] },
+        execution: { strategy: "immediate" },
+        userPromptText: "u",
+        systemPromptFile: "../../leak.md",
+      }),
+    );
+    writeHankConfig(
+      configPath,
+      codonWith({ sentinels: [{ sentinelConfig: "sentinels/leaky.json" }] }),
+    );
+    expect(() => loadCodonSequence({ configPath })).toThrow(
+      /systemPromptFile "\.\.\/\.\.\/leak\.md" resolves outside the hank directory/,
+    );
+  });
+
+  test("a file sentinel config that fails the sentinel schema is reported as invalid", () => {
+    createTestFile(
+      path.join(tempDir, "sentinels", "malformed.json"),
+      JSON.stringify({ id: "malformed" }),
+    );
+    writeHankConfig(
+      configPath,
+      codonWith({ sentinels: [{ sentinelConfig: "sentinels/malformed.json" }] }),
+    );
+    expect(() => loadCodonSequence({ configPath })).toThrow(/Invalid sentinel config/);
+  });
+
+  test("an escaping globalSystemPromptFile is rejected before being read", () => {
+    createTestFile(path.join(tempDir, "..", "outside-global.md"), "outside");
+    writeHankConfig(configPath, codonWith({}));
+    const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    raw.globalSystemPromptFile = "../outside-global.md";
+    fs.writeFileSync(configPath, JSON.stringify(raw));
+    try {
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /resolves outside the hank directory/,
+      );
+    } finally {
+      fs.rmSync(path.join(tempDir, "..", "outside-global.md"), { force: true });
+    }
+  });
+});
+
+describe.skipIf(process.platform === "win32")(
+  "loader guards against non-regular files (FIFOs, directories)",
+  () => {
+    /**
+     * The existence walk in loadCodonSequence (and readRef in
+     * loadGlobalSystemPrompt) verifies readability by actually reading each
+     * file. readFileSync on a FIFO blocks FOREVER when nothing writes to the
+     * other end — synchronously, so not even a test timeout can interrupt
+     * it — which froze `hankweave run` with no error message. The loader
+     * must reject anything that isn't a regular file BEFORE reading it.
+     *
+     * Test technique: each FIFO gets a background writer that first feeds
+     * one read and then drains one write-back (for code like ensureSchemaUrl
+     * that rewrites the file it read). WITHOUT the guard the code under test
+     * connects to that writer and completes — so the pre-fix failure mode is
+     * a cleanly failing assertion, never a hung test run. WITH the guard the
+     * FIFO is rejected before being opened (the writer stays blocked in
+     * open() and is killed in the finally).
+     */
+    const { execSync, spawn } =
+      require("node:child_process") as typeof import("node:child_process");
+    const tempDir = path.resolve("tests", "test-area", "temp-fifo-guard-test");
+    const configPath = path.join(tempDir, "hank.json");
+
+    beforeEach(() => {
+      cleanup(tempDir);
+      fs.mkdirSync(tempDir, { recursive: true });
+      const mockLogger = new Logger("/dev/null");
+      LlmProviderRegistry.getInstance({ logger: mockLogger, performHealthCheckOnInit: false });
+    });
+
+    afterEach(() => {
+      cleanup(tempDir);
+      LlmProviderRegistry.resetInstance();
+    });
+
+    const codonWith = (extra: Record<string, unknown>) => [
+      {
+        id: "c1",
+        name: "C1",
+        model: "sonnet",
+        continuationMode: "fresh",
+        promptText: "t",
+        ...extra,
+      },
+    ];
+
+    const makeFifo = (rel: string): string => {
+      const p = path.join(tempDir, rel);
+      execSync(`mkfifo ${JSON.stringify(p)}`);
+      return p;
+    };
+
+    const withFifoWriter = (fifoPath: string, data: string, run: () => void): void => {
+      const writer = spawn(
+        "sh",
+        [
+          "-c",
+          `printf %s ${JSON.stringify(data)} > ${JSON.stringify(fifoPath)}; cat ${JSON.stringify(fifoPath)} > /dev/null`,
+        ],
+        {
+          stdio: "ignore",
+        },
+      );
+      try {
+        run();
+      } finally {
+        writer.kill("SIGKILL");
+      }
+    };
+
+    test("a FIFO promptFile is rejected before any read", () => {
+      const fifo = makeFifo("pipe.md");
+      writeHankConfig(configPath, codonWith({ promptText: undefined, promptFile: "pipe.md" }));
+      withFifoWriter(fifo, "prompt via pipe", () => {
+        expect(() => loadCodonSequence({ configPath })).toThrow(
+          /promptFile .* is not a regular file/,
+        );
+      });
+    });
+
+    test("a directory promptFile reports 'not a regular file', not a raw EISDIR", () => {
+      fs.mkdirSync(path.join(tempDir, "prompts-dir"));
+      writeHankConfig(configPath, codonWith({ promptText: undefined, promptFile: "prompts-dir" }));
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /promptFile .* is not a regular file/,
+      );
+    });
+
+    test("a directory appendSystemPromptFile reports 'not a regular file'", () => {
+      fs.mkdirSync(path.join(tempDir, "sys-dir"));
+      writeHankConfig(configPath, codonWith({ appendSystemPromptFile: "sys-dir" }));
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        /appendSystemPromptFile .* is not a regular file/,
+      );
+    });
+
+    test("a FIFO sentinel config file is rejected before any read", () => {
+      const fifo = makeFifo("sentinel.json");
+      writeHankConfig(configPath, codonWith({ sentinels: [{ sentinelConfig: "sentinel.json" }] }));
+      withFifoWriter(fifo, "{}", () => {
+        expect(() => loadCodonSequence({ configPath })).toThrow(/is not a regular file/);
+      });
+    });
+
+    test("a FIFO globalSystemPromptFile is rejected before any read", () => {
+      const fifo = makeFifo("global.md");
+      const hankFile = {
+        globalSystemPromptFile: "global.md",
+        hank: codonWith({}),
+      };
+      fs.writeFileSync(configPath, JSON.stringify(hankFile, null, 2));
+      withFifoWriter(fifo, "global via pipe", () => {
+        expect(() => loadCodonSequence({ configPath })).toThrow(/is not a regular file/);
+      });
+    });
+
+    test("a FIFO hank path is rejected before any read", () => {
+      const fifo = makeFifo("hank-pipe.json");
+      withFifoWriter(fifo, "{}", () => {
+        expect(() => loadHankFile({ hankPath: fifo })).toThrow(/is not a regular file/);
+      });
+    });
+
+    test("a directory hank path reports 'not a regular file', not a raw EISDIR", () => {
+      const dir = path.join(tempDir, "hank-dir");
+      fs.mkdirSync(dir);
+      expect(() => loadHankFile({ hankPath: dir })).toThrow(/is not a regular file/);
+    });
+
+    test("a FIFO runtime config path is rejected before any read", () => {
+      const fifo = makeFifo("hankweave.json");
+      withFifoWriter(fifo, "{}", () => {
+        expect(() => loadRuntimeConfig(fifo)).toThrow(/is not a regular file/);
+      });
+    });
+
+    test("ensureSchemaUrl silently skips a FIFO instead of blocking", () => {
+      const fifo = makeFifo("schema-pipe.json");
+      withFifoWriter(fifo, "{}", () => {
+        expect(ensureSchemaUrl(fifo)).toBe(false);
+      });
+    });
+  },
+);

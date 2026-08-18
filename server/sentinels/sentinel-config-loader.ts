@@ -1,6 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { sentinelConfigSchema } from "../config-validation/sentinel.schema.js";
+import { checkRegularFile } from "../fs-guards.js";
+import {
+  readRef,
+  refViolationMessage,
+  resolveRef,
+  sentinelOwnRefs,
+  validateRef,
+} from "../hank-refs.js";
 import type { SentinelConfig } from "../types/sentinel-types.js";
 import type { CodonSentinelEntry } from "../types/types.js";
 import type { Logger } from "../utils.js";
@@ -73,10 +81,14 @@ export class SentinelConfigLoader {
         const outputPaths = entry.settings?.outputPaths;
 
         if (typeof entry.sentinelConfig === "string") {
-          // File reference
-          const resolvedPath = path.isAbsolute(entry.sentinelConfig)
-            ? entry.sentinelConfig
-            : path.resolve(codonConfigDir, entry.sentinelConfig);
+          // File reference — strict-ref policy on the entry ref before it is
+          // resolved or read (sentinels load at codon start, not only during
+          // static validation, so this gate runs here too).
+          const vettedEntry = validateRef(entry.sentinelConfig, codonConfigDir, codonConfigDir);
+          if (typeof vettedEntry !== "string") {
+            throw new Error(refViolationMessage(vettedEntry));
+          }
+          const resolvedPath = resolveRef(vettedEntry, codonConfigDir);
 
           // Check cache first
           if (this.configCache.has(resolvedPath)) {
@@ -90,12 +102,20 @@ export class SentinelConfigLoader {
               "debug",
             );
           } else {
-            // Load and validate
-            if (!fs.existsSync(resolvedPath)) {
-              throw new Error(`Config file not found: ${entry.sentinelConfig}`);
+            // Load and validate. Guarded rather than existsSync-checked: this
+            // runs at codon startup even when validation only warned (a
+            // sentinel without failCodonIfNotLoaded), and reading a FIFO here
+            // would block forever.
+            const problem = checkRegularFile(resolvedPath, { read: false });
+            if (problem) {
+              throw new Error(
+                problem.kind === "missing"
+                  ? `Config file not found: ${entry.sentinelConfig}`
+                  : `Config file ${problem.phrase}: ${entry.sentinelConfig}`,
+              );
             }
 
-            const content = fs.readFileSync(resolvedPath, "utf-8");
+            const content = readRef(vettedEntry, codonConfigDir).text;
             const parsed = JSON.parse(content);
             config = sentinelConfigSchema.parse(parsed);
 
@@ -115,6 +135,19 @@ export class SentinelConfigLoader {
           config = sentinelConfigSchema.parse(entry.sentinelConfig);
           configDir = codonConfigDir;
           source = "inline";
+        }
+
+        // Strict-ref policy for the config's OWN refs. Anchor rule (mirrored
+        // in config.ts static sentinel validation): file-based refs resolve
+        // from the config file's own directory, inline refs from the hank
+        // dir; the hank dir is always the containment anchor. Runs on cache
+        // hits too — the parsed config is reusable, but the disk can change
+        // between codons and re-checking a handful of refs is nearly free.
+        for (const { field, raw } of sentinelOwnRefs(config)) {
+          const violation = validateRef(raw, configDir, codonConfigDir);
+          if (typeof violation !== "string") {
+            throw new Error(`${field}: ${refViolationMessage(violation)}`);
+          }
         }
 
         // Check for duplicate IDs

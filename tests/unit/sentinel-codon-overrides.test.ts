@@ -162,7 +162,8 @@ describe("Codon-Level Sentinel Overrides", () => {
       const result = loader.loadConfigsForCodon(
         [
           {
-            sentinelConfig: configFile,
+            // Strict hank refs: entry refs must be relative and in-dir
+            sentinelConfig: "test-sentinel.json",
             settings: {
               failCodonIfNotLoaded: true,
               outputPaths: {

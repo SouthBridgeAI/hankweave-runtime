@@ -10,6 +10,7 @@
 import { detectClaudeExecutable, isLegacyClaudeAuthEnabled } from "../claude-agent-sdk-manager.js";
 import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import { resolveProviderApiKey } from "../pi-sdk-manager.js";
+import { CLAUDE_AGENT_SDK_HARNESS, type Harness, PI_HARNESS } from "../provider-ids.js";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -37,8 +38,8 @@ export interface EnvironmentResult {
   canRunHanks: boolean;
   /** Human-readable summary of what they can run */
   summary: string;
-  /** The best available harness for the demo (claude > pi) */
-  bestHarness: "claude" | "pi" | null;
+  /** The best available harness for the demo (claude-agent-sdk > pi) */
+  bestHarness: Harness | null;
 }
 
 // ── API Key Detection ─────────────────────────────────────────
@@ -130,10 +131,10 @@ export function checkEnvironment(): EnvironmentResult {
     summary = "No agent harnesses are fully configured yet.";
   }
 
-  // Best harness for demo: claude > pi
-  let bestHarness: "claude" | "pi" | null = null;
-  if (canClaude) bestHarness = "claude";
-  else if (canOpenai || canGoogle) bestHarness = "pi";
+  // Best harness for demo: claude-agent-sdk > pi
+  let bestHarness: Harness | null = null;
+  if (canClaude) bestHarness = CLAUDE_AGENT_SDK_HARNESS;
+  else if (canOpenai || canGoogle) bestHarness = PI_HARNESS;
 
   return {
     harnesses,

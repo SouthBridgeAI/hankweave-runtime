@@ -4,6 +4,7 @@ import {
   isModelAccessDenialError,
   LlmProviderRegistry,
 } from "../../server/llm/llm-provider-registry.js";
+import { selectHarness, toPiTarget } from "../../server/provider-ids.js";
 import { Logger } from "../../server/utils.js";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
 import { createMockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
@@ -526,7 +527,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("google");
-          expect(result.modelInfo.modelId).toBe("gemini-3.6-flash");
+          expect(result.modelInfo.modelId).toBe("gemini-3.7-flash");
         }
       });
     });
@@ -568,7 +569,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Fuzzy match should prefer google provider for gemini and return most recent
-          expect(result.modelInfo.modelId).toBe("gemini-3.6-flash");
+          expect(result.modelInfo.modelId).toBe("gemini-3.7-flash");
           expect(result.modelInfo.providerId).toBe("google");
         }
       });
@@ -649,7 +650,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match a gemini flash model despite typo, preferring google provider
-          expect(result.modelInfo.modelId).toBe("gemini-3.6-flash");
+          expect(result.modelInfo.modelId).toBe("gemini-3.7-flash");
           expect(result.modelInfo.providerId).toBe("google");
           expect(result.matchType).toBe("fuzzy");
         }
@@ -1814,74 +1815,74 @@ describe("LlmProviderRegistry", () => {
       });
     });
 
-    // validateModel rewrites GLM ids to run through the pi shim's native Z.AI
-    // provider (pi/zai/<id>). The GLM id is lowercased because the pi/Z.AI
-    // catalog lookup is case-sensitive.
+    // GLM ids run on the pi harness through its native Z.AI provider — the
+    // dispatch-time pi route (toPiTarget) is "zai/<id>". The GLM id is
+    // lowercased because the pi/Z.AI catalog lookup is case-sensitive.
     describe("GLM routing through the pi shim's zai provider", () => {
-      it("routes bare glm-5.2 to pi with the zai modelId", () => {
+      /** The pi route dispatch would derive for a validation result. */
+      const piRouteOf = (result: ReturnType<typeof validateModel>) =>
+        result.modelInfo
+          ? toPiTarget(result.modelInfo.providerId, result.modelInfo.modelId)
+          : undefined;
+
+      it("routes bare glm-5.2 to the zai pi target", () => {
         const result = validateModel("glm-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
+        if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
         // The bare id resolves through the registry's preferred-provider
-        // inference (zhipuai) before being wrapped onto pi/zai.
+        // inference (zhipuai) before dispatch aliases it onto zai.
         expect(result.matchType).toBe("exact-with-inferred-provider");
       });
 
-      it("routes bare glm-5.1 to pi/zai", () => {
+      it("routes bare glm-5.1 to zai", () => {
         const result = validateModel("glm-5.1", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.1");
+        expect(piRouteOf(result)).toBe("zai/glm-5.1");
       });
 
       it("lowercases GLM-5.2 (catalog lookup is case-sensitive)", () => {
         const result = validateModel("GLM-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
       });
 
-      it("routes the canonical zhipuai/glm-5.2 spelling to pi/zai (pi has no zhipuai provider)", () => {
+      it("routes the canonical zhipuai/glm-5.2 spelling to zai (pi has no zhipuai provider)", () => {
         const result = validateModel("zhipuai/glm-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
       });
 
-      it("routes the zai/glm-5.2 (models.dev spelling) to pi/zai", () => {
+      it("routes the zai/glm-5.2 (models.dev spelling) to zai", () => {
         const result = validateModel("zai/glm-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
       });
 
-      it("normalizes the z-ai/glm-5.2 (dashed spelling) to pi/zai", () => {
+      it("normalizes the z-ai/glm-5.2 (dashed spelling) to zai", () => {
         const result = validateModel("z-ai/glm-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
       });
 
       it("lowercases Z-AI/GLM-5.2", () => {
         const result = validateModel("Z-AI/GLM-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
       });
 
-      it("leaves an explicit pi/zai/glm-5.2 passthrough verbatim", () => {
+      it("keeps an explicit pi/zai/glm-5.2 passthrough on the zai route", () => {
         const result = validateModel("pi/zai/glm-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(result.modelInfo?.harnessOverride).toBe("pi");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
       });
 
-      it("rewrites opencode/glm-5.2 to the canonical pi/zai target (opencode shim removed)", () => {
+      it("rewrites opencode/glm-5.2 to the canonical zai target (opencode shim removed)", () => {
         const result = validateModel("opencode/glm-5.2", registry);
         expect(result.valid).toBe(true);
-        expect(result.modelInfo?.providerId).toBe("pi");
-        expect(result.modelInfo?.modelId).toBe("zai/glm-5.2");
+        expect(result.modelInfo?.harnessOverride).toBe("pi");
+        expect(piRouteOf(result)).toBe("zai/glm-5.2");
       });
 
       it("does not rewrite non-glm models (haiku)", () => {
@@ -1893,9 +1894,10 @@ describe("LlmProviderRegistry", () => {
       it("does not rewrite a 'glmndalf-9000' word", () => {
         const result = validateModel("glmndalf-9000", registry);
         // The bare pattern requires glm to be followed by a digit/./-/slash/end,
-        // so a word like "glmndalf" must not become a pi passthrough.
-        if (result.valid) {
-          expect(result.modelInfo?.providerId).not.toBe("pi");
+        // so a word like "glmndalf" must not resolve onto the zai route.
+        if (result.valid && result.modelInfo) {
+          expect(result.modelInfo.providerId).not.toBe("zhipuai");
+          expect(result.modelInfo.providerId).not.toBe("zai");
         } else {
           expect(result.valid).toBe(false);
         }

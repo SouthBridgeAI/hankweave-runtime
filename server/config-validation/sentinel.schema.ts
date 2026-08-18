@@ -5,6 +5,12 @@ import {
   serverEventTypes,
 } from "../schemas/event-schemas.js";
 import { hankweaveLlmCallParamsSchema } from "../types/llm-call-types.js";
+import {
+  hankRefStringSchema,
+  inlineSentinelRefsEscapeIssues,
+  portableRefFieldSchema,
+  portableRefStringSchema,
+} from "./ref-schema.js";
 
 // Helper function to check if a string is a valid event type or wildcard
 const isValidEventType = (type: string): boolean => {
@@ -333,8 +339,12 @@ const errorHandlingSchema = z
 const structuredOutputSchema = z
   .object({
     output: z.enum(["object", "array", "enum"]),
-    schemaStr: z.string().optional(), // Inline Zod schema code
-    schemaFile: z.string().optional(), // Path to Zod schema file
+    schemaStr: z.string().optional().describe("Inline Zod schema code"),
+    schemaFile: portableRefStringSchema("structuredOutput.schemaFile")
+      .optional()
+      .describe(
+        "Path to a Zod schema file, relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected.",
+      ),
     enumValues: z.array(z.string()).min(1).optional(), // For enum mode
     schemaName: z.string().optional(),
     schemaDescription: z.string().optional(),
@@ -382,10 +392,22 @@ export const sentinelConfigSchema = z
     trigger: sentinelTriggerSchema,
     execution: sentinelExecutionSchema,
 
-    // Existing prompt fields remain
-    systemPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
+    // Existing prompt fields remain. Ref fields get the portable-spelling
+    // rule (R1) only: a FILE-based config's base is its own directory, whose
+    // position inside the hank this schema cannot know, so a leading "../"
+    // may be legal here. Escape/symlink checks (R2/R3) run in the loaders;
+    // the inline branch of codonSentinelEntrySchema adds R2 at the wrapper.
+    systemPromptFile: portableRefFieldSchema("systemPromptFile")
+      .optional()
+      .describe(
+        "System prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected.",
+      ),
     systemPromptText: z.string().optional(),
-    userPromptFile: z.union([z.string(), z.array(z.string())]).optional(),
+    userPromptFile: portableRefFieldSchema("userPromptFile")
+      .optional()
+      .describe(
+        "User prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected.",
+      ),
     userPromptText: z.string().optional(),
 
     // Optional conversational configuration
@@ -533,8 +555,17 @@ export const codonSentinelSettingsSchema = z
 // Codon sentinel entry schema (wrapper pattern)
 export const codonSentinelEntrySchema = z.object({
   sentinelConfig: z.union([
-    z.string(), // File path
-    sentinelConfigSchema, // Inline config
+    // File path — hank-dir anchored, so the full textual rules (R1+R2) apply.
+    hankRefStringSchema("sentinelConfig").describe(
+      "Path to a sentinel config file, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
+    ),
+    // Inline config — its base is knowably the hank dir, so this wrapper
+    // adds the escape rule (R2) the standalone schema can't apply.
+    sentinelConfigSchema.superRefine((config, ctx) => {
+      for (const message of inlineSentinelRefsEscapeIssues(config)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+      }
+    }),
   ]),
   settings: codonSentinelSettingsSchema,
 });

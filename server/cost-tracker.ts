@@ -1,6 +1,5 @@
 import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
-import { isPassthroughShimProvider } from "./provider-ids.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { TokenUsage } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -68,15 +67,9 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
   ) {
     super();
     this.executableModelId = model?.modelId;
-    this.pricingModelId = model ? CostTracker.getPricingModelId(model) : undefined;
-  }
-
-  private static getPricingModelId(model: ModelInfo): string {
-    if (isPassthroughShimProvider(model.providerId)) {
-      return model.modelId;
-    }
-
-    return `${model.providerId}/${model.modelId}`;
+    // ModelInfo always carries the real provider id, so pi-run models price by
+    // the same "provider/model" key as everything else.
+    this.pricingModelId = model ? `${model.providerId}/${model.modelId}` : undefined;
   }
 
   /**

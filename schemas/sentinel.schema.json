@@ -454,15 +454,18 @@
         "systemPromptFile": {
           "anyOf": [
             {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               }
             }
-          ]
+          ],
+          "description": "System prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
         },
         "systemPromptText": {
           "type": "string"
@@ -470,15 +473,18 @@
         "userPromptFile": {
           "anyOf": [
             {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               }
             }
-          ]
+          ],
+          "description": "User prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
         },
         "userPromptText": {
           "type": "string"
@@ -592,10 +598,13 @@
               ]
             },
             "schemaStr": {
-              "type": "string"
+              "type": "string",
+              "description": "Inline Zod schema code"
             },
             "schemaFile": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "description": "Path to a Zod schema file, relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
             },
             "enumValues": {
               "type": "array",

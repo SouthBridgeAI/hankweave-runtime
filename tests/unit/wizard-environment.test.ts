@@ -41,7 +41,7 @@ function makeEnv(opts: {
     ],
     canRunHanks: claude || openai || google,
     summary: "test summary",
-    bestHarness: claude ? "claude" : openai || google ? "pi" : null,
+    bestHarness: claude ? "claude-agent-sdk" : openai || google ? "pi" : null,
   };
 }
 

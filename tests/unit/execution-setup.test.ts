@@ -362,6 +362,40 @@ describe("Execution Setup - startNew flag", () => {
     });
   });
 
+  describe.skipIf(process.platform === "win32")("hank path validation", () => {
+    // The hank hash is computed before hank validation runs (resolveSettings
+    // swallows loader errors), so setupExecutionEnvironment must reject a
+    // non-regular hank path itself instead of blocking forever reading it.
+    it("rejects a FIFO hank path before reading it", async () => {
+      const { execSync } = await import("node:child_process");
+      const fifoPath = path.join(TEST_BASE_DIR, "hank-pipe.json");
+      execSync(`mkfifo ${JSON.stringify(fifoPath)}`);
+
+      await expect(
+        setupExecutionEnvironment({
+          readOnlySourceDataPath: DATA_SOURCE_DIR,
+          executionPath: EXECUTION_DIR,
+          startNew: true,
+          hankPath: fifoPath,
+        }),
+      ).rejects.toThrow(/Hank file is not a regular file/);
+    });
+
+    it("rejects a directory hank path with a clear error", async () => {
+      const dirPath = path.join(TEST_BASE_DIR, "hank-dir");
+      await fs.promises.mkdir(dirPath, { recursive: true });
+
+      await expect(
+        setupExecutionEnvironment({
+          readOnlySourceDataPath: DATA_SOURCE_DIR,
+          executionPath: EXECUTION_DIR,
+          startNew: true,
+          hankPath: dirPath,
+        }),
+      ).rejects.toThrow(/Hank file is not a regular file/);
+    });
+  });
+
   describe("nested execution prevention", () => {
     it("should prevent creating execution inside another execution directory", async () => {
       const nestedPath = path.join(EXEC_ROOT, "existing-exec", "data", "nested");

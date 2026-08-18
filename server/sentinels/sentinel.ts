@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { normalizeRefField, vetAndReadRef } from "../hank-refs.js";
 import type { ServerEvent } from "../schemas/event-schemas.js";
 import { type CodonId, EventId } from "../types/branded-types.js";
 import type {
@@ -125,6 +126,7 @@ export class Sentinel {
     private sendEventToServer?: (
       event: import("../schemas/event-schemas.js").SentinelEvent,
     ) => void, // Callback to emit events to server event stream
+    hankDirectory?: string, // Containment anchor for strict-ref checks; falls back to configDirectory
   ) {
     this.modelCost = modelCost;
     this.runStartTime = runStartTime || new Date();
@@ -134,7 +136,10 @@ export class Sentinel {
 
     // Load structured output schema if configured
     if (config.structuredOutput) {
-      this.structuredOutputContext = this.loadStructuredOutputSchema(configDirectory);
+      this.structuredOutputContext = this.loadStructuredOutputSchema(
+        configDirectory,
+        hankDirectory,
+      );
 
       // Validate we have llmObjectCall if needed
       if (this.structuredOutputContext && !llmObjectCall) {
@@ -158,6 +163,7 @@ export class Sentinel {
       config.userPromptText,
       configDirectory,
       "user prompt",
+      hankDirectory,
     );
 
     if (!userPrompt) {
@@ -170,6 +176,7 @@ export class Sentinel {
       config.systemPromptText,
       configDirectory,
       "system prompt",
+      hankDirectory,
     );
 
     // Create history manager if conversational mode is enabled
@@ -1171,7 +1178,10 @@ export class Sentinel {
    * Load and validate Zod schema from configuration.
    * Returns StructuredOutputContext for use in object generation.
    */
-  private loadStructuredOutputSchema(configDirectory?: string): StructuredOutputContext {
+  private loadStructuredOutputSchema(
+    configDirectory?: string,
+    hankDirectory?: string,
+  ): StructuredOutputContext {
     // Safe to assert: constructor only calls this when structuredOutput exists
     const cfg =
       this.config.structuredOutput ??
@@ -1199,13 +1209,28 @@ export class Sentinel {
     // Object/Array mode - load schema (refinement ensures exactly one exists)
     let schemaCode: string;
     if (cfg.schemaFile) {
-      const resolvedPath =
-        configDirectory && !path.isAbsolute(cfg.schemaFile)
-          ? path.resolve(configDirectory, cfg.schemaFile)
-          : cfg.schemaFile;
+      // No cwd fallback: a file-based schema ref requires a config directory
+      if (configDirectory === undefined) {
+        throw new SentinelFatalError(
+          this.config.id,
+          `Cannot resolve schema file "${cfg.schemaFile}": no config directory provided`,
+          "configuration",
+          true,
+        );
+      }
 
       try {
-        schemaCode = fs.readFileSync(resolvedPath, "utf-8");
+        // Strict-ref gate at the point of read; the anchor falls back to the
+        // config directory when no hank dir was provided (direct construction
+        // in tests), which is strictly narrower, never wider.
+        schemaCode = vetAndReadRef(
+          cfg.schemaFile,
+          configDirectory,
+          hankDirectory ?? configDirectory,
+          {
+            what: "Schema file",
+          },
+        ).text;
       } catch (error) {
         throw new SentinelFatalError(
           this.config.id,
@@ -1265,20 +1290,28 @@ export class Sentinel {
     text: string | undefined,
     configDirectory: string | undefined,
     promptType: string,
+    hankDirectory?: string,
   ): string | undefined {
     const parts: string[] = [];
 
     // Load files first
-    if (files) {
-      const fileArray = Array.isArray(files) ? files : [files];
+    const fileArray = normalizeRefField(files);
+    if (fileArray.length > 0) {
+      // No cwd fallback: file-based prompt refs require a config directory
+      if (configDirectory === undefined) {
+        throw new Error(
+          `[Sentinel:${this.config.id}] Cannot resolve ${promptType} file(s): no config directory provided`,
+        );
+      }
       for (const file of fileArray) {
         try {
-          // Resolve relative paths relative to config directory
-          const resolvedPath =
-            configDirectory && !path.isAbsolute(file) ? path.resolve(configDirectory, file) : file;
-
-          const content = fs.readFileSync(resolvedPath, "utf-8");
-          parts.push(content);
+          // Strict-ref gate at the point of read (anchor falls back to the
+          // config directory when no hank dir was provided).
+          parts.push(
+            vetAndReadRef(file, configDirectory, hankDirectory ?? configDirectory, {
+              what: `${promptType} file`,
+            }).text,
+          );
         } catch (error) {
           throw new Error(
             `[Sentinel:${this.config.id}] Failed to load ${promptType} file "${file}": ${

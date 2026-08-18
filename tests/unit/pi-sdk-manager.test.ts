@@ -588,6 +588,54 @@ describe("PiSdkManager runSelfTest Bedrock credential preflight", () => {
     expect(auth?.passed).toBe(true);
     expect(auth?.message).toContain("not credential-enforced");
   }, 20000);
+
+  // Stage 2 of two-stage validation: after the registry (validateModel, stage
+  // 1), the self-test verifies the model against pi's own catalog — the gate
+  // spawn actually applies. Registry-known-but-pi-unknown models (the
+  // zai/glm-5.1 class) must fail HERE, at startup, not at codon launch.
+  test("model_catalog passes for a catalog model", async () => {
+    const result = await makeManager().runSelfTest("deepseek/deepseek-v4-flash");
+
+    const catalog = result.checks.find((check) => check.name === "model_catalog");
+    expect(catalog?.passed).toBe(true);
+    expect(catalog?.message).toContain("deepseek/deepseek-v4-flash");
+  }, 20000);
+
+  test("model_catalog fails for a registry-known model pi cannot serve", async () => {
+    const result = await makeManager().runSelfTest("zai/glm-5.1");
+
+    const catalog = result.checks.find((check) => check.name === "model_catalog");
+    expect(catalog?.passed).toBe(false);
+    expect(catalog?.message).toContain("Pi model not found: zai/glm-5.1");
+    // The suggestion list names catalog neighbors the user probably meant.
+    expect(catalog?.message).toContain("glm-5.2");
+    expect(result.overall.passed).toBe(false);
+  }, 20000);
+
+  test("model_catalog resolves reasoning-effort suffixes to the base model", async () => {
+    const result = await makeManager().runSelfTest("openai-codex/gpt-5.6-terra-high");
+
+    const catalog = result.checks.find((check) => check.name === "model_catalog");
+    expect(catalog?.passed).toBe(true);
+  }, 20000);
+
+  test("model_catalog enforces pi's static openrouter list", async () => {
+    const known = await makeManager().runSelfTest("openrouter/moonshotai/kimi-k3");
+    expect(known.checks.find((check) => check.name === "model_catalog")?.passed).toBe(true);
+
+    const unknown = await makeManager().runSelfTest("openrouter/some-org/definitely-not-real");
+    const catalog = unknown.checks.find((check) => check.name === "model_catalog");
+    expect(catalog?.passed).toBe(false);
+    expect(catalog?.message).toContain("Pi model not found");
+  }, 40000);
+
+  test("model_catalog reports an unknown provider with the known-provider list", async () => {
+    const result = await makeManager().runSelfTest("nosuchprovider/some-model");
+
+    const catalog = result.checks.find((check) => check.name === "model_catalog");
+    expect(catalog?.passed).toBe(false);
+    expect(catalog?.message).toContain("Unknown pi provider 'nosuchprovider'");
+  }, 20000);
 });
 
 /**
