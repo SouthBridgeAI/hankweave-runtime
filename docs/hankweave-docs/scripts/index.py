@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Content-addressed Hankweave docs indexing and scoped queries through the DuckDB CLI."""
+# Forgiving this because python is more universally available compared to node. 
+# But prefer Typescript - anyone reading this - for an easier life.
 from __future__ import annotations
 
 import argparse
