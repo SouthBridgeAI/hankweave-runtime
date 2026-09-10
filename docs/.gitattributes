@@ -1,0 +1,2 @@
+# Parquet is binary: preserve bytes and do not attempt text diffs or merges.
+*.parquet binary
