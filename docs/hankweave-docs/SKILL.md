@@ -145,6 +145,8 @@ These links pin two different artifacts: **`61346534…` is the documentation-di
 
 ### Install the core skill
 
+For Claude UI and other ZIP-based skill uploaders, download the [v0.10.0 skill ZIP](https://github.com/SouthBridgeAI/hankweave-runtime/releases/download/v0.10.0/hankweave-docs-skill-0.10.0.zip) and upload it as a custom skill. The ZIP contains this core skill and its docs/fixtures; the optional source pack stays separate. Local setup and the hosted fallback are described above.
+
 Install from the repository:
 
 ```bash

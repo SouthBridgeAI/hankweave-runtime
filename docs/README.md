@@ -23,6 +23,10 @@ The [online-reference table](hankweave-docs/SKILL.md#online-references) links to
 
 ## Install the core skill
 
+For Claude UI or another browser-based agent that accepts skill uploads, download **[hankweave-docs-skill-0.10.0.zip](https://github.com/SouthBridgeAI/hankweave-runtime/releases/download/v0.10.0/hankweave-docs-skill-0.10.0.zip)** from the GitHub release and upload the ZIP as a custom skill. It contains the core documentation and fixtures, not the optional source pack. See the [setup and hosted fallback guidance](hankweave-docs/SKILL.md#setup) if the sandbox cannot run local lookups.
+
+For terminal-based agents:
+
 Install from the repository subpath:
 
 ```sh

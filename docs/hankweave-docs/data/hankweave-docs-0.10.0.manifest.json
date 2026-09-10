@@ -46,7 +46,7 @@
     "source_digest": "42de96683854e8702f47c725204d91c54eb2a33f5f11a70b656f091c367e6ef3"
   },
   "canonical_docs_url": "https://hankweave.southbridge.ai/0.10.0/files/",
-  "canonical_url_status": "planned",
+  "canonical_url_status": "verified",
   "source_commit": "d0f0a86bcf4528f23ffa687b9c8964c15fe7cb88",
   "bytes": 1924485,
   "links": 7765,
@@ -2829,9 +2829,9 @@
     "source": "SELECT * FROM read_parquet('hankweave-source-0.10.0.parquet') WHERE ptype='source'",
     "fixture": "SELECT * FROM read_parquet('hankweave-docs-0.10.0.parquet') WHERE ptype='fixture'"
   },
-  "status": "unaccepted",
-  "accepted": false,
-  "deployed": false,
+  "status": "accepted",
+  "accepted": true,
+  "deployed": true,
   "set_digest_format": "astra.editorial-projection.v1",
   "editorial_source": {
     "format": "astra.editorial-projection.v1",
@@ -3217,7 +3217,7 @@
     "version": "0.10.0",
     "source_commit": "d0f0a86bcf4528f23ffa687b9c8964c15fe7cb88"
   },
-  "local_only": true,
+  "local_only": false,
   "corrections": [
     {
       "id": "fixtures/connector-build-test/expected/failed-codon/MANIFEST.md",
