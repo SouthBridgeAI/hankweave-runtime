@@ -1,9 +1,9 @@
 {
-  "accepted": false,
+  "accepted": true,
   "broken_links": 0,
   "bytes": 10510733,
   "canonical_docs_url": "https://hankweave.southbridge.ai/0.10.0/files/",
-  "canonical_url_status": "planned",
+  "canonical_url_status": "verified",
   "columns": [
     "id",
     "slug",
@@ -31,7 +31,8 @@
     "fixture_manifest_id",
     "source_symbols"
   ],
-  "deployed": false,
+  "deployed": true,
+  "local_only": false,
   "diagrams": 0,
   "editorial_source": {
     "base_parquet": "ddf9709d3fc4609904e12bae0a874c422ec5537c25c4eb8b5de1aac5c529c05b",
@@ -3204,6 +3205,6 @@
     "scope": "Named declarations and class members; not ordinary object properties or anonymous callbacks",
     "signature": "Source header with whitespace collapsed, capped at 400 characters including any truncation marker"
   },
-  "status": "unaccepted",
+  "status": "accepted",
   "version": "0.10.0"
 }
