@@ -21,9 +21,9 @@ bash scripts/hankweave-docs.sh toc --parquet /absolute/path/to/hankweave-docs-0.
 
 A one-command selection does not select either part for later commands. Keep passing the selection options, or export `HANKWEAVE_DOCS_PARQUET` and, when needed, `HANKWEAVE_SOURCE_PARQUET` for the session. Prefer verified local copies for repeated lookup.
 
-Each adjacent `hankweave-docs-<version>.manifest.json` describes that file's SHA256, byte size, row counts, runtime version, public format and originating set. Its `role: docs` and `corpus_rows` distinguish core rows from full-corpus coverage; `source_pack` records the expected source filename, SHA256, bytes, rows, version and pinned source commit. The source manifest has `role: source` and its own file/hash/counts, with the same version, source commit and set digest. Review and planned-publication metadata remain in force.
+Each adjacent `hankweave-docs-<version>.manifest.json` describes that file's SHA256, byte size, row counts, runtime version, public format and originating set. Its `role: docs` and `corpus_rows` distinguish core rows from full-corpus coverage; `source_pack` records the expected source filename, SHA256, bytes, rows, version and pinned source commit. The source manifest has `role: source` and its own file/hash/counts, with the same version, source commit and set digest.
 
-The scripts reject bytes that disagree with a supplied manifest. An attached companion must match the expected hash and version, contain only source rows, and introduce no duplicate IDs. A missing optional pack means partial coverage; a present mismatched pack is an error. An index is not a release certificate: `status: unaccepted` or `accepted: false` remains a warning after indexing.
+The scripts reject bytes that disagree with a supplied manifest. An attached companion must match the expected hash and version, contain only source rows, and introduce no duplicate IDs. A missing optional pack means partial coverage; a present mismatched pack is an error.
 
 If an installed skill's edition differs from the user's runtime, update only this skill with `npx skills update hankweave-docs -g` for a global installation or `npx skills update hankweave-docs -p` for a project installation, then reread `info`. If the runtime remains older, explicitly select matching older docs and source; do not treat the newest docs as evidence for that runtime.
 
@@ -42,7 +42,7 @@ The default display is a short metadata listing. `info --json` emits **one objec
 | `format` | Public parquet format from the manifest, **not** the local cache format. |
 | `source_commit` | Pinned source commit recorded by the manifest. Missing metadata is `null`; it is not filled from the current checkout. |
 | `status`, `accepted` | Manifest content-review/acceptance facts, separate from online availability. Missing values are `null`, not an assumption of acceptance. |
-| `canonical_docs_url`, `canonical_url_status` | Manifest documentation root and its deployment-status label. Missing values are `null`; a planned URL is not proof of a live site. |
+| `canonical_docs_url`, `canonical_url_status` | Manifest documentation root and recorded URL status. Missing values are `null`. |
 | `rows`, `rows_by_ptype` | Counts read from the union of available parts, rather than copied from a potentially outdated manifest. |
 | `sources` | Per-part metadata, including resolved `source`, actual `sha256`, `bytes`, row counts and `role` (`docs`, `source`, or `corpus` for a legacy combined file). Use this to identify the file to query directly and its actual size. |
 | `source_pack` | `available` states whether source is loaded; `expected` is the docs manifest's companion descriptor, or `null`; `source` is the selected companion location, or `null`. Expected rows and bytes are not loaded coverage. |
@@ -100,11 +100,9 @@ With source attached, source-citation results include a short exact preview from
 
 Fixture manifests are real stored files, not generated claims that every neighboring file was exercised. Each associated fixture points to its manifest, and the manifest exposes its members. Some files have no identifiable scope manifest. Read the actual manifest for models, capture dates, normalized fields and limitations. Duplicate bytes at distinct fixture paths retain distinct identities.
 
-Documentation URLs use `https://hankweave.southbridge.ai/<version>/files/`; see the [online-reference table](SKILL.md#online-references) for the pinned root, first-run page and separate root-level downloads. The root is an alias for the introduction at `start/introduction/`; other page IDs keep their full route, including a terminal `/index`. Explicit versions in these URLs, or in legacy `/docs/<version>/` URLs from older data, must match the selected corpus. Legacy URLs are not new aliases.
+Documentation URLs use `https://hankweave.southbridge.ai/<version>/files/`; see the [online-reference table](SKILL.md#online-references) for the pinned root, first-run page and repository parquet/manifest downloads. The root is an alias for the introduction at `start/introduction/`; other page IDs keep their full route, including a terminal `/index`. Explicit versions in these URLs, or in legacy `/docs/<version>/` URLs from older data, must match the selected corpus. Legacy URLs are not new aliases.
 
 Figures have their own stored asset URLs: the general route is `https://hankweave.southbridge.ai/diagrams/<slug>/<n>.<ext>`, while a bundle may bind a figure to a content-addressed asset. Use the returned URL; never append `diagrams/` under `/files/`. GitHub repository URLs retain their pinned source commit; captured surfaces and fixture assets keep separate versioned locations.
-
-Deployment is in progress and parity with this bundle is unverified, so `canonical_url_status` remains `planned`. The content remains unaccepted regardless of whether a route becomes available; neither acceptance nor a canonical URL proves deployment.
 
 Older public artifacts remain readable. Their raw dependency labels are represented as unresolved when they lack stored identities. Missing graph metadata is disclosed; the index does not guess source-line relationships that an old artifact never recorded. Older root-relative figure paths retain their own page origin.
 
@@ -121,7 +119,7 @@ Older public artifacts remain readable. Their raw dependency labels are represen
 | `source_symbols` | Optional syntax-derived context for supported source files: `{name,kind,line_start,line_end,signature}`. Bounds describe complete constructs and are separate from the original lookup windows and evidence citations. |
 | `deps` | Entries retain the declared `label` with `target_id,status,candidates`. Only `status: resolved` has an authoritative target ID; ambiguous candidates are alternatives, not asserted dependencies. |
 | `fixture_role`, `fixture_manifest_id` | They identify actual manifest rows and their associated evidence. A manifest identifies itself for grouping; an unassociated file has no invented parent. |
-| `diagrams` | Entries include caption/kind, exact Mermaid, planned figure URL and optional measured `display_width`. |
+| `diagrams` | Entries include caption/kind, exact Mermaid, figure asset URL and optional measured `display_width`. |
 | `content_bytes`, `media_type`, `content_sha256` | Binary fixtures retain original bytes and metadata. Text fixtures retain the captured text. |
 
 ## Search full bodies without a large response
@@ -174,4 +172,4 @@ WHERE p.id = 'reference/hank-json';
 
 Raw section text can retain an HTML alias at a boundary. It is navigation syntax from the stored document, not a missing section or a new instruction. The reader deliberately does not strip it or rewrite the canonical text.
 
-Quote SQL strings by doubling single quotes. Do not interpolate unescaped user text or file paths. The CLI handles quoting itself. When edition or publication status matters to the answer, use `info` and preserve known mismatches, unknowns and review/planned status; direct SQL does not establish acceptance or deployment.
+Quote SQL strings by doubling single quotes. Do not interpolate unescaped user text or file paths. The CLI handles quoting itself. Use `info` to check the selected version, hashes and available scopes before interpreting query results.

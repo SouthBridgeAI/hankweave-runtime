@@ -80,34 +80,30 @@ bash scripts/hankweave-docs.sh info --json
 
 `info` reports the selected base, actual hashes, version, publication metadata, row counts and evidence capabilities. It also reports each loaded part's source and size, and the optional source pack's availability and expected descriptor, without building FTS or creating a cache. Missing legacy metadata stays unknown. To choose another docs base, pass `--parquet /absolute/path/to/docs.parquet` on each command or export `HANKWEAVE_DOCS_PARQUET` for the session.
 
-If the user's runtime or explicit URL names another version, check `info`. For an installed skill, update only this skill with `npx skills update hankweave-docs -g` (global) or `npx skills update hankweave-docs -p` (project), then reread `info`. If the runtime remains older, select matching older docs explicitly; do not substitute the latest docs blindly. A pinned URL never silently resolves to a different version. Preserve unaccepted/review status and planned-URL warnings, and do not claim deployment from a canonical URL. A missing or corrupt selected parquet is an error, not permission to use another checkout or an old cache.
+If the user's runtime or explicit URL names another version, check `info`. For an installed skill, update only this skill with `npx skills update hankweave-docs -g` (global) or `npx skills update hankweave-docs -p` (project), then reread `info`. If the runtime remains older, select matching older docs explicitly; do not substitute the latest docs blindly. A pinned URL never silently resolves to a different version. A missing or corrupt selected parquet is an error, not permission to use another checkout or an old cache.
 
 The scripts require Python 3.8+ and the DuckDB CLI. Query index creation may need the FTS extension downloaded; provision it before offline use. `info` needs no FTS. See [reference.md](reference.md) for metadata fields, source/cache details and direct SQL.
 
 ### Online references
 
-Deployment is in progress; availability and parity with this bundle are unverified. These are the intended locations, not confirmed live downloads. Content remains `unaccepted` independently of website availability; keep `canonical_url_status: planned` until deployed parity is checked.
-
 | Reference | URL |
 |---|---|
 | Pinned docs root | https://hankweave.southbridge.ai/0.10.0/files/ |
 | First-run page | https://hankweave.southbridge.ai/0.10.0/files/start/first-run/ |
-| Core docs and fixtures | https://hankweave.southbridge.ai/hankweave-docs-0.10.0.parquet · [matching manifest](https://hankweave.southbridge.ai/hankweave-docs-0.10.0.manifest.json) |
-| Optional source pack | https://hankweave.southbridge.ai/hankweave-source-0.10.0.parquet · [matching manifest](https://hankweave.southbridge.ai/hankweave-source-0.10.0.manifest.json) |
-| Core skill archive | https://hankweave.southbridge.ai/hankweave-docs-skill-0.10.0.tar.gz |
-| Site release manifest | https://hankweave.southbridge.ai/manifests/0.10.0.json |
+| Core docs and fixtures | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/hankweave-docs/data/hankweave-docs-0.10.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/hankweave-docs/data/hankweave-docs-0.10.0.manifest.json) |
+| Optional source pack | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/source/hankweave-source-0.10.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/source/hankweave-source-0.10.0.manifest.json) |
 
-Pages live under `/<version>/files/`; downloads and manifests use the separate site-root paths above. The pinned docs root resolves to the introduction (`start/introduction/`). Use each figure's returned asset URL rather than appending `diagrams/` to a page route. GitHub source citations stay pinned to their recorded commit.
+Documentation pages live under `/<version>/files/`. Parquet and manifest downloads come from the repository, pinned to the commit containing this edition. Download each parquet with its matching manifest for local use. The pinned docs root resolves to the introduction (`start/introduction/`). Use each figure's returned asset URL rather than appending `diagrams/` to a page route. GitHub source citations stay pinned to the runtime's recorded commit.
 
 ### Install the core skill
 
-Install from the public repository's default branch after this skill has been merged there:
+Install from the repository:
 
 ```bash
 npx skills add SouthBridgeAI/hankweave-runtime/docs/hankweave-docs --skill hankweave-docs -g
 ```
 
-To try an unmerged branch, check it out locally and run `npx skills add ./docs/hankweave-docs --skill hankweave-docs -g` from that checkout's root. Omit `-g` for a project-local installation. These commands install the core skill, not the optional source pack or the Hankweave runtime.
+From a local checkout, run `npx skills add ./docs/hankweave-docs --skill hankweave-docs -g` at the checkout's root. Omit `-g` for a project-local installation. These commands install the core skill, not the optional source pack or the Hankweave runtime.
 
 ## Answer from evidence
 

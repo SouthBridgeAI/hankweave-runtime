@@ -81,6 +81,6 @@ symlinks and invalid text payloads stop export instead of silently disappearing.
 GitHub repository URLs pin the commit above. Captured-surface URLs use the site's separate
 versioned `/source/` assets, not documentation page routes under `/<version>/files/`, and must
 not be cited as files from that commit. See the [online references](SKILL.md#online-references)
-for the optional pack and its matching manifest; deployment remains in progress and unverified.
+for the optional pack and its matching manifest in the repository.
 Discover the attached pack's source IDs with `toc --scope source`; an older parquet may not yet
 contain the expanded inventory.

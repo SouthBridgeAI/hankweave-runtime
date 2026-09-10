@@ -19,23 +19,23 @@ docs/
 
 The core parquet is approximately **1.92 MB**: 70 documentation pages and 553 fixture/evidence records. The source parquet is approximately **10.51 MB**: 693 source and captured-schema records. Each has its own checksum manifest; the docs manifest also identifies the exact matching source pack. The split does not remove content.
 
-The [online-reference table](hankweave-docs/SKILL.md#online-references) lists the pinned docs root, first-run page, separate root-level parquet/manifest downloads and core archive. Human pages use `https://hankweave.southbridge.ai/0.10.0/files/`; download URLs are not children of that route. Availability and parity with this payload are unverified. Content remains unaccepted independently of online availability, and canonical URLs remain marked `planned` until deployed parity is checked.
+The [online-reference table](hankweave-docs/SKILL.md#online-references) links to the pinned documentation and the repository's parquet files with their matching manifests. Human pages use `https://hankweave.southbridge.ai/0.10.0/files/`; parquet downloads are pinned to the repository commit containing this edition.
 
 ## Install the core skill
 
-After this skill is merged into the default branch of `SouthBridgeAI/hankweave-runtime`, install from the repository subpath:
+Install from the repository subpath:
 
 ```sh
 npx skills add SouthBridgeAI/hankweave-runtime/docs/hankweave-docs --skill hankweave-docs -g
 ```
 
-Omit `-g` for a project installation. To try an unmerged branch, check it out locally and run:
+Omit `-g` for a project installation. From a local checkout, run:
 
 ```sh
 npx skills add ./docs/hankweave-docs --skill hankweave-docs -g
 ```
 
-Website deployment is separate from publishing this GitHub subpath. A repository install may clone repository content before copying the selected skill; a core archive download avoids that extra repository transfer.
+A repository install may clone repository content before copying the selected skill. The installed core does not include the optional source pack.
 
 After installing from a tracked upstream source, update only this skill with `npx skills update hankweave-docs -g` (or `-p` for a project installation). If runtime and docs versions differ, update, reread `info`, and deliberately select older matching docs when appropriate. Do not silently treat a newer manual as the old runtime's contract.
 
