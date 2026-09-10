@@ -36,7 +36,7 @@
     "fixture_manifest_id",
     "source_symbols"
   ],
-  "sha256": "61a4b8b23f28c962feaa0c72ae5da7a22fcf08304cf0c6748ca474d8806ea20d",
+  "sha256": "8793c7503a493be58f41535135127f71d966bd2cee43b81658d164952fe6cc77",
   "set_digest": "a81a3ff264d0443f9c0700d7e4038da6e5e004abfcb3dd41ecbcc5c5221e6bb9",
   "publication_inputs": {
     "fixture_digest": "0d5044234d03c5fca7f73d682ed15925c586130b39ac264a50f58882ce0b1aaf",
@@ -48,7 +48,7 @@
   "canonical_docs_url": "https://hankweave.southbridge.ai/0.10.0/files/",
   "canonical_url_status": "planned",
   "source_commit": "d0f0a86bcf4528f23ffa687b9c8964c15fe7cb88",
-  "bytes": 1924081,
+  "bytes": 1924485,
   "links": 7765,
   "broken_links": 0,
   "sections": 1306,
@@ -3216,5 +3216,20 @@
     "rows": 693,
     "version": "0.10.0",
     "source_commit": "d0f0a86bcf4528f23ffa687b9c8964c15fe7cb88"
-  }
+  },
+  "local_only": true,
+  "corrections": [
+    {
+      "id": "fixtures/connector-build-test/expected/failed-codon/MANIFEST.md",
+      "before_sha256": "84b96a4b754af44595e42189ccd532040df35efbf6e936e8bc57c41d500e2a73",
+      "after_sha256": "9dd5bc9481316d70c186729b3314ac42cbfb469e86fc3f46e6056d4645e9faf4",
+      "source": "campaigns/lookup-feedback-20260910/corrections/fixtures/connector-build-test/expected/failed-codon/MANIFEST.md",
+      "basis": [
+        "events-error-lines.txt",
+        "state-summary.json",
+        "server-log-failure-lines.txt"
+      ],
+      "scope": "Post-projection description correction; original capture members and originating set unchanged"
+    }
+  ]
 }

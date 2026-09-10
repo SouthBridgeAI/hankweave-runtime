@@ -9,6 +9,40 @@ allowed-tools: Bash
 
 Consult this skill for runtime details while building, operating, or debugging hanks. It provides the reference; the separate `hank-in-the-shell` skill covers end-to-end workflow methodology. This skill works independently. Run lookup commands from this skill directory, or use an absolute path to `scripts/hankweave-docs.sh`. This helper reads documentation; it is distinct from the `hankweave` runtime CLI that runs hanks. Queries build a local index on first use.
 
+Prefer the local DuckDB helper for repeated work, exact identifiers, source and fixture evidence. If DuckDB or FTS cannot be made available, use the [hosted fallback](reference.md#hosted-fallback): direct HTTP search and reads of documentation only. It is slower and usually needs several network requests. Pin the requested version and supply the required agent/harness/purpose identity. Queries and identity fields are logged, so send only non-sensitive documentation questions. This is an explicit alternative, not an automatic fallback after an empty result, a corrupt pack or a version mismatch.
+
+## Setup
+
+The helper needs Python 3.8+ and the standalone `duckdb` CLI on `PATH`; installing the Python `duckdb` module alone is not enough. Check `python3 --version` and `duckdb --version`. On macOS, `brew install duckdb` supplies the CLI. For other platforms, use the [official CLI downloads](https://duckdb.org/install/).
+
+For a Linux x86_64 sandbox, install the CLI without root access:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+curl -fL https://github.com/duckdb/duckdb/releases/download/v1.5.2/duckdb_cli-linux-amd64.zip -o /tmp/duckdb-cli.zip
+unzip -o /tmp/duckdb-cli.zip -d "$HOME/.local/bin"
+chmod +x "$HOME/.local/bin/duckdb"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+`info` needs no FTS extension. Other lookups build an index and need FTS. If a proxy blocks DuckDB's extension host, use the explicit PyPI-wheel installer:
+
+```bash
+bash scripts/hankweave-docs.sh install-fts
+```
+
+This downloads the community-distributed `duckdb-extension-fts` wheel matching the installed DuckDB CLI's version and platform, extracts only its extension binary, and asks DuckDB to install and load it. It does not install or run the wheel's Python package, and it does not disable DuckDB's signature checks. The command needs pip and access to PyPI; wheel availability depends on version and platform.
+
+For an offline Linux x86_64 sandbox, download a wheel on a connected machine with `python3 -m pip download --only-binary=:all: --no-deps --platform manylinux2014_x86_64 --ignore-requires-python duckdb-extension-fts==1.5.2`, then transfer it. Use the target DuckDB CLI's version and platform, not necessarily the downloading machine's; `duckdb -c 'PRAGMA platform;'` reports the target. Install the transferred wheel with:
+
+```bash
+bash scripts/hankweave-docs.sh install-fts --wheel /path/to/duckdb_extension_fts.whl
+```
+
+Use `bash scripts/hankweave-docs.sh COMMAND --help` for command-specific syntax; help does not need DuckDB, a parquet or a cache.
+
+If setup is unavailable in your environment, stop retrying installers and follow [Hosted fallback](reference.md#hosted-fallback). It needs an HTTP client, not DuckDB. It cannot replace source/fixture lookups, evidence-graph traversal or arbitrary SQL.
+
 ## Start with the job
 
 | You want to… | Start here |
@@ -27,6 +61,18 @@ bash scripts/hankweave-docs.sh outline reference/hank-json
 bash scripts/hankweave-docs.sh read 'reference/hank-json#choose-the-hanks-root-fields'
 bash scripts/hankweave-docs.sh term outputFiles.beforeCopy --scope all --limit 12
 ```
+
+### Start from a symptom
+
+The commands below read the owning explanations; they do not run or modify a hank.
+
+| Symptom | What to check first |
+|---|---|
+| An edited model or budget is ignored on resume or rollback. | The persisted execution plan is reused. Use `read 'operate/resume-rollback-and-retry#choose-retry-edit-rollback-or-a-new-run'` before choosing a fresh run; prompt-file contents and planned JSON fields have different reload behavior. |
+| Validation says `0 system prompts`. | That count excludes global system prompts and inline append text. Use `read 'author/prompts#wire-prompt-files-and-validate-the-counts'`; do not duplicate instructions just to increase the count. |
+| The SDK says `aborted by user`, but nobody intervened. | A budget trip can produce this wording. Check the timestamp and stored `failureReason`; read `operate/troubleshooting#separate-misleading-messages-from-real-failures`. |
+| A rerun exits successfully without doing work. | A completed execution may have been silently reused. Read `operate/runbook#dont-mistake-a-silent-no-op-for-a-fresh-run`; use `--start-new` when fresh work is intended. |
+| A flag is absent from captured help. | Read `reference/cli#flag-inventory-and-version-notes` and follow its parser/source evidence. A help omission is not proof that the flag is unsupported; a separate `--- stderr ---` capture block is not part of the flag inventory. |
 
 If you do not know the owning page, search with the task's nouns and identifiers:
 
@@ -60,16 +106,18 @@ Pass `--source-parquet` on each command or export `HANKWEAVE_SOURCE_PARQUET` for
 ## Choose coverage and response size deliberately
 
 - Commands default to `--scope docs`; choose `source`, `fixture` or `all` explicitly. Without the source pack, `--scope source` fails with a missing-pack error and `--scope all` searches available scopes with a partial-coverage warning. **Source `search` covers selected lookup windows, not every line of every file.** A missing search hit is not an absence check.
-- `term` finds exact, case-sensitive technical identifiers across **full bodies in the loaded parts**, including source regions outside those windows when source is attached, and JSON paths. It is not arbitrary full-text substring search. Use `term rollback.toLastSuccess --scope all`; for prose or a literal substring anywhere in a loaded file, use the [bounded DuckDB query](reference.md#search-full-bodies-without-a-large-response).
+- `term` finds exact, case-sensitive technical identifiers across **full bodies in the loaded parts**, including source regions outside lookup windows, and JSON paths. Use `term --contains healthCheck --scope source` for case-insensitive substring matching within identifier names, such as `performHealthChecks`. This still is not arbitrary prose search. Delimiters are not retained in identifiers: use `term AGENT_ROOT` for the identifier inside `<%AGENT_ROOT%>`. For an exact prose phrase or marker including its delimiters, use the [bounded full-body SQL recipe](reference.md#search-full-bodies-without-a-large-response).
 - Check size before reading. `search` and `outline` report section `chars`; `toc` reports whole-page `word_count`. Use `outline PAGE`, then read one needed section. `read` returns the complete section without truncation; `page` returns the entire stored page or file and can flood the response with a large source file or transcript.
 - `read PAGE#ANCHOR` and `read PAGE ANCHOR` mean a section. `PAGE#` or `PAGE ''` selects the opening. `page PAGE` means the whole body. For source and text fixtures, an inclusive range such as `L46-L55` reads exact file lines even outside stored windows. A single `L46` prefers a stored section; use `L46-L46` for exactly one line. Binary fixture descriptors are not original file text.
-- `term` and `neighbors` show at most 24 rows by default and report totals. Continue with `--offset 24 --limit 24`. `--scope all` includes representative rows from available scopes; query one scope explicitly when checking it conclusively. Prefer pagination to `--all` for large result sets, and exhaust the relevant results before claiming absence.
+- `search` defaults to 12 results, at most three sections per page; `term` and `neighbors` default to 24. All three support `--limit`, `--offset` and `--all` and report totals. For example, continue a search with `search checkpoint --offset 12 --limit 12`. Prefer pagination to `--all`, and exhaust the relevant scope before claiming absence.
 - Put every option **before `--`** when the identifier starts with a dash: `term --scope all --limit 12 -- --start-new`. Everything after `--`, including something that looks like an option, is literal query text. Without `--`, options can appear before or after the ordinary arguments.
 - `--json` is for tabular queries (`search`, `term`, `outline`, `neighbors`, `resolve`, `toc`, `figures`) and `info`. Queries return arrays; `info` returns one object. `read` and `page` return exact raw text and reject `--json`.
+- Empty tabular results remain `[]` with exit status 0 and an actionable stderr diagnostic. Missing required source, invalid arguments and failed reads remain errors. An empty identifier result may suggest `--contains` or a delimiter-free identifier; an unknown page may suggest matching IDs in other sections or scopes.
 
-For other navigation: `resolve '<ID or URL>'` finds IDs and aliases; multiple matches are alternatives, not permission to pick the first. `figures PAGE` returns captions, figure URLs and verbatim Mermaid twins. `neighbors PAGE#ANCHOR` selects outgoing section evidence; `neighbors '<source ID>' --lines L5557 --scope source` finds incoming citations overlapping a file region. Omit the section/line filter for page-wide relationships.
+For other navigation: `resolve '<ID or URL>'` accepts IDs, aliases, unqualified names such as `rigs`, and same-version legacy documentation URLs. Multiple matches are alternatives, not permission to pick the first. `figures PAGE` returns captions, figure URLs and verbatim Mermaid twins. `neighbors PAGE#ANCHOR` selects outgoing section evidence; `neighbors '<source ID>' --lines L5557 --scope source` finds incoming citations overlapping a file region. Omit the section/line filter for page-wide relationships.
 
 Read a fixture's manifest before its transcripts. Find it with `neighbors` or `search --scope fixture`, read the manifest with `page '<manifest ID>' --scope fixture`, then open bounded member lines. Preserve the captured model, date, normalization and limitations. Manifest grouping does not prove every sibling file was executed, and a term occurrence does not prove the behavior was exercised. An empty term anchor can refer to a derived whole-file JSON path; use `page` when you need that whole file.
+When a conclusion depends on failure phase or terminal status, compare the manifest's description with its event and state records. If they disagree, cite the actual members and name the discrepancy rather than treating the manifest's prose as execution proof.
 
 ## Inspect the selected bundle when needed
 
@@ -82,7 +130,7 @@ bash scripts/hankweave-docs.sh info --json
 
 If the user's runtime or explicit URL names another version, check `info`. For an installed skill, update only this skill with `npx skills update hankweave-docs -g` (global) or `npx skills update hankweave-docs -p` (project), then reread `info`. If the runtime remains older, select matching older docs explicitly; do not substitute the latest docs blindly. A pinned URL never silently resolves to a different version. A missing or corrupt selected parquet is an error, not permission to use another checkout or an old cache.
 
-The scripts require Python 3.8+ and the DuckDB CLI. Query index creation may need the FTS extension downloaded; provision it before offline use. `info` needs no FTS. See [reference.md](reference.md) for metadata fields, source/cache details and direct SQL.
+See [Setup](#setup) for DuckDB and restricted-network FTS installation. `info` needs no FTS. The helper reports acceptance/URL metadata once per invocation for the selected parts; it does not change those facts. See [reference.md](reference.md) for metadata fields, source/cache details and direct SQL.
 
 ### Online references
 
@@ -93,7 +141,7 @@ The scripts require Python 3.8+ and the DuckDB CLI. Query index creation may nee
 | Core docs and fixtures | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/hankweave-docs/data/hankweave-docs-0.10.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/hankweave-docs/data/hankweave-docs-0.10.0.manifest.json) |
 | Optional source pack | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/source/hankweave-source-0.10.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/ac054073b90fcda0b380f2c59cc7356dbcaa6844/docs/source/hankweave-source-0.10.0.manifest.json) |
 
-Documentation pages live under `/<version>/files/`. Parquet and manifest downloads come from the repository, pinned to the commit containing this edition. Download each parquet with its matching manifest for local use. The pinned docs root resolves to the introduction (`start/introduction/`). Use each figure's returned asset URL rather than appending `diagrams/` to a page route. GitHub source citations stay pinned to the runtime's recorded commit.
+These links pin two different artifacts: **`ac054073…` is the documentation-distribution commit**, containing the parquet files and manifests; **`d0f0a86…` is the runtime v0.10.0 source commit**, recorded as `source_commit` and used by code citations. The docs were added after the runtime release, so the hashes differ intentionally. Download each parquet with its matching manifest. Documentation pages live under `/<version>/files/`; the pinned root resolves to `start/introduction/`. Use each figure's returned asset URL rather than appending `diagrams/` to a page route. A sandbox proxy denial does not establish whether a public URL exists.
 
 ### Install the core skill
 

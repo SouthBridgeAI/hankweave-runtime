@@ -41,7 +41,7 @@ After installing from a tracked upstream source, update only this skill with `np
 
 ## Read docs or inspect source
 
-Lookup requires Python 3.8+ and DuckDB. It is separate from running the Hankweave runtime.
+Local lookup requires Python 3.8+ and the DuckDB CLI; see the [setup guide](hankweave-docs/SKILL.md#setup). When those dependencies cannot be made available, the [hosted fallback](hankweave-docs/reference.md#hosted-fallback) offers documentation-only search and reads over HTTP. It is slower, makes more network requests and logs query/identity metadata; it does not search source or fixtures. Neither lookup path runs the Hankweave runtime.
 
 ```sh
 bash docs/hankweave-docs/scripts/hankweave-docs.sh info

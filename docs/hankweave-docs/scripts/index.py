@@ -11,11 +11,13 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 import urllib.parse
 import urllib.request
+import zipfile
 
 CACHE_FORMAT = 10  # Optional source coverage and retained missing-source graph identities
 DEFAULT_VERSION = "0.10.0"
@@ -286,8 +288,59 @@ def duckdb(cache, sql, capture=False, readonly=True, json_output=False):
     if readonly:
         args.append("-readonly")
     args.append("-json" if json_output else "-markdown")
-    return subprocess.run([*args, "-c", sql], check=True, text=True, capture_output=capture)
+    try:
+        return subprocess.run([*args, "-c", sql], check=True, text=True, capture_output=capture)
+    except FileNotFoundError as error:
+        raise ValueError("DuckDB CLI not found on PATH. Install the standalone duckdb executable "
+                         "from https://duckdb.org/install/ and add its directory to PATH. "
+                         "The Python duckdb package alone does not provide this command.") from error
 
+
+def install_fts(wheel=None):
+    """Install a matching signed extension from a downloaded or local PyPI wheel."""
+    version = query_rows(":memory:", "SELECT version() AS version", readonly=False)[0]["version"].lstrip("v")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError("The FTS wheel installer requires a stable DuckDB release, not a development build")
+    with tempfile.TemporaryDirectory(prefix="hankweave-fts-") as temporary:
+        directory = pathlib.Path(temporary)
+        if wheel is None:
+            platform = query_rows(":memory:", "PRAGMA platform", readonly=False)[0]["platform"]
+            wheel_platform = {
+                "osx_arm64": "macosx_11_0_arm64", "osx_amd64": "macosx_11_0_x86_64",
+                "linux_amd64": "manylinux2014_x86_64", "linux_amd64_gcc4": "manylinux2014_x86_64",
+                "linux_arm64": "manylinux2014_aarch64", "linux_arm64_gcc4": "manylinux2014_aarch64",
+                "windows_amd64": "win_amd64",
+            }.get(platform)
+            if wheel_platform is None:
+                raise ValueError(f"No FTS wheel mapping for DuckDB platform {platform}; use a matching --wheel")
+            # Python may run under emulation while DuckDB is native. Only the
+            # extension binary is used, so the wheel's Python requirement is irrelevant.
+            subprocess.run([sys.executable, "-m", "pip", "download", "--only-binary=:all:", "--no-deps",
+                            "--index-url", "https://pypi.org/simple", "--platform", wheel_platform,
+                            "--ignore-requires-python", "--dest", str(directory),
+                            f"duckdb-extension-fts=={version}"], check=True)
+            wheels = list(directory.glob("*.whl"))
+            if len(wheels) != 1:
+                raise ValueError("Expected one platform-compatible duckdb-extension-fts wheel")
+            wheel = wheels[0]
+        with zipfile.ZipFile(pathlib.Path(wheel).expanduser()) as archive:
+            metadata = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
+            if len(metadata) != 1:
+                raise ValueError("FTS wheel must contain one package metadata record")
+            text = archive.read(metadata[0]).decode("utf-8")
+            if (not re.search(r"(?m)^Name: duckdb[-_]extension[-_]fts\s*$", text)
+                    or not re.search(r"(?m)^Version: " + re.escape(version) + r"\s*$", text)):
+                raise ValueError(f"Expected duckdb-extension-fts=={version} to match the DuckDB CLI")
+            extensions = [name for name in archive.namelist()
+                          if pathlib.PurePosixPath(name).name == "fts.duckdb_extension"]
+            if len(extensions) != 1:
+                raise ValueError("FTS wheel must contain one fts.duckdb_extension binary")
+            # Never extract wheel paths or execute its Python package. DuckDB
+            # validates the extension's version, platform and signature on load.
+            extension = directory / "fts.duckdb_extension"
+            extension.write_bytes(archive.read(extensions[0]))
+        duckdb(":memory:", f"INSTALL {sql_string(str(extension))}; LOAD fts;", capture=True, readonly=False)
+    print(f"Installed and loaded FTS for DuckDB {version}.")
 
 def resolve_source(explicit=None):
     source = explicit if explicit is not None else os.environ.get("HANKWEAVE_DOCS_PARQUET")
@@ -337,10 +390,6 @@ def source_manifest(source):
     manifest = json.loads(manifest_path.read_text())
     if not isinstance(manifest, dict):
         raise ValueError("Selected parquet manifest must be a JSON object")
-    if manifest.get("accepted") is False or manifest.get("status") == "unaccepted":
-        print("hankweave-docs: selected artifact is an unaccepted review snapshot; do not describe it as accepted or certified. Web availability is a separate fact.", file=sys.stderr)
-    if manifest.get("canonical_url_status") == "planned":
-        print("hankweave-docs: canonical documentation and figure URLs are planned locations, not evidence of deployment.", file=sys.stderr)
     return manifest
 
 
@@ -407,6 +456,16 @@ def selected_parts(explicit=None, source_explicit=None):
     if companion is not None:
         companion = resolve_location(companion)
         parts.append((companion, source_manifest(companion)))
+    notices = []
+    for label, predicate in (
+        ("unaccepted", lambda item: item.get("accepted") is False or item.get("status") == "unaccepted"),
+        ("URLs marked planned", lambda item: item.get("canonical_url_status") == "planned"),
+    ):
+        affected = ["base" if index == 0 else "source" for index, (_, item) in enumerate(parts) if predicate(item)]
+        if affected:
+            notices.append(f"{label} ({', '.join(affected)})")
+    if notices:
+        print("hankweave-docs: bundle metadata: " + "; ".join(notices) + ". See info for details.", file=sys.stderr)
     return parts, expected
 
 
@@ -704,8 +763,13 @@ CREATE TABLE source_identity AS {source_identity};
     try:
         duckdb(staging, "LOAD fts;", capture=True, readonly=False)
     except subprocess.CalledProcessError:
-        # DuckDB may need network access to its extension repository on first use.
-        duckdb(staging, "INSTALL fts; LOAD fts;", capture=True, readonly=False)
+        try:
+            duckdb(staging, "INSTALL fts FROM 'https://extensions.duckdb.org'; LOAD fts;", capture=True, readonly=False)
+        except subprocess.CalledProcessError as error:
+            raise ValueError("FTS is unavailable and its extension repository could not be used. "
+                             "Run hankweave-docs.sh install-fts to download a matching PyPI wheel, or "
+                             "hankweave-docs.sh install-fts --wheel /path/to/duckdb_extension_fts.whl offline. "
+                             "See SKILL.md#setup. DuckDB reported:\n" + (error.stderr or str(error))) from error
     # FTS binds after the search-only table is materialized; whole sections
     # remain separately available to SQL and exact read consumers.
     duckdb(staging, "LOAD fts; PRAGMA create_fts_index('search_chunks', 'subchunk_id', 'search_text'); CHECKPOINT;",
@@ -754,7 +818,48 @@ def ensure_index(explicit=None, source_explicit=None, scope=None):
     return cache, {**identity, "source_pack": metadata["source_pack"]}
 
 
-def search(cache, terms, filt, json_output=False):
+def no_results(cache, command, value, scope, contains=False):
+    message = f"hankweave-docs: no {command} results for {value!r} in --scope {scope}."
+    if command == "search":
+        message += " Try distinctive nouns or identifiers rather than only common words; use term for an identifier."
+        if scope in ("source", "all"):
+            message += " Source search covers selected windows, not full files; use the full-body SQL recipe in reference.md for exhaustive prose checks."
+    elif command == "term":
+        message += " term matches identifiers, not arbitrary prose."
+        tokens = list(dict.fromkeys(match.group() for match in IDENTIFIER.finditer(value)))
+        if len(tokens) == 1 and tokens[0] != value:
+            argument = ("-- " if tokens[0].startswith("-") else "") + shlex.quote(tokens[0])
+            message += f" Delimiters are not part of the indexed identifier; try term {argument}."
+        elif re.search(r"\s", value):
+            message += " Use search for indexed prose or the full-body SQL recipe in reference.md for a literal phrase."
+        elif not contains:
+            argument = ("-- " if value.startswith("-") else "") + shlex.quote(value)
+            message += f" Exact matching is case-sensitive; try term --contains {argument} for part of a name."
+        else:
+            message += " Try a different identifier fragment or use search for indexed prose."
+    elif command == "neighbors":
+        message += f" No stored links match this page/section/line selection. Omit filters for page-wide evidence, or use page {shlex.quote(value)} for its text."
+    elif command == "toc":
+        message += " Use toc --scope all to inspect the loaded scopes."
+    else:
+        basename = urllib.parse.urlsplit(value).path.rstrip("/").rsplit("/", 1)[-1]
+        candidates = query_rows(cache, f"""
+SELECT id, scope FROM pages WHERE lower(regexp_extract(id, '[^/]+$'))=lower({sql_string(basename)})
+ORDER BY id LIMIT 5;""") if basename else []
+        if candidates:
+            message += " Available page IDs: " + "; ".join(
+                f"{row['id']} (--scope {row['scope']})" for row in candidates) + ". Use the full ID."
+        else:
+            message += " Use toc --scope all or resolve to find an available page ID."
+        if command == "outline":
+            message += " A page without stored sections can still be read with page PAGE."
+        elif command == "figures":
+            message += " Not every page has a stored figure."
+    print(message, file=sys.stderr)
+
+
+def search(cache, terms, scope, limit=12, offset=0, all_results=False, json_output=False):
+    filt = "TRUE" if scope == "all" else "scope=" + sql_string(scope)
     # Multiword questions/keyword bundles benefit from a procedural answer.
     # Single identifiers benefit modestly from reference. This uses query form,
     # not a list of privileged operational words, page IDs or example queries.
@@ -762,7 +867,7 @@ def search(cache, terms, filt, json_output=False):
     purpose = ("CASE WHEN quadrant IN ('how-to', 'howto', 'how-to guides') THEN 1.6 "
                "WHEN quadrant='tutorial' THEN 1.15 ELSE 1 END") if multiword else (
                "CASE WHEN quadrant='reference' THEN 1.15 ELSE 1 END")
-    rows = query_rows(cache, f"""LOAD fts;
+    ranking = f"""LOAD fts;
 WITH scored AS (
   SELECT s.*, p.scope, p.version, p.url, p.quadrant,
          fts_main_search_chunks.match_bm25(subchunk_id, {sql_string(terms)}, b := 0.3)
@@ -775,14 +880,24 @@ WITH scored AS (
 ), sections AS (
   SELECT *, row_number() OVER (PARTITION BY page ORDER BY score DESC, ord) AS rp
   FROM subhits WHERE best=1
-)
+)"""
+    bounds = "" if all_results else f"LIMIT {limit} OFFSET {offset}"
+    rows = query_rows(cache, ranking + f"""
 SELECT page || CASE WHEN anchor='' THEN '' ELSE '#' || anchor END AS hit,
        scope, version, quadrant, ord AS section_ord, round(score, 3) AS score,
-       parent_chars AS chars, subhits, url, search_text AS text
-FROM sections WHERE rp<=3 ORDER BY score DESC, page, ord LIMIT 12;""")
+       parent_chars AS chars, subhits, url, search_text AS text, count(*) OVER () AS total
+FROM sections WHERE rp<=3 ORDER BY score DESC, page, ord {bounds};""")
     for row in rows:
         row["snippet"] = matching_passage(row.pop("text"), terms)
-    markdown_table(rows, ("hit", "scope", "version", "quadrant", "section_ord", "score", "chars", "subhits", "url", "snippet"), json_output)
+    markdown_table(rows, ("hit", "scope", "version", "quadrant", "section_ord", "score", "chars", "subhits", "url", "snippet", "total"), json_output)
+    total = rows[0]["total"] if rows else query_rows(cache, ranking + " SELECT count(*) AS total FROM sections WHERE rp<=3;")[0]["total"]
+    if not total:
+        no_results(cache, "search", terms, scope)
+    elif not rows:
+        print(f"hankweave-docs: offset {offset} is beyond {total} search results; use --offset 0.", file=sys.stderr)
+    elif not all_results and offset + len(rows) < total:
+        print(f"hankweave-docs: showing {offset + 1}-{offset + len(rows)} of {total} search results. "
+              f"Continue search with --offset {offset + len(rows)} --limit {limit}, or --all.", file=sys.stderr)
 
 
 def file_lines(text):
@@ -802,28 +917,34 @@ def line_bounds(selector, single=False):
     return first, last
 
 
-def term_results(cache, term, scope, limit, offset, all_results, json_output):
+def term_results(cache, term, scope, limit, offset, all_results, json_output, contains=False):
     filt = "TRUE" if scope == "all" else "scope=" + sql_string(scope)
-    condition = f"{filt} AND term={sql_string(term)}"
+    match = f"contains(lower(term), lower({sql_string(term)}))" if contains else f"term={sql_string(term)}"
+    condition = f"{filt} AND {match}"
     counts = {row["scope"]: row["row_count"] for row in query_rows(cache, f"""
 SELECT scope, count(*) AS row_count FROM terms WHERE {condition} GROUP BY scope;""")}
     total = sum(counts.values())
     bounds = "" if all_results else f"LIMIT {limit} OFFSET {offset}"
     rows = query_rows(cache, f"""
 WITH hits AS (
-  SELECT *, row_number() OVER (PARTITION BY scope ORDER BY page, anchor) AS scope_hit
+  SELECT *, row_number() OVER (PARTITION BY scope ORDER BY page, anchor, term) AS scope_hit
   FROM terms WHERE {condition}
 )
 SELECT t.term, t.page, t.anchor, t.scope, t.count, p.version, p.url, {total} AS total
 FROM hits t JOIN pages p ON p.id=t.page
 ORDER BY t.scope_hit, CASE t.scope WHEN 'docs' THEN 0 WHEN 'source' THEN 1 ELSE 2 END {bounds};""")
     markdown_table(rows, ("term", "page", "anchor", "scope", "count", "version", "url", "total"), json_output)
+    if not total:
+        no_results(cache, "term", term, scope, contains)
+        return
     scopes = ("docs", "source", "fixture") if scope == "all" else (scope,)
     summary = ", ".join(f"{name}={counts.get(name, 0)}" for name in scopes)
     shown = f"{offset + 1}-{offset + len(rows)}" if rows else "0"
     message = f"hankweave-docs: showing {shown} of {total} term rows ({summary})."
     if not all_results and offset + len(rows) < total:
         message += f" Continue term with --offset {offset + len(rows)} --limit {limit}, or --all."
+    elif not rows:
+        message += " The offset is beyond the last result; use --offset 0."
     print(message, file=sys.stderr)
 
 
@@ -904,6 +1025,11 @@ ORDER BY floor((e.kind_hit-1)/6), e.priority, e.kind, e.kind_hit {bounds};""")
     citation_previews(cache, rows)
     markdown_table(rows, ("kind", "page", "scope", "version", "label", "status", "candidates",
                           "source_anchor", "anchor", "line_start", "line_end", "symbol", "preview", "fixture_role", "url", "href", "total"), json_output)
+    if not total:
+        no_results(cache, "neighbors", page_id, selected[0]["scope"])
+        return
+    if not rows:
+        print(f"hankweave-docs: offset {offset} is beyond {total} evidence results; use --offset 0.", file=sys.stderr)
     if anchor is not None:
         print("hankweave-docs: section-scoped outgoing evidence; omit --anchor for page-wide and incoming edges.", file=sys.stderr)
     if region is not None:
@@ -924,7 +1050,7 @@ ORDER BY floor((e.kind_hit-1)/6), e.priority, e.kind, e.kind_hit {bounds};""")
         print(message, file=sys.stderr)
 
 
-def query(cache, command, args, scope, limit=24, offset=0, all_results=False, json_output=False, anchor=None, region=None, at=None):
+def query(cache, command, args, scope, limit=24, offset=0, all_results=False, json_output=False, anchor=None, region=None, at=None, contains=False):
     filt = "TRUE" if scope == "all" else "scope=" + sql_string(scope)
     value = sql_string(args[0]) if args else "''"
     if not query_rows(cache, "SELECT id FROM pages WHERE scope='source' LIMIT 1"):
@@ -938,10 +1064,10 @@ def query(cache, command, args, scope, limit=24, offset=0, all_results=False, js
             print("hankweave-docs: partial coverage: source pack unavailable; --scope all searches only available docs and fixtures. "
                   "Attach matching source with --source-parquet or HANKWEAVE_SOURCE_PARQUET.", file=sys.stderr)
     if command == "search":
-        search(cache, " ".join(args), filt, json_output)
+        search(cache, " ".join(args), scope, limit, offset, all_results, json_output)
         return
     elif command == "term":
-        term_results(cache, args[0], scope, limit, offset, all_results, json_output)
+        term_results(cache, args[0], scope, limit, offset, all_results, json_output, contains)
         return
     elif command == "outline":
         if at is not None:
@@ -1004,28 +1130,45 @@ FROM (SELECT id, url, unnest(diagrams) AS d FROM pages WHERE {filt} AND id={valu
         lookup = args[0]
         parsed = urllib.parse.urlsplit(lookup)
         route_match = ""
+        same_origin = "TRUE"
+        version = re.match(r"^/(?:docs|source|fixtures)/(\d+\.\d+\.\d+(?:[-+][^/]+)?)(?:/|$)", parsed.path)
+        if not version:
+            version = re.match(r"^/(\d+\.\d+\.\d+(?:[-+][^/]+)?)/files(?:/|$)", parsed.path)
+        edition = f" AND version={sql_string(version[1])}" if version else ""
         if parsed.scheme.lower() in ("http", "https") or lookup.startswith("/"):
             path = sql_string(parsed.path.rstrip("/"))
             origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""
             clean = sql_string((origin + parsed.path).rstrip("/"))
             same_origin = f"regexp_extract(url, '^https?://[^/]+')={sql_string(origin)}" if origin else "TRUE"
-            # Keep the version prefix intact: an old alias may resolve within this
-            # corpus, but pinned /<version>/files/ and legacy /docs/<version>/ stay distinct.
+            # A URL's explicit edition and origin constrain every match,
+            # including aliases and same-edition legacy route normalization.
             route_match = f"""OR rtrim(url,'/')={clean}
 OR ({same_origin} AND (rtrim(regexp_replace(url,'^https?://[^/]+',''),'/')={path}
     OR EXISTS (SELECT 1 FROM unnest(aliases) AS names(alias) WHERE rtrim(alias,'/')={path})))"""
-        statement = f"""SELECT id,title,scope,version,url FROM pages WHERE {filt}
+        statement = f"""SELECT id,title,scope,version,url FROM pages WHERE {filt}{edition}
 AND (list_contains(aliases,{value}) OR id={value} OR slug={value} OR url={value}
      {route_match}) ORDER BY id;"""
         rows = query_rows(cache, statement)
-        version = re.match(r"^/(?:docs|source|fixtures)/(\d+\.\d+\.\d+(?:[-+][^/]+)?)(?:/|$)", parsed.path)
-        if not version:
-            version = re.match(r"^/(\d+\.\d+\.\d+(?:[-+][^/]+)?)/files(?:/|$)", parsed.path)
+        if not rows and not parsed.scheme and "/" not in lookup:
+            rows = query_rows(cache, f"""SELECT id,title,scope,version,url FROM pages WHERE {filt}
+AND regexp_extract(id, '[^/]+$')={value} ORDER BY id;""")
+        legacy = re.fullmatch(r"/docs/(\d+\.\d+\.\d+(?:[-+][^/]+)?)(?:/(.*))?", parsed.path.rstrip("/"))
+        if not rows and legacy:
+            page_id = (legacy[2] or "").strip("/")
+            ids = ["index", "start/introduction"] if page_id in ("", "start/introduction") else [page_id, page_id + "/index"]
+            rows = query_rows(cache, f"""SELECT id,title,scope,version,url FROM pages
+WHERE {filt} AND scope='docs' AND version={sql_string(legacy[1])} AND {same_origin}
+AND (id IN ({','.join(sql_string(item) for item in ids)})
+     OR list_contains(aliases,{sql_string('/' + page_id)})) ORDER BY id;""")
         if not rows and version:
             available = [row["version"] for row in query_rows(cache, "SELECT DISTINCT version FROM pages ORDER BY version")]
             if version[1] not in available:
                 print(f"hankweave-docs: URL pins version {version[1]}; selected artifact contains "
                       f"{', '.join(available) or 'no editions'}. No version was substituted; select that edition's parquet to resolve it.", file=sys.stderr)
+                markdown_table(rows, ("id", "title", "scope", "version", "url"), json_output)
+                return
+        if not rows:
+            no_results(cache, command, lookup, scope)
         markdown_table(rows, ("id", "title", "scope", "version", "url"), json_output)
         return
     elif command == "neighbors":
@@ -1045,14 +1188,36 @@ AND (list_contains(aliases,{value}) OR id={value} OR slug={value} OR url={value}
             raise ValueError("No matching text: check the page, --scope, and an anchor copied from outline")
         for row in rows:
             sys.stdout.write(row["text"])
-    elif json_output:
-        print(json.dumps(query_rows(cache, statement), ensure_ascii=False))
     else:
-        duckdb(cache, statement)
+        rows = query_rows(cache, statement)
+        if not rows:
+            no_results(cache, command, args[0] if args else "", scope)
+        if json_output:
+            print(json.dumps(rows, ensure_ascii=False))
+        else:
+            columns = {"outline": ("ord", "outline", "anchor", "chars", "url"),
+                       "figures": ("page", "n", "kind", "title", "figure", "mermaid"),
+                       "toc": ("id", "scope", "version", "quadrant", "title", "word_count", "url")}
+            markdown_table(rows, columns[command])
 
 
 def main():
+    help_text = {
+        "info": "info [--json]\nInspect selected parts, versions and hashes without a cache or FTS.",
+        "build": "build [PARQUET] [--path]\nBuild the local search index. --path prints only its database path.",
+        "install-fts": "install-fts [--wheel PATH]\nDownload a matching duckdb-extension-fts wheel from PyPI, or use a local wheel offline.\nOnly the extension binary is extracted; its Python package is not installed or executed.\nDuckDB keeps signature, platform and version checks enabled.",
+        "search": "search WORDS... [--limit N] [--offset N] [--all] [--json]\nRank indexed passages and return section locators. Default: 12 results, at most 3 per page.\nSource search covers stored windows, not full source bodies.",
+        "term": "term IDENTIFIER [--contains] [--limit N] [--offset N] [--all] [--json]\nDefault: exact, case-sensitive identifiers across full bodies, 24 rows.\n--contains matches a case-insensitive substring of identifier names, not arbitrary prose.\nFor flags, put options before --: term --scope all -- --start-new",
+        "outline": "outline PAGE [--at LNUMBER] [--json]\nList stored sections and sizes. --at finds recorded containing source constructs.",
+        "read": "read PAGE#ANCHOR | read PAGE ANCHOR\nReturn exact text. Source/text fixtures accept LSTART-LEND; an empty anchor selects the opening.\nUse page PAGE for the whole body. --json is not supported.",
+        "page": "page PAGE\nReturn the entire stored body exactly. Use outline/read to avoid a very large response.",
+        "neighbors": "neighbors PAGE[#ANCHOR] [--anchor ANCHOR | --lines LSTART-LEND] [--limit N] [--offset N] [--all] [--json]\nFollow stored evidence. --lines selects incoming citations; --anchor selects outgoing section links.",
+        "resolve": "resolve ID_OR_URL [--json]\nResolve IDs, aliases, unqualified names and same-edition legacy URLs.\nAmbiguous names return alternatives. Explicit URL versions are never substituted.",
+        "toc": "toc [--json]\nList available page IDs and sizes in the selected scope.",
+        "figures": "figures PAGE [--json]\nList a page's stored figure URLs, captions and Mermaid.",
+    }
     parser = argparse.ArgumentParser(
+        prog="hankweave-docs.sh", add_help=False,
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Commands:
   info       Inspect selected parquet metadata and SHA256 without a cache or FTS.
@@ -1066,21 +1231,25 @@ def main():
   toc        List pages with word counts in the selected scope.
   figures    Return figure captions, URLs and verbatim Mermaid.
   build      Build the local search index explicitly.
+  install-fts Install FTS from a matching PyPI wheel or --wheel PATH.
 
 Use outline before large reads. Source search covers selected windows, not every
 file line; term covers identifiers in full bodies. Put all options before --:
   term --scope all --limit 12 -- --start-new
 JSON is an array for tabular queries and one object for info; read/page stay raw.""",
     )
-    parser.add_argument("command", choices=("info", "build", "search", "term", "outline", "read", "page", "neighbors", "resolve", "toc", "figures"))
+    parser.add_argument("command", nargs="?", choices=tuple(help_text))
     parser.add_argument("args", nargs="*")
+    parser.add_argument("-h", "--help", action="store_true", help="show general or command-specific help")
+    parser.add_argument("--contains", action="store_true", help="term: case-insensitive substring of identifier names")
+    parser.add_argument("--wheel", metavar="PATH", help="install-fts: use a local matching wheel without network access")
     parser.add_argument("--scope", choices=("docs", "source", "fixture", "all"), default="docs")
     parser.add_argument("--parquet", metavar="PATH_OR_URL", help="select base docs (otherwise HANKWEAVE_DOCS_PARQUET, then bundled default)")
     parser.add_argument("--source-parquet", metavar="PATH_OR_URL", help="attach optional source (otherwise HANKWEAVE_SOURCE_PARQUET or a matching local companion)")
     parser.add_argument("--path", action="store_true", help="build: print only the selected DuckDB cache path")
-    parser.add_argument("--limit", type=int, default=24, help="neighbors/term: maximum result rows (default: 24)")
-    parser.add_argument("--offset", type=int, default=0, help="neighbors/term: skip this many result rows")
-    parser.add_argument("--all", action="store_true", dest="all_results", help="neighbors/term: show every result")
+    parser.add_argument("--limit", type=int, help="search/term/neighbors: maximum rows (search: 12; others: 24)")
+    parser.add_argument("--offset", type=int, default=0, help="search/term/neighbors: skip this many rows")
+    parser.add_argument("--all", action="store_true", dest="all_results", help="search/term/neighbors: show every result")
     parser.add_argument("--json", action="store_true", help="tabular queries: JSON array; info: one metadata object")
     parser.add_argument("--anchor", help="neighbors: outgoing evidence from this exact source section")
     parser.add_argument("--lines", help="neighbors: incoming bounded evidence overlapping Lstart[-Lend]")
@@ -1093,6 +1262,20 @@ JSON is an array for tabular queries and one object for info; read/page stay raw
         argv, literal = argv[:boundary], argv[boundary + 1:]
     args = parser.parse_intermixed_args(argv)
     args.args.extend(literal)
+    if args.help:
+        if args.command:
+            print("Usage: hankweave-docs.sh " + help_text[args.command])
+            if args.command != "install-fts":
+                print("\nShared options: --scope docs|source|fixture|all, --parquet PATH_OR_URL, --source-parquet PATH_OR_URL")
+        else:
+            parser.print_help()
+        return
+    if args.command is None:
+        parser.error("Choose a command; use --help for the command list")
+    if args.contains and args.command != "term":
+        parser.error("--contains is only available with term")
+    if args.wheel is not None and args.command != "install-fts":
+        parser.error("--wheel is only available with install-fts")
     if args.command in ("read", "neighbors") and len(args.args) == 1 and "#" in args.args[0]:
         page_id, hit_anchor = args.args[0].split("#", 1)
         if args.command == "read":
@@ -1104,21 +1287,28 @@ JSON is an array for tabular queries and one object for info; read/page stay raw
     if args.command == "read" and len(args.args) < 2:
         parser.error("read requires PAGE#ANCHOR or PAGE ANCHOR (use '' for the opening section); "
                      "use page PAGE for the complete stored body")
-    required = {"info": 0, "search": 1, "term": 1, "outline": 1, "read": 2, "page": 1, "neighbors": 1, "resolve": 1, "toc": 0, "build": 0, "figures": 1}
+    required = {"info": 0, "install-fts": 0, "search": 1, "term": 1, "outline": 1, "read": 2, "page": 1, "neighbors": 1, "resolve": 1, "toc": 0, "build": 0, "figures": 1}
     count = len(args.args)
     if count < required[args.command]:
         parser.error(f"{args.command} requires {required[args.command]} argument(s)")
     maximum = 1 if args.command == "build" else required[args.command]
     if args.command != "search" and count > maximum:
-        parser.error(f"{args.command} takes at most {maximum} argument(s)")
+        message = f"{args.command} takes at most {maximum} argument(s)."
+        if literal:
+            message += " Everything after -- is literal query text. Move options before --; for example: term --scope all -- --start-new"
+        elif args.command == "term":
+            message += " Use one identifier, --contains for part of a name, or search for prose."
+        parser.error(message)
     if args.command == "search" and not " ".join(args.args).strip():
         parser.error("search requires non-empty terms")
     if args.command == "term" and not args.args[0].strip():
         parser.error("term requires a non-empty exact identifier")
-    if args.limit < 1 or args.offset < 0:
+    if (args.limit is not None and args.limit < 1) or args.offset < 0:
         parser.error("--limit must be positive and --offset nonnegative")
-    if args.command not in ("neighbors", "term") and (args.limit != 24 or args.offset or args.all_results):
-        parser.error("--limit, --offset and --all are only available with neighbors or term")
+    if args.command not in ("search", "neighbors", "term") and (args.limit is not None or args.offset or args.all_results):
+        parser.error("--limit, --offset and --all are only available with search, neighbors or term")
+    if args.limit is None:
+        args.limit = 12 if args.command == "search" else 24
     if args.command != "neighbors" and (args.anchor is not None or args.lines is not None):
         parser.error("--anchor and --lines are only available with neighbors")
     if args.anchor is not None and args.lines is not None:
@@ -1132,13 +1322,18 @@ JSON is an array for tabular queries and one object for info; read/page stay raw
         parser.error(str(error))
     if args.all_results and args.offset:
         parser.error("Choose either --all or --offset")
-    if args.json and args.command in ("read", "page", "build"):
+    if args.json and args.command in ("read", "page", "build", "install-fts"):
         parser.error("--json is only available with tabular queries or info")
     if args.path and args.command != "build":
         parser.error("--path is only available with build")
     if args.command == "build" and args.args and args.parquet is not None:
         parser.error("Choose either the positional parquet or --parquet, not both")
     source = args.args[0] if args.command == "build" and args.args else args.parquet
+    if args.command == "install-fts":
+        if args.parquet is not None or args.source_parquet is not None:
+            parser.error("install-fts does not select a parquet; use --wheel for a local extension wheel")
+        install_fts(args.wheel)
+        return
     if args.command == "info":
         info(source, args.json, args.source_parquet)
         return
@@ -1149,13 +1344,13 @@ JSON is an array for tabular queries and one object for info; read/page stay raw
         else:
             print(json.dumps({**identity, "cache": str(cache)}))
     else:
-        query(cache, args.command, args.args, args.scope, args.limit, args.offset, args.all_results, args.json, args.anchor, region, at)
+        query(cache, args.command, args.args, args.scope, args.limit, args.offset, args.all_results, args.json, args.anchor, region, at, args.contains)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         print(f"hankweave-docs: {error}", file=sys.stderr)
         if isinstance(error, subprocess.CalledProcessError) and error.stderr:
             print(error.stderr, file=sys.stderr)

@@ -54,31 +54,131 @@ No manifest means its publication fields stay unknown. Introspection is not acce
 
 ### Requirements and cache identity
 
-The scripts use Python 3.8+ with its standard library, plus the `duckdb` CLI. The builder loads DuckDB's FTS extension and installs that extension if needed. Provision DuckDB and FTS in advance for offline use; the skill does not install Python or DuckDB.
+The scripts use Python 3.8+ with its standard library, plus the standalone `duckdb` CLI. The [setup guide](SKILL.md#setup) gives CLI installation commands and the restricted-network FTS path. The builder tries the HTTPS extension repository if FTS is not installed. If that host is blocked, `install-fts` explicitly downloads a matching `duckdb-extension-fts` wheel from PyPI, or `install-fts --wheel PATH` consumes one offline. The helper never installs Python or the CLI automatically, never executes the wheel's Python package and leaves DuckDB's extension-signature checks enabled.
 
 `HANKWEAVE_DOCS_CACHE` defaults to `~/.hankweave/docs`. Completed database names use the `hankweave-docs` prefix and bind the canonical identities and actual SHA256 hashes of both selected files, plus the cache-format version. Adding, removing or replacing the companion changes cache identity; changing a file while preserving its timestamp still selects a new cache. Old completed generations remain available.
 
 The builder materializes a temporary index, closes it successfully, and only then promotes it. A failed build does not replace completed generations. `build-index.sh` prints `{format,source,sha256,cache}`; here `format` is the **cache** format. `build-index.sh --path` prints only the selected database path. Normal queries ensure the index exists automatically; `info` does not use it.
+
+## Hosted fallback
+
+Use the hosted documentation API when local DuckDB/FTS setup is unavailable. Local lookup remains preferable for repeated work: the hosted path has higher latency and usually requires discovery, search and one or more reads over the network. This is a separate HTTP workflow, not a `--hosted` option or a parquet URL for the local helper.
+
+**Base URL:** `https://hankweave-docs-search.operations-aa6.workers.dev`. The API is GET-only and needs no key.
+
+### Scope and provenance
+
+The hosted corpus contains authored/generated documentation pages. It does **not** contain runtime source or fixture files and has no equivalent of `term`, `neighbors` evidence traversal, source-line reads or arbitrary SQL. Its `prev`/`next` sections and `related`/`next` pages are reading navigation, not evidence edges. You may follow a source or fixture URL separately, but do not claim that the API searched or verified those files.
+
+Once per session, inspect `/v1/versions`, then `/v1/healthz?version=0.10.0` for the chosen release. Health reports the loaded version, page/section counts, embedding model and `source_sha256`: the parquet used to build the hosted docs bundle. Record that provenance when relevant. The health response does not report or establish release acceptance.
+
+Pass `version` explicitly on data requests; do not rely on the moving `latest` default. Honor the version in the user's runtime or URL. If it is unavailable, report that limitation rather than substitute another release. JSON responses identify their version; check it. A matching version does not prove byte identity with a selected local pack, which may contain later corrections. If their parquet hashes differ, identify the hosted snapshot rather than claiming it is the local one. Do not silently replace an explicitly selected or corrupt local corpus with hosted results.
+
+### Identity and privacy
+
+Every `/v1` data route requires `agent`, `harness` and `purpose`, either as query parameters or as `x-agent`, `x-harness` and `x-purpose` headers. `/v1/versions` and `/v1/healthz` are exempt. Use your actual agent and harness; the limits are 80 characters each and 200 for purpose.
+
+The service logs the query or requested ID, identity fields, optional installation ID and request metadata. Keep queries and purpose generic: do not send keys, private code, private hank contents or personal identifiers. An optional `x-hankweave-install` header can carry an opaque random ID retained for the installation, giving it its own rate-limit bucket. Do not rotate IDs to evade limits.
+
+Set a User-Agent if using Python's standard HTTP library: the Worker host rejects the default `Python-urllib/…` agent with 403. `User-Agent: hankweave-docs/1` works without pretending to be a browser. Curl's default agent is also supported.
+
+### Search, then read
+
+This Bash example identifies a Claude UI client; change `AGENT` and `HARNESS` to your actual client. `PURPOSE` describes the public documentation question, not private task details. The function carries identity and the selected version on every request and leaves HTTP errors visible.
+
+```bash
+BASE=https://hankweave-docs-search.operations-aa6.workers.dev
+VERSION=0.10.0
+AGENT=claude
+HARNESS=claude-ui
+PURPOSE='look up run recovery'
+
+hwdocs() {
+  local route="$1"
+  shift
+  curl --silent --show-error --fail-with-body --get "$BASE/v1/$route" \
+    --user-agent 'hankweave-docs/1' \
+    --header "x-agent: $AGENT" \
+    --header "x-harness: $HARNESS" \
+    --header "x-purpose: $PURPOSE" \
+    --data-urlencode "version=$VERSION" "$@"
+}
+
+hwdocs versions
+hwdocs healthz
+hwdocs search \
+  --data-urlencode 'q=how do I resume a stopped run' \
+  --data-urlencode 'k=3'
+```
+
+Search JSON contains `hits[]` with section IDs, canonical citation URLs, full `chars`, `truncated` and an excerpt. Excerpts stop at 1,500 characters and may end inside a code block. Read the relevant full section before relying on an incomplete excerpt. Copy a returned `id`; it is `page#anchor`, or just `page` for the opening section:
+
+```bash
+SECTION_ID='operate/resume-rollback-and-retry#resume-without-re-running-sealed-work'
+hwdocs section --data-urlencode "id=$SECTION_ID" --data-urlencode 'format=md'
+```
+
+`--data-urlencode` matters: a literal `#` in a URL is a client-side fragment and never reaches the server. Cite the returned canonical documentation URL, not the Worker request URL.
+
+For a known page, skip search and inspect its outline without downloading its body. Copy an outline section ID into the section request above:
+
+```bash
+PAGE_ID=reference/hank-json
+hwdocs page --data-urlencode "id=$PAGE_ID" --data-urlencode 'body=false'
+```
+
+Only request a whole page when needed: `hwdocs page --data-urlencode "id=$PAGE_ID" --data-urlencode 'format=md'`. The default page body is complete and can be tens of kilobytes. Use JSON for provenance/outline fields and Markdown for reading text; do not fetch both forms merely to reformat the same answer.
+
+### Request contract
+
+| Route | Inputs and result |
+|---|---|
+| `/v1/search` | `q` is required, whitespace-normalized and at most 300 characters. `k` defaults to 8 and accepts 1–20. `hits[]` contains ranked sections; `pages[]` groups them with reading links. This semantic ranking differs from local DuckDB ranking. |
+| `/v1/toc` | Lists the selected version's page IDs, titles, URLs, word counts and section counts. Use it for browsing or when search is unavailable. |
+| `/v1/page` | Requires `id`: a page ID, slug, stored alias or canonical URL. JSON includes metadata, diagrams with verbatim Mermaid, the section outline and full `body`; `body=false` omits the body. Keep JSON format for metadata-only requests. |
+| `/v1/section` | Requires a returned section ID or canonical URL with its fragment. Returns full section text, canonical URL and adjacent sections; `format=md` returns text alone. A page ID alone selects its opening, not the whole page. |
+| `/v1/versions`, `/v1/healthz` | Discover available editions and inspect the chosen hosted corpus. Neither requires identity. |
+
+`format` is `json` by default or `md` for reading. Hosted search uses `k`, not the local CLI's `--limit`/`--offset`, and does not offer search pagination. Start with 3–5 hits, reuse responses, and widen through section/page links rather than repeatedly issuing similar searches. A low similarity score or no hit is not an absence proof. Exact identifiers can rank poorly; try the concept around the identifier or read its owning reference page directly.
+
+The `/v1/embed` route and `/data/<version>/` files are for custom vector-search clients, not needed for this fallback. Downloading that bundle alone does not make new semantic queries offline: the documented recipe still obtains query embeddings from `/v1/embed`.
+
+### Errors and service limits
+
+Errors are JSON objects shaped as `{"error":{"code":"…","message":"…"}}`, even when Markdown was requested. Check HTTP failures and error objects before treating a response as documentation. Curl's `--include` option exposes status and `Retry-After` headers when diagnosing a failure.
+
+| Response | Action |
+|---|---|
+| `400 identify_yourself` | Supply the missing identity fields named in the message. |
+| `400 missing_query`, `missing_id`, `bad_param`; `413 query_too_long` | Correct the parameters or shorten the question. Do not retry unchanged. |
+| `404 unknown_version` | Stop or explicitly choose an available edition that fits the task; never silently use `latest`. |
+| `404 unknown_page`, `unknown_section` | Use `/v1/toc` or the page's JSON outline and copy an actual ID. |
+| `429 rate_limited` | Honor `Retry-After`. Limits are about 30 requests/minute per client and 120 total per Cloudflare location; cached responses do not count. |
+| `502`/`503 embedding_unavailable` | Honor `Retry-After` when present. Browse `/v1/toc`, `/v1/page` and `/v1/section`, which do not need query embeddings. There is no separate hosted keyword-search endpoint. |
+| Proxy denial, non-JSON error page or transport failure | Report service unavailability, not missing documentation. If the response identifies the daily Worker quota, wait for its UTC-day reset. Do not loop or evade network controls. |
+
+The Worker also has a 100,000-request daily free-tier ceiling. Cache the discovery metadata and useful page/section responses within the task; do not poll health before every lookup.
 
 ## Query contracts
 
 | Command | Result |
 |---|---|
 | `info` | It inspects all selected parts without a cache or FTS. `--json` emits one metadata object; see the fields above. |
-| `search words…` | It scores block-sized passages and returns up to twelve parent-section hits, at most three per page. It includes the section ordinal, scope, version, document type, score, parent `chars` and a matching passage. Generated navigation and link destinations do not compete with substantive documentation. Source search covers selected stored windows, not the entire source body. |
-| `term IDENTIFIER` | It returns exact, case-sensitive technical identifier occurrences across full bodies in available parts, including code outside source windows when source is loaded, and JSON paths. It is not arbitrary substring search. Results include page, anchor, scope, count, version and URL. `--scope all` interleaves available scopes. Totals count result rows, while `count` records occurrences. |
+| `search words…` | It scores block-sized passages and returns 12 parent-section hits by default, at most three per page. `--limit`, `--offset` and `--all` page the same ordering; `total` counts available section results. It includes section ordinal, scope, version, document type, score, parent `chars` and a matching passage. Generated navigation and link destinations do not compete with substantive docs. Source search covers selected stored windows, not the entire source body. |
+| `term IDENTIFIER` | It returns exact, case-sensitive identifier occurrences across full bodies in available parts, including source outside lookup windows and JSON paths. `--contains` instead matches a case-insensitive substring of identifier names, not arbitrary prose. Results include the matched term, page, anchor, scope, count, version and URL. `--scope all` interleaves available scopes. Totals count result rows; `count` records occurrences. |
 | `outline PAGE` | It returns stored sections in order, with anchors and `chars`. `outline SOURCE --at L5557 --scope source` instead returns recorded containing constructs, innermost first. |
 | `read PAGE#ANCHOR` or `read PAGE ANCHOR` | It emits the stored section text without an added heading or newline. For the opening, pass `PAGE ''` or `PAGE#`. A bare page ID is not a request for the whole page: use `page`. |
 | `read ID Lstart-Lend --scope source` | It emits exact inclusive source lines from the whole file. Use `--scope fixture` for text fixtures. Line endings are preserved; invalid ranges and binary descriptors fail. A single `Lstart` prefers an existing stored section, otherwise that file line. |
 | `page ID` | It emits the complete stored body exactly, with no response-size limit. Binary fixture rows return their descriptor, not an invented transcription. Not-found errors direct you to ID/scope/fixture discovery. |
 | `neighbors PAGE` | It returns typed evidence, dependencies and fixture relationships. `PAGE#ANCHOR` selects outgoing section evidence; `--lines L5557` or `--lines L5481-L5608` on a source/text fixture selects incoming bounded citations of that region. |
-| `resolve ID-OR-URL` | It resolves IDs, slugs, canonical URLs and aliases. Historical fan-outs remain multiple results. Explicit version prefixes never substitute another edition; a mismatch preserves empty results and explains it on stderr. |
+| `resolve ID-OR-URL` | It resolves IDs, slugs, aliases, URLs and unqualified names such as `rigs`. Exact matches take precedence over basename alternatives. Same-version `/docs/<version>/…` URLs resolve to the selected edition's canonical route, but foreign origins and other versions are never substituted. Ambiguities remain multiple results; mismatches return an empty array and a stderr diagnostic. |
 | `toc` | It lists the selected scope, including whole-page `word_count`. This is an inventory, not a reconstruction of the curated reading journey. |
 | `figures PAGE` | It lists the figure's caption, kind, stored URL and verbatim Mermaid twin. |
+| `install-fts [--wheel PATH]` | It installs and loads an FTS binary matching the installed DuckDB CLI from a PyPI wheel, or a local wheel offline. It needs no documentation corpus or search cache. |
 
 Queries default to `--scope docs`; use `source`, `fixture` or `all` deliberately. Without source, `--scope source` returns a missing-pack error; `--scope all` searches available scopes and warns about partial coverage. Do not report that source was searched in that case. `info` always describes all available parts and the expected companion, regardless of scope. Put **all options before `--`** when passing literal arguments beginning with a dash: `term --scope all --limit 12 -- --start-new`. Everything after `--` is query text, even `--json` or `--scope`. Without the separator, options may precede or follow ordinary positional arguments.
 
-Tabular queries accept `--json` and return arrays; `info --json` returns one object. Raw `read`/`page` text cannot be wrapped with `--json`. Both `neighbors` and `term` accept `--limit`, `--offset` and `--all`. An outgoing `neighbors --anchor` filter excludes unrelated page-wide dependencies and incoming links. An incoming `--lines` filter requires a source or text-fixture row and includes only overlapping, explicitly bounded citations. Do not combine the two directions. `outline --at` is the source-context lookup.
+Tabular queries accept `--json` and return arrays; `info --json` returns one object. Raw `read`/`page` text cannot be wrapped with `--json`. `search`, `neighbors` and `term` accept `--limit`, `--offset` and `--all`. Empty result arrays keep exit status 0 and emit actionable stderr diagnostics; invalid arguments, missing required source and failed reads are errors. Every command supports `--help` without loading a corpus. An outgoing `neighbors --anchor` filter excludes unrelated page-wide dependencies and incoming links. An incoming `--lines` filter requires a source or text-fixture row and includes only overlapping, explicitly bounded citations. Do not combine the two directions. `outline --at` is the source-context lookup.
 
 ```bash
 bash scripts/hankweave-docs.sh neighbors '<page#section>' --json
@@ -86,6 +186,8 @@ bash scripts/hankweave-docs.sh neighbors '<source ID>' --lines L5557 --scope sou
 bash scripts/hankweave-docs.sh outline '<source ID>' --at L5557 --scope source --json
 bash scripts/hankweave-docs.sh term outputFiles --scope all --limit 12 --json
 bash scripts/hankweave-docs.sh term outputFiles --scope all --all --json
+bash scripts/hankweave-docs.sh term --contains healthCheck --scope source --json
+bash scripts/hankweave-docs.sh search checkpoint rollback --limit 6 --offset 6 --json
 ```
 
 Before a large read, compare whole-page `word_count` from `toc` with section `chars` from `outline` or `search`. Read one section or a bounded source/fixture line range first. Neither `read` nor `page` truncates the stored text. Prefer `--offset`/`--limit` to `--all` for large term or evidence results; exhaust the relevant scope's pages before claiming absence.
@@ -100,7 +202,7 @@ With source attached, source-citation results include a short exact preview from
 
 Fixture manifests are real stored files, not generated claims that every neighboring file was exercised. Each associated fixture points to its manifest, and the manifest exposes its members. Some files have no identifiable scope manifest. Read the actual manifest for models, capture dates, normalized fields and limitations. Duplicate bytes at distinct fixture paths retain distinct identities.
 
-Documentation URLs use `https://hankweave.southbridge.ai/<version>/files/`; see the [online-reference table](SKILL.md#online-references) for the pinned root, first-run page and repository parquet/manifest downloads. The root is an alias for the introduction at `start/introduction/`; other page IDs keep their full route, including a terminal `/index`. Explicit versions in these URLs, or in legacy `/docs/<version>/` URLs from older data, must match the selected corpus. Legacy URLs are not new aliases.
+Documentation URLs use `https://hankweave.southbridge.ai/<version>/files/`; see the [online-reference table](SKILL.md#online-references) for downloads and the distinction between the docs-distribution commit and runtime source commit. The root is an alias for `start/introduction/`; other page IDs keep their full route, including terminal `/index`. The resolver also accepts legacy `/docs/<version>/…` documentation URLs within the same origin and selected version. It returns the selected corpus's canonical URL, not a claim that the legacy website route redirects.
 
 Figures have their own stored asset URLs: the general route is `https://hankweave.southbridge.ai/diagrams/<slug>/<n>.<ext>`, while a bundle may bind a figure to a content-addressed asset. Use the returned URL; never append `diagrams/` under `/files/`. GitHub repository URLs retain their pinned source commit; captured surfaces and fixture assets keep separate versioned locations.
 
