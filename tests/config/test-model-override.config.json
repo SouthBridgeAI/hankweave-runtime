@@ -5,7 +5,7 @@
       "id": "codon-1",
       "name": "Pre-Loop Codon",
       "promptText": "Create a simple file at <%PROJECT_DIR%>/output/step1.txt with the text 'Step 1 completed'.",
-      "model": "opus",
+      "model": "pi/openai-codex/gpt-5.6-terra",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -32,17 +32,17 @@
           "id": "codon-a",
           "name": "Loop Codon A",
           "promptText": "Create a file in <%PROJECT_DIR%>/output/ directory with a name starting with 'loop_a_' followed by a unique identifier (like a timestamp or random number). Write the text 'Loop A iteration completed' to it.",
-          "model": "sonnet",
+          "model": "pi/openai-codex/gpt-5.6-sol",
           "continuationMode": "continue-previous",
-          "description": "Loop step A using Sonnet"
+          "description": "Loop step A using gpt-5.6-sol"
         },
         {
           "id": "codon-b",
           "name": "Loop Codon B",
           "promptText": "Create a file in <%PROJECT_DIR%>/output/ directory with a name starting with 'loop_b_' followed by a unique identifier (like a timestamp or random number). Write the text 'Loop B iteration completed' to it.",
-          "model": "opus",
+          "model": "pi/openai-codex/gpt-5.6-terra",
           "continuationMode": "continue-previous",
-          "description": "Loop step B using Opus"
+          "description": "Loop step B using gpt-5.6-terra"
         }
       ]
     },
@@ -50,9 +50,9 @@
       "id": "codon-2",
       "name": "Post-Loop Codon",
       "promptText": "Create a final file at <%PROJECT_DIR%>/output/final.txt with the text 'All steps completed'.",
-      "model": "sonnet",
+      "model": "pi/openai-codex/gpt-5.6-sol",
       "continuationMode": "fresh",
-      "description": "Final step using Sonnet"
+      "description": "Final step using gpt-5.6-sol"
     }
   ]
 }

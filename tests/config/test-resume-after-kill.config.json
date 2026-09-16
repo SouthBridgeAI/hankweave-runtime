@@ -5,7 +5,7 @@
       "id": "codon-1",
       "name": "Codon 1: TestCodon1",
       "promptFile": ["./codon1Prompt1.md", "./codon1Prompt2.md"],
-      "model": "haiku",
+      "model": "pi/openai-codex/gpt-5.6-luna",
       "continuationMode": "fresh",
       "rigSetup": [
         {

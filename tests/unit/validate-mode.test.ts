@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import { getManagedExecutionsRoot } from "../../server/utils.js";
 
 /**
@@ -100,10 +101,11 @@ describe("Validation Mode - No Directory Creation", () => {
       const _dataHash = await hashDataSource(DATA_SOURCE_DIR, 5000);
 
       // Construct what paths would be (mirroring determinePaths logic)
-      const _expectedDataPath = path.join(nonExistentPath, "read_only_data_source");
+      const expectedDataPath = new ExecutionLayout(nonExistentPath).dataPathInExecutionDir;
 
       // Verify the non-existent path still doesn't exist
       expect(fs.existsSync(nonExistentPath)).toBe(false);
+      expect(fs.existsSync(expectedDataPath)).toBe(false);
 
       // Verify no directories were created in exec root
       const afterDirs = fs.existsSync(EXEC_ROOT) ? await fs.promises.readdir(EXEC_ROOT) : [];

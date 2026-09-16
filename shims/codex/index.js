@@ -73,6 +73,7 @@ var Thread = class {
       threadId: this._id,
       images,
       model: options?.model,
+      threadSource: options?.threadSource,
       sandboxMode: options?.sandboxMode,
       workingDirectory: options?.workingDirectory,
       skipGitRepoCheck: options?.skipGitRepoCheck,
@@ -95,6 +96,8 @@ var Thread = class {
         }
         if (parsed.type === "thread.started") {
           this._id = parsed.thread_id;
+        } else if (parsed.type === "turn.completed") {
+          parsed.usage.cache_write_input_tokens ??= 0;
         }
         yield parsed;
       }
@@ -160,7 +163,8 @@ var CodexExec = class {
   pathDirs;
   envOverride;
   configOverrides;
-  constructor(executablePath = null, env, configOverrides) {
+  rawConfigOverrides;
+  constructor(executablePath = null, env, configOverrides, rawConfigOverrides) {
     if (executablePath) {
       this.executablePath = executablePath;
       this.pathDirs = [];
@@ -171,11 +175,17 @@ var CodexExec = class {
     }
     this.envOverride = env;
     this.configOverrides = configOverrides;
+    this.rawConfigOverrides = rawConfigOverrides;
   }
   async *run(args) {
     const commandArgs = ["exec", "--experimental-json"];
     if (this.configOverrides) {
       for (const override of serializeConfigOverrides(this.configOverrides)) {
+        commandArgs.push("--config", override);
+      }
+    }
+    if (this.rawConfigOverrides) {
+      for (const override of this.rawConfigOverrides) {
         commandArgs.push("--config", override);
       }
     }
@@ -187,6 +197,9 @@ var CodexExec = class {
     }
     if (args.model) {
       commandArgs.push("--model", args.model);
+    }
+    if (args.threadSource !== void 0 && !args.threadId) {
+      commandArgs.push("--thread-source", args.threadSource);
     }
     if (args.sandboxMode) {
       commandArgs.push("--sandbox", args.sandboxMode);
@@ -510,8 +523,8 @@ var Codex = class {
   exec;
   options;
   constructor(options = {}) {
-    const { codexPathOverride, env, config } = options;
-    this.exec = new CodexExec(codexPathOverride, env, config);
+    const { codexPathOverride, env, config, configOverrides } = options;
+    this.exec = new CodexExec(codexPathOverride, env, config, configOverrides);
     this.options = options;
   }
   /**
@@ -1254,7 +1267,7 @@ var package_default = {
     clean: `node -e "const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('index.js',{force:true});"`
   },
   dependencies: {
-    "@openai/codex-sdk": "0.144.5",
+    "@openai/codex-sdk": "0.153.4",
     "@shims/common": "file:./common"
   },
   devDependencies: {

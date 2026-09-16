@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ValidationResult } from "./config.js";
 import { DEFAULT_CONFIG, ensureSchemaUrl, validateHank } from "./config.js";
 import { hashDataSource } from "./data-hasher.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { formatEnvVarForDisplay, getManagedExecutionsRoot, Logger } from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
@@ -13,52 +14,36 @@ import { renderBudgetResolutionTable } from "./validate-budget.js";
 // Path Determination (for validation mode)
 // -------------
 
-interface PathsForValidation {
-  executionPath: string;
-  dataPathInExecutionDir: string;
-  configPath: string;
-}
-
 /**
  * Determines what paths WOULD be used without creating any directories or files.
  * Used by validation mode to simulate execution setup without side effects.
+ *
+ * The returned record is the same canonical layout `setupExecutionEnvironment`
+ * builds for a real run (agentRoot/, agentRoot/read_only_data_source/, ...), so
+ * what validation reports can never differ from what a run would create.
  */
 function determinePaths(options: {
   readOnlySourceDataPath: string;
   executionPath?: string;
   startNew?: boolean;
   dataHash: string;
-}): PathsForValidation {
+}): ExecutionLayout {
   if (options.executionPath) {
     // Explicit execution path provided
-    return {
-      executionPath: options.executionPath,
-      dataPathInExecutionDir: path.join(options.executionPath, "read_only_data_source"),
-      configPath: options.executionPath,
-    };
+    return new ExecutionLayout(options.executionPath);
   } else if (options.startNew) {
     // Would create new directory in managed executions
     const executionRoot = getManagedExecutionsRoot();
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 6);
     const dirName = `${timestamp}-${random}-${options.dataHash.substring(0, 6)}`;
-    const execPath = path.join(executionRoot, dirName);
-    return {
-      executionPath: execPath,
-      dataPathInExecutionDir: path.join(execPath, "read_only_data_source"),
-      configPath: execPath,
-    };
+    return new ExecutionLayout(path.join(executionRoot, dirName));
   } else {
     // Would search for existing or create new
     // For validation, we generate a synthetic path since we don't want to search the filesystem
     const executionRoot = getManagedExecutionsRoot();
     const dirName = `validation-${options.dataHash.substring(0, 6)}`;
-    const execPath = path.join(executionRoot, dirName);
-    return {
-      executionPath: execPath,
-      dataPathInExecutionDir: path.join(execPath, "read_only_data_source"),
-      configPath: execPath,
-    };
+    return new ExecutionLayout(path.join(executionRoot, dirName));
   }
 }
 

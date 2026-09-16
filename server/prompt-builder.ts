@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import type { PromptFrontmatter } from "./prompt-frontmatter.js";
 import type { Codon } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -13,6 +12,8 @@ export class PromptBuilder {
 
   constructor(
     private agentRootPath: string,
+    /** Absolute path of the data link inside the agent workspace (`<%DATA_DIR%>`). */
+    private dataPath: string,
     private logger: Logger,
     private globalSystemPrompt?: string | null,
   ) {}
@@ -179,7 +180,7 @@ export class PromptBuilder {
       .replace(/<%AGENT_ROOT%>/g, this.agentRootPath)
       .replace(/<%PROJECT_DIR%>/g, this.agentRootPath) // Silent alias
       .replace(/<%EXECUTION_DIR%>/g, this.agentRootPath) // Silent alias
-      .replace(/<%DATA_DIR%>/g, path.join(this.agentRootPath, "read_only_data_source"));
+      .replace(/<%DATA_DIR%>/g, this.dataPath);
   }
 
   /**

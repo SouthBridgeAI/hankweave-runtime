@@ -1,0 +1,81 @@
+{
+  "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "hank": [
+    {
+      "id": "divergent-matcher",
+      "name": "Divergent matcher codon",
+      "description": "Writes a root, deep-basename, and gitignored file; only the root write may be journaled",
+      "promptText": "Use the Write tool exactly three times, once per file, in this order. 1. Create the file <%PROJECT_DIR%>/root-control.md with exactly this text: LIVE_ROOT_CONTROL_BODY 2. Create the file <%PROJECT_DIR%>/deep/dir/nested.md with exactly this text: LIVE_DEEP_BASENAME_BODY 3. Create the file <%PROJECT_DIR%>/output/tmp/ignored.md with exactly this text: LIVE_GITIGNORED_BODY Do not use Read, Edit, Bash, or any other tool. After all three Writes succeed, reply with exactly WRITES_DONE.",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "bun -e \"await Bun.write('.gitignore', 'output/tmp/\\\\n'); const fs = await import('node:fs'); fs.mkdirSync('deep/dir', { recursive: true }); fs.mkdirSync('output/tmp', { recursive: true })\"",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "checkpointedFiles": ["*.md", "output/**"]
+    },
+    {
+      "id": "read-only-codon",
+      "name": "Read-only codon",
+      "description": "Reads a pre-existing watched file; must not journal a fabricated 'modified' event",
+      "promptText": "Use the Read tool exactly once to read the file <%PROJECT_DIR%>/watched.md. Do not use Write, Edit, Bash, or any other tool. Do not create or modify any file. After the Read succeeds, reply with exactly READ_DONE.",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "bun -e \"await Bun.write('watched.md', 'LIVE_WATCHED_REFERENCE_BODY')\"",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "checkpointedFiles": ["*.md"]
+    },
+    {
+      "id": "watching-a",
+      "name": "Watching codon A",
+      "description": "Watches *.txt and is held inside outputFiles.beforeCopy until .release-a appears",
+      "promptText": "Reply with exactly A_DONE. Do not call any tools or modify files.",
+      "model": "haiku",
+      "continuationMode": "fresh",
+      "rigSetup": [
+        {
+          "type": "command",
+          "command": {
+            "run": "bun -e \"await Bun.write('owned-by-a.txt', 'owned by codon A\\\\n')\"",
+            "workingDirectory": "project"
+          }
+        }
+      ],
+      "checkpointedFiles": ["*.txt"],
+      "outputFiles": [
+        {
+          "copy": ["owned-by-a.txt"],
+          "beforeCopy": [
+            {
+              "type": "command",
+              "command": {
+                "run": "bun -e \"await Bun.write('.a-finalizing', 'ready'); while (!(await Bun.file('.release-a').exists())) await Bun.sleep(20)\"",
+                "workingDirectory": "project"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "unwatched-b",
+      "name": "Unwatched codon B",
+      "description": "Declares no checkpointedFiles; its Write must not be journaled",
+      "promptText": "Use the Write tool exactly once to create the new file <%PROJECT_DIR%>/created-by-b.txt with exactly this text: LIVE_CODON_B_WROTE_THIS. Do not use Read, Edit, Bash, or any other tool. After Write succeeds, reply with exactly B_DONE.",
+      "model": "haiku",
+      "continuationMode": "fresh"
+    }
+  ]
+}

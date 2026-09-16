@@ -40,8 +40,9 @@ type FileUpdatedEvent = Extract<ServerEvent, { type: "file.updated" }>;
 let fileUpdatedEventCounter = 0;
 
 /**
- * The file.updated ServerEvent sentinel tests trigger on, with the usual
- * placeholder data. Override the id or any data field as needed.
+ * The file.updated ServerEvent sentinel tests trigger on, in the wire's
+ * fingerprint form (sha256/bytes/source — never a body). Override the id or
+ * any data field as needed.
  */
 export function fileUpdatedEvent(
   overrides: Partial<FileUpdatedEvent["data"]> & { id?: string } = {},
@@ -54,8 +55,10 @@ export function fileUpdatedEvent(
     data: {
       path: "test.txt",
       filename: "test.txt",
-      content: "content",
       action: "created",
+      sha256: "0".repeat(64),
+      bytes: 7,
+      source: { kind: "codon-start" },
       ...data,
     },
   };

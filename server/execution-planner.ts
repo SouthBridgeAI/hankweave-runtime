@@ -37,6 +37,40 @@ export interface ExecutionCodonEntry {
  * Handles all execution planning logic.
  * Pure functions - no side effects, just config → plan transformations.
  */
+/**
+ * The checkpoint patterns in force when `codonId` runs: the checkpointedFiles
+ * of every plan entry before it, in plan order, plus its own when
+ * `includeSelf` (a rig-setup checkpoint is taken after the codon's rig ran,
+ * so the codon's files must already be tracked). Deduplicated, first
+ * occurrence wins. Null when the codon is not in the plan.
+ *
+ * The plan is the source, not the top-level codon list: a loop iteration
+ * ("plan#2") is not a top-level codon, so looked up there it registered
+ * nothing. That was harmless in one process (earlier codons had already
+ * filled the pattern set) and destructive after a crash restart, where the
+ * set starts empty: the first codon's completion checkpoint captured none
+ * of its output, and a later rollback onto it deleted files.
+ */
+export function checkpointPatternsThrough(
+  plan: ExecutionCodonEntry[],
+  codonId: CodonId,
+  includeSelf: boolean,
+): string[] | null {
+  const index = plan.findIndex((e) => e.codonId === codonId);
+  if (index < 0) return null;
+  const patterns: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of plan.slice(0, includeSelf ? index + 1 : index)) {
+    for (const pattern of entry.codon.checkpointedFiles ?? []) {
+      if (!seen.has(pattern)) {
+        seen.add(pattern);
+        patterns.push(pattern);
+      }
+    }
+  }
+  return patterns;
+}
+
 export class ExecutionPlanner {
   constructor(private codonConfigs: CodonConfig[]) {}
 

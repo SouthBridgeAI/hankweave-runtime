@@ -71,7 +71,8 @@ describe("ENG-198: Resume auto-managed executions", () => {
 
     const testTimestamp = generateTestTimestamp();
     const port = await getFreePort();
-    // Use single-codon haiku config to avoid flaky Gemini failures
+    // Use a single-codon gpt-5.6-luna config (test-resume-after-kill) so the
+    // resume assertion lands on one codon.
     const configPath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       "../config/test-resume-after-kill.config.json",
@@ -182,10 +183,8 @@ describe("ENG-198: Resume auto-managed executions", () => {
 
     const testTimestamp = generateTestTimestamp();
     const port = await getFreePort();
-    // Use single-codon haiku config, like the resume test above — the default
-    // config's codon-3 is gemini, and this suite declares only ANTHROPIC_API_KEY
-    // (under key enforcement the default config cannot even pass the startup
-    // self-test here).
+    // Use a single-codon gpt-5.6-luna config, like the resume test above — the
+    // default config runs three codons, and this suite only needs one.
     const configPath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       "../config/test-resume-after-kill.config.json",

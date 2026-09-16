@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { getFlagValue, parseCliArgs } from "../../server/cli-parser.js";
+import { ALL_KNOWN_FLAGS, getFlagValue, HELP_TEXT, parseCliArgs } from "../../server/cli-parser.js";
 
 describe("getFlagValue", () => {
   let consoleWarnSpy: Array<string>;
@@ -368,9 +368,43 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
   });
 
-  test("hankweave --idle-timeout 0 throws", () => {
+  test("hankweave --idle-timeout 0 is accepted (0 disables the timeout)", () => {
     const args = ["--idle-timeout", "0"];
+    const result = parseCliArgs(args);
+    expect(result.idleTimeout).toBe(0);
+  });
+
+  test("hankweave --idle-timeout 0.5 throws (not an integer)", () => {
+    const args = ["--idle-timeout", "0.5"];
     expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
+  });
+
+  test("hankweave --idle-timeout 0junk throws (trailing garbage)", () => {
+    const args = ["--idle-timeout", "0junk"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
+  });
+
+  test("hankweave --idle-timeout=0=garbage throws (deprecated syntax, extra =)", () => {
+    const args = ["--idle-timeout=0=garbage"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
+  });
+
+  test("hankweave --idle-timeout 255 is accepted (max boundary)", () => {
+    const args = ["--idle-timeout", "255"];
+    const result = parseCliArgs(args);
+    expect(result.idleTimeout).toBe(255);
+  });
+
+  test("hankweave --idle-timeout=-1 throws (deprecated syntax, negative)", () => {
+    const args = ["--idle-timeout=-1"];
+    expect(() => parseCliArgs(args)).toThrow("Invalid --idle-timeout value");
+  });
+
+  test("hankweave --idle-timeout error message explains the 0-255 range", () => {
+    const args = ["--idle-timeout", "999"];
+    expect(() => parseCliArgs(args)).toThrow(
+      "must be an integer between 0 and 255; 0 disables the timeout",
+    );
   });
 
   test("hankweave --idle-timeout 256 throws (exceeds max)", () => {
@@ -776,6 +810,19 @@ describe("parseCliArgs", () => {
     expect(result.skipConfirmation).toBe(true);
     expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
+  });
+
+  test("hankweave --yes (long alias for -y)", () => {
+    const args = ["--yes"];
+    const result = parseCliArgs(args);
+    expect(result.skipConfirmation).toBe(true);
+    expect(result.hankPath).toBeUndefined();
+    expect(result.dataPath).toBeUndefined();
+  });
+
+  test("hankweave --yes=true throws (boolean flag takes no value)", () => {
+    const args = ["--yes=true"];
+    expect(() => parseCliArgs(args)).toThrow("Flag '--yes' does not take a value.");
   });
 
   test("hankweave --start-new", () => {
@@ -1223,5 +1270,52 @@ describe("parseCliArgs", () => {
       const result = parseCliArgs(["--max-time", "120", "--max-cost", "3.00"]);
       expect(result.budget).toEqual({ maxDollars: 3.0, maxTimeSeconds: 120 });
     });
+  });
+});
+
+describe("help/parser parity", () => {
+  // Candidate option rows: whitespace, then a dash NOT followed by a space.
+  // Prose bullets ("- Tier 2: ... require --force ..." and the positional-arg
+  // bullets under Arguments) have a space after the dash, so they are skipped.
+  const candidateRows = HELP_TEXT.split("\n").filter((line) => /^\s+-(?!\s)/.test(line));
+
+  // Full option-row grammar: one or more comma-separated flag spellings
+  // (-y, --max-cost, ...), an optional <value> placeholder, then 2+ spaces
+  // before the description. Flags are extracted only from the matched
+  // signature group, never from description prose; rows that fail to parse
+  // (e.g. "--Bogus", "---x", or a single space before the description) get
+  // an empty flag list and fail the grammar test below.
+  const OPTION_ROW =
+    /^\s+(-{1,2}[a-z][a-z0-9-]*(?:, -{1,2}[a-z][a-z0-9-]*)*)(?: <[a-z-]+>)?\s{2,}\S/;
+
+  const rows = candidateRows.map((line) => ({
+    line,
+    flags: line.match(OPTION_ROW)?.[1].split(", ") ?? [],
+  }));
+
+  const declared = rows.flatMap((row) => row.flags);
+
+  test("every candidate row parses with the option-row grammar", () => {
+    for (const { line, flags } of rows) {
+      if (flags.length === 0) {
+        throw new Error(
+          `Help option row does not match the option-row grammar: ${JSON.stringify(line)}`,
+        );
+      }
+    }
+  });
+
+  test("every parser flag has a help row and every help row is a parser flag", () => {
+    expect([...new Set(declared)].sort()).toEqual([...ALL_KNOWN_FLAGS].sort());
+  });
+
+  test("no flag is declared on more than one help row", () => {
+    expect(declared).toHaveLength(new Set(declared).size);
+  });
+
+  test("--ignore-data-mismatch row is marked deprecated", () => {
+    const row = rows.find((r) => r.flags.includes("--ignore-data-mismatch"));
+    expect(row).toBeDefined();
+    expect(row?.line).toContain("Deprecated");
   });
 });

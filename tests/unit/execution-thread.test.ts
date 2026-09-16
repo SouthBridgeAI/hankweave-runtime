@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ExecutionPlanner } from "../../server/execution-planner";
-import { analyzeExecutionThread, findContinuationSessionId } from "../../server/execution-thread";
+import {
+  analyzeExecutionThread,
+  bestConfirmedCheckpoint,
+  type CheckpointInfo,
+  confirmedCompletion,
+  decideRollback,
+  ExecutionThread,
+  findContinuationSessionId,
+  findRollbackTarget,
+  seedFromState,
+  seedFromThread,
+  type ThreadCodon,
+} from "../../server/execution-thread";
 import type { CodonId, HankweaveState, RunId, SessionId } from "../../server/types/state-types";
 import type { CodonConfig } from "../../server/types/types";
 import type { Logger } from "../../server/utils";
@@ -1075,5 +1087,227 @@ describe("Execution Thread Analysis", () => {
       // No next codon when something is running
       expect(thread.nextCodonId).toBeNull();
     });
+  });
+});
+
+describe("rollback target selection (pure)", () => {
+  const cp = (type: CheckpointInfo["type"], sha: string): CheckpointInfo => ({
+    type,
+    sha,
+    message: `${type}:${sha}`,
+    timestamp: "2026-09-05T00:00:00.000Z",
+    branch: "run-r1",
+  });
+
+  /** A ThreadCodon with the given status, raw completion reference, and confirmed checkpoints. */
+  const tc = (
+    id: string,
+    status: "completed" | "failed" | "skipped" | "running",
+    confirmed: CheckpointInfo[],
+    rawCompletion = "raw-not-confirmed",
+  ): ThreadCodon =>
+    ({
+      codon: {
+        codonId: id as CodonId,
+        status,
+        ...(status === "completed" ? { completionCheckpoint: rawCompletion } : {}),
+      },
+      runId: "r1" as RunId,
+      runStatus: "crashed",
+      runStartTime: "2026-09-05T00:00:00.000Z",
+      runEndTime: null,
+      gitBranch: "run-r1",
+      globalIndex: 0,
+      runIndex: 0,
+      codonIndexInRun: 0,
+      validatedCheckpoints: confirmed,
+      continuationSessionId: null,
+    }) as unknown as ThreadCodon;
+
+  const thread = (...codons: ThreadCodon[]) => new ExecutionThread(codons, 1, false, null);
+
+  test("confirmedCompletion reads the confirmed list, never the raw reference", () => {
+    expect(confirmedCompletion(tc("a", "completed", [cp("completed", "aaa1111")], "raw"))).toBe(
+      "aaa1111",
+    );
+    expect(confirmedCompletion(tc("a", "completed", [], "raw"))).toBeNull();
+    expect(confirmedCompletion(tc("a", "completed", [cp("rig-setup", "rrr1111")]))).toBeNull();
+    expect(confirmedCompletion(tc("a", "failed", [cp("completed", "aaa1111")]))).toBeNull();
+  });
+
+  test("bestConfirmedCheckpoint prefers completed, then error, skipped, rig-setup", () => {
+    const codon = tc("a", "failed", [
+      cp("rig-setup", "rrr1111"),
+      cp("error", "eee1111"),
+      cp("skipped", "sss1111"),
+    ]);
+    expect(bestConfirmedCheckpoint(codon)?.sha).toBe("eee1111");
+    expect(bestConfirmedCheckpoint(tc("a", "failed", [cp("rig-setup", "rrr1111")]))?.sha).toBe(
+      "rrr1111",
+    );
+    expect(bestConfirmedCheckpoint(tc("a", "failed", []))).toBeNull();
+  });
+
+  test("rung 0: the newest completed codon's confirmed completion wins over a newer error checkpoint", () => {
+    const t = thread(
+      tc("c", "failed", [cp("error", "eee3333"), cp("rig-setup", "rrr3333")]),
+      tc("b", "completed", [cp("completed", "bbb2222")]),
+      tc("a", "completed", [cp("completed", "aaa1111")]),
+    );
+    expect(findRollbackTarget(t)).toEqual({ index: 1, sha: "bbb2222", type: "completed" });
+  });
+
+  test("rung 1: a failed codon with a rig-setup checkpoint is retried from it, not continued past its error", () => {
+    // Relaunch after the first codon failed: rolling back to the error
+    // checkpoint records afterCodon = a and skips a; the rig-setup checkpoint
+    // records afterCodon = null and runs a again with the rig skipped.
+    const t = thread(
+      tc("b", "failed", []),
+      tc("a", "failed", [cp("rig-setup", "rrr1111"), cp("error", "eee1111")]),
+    );
+    expect(findRollbackTarget(t)).toEqual({ index: 1, sha: "rrr1111", type: "rig-setup" });
+  });
+
+  test("rung 1: a failed codon with no rig-setup checkpoint falls back to its error checkpoint", () => {
+    const t = thread(tc("b", "failed", []), tc("a", "failed", [cp("error", "eee1111")]));
+    expect(findRollbackTarget(t)).toEqual({ index: 1, sha: "eee1111", type: "error" });
+  });
+
+  test("rung 1: the rig-setup preference applies to failed codons only", () => {
+    // A skipped codon keeps its skip checkpoint ahead of its rig-setup one.
+    const t = thread(tc("a", "skipped", [cp("rig-setup", "rrr1111"), cp("skipped", "sss1111")]));
+    expect(findRollbackTarget(t)).toEqual({ index: 0, sha: "sss1111", type: "skipped" });
+  });
+
+  test("a completed codon whose completion git does not hold is not a target", () => {
+    // Its rig-setup checkpoint may still be, via rung 1.
+    const t = thread(tc("a", "completed", [cp("rig-setup", "rrr1111")], "dangling"));
+    expect(findRollbackTarget(t)).toEqual({ index: 0, sha: "rrr1111", type: "rig-setup" });
+  });
+
+  test("decideRollback names the completed codon that was passed over", () => {
+    const torn = thread(tc("b", "failed", []), tc("a", "completed", [], "dangling"));
+    const d = decideRollback(torn);
+    expect(d.target).toBeNull();
+    expect(d.passedOverCompletion?.codon.codonId).toBe("a" as CodonId);
+
+    const healthy = thread(tc("a", "completed", [cp("completed", "aaa1111")]));
+    expect(decideRollback(healthy).passedOverCompletion).toBeNull();
+
+    const noCompletion = thread(tc("a", "failed", [cp("error", "eee1111")]));
+    expect(decideRollback(noCompletion).target?.type).toBe("error");
+    expect(decideRollback(noCompletion).passedOverCompletion).toBeNull();
+  });
+
+  test("nothing confirmed anywhere: null (rung 2 is the caller's)", () => {
+    const t = thread(tc("b", "failed", []), tc("a", "completed", [], "dangling"));
+    expect(findRollbackTarget(t)).toBeNull();
+    expect(findRollbackTarget(thread())).toBeNull();
+  });
+});
+
+describe("continuation seed selection (pure)", () => {
+  const cp = (type: CheckpointInfo["type"], sha: string): CheckpointInfo => ({
+    type,
+    sha,
+    message: `${type}:${sha}`,
+    timestamp: "2026-09-05T00:00:00.000Z",
+    branch: "run-r1",
+  });
+
+  const tc = (
+    id: string,
+    status: "completed" | "failed" | "skipped" | "running",
+    confirmed: CheckpointInfo[],
+    rawCompletion = "raw-not-confirmed",
+  ): ThreadCodon =>
+    ({
+      codon: {
+        codonId: id as CodonId,
+        status,
+        ...(status === "completed" ? { completionCheckpoint: rawCompletion } : {}),
+      },
+      runId: "r1" as RunId,
+      validatedCheckpoints: confirmed,
+    }) as unknown as ThreadCodon;
+
+  const thread = (...codons: ThreadCodon[]) => new ExecutionThread(codons, 1, false, null);
+
+  test("seedFromThread: newest completed codon, confirmed by the validated list", () => {
+    const t = thread(
+      tc("c", "failed", []),
+      tc("b", "completed", [cp("completed", "bbb1111")], "raw-b"),
+      tc("a", "completed", [cp("completed", "aaa1111")], "raw-a"),
+    );
+    expect(seedFromThread(t)).toEqual({
+      codonId: "b" as CodonId,
+      runId: "r1" as RunId,
+      sha: "bbb1111",
+      confirmed: true,
+    });
+  });
+
+  test("seedFromThread: unconfirmed completion keeps the raw reference for the message", () => {
+    const t = thread(tc("b", "failed", []), tc("a", "completed", [], "dangling"));
+    expect(seedFromThread(t)).toEqual({
+      codonId: "a" as CodonId,
+      runId: "r1" as RunId,
+      sha: "dangling",
+      confirmed: false,
+    });
+  });
+
+  test("seedFromThread: no completed codon → null", () => {
+    expect(seedFromThread(thread(tc("a", "failed", [cp("error", "eee1111")])))).toBeNull();
+    expect(seedFromThread(thread())).toBeNull();
+  });
+
+  /** A state whose runs are listed newest first, as the state file keeps them. */
+  const stateWith = (...runs: Array<{ runId: string; codons: Array<[string, string, string?]> }>) =>
+    ({
+      runs: runs.map((r) => ({
+        runId: r.runId as RunId,
+        codons: r.codons.map(([codonId, status, completionCheckpoint]) => ({
+          codonId: codonId as CodonId,
+          status,
+          ...(completionCheckpoint ? { completionCheckpoint } : {}),
+        })),
+      })),
+    }) as unknown as HankweaveState;
+
+  test("seedFromState: skips the empty newest run, takes the last completed codon of the next", () => {
+    const state = stateWith(
+      { runId: "r3", codons: [] },
+      {
+        runId: "r2",
+        codons: [
+          ["a", "completed", "aaa1111"],
+          ["b", "completed", "bbb1111"],
+          ["c", "failed"],
+        ],
+      },
+      { runId: "r1", codons: [["a", "completed", "old1111"]] },
+    );
+    const held = new Map([["bbb1111", {}]]);
+    expect(seedFromState(state, held)).toEqual({
+      codonId: "b" as CodonId,
+      runId: "r2" as RunId,
+      sha: "bbb1111",
+      confirmed: true,
+    });
+  });
+
+  test("seedFromState: confirmation is map membership, never the raw reference alone", () => {
+    const state = stateWith({ runId: "r1", codons: [["a", "completed", "aaa1111"]] });
+    expect(seedFromState(state, new Map())?.confirmed).toBe(false);
+    expect(seedFromState(state, undefined)?.confirmed).toBe(false);
+    expect(seedFromState(state, new Map([["aaa1111", {}]]))?.confirmed).toBe(true);
+  });
+
+  test("seedFromState: no completed codon anywhere → null", () => {
+    expect(
+      seedFromState(stateWith({ runId: "r1", codons: [["a", "failed"]] }), new Map()),
+    ).toBeNull();
+    expect(seedFromState(stateWith(), new Map())).toBeNull();
   });
 });

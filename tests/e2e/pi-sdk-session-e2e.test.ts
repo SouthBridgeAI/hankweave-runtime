@@ -16,10 +16,12 @@ import { generateTestTimestamp } from "../utils/test-helpers.js";
 
 /**
  * The Pi coding agent runs IN-PROCESS (embedded SDK) — nothing to install.
- * We only need an API key (ANTHROPIC_API_KEY for default Anthropic models).
+ * The pi half of this suite runs pi/openai-codex/* codons, which authenticate
+ * from pi's own credential store (~/.pi/agent/auth.json) rather than an API
+ * key. CODEX_AUTH_JSON marks that the store is provisioned, so it is the gate.
  */
 function hasApiKey(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return !!process.env.CODEX_AUTH_JSON;
 }
 
 interface SessionResult {
@@ -129,7 +131,9 @@ describe("Pi SDK Manager Integration Test", () => {
 
   test("can run in-process pi session and get response", async () => {
     if (!apiKeyAvailable) {
-      console.log("⏭️  Skipping test: No ANTHROPIC_API_KEY found");
+      console.log(
+        "⏭️  Skipping test: No CODEX_AUTH_JSON found (no openai-codex credential provisioned)",
+      );
       return;
     }
 
@@ -137,7 +141,7 @@ describe("Pi SDK Manager Integration Test", () => {
       id: "pi-test-codon",
       name: "Pi Test Session",
       promptText: "Say 'Hello from Pi' and nothing else.",
-      model: "pi/anthropic/claude-haiku-4-5",
+      model: "pi/openai-codex/gpt-5.6-luna",
       continuationMode: "fresh",
     });
 
@@ -177,7 +181,9 @@ describe("Pi SDK Manager Integration Test", () => {
 
   test("in-process pi session with continuation mode", async () => {
     if (!apiKeyAvailable) {
-      console.log("⏭️  Skipping test: No ANTHROPIC_API_KEY found");
+      console.log(
+        "⏭️  Skipping test: No CODEX_AUTH_JSON found (no openai-codex credential provisioned)",
+      );
       return;
     }
 
@@ -186,7 +192,7 @@ describe("Pi SDK Manager Integration Test", () => {
       id: "pi-test-codon-1",
       name: "First Pi Session",
       promptText: "Remember the number 42. Say 'Number saved' and nothing else.",
-      model: "pi/anthropic/claude-haiku-4-5",
+      model: "pi/openai-codex/gpt-5.6-luna",
       continuationMode: "fresh",
     });
 
@@ -205,7 +211,7 @@ describe("Pi SDK Manager Integration Test", () => {
       id: "pi-test-codon-2",
       name: "Continuation Pi Session",
       promptText: "What number did I tell you to remember? Reply with just the number.",
-      model: "pi/anthropic/claude-haiku-4-5",
+      model: "pi/openai-codex/gpt-5.6-luna",
       continuationMode: "continue-previous",
     });
 

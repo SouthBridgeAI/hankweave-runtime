@@ -159,8 +159,10 @@ describe("Sentinel Output Files - Integration Tests", () => {
           data: {
             path: "test.ts",
             filename: "test.ts",
-            content: "",
             action: "created",
+            sha256: "0".repeat(64),
+            bytes: 0,
+            source: { kind: "codon-start" },
           },
         });
       }

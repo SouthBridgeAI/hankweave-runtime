@@ -46,8 +46,10 @@ describe("TemplateRenderer", () => {
         data: {
           path: "src/index.ts",
           filename: "index.ts",
-          content: "// Updated content",
           action: "modified",
+          sha256: "0".repeat(64),
+          bytes: 18,
+          source: { kind: "tool_use", toolUseId: "toolu_123" },
         },
       },
     ];

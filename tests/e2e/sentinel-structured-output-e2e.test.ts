@@ -136,8 +136,10 @@ describe("Structured Output E2E (Real Providers)", () => {
         data: {
           path: "test.txt",
           filename: "test.txt",
-          content: "test content",
           action: "created",
+          sha256: "0".repeat(64),
+          bytes: 12,
+          source: { kind: "codon-start" },
         },
       };
 
@@ -466,8 +468,10 @@ describe("Structured Output E2E (Real Providers)", () => {
           data: {
             path: `test${i}.txt`,
             filename: `test${i}.txt`,
-            content: "content",
             action: "created",
+            sha256: "0".repeat(64),
+            bytes: 7,
+            source: { kind: "codon-start" },
           },
         };
         manager.handleEvent(event);
@@ -951,8 +955,10 @@ describe("Structured Output E2E (Real Providers)", () => {
         data: {
           path: "test.txt",
           filename: "test.txt",
-          content: "42",
           action: "created",
+          sha256: "0".repeat(64),
+          bytes: 2,
+          source: { kind: "codon-start" },
         },
       };
 

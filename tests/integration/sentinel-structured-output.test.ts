@@ -184,12 +184,8 @@ describe("Structured Output Integration", () => {
     });
 
     // Send 2 events to create 2 conversation turns
-    await manager.handleEvent(
-      fileUpdatedEvent({ path: "test1.txt", filename: "test1.txt", content: "content1" }),
-    );
-    await manager.handleEvent(
-      fileUpdatedEvent({ path: "test2.txt", filename: "test2.txt", content: "content2" }),
-    );
+    await manager.handleEvent(fileUpdatedEvent({ path: "test1.txt", filename: "test1.txt" }));
+    await manager.handleEvent(fileUpdatedEvent({ path: "test2.txt", filename: "test2.txt" }));
     await manager.completeAllWork();
 
     expect(executionLog.length).toBe(2);

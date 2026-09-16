@@ -14,24 +14,28 @@ interface TestState {
 }
 
 export function runStateSnapshotTests(testState: TestState) {
-  test("state snapshot includes recent file access", () => {
-    const stateSnapshots = testState.client?.getEventsByType("state.snapshot") || [];
+  test("state snapshots carry only a {path, timestamp} pointer for recent file access", () => {
+    const stateSnapshots = (testState.client?.getEventsByType("state.snapshot") ||
+      []) as StateSnapshotEvent[];
+    expect(stateSnapshots.length).toBeGreaterThan(0);
 
-    // The final state snapshot (sent after codon completion) should have recent file access
-    // if any files were accessed during the codons
-    const lastSnapshot = stateSnapshots[stateSnapshots.length - 1] as StateSnapshotEvent;
-
-    if (lastSnapshot) {
-      // Recent file access is optional, but if present should have all fields
-      if (lastSnapshot.data?.recentFileAccess) {
-        expect(lastSnapshot.data.recentFileAccess.path).toBeDefined();
-        expect(lastSnapshot.data.recentFileAccess.content).toBeDefined();
-        expect(lastSnapshot.data.recentFileAccess.timestamp).toBeDefined();
-      }
-      // The test passes even if recentFileAccess is null/undefined
-      // because it's only set when files match the watch pattern
-      expect(true).toBe(true);
+    // recentFileAccess is optional per-snapshot (only set while a codon with
+    // watched files is active), but EVERY snapshot that has one must be a
+    // pointer — no body in any form (fingerprint-events proposal). The
+    // happy-path workload (the only suite running this group) watches files,
+    // so at least one snapshot must actually carry the pointer.
+    let snapshotsWithRecent = 0;
+    for (const snapshot of stateSnapshots) {
+      const recent = snapshot.data?.recentFileAccess;
+      if (!recent) continue;
+      snapshotsWithRecent++;
+      expect(typeof recent.path).toBe("string");
+      expect(recent.path.length).toBeGreaterThan(0);
+      expect(recent.timestamp).toBeDefined();
+      expect("content" in recent).toBe(false);
+      expect("contentRef" in recent).toBe(false);
     }
+    expect(snapshotsWithRecent).toBeGreaterThan(0);
   });
 
   test("state snapshot matches state.json data", () => {

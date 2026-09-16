@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   type ServerEvent,
+  sentinelVirtualFields,
   serverEventDataSchemas,
   serverEventTypes,
 } from "../schemas/event-schemas.js";
@@ -30,6 +31,105 @@ function getValueByPath(obj: unknown, path: string): unknown {
   }
 
   return current;
+}
+
+/**
+ * Why this exists, in plain terms: this file checks sentinel configs when a
+ * hank loads. Each condition names a field on an event ("path": "content"),
+ * and we verify that field really exists on that event's schema — otherwise
+ * a typo ("contnet") would make the sentinel silently never fire, with no
+ * error, ever. Better to fail loudly at load time.
+ *
+ * Since the fingerprint-events change, `file.updated` events no longer carry
+ * a `content` field on the wire — sentinels still get one, but it is
+ * attached to their view of the event at trigger time and filled in on
+ * demand. The schema check can't see that trick, so without help it would
+ * reject every working content-condition. This allow-list (declared next to
+ * the event schemas as `sentinelVirtualFields`) tells the checker which
+ * filled-in-later fields are legal. It is an exact match, not a wildcard:
+ * `content` on `file.updated` passes; `contnet`, `content.length`, or
+ * `content` on any other event type still fail like any typo.
+ */
+const isVirtualConditionPath = (eventType: string, conditionPath: string): boolean =>
+  sentinelVirtualFields[eventType]?.includes(conditionPath) ?? false;
+
+/**
+ * Top-level object shapes of an event data schema: one for a plain object,
+ * one per object arm should a union event schema ever exist. Refinements
+ * (ZodEffects, e.g. assistant.action's tool_use join-key requirement) are
+ * unwrapped to the object they refine. A condition path is valid if any arm
+ * accepts it.
+ */
+function topLevelObjectShapes(schema: z.ZodTypeAny): Array<Record<string, z.ZodTypeAny>> {
+  if (schema instanceof z.ZodEffects) {
+    return topLevelObjectShapes(schema._def.schema);
+  }
+  if (schema instanceof z.ZodObject) {
+    return [schema.shape];
+  }
+  if (schema instanceof z.ZodUnion) {
+    return (schema._def.options as z.ZodTypeAny[])
+      .filter((option): option is z.ZodObject<z.ZodRawShape> => option instanceof z.ZodObject)
+      .map((option) => option.shape);
+  }
+  return [];
+}
+
+/** Walk a dotted condition path through a schema shape, descending into nested objects, optionals and unions. */
+function isValidConditionPath(
+  topShape: Record<string, z.ZodTypeAny>,
+  pathParts: string[],
+): boolean {
+  let currentShape: Record<string, z.ZodTypeAny> | null = topShape;
+
+  for (let i = 0; i < pathParts.length; i++) {
+    const part = pathParts[i];
+    if (!currentShape || !currentShape[part]) {
+      return false;
+    }
+
+    // Try to get the inner type for nested objects
+    const fieldSchema: z.ZodTypeAny = currentShape[part];
+    if (fieldSchema instanceof z.ZodObject) {
+      currentShape = fieldSchema.shape;
+    } else if (
+      fieldSchema instanceof z.ZodOptional &&
+      fieldSchema._def.innerType instanceof z.ZodObject
+    ) {
+      currentShape = fieldSchema._def.innerType.shape;
+    } else if (
+      fieldSchema instanceof z.ZodUnion ||
+      fieldSchema instanceof z.ZodDiscriminatedUnion
+    ) {
+      // For unions (including discriminated unions), check if any option is an object with the needed shape
+      let unionOptions: z.ZodTypeAny[];
+      if (fieldSchema instanceof z.ZodDiscriminatedUnion) {
+        // For discriminated unions, get options from the optionsMap
+        unionOptions = Array.from(fieldSchema._def.optionsMap.values());
+      } else {
+        // For regular unions
+        unionOptions = fieldSchema._def.options;
+      }
+
+      let foundObjectShape: Record<string, z.ZodTypeAny> | null = null;
+      for (const option of unionOptions) {
+        if (option instanceof z.ZodObject) {
+          const optionShape = option.shape;
+          // Check if the next part of the path exists in this option
+          if (i < pathParts.length - 1 && optionShape[pathParts[i + 1]]) {
+            foundObjectShape = optionShape;
+            break;
+          }
+        }
+      }
+      currentShape = foundObjectShape;
+    } else {
+      // We've reached a leaf node, no more nesting possible
+      currentShape = null;
+    }
+  }
+
+  return true;
 }
 
 // Condition schemas with refinements
@@ -91,61 +191,13 @@ const patternStepSchema = z
     // Validate that condition paths are valid for the event type
     if (data.conditions) {
       const eventSchema = serverEventDataSchemas[data.type as ServerEvent["type"]];
-      if (eventSchema && eventSchema instanceof z.ZodObject) {
-        const shape = eventSchema.shape;
-
+      const shapes = eventSchema ? topLevelObjectShapes(eventSchema) : [];
+      if (shapes.length > 0) {
         for (const condition of data.conditions) {
           const pathParts = condition.path.split(".");
-          let currentShape: Record<string, z.ZodTypeAny> | null = shape;
-          let validPath = true;
-
-          for (let i = 0; i < pathParts.length; i++) {
-            const part = pathParts[i];
-            if (!currentShape || !currentShape[part]) {
-              validPath = false;
-              break;
-            }
-
-            // Try to get the inner type for nested objects
-            const fieldSchema = currentShape[part];
-            if (fieldSchema instanceof z.ZodObject) {
-              currentShape = fieldSchema.shape;
-            } else if (
-              fieldSchema instanceof z.ZodOptional &&
-              fieldSchema._def.innerType instanceof z.ZodObject
-            ) {
-              currentShape = fieldSchema._def.innerType.shape;
-            } else if (
-              fieldSchema instanceof z.ZodUnion ||
-              fieldSchema instanceof z.ZodDiscriminatedUnion
-            ) {
-              // For unions (including discriminated unions), check if any option is an object with the needed shape
-              let unionOptions: z.ZodTypeAny[];
-              if (fieldSchema instanceof z.ZodDiscriminatedUnion) {
-                // For discriminated unions, get options from the optionsMap
-                unionOptions = Array.from(fieldSchema._def.optionsMap.values());
-              } else {
-                // For regular unions
-                unionOptions = fieldSchema._def.options;
-              }
-
-              let foundObjectShape: Record<string, z.ZodTypeAny> | null = null;
-              for (const option of unionOptions) {
-                if (option instanceof z.ZodObject) {
-                  const optionShape = option.shape;
-                  // Check if the next part of the path exists in this option
-                  if (i < pathParts.length - 1 && optionShape[pathParts[i + 1]]) {
-                    foundObjectShape = optionShape;
-                    break;
-                  }
-                }
-              }
-              currentShape = foundObjectShape;
-            } else {
-              // We've reached a leaf node, no more nesting possible
-              currentShape = null;
-            }
-          }
+          const validPath =
+            shapes.some((shape) => isValidConditionPath(shape, pathParts)) ||
+            isVirtualConditionPath(data.type, condition.path);
 
           if (!validPath) {
             ctx.addIssue({
@@ -214,64 +266,14 @@ export const sentinelTriggerSchema = z
           }
 
           const eventSchema = serverEventDataSchemas[eventType as ServerEvent["type"]];
-          if (eventSchema && eventSchema instanceof z.ZodObject) {
-            const shape = eventSchema.shape;
-
-            // Check if path is valid for this event type
-            const pathParts = condition.path.split(".");
-            let currentShape: Record<string, z.ZodTypeAny> | null = shape;
-            let validPath = true;
-
-            for (let i = 0; i < pathParts.length; i++) {
-              const part = pathParts[i];
-              if (!currentShape || !currentShape[part]) {
-                validPath = false;
-                break;
-              }
-
-              const fieldSchema = currentShape[part];
-              if (fieldSchema instanceof z.ZodObject) {
-                currentShape = fieldSchema.shape;
-              } else if (
-                fieldSchema instanceof z.ZodOptional &&
-                fieldSchema._def.innerType instanceof z.ZodObject
-              ) {
-                currentShape = fieldSchema._def.innerType.shape;
-              } else if (
-                fieldSchema instanceof z.ZodUnion ||
-                fieldSchema instanceof z.ZodDiscriminatedUnion
-              ) {
-                // For unions (including discriminated unions), check if any option is an object with the needed shape
-                let unionOptions: z.ZodTypeAny[];
-                if (fieldSchema instanceof z.ZodDiscriminatedUnion) {
-                  // For discriminated unions, get options from the optionsMap
-                  unionOptions = Array.from(fieldSchema._def.optionsMap.values());
-                } else {
-                  // For regular unions
-                  unionOptions = fieldSchema._def.options;
-                }
-
-                let foundObjectShape: Record<string, z.ZodTypeAny> | null = null;
-                for (const option of unionOptions) {
-                  if (option instanceof z.ZodObject) {
-                    const optionShape = option.shape;
-                    // Check if the next part of the path exists in this option
-                    if (i < pathParts.length - 1 && optionShape[pathParts[i + 1]]) {
-                      foundObjectShape = optionShape;
-                      break;
-                    }
-                  }
-                }
-                currentShape = foundObjectShape;
-              } else {
-                currentShape = null;
-              }
-            }
-
-            if (validPath) {
-              validForAnyEvent = true;
-              break;
-            }
+          const shapes = eventSchema ? topLevelObjectShapes(eventSchema) : [];
+          const pathParts = condition.path.split(".");
+          if (
+            shapes.some((shape) => isValidConditionPath(shape, pathParts)) ||
+            isVirtualConditionPath(eventType, condition.path)
+          ) {
+            validForAnyEvent = true;
+            break;
           }
         }
 

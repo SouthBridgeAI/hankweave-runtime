@@ -272,11 +272,12 @@ ${bold("EXAMPLES")}
 // ─── Cost accounting ──────────────────────────────────────────────────
 
 /**
- * Sum spend recorded by the runtime itself, for codons that ran in this window.
+ * Sum billable API spend for codons that ran in this window.
  *
  * Tests write real `state.json` files and every codon carries its own final or
- * partial cost, so reading those back beats any estimate — a price change in
- * models.dev can't make this number lie.
+ * partial cost. openai-codex codons can carry a token-price valuation in that
+ * field, but it is not an API charge: exclude it using the execution plan's
+ * resolved provider identity. Their sentinel API calls still count.
  *
  * Two things this is careful about, and one it cannot be:
  *
@@ -338,14 +339,33 @@ export function costFromStateFile(statePath: string, sinceMs: number): number {
   let total = 0;
   try {
     const state = JSON.parse(raw);
+    // Runtime codon state contains costs and ids; resolved models live in the
+    // execution plan (including expanded loop ids and CLI model overrides).
+    // Unknown/missing identities remain billable, as do OpenAI API models with
+    // the same model name. Also recognize the pre-migration Pi identity shape.
+    const codexCodons = new Set(
+      (state.executionPlan ?? [])
+        .filter((entry: { codon?: { model?: { providerId?: string; modelId?: string } } }) => {
+          const model = entry.codon?.model;
+          return (
+            model?.providerId === "openai-codex" ||
+            (model?.providerId === "pi" && model.modelId?.startsWith("openai-codex/"))
+          );
+        })
+        .map((entry: { codonId: string }) => entry.codonId),
+    );
     for (const run of state.runs ?? []) {
       for (const codon of run.codons ?? []) {
         const startedMs = Date.parse(codon.startTime ?? "");
         if (!Number.isFinite(startedMs) || startedMs < sinceMs) continue;
         // Sentinel spend is persisted beside the agent's cost, not inside it
         // (state-manager writes finalCost/partialCost from currentCost and
-        // sentinels.totalCost separately) — both are real dollars.
-        total += (codon.finalCost ?? codon.partialCost ?? 0) + (codon.sentinels?.totalCost ?? 0);
+        // sentinels.totalCost separately). Sentinels use billed APIs even when
+        // their parent codon runs on openai-codex.
+        const agentCost = codexCodons.has(codon.codonId)
+          ? 0
+          : (codon.finalCost ?? codon.partialCost ?? 0);
+        total += agentCost + (codon.sentinels?.totalCost ?? 0);
       }
     }
   } catch {
@@ -471,6 +491,26 @@ interface SuiteAttempt {
   timedOut: boolean;
 }
 
+/**
+ * Env vars a suite still lacks, deciding a credential skip. Mirrors
+ * isLegacyClaudeAuthEnabled (server/claude-agent-sdk-manager.ts): with
+ * HW_INTERNAL_CLAUDE_LEGACY_AUTH set, the Agent SDK resolves a local Claude
+ * Code login (Keychain) itself, so a missing ANTHROPIC_API_KEY is not a
+ * reason to skip — Agent-SDK suites run on the subscription login, while
+ * tests that need the raw HTTP API (pi, sentinels) keep their own in-test
+ * key guards.
+ */
+function missingSuiteEnv(suite: Pick<SuiteSpec, "needsEnv" | "needsRawAnthropicKey">): string[] {
+  const legacy = process.env.HW_INTERNAL_CLAUDE_LEGACY_AUTH;
+  const legacyAuth = !!legacy && !["0", "false", "no", "off"].includes(legacy.trim().toLowerCase());
+  // Suites that hit Anthropic's raw HTTP API (pi provider, sentinels) cannot
+  // run on the subscription login — for them the real key stays required.
+  const exemptAnthropicKey = legacyAuth && !suite.needsRawAnthropicKey;
+  return (suite.needsEnv ?? []).filter(
+    (k) => !process.env[k]?.trim() && !(k === "ANTHROPIC_API_KEY" && exemptAnthropicKey),
+  );
+}
+
 // `needsEnv` is a contract, not a note: a suite gets exactly the provider
 // keys it declared and none of the others. Anything that reaches for an
 // undeclared provider fails at the point of the lie, in the tier that lied,
@@ -480,9 +520,21 @@ interface SuiteAttempt {
 // reads each run's `state.json`, so a suite that deletes its execution
 // directory in `afterAll` reports $0 no matter what it spent — which is
 // exactly how `replay-e2e` ran live models inside `e2e-offline` unnoticed.
+//
+// One credential does not live in the environment: pi/openai-codex/* models
+// authenticate from pi's store (`$PI_CODING_AGENT_DIR/auth.json`, default
+// `~/.pi/agent/auth.json`), and CI provisions that file in every job. Deleting
+// the CODEX_AUTH_JSON marker from an undeclared suite's env therefore proves
+// nothing on its own — the runtime never reads the marker. So a suite that
+// does not declare it also gets `PI_CODING_AGENT_DIR` pointed at
+// `keylessPiAgentDir`, an empty directory the runner owns: pi finds no
+// credentials there and an undeclared codex codon fails at its self-test.
+// Suites that mock pi set their own `PI_CODING_AGENT_DIR` on the server they
+// spawn; that per-process value wins over this one.
 export function buildSuiteEnv(
   suite: Pick<SuiteSpec, "needsEnv" | "optionalEnv" | "env">,
   baseEnv: NodeJS.ProcessEnv,
+  keylessPiAgentDir: string,
 ): NodeJS.ProcessEnv {
   const declared = new Set([...(suite.needsEnv ?? []), ...(suite.optionalEnv ?? [])]);
   const childEnv: NodeJS.ProcessEnv = {
@@ -506,6 +558,11 @@ export function buildSuiteEnv(
       delete childEnv[key];
       delete childEnv[alias];
     }
+  }
+  // Applied after `suite.env`, like the key stripping: a suite cannot grant
+  // itself the store through `env` without declaring the marker.
+  if (!declared.has("CODEX_AUTH_JSON")) {
+    childEnv.PI_CODING_AGENT_DIR = keylessPiAgentDir;
   }
   return childEnv;
 }
@@ -584,7 +641,13 @@ async function runSuiteOnce(
     `--reporter-outfile=${junitPath}`,
   ];
 
-  const childEnv = buildSuiteEnv(suite, process.env);
+  // Per suite rather than per run: pi initializes its store files here on
+  // first use (an empty `auth.json` — `{}` — and `models-store.json`), so
+  // concurrent suites must not share the directory. Nothing ever writes a
+  // credential into it, which is the point.
+  const keylessPiAgentDir = path.join(outDir, "pi-agent-keyless", suite.id);
+  fs.mkdirSync(keylessPiAgentDir, { recursive: true });
+  const childEnv = buildSuiteEnv(suite, process.env, keylessPiAgentDir);
   // Telemetry identity lives in ~/.hankweave/telemetry.json by default, and
   // nearly every server boot read-modify-writes it — ~80 boots per sweep on a
   // SHARED file, concurrently under the parallel default. Redirect the cache
@@ -1271,7 +1334,7 @@ async function main(): Promise<void> {
     let estCost = 0;
     let estTime = 0;
     for (const s of suites) {
-      const miss = (s.needsEnv ?? []).filter((k) => !process.env[k]?.trim());
+      const miss = missingSuiteEnv(s);
       estCost += s.estCostUsd;
       estTime += s.estSeconds;
       console.log(
@@ -1677,7 +1740,7 @@ async function main(): Promise<void> {
     // trip — a budget limit. Checked before any limitHit mutation, otherwise
     // an unaffordable keyless suite poisons the global flag, turns itself
     // into a red budget failure, and declines every free suite behind it.
-    const missing = (suite.needsEnv ?? []).filter((k) => !process.env[k]?.trim());
+    const missing = missingSuiteEnv(suite);
     if (missing.length > 0) return `missing ${missing.join(", ")}`;
 
     const elapsed = (Date.now() - runStart) / 1000;

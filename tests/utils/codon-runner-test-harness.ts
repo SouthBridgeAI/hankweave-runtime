@@ -112,6 +112,29 @@ export const sdkLog = {
     });
   },
 
+  /** An assistant message containing one tool-use item. */
+  assistantToolUse(name: string, input: Record<string, unknown>): string {
+    return JSON.stringify({
+      type: "assistant",
+      message: {
+        id: nextMessageId(),
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-5",
+        content: [
+          {
+            type: "tool_use",
+            id: `toolu_test${String(messageCounter).padStart(8, "0")}`,
+            name,
+            input,
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 3, output_tokens: 5 },
+      },
+    });
+  },
+
   /** The CLI's synthetic timeout: model "<synthetic>", string content. */
   syntheticTimeout(): string {
     return sdkLog.assistantText(TIMEOUT_TEXT, { model: "<synthetic>", stringContent: true });
@@ -134,6 +157,7 @@ export interface RunnerInternals {
     emit: (event: string, ...args: unknown[]) => void;
   };
   costTracker: { handleAssistantUsage: (usage: unknown) => void };
+  fileTracker: { initialize: () => Promise<void>; drain: () => Promise<void> };
   successResultReceived: boolean;
   systemMessageReceived: boolean;
   runExtension: (sessionId: SessionId, exhaustionPrompt: string) => Promise<void>;
@@ -236,7 +260,7 @@ export function useCodonRunnerSuite(prefix: string): CodonRunnerSuite {
   afterEach(async () => {
     for (const handle of handles) {
       handle.internals.logParser.stop();
-      handle.runner.cleanup();
+      await handle.runner.cleanup();
     }
     handles.length = 0;
     await fs.promises.rm(tempDir, { recursive: true, force: true });

@@ -1,8 +1,8 @@
 import type { LanguageModel, Provider } from "ai";
 import { generateText } from "ai";
 import type { Logger } from "../utils.js";
-import customModelsDataRaw from "./models-custom-data.json";
-import modelsDataRaw from "./models-dev-data.json";
+import customModelsDataRaw from "./models-custom-data.json" with { type: "json" };
+import modelsDataRaw from "./models-dev-data.json" with { type: "json" };
 import { type ModelInfo, modelsDataSchema } from "./models-dev-schema.js";
 import { PROVIDER_DEFINITIONS } from "./provider-config.js";
 
@@ -1159,12 +1159,19 @@ export class LlmProviderRegistry {
   /**
    * Calculate cost for a given token usage with full cache support.
    *
-   * Handles provider-specific token semantics:
-   * - OpenAI: inputTokens INCLUDES cached tokens (cache_read is a subset)
-   * - Anthropic: inputTokens is fresh only (cache_read is additive)
+   * Token semantics are the Claude session schema's, for every provider:
+   * `inputTokens` is fresh (uncached) input, and cache reads and writes are
+   * additive on top. Both live producers deliver exactly that shape — the
+   * Claude Agent SDK natively, and pi by contract: its OpenAI adapters
+   * subtract cached and cache-write tokens out of OpenAI's cache-inclusive
+   * `input_tokens` before reporting (see `openai-responses-shared.ts` in
+   * `@earendil-works/pi-ai`). This method used to special-case `openai` as
+   * cache-inclusive; that matched the codex shim's raw usage and became a
+   * second subtraction once OpenAI models moved to pi, under-counting every
+   * codon with cache hits.
    *
    * @param modelName - Model identifier (will be resolved via registry)
-   * @param usage - Token usage breakdown
+   * @param usage - Token usage breakdown, fresh input + additive cache tokens
    * @returns Cost in USD, or null if model not found or no pricing data available
    */
   public calculateCost(
@@ -1182,31 +1189,15 @@ export class LlmProviderRegistry {
       return null;
     }
 
-    const { cost, providerId } = result.info;
+    const { cost } = result.info;
     if (!cost) {
       this.logger?.log(`Cannot calculate cost: no pricing data for ${modelName}`, "debug");
       return null;
     }
 
-    const cacheReadTokens = usage.cacheReadTokens || 0;
-
-    // Handle provider-specific token semantics for cache reads
-    // OpenAI: inputTokens includes cached tokens (cache_read is a subset)
-    // Anthropic and others: inputTokens is fresh only (cache_read is additive)
-    const isOpenAI = providerId === "openai";
-    let inputCost: number;
-
-    if (isOpenAI && cacheReadTokens > 0) {
-      // OpenAI: Subtract cached from total to get fresh input tokens
-      const freshInputTokens = Math.max(0, usage.inputTokens - cacheReadTokens);
-      inputCost = (freshInputTokens / 1_000_000) * (cost.input || 0);
-    } else {
-      // Anthropic-style: inputTokens is already fresh only
-      inputCost = (usage.inputTokens / 1_000_000) * (cost.input || 0);
-    }
-
+    const inputCost = (usage.inputTokens / 1_000_000) * (cost.input || 0);
     const outputCost = (usage.outputTokens / 1_000_000) * (cost.output || 0);
-    const cacheReadCost = (cacheReadTokens / 1_000_000) * (cost.cache_read || 0);
+    const cacheReadCost = ((usage.cacheReadTokens || 0) / 1_000_000) * (cost.cache_read || 0);
     const cacheWriteCost = ((usage.cacheCreationTokens || 0) / 1_000_000) * (cost.cache_write || 0);
 
     return inputCost + outputCost + cacheReadCost + cacheWriteCost;

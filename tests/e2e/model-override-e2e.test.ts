@@ -7,18 +7,18 @@ import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 import { getFreePort } from "../utils/test-helpers.js";
 
 describe("Model Override E2E Test", () => {
-  it("should override all codon models to haiku when --model haiku is passed", async () => {
+  it("should override all codon models to gpt-5.6-luna when --model pi/openai-codex/gpt-5.6-luna is passed", async () => {
     const configPath = "tests/config/test-model-override.config.json";
     const port = await getFreePort();
 
-    // Launch server with --model haiku flag to override all codon models
+    // Launch server with --model pi/openai-codex/gpt-5.6-luna flag to override all codon models
     const hankweave = await launchHankweave({
       configPath,
       port,
       logPrefix: "[model-override-test]",
       commandOverride: {
         command: "bun",
-        args: ["server/index.ts", "--model", "haiku"],
+        args: ["server/index.ts", "--model", "pi/openai-codex/gpt-5.6-luna"],
       },
     });
 
@@ -29,12 +29,12 @@ describe("Model Override E2E Test", () => {
       const agentRootPath = readyEvent.data.agentRootPath;
 
       // Expected codons (in order):
-      // 1. codon-1 (configured as opus, should run as haiku)
-      // 2. codon-a#0 (configured as sonnet, should run as haiku)
-      // 3. codon-b#0 (configured as opus, should run as haiku)
-      // 4. codon-a#1 (configured as sonnet, should run as haiku)
-      // 5. codon-b#1 (configured as opus, should run as haiku)
-      // 6. codon-2 (configured as sonnet, should run as haiku)
+      // 1. codon-1 (configured as pi/openai-codex/gpt-5.6-terra, should run as gpt-5.6-luna)
+      // 2. codon-a#0 (configured as pi/openai-codex/gpt-5.6-sol, should run as gpt-5.6-luna)
+      // 3. codon-b#0 (configured as pi/openai-codex/gpt-5.6-terra, should run as gpt-5.6-luna)
+      // 4. codon-a#1 (configured as pi/openai-codex/gpt-5.6-sol, should run as gpt-5.6-luna)
+      // 5. codon-b#1 (configured as pi/openai-codex/gpt-5.6-terra, should run as gpt-5.6-luna)
+      // 6. codon-2 (configured as pi/openai-codex/gpt-5.6-sol, should run as gpt-5.6-luna)
 
       const expectedCodons = [
         "codon-1",
@@ -97,7 +97,7 @@ describe("Model Override E2E Test", () => {
       expect(outputFiles.filter((f) => f.startsWith("loop_a_")).length).toBe(2);
       expect(outputFiles.filter((f) => f.startsWith("loop_b_")).length).toBe(2);
 
-      // CRITICAL TEST: Verify all codons used haiku model by checking log files
+      // CRITICAL TEST: Verify all codons used gpt-5.6-luna by checking log files
       const runFolder = path.join(executionPath, ".hankweave", "runs", runId);
       expect(fs.existsSync(runFolder)).toBe(true);
 
@@ -127,14 +127,16 @@ describe("Model Override E2E Test", () => {
         expect(initMessage.type).toBe("system");
         expect(initMessage.subtype).toBe("init");
 
-        // CRITICAL ASSERTION: Model should be haiku
+        // CRITICAL ASSERTION: Model should be gpt-5.6-luna
         expect(initMessage.model).toBeDefined();
-        expect(initMessage.model).toContain("haiku");
+        expect(initMessage.model).toContain("gpt-5.6-luna");
 
         console.log(`  ✓ ${logFile}: model = ${initMessage.model}`);
       }
 
-      console.log("\n✅ All codons correctly used haiku model despite different config settings\n");
+      console.log(
+        "\n✅ All codons correctly used gpt-5.6-luna despite different config settings\n",
+      );
 
       // Server will shutdown automatically, wait for connection close
       await hankweave.waitForConnectionClose(30_000);

@@ -15,6 +15,17 @@ export interface RawApiUsage {
 }
 
 /**
+ * Providers whose models are priced under another provider's key.
+ *
+ * `openai-codex` is pi's ChatGPT-login route to OpenAI's own models. The
+ * registry (models.dev data) has no such provider, so pricing by the literal
+ * key returned null and every incremental `token.usage` for a codex codon read
+ * $0 — budgets could not enforce until the codon's final result arrived with
+ * pi's own total. Same models, same token prices: value them as `openai/*`.
+ */
+const PRICING_PROVIDER_ALIASES: Record<string, string> = { "openai-codex": "openai" };
+
+/**
  * Raw fields from a result message relevant to cost tracking.
  */
 export interface RawResultUsage {
@@ -68,8 +79,10 @@ export class CostTracker extends TypedEventEmitter<CostTrackerEvents> {
     super();
     this.executableModelId = model?.modelId;
     // ModelInfo always carries the real provider id, so pi-run models price by
-    // the same "provider/model" key as everything else.
-    this.pricingModelId = model ? `${model.providerId}/${model.modelId}` : undefined;
+    // the same "provider/model" key as everything else (aliases aside).
+    this.pricingModelId = model
+      ? `${PRICING_PROVIDER_ALIASES[model.providerId] ?? model.providerId}/${model.modelId}`
+      : undefined;
   }
 
   /**

@@ -557,6 +557,61 @@ describe("Sentinel Configuration Validation", () => {
       expect(invalidResult.success).toBe(false);
     });
 
+    it("accepts real fingerprint fields on file.updated", () => {
+      for (const path of ["sha256", "bytes", "source.kind", "source.toolUseId"]) {
+        const result = sentinelTriggerSchema.safeParse({
+          type: "event",
+          on: ["file.updated"],
+          conditions: [{ operator: "equals", path, value: "x" }],
+        });
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it("accepts the registered virtual field `content` on file.updated", () => {
+      // `content` is not on the wire — it is resolved onto the sentinel view
+      // at trigger time. The validator accepts it via the virtual-field
+      // registry, for event and sequence triggers alike.
+      const eventTrigger = sentinelTriggerSchema.safeParse({
+        type: "event",
+        on: ["file.updated"],
+        conditions: [{ operator: "contains", path: "content", value: "TODO" }],
+      });
+      expect(eventTrigger.success).toBe(true);
+
+      const sequenceTrigger = sentinelTriggerSchema.safeParse({
+        type: "sequence",
+        interestFilter: { on: ["file.updated"] },
+        pattern: [
+          {
+            type: "file.updated",
+            conditions: [{ operator: "contains", path: "content", value: "TODO" }],
+          },
+        ],
+      });
+      expect(sequenceTrigger.success).toBe(true);
+    });
+
+    it("keeps unknown file.updated paths hard errors (virtual fields are a registry, not a wildcard)", () => {
+      for (const path of ["contentRef.sha256", "body", "content.length"]) {
+        const result = sentinelTriggerSchema.safeParse({
+          type: "event",
+          on: ["file.updated"],
+          conditions: [{ operator: "equals", path, value: "x" }],
+        });
+        expect(result.success).toBe(false);
+      }
+    });
+
+    it("does not leak virtual fields onto other event types", () => {
+      const result = sentinelTriggerSchema.safeParse({
+        type: "event",
+        on: ["codon.completed"],
+        conditions: [{ operator: "contains", path: "content", value: "TODO" }],
+      });
+      expect(result.success).toBe(false);
+    });
+
     it("should validate nested paths", () => {
       const config = {
         type: "event",

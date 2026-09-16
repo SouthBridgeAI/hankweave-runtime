@@ -132,6 +132,33 @@ const checkpointQueryInfoSchema = z.object({
 // Event Data Payload Schemas
 // -------------
 
+/**
+ * Version of the published event payload contract, recorded file-level in
+ * `events.meta.json` (never per-event). Bumped to 2 when `file.updated`
+ * dropped file bodies for the fingerprint form (`sha256`/`bytes`/`source`)
+ * and `state.snapshot.recentFileAccess` slimmed to `{path, timestamp}`
+ * (events.jsonl diet P3, revised by the fingerprint-events proposal).
+ */
+export const EVENT_SCHEMA_VERSION = 2;
+
+/**
+ * What caused a `file.updated` emission.
+ *
+ * - "tool_use": a file tool call (Write/Edit/MultiEdit). `toolUseId` joins to
+ *   the `assistant.action` event carrying the tool's full input — Write's
+ *   complete body, Edit's old/new strings — and to the matching `tool.result`.
+ *   That receipt, not this event, is where the change's bytes live.
+ * - "codon-start": the tracker's initial snapshot of watched files when a
+ *   codon begins (re-emission of state, not a change).
+ *
+ * Discriminated union so a future granular-checkpoint revival can add a kind
+ * (and e.g. a `checkpointSha`) without a version break.
+ */
+export const fileUpdatedSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("tool_use"), toolUseId: z.string() }),
+  z.object({ kind: z.literal("codon-start") }),
+]);
+
 export const serverReadyEventDataSchema = z.object({
   serverVersion: z.string(),
   executionPath: z.string(),
@@ -148,10 +175,12 @@ export const stateSnapshotEventDataSchema = z.object({
   fileTree: z.array(fileNodeSchema),
   totalCost: z.number(),
   totalTime: z.number(),
+  // Pointer only. The body was by construction a duplicate of the
+  // immediately-preceding file.updated emission for the same path, and
+  // nothing consumed it — so snapshots carry neither bodies nor fingerprints.
   recentFileAccess: z
     .object({
       path: z.string(),
-      content: z.string(),
       timestamp: z.date(),
     })
     .optional(),
@@ -234,13 +263,61 @@ export const loopIterationCompletedEventDataSchema = z.object({
     .optional(),
 });
 
-export const assistantActionEventDataSchema = z.object({
+/**
+ * The composable object shape of assistant.action data. External consumers
+ * that build on the schema (`.pick`/`.extend`/`.shape`) use this; the wire
+ * validator is {@link assistantActionEventDataSchema}, which adds the
+ * tool_use join-key refinement (and is therefore a ZodEffects, not an
+ * object).
+ */
+export const assistantActionEventDataBaseSchema = z.object({
   codonId: z.string(),
   action: z.enum(["thinking", "message", "tool_use"]),
   content: z.string(),
   toolName: z.string().optional(),
+  /**
+   * CONTRACT: journaled verbatim, never truncated. Only tool *results* pass
+   * through `toolResultTruncateLength`. With `file.updated` carrying only
+   * fingerprints, this field is the journal's sole copy of a Write's body and
+   * an Edit's old/new strings — truncating it would sever the receipt that
+   * `file.updated.source.toolUseId` points at (fingerprint-events proposal).
+   */
   toolInput: z.record(z.unknown()).optional(),
+  /** The provider's tool_use id; present when action === "tool_use". Joins to `tool.result.toolUseId` and `file.updated.source.toolUseId`. */
+  toolUseId: z.string().optional(),
 });
+
+/**
+ * tool_use actions must carry the join keys: `file.updated.source.toolUseId`
+ * points at this event as the receipt holding the change's bytes, so an
+ * emission without `toolUseId`/`toolName` would silently sever that
+ * correlation. Refinement (not a union) so the object shape stays walkable
+ * by the sentinel condition-path validator.
+ */
+export const assistantActionEventDataSchema = assistantActionEventDataBaseSchema.superRefine(
+  (data, ctx) => {
+    if (data.action !== "tool_use") return;
+    // toolUseId is the correlation key fingerprints join on — it must be a
+    // non-empty string (ids are provider-generated or normalized, never "").
+    if (!data.toolUseId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'a non-empty toolUseId is required when action is "tool_use"',
+        path: ["toolUseId"],
+      });
+    }
+    // toolName is presence-based, not truthiness-based: the session-log
+    // parser accepts an empty-string tool name, and an event derived from
+    // one must not fail validation the parser accepted.
+    if (typeof data.toolName !== "string") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'toolName is required when action is "tool_use"',
+        path: ["toolName"],
+      });
+    }
+  },
+);
 
 export const tokenUsageEventDataSchema = z.object({
   codonId: z.string(),
@@ -275,12 +352,47 @@ export const toolResultEventDataSchema = z.object({
   isError: z.boolean(),
 });
 
+// Fingerprint-only: the journal carries claims, fingerprints, and receipts;
+// file state lives in checkpoints and on disk; sentinels resolve bodies at
+// the moment they ask (fingerprint-events proposal). The change's bytes are
+// in the `assistant.action` receipt that `source.toolUseId` joins to.
+//
+// Fingerprints are captured at tool-use observation time (the attempt), not
+// tool-result time — the same semantics the inline body always had. An Edit's
+// fingerprint therefore describes the file as read *before* the edit applied;
+// moving capture to confirmed results is a separate, planned change.
 export const fileUpdatedEventDataSchema = z.object({
   path: z.string(),
   filename: z.string(),
-  content: z.string(),
+  // "deleted" is reserved: no emitter produces it today (the tracker only
+  // observes Write/Edit/MultiEdit, and has no deletion detection). If
+  // deletion emission is ever added, decide then what its fingerprint means
+  // — sha256/bytes are required on every action by this schema.
   action: z.enum(["created", "modified", "deleted"]),
+  /**
+   * SHA-256 (hex) of the observed body as UTF-8 text. Watched files are
+   * text by contract — the tracker reads them with UTF-8 decoding, exactly
+   * as the old inline `content` string did — so a non-UTF-8 file is hashed
+   * over its lossily-decoded text, not its raw bytes (distinct invalid byte
+   * sequences can fingerprint identically). Byte-exact provenance for
+   * binary files is the checkpoint system's job, not this event's.
+   */
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Observed body length in bytes (UTF-8 re-encoding of the decoded text). */
+  bytes: z.number().int().nonnegative(),
+  source: fileUpdatedSourceSchema,
 });
+
+/**
+ * Fields sentinels may reference on an event that are not on the wire:
+ * resolved at trigger time onto the sentinel's view of the event (e.g.
+ * `file.updated`'s `content`, served from the runtime's retained-body map
+ * with a hash-verified disk fallback). The condition-path validator accepts
+ * these alongside real schema fields; unknown paths stay hard errors.
+ */
+export const sentinelVirtualFields: Partial<Record<string, readonly string[]>> = {
+  "file.updated": ["content"],
+};
 
 export const fileTreeUpdatedEventDataSchema = z.object({
   tree: z.array(fileNodeSchema),
@@ -897,6 +1009,8 @@ export type AssistantActionEvent = z.infer<typeof assistantActionEventSchema>;
 export type TokenUsageEvent = z.infer<typeof tokenUsageEventSchema>;
 export type ToolResultEvent = z.infer<typeof toolResultEventSchema>;
 export type FileUpdatedEvent = z.infer<typeof fileUpdatedEventSchema>;
+export type FileUpdatedEventData = z.infer<typeof fileUpdatedEventDataSchema>;
+export type FileUpdatedSource = z.infer<typeof fileUpdatedSourceSchema>;
 export type FileTreeUpdatedEvent = z.infer<typeof fileTreeUpdatedEventSchema>;
 export type RigSetupCompletedEvent = z.infer<typeof rigSetupCompletedEventSchema>;
 export type RigSetupFailedEvent = z.infer<typeof rigSetupFailedEventSchema>;

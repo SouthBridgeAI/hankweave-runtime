@@ -6,6 +6,7 @@ import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { ensureCodexAvailable } from "./codex-runtime-extractor.js";
 import { TIMEOUTS } from "./config.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
@@ -32,7 +33,12 @@ export class ShimProcessManager extends BaseProcessManager {
     private defaultShimIdleTimeout?: number,
   ) {
     super(logger, logParser);
-    this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
+    this.promptBuilder = new PromptBuilder(
+      agentRootPath,
+      new ExecutionLayout(executionPath).dataPathInExecutionDir,
+      logger,
+      globalSystemPrompt,
+    );
   }
 
   /** Frontmatter metadata from the prompt file (if any) */

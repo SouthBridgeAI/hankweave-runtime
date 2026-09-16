@@ -4,10 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BasicTUI } from "./basic-tui.js";
+import { assertGitAvailable } from "./checkpoint-git.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
-import { parseCliArgs, showDeprecationWarnings } from "./cli-parser.js";
+import { HELP_TEXT, parseCliArgs, showDeprecationWarnings } from "./cli-parser.js";
 import { ensureSchemaUrl, resolveSettings, validateHank } from "./config.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import type { ExecutionSetup } from "./execution-setup.js";
 import { setupExecutionEnvironment } from "./execution-setup.js";
 import { checkRegularFile } from "./fs-guards.js";
@@ -174,7 +176,9 @@ async function main() {
     !cliArgs.cleanup &&
     !cliArgs.attach &&
     !cliArgs.headless &&
-    !cliArgs.replayDir;
+    !cliArgs.replayDir &&
+    !cliArgs.restoreJournalPath &&
+    !cliArgs.dietJournalPath;
 
   if (isBareBones) {
     try {
@@ -210,75 +214,253 @@ async function main() {
   const ignoreDataMismatch = cliArgs.ignoreDataMismatch || false;
 
   if (cliArgs.help) {
-    console.log(`
-Hankweave Runtime - Codon Orchestration
-
-Usage: hankweave [options] [config-or-data-path]
-
-Arguments:
-  config-or-data-path       Path to hank.json or project directory
-                            When only one argument provided:
-                            - If ends with .json: treated as hank-path
-                            - Otherwise: treated as data-path
-
-Execution Control:
-  -e, --execution <path>    Use specific execution directory
-                            Creates if doesn't exist, resumes if has state
-  -n, --new, --start-new    Start new execution, never resume
-                            Use -n -f to overwrite existing state
-  -f, --force               Override safety checks (hash mismatch, existing state)
-  --no-wipe                 With --start-new --force, preserve the existing
-                            agentRoot/ workspace instead of wiping it
-  -y                        Non-interactive mode, skip confirmation prompts
-
-Output:
-  -o, --output <path>       Copy outputs to this path (default: stay in execution dir)
-  --overwrite-output        Overwrite existing output files instead of renaming
-
-Configuration:
-  --config <path>           Path to hank.json (alternative to positional arg)
-  --data <path>             Path to data source (default: config directory)
-  -i, --input <text>        Use inline text as data input (highest priority)
-  -m, --model <model>       Model override (sonnet|opus|gemini-flash|etc)
-
-Server:
-  -p, --port <port>         WebSocket server port (default: auto-select free port)
-  --headless                Run without TUI (for CI/CD and scripts)
-  --no-autostart            Don't automatically start codons
-  --proxy                   Enable the LLM proxy server (disabled by default)
-  --anthropic-base-url <url> Custom Anthropic API base URL
-  --idle-timeout <seconds>  Idle timeout for WebSocket and proxy servers (0-255, default: 0)
-  --shim-idle-timeout <seconds>   Harness idle timeout in seconds (default: 120, per-codon)
-
-Other:
-  --init                    Initialize a new hank in current directory
-  -v, --validate            Validate configuration without running
-  --cleanup                 Remove execution artifacts
-  --copy                    Copy data instead of symlinking (for compatibility)
-  --ignore-rig-failures     Ignore rig setup failures
-  --attach                  Connect TUI to an already-running server (read-only mode)
-  -h, --help                Show this help
-  --version                 Show version
-
-Execution Safety:
-  Hankweave implements a three-tier safety system for execution directories:
-  - Tier 1: Cannot use ~/.hankweave-executions/ directly (reserved for auto-managed)
-  - Tier 2: Directories with existing .hankweave/ require --force (backs up existing)
-  - Tier 3: Non-empty directories show warning and prompt for confirmation
-
-Examples:
-  hankweave                           Run with hank.json in current directory
-  hankweave ./my-project              Run project, resume if possible
-  hankweave ./my-project -n           Start fresh execution (--new)
-  hankweave -e ./my-exec              Use specific execution directory
-  hankweave -o ./results              Copy outputs to ./results
-  hankweave -m opus -p 8080           Use opus model on port 8080
-
-Outputs are stored in the agent workspace (~/.hankweave-executions/{id}/agentRoot) by default.
-Use --output to copy them elsewhere.
-`);
+    console.log(HELP_TEXT);
     await sendCliTelemetry("cli_help", {});
     process.exit(0);
+  }
+
+  // Handle journal restore/diet modes (events.jsonl diet P4). Early-exit
+  // paths like --cleanup: no hank config, no SDK, no server.
+  if (cliArgs.restoreJournalPath || cliArgs.dietJournalPath) {
+    const executionDir = path.resolve(cliArgs.restoreJournalPath || cliArgs.dietJournalPath || "");
+    const layout = new ExecutionLayout(executionDir);
+    const eventsDir = layout.eventsDir;
+    const isRestore = Boolean(cliArgs.restoreJournalPath);
+    try {
+      const { dietJournal, restoreJournal } = await import("./storage/journal-diet.js");
+      if (isRestore) {
+        const report = await restoreJournal(eventsDir);
+        if (report.alreadyRestored) {
+          console.log(`✓ Journal already restored and verified (sha256 ${report.sha256})`);
+        } else {
+          console.log(
+            `✓ Journal restored: ${report.bytes} bytes, verified byte-for-byte (sha256 ${report.sha256})`,
+          );
+        }
+      } else {
+        // Never diet under (or racing) a live runtime: its journal writer
+        // would keep appending to the unlinked inode and those events would
+        // be lost at close. The diet CLAIMS runtime.lock for its duration —
+        // the same protocol a booting runtime honors ("Server already
+        // running") — and fails CLOSED on any lock it cannot positively
+        // identify as stale. (dietJournal additionally re-validates the
+        // journal bytes and the lock's ownership right before promotion.)
+        const lockPath = layout.lockPath;
+        const refuse = (why: string): never => {
+          console.error(
+            `\nError: not dieting ${executionDir}: ${why}.\n` +
+              `If you are certain no hankweave process is using this execution, ` +
+              `remove ${lockPath} and retry.`,
+          );
+          process.exit(1);
+        };
+        const hasExecutionLayout = fs.existsSync(layout.stateDir);
+        let claimedLock = false;
+        // No runId in this maintenance lock: a runtime finding it after a
+        // crashed diet would otherwise dispatch a bogus RunCrashed for a run
+        // that never existed.
+        const ourLockPayload = () =>
+          JSON.stringify({
+            pid: process.pid,
+            lastHeartbeat: new Date().toISOString(),
+          });
+        const lockIsOurs = (): boolean => {
+          try {
+            const raw = fs.readFileSync(lockPath, "utf-8");
+            return (JSON.parse(raw) as { pid?: number }).pid === process.pid;
+          } catch {
+            return false;
+          }
+        };
+        // Flipped (permanently) the moment the lock is observed in someone
+        // else's hands; beforePromote turns it into an abort.
+        let lockLost = false;
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+        if (hasExecutionLayout) {
+          if (fs.existsSync(lockPath)) {
+            let lockRaw: string | null = null;
+            try {
+              lockRaw = fs.readFileSync(lockPath, "utf-8");
+            } catch {
+              refuse("its runtime.lock exists but is unreadable");
+            }
+            // Current lock format is JSON {pid, ...}; the legacy format is a
+            // bare numeric pid (exact — "123-corrupt" is NOT a legacy lock).
+            // Anything else fails closed, matching the runtime's own
+            // "Server already running" fallback for unparseable locks.
+            // Only POSITIVE integers are pids: kill(-n, 0) probes process
+            // GROUP n (and kill(0, 0) our own group), so zero/negative
+            // garbage must fail closed, not read as a checkable pid.
+            let lockPid: number | undefined;
+            try {
+              const parsed = JSON.parse(lockRaw ?? "") as unknown;
+              if (typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0) {
+                lockPid = parsed;
+              } else if (
+                parsed &&
+                typeof (parsed as { pid?: unknown }).pid === "number" &&
+                Number.isInteger((parsed as { pid: number }).pid) &&
+                (parsed as { pid: number }).pid > 0
+              ) {
+                lockPid = (parsed as { pid: number }).pid;
+              }
+            } catch {
+              const trimmed = (lockRaw ?? "").trim();
+              if (/^\d+$/.test(trimmed)) {
+                const bare = Number.parseInt(trimmed, 10);
+                if (bare > 0) lockPid = bare;
+              }
+            }
+            if (lockPid === undefined) {
+              refuse("its runtime.lock could not be parsed, so liveness is unknown");
+            } else {
+              try {
+                process.kill(lockPid, 0);
+                refuse(`the execution appears to be running (pid ${lockPid} holds runtime.lock)`);
+              } catch (error) {
+                // ESRCH: no such process — stale. Anything else (EPERM: the
+                // pid is alive under another user) means live: fail closed.
+                if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+                  refuse(`pid ${lockPid} in runtime.lock appears to be alive`);
+                }
+              }
+              // Stale — remove it WITHOUT clobbering a lock that changed
+              // hands after our liveness check: atomically rename the file
+              // aside, confirm it is still the bytes we inspected, and only
+              // then discard it. If a booting runtime replaced it in that
+              // window, the rename captured the runtime's lock instead —
+              // put it back and refuse.
+              const stalePath = `${lockPath}.stale-${process.pid}`;
+              try {
+                fs.renameSync(lockPath, stalePath);
+              } catch {
+                refuse("its runtime.lock changed while being checked");
+              }
+              let renamedRaw: string | null = null;
+              try {
+                renamedRaw = fs.readFileSync(stalePath, "utf-8");
+              } catch {
+                renamedRaw = null;
+              }
+              if (renamedRaw !== lockRaw) {
+                try {
+                  fs.renameSync(stalePath, lockPath);
+                } catch {
+                  // Owner already re-created its lock; drop our copy.
+                  fs.rmSync(stalePath, { force: true });
+                }
+                refuse("its runtime.lock changed hands while being checked");
+              }
+              fs.rmSync(stalePath, { force: true });
+            }
+          }
+          try {
+            // Atomic create-if-absent with full content: write a temp, then
+            // link() it into place (EEXIST if someone else claimed first).
+            // A plain "wx" write that failed midway (ENOSPC/EIO) would leave
+            // a PARTIAL lock no later boot can parse — fail-closed guards
+            // then refuse until it is deleted by hand.
+            const claimTmp = `${lockPath}.tmp-${process.pid}`;
+            try {
+              fs.writeFileSync(claimTmp, ourLockPayload());
+              try {
+                fs.linkSync(claimTmp, lockPath);
+              } catch (linkError) {
+                const code = (linkError as NodeJS.ErrnoException).code;
+                if (
+                  code === "ENOSYS" ||
+                  code === "ENOTSUP" ||
+                  code === "EOPNOTSUPP" ||
+                  code === "EPERM"
+                ) {
+                  // Filesystems without hard links (exFAT/FAT32, some SMB):
+                  // fall back to exclusive-create. Partial-write risk on
+                  // failure is the price of the filesystem, not the default.
+                  fs.writeFileSync(lockPath, ourLockPayload(), { flag: "wx" });
+                } else {
+                  throw linkError;
+                }
+              }
+              claimedLock = true;
+            } finally {
+              fs.rmSync(claimTmp, { force: true });
+            }
+          } catch {
+            refuse("another process claimed runtime.lock while we were checking");
+          }
+          // A booting runtime treats a >2-minute-old heartbeat as stale, so
+          // keep ours fresh across long diets (async zstd keeps timers
+          // live). Refresh ONLY while the lock is still ours: if a runtime
+          // ever replaced it (e.g. a long timer stall let our heartbeat go
+          // stale), overwriting it back would hijack the runtime's lock —
+          // instead mark the claim as permanently lost and let
+          // beforePromote abort the diet.
+          heartbeat = setInterval(() => {
+            if (lockLost) return;
+            if (!lockIsOurs()) {
+              lockLost = true;
+              if (heartbeat) clearInterval(heartbeat);
+              return;
+            }
+            try {
+              // Atomic replace: a mid-write failure must not leave a
+              // partial lock behind (see the claim above).
+              const hbTmp = `${lockPath}.tmp-${process.pid}`;
+              fs.writeFileSync(hbTmp, ourLockPayload());
+              fs.renameSync(hbTmp, lockPath);
+            } catch {
+              // Best effort; the beforePromote ownership check still guards.
+            }
+          }, 30_000);
+        }
+
+        try {
+          const report = await dietJournal(eventsDir, {
+            beforePromote: () => {
+              if (!claimedLock) return;
+              // If our claim was ever lost — or anything replaced the lock
+              // since — abort before the promotion+unlink step; the
+              // original stays untouched.
+              if (lockLost || !lockIsOurs()) {
+                lockLost = true;
+                throw new Error("runtime.lock changed hands during the diet");
+              }
+            },
+          });
+          if (report.alreadyDieted) {
+            console.log(`✓ Journal already dieted (${report.totalEvents} events)`);
+          } else {
+            console.log(
+              `✓ Journal dieted: ${report.originalBytes} → ${report.dietedBytes} bytes ` +
+                `(${report.uniqueCasBodies} unique bodies in CAS). ` +
+                `Restore with: hankweave --restore-journal ${executionDir}`,
+            );
+          }
+        } finally {
+          if (heartbeat) clearInterval(heartbeat);
+          if (claimedLock && !lockLost && lockIsOurs()) {
+            try {
+              fs.unlinkSync(lockPath);
+            } catch {
+              // Already gone — fine.
+            }
+          }
+        }
+      }
+      await sendCliTelemetry(isRestore ? "cli_restore_journal" : "cli_diet_journal", {
+        success: true,
+      });
+      process.exit(0);
+    } catch (error) {
+      await sendCliTelemetry(isRestore ? "cli_restore_journal" : "cli_diet_journal", {
+        success: false,
+      });
+      console.error(
+        `\nError: journal ${isRestore ? "restore" : "diet"} failed: ${(error as Error).message}`,
+      );
+      process.exit(1);
+    }
   }
 
   // Handle init mode
@@ -303,7 +485,7 @@ Use --output to copy them elsewhere.
       port = cliArgs.port;
     } else if (cliArgs.executionPath) {
       // Try to read port from lock file
-      const lockPath = path.join(cliArgs.executionPath, ".hankweave", "runtime.lock");
+      const lockPath = new ExecutionLayout(cliArgs.executionPath).lockPath;
       try {
         const lockContent = await fs.promises.readFile(lockPath, "utf-8");
         const lockData = JSON.parse(lockContent);
@@ -377,11 +559,7 @@ Use --output to copy them elsewhere.
   // use the data source path stored in execution metadata.
   // This prevents hash mismatches when CWD differs from original creation dir.
   if (executionPath && !dataSourcePath && !inlineInput && inputSourceType === "path") {
-    const execMetaPath = path.join(
-      path.resolve(executionPath),
-      ".hankweave",
-      "execution-meta.json",
-    );
+    const execMetaPath = new ExecutionLayout(path.resolve(executionPath)).metaPath;
     if (fs.existsSync(execMetaPath)) {
       try {
         const execMeta = JSON.parse(fs.readFileSync(execMetaPath, "utf-8"));
@@ -439,11 +617,7 @@ Use --output to copy them elsewhere.
   // `--replay <dir>` self-contained — no need to separately locate the
   // original hank.json or data source.
   if (cliArgs.replayDir) {
-    const replayMetaPath = path.join(
-      path.resolve(cliArgs.replayDir),
-      ".hankweave",
-      "execution-meta.json",
-    );
+    const replayMetaPath = new ExecutionLayout(path.resolve(cliArgs.replayDir)).metaPath;
     if (fs.existsSync(replayMetaPath)) {
       try {
         const replayMeta = JSON.parse(fs.readFileSync(replayMetaPath, "utf-8"));
@@ -580,7 +754,7 @@ Use --output to copy them elsewhere.
       process.exit(1);
     }
     // Remove copied runtime lock so a live source run doesn't block replay startup
-    const copiedLock = path.join(tempExecDir, ".hankweave", "runtime.lock");
+    const copiedLock = new ExecutionLayout(tempExecDir).lockPath;
     if (fs.existsSync(copiedLock)) {
       fs.unlinkSync(copiedLock);
     }
@@ -598,6 +772,32 @@ Use --output to copy them elsewhere.
   // ========== NORMAL MODE BRANCH ==========
   // Only reaches here if NOT in validation mode
 
+  // Auto-add $schema for editor support if missing.
+  // This MUST run before setupExecutionEnvironment: the rewrite changes the
+  // file on disk, so hashing first would record pre-rewrite data/hank hashes
+  // and the very next resume would report a phantom "changed" data source
+  // (when hank.json lives inside the data directory) or config.
+  // Skipped in cleanup mode, which never rewrote the file before.
+  if (!cleanupMode) {
+    const schemaAdded = ensureSchemaUrl(absoluteConfigPath);
+    if (schemaAdded) {
+      console.log(`+ Added $schema to ${path.basename(absoluteConfigPath)} for editor support`);
+    }
+  }
+
+  // Checkpoints need git, and checkpoints are not optional. Prove it before
+  // the execution directory is created, wiped, or copied into, so a machine
+  // without git fails cleanly with nothing touched. --cleanup never runs the
+  // runtime and so never needs git.
+  if (!cleanupMode) {
+    try {
+      await assertGitAvailable();
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exit(1);
+    }
+  }
+
   // Set up execution environment
   let executionSetup: ExecutionSetup;
   try {
@@ -612,6 +812,9 @@ Use --output to copy them elsewhere.
       hankPath: absoluteConfigPath,
       ignoreDataMismatch: ignoreDataMismatch || !!resolvedConfig.replayDir,
       noWipe,
+      // --headless runs unattended: never prompt, fail closed like CI
+      headless: headlessMode,
+      skipJournalRestore: cleanupMode,
     });
   } catch (error) {
     console.error("[ERROR] Execution setup failed!");
@@ -697,12 +900,6 @@ Use --output to copy them elsewhere.
     logger: serverLogger,
     performHealthCheckOnInit: false,
   });
-
-  // Auto-add $schema for editor support if missing
-  const schemaAdded = ensureSchemaUrl(absoluteConfigPath);
-  if (schemaAdded) {
-    console.log(`+ Added $schema to ${path.basename(absoluteConfigPath)} for editor support`);
-  }
 
   try {
     // Normal server mode - validate config

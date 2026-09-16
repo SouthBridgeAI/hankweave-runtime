@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CheckpointGit } from "../../server/checkpoint-git";
+import {
+  CheckpointGit,
+  CheckpointNotFoundError,
+  CheckpointStorageError,
+} from "../../server/checkpoint-git";
 import { Logger } from "../../server/utils";
 
 describe("CheckpointGit", () => {
@@ -568,6 +572,74 @@ describe("CheckpointGit", () => {
     }
   });
 
+  describe("rollback reachability helpers (issue #228)", () => {
+    test("getHeadSha returns the current HEAD SHA", async () => {
+      await checkpointGit.initialize();
+      await checkpointGit.addPatterns(["*.txt"]);
+      await fs.promises.writeFile(path.join(tempDir, "h.txt"), "h");
+      const sha = await checkpointGit.commit("head commit");
+      expect(await checkpointGit.getHeadSha()).toBe(sha);
+    });
+
+    test("shasBetween returns commits strictly after target on a linear history", async () => {
+      await checkpointGit.initialize();
+      await checkpointGit.addPatterns(["*.txt"]);
+
+      await fs.promises.writeFile(path.join(tempDir, "l.txt"), "1");
+      const c1 = await checkpointGit.commit("c1");
+      await fs.promises.writeFile(path.join(tempDir, "l.txt"), "2");
+      const c2 = await checkpointGit.commit("c2");
+      await fs.promises.writeFile(path.join(tempDir, "l.txt"), "3");
+      const c3 = await checkpointGit.commit("c3");
+      if (!c1 || !c2 || !c3) throw new Error("commit failed");
+
+      const between = await checkpointGit.shasBetween(c1, c3);
+      expect(between.has(c1)).toBe(false); // target itself excluded
+      expect(between.has(c2)).toBe(true);
+      expect(between.has(c3)).toBe(true);
+    });
+
+    test("shasBetween excludes sibling-branch (foreign timeline) commits", async () => {
+      await checkpointGit.initialize();
+      await checkpointGit.addPatterns(["*.txt"]);
+
+      await fs.promises.writeFile(path.join(tempDir, "s.txt"), "base");
+      const base = await checkpointGit.commit("base");
+
+      // Sibling branch off base
+      await fs.promises.writeFile(path.join(tempDir, "s.txt"), "feature");
+      const feature = await checkpointGit.commit("feature", { branch: "feat-a" });
+
+      // Continue on main (commit() restored the original branch)
+      await fs.promises.writeFile(path.join(tempDir, "s.txt"), "main-after");
+      const mainAfter = await checkpointGit.commit("main after");
+      if (!base || !feature || !mainAfter) throw new Error("commit failed");
+
+      const between = await checkpointGit.shasBetween(base, mainAfter);
+      expect(between.has(mainAfter)).toBe(true);
+      expect(between.has(feature)).toBe(false); // foreign timeline stays out
+      expect(between.has(base)).toBe(false);
+    });
+
+    test("shasBetween returns an empty set when target equals origin", async () => {
+      await checkpointGit.initialize();
+      await checkpointGit.addPatterns(["*.txt"]);
+      await fs.promises.writeFile(path.join(tempDir, "e.txt"), "e");
+      const sha = await checkpointGit.commit("only");
+      if (!sha) throw new Error("commit failed");
+
+      const between = await checkpointGit.shasBetween(sha, sha);
+      expect(between.size).toBe(0);
+    });
+
+    test("shasBetween throws CheckpointStorageError for unknown SHAs", async () => {
+      await checkpointGit.initialize();
+      await expect(
+        checkpointGit.shasBetween("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "HEAD"),
+      ).rejects.toBeInstanceOf(CheckpointStorageError);
+    });
+  });
+
   test("checkpoint directory is not detected as git submodule when committed", async () => {
     const submoduleTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-submodule-test-"));
 
@@ -606,5 +678,356 @@ describe("CheckpointGit", () => {
     } finally {
       rmSync(submoduleTempDir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Crash-safe initialization and the three-way resolver
+ * (intermediates/66-crash-safe-checkpoints). Fixtures reproduce the on-disk
+ * footprint of a SIGKILL at each point of the build, using the production
+ * layout: a bare-style git dir at .hankweave/checkpoints/.hankweavecheckpoints
+ * addressed via GIT_DIR — never a nested .git.
+ */
+describe("CheckpointGit crash-safe initialization", () => {
+  let tempDir: string;
+  let logger: Logger;
+  let logPath: string;
+
+  const gitDirOf = (root: string) =>
+    path.join(root, ".hankweave", "checkpoints", ".hankweavecheckpoints");
+
+  async function git(root: string, args: string[]): Promise<{ code: number; out: string }> {
+    const proc = Bun.spawn(["git", ...args], {
+      cwd: root,
+      env: { ...process.env, GIT_DIR: gitDirOf(root), GIT_WORK_TREE: root },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const out = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    return { code, out: out.trim() };
+  }
+
+  /** A repo folder exactly as a kill between `git init` and the first commit leaves it. */
+  async function makeUnbornRepo(root: string): Promise<void> {
+    fs.mkdirSync(path.dirname(gitDirOf(root)), { recursive: true });
+    const r = await git(root, ["init", "--initial-branch=main"]);
+    expect(r.code).toBe(0);
+    expect((await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"])).code).not.toBe(0);
+  }
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hankweave-crashsafe-test-"));
+    logPath = path.join(tempDir, "test.log");
+    logger = new Logger(logPath);
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const readLog = () => (fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf-8") : "");
+  const siblingsOfRepo = () =>
+    fs.readdirSync(path.join(tempDir, ".hankweave", "checkpoints")).sort();
+
+  test("a fresh build leaves no temp folder behind", async () => {
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    const sha = await cg.initialize();
+    expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(siblingsOfRepo()).toEqual([".gitconfig", ".hankweavecheckpoints"]);
+    expect((await git(tempDir, ["rev-parse", "HEAD"])).out).toBe(sha);
+  });
+
+  test("an unborn repo (killed between init and first commit) is rebuilt", async () => {
+    await makeUnbornRepo(tempDir);
+    // Locks the killed builder may have left behind go with the folder.
+    fs.writeFileSync(path.join(gitDirOf(tempDir), "index.lock"), "");
+    fs.writeFileSync(path.join(gitDirOf(tempDir), "config.lock"), "");
+
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    const sha = await cg.initialize();
+
+    expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    expect((await git(tempDir, ["rev-parse", "HEAD"])).out).toBe(sha);
+    expect(readLog()).toContain("has no resolvable HEAD; removing it and building a fresh one");
+    expect(siblingsOfRepo()).toEqual([".gitconfig", ".hankweavecheckpoints"]);
+    expect(fs.existsSync(path.join(gitDirOf(tempDir), "index.lock"))).toBe(false);
+    expect((await git(tempDir, ["config", "user.name"])).out).toBe("Hankweave Runtime");
+
+    // The rebuilt repo is fully usable: checkpoints commit and resolve.
+    await fs.promises.writeFile(path.join(tempDir, "a.txt"), "a");
+    await cg.addPatterns(["*.txt"]);
+    const commit = await cg.commit("after rebuild");
+    expect(commit).not.toBeNull();
+    await expect(cg.requireCheckpoint(commit as string)).resolves.toBe(commit as string);
+  });
+
+  test("a second boot over a rebuilt repo reuses it", async () => {
+    await makeUnbornRepo(tempDir);
+    const first = new CheckpointGit(tempDir, tempDir, logger);
+    const built = await first.initialize();
+    const second = new CheckpointGit(tempDir, tempDir, logger);
+    const sha = await second.initialize();
+    expect(sha).toBe(built);
+    expect(readLog()).toContain(`Using existing shadow git repository with HEAD: ${built}`);
+  });
+
+  test("a temp build folder from a dead builder (kill before rename) is swept", async () => {
+    const checkpointsDir = path.dirname(gitDirOf(tempDir));
+    fs.mkdirSync(checkpointsDir, { recursive: true });
+    const stale = path.join(checkpointsDir, ".hankweavecheckpoints.tmp-999999-1");
+    fs.mkdirSync(stale);
+    fs.writeFileSync(path.join(stale, "HEAD"), "ref: refs/heads/main\n");
+
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    await cg.initialize();
+
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(readLog()).toContain("Removing stale checkpoint build folder");
+  });
+
+  test("a repo with objects but no resolvable HEAD is rebuilt from scratch", async () => {
+    const seed = new CheckpointGit(tempDir, tempDir, logger);
+    await seed.initialize();
+    await fs.promises.writeFile(path.join(tempDir, "keep.txt"), "history");
+    await seed.addPatterns(["*.txt"]);
+    const kept = await seed.commit("history behind a lost ref");
+    expect(kept).not.toBeNull();
+
+    // Lose the refs but keep the objects: HEAD now points at a branch that is gone.
+    const gitDir = gitDirOf(tempDir);
+    rmSync(path.join(gitDir, "refs", "heads"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(gitDir, "refs", "heads"));
+    rmSync(path.join(gitDir, "packed-refs"), { force: true });
+    expect((await git(tempDir, ["rev-parse", "--verify", "--quiet", "HEAD"])).code).not.toBe(0);
+
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    const sha = await cg.initialize();
+
+    // Nothing is kept aside: the folder was replaced, and the old SHA is gone.
+    expect(siblingsOfRepo()).toEqual([".gitconfig", ".hankweavecheckpoints"]);
+    expect((await git(tempDir, ["rev-parse", "HEAD"])).out).toBe(sha);
+    await expect(cg.requireCheckpoint(kept as string)).rejects.toBeInstanceOf(
+      CheckpointNotFoundError,
+    );
+    expect(readLog()).toContain("has no resolvable HEAD; removing it and building a fresh one");
+  });
+
+  describe("requireCheckpoint", () => {
+    test("full SHA and unambiguous prefix resolve; unknown and empty references are not found", async () => {
+      const cg = new CheckpointGit(tempDir, tempDir, logger);
+      await cg.initialize();
+      await fs.promises.writeFile(path.join(tempDir, "x.txt"), "x");
+      await cg.addPatterns(["*.txt"]);
+      const sha = await cg.commit("populate");
+      expect(sha).not.toBeNull();
+
+      await expect(cg.requireCheckpoint(sha as string)).resolves.toBe(sha as string);
+      await expect(cg.requireCheckpoint((sha as string).slice(0, 8))).resolves.toBe(sha as string);
+      for (const missing of ["0123456789abcdef0123456789abcdef01234567", "", "abc"]) {
+        await expect(cg.requireCheckpoint(missing)).rejects.toBeInstanceOf(CheckpointNotFoundError);
+      }
+    });
+
+    test("before initialization the failure is storage trouble, never 'not found'", async () => {
+      const cg = new CheckpointGit(tempDir, tempDir, logger);
+      await expect(
+        cg.requireCheckpoint("0123456789abcdef0123456789abcdef01234567"),
+      ).rejects.toBeInstanceOf(CheckpointStorageError);
+    });
+  });
+
+  test("resetToCheckpoint refuses an empty reference on a populated repo", async () => {
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    await cg.initialize();
+    await fs.promises.writeFile(path.join(tempDir, "x.txt"), "x");
+    await cg.addPatterns(["*.txt"]);
+    await cg.commit("populate");
+
+    await expect(cg.resetToCheckpoint("")).rejects.toBeInstanceOf(CheckpointNotFoundError);
+    await expect(cg.resetToCheckpoint("abc")).rejects.toBeInstanceOf(CheckpointNotFoundError);
+  });
+
+  test("stale git locks in a healthy repo are cleared at boot so recovery can check out", async () => {
+    // A kill during an ordinary checkpoint leaves index.lock (and, inside a
+    // branch update, a ref lock). HEAD resolves, so the repo is "healthy" —
+    // but `checkout --force` would fail on the lock every boot.
+    const first = new CheckpointGit(tempDir, tempDir, logger);
+    await first.initialize();
+    await fs.promises.writeFile(path.join(tempDir, "a.txt"), "a");
+    await first.addPatterns(["*.txt"]);
+    const sha = await first.commit("checkpoint");
+    fs.writeFileSync(path.join(gitDirOf(tempDir), "index.lock"), "");
+    fs.writeFileSync(path.join(gitDirOf(tempDir), "refs", "heads", "main.lock"), "");
+
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    expect(await cg.initialize()).toBe(sha as string);
+
+    expect(fs.existsSync(path.join(gitDirOf(tempDir), "index.lock"))).toBe(false);
+    expect(fs.existsSync(path.join(gitDirOf(tempDir), "refs", "heads", "main.lock"))).toBe(false);
+    expect(readLog()).toContain("Removing stale git lock index.lock");
+    await expect(cg.resetToCheckpoint(sha as string)).resolves.toBeUndefined();
+  });
+
+  test("a truncated HEAD stops the boot with the folder intact; it is not a torn build", async () => {
+    // Same empty footprint as an unborn repo, but HEAD itself is empty. Git
+    // writes HEAD through HEAD.lock + rename, so a kill cannot leave this;
+    // it is disk trouble, and rev-parse exits 128 ("not a git repository")
+    // rather than 1. Rebuilding here would be the same rm -rf that an
+    // unreadable HEAD on a populated repo gets, so stop instead.
+    await makeUnbornRepo(tempDir);
+    fs.writeFileSync(path.join(gitDirOf(tempDir), "HEAD"), "");
+
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    await expect(cg.initialize()).rejects.toThrow(CheckpointStorageError);
+
+    expect(readLog()).not.toContain("has no resolvable HEAD; removing it and building a fresh one");
+    expect(siblingsOfRepo()).toEqual([".hankweavecheckpoints"]);
+    expect(fs.readFileSync(path.join(gitDirOf(tempDir), "HEAD"), "utf-8")).toBe("");
+  });
+
+  // Root ignores mode bits, so the unreadable-HEAD fixture cannot be built there.
+  const notRoot = typeof process.getuid === "function" && process.getuid() !== 0;
+  test.skipIf(!notRoot)(
+    "a repo git cannot read (rev-parse exit 128) stops the boot and keeps every checkpoint",
+    async () => {
+      // A healthy repo: one checkpoint, one recovery snapshot.
+      const first = new CheckpointGit(tempDir, tempDir, logger);
+      await first.initialize();
+      fs.writeFileSync(path.join(tempDir, "work.txt"), "checkpointed work");
+      await first.addPatterns(["*.txt"]);
+      const checkpoint = (await first.commit("completed:one")) as string;
+      const snapshot = await first.snapshotForRecovery("probe");
+      expect(checkpoint).toMatch(/^[0-9a-f]{40}$/);
+      expect(snapshot.recoveryBranch).toMatch(/^recovery\//);
+
+      // One file becomes unreadable: a permission glitch, not a torn build.
+      // Before PR #242 review finding 2, this rebuilt the repo and deleted
+      // every run-* branch and recovery/* snapshot.
+      const headPath = path.join(gitDirOf(tempDir), "HEAD");
+      fs.chmodSync(headPath, 0o000);
+      try {
+        await expect(new CheckpointGit(tempDir, tempDir, logger).initialize()).rejects.toThrow(
+          CheckpointStorageError,
+        );
+      } finally {
+        fs.chmodSync(headPath, 0o644);
+      }
+
+      expect(readLog()).not.toContain(
+        "has no resolvable HEAD; removing it and building a fresh one",
+      );
+      const again = new CheckpointGit(tempDir, tempDir, logger);
+      await again.initialize();
+      await again.requireCheckpoint(checkpoint);
+      expect(fs.readdirSync(path.join(gitDirOf(tempDir), "refs", "heads"))).toContain("recovery");
+    },
+  );
+
+  test("an existing SHA-256 repository checkpoints and resolves end to end", async () => {
+    // GIT_DEFAULT_HASH=sha256 (or init.defaultObjectFormat) makes `git init`
+    // build such a repo; ids are 64 hex chars and simple-git's commit output
+    // (core.abbrev=40) truncates them. The stored reference must still match
+    // what enumeration returns.
+    fs.mkdirSync(path.dirname(gitDirOf(tempDir)), { recursive: true });
+    const init = await git(tempDir, ["init", "--object-format=sha256", "--initial-branch=main"]);
+    expect(init.code).toBe(0);
+    // CheckpointGit points HOME at the checkpoint folder, so the only identity
+    // its commits can see is the repo's own config — which a repo it built
+    // carries, and which this hand-built fixture must carry too. Without it
+    // git falls back to auto-detection, which fails on CI runners whose
+    // account has no display name (Linux) or no domain (Windows).
+    expect((await git(tempDir, ["config", "user.name", "t"])).code).toBe(0);
+    expect((await git(tempDir, ["config", "user.email", "t@t"])).code).toBe(0);
+    expect((await git(tempDir, ["commit", "-q", "--allow-empty", "-m", "root"])).code).toBe(0);
+
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    await cg.initialize();
+    expect(readLog()).toContain("Using existing shadow git repository with HEAD");
+
+    await fs.promises.writeFile(path.join(tempDir, "a.txt"), "a");
+    await cg.addPatterns(["*.txt"]);
+    const sha = await cg.commit("sha256 checkpoint");
+    expect(sha).toMatch(/^[0-9a-f]{64}$/);
+    await expect(cg.requireCheckpoint(sha as string)).resolves.toBe(sha as string);
+    expect((await cg.getAllCheckpointShas()).has(sha as string)).toBe(true);
+    expect((await cg.getAllCheckpoints()).some((c) => c.sha === sha)).toBe(true);
+    await expect(cg.resetToCheckpoint(sha as string)).resolves.toBeUndefined();
+  });
+
+  test("getAllCheckpoints reports unreadable storage instead of answering 'no checkpoints'", async () => {
+    if (typeof process.getuid === "function" && process.getuid() === 0) return; // root ignores modes
+    if (process.platform === "win32") return; // chmod is a no-op on Windows; the dir stays readable
+    const cg = new CheckpointGit(tempDir, tempDir, logger);
+    await cg.initialize();
+    await fs.promises.writeFile(path.join(tempDir, "x.txt"), "x");
+    await cg.addPatterns(["*.txt"]);
+    const sha = await cg.commit("populate");
+    expect((await cg.getAllCheckpoints()).some((c) => c.sha === sha)).toBe(true);
+
+    // Storage that git cannot read must surface as an error, never as [].
+    // (A dangling ref is not enough: `git branch -v` silently drops it.)
+    const objects = path.join(gitDirOf(tempDir), "objects");
+    fs.chmodSync(objects, 0o000);
+    try {
+      await expect(cg.getAllCheckpoints()).rejects.toBeInstanceOf(CheckpointStorageError);
+    } finally {
+      fs.chmodSync(objects, 0o755);
+    }
+  });
+
+  describe("snapshotWorkTree", () => {
+    test("keeps the current contents of a tracked file that .gitignore now matches", async () => {
+      const cg = new CheckpointGit(tempDir, tempDir, logger);
+      await cg.initialize();
+      await fs.promises.writeFile(path.join(tempDir, "notes.txt"), "v1");
+      await cg.addPatterns(["*.txt"]);
+      const head = await cg.commit("track notes");
+      expect(head).not.toBeNull();
+
+      // Later the file is modified AND ignored — the empty-index footgun.
+      await fs.promises.writeFile(path.join(tempDir, "notes.txt"), "v2");
+      await fs.promises.appendFile(path.join(tempDir, ".gitignore"), "notes.txt\n");
+
+      const sha = await cg.snapshotWorkTree("recovery/test", "snap");
+      expect((await git(tempDir, ["show", `${sha}:notes.txt`])).out).toBe("v2");
+      // HEAD, the real index and the work tree are untouched.
+      expect((await git(tempDir, ["rev-parse", "HEAD"])).out).toBe(head as string);
+      expect(fs.readFileSync(path.join(tempDir, "notes.txt"), "utf-8")).toBe("v2");
+    });
+
+    test("drops a read_only_data_source that HEAD already tracks", async () => {
+      // HEAD can be an older snapshot (or a hand-made commit) that carries the
+      // data tree; seeding the index from it must not carry the tree forward.
+      const cg = new CheckpointGit(tempDir, tempDir, logger);
+      await cg.initialize();
+      fs.mkdirSync(path.join(tempDir, "read_only_data_source"), { recursive: true });
+      await fs.promises.writeFile(path.join(tempDir, "read_only_data_source", "d.bin"), "data");
+      expect((await git(tempDir, ["add", "-f", "read_only_data_source/d.bin"])).code).toBe(0);
+      expect((await git(tempDir, ["commit", "-q", "-m", "tracks data"])).code).toBe(0);
+      expect((await git(tempDir, ["ls-tree", "-r", "--name-only", "HEAD"])).out).toContain(
+        "read_only_data_source/d.bin",
+      );
+
+      const sha = await cg.snapshotWorkTree("recovery/test", "snap");
+      const files = (await git(tempDir, ["ls-tree", "-r", "--name-only", sha])).out;
+      expect(files).not.toContain("read_only_data_source");
+    });
+
+    test("excludes a copied read_only_data_source like every normal checkpoint", async () => {
+      const cg = new CheckpointGit(tempDir, tempDir, logger);
+      await cg.initialize();
+      fs.mkdirSync(path.join(tempDir, "read_only_data_source", "deep"), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(tempDir, "read_only_data_source", "deep", "big.bin"),
+        "dataset",
+      );
+      await fs.promises.writeFile(path.join(tempDir, "work.txt"), "w");
+
+      const sha = await cg.snapshotWorkTree("recovery/test", "snap");
+      const files = (await git(tempDir, ["ls-tree", "-r", "--name-only", sha])).out.split("\n");
+      expect(files).toContain("work.txt");
+      expect(files.some((f) => f.startsWith("read_only_data_source"))).toBe(false);
+    });
   });
 });

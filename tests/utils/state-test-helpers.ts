@@ -1,4 +1,5 @@
 import path from "node:path";
+import { ExecutionLayout } from "../../server/execution-layout";
 import { StateManager } from "../../server/state-manager";
 import { CodonId } from "../../server/types/branded-types";
 import type { CodonStatus, HankweaveState } from "../../server/types/state-types";
@@ -41,7 +42,7 @@ export function createTestStateManager(
   codonConfigs?: CodonConfig[],
 ): StateManager {
   const logger = new Logger(path.join(testDir, "test.log"));
-  return new StateManager(path.join(testDir, ".hankweave"), logger, codonConfigs);
+  return new StateManager(new ExecutionLayout(testDir), logger, codonConfigs);
 }
 
 export function getCompletedCodonsFromState(state: HankweaveState): Array<{

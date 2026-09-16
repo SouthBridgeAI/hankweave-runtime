@@ -2,7 +2,14 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  type Options,
+  query,
+  type SDKMessage,
+  type SessionKey,
+  type SessionStore,
+  type SessionStoreEntry,
+} from "@anthropic-ai/claude-agent-sdk";
 import {
   BEDROCK_DEFAULT_REGION,
   defaultProfileDefinesRegion,
@@ -18,6 +25,7 @@ import {
   needsExtraction,
 } from "./claude-runtime-extractor.js";
 import { TIMEOUTS } from "./config.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -188,6 +196,141 @@ const BEDROCK_AWS_ENV_VARS = [
 // same detection; re-exported to keep this module's public surface stable.
 export { BEDROCK_DEFAULT_REGION, describeAmbientAwsCredentialSource };
 
+/**
+ * File-backed SessionStore adapter for the Claude Agent SDK.
+ *
+ * The SDK subprocess keeps its own transcript under the machine-local
+ * `~/.claude` config dir, which does not survive the machine/container. This
+ * adapter receives a mirrored copy of every transcript entry and lands it
+ * inside the execution directory, giving the Claude path the same property
+ * the pi path already has (native sessions under `.hankweave/logs/pi-sessions/`):
+ * the session travels with the run.
+ *
+ * Layout under the base directory (`.hankweave/logs/claude-sessions/`):
+ *
+ *   <sessionId>.jsonl             main transcript
+ *   <sessionId>/<subpath>.jsonl   subagent transcripts (subpath is the SDK's
+ *                                 storage-key suffix, e.g. "subagents/agent-1")
+ *
+ * `load()` also makes resume work from the mirrored copy: with the store set,
+ * the SDK materializes the session from here before spawning, so a resumed
+ * codon no longer depends on the previous machine's `~/.claude`.
+ */
+export class FileSessionStore implements SessionStore {
+  /** Per-file write chains: the SDK requires append-call order per session. */
+  private writeChains = new Map<string, Promise<void>>();
+
+  constructor(private baseDir: string) {}
+
+  private filePathFor(key: SessionKey): string {
+    const file = key.subpath
+      ? path.join(
+          this.sanitize(key.sessionId),
+          ...key.subpath.split("/").map((s) => this.sanitize(s)),
+        )
+      : this.sanitize(key.sessionId);
+    return path.join(this.baseDir, `${file}.jsonl`);
+  }
+
+  /** Storage keys become path segments — never let them escape baseDir. */
+  private sanitize(segment: string): string {
+    if (!segment || segment === "." || segment === ".." || segment.includes(path.sep)) {
+      throw new Error(`Invalid session storage key segment: ${JSON.stringify(segment)}`);
+    }
+    return segment.replace(/[^A-Za-z0-9._-]/g, "_");
+  }
+
+  async append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    const filePath = this.filePathFor(key);
+    const chain = (this.writeChains.get(filePath) ?? Promise.resolve()).then(async () => {
+      await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+      const lines = entries.map((e) => `${JSON.stringify(e)}\n`).join("");
+      await fs.promises.appendFile(filePath, lines, "utf8");
+    });
+    // Keep the chain alive past a failed link so one bad batch (which the SDK
+    // retries itself) doesn't poison every later append to the same file.
+    this.writeChains.set(
+      filePath,
+      chain.catch(() => {}),
+    );
+    return chain;
+  }
+
+  async load(key: SessionKey): Promise<SessionStoreEntry[] | null> {
+    let raw: string;
+    try {
+      raw = await fs.promises.readFile(this.filePathFor(key), "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+
+    // uuid is the idempotency key: retried/replayed batches may duplicate
+    // entries, and resume must not see them twice. Last write wins, in place.
+    const entries: SessionStoreEntry[] = [];
+    const indexByUuid = new Map<string, number>();
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let entry: SessionStoreEntry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue; // torn tail line from a crashed write — entries are best-effort mirrors
+      }
+      const seenAt = entry.uuid ? indexByUuid.get(entry.uuid) : undefined;
+      if (seenAt !== undefined) {
+        entries[seenAt] = entry;
+      } else {
+        if (entry.uuid) indexByUuid.set(entry.uuid, entries.length);
+        entries.push(entry);
+      }
+    }
+    return entries;
+  }
+
+  async listSessions(_projectKey: string): Promise<Array<{ sessionId: string; mtime: number }>> {
+    let names: fs.Dirent[];
+    try {
+      names = await fs.promises.readdir(this.baseDir, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
+    const sessions: Array<{ sessionId: string; mtime: number }> = [];
+    for (const d of names) {
+      if (!d.isFile() || !d.name.endsWith(".jsonl")) continue;
+      const stat = await fs.promises.stat(path.join(this.baseDir, d.name));
+      sessions.push({
+        sessionId: d.name.slice(0, -".jsonl".length),
+        mtime: Math.floor(stat.mtimeMs),
+      });
+    }
+    return sessions;
+  }
+
+  async listSubkeys(key: { projectKey: string; sessionId: string }): Promise<string[]> {
+    const sessionDir = path.join(this.baseDir, this.sanitize(key.sessionId));
+    const subkeys: string[] = [];
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      let names: fs.Dirent[];
+      try {
+        names = await fs.promises.readdir(dir, { withFileTypes: true });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw err;
+      }
+      for (const d of names) {
+        const rel = prefix ? `${prefix}/${d.name}` : d.name;
+        if (d.isDirectory()) await walk(path.join(dir, d.name), rel);
+        else if (d.name.endsWith(".jsonl")) subkeys.push(rel.slice(0, -".jsonl".length));
+      }
+    };
+    await walk(sessionDir, "");
+    return subkeys;
+  }
+}
+
 export class ClaudeAgentSDKManager extends BaseProcessManager {
   private abortController: AbortController | undefined;
   private logStream: fs.WriteStream | undefined;
@@ -196,6 +339,7 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
   private syntheticPid: number | undefined;
   private queryPromise: Promise<void> | undefined;
   private promptBuilder: PromptBuilder;
+  private sessionStore: FileSessionStore;
 
   constructor(
     private executionPath: string,
@@ -213,7 +357,15 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
     private bedrockMode: boolean = false,
   ) {
     super(logger, logParser);
-    this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
+    this.promptBuilder = new PromptBuilder(
+      agentRootPath,
+      new ExecutionLayout(executionPath).dataPathInExecutionDir,
+      logger,
+      globalSystemPrompt,
+    );
+    this.sessionStore = new FileSessionStore(
+      path.join(executionPath, ".hankweave/logs/claude-sessions"),
+    );
   }
 
   /** Frontmatter metadata from the prompt file (if any) */
@@ -393,6 +545,10 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       // provider's overflow 400, emits compact_boundary (Pattern 3), and
       // retries. Measured on CLI 2.1.215 — see intermediates/55.
       settings: { autoCompactEnabled: codon.autoCompact === true },
+      // Mirror the native session transcript into the execution dir
+      // (.hankweave/logs/claude-sessions/) so it survives the machine —
+      // parity with pi's logs/pi-sessions/. Resume also loads from here.
+      sessionStore: this.sessionStore,
     };
 
     // Use custom Claude Code executable path if provided

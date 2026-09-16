@@ -225,7 +225,7 @@ describe("Loop E2E Test", () => {
       //
       // The loop's *runtime* contract is already asserted above: four loop-codon
       // completions, codon-3 ordered after the loop, and archiveOnSuccess having
-      // moved additional_poem_* out of notes/. Whether haiku actually wrote two
+      // moved additional_poem_* out of notes/. Whether the model actually wrote two
       // files named poem_review_N.txt is the model's compliance with a prompt,
       // not the runtime's behaviour — and it does sometimes write none, which
       // failed this suite while the run itself reported "All 6 codons completed
@@ -532,7 +532,7 @@ describe("Loop E2E Test", () => {
       const files = fs.readdirSync(notesDir);
       const messageFiles = files.filter((f) => f.startsWith("message_") && f.endsWith(".txt"));
       // Model-dependent, not a hard count (see the poem_review comment in the
-      // first test): haiku is asked to write message_<TIMESTAMP>.txt each
+      // first test): the model is asked to write message_<TIMESTAMP>.txt each
       // iteration but can reuse a name across iterations or skip the write
       // while still completing. Rig-side proof both iterations ran is the
       // setup_log assertion above.
@@ -848,20 +848,44 @@ describe("Loop E2E Test", () => {
       const rollbackEvent = await hankweave.waitForEvent("rollback.completed", 30_000);
       expect(rollbackEvent.type).toBe("rollback.completed");
 
-      // Check for archive restoration event
+      // Rolling back past iteration 1 selects its archive for restoration
+      // (#228: entries archived after the target on the abandoned line).
+      // But both iterations wrote temp/iteration.json, and iteration 0's
+      // completion checkpoint was taken BEFORE its archive step, so the
+      // target tree already holds iteration 0's copy. The target checkpoint
+      // tree is authoritative: the archived copy must not overwrite it, so
+      // the entry is reported as kept and its archive and manifest entry
+      // stay in place. (Before #228 every selected archive was restored and
+      // clobbered the target's file.)
       const restoreEvents = hankweave
         .getEvents()
         .filter((e) => e.type === "rollback.archiveRestore");
       expect(restoreEvents.length).toBeGreaterThan(0);
+      const restore = restoreEvents[restoreEvents.length - 1].data as {
+        restoredPaths: string[];
+        failedPaths?: Array<{ path: string; error: string }>;
+        status: string;
+      };
+      expect(restore.restoredPaths).toEqual([]);
+      expect(restore.failedPaths).toEqual([
+        {
+          path: "temp/iteration.json",
+          error: expect.stringContaining("Destination exists in target checkpoint tree"),
+        },
+      ]);
+      expect(restore.status).toBe("failed");
 
-      // Verify iteration 1 archives were restored to agentRoot
-      // (because we rolled back past when they were archived)
+      // The work tree holds the target checkpoint's temp file (iteration 0's).
       const restoredTempDir = path.join(agentRootPath, "temp");
-      expect(fs.existsSync(restoredTempDir)).toBe(true);
+      expect(fs.existsSync(path.join(restoredTempDir, "iteration.json"))).toBe(true);
 
-      // Verify iteration 1 archive is gone (files restored)
+      // Iteration 1's archive is kept, and the manifest still lists it.
       const archive1Path = path.join(rigArchivePath, "archive-loop-1", "process-iteration-1");
-      expect(fs.existsSync(archive1Path)).toBe(false);
+      expect(fs.existsSync(path.join(archive1Path, "temp", "iteration.json"))).toBe(true);
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(executionPath, ".hankweave", "archive-manifest.json"), "utf-8"),
+      ) as { entries: Array<{ archivePath: string }> };
+      expect(manifest.entries.some((e) => e.archivePath.includes("archive-loop-1"))).toBe(true);
 
       // Verify iteration 0 archive still exists (not affected by rollback)
       const archive0Path = path.join(rigArchivePath, "archive-loop-0", "process-iteration-0");

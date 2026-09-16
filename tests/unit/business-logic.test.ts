@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import { StateManager } from "../../server/state-manager.js";
 import { CodonId, RunId } from "../../server/types/branded-types.js";
 import type { Codon } from "../../server/types/types.js";
@@ -43,7 +44,7 @@ describe("StateManager - getNextCodonToExecute", () => {
     });
 
     const logger = new Logger(path.join(tempDir, "test.log"));
-    stateManager = new StateManager(path.join(tempDir, ".hankweave"), logger, mockCodons);
+    stateManager = new StateManager(new ExecutionLayout(tempDir), logger, mockCodons);
     await stateManager.initialize();
   });
 
@@ -191,7 +192,7 @@ describe("StateManager - Cost Calculations", () => {
     });
 
     const logger = new Logger(path.join(tempDir, "test.log"));
-    stateManager = new StateManager(path.join(tempDir, ".hankweave"), logger);
+    stateManager = new StateManager(new ExecutionLayout(tempDir), logger);
     await stateManager.initialize();
   });
 

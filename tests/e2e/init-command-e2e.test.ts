@@ -339,8 +339,8 @@ describe("init command e2e", () => {
         const analysisPiFile = path.join(agentRootPath, "analysis-pi.md");
         expect(fs.existsSync(analysisPiFile)).toBe(true);
 
-        // GPT analysis file (pi/openai-codex — ChatGPT subscription via pi's
-        // credential store; CI provisions it from CODEX_AUTH_JSON)
+        // GPT analysis file (pi/openai-codex — authenticates from pi's
+        // credential store, ~/.pi/agent/auth.json)
         const analysisGptFile = path.join(agentRootPath, "analysis-gpt.md");
         expect(fs.existsSync(analysisGptFile)).toBe(true);
 
@@ -382,6 +382,29 @@ describe("init command e2e", () => {
           expect(sessionContent.split("\n").filter((line) => line.trim()).length).toBeGreaterThan(
             0,
           );
+        }
+
+        // Verify the Claude SDK path persisted its session transcripts into
+        // the execution dir (FileSessionStore mirror — parity with the Pi
+        // block above). Guarded symmetrically: a non-Anthropic
+        // HANKWEAVE_RUNTIME_MODEL override routes every codon (including
+        // analyze-haiku) through Pi, so no Claude session exists then.
+        const someCodonOnClaudeSdk = runtimeModelOverride === "" || allCodonsOnClaudeSdk;
+        if (someCodonOnClaudeSdk) {
+          const claudeSessionsDir = path.join(INIT_TEST_DIR, ".hankweave/logs/claude-sessions");
+          expect(fs.existsSync(claudeSessionsDir)).toBe(true);
+
+          const claudeSessionFiles = fs
+            .readdirSync(claudeSessionsDir)
+            .filter((file) => file.endsWith(".jsonl"));
+          expect(claudeSessionFiles.length).toBeGreaterThan(0);
+
+          // Verify at least one mirrored transcript has content
+          const claudeSessionPath = path.join(claudeSessionsDir, claudeSessionFiles[0]);
+          const claudeSessionContent = fs.readFileSync(claudeSessionPath, "utf-8");
+          expect(
+            claudeSessionContent.split("\n").filter((line) => line.trim()).length,
+          ).toBeGreaterThan(0);
         }
 
         // Verify execution metadata contains environment info

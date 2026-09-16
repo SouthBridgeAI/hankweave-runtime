@@ -384,6 +384,8 @@ function buildCheckpointInfo(
     addCheckpoint("rig-setup", codon.rigSetupCheckpoint);
   }
 
+  // Truthiness is enough here: addCheckpoint keeps only SHAs present in the
+  // git data map, which is the real validation.
   if (codon.status === "completed" && codon.completionCheckpoint) {
     addCheckpoint("completed", codon.completionCheckpoint);
   }
@@ -402,6 +404,150 @@ function buildCheckpointInfo(
 // -------------
 // Simple Query Functions
 // -------------
+
+/**
+ * Which of a codon's confirmed checkpoints recovery prefers, best first.
+ * The completion is the codon's finished state; error and skipped record where
+ * it stopped; rig-setup is the folder before the codon ran at all.
+ */
+const CHECKPOINT_PRIORITY: ReadonlyArray<CheckpointInfo["type"]> = [
+  "completed",
+  "error",
+  "skipped",
+  "rig-setup",
+];
+
+/**
+ * The completion checkpoint a continuation may seed from, or null when the
+ * codon is not completed or git does not hold its completion checkpoint.
+ * Reads only validatedCheckpoints: the raw reference on the codon is history,
+ * never a target.
+ */
+export function confirmedCompletion(tc: ThreadCodon): string | null {
+  if (tc.codon.status !== "completed") return null;
+  return tc.validatedCheckpoints.find((cp) => cp.type === "completed")?.sha ?? null;
+}
+
+/** The best checkpoint git confirms for this codon, by CHECKPOINT_PRIORITY, or null. */
+export function bestConfirmedCheckpoint(tc: ThreadCodon): CheckpointInfo | null {
+  for (const type of CHECKPOINT_PRIORITY) {
+    const cp = tc.validatedCheckpoints.find((c) => c.type === type);
+    if (cp) return cp;
+  }
+  return null;
+}
+
+/**
+ * What rung 1 rolls back TO for a codon. A failed codon is retried from its
+ * rig-setup checkpoint (recorded as afterCodon: null, so it runs again with
+ * the rig skipped); its error checkpoint only records where it stopped, and
+ * continuing from it skips the codon.
+ */
+function rungOneTarget(tc: ThreadCodon): CheckpointInfo | null {
+  if (tc.codon.status === "failed") {
+    const rig = tc.validatedCheckpoints.find((c) => c.type === "rig-setup");
+    if (rig) return rig;
+  }
+  return bestConfirmedCheckpoint(tc);
+}
+
+export interface RollbackTarget {
+  /** Position in thread.codons (0 = newest). */
+  index: number;
+  /** Confirmed by git — never the raw state-file value. */
+  sha: string;
+  type: CheckpointInfo["type"];
+}
+
+/**
+ * Where recovery should roll back to, or null when git confirms nothing.
+ * Rung 0: the newest completed codon's completion checkpoint. Rung 1: the
+ * newest codon with any confirmed checkpoint, best type first, except that a
+ * failed codon is retried from its rig-setup checkpoint when git holds one.
+ * Rung 2 (nothing restorable) is the caller's: snapshot the work tree,
+ * degrade, start over.
+ */
+export function findRollbackTarget(thread: ExecutionThread): RollbackTarget | null {
+  const newestCompleted = thread.codons.findIndex((tc) => tc.codon.status === "completed");
+  if (newestCompleted >= 0) {
+    const sha = confirmedCompletion(thread.codons[newestCompleted]);
+    if (sha) return { index: newestCompleted, sha, type: "completed" };
+  }
+  for (const [index, tc] of thread.codons.entries()) {
+    const cp = rungOneTarget(tc);
+    if (cp) return { index, sha: cp.sha, type: cp.type };
+  }
+  return null;
+}
+
+/** Everything recovery needs to act on a rollback, decided in one place. */
+export interface RollbackDecision {
+  /** The thread the decision was made on; executeRollback walks it. */
+  thread: ExecutionThread;
+  /** Where to go, or null when git confirms nothing (caller snapshots and degrades). */
+  target: RollbackTarget | null;
+  /**
+   * The newest completed codon when the target is not its completion: git
+   * does not hold that checkpoint. Null when there is no such codon. Callers
+   * log it — it is the footprint of a torn checkpoint repository.
+   */
+  passedOverCompletion: ThreadCodon | null;
+}
+
+export function decideRollback(thread: ExecutionThread): RollbackDecision {
+  const target = findRollbackTarget(thread);
+  const newestCompleted = thread.codons.find((tc) => tc.codon.status === "completed") ?? null;
+  const passedOverCompletion = target?.type === "completed" ? null : newestCompleted;
+  return { thread, target, passedOverCompletion };
+}
+
+/** The completed codon a continuation may seed from. */
+export interface ContinuationSeed {
+  codonId: CodonId;
+  runId: RunId;
+  /** The completion reference from state; `confirmed` says whether git holds it. */
+  sha: string;
+  confirmed: boolean;
+}
+
+/** Newest completed codon in the thread, or null when the thread holds none. */
+export function seedFromThread(thread: ExecutionThread): ContinuationSeed | null {
+  const tc = thread.codons.find((c) => c.codon.status === "completed");
+  if (!tc || tc.codon.status !== "completed") return null;
+  const confirmedSha = confirmedCompletion(tc);
+  return {
+    codonId: tc.codon.codonId,
+    runId: tc.runId,
+    sha: confirmedSha ?? tc.codon.completionCheckpoint,
+    confirmed: confirmedSha !== null,
+  };
+}
+
+/**
+ * Newest completed codon anywhere in state, for the case where the thread is
+ * empty because the latest run is an empty fresh run. Confirmation comes from
+ * the same checkpoint map the thread was validated against, so both seed
+ * sources apply one rule. Runs are scanned in state order (newest first) and
+ * each run's codons from the end.
+ */
+export function seedFromState(
+  state: HankweaveState,
+  checkpointData: ReadonlyMap<string, unknown> | undefined,
+): ContinuationSeed | null {
+  for (const run of state.runs) {
+    for (let i = run.codons.length - 1; i >= 0; i--) {
+      const codon = run.codons[i];
+      if (codon.status !== "completed") continue;
+      return {
+        codonId: codon.codonId,
+        runId: run.runId,
+        sha: codon.completionCheckpoint,
+        confirmed: checkpointData?.has(codon.completionCheckpoint) ?? false,
+      };
+    }
+  }
+  return null;
+}
 
 /**
  * Get the next codon to execute from a thread

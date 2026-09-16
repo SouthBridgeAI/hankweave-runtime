@@ -19,6 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as p from "@clack/prompts";
+import { ExecutionLayout } from "../execution-layout.js";
 import { initProject } from "../init-command.js";
 import { hasNoticeBeenShown, markNoticeShown } from "../telemetry/telemetry-identity.js";
 import {
@@ -439,7 +440,7 @@ async function handleDemo(env: EnvironmentResult): Promise<void> {
       const existingDirs = await findExecutionDirs(dataHash);
 
       if (existingDirs.length > 0) {
-        const statePath = path.join(existingDirs[0], ".hankweave", "state.json");
+        const statePath = new ExecutionLayout(existingDirs[0]).statePath;
         if (fs.existsSync(statePath)) {
           const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
           const latestRun = state.runs?.[0];

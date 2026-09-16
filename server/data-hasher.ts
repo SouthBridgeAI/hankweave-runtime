@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { ExecutionLayout } from "./execution-layout.js";
 import { getManagedExecutionsRoot } from "./utils.js";
 
 /**
@@ -147,7 +148,7 @@ export async function findExecutionDirs(dataHash: string): Promise<string[]> {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const metaPath = path.join(executionRoot, entry.name, ".hankweave", "execution-meta.json");
+    const metaPath = new ExecutionLayout(path.join(executionRoot, entry.name)).metaPath;
     try {
       const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
       if (meta.dataHash === dataHash) {

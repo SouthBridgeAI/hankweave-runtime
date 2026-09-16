@@ -401,10 +401,10 @@ describe("Model Validator — Passthrough Providers", () => {
     });
 
     test("all moonshotai models route through openrouter, not just kimi-k3", () => {
-      const result = validateModel("moonshotai/kimi-k2.5", registry);
+      const result = validateModel("moonshotai/kimi-k2.6", registry);
       expect(result.valid).toBe(true);
       expect(result.modelInfo?.providerId).toBe("moonshotai");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k2.5");
+      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k2.6");
     });
   });
 

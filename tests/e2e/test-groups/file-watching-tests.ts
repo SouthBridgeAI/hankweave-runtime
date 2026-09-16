@@ -79,7 +79,7 @@ export function runFileWatchingTests(testState: TestState) {
     expect(codon2FileEvents.length).toBeGreaterThanOrEqual(0);
   });
 
-  test("file events contain actual content", () => {
+  test("file events carry fingerprints (sha256/bytes/source), never bodies", () => {
     const fileUpdateEvents = testState.client?.getEventsByType("file.updated") || [];
     const codon1FileEvents = fileUpdateEvents.filter((e) => {
       const fileEvent = e as FileUpdatedEvent;
@@ -91,7 +91,13 @@ export function runFileWatchingTests(testState: TestState) {
     });
     if (codon1FileEvents.length > 0) {
       const firstEvent = codon1FileEvents[0] as FileUpdatedEvent;
-      expect(firstEvent.data?.content?.length || 0).toBeGreaterThan(0);
+      // Fingerprint-only: every emission carries the body's hash and size,
+      // never the body itself (fingerprint-events proposal).
+      const data = firstEvent.data;
+      expect(data.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(data.bytes).toBeGreaterThan(0);
+      expect(["tool_use", "codon-start"]).toContain(data.source.kind);
+      expect("content" in data).toBe(false);
     }
   });
 

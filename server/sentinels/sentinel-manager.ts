@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { generateObject, generateText } from "ai";
 import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
-import type { ServerEvent } from "../schemas/event-schemas.js";
+import type { FileUpdatedEventData, ServerEvent } from "../schemas/event-schemas.js";
 import { type CodonId, EventId } from "../types/branded-types.js";
 import type {
   HankweaveGenerateObjectOptions,
@@ -22,6 +22,14 @@ export interface SentinelManagerOptions {
   enablePersistence?: boolean; // Allow disabling persistence for testing
   providerRegistry?: LlmProviderRegistry;
   rootDirectory?: string; // Root directory for sentinel files (default: current working directory)
+  /**
+   * Resolves the body a `file.updated` event described (fingerprint-events
+   * proposal: the wire event carries sha256/bytes, not content). When set,
+   * sentinels receive a view of each `file.updated` event with a lazy
+   * `content` getter backed by this callback, so existing content conditions
+   * and templates keep working against the fingerprint-only wire format.
+   */
+  resolveFileBody?: (data: Pick<FileUpdatedEventData, "path" | "sha256">) => string | undefined;
 }
 
 /**
@@ -616,11 +624,60 @@ export class SentinelManager {
    * @param event - Server event to distribute to sentinels
    */
   public async handleEvent(event: ServerEvent): Promise<void> {
+    // Sentinels see a resolved view of file.updated: the wire event carries
+    // only the body's fingerprint, so `content` is grafted on as a lazy
+    // getter. One view is built per event and shared by all sentinels.
+    const view = this.toSentinelView(event);
+
     // Use centralized error handling for event processing
     const promises = Array.from(this.sentinels.values()).map((sentinel) =>
-      this._safelyExecute(sentinel.getId(), () => sentinel.handleEvent(event)),
+      this._safelyExecute(sentinel.getId(), () => sentinel.handleEvent(view)),
     );
     await Promise.allSettled(promises);
+  }
+
+  /**
+   * The in-process rendered view of an event for sentinel consumption — the
+   * relationship a template context always had to raw events, not a third
+   * wire shape (journal and broadcast still carry one identical object).
+   *
+   * For `file.updated`, `data.content` becomes a lazy getter: a sentinel
+   * that never touches it never pays for it; one that does gets the body
+   * from the runtime's retained map (fingerprint-addressed, so this view
+   * resolves the body *its* event described even after later updates to the
+   * same path), with a hash-verified disk fallback. The getter is enumerable
+   * — templates that spread or stringify event data keep seeing `content`,
+   * as they did when it was a real field — and memoized, so a view resolves
+   * at most once and every read (condition, template, serialization) sees
+   * the same body.
+   *
+   * A view that HAS resolved pins its body for the view's lifetime (sentinel
+   * histories and queues, which are themselves bounded). That is the same
+   * order of retention the pre-fingerprint design had, where every buffered
+   * event carried its body inline — resolver-managed leases with eviction
+   * would only be worth building if profiling shows history-pinned bodies
+   * mattering in practice.
+   */
+  private toSentinelView(event: ServerEvent): ServerEvent {
+    const resolve = this.options.resolveFileBody;
+    if (!resolve || event.type !== "file.updated") return event;
+
+    const fingerprint = event.data;
+    const data = { ...fingerprint };
+    let resolved: string | undefined;
+    let resolvedKnown = false;
+    Object.defineProperty(data, "content", {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        if (!resolvedKnown) {
+          resolved = resolve(fingerprint);
+          resolvedKnown = true;
+        }
+        return resolved;
+      },
+    });
+    return { ...event, data } as ServerEvent;
   }
 
   /**

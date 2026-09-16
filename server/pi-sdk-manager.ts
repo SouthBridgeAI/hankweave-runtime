@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import {
   ensurePublicToolId,
   makeAssistantMessage,
@@ -363,7 +364,12 @@ export class PiSdkManager extends BaseProcessManager {
     private defaultShimIdleTimeout?: number,
   ) {
     super(logger, logParser);
-    this.promptBuilder = new PromptBuilder(agentRootPath, logger, globalSystemPrompt);
+    this.promptBuilder = new PromptBuilder(
+      agentRootPath,
+      new ExecutionLayout(executionPath).dataPathInExecutionDir,
+      logger,
+      globalSystemPrompt,
+    );
   }
 
   get promptFrontmatter(): import("./prompt-frontmatter.js").PromptFrontmatter | undefined {

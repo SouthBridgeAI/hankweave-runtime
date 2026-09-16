@@ -9,6 +9,10 @@ import type {
   ErrorEvent,
   ServerEvent,
 } from "../../../server/schemas/event-schemas.js";
+import {
+  createDietedJournalReadStream,
+  isDietedEventsDir,
+} from "../../../server/storage/journal-diet.js";
 
 interface TestState {
   executionPath?: string;
@@ -25,16 +29,22 @@ interface TestState {
 }
 
 /**
- * Helper to read all events from the event journal
+ * Helper to read all events from the event journal. These assertions run
+ * after the run's server has shut down, and dietOnFinalize (on by default)
+ * may have dieted the journal by then — read the logical journal through the
+ * dieted-transparent stream in that case.
  */
 async function readEventJournal(journalPath: string): Promise<ServerEvent[]> {
   const events: ServerEvent[] = [];
+  const eventsDir = path.dirname(journalPath);
 
-  if (!fs.existsSync(journalPath)) {
+  if (!fs.existsSync(journalPath) && !isDietedEventsDir(eventsDir)) {
     return events;
   }
 
-  const stream = createReadStream(journalPath, { encoding: "utf-8" });
+  const stream = fs.existsSync(journalPath)
+    ? createReadStream(journalPath, { encoding: "utf-8" })
+    : createDietedJournalReadStream(eventsDir);
   const reader = createInterface({
     input: stream,
     crlfDelay: Number.POSITIVE_INFINITY,
@@ -93,8 +103,13 @@ export function runEventJournalTests(testState: TestState): void {
   };
 
   it("should create event journal file", () => {
+    // Raw during/after a run with the diet off; dieted (events.jsonl.zst +
+    // manifest + CAS) after a finalize with dietOnFinalize on. Both are the
+    // journal existing.
     const journalPath = getEventJournalPath();
-    expect(fs.existsSync(journalPath)).toBe(true);
+    const journalExists =
+      fs.existsSync(journalPath) || isDietedEventsDir(path.dirname(journalPath));
+    expect(journalExists).toBe(true);
   });
 
   it("should journal events in JSONL format", async () => {
@@ -239,6 +254,72 @@ export function runEventJournalTests(testState: TestState): void {
         expect(["created", "modified", "deleted"]).toContain(data.action);
       }
     });
+  });
+
+  it("should carry fingerprints, never bodies, on file.updated — with tool receipts resolvable", async () => {
+    const journalPath = getEventJournalPath();
+    const events = await readEventJournal(journalPath);
+    const fileUpdatedEvents = filterEventsByType(events, "file.updated");
+    expect(fileUpdatedEvents.length).toBeGreaterThan(0);
+
+    // toolUseIds of journaled tool_use receipts, for the fingerprint→receipt
+    // join (fingerprint-events proposal: the change's bytes live in
+    // assistant.action.toolInput, addressed by source.toolUseId).
+    const receiptToolUseIds = new Set<string>();
+    const writeReceiptContent = new Map<string, string>();
+    for (const event of events) {
+      if (event.type !== "assistant.action") continue;
+      const data = event.data as Record<string, unknown>;
+      if (data.action === "tool_use" && typeof data.toolUseId === "string") {
+        receiptToolUseIds.add(data.toolUseId);
+        // The receipt itself must be present, untruncated by construction.
+        expect(data.toolInput).toBeDefined();
+        const input = data.toolInput as Record<string, unknown>;
+        if (data.toolName === "Write" && typeof input.content === "string") {
+          writeReceiptContent.set(data.toolUseId, input.content);
+        }
+      }
+    }
+
+    const { createHash } = await import("node:crypto");
+    let writeJoinsVerified = 0;
+
+    for (const event of fileUpdatedEvents) {
+      if (event.type !== "file.updated") continue;
+      const data = event.data as Record<string, unknown>;
+
+      // No body form at all — not inline, not as a reference.
+      expect("content" in data).toBe(false);
+      expect("contentRef" in data).toBe(false);
+
+      expect(data.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(typeof data.bytes).toBe("number");
+      expect((data.bytes as number) >= 0).toBe(true);
+
+      const source = data.source as { kind: string; toolUseId?: string };
+      expect(["tool_use", "codon-start"]).toContain(source.kind);
+      if (source.kind === "tool_use") {
+        // Every tool-sourced fingerprint joins to a journaled receipt.
+        expect(typeof source.toolUseId).toBe("string");
+        expect(receiptToolUseIds.has(source.toolUseId as string)).toBe(true);
+
+        // The no-truncation CONTRACT, proven end-to-end: a Write's journaled
+        // toolInput.content (empty string included) hashes to the fingerprint
+        // beside it. A truncated receipt could never reproduce the sha256.
+        const receiptBody = writeReceiptContent.get(source.toolUseId as string);
+        if (receiptBody !== undefined) {
+          const receiptSha = createHash("sha256").update(receiptBody, "utf-8").digest("hex");
+          expect(receiptSha).toBe(data.sha256 as string);
+          expect(Buffer.byteLength(receiptBody, "utf-8")).toBe(data.bytes as number);
+          writeJoinsVerified++;
+        }
+      }
+    }
+
+    // Guard against this test passing vacuously: the happy-path workload
+    // (the only suite running this group) has the agent Write watched files,
+    // so at least one fingerprint↔receipt pair must have been hash-compared.
+    expect(writeJoinsVerified).toBeGreaterThan(0);
   });
 
   it("should maintain chronological order", async () => {

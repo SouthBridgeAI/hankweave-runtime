@@ -225,7 +225,7 @@ describe("LlmProviderRegistry", () => {
       expect(registry.formatCost(1.5)).toBe("$1.5000");
     });
 
-    describe("provider-specific cache token semantics", () => {
+    describe("cache token semantics (fresh input, additive cache — every provider)", () => {
       it("should use additive semantics for Anthropic (inputTokens + cacheReadTokens)", () => {
         // Anthropic: inputTokens is fresh only, cacheReadTokens is additive
         // claude-sonnet-4-5-20250929 pricing:
@@ -241,56 +241,23 @@ describe("LlmProviderRegistry", () => {
         expect(cost).toBeCloseTo(0.0111, 6);
       });
 
-      it("should use inclusive semantics for OpenAI (inputTokens includes cacheReadTokens)", () => {
-        // OpenAI: inputTokens INCLUDES cached tokens, cacheReadTokens is a subset
-        // gpt-4o-2024-08-06 pricing (has cache_read):
-        //   input: $2.50/M, output: $10.00/M, cache_read: $1.25/M
+      it("prices OpenAI-family usage additively too — the boundary already reports fresh-only input", () => {
+        // pi subtracts cached (and cache-write) tokens out of OpenAI's
+        // cache-inclusive input_tokens before usage reaches the runtime, so
+        // `inputTokens` here is fresh input exactly as for Anthropic. A second
+        // subtraction in the registry under-counted every codon with cache hits.
+        // gpt-4o-2024-08-06 pricing: input $2.50/M, output $10.00/M, cache_read $1.25/M
         const cost = registry.calculateCost("gpt-4o-2024-08-06", {
-          inputTokens: 3000, // 3K total input (includes 2K cached)
+          inputTokens: 1000, // fresh
           outputTokens: 500,
-          cacheReadTokens: 2000, // 2K cached tokens (subset of inputTokens)
+          cacheReadTokens: 2000, // additive
         });
 
-        // OpenAI fix: freshInputTokens = 3000 - 2000 = 1000
-        // Expected: (1000/1M * 2.50) + (500/1M * 10.00) + (2000/1M * 1.25)
-        // = 0.0025 + 0.005 + 0.0025 = 0.01
+        // (1000/1M * 2.50) + (500/1M * 10.00) + (2000/1M * 1.25) = 0.0025 + 0.005 + 0.0025
         expect(cost).toBeCloseTo(0.01, 6);
       });
 
-      it("should NOT double-count cached tokens for OpenAI (bug fix verification)", () => {
-        // This test verifies the bug fix: before the fix, OpenAI costs were inflated
-        // because inputTokens (which includes cached) was being charged at full price,
-        // AND cacheReadTokens was charged again at cache_read price.
-
-        // gpt-4o-2024-08-06 pricing (has cache_read):
-        //   input: $2.50/M, output: $10.00/M, cache_read: $1.25/M
-        const cost = registry.calculateCost("gpt-4o-2024-08-06", {
-          inputTokens: 89958860, // Total (includes cached) - from bug report
-          outputTokens: 103588,
-          cacheReadTokens: 88836864, // Cached tokens (subset)
-        });
-
-        // CORRECT calculation (after fix):
-        // freshInputTokens = 89958860 - 88836864 = 1121996
-        // inputCost = (1121996/1M * 2.50) = 2.804990
-        // outputCost = (103588/1M * 10.00) = 1.03588
-        // cacheReadCost = (88836864/1M * 1.25) = 111.04608
-        // Total = 2.804990 + 1.03588 + 111.04608 = 114.88695
-        const expectedCorrect = 114.88695;
-
-        // WRONG calculation (before fix - double counting):
-        // inputCost = (89958860/1M * 2.50) = 224.897150
-        // outputCost = (103588/1M * 10.00) = 1.03588
-        // cacheReadCost = (88836864/1M * 1.25) = 111.04608
-        // Total = 224.897150 + 1.03588 + 111.04608 = 336.97911
-        const wrongDoubleCount = 336.97911;
-
-        expect(cost).toBeCloseTo(expectedCorrect, 2);
-        expect(cost).not.toBeCloseTo(wrongDoubleCount, 2);
-      });
-
-      it("should handle OpenAI with no cache tokens (no change in behavior)", () => {
-        // When there are no cache tokens, behavior should be the same
+      it("should handle OpenAI with no cache tokens", () => {
         // gpt-4o-2024-08-06 pricing: input: $2.50/M, output: $10.00/M
         const cost = registry.calculateCost("gpt-4o-2024-08-06", {
           inputTokens: 1000,
@@ -300,21 +267,6 @@ describe("LlmProviderRegistry", () => {
 
         // Expected: (1000/1M * 2.50) + (500/1M * 10.00) + 0
         // = 0.0025 + 0.005 = 0.0075
-        expect(cost).toBeCloseTo(0.0075, 6);
-      });
-
-      it("should handle edge case where cacheReadTokens exceeds inputTokens for OpenAI", () => {
-        // This shouldn't happen in practice, but the code should handle it gracefully
-        // gpt-4o-2024-08-06 pricing: input: $2.50/M, output: $10.00/M, cache_read: $1.25/M
-        const cost = registry.calculateCost("gpt-4o-2024-08-06", {
-          inputTokens: 1000,
-          outputTokens: 500,
-          cacheReadTokens: 2000, // More than inputTokens (shouldn't happen)
-        });
-
-        // freshInputTokens = max(0, 1000 - 2000) = 0
-        // Expected: (0/1M * 2.50) + (500/1M * 10.00) + (2000/1M * 1.25)
-        // = 0 + 0.005 + 0.0025 = 0.0075
         expect(cost).toBeCloseTo(0.0075, 6);
       });
 
@@ -527,7 +479,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.modelInfo.providerId).toBe("google");
-          expect(result.modelInfo.modelId).toBe("gemini-3.7-flash");
+          expect(result.modelInfo.modelId).toBe("gemini-3.8-flash");
         }
       });
     });
@@ -569,7 +521,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Fuzzy match should prefer google provider for gemini and return most recent
-          expect(result.modelInfo.modelId).toBe("gemini-3.7-flash");
+          expect(result.modelInfo.modelId).toBe("gemini-3.8-flash");
           expect(result.modelInfo.providerId).toBe("google");
         }
       });
@@ -650,7 +602,7 @@ describe("LlmProviderRegistry", () => {
         expect(result.success).toBe(true);
         if (result.success) {
           // Should match a gemini flash model despite typo, preferring google provider
-          expect(result.modelInfo.modelId).toBe("gemini-3.7-flash");
+          expect(result.modelInfo.modelId).toBe("gemini-3.8-flash");
           expect(result.modelInfo.providerId).toBe("google");
           expect(result.matchType).toBe("fuzzy");
         }

@@ -2,7 +2,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setupExecutionEnvironment } from "../../server/execution-setup.js";
+import { ensureSchemaUrl } from "../../server/config.js";
+import { isNonInteractive, setupExecutionEnvironment } from "../../server/execution-setup.js";
 import { rimrafSimple } from "../utils/test-helpers.js";
 
 describe("Execution Setup - startNew flag", () => {
@@ -772,6 +773,252 @@ describe("Execution Setup - startNew flag", () => {
           executionPath: filePath,
         }),
       ).rejects.toThrow("Execution path is not a directory");
+    });
+  });
+
+  describe("hank config change on resume", () => {
+    // hank.json lives OUTSIDE the data source dir: editing it must change only
+    // the hank hash, not the data hash (a data mismatch would throw earlier).
+    const HANK_PATH = path.join(TEST_BASE_DIR, "hank.json");
+
+    const writeHank = (extra: Record<string, unknown> = {}) =>
+      fs.promises.writeFile(
+        HANK_PATH,
+        `${JSON.stringify(
+          { $schema: "https://example.com/hank.schema.json", hank: [], ...extra },
+          null,
+          2,
+        )}\n`,
+      );
+
+    it("fails closed with a self-contained error on non-interactive resume with changed hank.json", async () => {
+      await writeHank();
+      const firstRun = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+        hankPath: HANK_PATH,
+      });
+      expect(firstRun.hankHash).toBeTruthy();
+
+      await writeHank({ changed: true });
+
+      // NODE_ENV=test makes isNonInteractive() true, so the resume must throw
+      // the self-contained non-interactive error — not a fake user cancel.
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (...args: unknown[]) => {
+        warnings.push(args.join(" "));
+      };
+      let error: Error | undefined;
+      try {
+        await setupExecutionEnvironment({
+          readOnlySourceDataPath: DATA_SOURCE_DIR,
+          executionPath: EXECUTION_DIR,
+          hankPath: HANK_PATH,
+        });
+      } catch (e) {
+        error = e as Error;
+      } finally {
+        console.warn = originalWarn;
+      }
+
+      expect(error).toBeDefined();
+      expect(error?.message).toMatch(/does not match the configuration recorded/);
+      expect(error?.message).toMatch(/refusing to resume in non-interactive mode/);
+      expect(error?.message).toContain("-y");
+      expect(error?.message).toContain("--start-new");
+      expect(error?.message).not.toMatch(/Operation cancelled by user/);
+      expect(warnings.join("\n")).not.toContain("skipping confirmation prompt");
+
+      // Fail-closed: the recorded hash must be untouched by the rejected resume
+      const meta = JSON.parse(
+        await fs.promises.readFile(
+          path.join(EXECUTION_DIR, ".hankweave", "execution-meta.json"),
+          "utf-8",
+        ),
+      );
+      expect(meta.hankHash).toBe(firstRun.hankHash);
+    });
+
+    it("resumes and updates the recorded hash with skipConfirmation (-y)", async () => {
+      await writeHank();
+      const firstRun = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+        hankPath: HANK_PATH,
+      });
+
+      await writeHank({ changed: true });
+
+      const secondRun = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        hankPath: HANK_PATH,
+        skipConfirmation: true,
+      });
+
+      expect(secondRun.isResuming).toBe(true);
+      expect(secondRun.configChanged).toBe(true);
+      expect(secondRun.hankHash).toBeTruthy();
+      expect(secondRun.hankHash).not.toBe(firstRun.hankHash);
+
+      const meta = JSON.parse(
+        await fs.promises.readFile(
+          path.join(EXECUTION_DIR, ".hankweave", "execution-meta.json"),
+          "utf-8",
+        ),
+      );
+      expect(meta.hankHash).toBe(secondRun.hankHash);
+    });
+
+    it("does not report a config change after ensureSchemaUrl rewrote a schema-less hank.json", async () => {
+      // Regression: setup hashes hank.json, then index.ts runs ensureSchemaUrl,
+      // which rewrites a schema-less file. The recorded hash must reflect the
+      // post-rewrite content so an unmodified resume never sees a phantom change.
+      await fs.promises.writeFile(HANK_PATH, `${JSON.stringify({ hank: [] }, null, 2)}\n`);
+
+      const firstRun = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+        hankPath: HANK_PATH,
+      });
+
+      // index.ts calls ensureSchemaUrl AFTER execution setup — file is rewritten
+      expect(ensureSchemaUrl(HANK_PATH)).toBe(true);
+
+      // Unmodified resume, no skipConfirmation: would fail closed under
+      // NODE_ENV=test if a config change were (wrongly) detected.
+      const secondRun = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        hankPath: HANK_PATH,
+      });
+
+      expect(secondRun.isResuming).toBe(true);
+      expect(secondRun.configChanged).toBe(false);
+      expect(secondRun.hankHash).toBe(firstRun.hankHash);
+    });
+
+    it("fails closed on --headless resume with changed hank.json even in an interactive environment", async () => {
+      await writeHank();
+      await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+        hankPath: HANK_PATH,
+      });
+
+      await writeHank({ changed: true });
+
+      // Simulate a real terminal (no CI vars, no NODE_ENV=test, TTY on both
+      // ends) so headless alone is what forces the non-interactive path.
+      const envKeys = [
+        "CI",
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "JENKINS",
+        "CIRCLECI",
+        "TRAVIS",
+        "NODE_ENV",
+      ] as const;
+      const savedEnv = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
+      const savedStdinTty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+      const savedStdoutTty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+      for (const key of envKeys) {
+        delete process.env[key];
+      }
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+
+      try {
+        // Sanity: the stubs must have taken effect, or this test proves nothing
+        expect(isNonInteractive()).toBe(false);
+
+        await expect(
+          setupExecutionEnvironment({
+            readOnlySourceDataPath: DATA_SOURCE_DIR,
+            executionPath: EXECUTION_DIR,
+            hankPath: HANK_PATH,
+            headless: true,
+          }),
+        ).rejects.toThrow(/refusing to resume in non-interactive mode/);
+      } finally {
+        for (const key of envKeys) {
+          if (savedEnv[key] === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = savedEnv[key];
+          }
+        }
+        // No own descriptor originally means the stubbed one must be deleted,
+        // or both streams would stay marked as TTY for every later test.
+        if (savedStdinTty) {
+          Object.defineProperty(process.stdin, "isTTY", savedStdinTty);
+        } else {
+          delete (process.stdin as { isTTY?: boolean }).isTTY;
+        }
+        if (savedStdoutTty) {
+          Object.defineProperty(process.stdout, "isTTY", savedStdoutTty);
+        } else {
+          delete (process.stdout as { isTTY?: boolean }).isTTY;
+        }
+      }
+    });
+
+    it("does not report a data or config change after ensureSchemaUrl rewrote hank.json inside the data directory", async () => {
+      // Regression for the auto-discovery layout: hank.json lives INSIDE the
+      // data source, so a post-hash rewrite would change the data hash too and
+      // the next resume would fail with "Data source has changed". index.ts
+      // therefore runs ensureSchemaUrl BEFORE setupExecutionEnvironment —
+      // mirror that order here.
+      const hankInDataPath = path.join(DATA_SOURCE_DIR, "hank.json");
+      await fs.promises.writeFile(hankInDataPath, `${JSON.stringify({ hank: [] }, null, 2)}\n`);
+
+      expect(ensureSchemaUrl(hankInDataPath)).toBe(true);
+      const firstRun = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        startNew: true,
+        hankPath: hankInDataPath,
+      });
+
+      // Unmodified resume: neither a data mismatch nor a config change
+      const secondRun = await setupExecutionEnvironment({
+        readOnlySourceDataPath: DATA_SOURCE_DIR,
+        executionPath: EXECUTION_DIR,
+        hankPath: hankInDataPath,
+      });
+
+      expect(secondRun.isResuming).toBe(true);
+      expect(secondRun.configChanged).toBe(false);
+      expect(secondRun.dataHash).toBe(firstRun.dataHash);
+      expect(secondRun.hankHash).toBe(firstRun.hankHash);
+    });
+  });
+
+  describe("isNonInteractive", () => {
+    const interactiveInputs = {
+      env: {} as NodeJS.ProcessEnv,
+      stdin: { isTTY: true },
+      stdout: { isTTY: true },
+    };
+
+    it("treats headless as non-interactive even with a full TTY environment", () => {
+      expect(isNonInteractive({ ...interactiveInputs, headless: true })).toBe(true);
+    });
+
+    it("stays interactive for a TTY environment without headless", () => {
+      expect(isNonInteractive({ ...interactiveInputs })).toBe(false);
+    });
+
+    it("is non-interactive under CI, test env, or missing TTY", () => {
+      expect(isNonInteractive({ ...interactiveInputs, env: { CI: "1" } })).toBe(true);
+      expect(isNonInteractive({ ...interactiveInputs, env: { NODE_ENV: "test" } })).toBe(true);
+      expect(isNonInteractive({ ...interactiveInputs, stdin: { isTTY: undefined } })).toBe(true);
+      expect(isNonInteractive({ ...interactiveInputs, stdout: { isTTY: undefined } })).toBe(true);
     });
   });
 });

@@ -3,9 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
-import { DEFAULT_CONFIG } from "./config.js";
+import { DEFAULT_CONFIG, normalizeHankContent } from "./config.js";
 import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import { checkRegularFile } from "./fs-guards.js";
+import { ensureJournalRestored } from "./storage/journal-diet.js";
 import {
   detectRuntime,
   getManagedExecutionsRoot,
@@ -16,27 +18,42 @@ import {
 
 /**
  * Check if we're in a non-interactive environment (CI, tests, pipes, etc.)
+ * or an explicitly headless run (--headless must never prompt).
+ *
+ * Inputs are injectable for testing; they default to the real process state.
  */
-function isNonInteractive(): boolean {
+export function isNonInteractive(
+  options: {
+    headless?: boolean;
+    env?: NodeJS.ProcessEnv;
+    stdin?: { isTTY?: boolean };
+    stdout?: { isTTY?: boolean };
+  } = {},
+): boolean {
+  const {
+    headless = false,
+    env = process.env,
+    stdin = process.stdin,
+    stdout = process.stdout,
+  } = options;
+
+  // --headless runs unattended even from a real terminal
+  if (headless) {
+    return true;
+  }
+
   // Check for common CI environment variables
-  if (
-    process.env.CI ||
-    process.env.GITHUB_ACTIONS ||
-    process.env.GITLAB_CI ||
-    process.env.JENKINS ||
-    process.env.CIRCLECI ||
-    process.env.TRAVIS
-  ) {
+  if (env.CI || env.GITHUB_ACTIONS || env.GITLAB_CI || env.JENKINS || env.CIRCLECI || env.TRAVIS) {
     return true;
   }
 
   // Check for test environment (Bun sets NODE_ENV=test)
-  if (process.env.NODE_ENV === "test") {
+  if (env.NODE_ENV === "test") {
     return true;
   }
 
   // Both stdin and stdout must be TTY for interactive mode
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+  if (!stdin.isTTY || !stdout.isTTY) {
     return true;
   }
 
@@ -48,9 +65,9 @@ function isNonInteractive(): boolean {
  * Returns true if user confirms, false otherwise.
  * In non-interactive environments, returns false immediately.
  */
-async function promptConfirmation(message: string): Promise<boolean> {
-  // In non-interactive mode (CI, tests, pipes), default to false (don't continue)
-  if (isNonInteractive()) {
+async function promptConfirmation(message: string, headless = false): Promise<boolean> {
+  // In non-interactive mode (CI, tests, pipes, --headless), default to false (don't continue)
+  if (isNonInteractive({ headless })) {
     console.warn("⚠️  Non-interactive mode, skipping confirmation prompt.");
     return false;
   }
@@ -134,10 +151,18 @@ export async function setupExecutionEnvironment(options: {
   dataHashTimeLimit?: number; // Time limit for hashing
   startNew?: boolean; // Force new execution
   forceMode?: boolean; // Force operation in existing directories with .hankweave
-  skipConfirmation?: boolean; // Skip confirmation prompts (-y flag)
+  skipConfirmation?: boolean; // Skip confirmation prompts (-y/--yes)
   hankPath?: string; // Path to hank.json for hash tracking
   ignoreDataMismatch?: boolean; // Skip data hash verification on resume
   noWipe?: boolean; // Preserve existing agentRoot/ on --start-new --force
+  headless?: boolean; // --headless: never prompt, fail closed like CI
+  /**
+   * Skip the dieted-journal auto-restore on resume. For flows that only
+   * DELETE the execution (--cleanup): restoring first is wasted work, and a
+   * damaged diet pair would abort setup and make the cleanup of exactly
+   * that broken execution impossible.
+   */
+  skipJournalRestore?: boolean;
 }): Promise<ExecutionSetup> {
   const {
     readOnlySourceDataPath,
@@ -150,6 +175,7 @@ export async function setupExecutionEnvironment(options: {
     hankPath,
     ignoreDataMismatch = false,
     noWipe = false,
+    headless = false,
   } = options;
 
   // Verify data source exists
@@ -182,7 +208,13 @@ export async function setupExecutionEnvironment(options: {
     }
     if (!problem) {
       const hankContent = await fs.promises.readFile(hankPath, "utf-8");
-      hankHash = crypto.createHash("sha256").update(hankContent).digest("hex");
+      // Hash the content as ensureSchemaUrl will leave it on disk: it rewrites
+      // a schema-less hank.json AFTER this hash is recorded, so hashing the raw
+      // content would make the very next resume report a phantom config change.
+      hankHash = crypto
+        .createHash("sha256")
+        .update(normalizeHankContent(hankContent))
+        .digest("hex");
     }
   }
 
@@ -193,8 +225,7 @@ export async function setupExecutionEnvironment(options: {
     const managedExecBase = getManagedExecutionsRoot();
     if (executionPath.startsWith(managedExecBase)) {
       // Allow resuming existing executions (they have .hankweave/execution-meta.json)
-      const metaPath = path.join(executionPath, ".hankweave", "execution-meta.json");
-      if (!fs.existsSync(metaPath)) {
+      if (!fs.existsSync(new ExecutionLayout(executionPath).metaPath)) {
         throw new Error(
           `❌ Cannot create new execution in ~/.hankweave-executions/.\n` +
             `This location is reserved for auto-managed executions.\n` +
@@ -210,7 +241,7 @@ export async function setupExecutionEnvironment(options: {
         const entries = await fs.promises.readdir(executionPath);
 
         if (entries.length > 0) {
-          const hasHankweave = entries.includes(".hankweave");
+          const hasHankweave = ExecutionLayout.hasExecutionState(entries);
 
           // Tier 2: Directory already has Hankweave execution
           if (hasHankweave) {
@@ -218,8 +249,9 @@ export async function setupExecutionEnvironment(options: {
               // Backup existing .hankweave (metadata + checkpoint history) so
               // the prior run stays recoverable.
               const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-              const backupPath = path.join(executionPath, `.hankweave.backup-${timestamp}`);
-              await fs.promises.rename(path.join(executionPath, ".hankweave"), backupPath);
+              const existing = new ExecutionLayout(executionPath);
+              const backupPath = existing.stateBackupDir(timestamp);
+              await fs.promises.rename(existing.stateDir, backupPath);
               console.log(`📦 Backed up existing execution to: ${backupPath}`);
 
               // Wipe the prior agentRoot/ so stale outputs from the previous
@@ -233,7 +265,7 @@ export async function setupExecutionEnvironment(options: {
               // survive a forced fresh start. The fresh checkpoint store starts
               // from an empty initial commit and captures the preserved files on
               // the first codon checkpoint.
-              const staleAgentRoot = path.join(executionPath, "agentRoot");
+              const staleAgentRoot = existing.agentRootPath;
               if (noWipe) {
                 if (fs.existsSync(staleAgentRoot)) {
                   console.log(
@@ -251,14 +283,14 @@ export async function setupExecutionEnvironment(options: {
               }
             } else {
               throw new Error(
-                `❌ Directory already contains execution state: ${executionPath}/.hankweave\n` +
+                `❌ Directory already contains execution state: ${executionPath}/${ExecutionLayout.STATE_DIR}\n` +
                   `This directory has an existing Hankweave execution.\n` +
                   `Options:\n` +
                   `  • Resume this execution (default):\n` +
                   `      hankweave --execution ${executionPath}\n` +
                   `  • Start fresh, backup existing state:\n` +
                   `      hankweave --execution ${executionPath} --start-new --force\n` +
-                  `      (state backed up to .hankweave.backup-{timestamp})\n` +
+                  `      (state backed up to ${ExecutionLayout.STATE_BACKUP_PREFIX}{timestamp})\n` +
                   `  • Use a different directory:\n` +
                   `      hankweave --execution ./other-dir`,
               );
@@ -278,19 +310,23 @@ export async function setupExecutionEnvironment(options: {
                 `  Hankweave agents will have access to READ and MODIFY files in this directory.`,
               );
               console.log(`\n  Hankweave will create:`);
-              console.log(`    ./.hankweave/           (execution metadata)`);
-              console.log(`    ./read_only_data_source/  (symlink to data)`);
+              console.log(`    ./${ExecutionLayout.STATE_DIR}/           (execution metadata)`);
+              console.log(`    ./${ExecutionLayout.AGENT_ROOT}/            (agent workspace)`);
+              console.log(
+                `    ./${ExecutionLayout.AGENT_ROOT}/${ExecutionLayout.DATA_SOURCE}/  (symlink to data)`,
+              );
+              console.log(`    ./${ExecutionLayout.RIG_ARCHIVE}/           (archived outputs)`);
               console.log(
                 `\n  IMPORTANT: Always use version control. Test hanks on non-critical directories first.\n`,
               );
 
-              const confirmed = await promptConfirmation("Continue?");
+              const confirmed = await promptConfirmation("Continue?", headless);
               if (!confirmed) {
                 throw new Error("Operation cancelled by user.");
               }
             } else if (skipConfirmation) {
               console.warn(
-                `⚠️  Running in non-empty directory with -y flag: ${executionPath} (${files} files, ${directories} directories)`,
+                `⚠️  Running in non-empty directory with confirmation prompts skipped: ${executionPath} (${files} files, ${directories} directories)`,
               );
             }
           }
@@ -334,7 +370,7 @@ export async function setupExecutionEnvironment(options: {
         }
 
         // Check if it has execution metadata
-        const metaPath = path.join(executionPath, ".hankweave", "execution-meta.json");
+        const metaPath = new ExecutionLayout(executionPath).metaPath;
         if (fs.existsSync(metaPath)) {
           // Has .hankweave - verify hash and resume
           const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
@@ -366,13 +402,32 @@ export async function setupExecutionEnvironment(options: {
           // Check for hank config changes
           if (hankHash && meta.hankHash && meta.hankHash !== hankHash) {
             configChanged = true;
+
+            // Fail closed with a self-contained error when we can't ask —
+            // "Operation cancelled by user." below is reserved for an actual
+            // interactive decline.
+            if (!skipConfirmation && !forceMode && isNonInteractive({ headless })) {
+              throw new Error(
+                `hank.json does not match the configuration recorded for this execution ` +
+                  `(recorded ${meta.hankHash.substring(0, 12)}..., current ${hankHash.substring(0, 12)}...); ` +
+                  `refusing to resume in non-interactive mode.\n` +
+                  `Options:\n` +
+                  `  • Accept the changed config and resume: add -y\n` +
+                  `  • Start a fresh managed execution: omit --execution and add --start-new\n` +
+                  `  • Start fresh in this directory: --start-new --force (backs up state; wipes the workspace unless --no-wipe)`,
+              );
+            }
+
             console.log(`\n⚠️  WARNING: hank.json has changed since last execution.`);
             console.log(`  Previous hash: ${meta.hankHash.substring(0, 12)}...`);
             console.log(`  Current hash:  ${hankHash.substring(0, 12)}...`);
             console.log(`  Changes may affect execution behavior.\n`);
 
             if (!skipConfirmation && !forceMode) {
-              const confirmed = await promptConfirmation("Continue with modified config?");
+              const confirmed = await promptConfirmation(
+                "Continue with modified config?",
+                headless,
+              );
               if (!confirmed) {
                 throw new Error("Operation cancelled by user.");
               }
@@ -426,10 +481,17 @@ export async function setupExecutionEnvironment(options: {
     }
   }
 
+  // Diet P4 resume path (single choke point for every resume path —
+  // explicit --execution, managed root, resume-by-dataHash): a dieted
+  // journal is auto-restored in place (verified byte-identical) so resume
+  // just works; only damaged diet artifacts still abort the setup.
+  if (isResuming && !options.skipJournalRestore) {
+    await ensureJournalRestored(finalExecutionPath, (message) => console.log(message));
+  }
+
   // Create the new directory structure: agentRoot/ and rigArchive/
-  const agentRootPath = path.join(finalExecutionPath, "agentRoot");
-  const rigArchivePath = path.join(finalExecutionPath, "rigArchive");
-  const dataPathInExecutionDir = path.join(agentRootPath, "read_only_data_source");
+  const layout = new ExecutionLayout(finalExecutionPath);
+  const { agentRootPath, rigArchivePath, dataPathInExecutionDir } = layout;
 
   // Ensure agentRoot/ and rigArchive/ directories exist
   await fs.promises.mkdir(agentRootPath, { recursive: true });
@@ -485,11 +547,10 @@ export async function setupExecutionEnvironment(options: {
   }
 
   // Create/update metadata
-  const metaDir = path.join(finalExecutionPath, ".hankweave");
-  await fs.promises.mkdir(metaDir, { recursive: true });
+  await fs.promises.mkdir(layout.stateDir, { recursive: true });
 
   // Create empty archive manifest if it doesn't exist (for archiveOnSuccess feature)
-  const archiveManifestPath = path.join(metaDir, "archive-manifest.json");
+  const archiveManifestPath = layout.archiveManifestPath;
   if (!fs.existsSync(archiveManifestPath)) {
     await fs.promises.writeFile(
       archiveManifestPath,
@@ -497,7 +558,7 @@ export async function setupExecutionEnvironment(options: {
     );
   }
 
-  const existingMetaPath = path.join(metaDir, "execution-meta.json");
+  const existingMetaPath = layout.metaPath;
   const existingMeta = fs.existsSync(existingMetaPath)
     ? JSON.parse(await fs.promises.readFile(existingMetaPath, "utf-8"))
     : null;

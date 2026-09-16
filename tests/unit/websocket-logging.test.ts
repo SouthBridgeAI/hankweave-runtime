@@ -113,12 +113,11 @@ describe("WebSocket Logging", () => {
       const message: ServerEvent = {
         id: EventId("evt-large"),
         timestamp: new Date().toISOString(),
-        type: "file.updated",
+        type: "assistant.action",
         data: {
-          path: "test.txt",
-          filename: "test.txt",
+          codonId: "codon-large",
+          action: "message" as const,
           content: largeData,
-          action: "modified" as const,
         },
       };
 

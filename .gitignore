@@ -215,4 +215,5 @@ verdaccio.pid
 new-models-dev
 
 # superbench workspace (runs/, logs/, downloaded benchmark data — see .claude/skills/bench)
-.bench-ws/ 
+.bench-ws/
+

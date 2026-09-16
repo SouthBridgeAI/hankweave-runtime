@@ -1,16 +1,30 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { minimatch } from "minimatch";
 import { ArchiveManifestManager } from "./archive-manifest.js";
+import { BodyResolver } from "./body-resolver.js";
 import { Budget } from "./budget.js";
-import { CheckpointGit } from "./checkpoint-git.js";
+import {
+  assertGitAvailable,
+  CheckpointGit,
+  CheckpointNotFoundError,
+  CheckpointStorageError,
+  type RecoverySnapshot,
+  type RestorePreconditions,
+} from "./checkpoint-git.js";
 import { CodonRunner, type ExtensionInfo } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { synthesizeMissingFailureReason } from "./error-classification.js";
 import { EventJournal } from "./event-journal.js";
-import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
+import { ExecutionLayout } from "./execution-layout.js";
+import { checkpointPatternsThrough } from "./execution-planner.js";
+import {
+  analyzeExecutionThread,
+  bestConfirmedCheckpoint,
+  findContinuationSessionId,
+} from "./execution-thread.js";
 import { fileResolver } from "./file-resolver.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { ProxyRunner } from "./llm-proxy.js";
@@ -45,8 +59,16 @@ import {
 } from "./schemas/event-schemas.js";
 import { SentinelConfigLoader } from "./sentinels/sentinel-config-loader.js";
 import { SentinelManager } from "./sentinels/sentinel-manager.js";
+import { ShutdownWatchdog, shutdownWatchdogWanted } from "./shutdown-watchdog.js";
 import { StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
+import {
+  dietJournal,
+  ensureJournalRestored,
+  isProcessOwnedLock,
+  registerProcessOwnedLock,
+  releaseProcessOwnedLock,
+} from "./storage/journal-diet.js";
 import { isTraceEnabled, registerTraceUpload } from "./trace-watcher.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { CodonId, EventId, RunId, SessionId } from "./types/branded-types.js";
@@ -69,7 +91,6 @@ import {
   isTerminalCodonStatus,
   type Run,
 } from "./types/state-types.js";
-import type { ToolInputMap, ToolName } from "./types/tool-types.js";
 import type {
   CheckpointInfo,
   ClientData,
@@ -86,7 +107,6 @@ import type {
 import { ClientMode } from "./types/types.js";
 import {
   assertNever,
-  buildFileTree,
   copyFiles,
   escapeShellArg,
   generateId,
@@ -103,13 +123,37 @@ import {
  */
 
 /**
+ * Thrown when a rollback failed AFTER it had started changing the work tree
+ * (a checkpoint was checked out or rig directories were removed). The tree
+ * may be half-restored; the pre-rollback tree is on a recovery/* branch.
+ * Callers must not start new work on it — unlike a rollback rejected up
+ * front (CheckpointNotFoundError), which left the tree untouched and may be
+ * degraded around.
+ */
+interface ArchiveRestoreResult {
+  entry: import("./archive-manifest.js").ArchiveEntry;
+  path: string;
+  success: boolean;
+  error?: string;
+}
+
+export class RollbackMutatedWorkspaceError extends Error {
+  constructor(cause: unknown) {
+    super(`Rollback failed after the work tree was changed: ${toError(cause).message}`, {
+      cause,
+    });
+    this.name = "RollbackMutatedWorkspaceError";
+  }
+}
+
+/**
  * Main server class that orchestrates Claude codons.
  *
  * Responsibilities:
  * - WebSocket server management (multiple clients)
  * - Codon execution and lifecycle
  * - Claude process management
- * - File watching and change detection
+ * - Watched-file event routing
  * - State persistence and recovery
  * - Cost tracking and reporting
  * - Event streaming to clients
@@ -127,6 +171,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private replay: Replay | undefined;
 
   // State management
+  /** Well-known paths under config.executionPath, derived once. */
+  private readonly layout: ExecutionLayout;
   private stateManager: StateManager;
   private currentRunId: RunId | null = null;
   private heartbeatInterval?: NodeJS.Timeout;
@@ -146,7 +192,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   > = new Map();
 
   // Temporary state during codon execution
-  private watchedPatterns: string[] = [];
   private currentCodon:
     | {
         status: "initializing" | "running";
@@ -157,18 +202,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         startTime: Date;
       }
     | undefined;
-  private recentFileAccess:
-    | {
-        path: string;
-        content: string;
-        timestamp: Date;
-      }
-    | undefined;
   // Map of codonId -> CodonRunner - single source of truth for all runners
   private codonRunners = new Map<string, CodonRunner>();
   private serverStartTime: Date;
   private isShuttingDown = false;
-  private shutdownWatchdog?: NodeJS.Timeout;
+  private readonly watchdog = new ShutdownWatchdog({
+    timeoutMs: TIMEOUTS.SHUTDOWN_WATCHDOG_MS,
+    log: (message, level) => this.logger.log(message, level),
+  });
   private isSkippingCodon = false;
   private uploadTrace?: () => void;
 
@@ -183,12 +224,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    */
   private initialAutostartTriggered = false;
 
-  // Checkpoint-related properties
-  private checkpointGit: CheckpointGit | null = null;
-  private checkpointingEnabled = true;
+  // Checkpoint-related properties. Both objects are built in the constructor
+  // (neither touches disk there) and brought up by initializeCheckpoints() in
+  // start(), which throws rather than leave them unusable. Non-nullable so no
+  // caller has to ask whether the repo "is there".
+  private readonly checkpointGit: CheckpointGit;
+  /**
+   * The recovery snapshot taken during this boot, if any. start() may reach
+   * the fresh-run fallback after a rung that already snapshotted the work
+   * tree; nothing changes the tree in between, so one snapshot is enough.
+   */
+  private bootRecoverySnapshot: RecoverySnapshot | null = null;
 
   // Archive manifest for archiveOnSuccess feature
-  private archiveManifest: ArchiveManifestManager | null = null;
+  private readonly archiveManifest: ArchiveManifestManager;
 
   // Failure tracking
   private codonFailureReason?: FailureReason;
@@ -204,6 +253,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(message, "info"),
   );
   private budget: Budget | null = null;
+
+  // Per-run file.updated fingerprint chokepoint and sentinel body source
+  // (fingerprint-events proposal). Spans codon boundaries by design; cleared
+  // on run start and rollback. Assigned in the constructor (needs config).
+  private readonly bodyResolver: BodyResolver;
 
   // Rollback state
   private isRollingBack = false;
@@ -256,14 +310,28 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       : path.join(this.config.executionPath, this.config.lockFile);
 
     // Initialize state manager with execution path
-    const hankweaveDir = path.join(this.config.executionPath, ".hankweave");
-    this.stateManager = new StateManager(hankweaveDir, this.logger, this.config.codons);
+    this.layout = new ExecutionLayout(this.config.executionPath);
+    this.stateManager = new StateManager(this.layout, this.logger, this.config.codons);
+
+    // Checkpoint repository and archive manifest: constructing either is pure
+    // bookkeeping (paths + logger); initializeCheckpoints() does the disk work.
+    this.checkpointGit = new CheckpointGit(
+      this.config.executionPath,
+      this.config.agentRootPath,
+      this.logger,
+    );
+    this.stateManager.setCheckpointGit(this.checkpointGit);
+    this.archiveManifest = new ArchiveManifestManager(this.config.executionPath, this.logger);
 
     // Initialize Event Journal with file-based storage
-    this.eventJournal = new EventJournal(new FileEventStorage(path.join(hankweaveDir, "events")));
+    this.eventJournal = new EventJournal(new FileEventStorage(this.layout.eventsDir));
 
     // Initialize sentinel config loader (stateful, with cache)
     this.sentinelConfigLoader = new SentinelConfigLoader(this.logger);
+
+    // file.updated events carry fingerprints only; this resolver retains the
+    // bodies for sentinel `content` access (fingerprint-events proposal).
+    this.bodyResolver = new BodyResolver(this.config.agentRootPath, this.logger);
 
     // Initialize SentinelManager
     this.sentinelManager = new SentinelManager({
@@ -272,6 +340,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       healthCheckGracePeriodMs: this.config.sentinel.healthCheckGracePeriodMs,
       waitForHealthChecks: this.config.sentinel.waitForAllHealthChecks,
       rootDirectory: this.config.executionPath, // Ensure sentinel files are in execution directory
+      resolveFileBody: (data) => this.bodyResolver.resolve(data),
     });
 
     // Get LLM registry instance for cost calculations
@@ -429,10 +498,170 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       // Signal 0 doesn't kill the process, just checks if it exists
       process.kill(pid, 0);
       return true;
-    } catch {
-      // ESRCH error means the process doesn't exist
-      return false;
+    } catch (error) {
+      // Only ESRCH proves the process is gone. EPERM means it exists but
+      // belongs to another user — very much alive.
+      return (error as NodeJS.ErrnoException).code !== "ESRCH";
     }
+  }
+
+  /** True only after THIS runtime instance wrote runtime.lock. */
+  private ownsLockFile = false;
+  /** Unique token for this instance's current lock acquisition. */
+  private lockId: string | null = null;
+  /**
+   * Set when a successor's lockId is conclusively observed in runtime.lock:
+   * this runtime is fenced — it must not reacquire the lock, and its
+   * finalize diet must not run (it would unlink the journal the successor
+   * is actively appending to).
+   */
+  private lockLostToSuccessor = false;
+
+  /**
+   * Write runtime.lock atomically (temp + rename). A plain truncating write
+   * that fails midway (ENOSPC/EIO) leaves an empty/partial lock that no
+   * later boot can parse — and fail-closed guards then refuse until someone
+   * deletes it by hand. rename() replaces the file whole or not at all.
+   */
+  private writeLockFileAtomic(json: string): void {
+    const tmp = `${this.config.lockFile}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, json);
+    fs.renameSync(tmp, this.config.lockFile);
+  }
+
+  /**
+   * Remove the lock file only if THIS runtime acquired it AND the file on
+   * disk is still ITS acquisition (lockId match). A runtime whose start()
+   * was refused must not unlink a sibling's lock, and a runtime that hung
+   * past staleness and was legitimately replaced must not unlink its
+   * successor's lock — either would leave a live runtime running unlocked.
+   * The registry entry is always released (by token) and the heartbeat
+   * stopped: an on-disk leftover then reads as recycled once its heartbeat
+   * lapses, instead of wedging later same-process runtimes or being kept
+   * fresh forever by an orphaned timer.
+   */
+  private removeOwnLockFile(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = undefined;
+    }
+    if (!this.ownsLockFile) return;
+    try {
+      let stillOurs = false;
+      try {
+        const current = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8")) as {
+          lockId?: unknown;
+        };
+        stillOurs = this.lockId !== null && current.lockId === this.lockId;
+      } catch {
+        // Absent, unreadable, or unparseable: not provably ours — leave it.
+      }
+      if (stillOurs) {
+        try {
+          fs.unlinkSync(this.config.lockFile);
+          this.logger.log("Lock file removed");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            this.logger.log(`Failed to remove lock file: ${error}`, "error");
+          }
+        }
+      } else {
+        this.logger.log("Lock file is no longer this runtime's acquisition — leaving it");
+      }
+    } finally {
+      if (this.lockId !== null) releaseProcessOwnedLock(this.lockId);
+      this.lockId = null;
+      this.ownsLockFile = false;
+    }
+  }
+
+  /**
+   * Fail fast when runtime.lock names a POSITIVELY live sibling instance —
+   * read-only, before any journal mutation (restore, append-mode open). A
+   * live pid with a fresh heartbeat always refuses: the old "recovering the
+   * same run" branch in start()'s lock check let a second instance run
+   * alongside a live first one (its own TODO admits recovery was never
+   * implemented), and two instances racing one journal is data loss. Dead
+   * and stale-heartbeat locks pass through — their removal, and the
+   * RunCrashed transitions, stay with start()'s full lock check.
+   */
+  private assertNoLiveSiblingLock(): void {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(this.config.lockFile, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return; // No lock — nothing to protect against.
+      }
+      // Present but unreadable: owner liveness is unknown — fail closed
+      // before the journal-mutating steps below (a torn heartbeat rewrite
+      // must not read as "no owner").
+      throw new Error(
+        `${this.config.lockFile} exists but could not be read — refusing to touch the event ` +
+          `journal while owner liveness is unknown. Remove the lock file if this is incorrect.`,
+      );
+    }
+    let pid: number | null = null;
+    let heartbeatFresh = true;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      // Only a POSITIVE integer is a pid — kill(-n, 0) probes a process group.
+      if (parsed && typeof parsed === "object") {
+        const info = parsed as { pid?: unknown; lastHeartbeat?: unknown };
+        if (typeof info.pid === "number" && Number.isInteger(info.pid) && info.pid > 0) {
+          pid = info.pid;
+        }
+        if (typeof info.lastHeartbeat === "string") {
+          const age = Date.now() - new Date(info.lastHeartbeat).getTime();
+          // A heartbeat we cannot parse is unknown, not stale — fail closed.
+          heartbeatFresh = Number.isNaN(age) ? true : age <= 120000;
+        }
+      } else if (typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0) {
+        // Legacy bare-pid locks parse as a JSON number, not an object.
+        pid = parsed;
+      }
+    } catch {
+      const bare = Number(raw.trim());
+      if (Number.isInteger(bare) && bare > 0) pid = bare;
+    }
+    if (pid === null) {
+      // Neither JSON nor a bare pid — e.g. a torn mid-write lock. Liveness
+      // unknown: fail closed, matching start()'s own unparseable-lock refusal
+      // but BEFORE any journal mutation instead of after.
+      throw new Error(
+        `${this.config.lockFile} exists but could not be parsed — refusing to touch the event ` +
+          `journal while owner liveness is unknown. Remove the lock file if this is incorrect.`,
+      );
+    }
+    if (pid === process.pid) {
+      if (isProcessOwnedLock(this.config.lockFile)) {
+        // We wrote this lock: a live runtime in THIS process owns the
+        // directory (two in-process runtimes, as integration tests do).
+        throw new Error(
+          `Server already running in this process — refusing to touch its event journal ` +
+            `(${this.config.lockFile}).`,
+        );
+      }
+      if (!heartbeatFresh) {
+        // A dead predecessor whose pid we recycled (e.g. a restarted PID-1
+        // container), gone long enough for its heartbeat to lapse — not a
+        // sibling.
+        return;
+      }
+      // Fresh (or unknown) heartbeat on an own-pid lock we did not write:
+      // possibly a live incumbent in another pid namespace sharing this
+      // volume (both PID 1). Refuse; a real leftover goes stale in 2min.
+      throw new Error(
+        `${this.config.lockFile} names this process's pid but was not written by it, and its ` +
+          `heartbeat is not stale — refusing to touch the event journal. Retry after the ` +
+          `heartbeat lapses, or remove the lock file if no runtime is running.`,
+      );
+    }
+    if (!heartbeatFresh || !this.isProcessRunning(pid)) return;
+    throw new Error(
+      `Server already running (PID: ${pid}) — refusing to touch its event journal. ` +
+        `Remove ${this.config.lockFile} if this is incorrect.`,
+    );
   }
 
   /**
@@ -456,6 +685,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // NOTE: Proxy startup moved AFTER WebSocket server to support dynamic ports
 
+    // A live sibling instance may own this directory — including one mid-
+    // shutdown whose finalize diet is about to swap events.jsonl for the
+    // compressed pair. Touching the journal in that window buries its
+    // history (our append-mode open would create an empty journal beside the
+    // valid diet), and touching the checkpoint repo (rebuild,
+    // temp-folder sweep) races its builder. Positively-live locks fail the
+    // boot HERE, before either; dead/stale locks are recovered later by the
+    // full lock check below, which owns lock removal and RunCrashed
+    // transitions.
+    this.assertNoLiveSiblingLock();
+
     // Initialize checkpoint system (checks for existing .hankweave)
     this.logger.log(`[DEBUG] Initializing checkpoints...`);
     await this.initializeCheckpoints();
@@ -472,7 +712,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       logger: this.logger,
     });
 
-    // Initialize event journal
+    // Initialize event journal. A dieted directory is auto-restored first
+    // (verified byte-identical, stale diet pair pruned): the runtime must
+    // never append to a dieted directory, and restoring is how a boot or
+    // resume on one just works. Damaged diet artifacts still fail the boot.
+    await ensureJournalRestored(this.config.executionPath, (message) => this.logger.log(message));
     this.logger.log(`[DEBUG] Initializing event journal...`);
     await this.eventJournal.initialize();
     this.logger.log(`[DEBUG] Event journal initialized`);
@@ -497,11 +741,37 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
       // Parse lock file for enhanced data
       try {
-        const lockInfo = JSON.parse(lockData);
-        const heartbeatAge = Date.now() - new Date(lockInfo.lastHeartbeat).getTime();
+        const parsedLock = JSON.parse(lockData) as unknown;
+        // A legacy bare-pid lock parses as a JSON number, not an object —
+        // coerce it so a DEAD legacy lock is recovered below instead of
+        // process.kill(undefined) reading as alive. Anything without an
+        // integer pid throws into the old-format refusal.
+        const lockInfo = (
+          parsedLock && typeof parsedLock === "object" ? parsedLock : { pid: parsedLock }
+        ) as { pid?: unknown; lastHeartbeat?: unknown; runId?: string };
+        if (
+          typeof lockInfo.pid !== "number" ||
+          !Number.isInteger(lockInfo.pid) ||
+          lockInfo.pid <= 0 // kill(-n, 0) probes a process GROUP, not a pid
+        ) {
+          throw new Error(`lock file has no usable pid`);
+        }
+        const heartbeatAge = Date.now() - new Date(String(lockInfo.lastHeartbeat)).getTime();
+
+        // A lock naming OUR pid that this process did not write, whose
+        // heartbeat has lapsed, is a dead predecessor's leftover on a
+        // recycled pid (restarted PID-1 container) — kill(0) on ourselves
+        // would read it as alive and this check would refuse forever. Route
+        // it through the dead-process recovery below. A fresh-or-unknown
+        // heartbeat does NOT qualify: it may be a live incumbent in another
+        // pid namespace sharing the volume.
+        const ownRecycled =
+          lockInfo.pid === process.pid &&
+          !isProcessOwnedLock(this.config.lockFile) &&
+          heartbeatAge > 120000;
 
         // First check if the process is actually running
-        const processRunning = this.isProcessRunning(lockInfo.pid);
+        const processRunning = !ownRecycled && this.isProcessRunning(lockInfo.pid);
 
         if (!processRunning) {
           // Process is not running - this is a crash regardless of heartbeat age
@@ -536,18 +806,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             });
           }
         } else {
-          // Process is running and heartbeat is recent - check if it's our current run
-          const state = this.stateManager.getState();
-          if (state.currentRunId && state.currentRunId === lockInfo.runId) {
-            // We're recovering from a crash - continue the same run
-            // TODO: This needs a lot more implementation to properly continue, but not implemented yet.
-            this.currentRunId = RunId(lockInfo.runId);
-            this.logger.log(`Recovering run ${this.currentRunId}`);
-          } else {
-            throw new Error(
-              `Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`,
-            );
-          }
+          // Process is running and heartbeat is recent: another live instance
+          // owns this directory. The old "recovering the same run" branch
+          // (matching persisted currentRunId) never actually recovered — its
+          // TODO admitted it — and simply let a second instance run beside a
+          // live first one, racing the journal, state.json, and the lock.
+          // A live owner always refuses, whatever run it is on.
+          throw new Error(`Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`);
         }
       } catch (_e) {
         // Old format lock file - just PID
@@ -557,7 +822,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    const thread = await this.stateManager.getExecutionThread();
+    // Recovery decisions below rest on the thread's git validation. The
+    // storage was proven readable by stateManager.initialize(), so this
+    // strict build cannot mistake "unreadable" for "no checkpoints".
+    const thread = await this.stateManager.getExecutionThreadForRecovery();
 
     if (this.replay) {
       // In replay mode, always start a fresh run — we replay all codons from scratch
@@ -566,65 +834,36 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     } else if (thread?.failed) {
       // let see if execution thread from state manager has previously failed
       this.logger.log("Execution thread failed, rolling back...", "error");
-      await this.rollbackToLastSuccess(this.config.autostart);
+      try {
+        await this.rollbackToLastSuccess(this.config.autostart);
+      } catch (error) {
+        // A rollback rejected before it touched the work tree is a
+        // degradation, not a failure: fall through to the continuation/
+        // fresh-run logic below. One that failed after changing files, or
+        // one that found the storage itself unreadable, must NOT start new
+        // work on a half-restored folder — stop with a clear error.
+        if (
+          error instanceof RollbackMutatedWorkspaceError ||
+          error instanceof CheckpointStorageError
+        ) {
+          throw this.recoveryStoppedError("rollback failed", error);
+        }
+        const message =
+          `Recovery degraded: rollback could not start (${toError(error).message}); ` +
+          "falling back to continuation or a fresh run";
+        this.logger.log(`${message} (work tree untouched)`, "error");
+        this.emitErrorEvent(message);
+      }
     }
 
     if (!this.replay && !this.currentRunId) {
-      // Start a new run if needed (also handles the case where a failed thread
-      // had no checkpoints to roll back to — we start fresh instead of hanging)
-      // Check if there's an existing execution thread with completed codons
-      // If so, create a continuation run instead of a fresh run
-      let lastCompletedCodon = thread?.codons.find((tc) => tc.codon.status === "completed");
-
-      // If the thread is empty (e.g., latest run is an empty fresh run),
-      // search directly through state runs to find the last completed codon
-      if (!lastCompletedCodon && thread?.codons.length === 0) {
-        const state = this.stateManager.getState();
-        for (const run of state.runs) {
-          // Skip empty runs
-          if (run.codons.length === 0) continue;
-
-          // Find the last completed codon in this run (codons are in chronological order)
-          for (let i = run.codons.length - 1; i >= 0; i--) {
-            const codon = run.codons[i];
-            if (codon.status === "completed" && codon.completionCheckpoint) {
-              this.logger.log(
-                `Thread was empty, found last completed codon by searching state: ${codon.codonId} in run ${run.runId}`,
-              );
-              // Create a minimal structure to use below
-              lastCompletedCodon = {
-                codon: codon,
-                runId: run.runId,
-              } as import("./execution-thread.js").ThreadCodon;
-              break;
-            }
-          }
-          if (lastCompletedCodon) break;
-        }
-      }
-
-      if (lastCompletedCodon && lastCompletedCodon.codon.status === "completed") {
-        // Create continuation from last completed codon
-        this.logger.log(
-          `Resuming from last completed codon: ${lastCompletedCodon.codon.codonId} in run ${lastCompletedCodon.runId}`,
-        );
-        await this.startNewRun({
-          type: "continuation",
-          source: {
-            runId: lastCompletedCodon.runId,
-            afterCodon: lastCompletedCodon.codon.codonId,
-            checkpointSha: lastCompletedCodon.codon.completionCheckpoint,
-          },
-          reason: "continue",
-        });
-      } else {
-        // No completed codons - start fresh
-        await this.startNewRun();
-      }
+      // Every rollback path above either created the run or left the tree
+      // untouched; pick a continuation seed or start fresh from history.
+      await this.establishRunFromHistory();
 
       // Now switch to the new run's branch if we have checkpoints
       const currentRun = this.stateManager.getCurrentRun();
-      if (currentRun?.gitBranch && this.checkpointGit) {
+      if (currentRun?.gitBranch) {
         // For fresh runs, the branch doesn't exist yet - it will be created on first checkpoint
         // Check if this is a fresh run to avoid unnecessary warnings
         const isFreshRun = currentRun.startingConditions?.type === "fresh";
@@ -827,7 +1066,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         if (proxyPort !== undefined) {
           lockData.proxyPort = proxyPort;
         }
-        fs.writeFileSync(this.config.lockFile, JSON.stringify(lockData));
+        this.writeLockFileAtomic(JSON.stringify(lockData));
         this.logger.log(
           `Lock file updated with port ${actualPort}${proxyPort !== undefined ? `, proxy ${proxyPort}` : ""}`,
         );
@@ -1047,6 +1286,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     sender: HankweaveWebSocket<ClientData>,
   ): Promise<void> {
     this.logger.log(`Handling command: ${command.type}`);
+
+    // Sockets stay open for a while during shutdown's awaited cleanup, and a
+    // fenced runtime's directory may already belong to a successor — no
+    // state-modifying command may land after the shutdown flag flips
+    // (rollback reaching git/workspace resets was the concrete hazard).
+    if (this.isShuttingDown && !this.READ_ONLY_COMMANDS.has(command.type)) {
+      this.logger.log(
+        `Client ${sender.data.id} attempted state-modifying command '${command.type}' during shutdown — refused`,
+        "error",
+      );
+      return;
+    }
 
     // Check if command is blocked during rollback
     if (this.isRollingBack && !this.READ_ONLY_COMMANDS.has(command.type)) {
@@ -1415,6 +1666,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Get the currently executing codon
     const currentCodon = this.stateManager.getCurrentlyRunningCodon();
+    const activeRunner = this.currentCodon
+      ? this.codonRunners.get(this.currentCodon.codonId)
+      : undefined;
 
     const stateSnapshotEvent: StateSnapshotEvent = {
       id: EventId(generateId()),
@@ -1426,7 +1680,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         fileTree: [],
         totalCost,
         totalTime,
-        recentFileAccess: this.recentFileAccess,
+        // Pointer only ({path, timestamp}): the body was always a duplicate
+        // of the immediately-preceding file.updated emission, and no consumer
+        // read it (fingerprint-events proposal).
+        recentFileAccess: activeRunner?.getRecentFileAccess(),
         isRollingBack: this.isRollingBack,
       },
     };
@@ -1451,11 +1708,44 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private async startNewRun(
     startingConditions?: import("./types/state-types.js").StartingConditions,
   ): Promise<void> {
+    if (this.lockLostToSuccessor) {
+      // Fenced BEFORE any state mutation (RunStarted, currentRunId, body
+      // resolver) — a successor owns this directory's state now, and the
+      // later lock-reacquisition refusal alone would fire only after this
+      // method had already queued transitions into the successor's state.
+      throw new Error(
+        "This runtime lost its lock to a successor instance — refusing to start a new run. " +
+          "Shut this instance down.",
+      );
+    }
+    if (this.isShuttingDown) {
+      // A rollback-continuation (or any other caller) racing shutdown must
+      // not rewrite runtime.lock and restart the heartbeat during teardown.
+      throw new Error("Shutdown in progress — refusing to start a new run.");
+    }
     const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
-    const runFolder = path.join(this.config.executionPath, ".hankweave", "runs", runId);
+    const runFolder = path.join(this.layout.runsDir, runId);
+
+    // Retained bodies must not describe an earlier run's state.
+    this.bodyResolver.clear();
 
     // Create run folder
     await fs.promises.mkdir(runFolder, { recursive: true });
+
+    // The mkdir above yields to the event loop, where a heartbeat tick may
+    // have fenced this runtime OR a shutdown may have begun — re-check both
+    // before the first STATE mutation, or RunStarted/currentRunId (and the
+    // lock rewrite + heartbeat restart further down) would land in the
+    // successor's state or recreate the lock after teardown.
+    if (this.lockLostToSuccessor) {
+      throw new Error(
+        "This runtime lost its lock to a successor instance — refusing to start a new run. " +
+          "Shut this instance down.",
+      );
+    }
+    if (this.isShuttingDown) {
+      throw new Error("Shutdown in progress — refusing to start a new run.");
+    }
 
     // Create run in state
     this.stateManager.transition({
@@ -1497,27 +1787,59 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Update lock file with runId and heartbeat
     interface LockFile {
       pid: number;
+      /**
+       * Unique per lock acquisition. Pid + "acquired once" is not identity:
+       * after >120s of missed heartbeats a successor may legitimately
+       * replace this lock, and teardown/heartbeat must then recognize the
+       * file is no longer theirs instead of unlinking or refreshing it.
+       */
+      lockId: string;
       runId: string;
       startTime: string;
       lastHeartbeat: string;
       port?: number; // Optional for backward compatibility with old lock files
     }
 
+    // The new token is committed to this.lockId only AFTER the write
+    // succeeds: assigning first would leave the instance holding token B
+    // while disk and registry still carry token A on an ENOSPC/EACCES
+    // failure — teardown would then release B (a no-op), skip the
+    // still-owned A lock, and leak A's registry entry.
+    const newLockId = randomUUID();
     const lockData: LockFile = {
       pid: process.pid,
+      lockId: newLockId,
       runId,
       startTime: new Date().toISOString(),
       lastHeartbeat: new Date().toISOString(),
       port: this.config.port, // NOTE: May be 0 initially if using dynamic port; updated after server binds
     };
 
+    if (this.lockLostToSuccessor) {
+      // A successor conclusively took this directory over; reacquiring would
+      // stomp its lock and race its journal. This runtime is fenced.
+      throw new Error(
+        "This runtime lost its lock to a successor instance — refusing to reacquire " +
+          `${this.config.lockFile}. Shut this instance down.`,
+      );
+    }
     const lockDir = path.dirname(this.config.lockFile);
     if (!fs.existsSync(lockDir)) {
       fs.mkdirSync(lockDir, { recursive: true });
     }
-    fs.writeFileSync(this.config.lockFile, JSON.stringify(lockData));
+    this.writeLockFileAtomic(JSON.stringify(lockData));
+    // Mark the lock as held by THIS runtime and process so the ownership
+    // guards can tell a live in-process sibling from a recycled-pid
+    // leftover, and so teardown only ever removes a lock it acquired. A
+    // re-acquisition releases the previous token first.
+    if (this.lockId !== null) releaseProcessOwnedLock(this.lockId);
+    registerProcessOwnedLock(this.config.lockFile, newLockId);
+    this.lockId = newLockId;
+    this.ownsLockFile = true;
 
-    // Start heartbeat
+    // (Re)start the heartbeat — clearing any previous interval, or a
+    // re-acquisition would leak a timer that shutdown can no longer stop.
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
     this.heartbeatInterval = setInterval(() => {
       this.updateHeartbeat();
     }, 30000); // Every 30 seconds
@@ -1530,13 +1852,89 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    */
   private updateHeartbeat(): void {
     try {
-      if (fs.existsSync(this.config.lockFile)) {
+      // Only ENOENT is "the lock is gone". existsSync also returns false on
+      // EACCES/EIO, and fencing on a transient filesystem error would
+      // permanently stop a healthy runtime's heartbeat — whose untouched
+      // lock then goes stale and invites a takeover beside it.
+      let lockPresent: boolean;
+      try {
+        fs.statSync(this.config.lockFile);
+        lockPresent = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          this.logger.log(`Heartbeat: could not stat lock file (transient?): ${error}`, "error");
+          return; // Unknown state — neither refresh nor fence this tick.
+        }
+        lockPresent = false;
+      }
+      if (!lockPresent) {
+        if (this.ownsLockFile) {
+          // We believe we hold the lock but the file is GONE: a successor
+          // took over and already finished (removing its own lock), or an
+          // operator deleted ours. Either way this runtime conclusively
+          // lost the directory — the ABA case a foreign-token check alone
+          // misses. Fence, same as an observed takeover.
+          this.logger.log(
+            "runtime.lock disappeared while this runtime believed it held it — fencing " +
+              "(no lock reacquisition, no finalize diet)",
+            "error",
+          );
+          this.fenceAfterLostLock();
+        }
+        return;
+      }
+      {
         const lock = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8"));
+        // A lock that is not THIS acquisition belongs to a successor that
+        // legitimately replaced us after our heartbeat lapsed. Our own
+        // acquisition always carries a string UUID, so an ABSENT lockId is
+        // foreign too (an older runtime's lock, or the diet CLI's
+        // maintenance claim). Refreshing either would keep alive a lock we
+        // no longer own; stop instead.
+        if ((lock as { lockId?: unknown }).lockId !== this.lockId) {
+          this.logger.log(
+            "runtime.lock was taken over by another instance — stopping heartbeat and " +
+              "fencing this runtime (no lock reacquisition, no finalize diet)",
+            "error",
+          );
+          this.fenceAfterLostLock();
+          return;
+        }
         lock.lastHeartbeat = new Date().toISOString();
-        fs.writeFileSync(this.config.lockFile, JSON.stringify(lock));
+        this.writeLockFileAtomic(JSON.stringify(lock));
       }
     } catch (error) {
       this.logger.log(`Failed to update heartbeat: ${error}`, "error");
+    }
+  }
+
+  /**
+   * Common fencing after conclusively losing the lock (foreign token or
+   * vanished file). Fencing is not bookkeeping alone: a displaced runtime
+   * that keeps serving commands and starting codons is ongoing split-brain
+   * against the successor's journal, state, and workspace — so this also
+   * INITIATES shutdown. shutdown() flips isShuttingDown synchronously,
+   * which closes the autostart/command gates; the finalize diet is
+   * separately guarded by the fresh lock-ownership check, and teardown by
+   * the lockId match. exitProcess=true, exit code 1: a fenced runtime has
+   * no legitimate work left, the TUI holds raw stdin that would keep a
+   * "drained" process alive forever, and exiting arms the shutdown
+   * watchdog so a wedged cleanup cannot leave a fenced server serving. A
+   * displaced runtime is a dead runtime.
+   */
+  private fenceAfterLostLock(): void {
+    this.lockLostToSuccessor = true;
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = undefined;
+    }
+    if (this.lockId !== null) releaseProcessOwnedLock(this.lockId);
+    this.lockId = null;
+    this.ownsLockFile = false;
+    if (!this.isShuttingDown) {
+      void this.shutdown("lock lost to successor instance — fencing", true, 1).catch((error) => {
+        this.logger.log(`Fencing shutdown failed: ${error}`, "error");
+      });
     }
   }
 
@@ -1583,19 +1981,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     this.logger.log(`Starting codon: ${codon.name}`);
 
-    // pull existing history for the codon and see if we had run rig setup for it
-    // git seems the best source of rig setup related info
-    const codonHistory = await this.stateManager.getCodonHistory(CodonId(codon.id));
-    let rigSetupCheckpoint: string | undefined;
-    for (const entry of codonHistory) {
-      if ("rigSetupCheckpoint" in entry.codon && entry.codon.rigSetupCheckpoint) {
-        rigSetupCheckpoint = entry.codon.rigSetupCheckpoint;
-        break;
-      }
-    }
-
+    // Skip the rig only if it already ran in THIS run (a retry). A rig-setup
+    // checkpoint from an earlier run does not count: the restart that led
+    // here restored a completion checkpoint, i.e. the tree from before the
+    // rig ran, so the rig's work must be redone. See
+    // StateManager.getRigSetupCheckpointInRun (66).
+    const rigSetupCheckpoint = this.currentRunId
+      ? (this.stateManager.getRigSetupCheckpointInRun(codonId, this.currentRunId) ?? undefined)
+      : undefined;
     if (rigSetupCheckpoint) {
-      this.logger.log(`Found existing rig setup checkpoint: ${rigSetupCheckpoint}`);
+      this.logger.log(
+        `Rig already ran in this run (checkpoint ${rigSetupCheckpoint.substring(0, 7)}); skipping rig setup`,
+      );
     }
 
     // Check if codon already running via state manager (single source of truth)
@@ -1711,6 +2108,21 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       let lastCopiedPath: string | null = null;
 
       for (const [index, item] of codon.rigSetup.entries()) {
+        // Rig shells are untracked local children, so shutdown's kill pass
+        // cannot stop them — cooperative cancellation between steps is the
+        // bound. A shutdown (fencing included) that starts mid-setup must
+        // not have further rig steps mutating what may now be a successor's
+        // workspace. ABORT the whole codon start, not just the loop: falling
+        // through would report completed setup, cut a rig-setup checkpoint
+        // missing steps, and let a later resume skip them forever
+        // (skipPreCommands trusts that checkpoint).
+        if (this.isShuttingDown) {
+          this.logger.log(
+            `Codon start aborted before rig step ${index + 1}/${codon.rigSetup.length}: ` +
+              `shutdown in progress — no completion is reported and no checkpoint is cut`,
+          );
+          return;
+        }
         const operationNum = index + 1;
         const operationType = item.type;
         const operationDetails =
@@ -1747,6 +2159,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
               this.logger.log(`Removed existing path: ${targetPath}`);
             }
 
+            // Removal + copy are two operations: a shutdown landing during
+            // the awaited removal must not be followed by a fresh cp -r
+            // into what may now be a successor-owned workspace.
+            if (this.isShuttingDown) {
+              this.logger.log(
+                `Codon start aborted between rig removal and copy for ${targetPath}: ` +
+                  `shutdown in progress`,
+              );
+              return;
+            }
             await this.copyPath(item.copy.from, targetPath);
             lastCopiedPath = targetPath;
             this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
@@ -1962,6 +2384,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         }
       }
 
+      // Re-check after the LAST in-flight rig step: a shutdown that began
+      // during it gets no next loop iteration to abort on, and falling
+      // through would report completion and cut a rig-setup checkpoint
+      // post-shutdown.
+      if (this.isShuttingDown) {
+        this.logger.log(
+          "Codon start aborted after final rig step: shutdown in progress — " +
+            "no completion is reported and no checkpoint is cut",
+        );
+        return;
+      }
+
       // Emit rig setup completed info event
       // MESSAGE FORMAT CONTRACT: TUI uses string matching on "Rig setup completed" and "failed"
       const rigSetupDuration = Date.now() - rigSetupStartTime;
@@ -2033,6 +2467,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           from: "starting",
           to: "failed",
           metadata: {
+            exitCode: -1,
             failedDuring: "starting",
             failureReason: this.codonFailureReason,
           },
@@ -2123,33 +2558,42 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       );
     }
 
-    // Add checkpoint patterns - accumulate from all codons up to current
-    // This ensures resume functionality works correctly
-    const currentCodonIndex = this.config.codons.findIndex((p) => p.id === codon.id);
-    if (currentCodonIndex >= 0) {
-      // Accumulate patterns from all codons up to and including current
-      for (let i = 0; i <= currentCodonIndex; i++) {
-        const codonConfig = this.config.codons[i];
-        // Only codons have checkpointedFiles (not loops)
-        if (
-          codonConfig.type !== "loop" &&
-          codonConfig.checkpointedFiles &&
-          codonConfig.checkpointedFiles.length > 0
-        ) {
-          await this.addCheckpointPatterns(codonConfig.checkpointedFiles);
-        }
-      }
+    // Register the checkpoint patterns in force for this codon: every plan
+    // entry up to and including it (see checkpointPatternsThrough for why the
+    // plan, not this.config.codons, is the source). The pattern set lives in
+    // memory only, so this must run on every start — a crash restart begins
+    // with an empty set.
+    await this.registerCheckpointPatternsThrough(codonId, true);
 
-      // Create checkpoint after rig setup if we have rig setup
-      if (!skipPreCommands && codon.rigSetup && this.checkpointingEnabled) {
-        const checkpointHash = await this.createCheckpoint({
+    // A shutdown that began during the awaited sentinel/pattern work above
+    // must not be followed by fresh checkpoint git operations (branch
+    // checkout/commit) — abort the codon start instead.
+    if (this.isShuttingDown) {
+      this.logger.log("Codon start aborted before rig-setup checkpoint: shutdown in progress");
+      return;
+    }
+
+    // Create checkpoint after rig setup if we have rig setup
+    if (!skipPreCommands && codon.rigSetup) {
+      try {
+        await this.createCheckpoint({
           status: "rig-setup",
           codonId: codonId,
           codonName: codon.name,
           runId: this.currentRunId || RunId("unknown"),
           timestamp: new Date().toISOString(),
         });
-        rigSetupCheckpointCreated = !!checkpointHash;
+        rigSetupCheckpointCreated = true;
+      } catch (error) {
+        // The codon is in `starting` here (rig work done, no runner yet).
+        // Fail it the same way a missing continuation session does.
+        await this.failCodonAtStart(
+          codonId,
+          codon,
+          `Rig-setup checkpoint failed for codon ${codonId}: ${toError(error).message}`,
+          toError(error),
+        );
+        return;
       }
     }
 
@@ -2222,6 +2666,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
               from: "starting",
               to: "failed",
               metadata: {
+                exitCode: -1,
                 failedDuring: "starting",
                 failureReason: this.codonFailureReason,
               },
@@ -2316,68 +2761,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       startTime: new Date(),
     };
 
-    // Store watch patterns for tool-based tracking
-    if (codon.checkpointedFiles && codon.checkpointedFiles.length > 0) {
-      this.watchedPatterns = codon.checkpointedFiles;
-      this.logger.log(`Watching patterns: ${this.watchedPatterns.join(", ")}`);
-    }
-
     // NOTE: codon.started event is now sent when Claude sends init message
     // This ensures we have the actual session ID before notifying clients
-
-    // Send initial file states if any exist
-    if (codon.checkpointedFiles && codon.checkpointedFiles.length > 0) {
-      // Use the unified file resolver to get files respecting gitignore
-      // Files are resolved relative to agentRootPath (where agent outputs live)
-      const resolvedFiles = await fileResolver.resolveFiles(
-        this.config.agentRootPath,
-        codon.checkpointedFiles,
-      );
-
-      // Get file contents for each resolved file
-      const files = await Promise.all(
-        resolvedFiles.map(async (filePath) => {
-          const fullPath = path.join(this.config.agentRootPath, filePath);
-          const stats = await fs.promises.stat(fullPath);
-          const content = await fs.promises.readFile(fullPath, "utf-8");
-          return {
-            path: filePath,
-            content,
-            lastModified: stats.mtime.toISOString(),
-          };
-        }),
-      );
-
-      // Only send events if we have files
-      if (files.length > 0) {
-        for (const file of files) {
-          this.emit("event", {
-            id: EventId(generateId()),
-            timestamp: new Date().toISOString(),
-            type: "file.updated",
-            data: {
-              path: file.path,
-              filename: path.basename(file.path),
-              content: file.content,
-              action: "created",
-            },
-          } as FileUpdatedEvent);
-        }
-
-        // Store most recent file
-        const mostRecent = files.reduce((latest, file) =>
-          new Date(file.lastModified) > new Date(latest.lastModified) ? file : latest,
-        );
-        this.recentFileAccess = {
-          path: mostRecent.path,
-          content: mostRecent.content,
-          timestamp: new Date(mostRecent.lastModified),
-        };
-
-        // Send file tree update
-        await this.sendFileTreeUpdate();
-      }
-    }
 
     // Run the codon
     await this.runCodon(codonId, codon, previousSessionId);
@@ -2444,6 +2829,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         budget: this.budget as Budget,
         replayConfig,
       };
+
+      // A shutdown (including a fencing shutdown) may have begun while the
+      // rig/sentinel setup above was running — its one-time kill pass can
+      // miss a codon that has no runner yet, so a runner must never LAUNCH
+      // once shutdown is underway.
+      if (this.isShuttingDown) {
+        this.logger.log(
+          `[runCodon] Shutdown in progress — not launching runner for codon ${codonId}`,
+        );
+        return;
+      }
 
       // Extension config is only provided when exhaustWithPrompt is set
       // The discriminated union requires shouldInterrupt and onExtension when extensionConfig is present
@@ -2554,6 +2950,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             from: "starting",
             to: "failed",
             metadata: {
+              exitCode: -1,
               failedDuring: "starting",
               failureReason: {
                 type: "unknown",
@@ -2620,13 +3017,45 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       } as ErrorEvent);
     });
 
+    // Watched-file state is owned by this runner. Runtime only adds the
+    // public event envelope, which keeps journaling/broadcast/sentinels at the
+    // server boundary and prevents one codon from sharing another's patterns.
+    runner.on("fileUpdated", (data) => {
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "file.updated",
+        // Fingerprint form only — the body is hashed and retained for
+        // sentinel resolution; journal and broadcast carry the same object
+        // (diet decision 0.3.1 — no wire/journal divergence).
+        data: this.bodyResolver.process(data),
+      } as FileUpdatedEvent);
+    });
+
+    runner.on("fileTreeUpdated", (data) => {
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "filetree.updated",
+        data,
+      } as FileTreeUpdatedEvent);
+    });
+
+    runner.on("fileTrackingError", (error, context) => {
+      void this.handleError(error, context, ErrorSeverity.OPERATION);
+    });
+
     // Log parser events (forwarded through runner)
     runner.on("systemMessage", (msg: SystemMessage) => {
       this.handleSystemMessage(msg, codonId);
     });
 
+    // Pass the runner captured by this closure — not a lookup of "the current
+    // runner" — so a message parsed during finalization overlap still routes
+    // its file tools to the codon that produced it (no cross-codon pattern
+    // leakage through a stale shared reference).
     runner.on("assistantMessage", (msg: AssistantMessage) => {
-      this.handleAssistantMessage(msg, codonId);
+      this.handleAssistantMessage(msg, codonId, runner);
     });
 
     runner.on("userMessage", (msg: UserMessage) => {
@@ -2740,7 +3169,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  private handleAssistantMessage(msg: AssistantMessage, codonId: string): void {
+  private handleAssistantMessage(
+    msg: AssistantMessage,
+    codonId: string,
+    runner: CodonRunner,
+  ): void {
     // Track that we've received an assistant message
     if (this.currentRunId) {
       const currentCodon = this.stateManager.getCodonInCurrentRun(CodonId(codonId));
@@ -2796,25 +3229,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       } else if (item.type === "tool_use") {
         const toolItem = item as ToolUseContent;
 
+        // Feed file tools to the emitting runner's tracker at this item's
+        // position: the tracker emits fileUpdated synchronously, so the
+        // file.updated event lands immediately before this tool's
+        // assistant.action, preserving the message's internal order. The
+        // toolUseId becomes file.updated.source.toolUseId — the join from a
+        // fingerprint to the receipt below that holds the change's bytes.
+        runner.observeToolUse(toolItem.name, toolItem.input, toolItem.id);
+
         // Track this tool use for result matching
         this.pendingToolUses.set(toolItem.id, {
           toolName: toolItem.name,
           timestamp: Date.now(),
           codonId,
         });
-
-        // Handle file-related tool calls
-        const fileTools: ToolName[] = ["Read", "Write", "Edit", "MultiEdit"];
-        if (fileTools.includes(toolItem.name as ToolName)) {
-          // Call async function without awaiting to avoid blocking
-          this.handleFileToolCall(toolItem.name as ToolName, toolItem.input).catch((err) => {
-            this.handleError(
-              toError(err),
-              `handleFileToolCall(${toolItem.name})`,
-              ErrorSeverity.OPERATION,
-            );
-          });
-        }
 
         // Send event for all tools, including unknown ones
         // toolName is typed as string to allow unknown tools
@@ -2827,7 +3255,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
             action: "tool_use",
             content: "",
             toolName: toolItem.name,
+            // CONTRACT: toolInput is journaled verbatim (see
+            // assistantActionEventDataSchema) — with fingerprint-only
+            // file.updated it is the journal's only copy of file bodies.
             toolInput: toolItem.input,
+            toolUseId: toolItem.id,
           },
         } as AssistantActionEvent);
       }
@@ -3246,40 +3678,32 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.codonFailureError = outcome?.failureError ?? this.codonFailureError;
     }
 
-    // Create checkpoint BEFORE state transition
+    // Create checkpoint BEFORE state transition. Left unset only when the
+    // checkpoint failed; a completed codon is then failed instead.
     let checkpointSha: string | undefined;
-    if (this.checkpointingEnabled) {
-      try {
-        const checkpointType =
-          finalStatus === "completed"
-            ? "completed"
-            : finalStatus === "skipped"
-              ? "skipped"
-              : "error";
+    try {
+      const checkpointType =
+        finalStatus === "completed" ? "completed" : finalStatus === "skipped" ? "skipped" : "error";
 
-        const commitInfo = await this.createCheckpoint({
-          status: checkpointType,
-          codonId: codonId,
-          codonName: codonConfig.name || codonId,
-          runId: this.currentRunId || RunId("unknown"),
-          timestamp: new Date().toISOString(),
-          duration: Date.now() - new Date(currentCodon.startTime).getTime(),
-        });
-
-        checkpointSha = commitInfo || undefined;
-      } catch (error) {
-        this.logger.log(`Checkpoint creation failed: ${error}`, "error");
-        // Decide: fail the codon or continue without checkpoint?
-        if (finalStatus === "completed") {
-          // For completed codons, checkpoint failure is critical
-          finalStatus = "failed";
-          this.codonFailureError = toError(error);
-          this.codonFailureReason = {
-            type: "unknown",
-            retriable: false,
-            message: `Checkpoint creation failed: ${toError(error).message}`,
-          };
-        }
+      checkpointSha = await this.createCheckpoint({
+        status: checkpointType,
+        codonId: codonId,
+        codonName: codonConfig.name || codonId,
+        runId: this.currentRunId || RunId("unknown"),
+        timestamp: new Date().toISOString(),
+        duration: Date.now() - new Date(currentCodon.startTime).getTime(),
+      });
+    } catch (error) {
+      // Already logged and emitted by createCheckpoint.
+      if (finalStatus === "completed") {
+        // For completed codons, checkpoint failure is critical
+        finalStatus = "failed";
+        this.codonFailureError = toError(error);
+        this.codonFailureReason = {
+          type: "unknown",
+          retriable: false,
+          message: `Checkpoint creation failed: ${toError(error).message}`,
+        };
       }
     }
 
@@ -3301,7 +3725,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           metadata: {
             exitCode,
             resultMessageReceived: outcome?.resultReceived ?? false,
-            checkpointSha: checkpointSha || "", // Ensure we always have a string
+            // Absent only when createCheckpoint threw, and then finalStatus is
+            // never "completed" (see above) — the completed guard in
+            // state-transition-guards rejects a blank SHA outright.
+            ...(checkpointSha !== undefined && { checkpointSha }),
             contextExceeded: isContextExceeded,
             extensionCount,
             ...(budgetInfo && {
@@ -3426,6 +3853,15 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // If outputDirectory is undefined, outputs stay in the agent workspace ({executionPath}/agentRoot)
     if (finalStatus === "completed" && codonConfig.outputFiles && this.config.outputDirectory) {
       for (const [groupIndex, outItem] of codonConfig.outputFiles.entries()) {
+        // beforeCopy runs arbitrary shell commands and each group performs
+        // several copies — do not start another group once shutdown began
+        // (the awaited snapshot/sentinel work above yields).
+        if (this.isShuttingDown) {
+          this.logger.log(
+            `Output copy aborted before group ${groupIndex + 1}: shutdown in progress`,
+          );
+          break;
+        }
         let beforeCopySuccess = false;
         try {
           if (outItem.beforeCopy && outItem.beforeCopy.length > 0) {
@@ -3836,127 +4272,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   // -------------
-  // File Operations & Watching
-  // -------------
-
-  private async handleFileToolCall<T extends ToolName>(
-    toolName: T,
-    toolInput: Record<string, unknown> | undefined,
-  ): Promise<void> {
-    if (this.watchedPatterns.length === 0) return;
-
-    let filePath: string | null = null;
-    let action: "created" | "modified" | "deleted" = "modified";
-    let content = "";
-
-    // Type-safe tool input handling
-    switch (toolName) {
-      case "Read": {
-        const input = toolInput as ToolInputMap["Read"] | undefined;
-        filePath = input?.file_path || null;
-        action = "modified"; // Read doesn't change the file
-        break;
-      }
-      case "Write": {
-        const input = toolInput as ToolInputMap["Write"] | undefined;
-        filePath = input?.file_path || null;
-        content = input?.content || "";
-        if (filePath) {
-          action = fs.existsSync(path.join(this.config.agentRootPath, filePath))
-            ? "modified"
-            : "created";
-        }
-        break;
-      }
-      case "Edit": {
-        const input = toolInput as ToolInputMap["Edit"] | undefined;
-        filePath = input?.file_path || null;
-        action = "modified";
-        break;
-      }
-      case "MultiEdit": {
-        const input = toolInput as ToolInputMap["MultiEdit"] | undefined;
-        filePath = input?.file_path || null;
-        action = "modified";
-        break;
-      }
-    }
-
-    if (!filePath) return;
-
-    // Make path relative if it's absolute
-    if (path.isAbsolute(filePath)) {
-      filePath = path.relative(this.config.agentRootPath, filePath);
-    }
-
-    // Check if file matches any watch pattern
-    const normalizedPath = filePath.replace(/^\.\//g, "");
-    const matchesPattern = this.watchedPatterns.some((pattern) => {
-      const normalizedPattern = pattern.replace(/^\.\//g, "");
-      return minimatch(normalizedPath, normalizedPattern, { matchBase: true });
-    });
-
-    if (!matchesPattern) {
-      return;
-    }
-
-    // Read current file content if not provided
-    if (!content) {
-      const fullPath = path.join(this.config.agentRootPath, filePath);
-      if (fs.existsSync(fullPath)) {
-        try {
-          content = fs.readFileSync(fullPath, "utf-8");
-        } catch (error) {
-          this.logger.log(`Error reading file ${filePath}: ${toError(error).message}`, "error");
-          return;
-        }
-      }
-    }
-
-    // Store recent file access
-    this.recentFileAccess = {
-      path: filePath,
-      content,
-      timestamp: new Date(),
-    };
-
-    // Send file update event
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "file.updated",
-      data: {
-        path: filePath,
-        filename: path.basename(filePath),
-        content,
-        action,
-      },
-    } as FileUpdatedEvent);
-
-    // Send file tree update
-    await this.sendFileTreeUpdate();
-  }
-
-  private async sendFileTreeUpdate(): Promise<void> {
-    if (this.watchedPatterns.length === 0) return;
-
-    // Build file tree for all watched patterns
-    const allTrees = await Promise.all(
-      this.watchedPatterns.map((pattern) => buildFileTree(this.config.agentRootPath, pattern)),
-    );
-
-    // Merge all trees into one
-    const mergedTree = allTrees.flat();
-
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "filetree.updated",
-      data: { tree: mergedTree },
-    } as FileTreeUpdatedEvent);
-  }
-
-  // -------------
   // Error Handling
   // -------------
 
@@ -4025,14 +4340,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.initialAutostartTriggered = true;
     this.logger.log(`[requestAutostart] Triggering initial autostart`);
 
-    await this.autoStartNextCodon();
+    await this.autoStartNextCodon(true);
   }
 
   /**
    * Automatically start the next available codon if none is running.
    * Called on connection and after codon completion.
+   *
+   * @param initialAutostart true only for the startup autostart from
+   *   requestAutostart() — used to detect a no-op rerun of a completed
+   *   execution (issue #231).
    */
-  private async autoStartNextCodon(): Promise<void> {
+  private async autoStartNextCodon(initialAutostart = false): Promise<void> {
     const thread = await this.stateManager.getExecutionThread();
 
     this.logger.log(
@@ -4051,15 +4370,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.logger.log("[autoStartNextCodon] No more codons to run");
 
       if (this.config.autostart) {
-        // Current behavior - shut down
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "info",
-          data: {
-            message: "All codons completed successfully. Server shutting down.",
-          },
-        } as InfoEvent);
+        // Current behavior - announce completion and shut down
+        this.announceAllCodonsCompleted(initialAutostart);
 
         setTimeout(() => {
           this.shutdown("all codons completed");
@@ -4081,6 +4393,51 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     this.logger.log(`[autoStartNextCodon] Auto-starting codon: ${nextCodonId}`);
     await this.startCodon(nextCodonId);
+  }
+
+  /**
+   * Emit the "all codons completed" info event that precedes the autostart
+   * shutdown.
+   *
+   * Issue #231: a resumed, already-completed execution reaches this point on
+   * the very first autostart without running anything. Say so on the console
+   * instead of looking like a successful fresh run. The reason === "continue"
+   * check keeps rollback's empty continuation runs (reason: "rollback") from
+   * triggering the notice.
+   *
+   * @param initialAutostart true only for the startup autostart from
+   *   requestAutostart().
+   */
+  private announceAllCodonsCompleted(initialAutostart: boolean): void {
+    const run = this.stateManager.getCurrentRun();
+    const isStartupNoop =
+      initialAutostart &&
+      this.config.isResuming &&
+      run?.startingConditions.type === "continuation" &&
+      run.startingConditions.reason === "continue" &&
+      run.codons.length === 0;
+
+    // MESSAGE FORMAT CONTRACT: the TUI string-matches
+    // "All codons completed successfully" (server/basic-tui.ts) — the
+    // no-op message must not contain that substring.
+    const message = isStartupNoop
+      ? `Resumed completed execution ${path.basename(this.config.executionPath)} — nothing to do. All codons already completed. Use --start-new to run fresh.`
+      : "All codons completed successfully. Server shutting down.";
+
+    if (isStartupNoop && this.config.headless) {
+      // Headless has no connected client to render the info event; print
+      // directly. TUI mode renders the event, so don't print twice.
+      console.log(message);
+    }
+
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "info",
+      data: {
+        message,
+      },
+    } as InfoEvent);
   }
 
   private async startNextCodon(): Promise<void> {
@@ -4356,14 +4713,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    // Build execution thread for current timeline
+    // Build execution thread for current timeline, with git's checkpoint
+    // map: the codon-by-codon walk steps through validatedCheckpoints, so a
+    // thread built without it walks nothing and emits no per-codon events.
     const state = this.stateManager.getState();
-    const thread = await analyzeExecutionThread(
-      state,
-      undefined, // No checkpoint validation needed for search
-      undefined, // Use latest run
-      this.logger,
-    );
+    const thread = await this.stateManager.getExecutionThread();
 
     // Find all matching checkpoints across the thread
     const matches: Array<{
@@ -4628,8 +4982,19 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Set the rollback flag
     this.isRollingBack = true;
+    // Checkpoint restore changes files underneath the retained-body map —
+    // drop it so sentinel resolution never serves a pre-rollback body.
+    this.bodyResolver.clear();
 
     try {
+      // 0. Preflight the target and snapshot the work tree BEFORE any state
+      // or workspace mutation, exactly as the codon-by-codon rollback does:
+      // a dangling reference must fail here, not after the current run has
+      // already been marked completed.
+      sha = (await this.confirmAndSnapshot(sha, `direct rollback to ${sha.substring(0, 7)}`))
+        .checkpoint;
+      const entriesToRestore = await this.planArchiveRestore(sha);
+
       // 1. Clean up current codon state
       this.cleanupCurrentCodon();
 
@@ -4664,45 +5029,33 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         await this.stateManager.waitForPendingTransitions();
       }
 
-      // 5. Capture archive entries to restore BEFORE git reset
-      let entriesToRestore: import("./archive-manifest.js").ArchiveEntry[] = [];
-      if (this.archiveManifest) {
-        entriesToRestore = this.archiveManifest.getEntriesAfterCheckpoint(sha);
-        this.logger.log(
-          `Found ${entriesToRestore.length} archive entries to restore during direct rollback`,
-        );
+      // 5. Put the work tree at the target checkpoint.
+      // The awaits above (pending transitions) yield — a fencing shutdown
+      // landing there must stop this rollback before its first workspace
+      // mutation.
+      if (this.isShuttingDown) {
+        throw new Error("Direct rollback aborted: shutdown in progress");
       }
-
-      // 6. Reset git to the target checkpoint
-      if (this.checkpointGit) {
-        this.logger.log(`Resetting to checkpoint ${sha.substring(0, 7)}`);
-        await this.checkpointGit.resetToCheckpoint(sha);
-
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "rollback.codonCheckpoint",
-          data: {
-            codonId: targetCodon.codon.codonId,
-            codonName,
-            checkpointType,
-            checkpoint: sha,
-            message: `Reset to ${codonName} ${checkpointType} checkpoint`,
-          },
-        } as import("./types/types.js").RollbackCodonCheckpointEvent);
+      this.logger.log(`Resetting to checkpoint ${sha.substring(0, 7)}`);
+      try {
+        await this.restoreWorkTreeToCheckpoint(sha, entriesToRestore);
+      } catch (error) {
+        throw new RollbackMutatedWorkspaceError(error);
       }
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "rollback.codonCheckpoint",
+        data: {
+          codonId: targetCodon.codon.codonId,
+          codonName,
+          checkpointType,
+          checkpoint: sha,
+          message: `Reset to ${codonName} ${checkpointType} checkpoint`,
+        },
+      } as import("./types/types.js").RollbackCodonCheckpointEvent);
 
-      // 7. Restore archived files back to agentRoot/
-      if (entriesToRestore.length > 0) {
-        await this.restoreArchiveEntries(entriesToRestore, sha);
-      }
-
-      // 8. Reload manifest from disk (git restored it to checkpoint state)
-      if (this.archiveManifest) {
-        await this.archiveManifest.reload();
-      }
-
-      // 10. Start new continuation run
+      // 6. Start new continuation run
       const afterCodon = checkpointType === "rig-setup" ? null : targetCodon.codon.codonId;
       await this.startNewRun({
         type: "continuation",
@@ -4714,7 +5067,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         reason: "rollback",
       });
 
-      // 11. Emit rollback completed event
+      // 7. Emit rollback completed event
       const newRun = this.stateManager.getCurrentRun();
       this.emit("event", {
         id: EventId(generateId()),
@@ -4731,7 +5084,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         },
       } as import("./types/types.js").RollbackCompletedEvent);
 
-      // 12. Auto-restart if requested
+      // 8. Auto-restart if requested
       if (autoRestart && newRun) {
         this.logger.log("Auto-starting next codon after rollback");
         await this.autoStartNextCodon();
@@ -4776,14 +5129,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    // Build execution thread to search across all runs
-    const state = this.stateManager.getState();
-    const thread = await analyzeExecutionThread(
-      state,
-      undefined, // No checkpoint validation needed for search
-      undefined, // Use latest run
-      this.logger,
-    );
+    // Build execution thread to search across all runs, with git's
+    // checkpoint map (see rollbackToCheckpoint).
+    const thread = await this.stateManager.getExecutionThread();
 
     // Find the codon in the thread
     let targetThreadCodon: import("./execution-thread.js").ThreadCodon | null = null;
@@ -4912,114 +5260,92 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Check if codon is running
     const currentCodon = this.stateManager.getCurrentlyRunningCodon();
     if (currentCodon && !isTerminalCodonStatus(currentCodon.status)) {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
-          codon: currentCodon.codonId,
-          fatal: false,
-        },
-      } as ErrorEvent);
+      this.emitErrorEvent("Cannot rollback while codon is running. Use 'codon.forceStop' first.", {
+        codon: currentCodon.codonId,
+      });
       return;
     }
 
-    // Build execution thread to search across all runs
-    const state = this.stateManager.getState();
-    const thread = await analyzeExecutionThread(
-      state,
-      undefined, // No checkpoint validation needed for search
-      undefined, // Use latest run
-      this.logger,
-    );
-
-    // Find last completed codon in the thread
-    let lastCompletedIndex = -1;
-    for (let i = 0; i < thread.codons.length; i++) {
-      if (thread.codons[i].codon.status === "completed") {
-        lastCompletedIndex = i;
-        break;
-      }
-    }
-
-    if (lastCompletedIndex >= 0) {
-      const lastCompleted = thread.codons[lastCompletedIndex];
-      if (lastCompleted.codon.status === "completed") {
-        this.logger.log(
-          `Found last successfully completed thread codon to rollback to: ${JSON.stringify(
-            lastCompleted,
-          )}`,
-        );
-
-        // Rollback to last successful codon
-        await this.executeRollback(
-          thread,
-          lastCompletedIndex,
-          lastCompleted.codon.completionCheckpoint,
-          "completed",
-          autoRestart,
-        );
-        return;
-      }
-    }
-
-    this.logger.log(
-      "Did not find any successful codon to rollback to. Going to look for a checkpoint in the thread.",
-    );
-
-    // No successful codons - find the first checkpoint in the thread
-    let firstCheckpointIndex = -1;
-    let firstCheckpointSha: string | null = null;
-    let firstCheckpointType: string | null = null;
-
-    for (let i = thread.codons.length - 1; i >= 0; i--) {
-      const threadCodon = thread.codons[i];
-      const codon = threadCodon.codon;
-
-      if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
-        firstCheckpointIndex = i;
-        firstCheckpointSha = codon.rigSetupCheckpoint;
-        firstCheckpointType = "rig-setup";
-        this.logger.log(`Found rig setup checkpoint in codon ${codon.codonId}`);
-      } else if (codon.status === "completed" && codon.completionCheckpoint) {
-        firstCheckpointIndex = i;
-        firstCheckpointSha = codon.completionCheckpoint;
-        firstCheckpointType = "completed";
-        this.logger.log(`Found completion checkpoint in codon ${codon.codonId}`);
-      } else if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
-        firstCheckpointIndex = i;
-        firstCheckpointSha = codon.errorCheckpoint;
-        firstCheckpointType = "error";
-        this.logger.log(`Found error checkpoint in codon ${codon.codonId}`);
-      } else if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
-        firstCheckpointIndex = i;
-        firstCheckpointSha = codon.skipCheckpoint;
-        firstCheckpointType = "skipped";
-        this.logger.log(`Found skipped checkpoint in codon ${codon.codonId}`);
-      }
-    }
-
-    if (firstCheckpointIndex >= 0 && firstCheckpointSha && firstCheckpointType) {
-      await this.executeRollback(
-        thread,
-        firstCheckpointIndex,
-        firstCheckpointSha,
-        firstCheckpointType,
-        autoRestart,
+    // Rungs 0 and 1 are decided by the state manager on the strict thread
+    // (unreadable storage throws CheckpointStorageError for start()'s catch).
+    const { thread, target, passedOverCompletion } = await this.stateManager.findRollbackTarget();
+    if (passedOverCompletion?.codon.status === "completed") {
+      this.logger.log(
+        `Completed codon ${passedOverCompletion.codon.codonId} (run ${passedOverCompletion.runId}) ` +
+          "has no git-confirmed completion checkpoint (reference " +
+          `${JSON.stringify(passedOverCompletion.codon.completionCheckpoint)}) — not a rollback target`,
+        "error",
       );
-    } else {
-      this.logger.log("No checkpoints found in execution history", "error");
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: "No checkpoints found in execution history",
-          fatal: false,
-        },
-      } as ErrorEvent);
     }
+    if (target) {
+      const tc = thread.codons[target.index];
+      this.logger.log(
+        `Rolling back to ${target.type} checkpoint of codon ${tc.codon.codonId} (run ${tc.runId}): ` +
+          JSON.stringify(tc),
+      );
+      await this.executeRollback(thread, target.index, target.sha, target.type, autoRestart);
+      return;
+    }
+
+    // Rung 2: nothing restorable. start() will fall back to a continuation or
+    // a fresh run; a fresh run's rig setup deletes its copy.to directories and
+    // every codon re-runs, so snapshot the work tree first and say so loudly.
+    const snapshot = await this.snapshotWorkspaceForRecovery("no restorable checkpoint");
+    const message =
+      "Recovery degraded: no git-confirmed checkpoint in execution history; falling back to " +
+      `continuation or a fresh run (work tree snapshotted to ${snapshot.recoveryBranch})`;
+    this.logger.log(message, "error");
+    this.emitErrorEvent(message);
+  }
+
+  /**
+   * Save the work tree on a recovery branch before recovery changes or
+   * discards files. Throws CheckpointStorageError if git cannot record it —
+   * proceeding to change files without a snapshot is the one thing recovery
+   * must never do.
+   */
+  private async snapshotWorkspaceForRecovery(reason: string): Promise<RecoverySnapshot> {
+    try {
+      const snapshot = await this.checkpointGit.snapshotForRecovery(reason);
+      this.noteRecoverySnapshot(snapshot, reason);
+      return snapshot;
+    } catch (error) {
+      throw this.recoverySnapshotFailed(reason, error);
+    }
+  }
+
+  /**
+   * Confirm a restore target and save the work tree, in that order, before
+   * anything is touched. A reference git does not hold is a
+   * CheckpointNotFoundError (nothing changed; callers may degrade); anything
+   * else is a CheckpointStorageError (callers must stop).
+   */
+  private async confirmAndSnapshot(sha: string, reason: string): Promise<RestorePreconditions> {
+    try {
+      const preconditions = await this.checkpointGit.confirmAndSnapshot(sha, reason);
+      this.noteRecoverySnapshot(preconditions, reason);
+      return preconditions;
+    } catch (error) {
+      if (error instanceof CheckpointNotFoundError) throw error;
+      throw this.recoverySnapshotFailed(reason, error);
+    }
+  }
+
+  private noteRecoverySnapshot(snapshot: RecoverySnapshot, reason: string): void {
+    this.emitInfoEvent(
+      `Recovery snapshot: work tree saved to ${snapshot.recoveryBranch} ` +
+        `(${snapshot.recoveryCommit.substring(0, 7)}) before ${reason}`,
+    );
+    this.bootRecoverySnapshot = snapshot;
+  }
+
+  private recoverySnapshotFailed(reason: string, error: unknown): CheckpointStorageError {
+    const message = `Recovery snapshot failed before ${reason}: ${toError(error).message}`;
+    this.logger.log(message, "error");
+    this.emitErrorEvent(message);
+    return error instanceof CheckpointStorageError
+      ? error
+      : new CheckpointStorageError(message, error);
   }
 
   /**
@@ -5047,6 +5373,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Set the rollback flag
     this.isRollingBack = true;
+    // Checkpoint restore changes files underneath the retained-body map —
+    // drop it so sentinel resolution never serves a pre-rollback body.
+    this.bodyResolver.clear();
 
     // Execute the new codon-by-codon rollback
     // The flag will be cleared inside executeCodonByCodonRollback before sending events
@@ -5068,11 +5397,22 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private async executeCodonByCodonRollback(
     thread: import("./execution-thread.js").ExecutionThread,
     targetCodonIndex: number,
-    targetSha: string,
+    requestedSha: string,
     checkpointType: string,
     targetCodonName: string,
     autoRestart: boolean,
   ): Promise<void> {
+    // 0. Confirm the target and snapshot the work tree BEFORE anything is
+    // touched (see confirmAndSnapshot for what each failure means).
+    const targetSha = (
+      await this.confirmAndSnapshot(requestedSha, `rollback to ${requestedSha.substring(0, 7)}`)
+    ).checkpoint;
+
+    // Decide the archive restore now, from the HEAD this rollback abandons:
+    // the per-codon checkouts below move HEAD. Still read-only.
+    const originHead = await this.checkpointGit.getHeadSha();
+    const entriesToRestore = await this.planArchiveRestore(targetSha, originHead);
+
     // 1. Clean up current codon state
     this.cleanupCurrentCodon();
 
@@ -5103,14 +5443,75 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as import("./types/types.js").RollbackStartedEvent);
 
-    // 4. Process each codon (they're already in reverse order)
+    // 4. Process each codon (they're already in reverse order). From the
+    // first checkout or rig deletion on, the work tree is changing; an error
+    // after that point is reported as RollbackMutatedWorkspaceError so the
+    // caller knows it must not start new work on this tree.
     let currentStep = 0;
     const totalSteps = codonsToProcess.length + 1; // +1 for final checkpoint
+    let mutated = false;
 
-    for (const threadCodon of codonsToProcess) {
+    try {
+      for (const threadCodon of codonsToProcess) {
+        // A rollback accepted while ownership was valid can be overtaken by a
+        // fencing shutdown mid-flight (each await below yields). Every further
+        // checkout and rig deletion would then mutate a successor-owned
+        // workspace — abort between steps rather than only at dispatch.
+        if (this.isShuttingDown) {
+          throw new Error("Rollback aborted: shutdown in progress");
+        }
+        currentStep++;
+
+        // Emit progress
+        this.emit("event", {
+          id: EventId(generateId()),
+          timestamp: new Date().toISOString(),
+          type: "rollback.progress",
+          data: {
+            currentStep,
+            totalSteps,
+            message: `Rolling back through ${threadCodon.codon.codonId}`,
+          },
+        } as import("./types/types.js").RollbackProgressEvent);
+
+        // Step through this codon's best git-confirmed checkpoint, if it has
+        // one; the final target below is what the work tree ends up as.
+        const checkpoint = bestConfirmedCheckpoint(threadCodon);
+        if (checkpoint) {
+          mutated = true;
+          await this.checkpointGit.resetToCheckpoint(checkpoint.sha);
+
+          // Emit checkpoint event
+          const codonConfig = this.config.codons.find((p) => p.id === threadCodon.codon.codonId);
+          this.emit("event", {
+            id: EventId(generateId()),
+            timestamp: new Date().toISOString(),
+            type: "rollback.codonCheckpoint",
+            data: {
+              codonId: threadCodon.codon.codonId,
+              codonName: codonConfig?.name || threadCodon.codon.codonId,
+              checkpoint: checkpoint.sha,
+              checkpointType: checkpoint.type,
+              message: `Reset to ${threadCodon.codon.codonId} ${checkpoint.type} checkpoint`,
+            },
+          } as import("./types/types.js").RollbackCodonCheckpointEvent);
+        }
+
+        // Clean up rig directories from this codon — re-check after the
+        // awaited reset above: a shutdown landing during it must not be
+        // followed by fresh recursive rig deletion.
+        if (this.isShuttingDown) {
+          throw new Error("Rollback aborted before rig cleanup: shutdown in progress");
+        }
+        mutated = true;
+        await this.cleanupCodonRigDirectories(threadCodon.codon);
+      }
+
+      // 5. Final reset to target checkpoint
+      if (this.isShuttingDown) {
+        throw new Error("Rollback aborted before final checkpoint reset: shutdown in progress");
+      }
       currentStep++;
-
-      // Emit progress
       this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
@@ -5118,71 +5519,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         data: {
           currentStep,
           totalSteps,
-          message: `Rolling back through ${threadCodon.codon.codonId}`,
+          message: `Applying final checkpoint`,
         },
       } as import("./types/types.js").RollbackProgressEvent);
 
-      // Get the last checkpoint for this codon
-      const checkpoint = this.getLastCheckpointForCodon(threadCodon.codon);
-      if (checkpoint && this.checkpointGit) {
-        // Reset to this codon's checkpoint
-        await this.checkpointGit.resetToCheckpoint(checkpoint.sha);
-
-        // Emit checkpoint event
-        const codonConfig = this.config.codons.find((p) => p.id === threadCodon.codon.codonId);
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "rollback.codonCheckpoint",
-          data: {
-            codonId: threadCodon.codon.codonId,
-            codonName: codonConfig?.name || threadCodon.codon.codonId,
-            checkpoint: checkpoint.sha,
-            checkpointType: checkpoint.type,
-            message: `Reset to ${threadCodon.codon.codonId} ${checkpoint.type} checkpoint`,
-          },
-        } as import("./types/types.js").RollbackCodonCheckpointEvent);
-      }
-
-      // Clean up rig directories from this codon
-      await this.cleanupCodonRigDirectories(threadCodon.codon);
-    }
-
-    // 5. Final reset to target checkpoint
-    currentStep++;
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "rollback.progress",
-      data: {
-        currentStep,
-        totalSteps,
-        message: `Applying final checkpoint`,
-      },
-    } as import("./types/types.js").RollbackProgressEvent);
-
-    // Capture archive entries to restore BEFORE git reset
-    // (After git reset, manifest will be restored to checkpoint state)
-    let entriesToRestore: import("./archive-manifest.js").ArchiveEntry[] = [];
-    if (this.archiveManifest) {
-      entriesToRestore = this.archiveManifest.getEntriesAfterCheckpoint(targetSha);
-      this.logger.log(
-        `Found ${entriesToRestore.length} archive entries to restore during rollback`,
-      );
-    }
-
-    if (this.checkpointGit) {
-      await this.checkpointGit.resetToCheckpoint(targetSha);
-    }
-
-    // Restore archived files back to agentRoot/
-    if (entriesToRestore.length > 0) {
-      await this.restoreArchiveEntries(entriesToRestore, targetSha);
-    }
-
-    // Reload manifest from disk (git restored it to checkpoint state)
-    if (this.archiveManifest) {
-      await this.archiveManifest.reload();
+      mutated = true;
+      await this.restoreWorkTreeToCheckpoint(targetSha, entriesToRestore);
+    } catch (error) {
+      throw mutated ? new RollbackMutatedWorkspaceError(error) : error;
     }
 
     this.emit("event", {
@@ -5223,22 +5567,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       reason: "rollback",
     });
 
-    // 9. Restore checkpoint patterns
-    const targetCodonConfigIndex = this.config.codons.findIndex(
-      (p) => p.id === targetThreadCodon.codon.codonId,
+    // 9. Restore checkpoint patterns: everything in force at the target. A
+    // rig-setup target was taken after the target codon's rig ran, so its own
+    // patterns count too; a completion target does not include the codon
+    // that will run next.
+    await this.registerCheckpointPatternsThrough(
+      targetThreadCodon.codon.codonId,
+      checkpointType === "rig-setup",
     );
-    if (targetCodonConfigIndex >= 0) {
-      const includeTarget = checkpointType === "rig-setup";
-      const maxIndex = includeTarget ? targetCodonConfigIndex : targetCodonConfigIndex - 1;
-
-      for (let i = 0; i <= maxIndex; i++) {
-        const codonConfig = this.config.codons[i];
-        // Only codons have checkpointedFiles (not loops)
-        if (codonConfig.type !== "loop" && codonConfig.checkpointedFiles?.length) {
-          await this.addCheckpointPatterns(codonConfig.checkpointedFiles);
-        }
-      }
-    }
 
     // 8.b. Wait for transitions
 
@@ -5298,26 +5634,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   /**
-   * Get the last checkpoint for a codon
-   */
-  private getLastCheckpointForCodon(codon: CodonExecution): { sha: string; type: string } | null {
-    // Priority: completed > error > skipped > rig-setup
-    if (codon.status === "completed" && codon.completionCheckpoint) {
-      return { sha: codon.completionCheckpoint, type: "completed" };
-    }
-    if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
-      return { sha: codon.errorCheckpoint, type: "error" };
-    }
-    if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
-      return { sha: codon.skipCheckpoint, type: "skipped" };
-    }
-    if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
-      return { sha: codon.rigSetupCheckpoint, type: "rig-setup" };
-    }
-    return null;
-  }
-
-  /**
    * Get rig setup directories for a codon
    */
   private getRigSetupDirectories(codonId: CodonId): string[] {
@@ -5357,8 +5673,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     isLoopLevelArchive = false,
   ): Promise<void> {
     if (!archiveOnSuccess || archiveOnSuccess.length === 0) return;
-    if (!this.archiveManifest) {
-      this.logger.log("Archive manifest not initialized, skipping archiveOnSuccess", "error");
+    // Archiving is a chain of mkdir/rm/cp/manifest operations — none of it
+    // may START once shutdown has begun (archives are re-creatable on the
+    // next successful run of the codon).
+    if (this.isShuttingDown) {
+      this.logger.log(`Archive rigs skipped for codon ${codonId}: shutdown in progress`);
       return;
     }
 
@@ -5475,22 +5794,51 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * Restore archived files back to agentRoot/ during rollback.
    * Called after git reset has restored the workspace to checkpoint state.
    *
-   * @param entries - Archive entries to restore (from getEntriesAfterCheckpoint)
+   * The target checkpoint tree is authoritative: when a destination path
+   * already exists in the post-checkout workspace BEFORE restoration begins,
+   * the entry is SKIPPED (with a warning) and its archive copy and manifest
+   * entry stay in place — nothing the target tree contains is silently
+   * overwritten by an archived copy. Destinations created by earlier entries
+   * of the same restoration (multiple loop iterations archiving one path)
+   * are overwritten newest-wins, as before.
+   *
+   * @param entries - Archive entries to restore (from planArchiveRestore)
    * @param targetCheckpointSha - The checkpoint we're rolling back to
+   * @returns Per-entry outcomes; callers remove ONLY the successfully
+   *          restored entries from the manifest
    */
   private async restoreArchiveEntries(
     entries: import("./archive-manifest.js").ArchiveEntry[],
     targetCheckpointSha: string,
-  ): Promise<void> {
-    if (entries.length === 0) return;
+  ): Promise<ArchiveRestoreResult[]> {
+    if (entries.length === 0) return [];
 
     this.logger.log(
       `Restoring ${entries.length} archived files during rollback to ${targetCheckpointSha}`,
     );
 
-    const results: { path: string; success: boolean; error?: string }[] = [];
+    // Destinations the TARGET TREE owns, captured before any restoration
+    // touches the workspace. Only these are protected by the collision rule.
+    const targetTreeOwned = new Set<string>();
+    for (const entry of entries) {
+      const sourceFullPath = path.join(this.config.agentRootPath, entry.sourcePath);
+      if (fs.existsSync(sourceFullPath)) {
+        targetTreeOwned.add(sourceFullPath);
+      }
+    }
+
+    const results: ArchiveRestoreResult[] = [];
 
     for (const entry of entries) {
+      // Each entry is several destructive operations (removals, copies,
+      // pruning) — a shutdown mid-restore must not start further entries
+      // against what may now be a successor-owned workspace.
+      if (this.isShuttingDown) {
+        throw new Error(
+          `Archive restoration aborted after ${results.length}/${entries.length} entries: ` +
+            `shutdown in progress`,
+        );
+      }
       const archiveFullPath = path.join(this.config.executionPath, entry.archivePath);
       const sourceFullPath = path.join(this.config.agentRootPath, entry.sourcePath);
 
@@ -5499,9 +5847,27 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         if (!fs.existsSync(archiveFullPath)) {
           this.logger.log(`Archive file not found (skipping): ${entry.archivePath}`, "error");
           results.push({
+            entry,
             path: entry.sourcePath,
             success: false,
             error: "Archive not found",
+          });
+          continue;
+        }
+
+        // The target checkpoint tree is authoritative: keep the workspace
+        // file AND the archive copy (plus its manifest entry).
+        if (targetTreeOwned.has(sourceFullPath)) {
+          this.logger.log(
+            `Restore destination already exists in target checkpoint tree, ` +
+              `leaving archived: ${entry.sourcePath} (archive kept at ${entry.archivePath})`,
+            "error",
+          );
+          results.push({
+            entry,
+            path: entry.sourcePath,
+            success: false,
+            error: "Destination exists in target checkpoint tree; archive copy kept",
           });
           continue;
         }
@@ -5511,7 +5877,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           recursive: true,
         });
 
-        // Remove existing file if present (shouldn't be, but defensive)
+        // Remove a destination created by an earlier entry of this loop (the
+        // same sourcePath archived by several iterations — newest wins).
         if (fs.existsSync(sourceFullPath)) {
           await fs.promises.rm(sourceFullPath, {
             recursive: true,
@@ -5526,11 +5893,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         await fs.promises.rm(archiveFullPath, { recursive: true, force: true });
 
         this.logger.log(`Restored: ${entry.archivePath} → ${entry.sourcePath}`, "info");
-        results.push({ path: entry.sourcePath, success: true });
+        results.push({ entry, path: entry.sourcePath, success: true });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.log(`Failed to restore ${entry.sourcePath}: ${errorMsg}`, "error");
         results.push({
+          entry,
           path: entry.sourcePath,
           success: false,
           error: errorMsg,
@@ -5586,7 +5954,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // Remove empty directories (deepest first)
+    // Remove empty directories (deepest first) — skipped once shutdown has
+    // begun (a shutdown during the final archive entry would otherwise fall
+    // through into fresh rmdir operations); leftover empty dirs are pruned
+    // by any later archive pass.
+    if (this.isShuttingDown) return results;
     const sortedDirs = Array.from(archiveDirs).sort((a, b) => b.length - a.length);
     for (const dir of sortedDirs) {
       try {
@@ -5605,6 +5977,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         this.logger.log(`Could not clean up archive directory ${dir}: ${error}`, "debug");
       }
     }
+
+    return results;
   }
 
   /**
@@ -5634,6 +6008,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     const failedCleanups: { directory: string; error: string }[] = [];
 
     for (const dir of directories) {
+      // Each target is its own recursive deletion — do not start the next
+      // one once shutdown has begun.
+      if (this.isShuttingDown) {
+        throw new Error(
+          `Rig cleanup aborted after ${successfulCleanups.length}/${directories.length} ` +
+            `directories: shutdown in progress`,
+        );
+      }
       const fullPath = path.join(this.config.agentRootPath, dir);
       try {
         if (fs.existsSync(fullPath)) {
@@ -5916,8 +6298,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    this.watchedPatterns = [];
-    this.recentFileAccess = undefined;
     this.currentCodon = undefined;
     this.codonFailureReason = undefined;
     this.codonFailureError = undefined;
@@ -6223,71 +6603,299 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     await this.runCommand(`cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`);
   }
 
+  /**
+   * Decide what run this boot continues with, given execution history that
+   * was not (or could not be) rolled back: a continuation from the newest
+   * completed codon when git holds its checkpoint, otherwise a fresh run.
+   * The state manager picks the seed; this method only acts on it. The
+   * checkpoint repository is reused whole or rebuilt empty, never partially,
+   * so if the newest completed codon's checkpoint is missing no older one is
+   * held either; there is no older seed to fall back to. A fresh run over
+   * existing history is snapshotted first: rig setup deletes its copy.to
+   * directories and every codon re-runs.
+   *
+   * On return `currentRunId` is set. Throws when checkpoint storage cannot
+   * be read.
+   */
+  private async establishRunFromHistory(): Promise<void> {
+    const seed = await this.stateManager.findContinuationSeed();
+
+    if (seed?.confirmed) {
+      this.logger.log(`Resuming from last completed codon: ${seed.codonId} in run ${seed.runId}`);
+      await this.startNewRun({
+        type: "continuation",
+        source: { runId: seed.runId, afterCodon: seed.codonId, checkpointSha: seed.sha },
+        reason: "continue",
+      });
+      return;
+    }
+
+    if (seed) {
+      const message =
+        `Recovery degraded: newest completed codon ${seed.codonId} (run ${seed.runId}) has no ` +
+        `git-confirmed completion checkpoint (reference ${JSON.stringify(seed.sha)}); ` +
+        "starting fresh instead";
+      this.logger.log(message, "error");
+      this.emitErrorEvent(message);
+    }
+
+    // No seedable completed codon — start fresh. A fresh run's rig setup
+    // deletes its copy.to directories and every codon re-runs, so when there
+    // is history on disk snapshot the work tree first. The failed-thread
+    // ladder does this in rung 2; this is the non-failed counterpart. Any run
+    // at all counts as history: a kill during the first rig setup, before
+    // CodonStarted was persisted, leaves a zero-codon run and a partly
+    // mutated tree.
+    if (this.stateManager.getState().runs.length > 0 && !this.bootRecoverySnapshot) {
+      await this.snapshotWorkspaceForRecovery("fresh run over existing history");
+    }
+    await this.startNewRun();
+  }
+
+  /** Emit a non-fatal `error` event with the given message. */
+  private emitErrorEvent(
+    message: string,
+    extra: Partial<Omit<ErrorEvent["data"], "message">> = {},
+  ): void {
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "error",
+      data: { fatal: false, ...extra, message },
+    } as ErrorEvent);
+  }
+
+  /** Emit an `info` event with the given message. */
+  private emitInfoEvent(message: string): void {
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "info",
+      data: { message },
+    } as InfoEvent);
+  }
+
+  /**
+   * The error start() stops with when recovery cannot safely go on. What it
+   * says about the work tree follows from the error's type: a rollback that
+   * failed after changing files leaves the tree half-restored (the
+   * pre-rollback tree is on a recovery/* branch); unreadable storage or a
+   * target rejected up front left it untouched.
+   */
+  private recoveryStoppedError(context: string, error: unknown): Error {
+    const mutated = error instanceof RollbackMutatedWorkspaceError;
+    const why = mutated
+      ? "the work tree may be half-restored"
+      : error instanceof CheckpointStorageError
+        ? "checkpoint storage is unreadable"
+        : "the checkpoint could not be restored";
+    const state = mutated
+      ? "Rig directories may have been removed; the pre-rollback work tree is on the recovery/* branch"
+      : "Nothing has been changed";
+    const message =
+      `Recovery stopped: ${context}: ${why} (${toError(error).message}). ${state}; ` +
+      "see .hankweave/logs/server.log and the recovery/* branches in the checkpoint repository.";
+    this.logger.log(message, "error");
+    return new Error(message, { cause: error });
+  }
+
+  /**
+   * Decide which archive-manifest entries a rollback to `targetSha` restores:
+   * exactly the entries archived strictly after the target on the line being
+   * abandoned (`git rev-list target..originHead`), plus 'orphan' entries.
+   * Entries at or before the target, on unrelated timelines, or with SHAs the
+   * repository does not know stay archived (the last with a warning). The
+   * manifest is not a checkpoint registry — most checkpoints never appear in
+   * it — so its list order says nothing about what to restore (#228).
+   *
+   * Read-only git work: call it BEFORE the first mutation, with `originHead`
+   * captured before any intermediate checkout moves HEAD. Storage trouble
+   * surfaces as CheckpointStorageError so start() stops rather than restoring
+   * an incomplete selection.
+   */
+  private async planArchiveRestore(
+    targetSha: string,
+    originHead?: string | null,
+  ): Promise<import("./archive-manifest.js").ArchiveEntry[]> {
+    if (this.archiveManifest.getManifest().entries.length === 0) {
+      return [];
+    }
+    const head = originHead ?? (await this.checkpointGit.getHeadSha());
+    if (!head) {
+      throw new CheckpointStorageError(
+        "Could not resolve checkpoint HEAD to select archive entries for rollback",
+      );
+    }
+    const reachableAfterTarget = await this.checkpointGit.shasBetween(targetSha, head);
+    const knownShas = await this.checkpointGit.getAllCheckpointShas();
+    const entries = this.archiveManifest.selectEntriesToRestore(reachableAfterTarget, knownShas);
+    if (entries.length > 0) {
+      this.logger.log(`Found ${entries.length} archive entries to restore during rollback`);
+    }
+    return entries;
+  }
+
+  /**
+   * Put the work tree at a checkpoint: check the commit out, copy the
+   * archived files `planArchiveRestore` selected back into place, and drop
+   * exactly the restored entries from the manifest (which lives outside the
+   * work tree, so the checkout never touches it). Every rollback path ends
+   * with this; it is the one place the archive-rewind protocol lives. The
+   * caller has already preflighted `sha` (a full, git-confirmed id),
+   * planned the restore, and snapshotted the tree, so this changes files
+   * from its first step.
+   */
+  private async restoreWorkTreeToCheckpoint(
+    sha: string,
+    entriesToRestore: import("./archive-manifest.js").ArchiveEntry[],
+  ): Promise<void> {
+    await this.checkpointGit.resetToCheckpoint(sha);
+
+    // Archive restoration must not START once shutdown has begun.
+    if (this.isShuttingDown) {
+      throw new Error("Rollback aborted after reset: shutdown in progress");
+    }
+    if (entriesToRestore.length > 0) {
+      const results = await this.restoreArchiveEntries(entriesToRestore, sha);
+      await this.archiveManifest.removeEntries(
+        results.filter((r) => r.success).map((r) => r.entry),
+      );
+    }
+  }
+
+  /**
+   * Fail a codon that is in `starting` (rig work done, no runner yet) with a
+   * non-retriable reason, applying the codon's failure policy exactly as the
+   * missing-continuation-session path does.
+   */
+  private async failCodonAtStart(
+    codonId: CodonId,
+    codon: Codon,
+    message: string,
+    error: Error,
+  ): Promise<void> {
+    this.logger.log(message, "error");
+    this.codonFailureError = error;
+    this.codonFailureReason = { type: "unknown", retriable: false, message };
+
+    if (this.currentRunId) {
+      this.stateManager.transition({
+        type: "CodonTransitioned",
+        data: {
+          runId: this.currentRunId,
+          codonId,
+          from: "starting",
+          to: "failed",
+          // exitCode is required by the failed-transition guard; -1 marks
+          // "no runner ever ran", as the missing-session path records it.
+          metadata: {
+            exitCode: -1,
+            failedDuring: "starting",
+            failureReason: this.codonFailureReason,
+          },
+        },
+      });
+    }
+
+    this.emitErrorEvent(message, { codon: codon.id, fatal: true, severity: ErrorSeverity.CODON });
+
+    const { action } = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
+
+    if (action === "continue") {
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "codon.completed",
+        data: {
+          codonId,
+          success: false,
+          cost: 0,
+          duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
+          exitStatus: { type: "error", code: -1 },
+          failureReason: this.codonFailureReason,
+          failureIgnored: true,
+        },
+      } as CodonCompletedEvent);
+      this.emitInfoEvent(`Codon ${codonId} failed at start, continuing (onFailure=ignore)`);
+      this.cleanupCurrentCodon();
+      await this.stateManager.waitForPendingTransitions();
+      await this.stateManager.expandNextIterationForCodon({
+        codonId: CodonId(codonId),
+        contextExceeded: false,
+        budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
+      });
+      if (this.config.autostart) {
+        await this.autoStartNextCodon();
+      }
+      return;
+    }
+
+    this.cleanupCurrentCodon();
+    if (action === "shutdown") {
+      if (this.currentRunId) {
+        this.stateManager.transition({ type: "RunFailed", data: { runId: this.currentRunId } });
+        await this.stateManager.waitForPendingTransitions();
+      }
+      await this.shutdown("codon failed at start");
+    }
+  }
+
   // -------------
   // Checkpoint Methods
   // -------------
 
   /**
-   * Initialize checkpoint system - check git availability and switch branch
+   * Initialize checkpoint system. git must be runnable: a missing git fails
+   * the boot here (GitUnavailableError) rather than silently downgrading to a
+   * run without rollback or crash recovery. The CLI proves the same thing
+   * even earlier, before the execution directory is set up.
    */
   private async initializeCheckpoints(): Promise<void> {
-    // Check if git is available
-    if (!(await this.isGitAvailable())) {
-      this.logger.log("Git is not available. Checkpointing disabled.", "info");
-      this.checkpointingEnabled = false;
-      return;
-    }
+    await assertGitAvailable();
 
-    // Initialize checkpoint git
-    this.checkpointGit = new CheckpointGit(
-      this.config.executionPath,
-      this.config.agentRootPath,
-      this.logger,
-    );
+    // initialize() returns a real HEAD or throws; a repository on disk that
+    // git cannot use is rebuilt there.
     await this.checkpointGit.initialize();
 
-    // Provide checkpoint git to state manager for git operations
-    this.stateManager.setCheckpointGit(this.checkpointGit);
-
-    // Initialize archive manifest (for archiveOnSuccess feature)
+    // Load the archive manifest (for archiveOnSuccess feature)
     // Note: The manifest is NOT checkpointed because it lives outside the git work tree
     // (at .hankweave/archive-manifest.json, sibling to agentRoot/). Instead, its state
-    // is managed programmatically during rollback via removeEntriesAfterCheckpoint().
-    this.archiveManifest = new ArchiveManifestManager(this.config.executionPath, this.logger);
+    // is managed programmatically during rollback: planArchiveRestore() selects entries
+    // by git reachability and removeEntries() drops exactly the restored ones.
     await this.archiveManifest.load();
 
     this.logger.log("Checkpoint system initialized");
   }
 
   /**
-   * Check if git command is available using spawn for consistency
-   */
-  private async isGitAvailable(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const proc = spawn("git", ["--version"], {
-        stdio: "ignore",
-      });
-
-      proc.on("error", () => resolve(false));
-      proc.on("exit", (code) => resolve(code === 0));
-    });
-  }
-
-  /**
    * Add checkpoint patterns for a codon (cumulative)
    */
-  private async addCheckpointPatterns(patterns: string[]): Promise<void> {
-    if (!this.checkpointingEnabled || patterns.length === 0) return;
-
-    // Initialize repository on first tracked patterns
-    if (!this.checkpointGit) {
-      this.checkpointGit = new CheckpointGit(
-        this.config.executionPath,
-        this.config.agentRootPath,
-        this.logger,
+  /**
+   * Register the checkpoint patterns in force at `codonId` (plan order,
+   * loop iterations included). Not being in the plan is a programming error
+   * worth a loud log, not a silent empty pattern set.
+   */
+  private async registerCheckpointPatternsThrough(
+    codonId: CodonId,
+    includeSelf: boolean,
+  ): Promise<void> {
+    const patterns = checkpointPatternsThrough(
+      this.stateManager.getState().executionPlan,
+      codonId,
+      includeSelf,
+    );
+    if (patterns === null) {
+      this.logger.log(
+        `Codon ${codonId} is not in the execution plan; no checkpoint patterns registered`,
+        "error",
       );
-      await this.checkpointGit.initialize();
+      return;
     }
+    await this.addCheckpointPatterns(patterns);
+  }
+
+  private async addCheckpointPatterns(patterns: string[]): Promise<void> {
+    if (patterns.length === 0) return;
 
     // Add new patterns
     await this.checkpointGit.addPatterns(patterns);
@@ -6295,18 +6903,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   /**
-   * Create a checkpoint commit
+   * Create a checkpoint commit. Returns the commit SHA; throws on any failure
+   * (never returns without a checkpoint).
    */
-  private async createCheckpoint(info: CheckpointInfo): Promise<string | undefined> {
-    if (!this.checkpointingEnabled || !this.checkpointGit) {
-      this.logger.log(
-        `[CHECKPOINT-DEBUG] Checkpoint creation skipped - enabled: ${
-          this.checkpointingEnabled
-        }, git: ${!!this.checkpointGit}`,
-      );
-      return;
-    }
-
+  private async createCheckpoint(info: CheckpointInfo): Promise<string> {
     this.logger.log(
       `[CHECKPOINT-DEBUG] Creating checkpoint for codon ${info.codonId} with status ${info.status}`,
     );
@@ -6373,17 +6973,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         }
 
         return commitHash;
-      } else {
-        this.logger.log(`[CHECKPOINT-DEBUG] No commit hash returned from checkpoint.commit()`);
       }
+      throw new Error("checkpoint commit returned no SHA");
     } catch (error) {
-      // Handle disk full or other git errors
-      this.logger.log(
-        `[CHECKPOINT-DEBUG] Checkpoint failed: ${toError(error).message}. ` +
-          "Disabling checkpointing for this session.",
-        "error",
-      );
-      this.checkpointingEnabled = false;
+      // Disk full, a broken repo, a stale lock — whatever it is, it must be
+      // loud and it must reach the caller. Swallowing it here (and switching
+      // checkpointing off for the rest of the run) is exactly how a completed
+      // codon ends up with an empty checkpoint reference that recovery later
+      // trips over.
+      const message = `Checkpoint creation failed for codon ${info.codonId} (${info.status}): ${
+        toError(error).message
+      }`;
+      this.logger.log(`[CHECKPOINT-DEBUG] ${message}`, "error");
+      this.emitErrorEvent(message, { codon: info.codonId });
+      throw new Error(message, { cause: error });
     }
   }
 
@@ -6416,8 +7019,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
     // Arm the force-exit backstop BEFORE any awaited cleanup, so a wedged step
     // can never leave the process hanging after a fatal condition was detected.
-    if (exitProcess && reason !== "running integration test") {
-      this.armShutdownWatchdog(reason, exitCode);
+    if (shutdownWatchdogWanted(exitProcess, reason)) {
+      this.watchdog.arm(reason, this.computeExitCode(reason, exitCode));
     }
 
     // Notify clients that we're shutting down and waiting for the agent process
@@ -6442,14 +7045,19 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
 
     // Create exit checkpoint if not shutting down normally (all codons completed)
-    if (reason !== "all codons completed" && this.checkpointingEnabled && this.currentCodon) {
-      await this.createCheckpoint({
-        status: "exit",
-        codonId: CodonId(this.currentCodon.codon.id),
-        codonName: this.currentCodon.codon.name,
-        runId: this.currentRunId || RunId("unknown"),
-        timestamp: new Date().toISOString(),
-      });
+    if (reason !== "all codons completed" && this.currentCodon) {
+      try {
+        await this.createCheckpoint({
+          status: "exit",
+          codonId: CodonId(this.currentCodon.codon.id),
+          codonName: this.currentCodon.codon.name,
+          runId: this.currentRunId || RunId("unknown"),
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        // Already logged and emitted by createCheckpoint; must not block shutdown.
+        this.logger.log(`Exit checkpoint skipped: ${toError(error).message}`, "error");
+      }
     }
 
     this.cleanupCurrentCodon();
@@ -6558,33 +7166,98 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.proxyRunner = null;
     }
 
-    // Close event journal
+    // Close event journal: drains pending writes, flushes the meta sidecar,
+    // and releases the held file descriptor. Re-drain the append queue first:
+    // teardown between the drain above and here (client close, server stop)
+    // can still have enqueued events, and close() rejects appends submitted
+    // after it starts.
     try {
-      // Event journal no longer requires explicit shutdown
+      await this.eventJournalAppendQueue;
+      await this.eventJournal.close();
       this.logger.log("Event journal closed");
     } catch (error) {
       this.logger.log(`Error closing event journal: ${error}`, "error");
     }
 
-    if (fs.existsSync(this.config.lockFile)) {
+    // Finalize-time journal diet (events.jsonl diet P4): shrink the finished
+    // run's journal now that the storage is closed. Gated on a terminal run
+    // state (RunCompleted/RunFailed — never an attach-disconnect that left
+    // no run), skipped when the shutdown watchdog is close to firing (the
+    // diet is verify-before-unlink and re-runnable offline, so skipping is
+    // always safe), and never allowed to fail the shutdown itself.
+    // The cached fence flag is not enough here: shutdown cancels the
+    // heartbeat, so a takeover landing after the last tick would go
+    // undetected and this diet would unlink the successor's live journal.
+    // Prove ownership FRESH, at the decision point: the lock on disk must
+    // still carry this runtime's own acquisition token.
+    const lockStillOurs = (): boolean => {
+      if (this.lockLostToSuccessor || this.lockId === null) return false;
       try {
-        fs.unlinkSync(this.config.lockFile);
-        this.logger.log("Lock file removed");
-      } catch (error) {
-        this.logger.log(`Failed to remove lock file: ${error}`, "error");
+        const lock = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8")) as {
+          lockId?: unknown;
+        };
+        return lock.lockId === this.lockId;
+      } catch {
+        return false; // Absent, unreadable, or unparseable: not provably ours.
+      }
+    };
+    if (this.config.dietOnFinalize && !lockStillOurs()) {
+      // Fenced, taken over after the last heartbeat tick, or ownership
+      // unprovable. Dieting would risk unlinking a successor's live
+      // journal; the offline CLI can always diet later.
+      this.logger.log("Journal diet skipped: this runtime cannot prove it still owns runtime.lock");
+    } else if (this.config.dietOnFinalize) {
+      // Resolve the run being finalized. `runForTelemetry` is null on the
+      // codon-failure paths (RunFailed transitioned BEFORE shutdown() was
+      // called, clearing the state's currentRunId), so fall back to the
+      // runtime's own retained run id — failed runs are explicitly in scope
+      // for the diet.
+      const finalRunId = runForTelemetry?.runId ?? this.currentRunId;
+      const finalRun = finalRunId ? this.stateManager.getRun(finalRunId) : null;
+      const runIsTerminal = finalRun?.status === "completed" || finalRun?.status === "failed";
+      if (!runIsTerminal) {
+        this.logger.log("Journal diet skipped: run did not reach a terminal state");
+      } else {
+        // The trace uploader spawns hankweave-trace, which reads
+        // events.jsonl straight off disk — it must run BEFORE the diet
+        // removes that file (spawnSync + the uploadDone guard: the upload
+        // completes here and the later shutdown call becomes a no-op).
+        try {
+          this.uploadTrace?.();
+        } catch (error) {
+          this.logger.log(`Trace upload before journal diet failed: ${error}`, "error");
+        }
+        // That upload is synchronous: it blocks the event loop for its whole
+        // duration (bounded only by its own 60 s spawnSync timeout), so the
+        // watchdog armed at shutdown start cannot fire during it — but it
+        // does not disappear. An overdue timer fires at the diet's first
+        // await and kills the diet mid-flight. Observed in production: a
+        // five-run execution's upload took 39 s and the diet was skipped
+        // with "-9382ms of headroom". The upload is a separately bounded
+        // phase; give the diet its own full watchdog window instead of
+        // inheriting the upload's debt. Shutdown stays hard-bounded
+        // (pre-upload cleanup ≤ watchdog, upload ≤ its spawnSync timeout,
+        // diet ≤ watchdog) — it is just three windows instead of one.
+        this.watchdog.reset(reason, this.computeExitCode(reason, exitCode));
+        try {
+          const report = await dietJournal(this.layout.eventsDir, {
+            thresholdBytes: this.config.journalDietThresholdBytes,
+          });
+          if (report.dieted) {
+            this.logger.log(
+              `Event journal dieted: ${report.originalBytes} → ${report.dietedBytes} bytes ` +
+                `(${report.uniqueCasBodies} bodies in CAS, restore with --restore-journal)`,
+            );
+          }
+        } catch (error) {
+          this.logger.log(`Journal diet failed (original journal left intact): ${error}`, "error");
+        }
       }
     }
+
+    this.removeOwnLockFile();
 
     this.logger.log("Server shutdown complete");
-
-    // Ensure lock file is really gone before delay
-    try {
-      if (fs.existsSync(this.config.lockFile)) {
-        fs.unlinkSync(this.config.lockFile);
-      }
-    } catch {
-      // Ignore errors on second attempt
-    }
 
     // Conditionally exit the process based on the exitProcess parameter
     // In production, we want to exit the process after shutdown
@@ -6598,13 +7271,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
       this.logger.log(`Shutdown: ${reason} (exit code: ${finalExitCode})`);
 
-      // Upload trace before exiting so the upload completes synchronously
-      // and doesn't block in an exit handler. The uploadDone guard in
-      // uploadTrace() prevents double-upload if called multiple times.
+      // Fallback trace upload. In the common case (dietOnFinalize on, lock
+      // still ours, terminal run) the finalize block above already ran the
+      // upload ahead of the journal diet and this is a no-op via the
+      // uploadDone guard. It is the real upload only when that block was
+      // skipped. Synchronous, so it completes before exit rather than
+      // racing an exit handler; the watchdog is cleared synchronously right
+      // after, so a long upload here cannot be interrupted by it.
       this.uploadTrace?.();
 
       // Graceful shutdown completed — cancel the watchdog and exit normally.
-      this.clearShutdownWatchdog();
+      this.watchdog.clear();
       // Small delay to ensure log is written before process exits
       setTimeout(() => {
         process.exit(finalExitCode);
@@ -6634,35 +7311,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   /**
-   * Arm a backstop timer that force-exits the process if graceful shutdown does
-   * not complete within SHUTDOWN_WATCHDOG_MS. Without it, any single awaited
-   * shutdown step that never resolves (a wedged process kill, an in-flight SDK
-   * stream teardown, a hung sentinel/telemetry flush, or a pending state
-   * transition) would leave a run that already detected a fatal condition
-   * hanging forever instead of exiting. Idempotent and unref'd so it never keeps
-   * the event loop alive on its own.
-   */
-  private armShutdownWatchdog(reason: string, exitCode?: number): void {
-    if (this.shutdownWatchdog) return;
-    const code = this.computeExitCode(reason, exitCode);
-    this.shutdownWatchdog = setTimeout(() => {
-      this.logger.log(
-        `Shutdown watchdog: graceful shutdown exceeded ${TIMEOUTS.SHUTDOWN_WATCHDOG_MS}ms for "${reason}" — forcing exit (code ${code})`,
-        "error",
-      );
-      process.exit(code);
-    }, TIMEOUTS.SHUTDOWN_WATCHDOG_MS);
-    this.shutdownWatchdog.unref?.();
-  }
-
-  private clearShutdownWatchdog(): void {
-    if (this.shutdownWatchdog) {
-      clearTimeout(this.shutdownWatchdog);
-      this.shutdownWatchdog = undefined;
-    }
-  }
-
-  /**
    * Force shutdown the Hankweave server immediately.
    * Called when the user presses q/Ctrl+C a second time during graceful shutdown,
    * or when a client sends the server.force_shutdown command.
@@ -6682,9 +7330,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // watchdog with a success code (e.g. 0). Clear and re-arm with code 1 so a
     // wedged force-kill exits 1 — not the stale code, which would misreport a
     // forced/failed shutdown as success.
-    if (exitProcess && reason !== "running integration test") {
-      this.clearShutdownWatchdog();
-      this.armShutdownWatchdog(reason, 1);
+    if (shutdownWatchdogWanted(exitProcess, reason)) {
+      this.watchdog.clear();
+      this.watchdog.arm(reason, 1);
     }
 
     // Force kill any running process immediately
@@ -6720,14 +7368,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.proxyRunner = null;
     }
 
-    // Remove lock file
-    if (fs.existsSync(this.config.lockFile)) {
-      try {
-        fs.unlinkSync(this.config.lockFile);
-      } catch {
-        // Best effort
-      }
-    }
+    // Remove lock file (only if this runtime acquired it)
+    this.removeOwnLockFile();
 
     this.logger.log("Force shutdown complete");
 
@@ -6735,9 +7377,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // The uploadDone guard prevents double-upload if shutdown() already ran it.
     this.uploadTrace?.();
 
-    if (exitProcess && reason !== "running integration test") {
+    if (shutdownWatchdogWanted(exitProcess, reason)) {
       // Force shutdown completed — cancel the watchdog and exit immediately.
-      this.clearShutdownWatchdog();
+      this.watchdog.clear();
       setTimeout(() => {
         process.exit(1);
       }, TIMEOUTS.CODON_CLEANUP_DELAY_MS);

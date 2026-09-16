@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ExecutionLayout } from "./execution-layout.js";
 import type { HankweaveState } from "./types/state-types.js";
 import type { Logger } from "./utils.js";
 
@@ -41,7 +42,7 @@ const DEFAULT_REPLAY_SPEED = (() => {
  * claudeLogPath to an absolute path.
  */
 function loadReplayManifest(replayDir: string, runId?: string): ReplayManifest {
-  const statePath = path.join(replayDir, ".hankweave", "state.json");
+  const statePath = new ExecutionLayout(replayDir).statePath;
 
   if (!fs.existsSync(statePath)) {
     throw new Error(`Replay state file not found: ${statePath}`);

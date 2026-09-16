@@ -1278,7 +1278,7 @@ export interface ValidationError {
 }
 
 export interface ValidationWarning {
-  type: "orphaned_folder" | "missing_checkpoint" | "cost_mismatch";
+  type: "orphaned_folder" | "cost_mismatch";
   message: string;
 }
 

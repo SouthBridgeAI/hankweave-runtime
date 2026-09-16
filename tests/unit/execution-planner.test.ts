@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { type ExecutionCodonEntry, ExecutionPlanner } from "../../server/execution-planner.js";
+import {
+  checkpointPatternsThrough,
+  type ExecutionCodonEntry,
+  ExecutionPlanner,
+} from "../../server/execution-planner.js";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type { CodonExecution, Run } from "../../server/types/state-types.js";
 import type { Codon, CodonConfig, Loop } from "../../server/types/types.js";
@@ -979,5 +983,74 @@ describe("ExecutionPlanner - expandNextIteration - budget exceeded", () => {
       completedCodonId: CodonId("work#0"),
     });
     expect(plan).toHaveLength(2);
+  });
+});
+
+describe("checkpointPatternsThrough", () => {
+  const entry = (
+    codonId: string,
+    id: string,
+    checkpointedFiles?: string[],
+    loop?: { loopId: string; iteration: number },
+  ): ExecutionCodonEntry =>
+    ({
+      codonId: CodonId(codonId),
+      codon: {
+        ...createTestCodon({
+          id,
+          name: id,
+          model: "haiku",
+          continuationMode: "fresh",
+          promptText: id,
+        }),
+        checkpointedFiles,
+      },
+      ...(loop && {
+        loopContext: {
+          loopId: CodonId(loop.loopId),
+          iteration: loop.iteration,
+          codonIndexInLoop: 0,
+        },
+      }),
+    }) as ExecutionCodonEntry;
+
+  // transform → catalog → plan#0 → plan#1 (loop "planloop") → consolidate → emit
+  const plan: ExecutionCodonEntry[] = [
+    entry("transform", "transform", ["scripts/**/*", "docs_md/**/*"]),
+    entry("catalog", "catalog", ["notes/**/*"]),
+    entry("plan#0", "plan", ["notes/**/*"], { loopId: "planloop", iteration: 0 }),
+    entry("plan#1", "plan", ["notes/**/*", "notes/candidates/*"], {
+      loopId: "planloop",
+      iteration: 1,
+    }),
+    entry("consolidate", "consolidate", ["notes/**/*"]),
+    entry("emit", "emit", ["answer.txt"]),
+  ];
+
+  test("a loop iteration registers every pattern up to and including itself", () => {
+    // The incident: plan#1 as the first codon after a crash restart. Looked
+    // up in the top-level codon list it registered nothing.
+    expect(checkpointPatternsThrough(plan, CodonId("plan#1"), true)).toEqual([
+      "scripts/**/*",
+      "docs_md/**/*",
+      "notes/**/*",
+      "notes/candidates/*",
+    ]);
+  });
+
+  test("a completion target excludes the codon that runs next; a rig-setup target includes it", () => {
+    expect(checkpointPatternsThrough(plan, CodonId("emit"), false)).toEqual([
+      "scripts/**/*",
+      "docs_md/**/*",
+      "notes/**/*",
+      "notes/candidates/*",
+    ]);
+    expect(checkpointPatternsThrough(plan, CodonId("emit"), true)).toContain("answer.txt");
+    expect(checkpointPatternsThrough(plan, CodonId("transform"), false)).toEqual([]);
+  });
+
+  test("a codon missing from the plan is null, not an empty set", () => {
+    expect(checkpointPatternsThrough(plan, CodonId("nope"), true)).toBeNull();
+    expect(checkpointPatternsThrough([], CodonId("transform"), true)).toBeNull();
   });
 });

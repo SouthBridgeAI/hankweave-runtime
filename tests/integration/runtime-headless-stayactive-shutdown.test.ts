@@ -119,7 +119,9 @@ describe("Runtime: headless stay-active must shut down, not hang", () => {
       startTime: new Date(),
     };
     internals.currentRunId = RunId("run-1");
-    internals.checkpointingEnabled = false;
+    // The runtime is not booted, so there is no checkpoint repo; stand in for
+    // the checkpoint commit rather than exercising git here.
+    internals.createCheckpoint = async () => "stub-checkpoint-sha";
     internals.budget = null;
     internals.currentCodonSentinels = new Set();
 

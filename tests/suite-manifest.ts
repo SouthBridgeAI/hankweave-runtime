@@ -28,9 +28,10 @@ const ROOT = path.resolve(import.meta.dir, "..");
  * - `integration`  component wiring against mock LLM providers, no network
  * - `e2e-offline`  full runtime end to end, but driven by replay logs or mocked
  *                  registries — real servers, zero API spend
- * - `e2e-live`     full runtime against real provider APIs (haiku unless noted)
+ * - `e2e-live`     full runtime against real provider APIs
+ *                  (pi/openai-codex/gpt-5.6-luna unless noted)
  * - `e2e-heavy`    infrastructure-dependent or frontier-model: npm registry,
- *                  compiled binaries, opus/sonnet. Minutes and cents.
+ *                  compiled binaries, frontier models. Minutes and cents.
  * - `e2e-marathon` deliberately hours and dollars. Never run by CI; a human
  *                  starts these. Separated from `e2e-heavy` so `--max-cost`
  *                  stays a genuine safety brake rather than a routine filter —
@@ -89,6 +90,14 @@ export interface SuiteSpec {
    * (e.g. provider health pings) — everything else still runs keyless.
    */
   optionalEnv?: string[];
+  /**
+   * This suite reaches Anthropic over the raw HTTP API (pi provider,
+   * AI-SDK sentinels) — a Claude Code subscription login cannot serve it, so
+   * HW_INTERNAL_CLAUDE_LEGACY_AUTH must NOT satisfy its ANTHROPIC_API_KEY
+   * requirement: without the real key the suite skips instead of failing at
+   * the provider self-test.
+   */
+  needsRawAnthropicKey?: boolean;
   /** Extra env for the subprocess. */
   env?: Record<string, string>;
   /** `bun test --timeout`, per individual test. */
@@ -97,7 +106,13 @@ export interface SuiteSpec {
   suiteTimeoutSeconds: number;
   /** Measured wall time, for `--list` planning and `--max-time` budgeting. */
   estSeconds: number;
-  /** Measured spend. Offline tiers are 0 by construction. */
+  /**
+   * Estimated billable API spend, used for planning, reservations, and retries.
+   * Offline suites are 0, as are suites whose only provider is openai-codex
+   * (its usage is not API-billed). Mixed suites budget only billed
+   * providers/sentinels; their estimates remain conservative upper bounds
+   * until remeasured.
+   */
   estCostUsd: number;
 }
 
@@ -134,11 +149,25 @@ export const PROVIDER_KEY_ENV_VARS = [
   "AWS_SECRET_ACCESS_KEY",
   "AWS_PROFILE",
   "BEDROCK_API_KEY",
+  // Marker that an openai-codex OAuth credential is provisioned in pi's store
+  // (~/.pi/agent/auth.json, written by `pi login`). pi/openai-codex/* models
+  // authenticate from that store, never from this variable — suites gate on
+  // the marker so they skip cleanly when no credential exists. Stripped from
+  // suites that do not declare it, like any key.
+  "CODEX_AUTH_JSON",
 ] as const;
 
 const ANTHROPIC = ["ANTHROPIC_API_KEY"];
-/** The default `launchHankweave` config runs codon-3 on `pi/google/gemini-2.5-flash`. */
-const ANTHROPIC_GEMINI = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY"];
+/** openai-codex credential marker (see the CODEX_AUTH_JSON comment above). */
+const CODEX = ["CODEX_AUTH_JSON"];
+/** Anthropic-keyed sentinel/AI-SDK calls plus pi/openai-codex codon runs. */
+const ANTHROPIC_CODEX = ["ANTHROPIC_API_KEY", "CODEX_AUTH_JSON"];
+/**
+ * The init template's codon mix (haiku + gemini + pi + gpt) runs on the
+ * Anthropic key and the Gemini key; its gpt codon authenticates from pi's
+ * store, so the gate for it is the marker only.
+ */
+const ANTHROPIC_GEMINI_CODEX = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CODEX_AUTH_JSON"];
 
 export const SUITES: SuiteSpec[] = [
   // ── unit ────────────────────────────────────────────────────────────
@@ -210,13 +239,16 @@ export const SUITES: SuiteSpec[] = [
   {
     id: "e2e-replay",
     // Live, not offline: both describe blocks *record* a run with real models
-    // in beforeAll (haiku + gemini + pi), then replay it. That round trip is
+    // in beforeAll (the init template's haiku/gemini/pi/gpt mix; the happy-path
+    // default config is all gpt-5.6-luna), then replay it. That round trip is
     // the point — it proves current recordings replay — but it spends, and it
     // sat in e2e-offline declaring $0 while deleting the execution dirs that
     // would have shown the spend. The free tier's replay coverage comes from
     // the checked-in and built fixtures in the four suites below.
     tier: "e2e-live",
     files: ["tests/e2e/replay-e2e.test.ts"],
+    // The recorded run drives anthropic/* through the pi provider's raw API.
+    needsRawAnthropicKey: true,
     description: "Records a live run, then proves replay reproduces it without a provider.",
     failureMeans:
       "The record-then-replay round trip broke. A failure while RECORDING is a live runtime " +
@@ -228,7 +260,7 @@ export const SUITES: SuiteSpec[] = [
       "server/replay-process-manager.ts",
       "server/claude-log-parser.ts",
     ],
-    needsEnv: ANTHROPIC_GEMINI,
+    needsEnv: ANTHROPIC_GEMINI_CODEX,
     // Recorded logs carry the original run's inter-message gaps, which replay
     // faithfully re-waits; the cap collapses them. This suite keeps timestamped
     // pacing exercised — it asserts replay duration tracks the recording.
@@ -249,11 +281,11 @@ export const SUITES: SuiteSpec[] = [
       "the continuation run's limits, or the carried total is wrong. Asserts real cost " +
       "magnitude by construction.",
     suspects: ["server/budget.ts", "server/execution-thread.ts", "server/execution-setup.ts"],
-    needsEnv: ANTHROPIC,
+    needsEnv: CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 1200,
     estSeconds: 30,
-    estCostUsd: 0.05,
+    estCostUsd: 0,
   },
   {
     id: "e2e-replay-plan-gen",
@@ -319,6 +351,24 @@ export const SUITES: SuiteSpec[] = [
     estCostUsd: 0,
   },
   {
+    id: "e2e-noop-resume",
+    tier: "e2e-offline",
+    files: ["tests/e2e/noop-resume-e2e.test.ts"],
+    description:
+      "Rerunning an already-completed execution prints the 'nothing to do' notice once and " +
+      "exits 0 (issue #231). Real headless CLI runs against the local mock provider — keyless.",
+    failureMeans:
+      "The no-op rerun console contract broke: a resumed, fully-completed execution stopped " +
+      "announcing itself on stdout (or prints it more than once / on fresh runs too), or the " +
+      "rerun stopped exiting 0. Look at the isStartupNoop branch in announceAllCodonsCompleted " +
+      "(server/hankweave-runtime.ts) and the resume continuation-run wiring.",
+    suspects: ["server/hankweave-runtime.ts", "server/execution-setup.ts"],
+    perTestTimeoutMs: 300_000,
+    suiteTimeoutSeconds: 900,
+    estSeconds: 30,
+    estCostUsd: 0,
+  },
+  {
     id: "e2e-error-classification",
     tier: "e2e-offline",
     files: ["tests/e2e/error-classification-replay-e2e.test.ts"],
@@ -351,23 +401,47 @@ export const SUITES: SuiteSpec[] = [
   },
   // ── e2e-live ────────────────────────────────────────────────────────
   {
+    id: "e2e-events-journal-integrity",
+    tier: "e2e-live",
+    files: ["tests/e2e/events-journal-integrity-e2e.test.ts"],
+    description:
+      "Live Haiku codons: file.updated journal integrity — tool-path matching follows resolver " +
+      "semantics, Read fabricates nothing, watched patterns stay scoped to their codon.",
+    failureMeans:
+      "A file.updated event landed in (or vanished from) the journal wrongly: the tool-call " +
+      "matcher diverged from the shared resolver (basename magic or ignored gitignore), a Read " +
+      "was journaled as a mutation, or per-codon watched-file state leaked across the " +
+      "completion/start overlap into a codon with no checkpointedFiles.",
+    suspects: [
+      "server/codon-file-tracker.ts",
+      "server/file-resolver.ts",
+      "server/codon-runner.ts",
+      "server/hankweave-runtime.ts",
+    ],
+    needsEnv: ANTHROPIC,
+    perTestTimeoutMs: 300_000,
+    suiteTimeoutSeconds: 1_200,
+    estSeconds: 120,
+    estCostUsd: 0.06,
+  },
+  {
     id: "e2e-output-copy-exit",
     tier: "e2e-live",
     files: ["tests/e2e/output-copy-exit-code-e2e.test.ts"],
     description:
       "Headless process exit codes when outputFiles beforeCopy fails vs passes — real CLI, " +
-      "live haiku codon.",
+      "live gpt-5.6-luna codon.",
     failureMeans:
       "An output-stage failure no longer fails the headless run: a beforeCopy/copy error " +
       "stopped exiting 1 (the run silently reads as green), or a passing run stopped exiting 0. " +
       "Look at the outputFiles catch in handleCodonComplete and computeExitCode's run-status " +
       "fallback in shutdown().",
     suspects: ["server/hankweave-runtime.ts"],
-    needsEnv: ANTHROPIC,
+    needsEnv: CODEX,
     perTestTimeoutMs: 300_000,
     suiteTimeoutSeconds: 900,
     estSeconds: 60,
-    estCostUsd: 0.01,
+    estCostUsd: 0,
   },
   {
     id: "e2e-server",
@@ -379,10 +453,10 @@ export const SUITES: SuiteSpec[] = [
       "recovery, or stop. First distinguish assertion failures (regression) from provider-call " +
       "timeouts (outage) — this suite runs real models and reddens on both.",
     suspects: ["server/index.ts", "server/hankweave-runtime.ts", "server/checkpoint-git.ts"],
-    // The default test config's codon-3 is pi/google/gemini-2.5-flash, and
-    // several tests run it to completion — the Gemini dependency was real but
-    // undeclared until the runner started enforcing this list.
-    needsEnv: ANTHROPIC_GEMINI,
+    // The default test config's codons all run pi/openai-codex/gpt-5.6-luna
+    // (credential from pi's store), and several tests run them to completion;
+    // its anthropic-modeled sentinels also need the Anthropic key.
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 300_000,
     suiteTimeoutSeconds: 1200,
     estSeconds: 220,
@@ -400,7 +474,7 @@ export const SUITES: SuiteSpec[] = [
       "behind isNonAnthropicModel hatches, so 'model produced X' flakes should already be " +
       "impossible. The most model-quality-coupled suite in the tier.",
     suspects: ["server/hankweave-runtime.ts", "server/checkpoint-git.ts", "server/telemetry"],
-    needsEnv: ANTHROPIC_GEMINI,
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 2400,
     estSeconds: 60,
@@ -420,7 +494,7 @@ export const SUITES: SuiteSpec[] = [
       "server/hankweave-runtime.ts",
       "server/cleanup-command.ts",
     ],
-    needsEnv: ANTHROPIC_GEMINI,
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 2400,
     estSeconds: 85,
@@ -442,7 +516,7 @@ export const SUITES: SuiteSpec[] = [
       "server/state-manager.ts",
       "server/hankweave-runtime.ts",
     ],
-    needsEnv: ANTHROPIC,
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 2400,
     estSeconds: 450,
@@ -458,7 +532,7 @@ export const SUITES: SuiteSpec[] = [
       "stopping at context exhaustion. shouldExtendCodon (codon-runner) and SDK session resume " +
       "are the moving parts.",
     suspects: ["server/codon-runner.ts", "server/claude-agent-sdk-manager.ts"],
-    needsEnv: ANTHROPIC,
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 1800,
     estSeconds: 115,
@@ -468,13 +542,18 @@ export const SUITES: SuiteSpec[] = [
     id: "e2e-sentinel-integration",
     tier: "e2e-live",
     files: ["tests/e2e/sentinel-integration-e2e.test.ts"],
+    // Sentinels call Anthropic's raw HTTP API (AI SDK) with no in-test key
+    // guard — a subscription login cannot serve them. (A machine with only
+    // HANKWEAVE_SENTINEL_ANTHROPIC_API_KEY loses this suite under legacy
+    // auth; honest gating over accidental coverage.)
+    needsRawAnthropicKey: true,
     description: "Sentinel load/trigger/output/unload lifecycle against a live codon.",
     failureMeans:
       "Sentinel lifecycle against a live codon broke: load/unload ordering, trigger firing, or " +
       "output writing. Event routing between the runtime and sentinel-manager is the usual " +
       "culprit; sentinel LLM calls themselves are real and can also fail on provider outage.",
     suspects: ["server/sentinels", "server/hankweave-runtime.ts"],
-    needsEnv: ANTHROPIC,
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 1800,
     estSeconds: 30,
@@ -508,11 +587,11 @@ export const SUITES: SuiteSpec[] = [
       "codon.env stopped reaching rigSetup shell commands — the env overlay plumbing between " +
       "codon config and rig command execution regressed.",
     suspects: ["server/hankweave-runtime.ts", "server/utils.ts"],
-    needsEnv: ANTHROPIC,
+    needsEnv: CODEX,
     perTestTimeoutMs: 300_000,
     suiteTimeoutSeconds: 900,
     estSeconds: 10,
-    estCostUsd: 0.01,
+    estCostUsd: 0,
   },
   {
     id: "e2e-data-mismatch",
@@ -523,14 +602,15 @@ export const SUITES: SuiteSpec[] = [
       "--ignore-data-mismatch resume relinking broke: data-source hashing or the resume-time " +
       "relink of read_only_data_source.",
     suspects: ["server/data-hasher.ts", "server/execution-setup.ts"],
-    // The default config's codon-3 is gemini: even with no codon awaited, the
-    // startup self-test requires the key to be present. Verified the hard way —
-    // this suite failed under enforcement with only ANTHROPIC declared.
-    needsEnv: ANTHROPIC_GEMINI,
+    // The default config's codons run pi/openai-codex/gpt-5.6-luna: even with
+    // no codon awaited, the startup self-test pings the model through pi's
+    // store, so the CODEX_AUTH_JSON marker must be present. Verified the hard
+    // way — this suite failed under enforcement with only ANTHROPIC declared.
+    needsEnv: CODEX,
     perTestTimeoutMs: 300_000,
     suiteTimeoutSeconds: 900,
     estSeconds: 10,
-    estCostUsd: 0.01,
+    estCostUsd: 0,
   },
   {
     id: "e2e-resume-auto-managed",
@@ -542,11 +622,11 @@ export const SUITES: SuiteSpec[] = [
       "(HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR sandbox). A red often means execution-setup path " +
       "resolution changed.",
     suspects: ["server/execution-setup.ts", "server/index.ts"],
-    needsEnv: ANTHROPIC,
+    needsEnv: CODEX,
     perTestTimeoutMs: 300_000,
     suiteTimeoutSeconds: 1200,
     estSeconds: 30,
-    estCostUsd: 0.02,
+    estCostUsd: 0,
   },
   {
     id: "e2e-start-new-force-wipe",
@@ -566,6 +646,45 @@ export const SUITES: SuiteSpec[] = [
     estCostUsd: 0,
   },
   {
+    id: "e2e-event-journal-torn-line",
+    tier: "e2e-offline",
+    files: ["tests/e2e/event-journal-torn-line-e2e.test.ts"],
+    description:
+      "WS handshake with history survives a torn/corrupt events.jsonl line. Keyless, no codons.",
+    failureMeans:
+      "A corrupt journal line breaks client connection again: the tolerant tail reader in " +
+      "FileEventStorage stopped skipping unparseable lines, or torn-tail healing on initialize " +
+      "regressed. Before the fd/tail rework this was a real SyntaxError inside the handshake.",
+    suspects: ["server/storage/file-event-storage.ts", "server/event-journal.ts"],
+    perTestTimeoutMs: 180_000,
+    suiteTimeoutSeconds: 600,
+    estSeconds: 15,
+    estCostUsd: 0,
+  },
+  {
+    id: "e2e-journal-diet-restore",
+    tier: "e2e-offline",
+    files: ["tests/e2e/journal-diet-restore-e2e.test.ts"],
+    description:
+      "Journal diet CLI round-trip: --diet-journal compresses a finished execution, the runtime " +
+      "refuses to boot on it with the restore remedy, --restore-journal rebuilds events.jsonl " +
+      "byte-for-byte (SHA-256 proven), and the restored dir boots again. Keyless, no codons.",
+    failureMeans:
+      "The finalize diet's offline surface broke: dietJournal/restoreJournal lost byte-identity " +
+      "or crash-safe sequencing, the CLI wiring in index.ts/cli-parser.ts regressed, or the " +
+      "dieted-dir resume guard (runtime start / execution-setup) stopped refusing.",
+    suspects: [
+      "server/storage/journal-diet.ts",
+      "server/index.ts",
+      "server/execution-setup.ts",
+      "server/hankweave-runtime.ts",
+    ],
+    perTestTimeoutMs: 180_000,
+    suiteTimeoutSeconds: 600,
+    estSeconds: 20,
+    estCostUsd: 0,
+  },
+  {
     id: "e2e-hw-trace-resume",
     tier: "e2e-live",
     files: ["tests/e2e/hw-trace-resume-e2e.test.ts"],
@@ -574,7 +693,7 @@ export const SUITES: SuiteSpec[] = [
       "Trace upload stopped firing on SIGTERM or on resumed-run completion — telemetry " +
       "shutdown-path wiring (uploadTrace) or resume detection regressed.",
     suspects: ["server/telemetry", "server/hankweave-runtime.ts"],
-    needsEnv: ANTHROPIC_GEMINI,
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 300_000,
     suiteTimeoutSeconds: 900,
     estSeconds: 85,
@@ -593,7 +712,9 @@ export const SUITES: SuiteSpec[] = [
       "or teardown in one of the two managers. If the offline local-mock suites are green, the " +
       "LIVE session semantics drifted (SDK bump or provider change).",
     suspects: ["server/claude-agent-sdk-manager.ts", "server/pi-sdk-manager.ts"],
-    needsEnv: ANTHROPIC,
+    // The claude half runs the Claude Agent SDK (sonnet, Anthropic key); the pi
+    // half runs pi/openai-codex/gpt-5.6-luna sessions from pi's store.
+    needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 300_000,
     suiteTimeoutSeconds: 1200,
     estSeconds: 30,
@@ -605,16 +726,18 @@ export const SUITES: SuiteSpec[] = [
     id: "e2e-model-override",
     tier: "e2e-heavy",
     files: ["tests/e2e/model-override-e2e.test.ts"],
-    description: "--model haiku overrides every codon model; asserts each log's init model string.",
+    description:
+      "--model pi/openai-codex/gpt-5.6-luna overrides every codon model; asserts each log's " +
+      "init model string.",
     failureMeans:
       "--model override stopped rewriting every codon's model (asserted via each log's init " +
       "model string) — model validation/override path in config loading.",
     suspects: ["server/config.ts", "server/config-validation"],
-    needsEnv: ANTHROPIC,
+    needsEnv: CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 1800,
     estSeconds: 60,
-    estCostUsd: 0.06,
+    estCostUsd: 0,
   },
   {
     id: "e2e-llm-provider-health",
@@ -672,6 +795,8 @@ export const SUITES: SuiteSpec[] = [
     id: "e2e-init-command",
     tier: "e2e-heavy",
     files: ["tests/e2e/init-command-e2e.test.ts"],
+    // The generated hank pins anthropic/claude-haiku-4-5 (pi provider raw API).
+    needsRawAnthropicKey: true,
     description:
       "`hankweave init` scaffolding, then running the generated hank. Needs Anthropic + Gemini.",
     failureMeans:
@@ -679,7 +804,7 @@ export const SUITES: SuiteSpec[] = [
       "templates, packaging/registry surface, or the scaffolded config drifted from current " +
       "schema requirements.",
     suspects: ["server/wizard", "schemas"],
-    needsEnv: ANTHROPIC_GEMINI,
+    needsEnv: ANTHROPIC_GEMINI_CODEX,
     perTestTimeoutMs: 900_000,
     suiteTimeoutSeconds: 2400,
     estSeconds: 65,

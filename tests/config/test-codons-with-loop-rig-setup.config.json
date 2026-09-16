@@ -5,7 +5,7 @@
       "id": "setup-codon",
       "name": "Setup Codon",
       "promptText": "Create a simple file at <%PROJECT_DIR%>/notes/initial.txt with the text 'Initial setup complete'.",
-      "model": "haiku",
+      "model": "pi/openai-codex/gpt-5.6-luna",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -34,7 +34,7 @@
           "id": "loop-codon-with-setup",
           "name": "Loop Codon with Rig Setup",
           "promptText": "Write a short message to <%PROJECT_DIR%>/notes/message_<TIMESTAMP>.txt. Each iteration should be unique.",
-          "model": "haiku",
+          "model": "pi/openai-codex/gpt-5.6-luna",
           "continuationMode": "continue-previous",
           "rigSetup": [
             {
@@ -64,7 +64,7 @@
       "id": "final-codon",
       "name": "Final Codon",
       "promptText": "Create a summary file at <%PROJECT_DIR%>/notes/summary.txt that says 'All codons completed successfully'.",
-      "model": "haiku",
+      "model": "pi/openai-codex/gpt-5.6-luna",
       "continuationMode": "fresh",
       "appendSystemPromptFile": ["./noTodosPrompt.md"],
       "description": "Final verification",

@@ -860,8 +860,10 @@ const failedTools = toolEvents.filter(t => t.data.isError);
           data: {
             path: "src/index.ts",
             filename: "index.ts",
-            content: "const app = express();",
             action: "modified",
+            sha256: "0".repeat(64),
+            bytes: 22,
+            source: { kind: "tool_use", toolUseId: "toolu_write_1" },
           },
         },
         {

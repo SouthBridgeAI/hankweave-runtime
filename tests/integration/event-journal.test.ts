@@ -95,7 +95,67 @@ describe("EventJournal with FileEventStorage", () => {
     expect(events[0].id).toBe(lastEventId);
   }, 10000);
 
+  it("tails 50 events from the 200 MB journal in O(tail) time", async () => {
+    // Order-of-magnitude guard only: the tail read must seek from EOF, not
+    // parse the whole file (which takes ~250 ms on this fixture). Best of 3
+    // so one cold-cache or GC hiccup can't flake the bound.
+    let bestMs = Number.POSITIVE_INFINITY;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const start = performance.now();
+      const { events } = await journal.getMostRecentEvents(50);
+      bestMs = Math.min(bestMs, performance.now() - start);
+      expect(events).toHaveLength(50);
+      expect(events[0].id).toBe(lastEventId);
+    }
+    expect(bestMs).toBeLessThan(50);
+  });
+
+  it("pages by cursor without drifting from the journal tail", async () => {
+    // Sanity for the cursor API at scale: sequential pages must continue
+    // exactly where the previous one stopped (cursor lineNo == lines consumed).
+    const { totalEvents } = await journal.getMostRecentEvents(1);
+    const page1 = await journal.transport.getEventsAfter(null, 100);
+    expect(page1.events).toHaveLength(100);
+    expect(page1.events[0].id).toBe("info-event-0000000000");
+    expect(page1.hasMore).toBe(totalEvents > 100);
+
+    const page2 = await journal.transport.getEventsAfter(page1.nextCursor, 100);
+    expect(page2.events[0].id).toBe("info-event-0000000100");
+    expect(page2.events[99].id).toBe("info-event-0000000199");
+
+    // A fresh instance has no warm cursor→offset cache, so resuming from a
+    // mid-file cursor exercises the skip-from-zero path; it must agree.
+    const cold = new FileEventStorage(tempDir);
+    await cold.initialize();
+    const coldPage = await cold.getEventsAfter(page1.nextCursor, 3);
+    expect(coldPage.events.map((e) => e.id)).toEqual([
+      "info-event-0000000100",
+      "info-event-0000000101",
+      "info-event-0000000102",
+    ]);
+  });
+
+  it("getAllEvents crosses cursor page boundaries in order", async () => {
+    // The journal pages getAllEvents at 1000 events/page; walking past 2500
+    // covers two page transitions and the 64 KB scan-boundary arithmetic.
+    const iterator = journal.getAllEvents()[Symbol.asyncIterator]();
+    for (let i = 0; i < 2500; i++) {
+      const next = await iterator.next();
+      expect(next.done).toBe(false);
+      const expectedId = `info-event-${i.toString().padStart(10, "0")}`;
+      if (next.value.id !== expectedId) {
+        throw new Error(`Out of order at ${i}: expected ${expectedId}, got ${next.value.id}`);
+      }
+    }
+    await iterator.return?.(undefined);
+  });
+
   it("streams the full log", async () => {
+    // Stream contract (diet decision 0.3.2): streamAllEvents yields the
+    // LOGICAL journal. On a live (undieted) directory like this one, the
+    // logical journal is the on-disk file, so hash equality still holds;
+    // the byte-identity requirement itself is asserted where it belongs —
+    // on diet/restore, in tests/unit/journal-diet.test.ts.
     const stream = await journal.streamAllEvents();
     const destinationPath = join(tempDir, "events-copy.jsonl");
     const destination = createWriteStream(destinationPath, {

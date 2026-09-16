@@ -34,6 +34,8 @@ const VALUE_FLAGS = new Set([
   "--replay",
   "--max-cost",
   "--max-time",
+  "--restore-journal",
+  "--diet-journal",
 ]);
 
 /**
@@ -45,6 +47,7 @@ const BOOLEAN_FLAGS = new Set([
   "--validate",
   "-v",
   "--cleanup",
+  "--yes",
   "-y",
   "--no-autostart",
   "--start-new",
@@ -69,7 +72,87 @@ const BOOLEAN_FLAGS = new Set([
 /**
  * All known flags (union of VALUE_FLAGS and BOOLEAN_FLAGS)
  */
-const ALL_KNOWN_FLAGS = new Set([...VALUE_FLAGS, ...BOOLEAN_FLAGS]);
+export const ALL_KNOWN_FLAGS: ReadonlySet<string> = new Set([...VALUE_FLAGS, ...BOOLEAN_FLAGS]);
+
+/**
+ * Help text for --help/-h. Lives next to the flag tables so the
+ * help/parser parity test can compare it against ALL_KNOWN_FLAGS.
+ */
+export const HELP_TEXT = `
+Hankweave Runtime - Codon Orchestration
+
+Usage: hankweave [options] [config-or-data-path]
+
+Arguments:
+  config-or-data-path       Path to hank.json or project directory
+                            When only one argument provided:
+                            - If ends with .json: treated as hank-path
+                            - Otherwise: treated as data-path
+
+Execution Control:
+  -e, --execution <path>    Use specific execution directory
+                            Creates if doesn't exist, resumes if has state
+  --replay <path>           Replay an execution from recorded logs (no LLM calls)
+                            Mutually exclusive with --execution
+  -n, --new, --start-new    Start new execution, never resume
+                            Use -n -f to overwrite existing state
+  -f, --force               Override safety checks (hash mismatch, existing state)
+  --no-wipe                 With --start-new --force, preserve the existing
+                            agentRoot/ workspace instead of wiping it
+  -y, --yes                 Skip confirmation prompts
+  --max-cost <dollars>      Set a run-wide cost ceiling in USD
+  --max-time <seconds>      Set a run-wide wall-clock limit in seconds
+
+Output:
+  -o, --output <path>       Copy outputs to this path (default: stay in execution dir)
+  --overwrite-output        Overwrite existing output files instead of renaming
+
+Configuration:
+  --config <path>           Path to hank.json (alternative to positional arg)
+  --data <path>             Path to data source (default: config directory)
+  -i, --input <text>        Use inline text as data input (highest priority)
+  -m, --model <model>       Model override (sonnet|opus|gemini-flash|etc)
+
+Server:
+  -p, --port <port>         WebSocket server port (default: auto-select free port)
+  --headless                Run without TUI (for CI/CD and scripts)
+  --no-autostart            Don't automatically start codons
+  --proxy                   Enable the LLM proxy server (disabled by default)
+  --without-proxy           Disable the LLM proxy (this is the default)
+  --anthropic-base-url <url>  Custom Anthropic API base URL
+  --idle-timeout <seconds>  Idle timeout for WebSocket and proxy servers (0-255, 0 disables, default: 0)
+  --shim-idle-timeout <seconds>   Harness idle timeout in seconds (default: 120, per-codon)
+
+Other:
+  --init                    Initialize a new hank in current directory
+  -v, --validate            Validate configuration without running
+  --cleanup                 Remove execution artifacts
+  --restore-journal <path>  Rebuild a dieted execution's event journal (byte-for-byte, verified)
+  --diet-journal <path>     Compress a finished execution's event journal (restorable)
+  --copy                    Copy data instead of symlinking (for compatibility)
+  --ignore-rig-failures     Ignore rig setup failures
+  --attach                  Connect TUI to an already-running server (read-only mode)
+  --ignore-data-mismatch    [Deprecated] Use --force instead
+  -h, --help                Show this help
+  --version                 Show version
+
+Execution Safety:
+  Hankweave implements a three-tier safety system for execution directories:
+  - Tier 1: Cannot use ~/.hankweave-executions/ directly (reserved for auto-managed)
+  - Tier 2: Directories with existing .hankweave/ require --force (backs up existing)
+  - Tier 3: Non-empty directories show warning and prompt for confirmation
+
+Examples:
+  hankweave                           Run with hank.json in current directory
+  hankweave ./my-project              Run project, resume if possible
+  hankweave ./my-project -n           Start fresh execution (--new)
+  hankweave -e ./my-exec              Use specific execution directory
+  hankweave -o ./results              Copy outputs to ./results
+  hankweave -m opus -p 8080           Use opus model on port 8080
+
+Outputs are stored in the agent workspace (~/.hankweave-executions/{id}/agentRoot) by default.
+Use --output to copy them elsewhere.
+`;
 
 /**
  * Get value for a flag, supporting both --flag=value (deprecated) and --flag value syntax.
@@ -82,7 +165,8 @@ export function getFlagValue(args: string[], flagName: string): string | undefin
     console.warn(
       `⚠️  Deprecation warning: '${args[equalsIndex]}' uses deprecated syntax. Use '${flagName} <value>' instead.`,
     );
-    return args[equalsIndex].split("=")[1];
+    // Everything after the first "=" (a value may itself contain "=")
+    return args[equalsIndex].slice(flagName.length + 1);
   }
 
   // Check for --flag value syntax
@@ -117,7 +201,7 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   headless?: boolean; // --headless
   validate?: boolean; // --validate, -v
   cleanup?: boolean; // --cleanup
-  skipConfirmation?: boolean; // -y
+  skipConfirmation?: boolean; // --yes, -y
   startNew?: boolean; // --start-new, --new, -n
   force?: boolean; // --force, -f
   noWipe?: boolean; // --no-wipe (preserve agentRoot/ on --start-new --force)
@@ -130,6 +214,8 @@ export interface ParsedCliArgs extends Omit<Partial<HankweaveConfig>, "version">
   ignoreDataMismatch?: boolean; // --ignore-data-mismatch (deprecated, use --force)
   overwriteOutput?: boolean; // --overwrite-output
   replayDir?: string; // --replay <path> - replay from an execution directory dump
+  restoreJournalPath?: string; // --restore-journal <executionPath> - rebuild a dieted event journal
+  dietJournalPath?: string; // --diet-journal <executionPath> - diet a finished run's event journal offline
 }
 
 /**
@@ -260,13 +346,13 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     result.withoutProxy = true;
   }
 
-  // Parse idleTimeout
+  // Parse idleTimeout (strict integer; 0 is valid and disables the timeout)
   const idleTimeoutArg = getFlagValue(args, "--idle-timeout");
-  if (idleTimeoutArg) {
-    const parsed = parseInt(idleTimeoutArg, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 255) {
+  if (idleTimeoutArg !== undefined) {
+    const parsed = Number(idleTimeoutArg);
+    if (!/^\d+$/.test(idleTimeoutArg) || !Number.isInteger(parsed) || parsed > 255) {
       throw new Error(
-        `Invalid --idle-timeout value: "${idleTimeoutArg}" (must be a positive integer, max 255)`,
+        `Invalid --idle-timeout value: "${idleTimeoutArg}" (must be an integer between 0 and 255; 0 disables the timeout)`,
       );
     }
     result.idleTimeout = parsed;
@@ -313,12 +399,14 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   result.inputText = getFlagValue(args, "--input") || getFlagValue(args, "-i");
   result.outputPath = getFlagValue(args, "--output") || getFlagValue(args, "-o");
   result.replayDir = getFlagValue(args, "--replay");
+  result.restoreJournalPath = getFlagValue(args, "--restore-journal");
+  result.dietJournalPath = getFlagValue(args, "--diet-journal");
 
   // Parse boolean flags (non-config)
   result.headless = args.includes("--headless");
   result.validate = args.includes("--validate") || args.includes("-v");
   result.cleanup = args.includes("--cleanup");
-  result.skipConfirmation = args.includes("-y");
+  result.skipConfirmation = args.includes("--yes") || args.includes("-y");
   result.startNew = args.includes("--start-new") || args.includes("--new") || args.includes("-n");
   result.force = args.includes("--force") || args.includes("-f");
   result.noWipe = args.includes("--no-wipe");

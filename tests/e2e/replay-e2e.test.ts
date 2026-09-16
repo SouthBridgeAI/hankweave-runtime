@@ -90,7 +90,7 @@ async function replayAndVerify(scenario: ReplayScenario, logPrefix: string) {
 // analyze-opencode codon did not replay to a deterministic codon.completed).
 // The opencode shim was removed in the shim reorg — the init template is now
 // haiku (Claude SDK), gemini (embedded Pi agent), pi, and gpt
-// (pi/openai-codex, ChatGPT subscription) — so the block is re-enabled.
+// (pi/openai-codex) — so the block is re-enabled.
 describe("Replay E2E — init-generated hank", () => {
   const INIT_DIR = path.join(TEST_AREA, `replay-init-${TEST_TIMESTAMP}`);
 
@@ -216,7 +216,8 @@ describe("Replay E2E — happy-path hank", () => {
     fs.mkdirSync(HAPPY_DIR, { recursive: true });
 
     // Execute the default test config (tests/config/test-codons.config.json)
-    // which has rig setups, sentinels, continue-previous, and mixed models.
+    // which has rig setups, sentinels, continue-previous, and three codons
+    // running pi/openai-codex/gpt-5.6-luna.
     const port = await getFreePort();
     const server = await launchHankweave({
       port,

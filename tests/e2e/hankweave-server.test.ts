@@ -166,7 +166,8 @@ describe("hankweave server", () => {
     // Previously, the failed thread had no checkpoints to roll back to, and the
     // !thread?.failed guard prevented starting a new run.
     const port = await getFreePort();
-    // Use a single-codon haiku-only config to avoid flaky Gemini failures
+    // Use a single-codon gpt-5.6-luna config (test-resume-after-kill) so the
+    // KILL lands inside the only codon and no checkpoint exists yet
     const configPath = path.resolve(__dirname, "../config/test-resume-after-kill.config.json");
     let hankweave = await launchHankweave({ port, configPath });
     const codonOne = CodonId("codon-1");

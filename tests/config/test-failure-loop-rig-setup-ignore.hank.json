@@ -13,7 +13,7 @@
         {
           "id": "rig-setup-failure",
           "name": "Rig Setup Failure (Ignored)",
-          "model": "haiku",
+          "model": "pi/openai-codex/gpt-5.6-luna",
           "continuationMode": "fresh",
           "promptText": "This codon should not run because rig setup fails.",
           "onFailure": "ignore",

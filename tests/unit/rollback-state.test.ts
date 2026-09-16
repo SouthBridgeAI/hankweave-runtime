@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import { rmSync } from "node:fs";
 import * as path from "node:path";
+import { ExecutionLayout } from "../../server/execution-layout";
 import { StateManager } from "../../server/state-manager";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
 import type { CodonConfig } from "../../server/types/types";
@@ -52,20 +53,127 @@ describe("Rollback State Management", () => {
     const testAreaPath = path.join(__dirname, "..", "test-area");
     await fs.promises.mkdir(testAreaPath, { recursive: true });
     tempDir = path.join(testAreaPath, `test-state-${Date.now()}`);
-    await fs.promises.mkdir(tempDir, { recursive: true });
+    const layout = new ExecutionLayout(tempDir);
+    await fs.promises.mkdir(layout.stateDir, { recursive: true });
 
     // Create logger
     const logPath = path.join(tempDir, "test.log");
     logger = new Logger(logPath);
 
     // Create state manager
-    stateManager = new StateManager(tempDir, logger, testCodons);
+    stateManager = new StateManager(layout, logger, testCodons);
     await stateManager.initialize();
   });
 
   afterEach(async () => {
     // Clean up
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  describe("rig-setup checkpoint reuse across runs", () => {
+    /** Run `runId` with codon-1 through its rig (rig-setup checkpoint `sha`) into `running`. */
+    async function runWithRig(
+      runId: RunId,
+      sha: string,
+      startingConditions: unknown,
+      codonId: CodonId = CodonId("codon-1"),
+    ) {
+      stateManager.transition({
+        type: "RunStarted",
+        data: {
+          runId,
+          runFolder: path.join(tempDir, "runs", runId),
+          gitBranch: `run-${runId}`,
+          startingConditions: startingConditions as never,
+          serverPid: process.pid,
+        },
+      });
+      stateManager.transition({
+        type: "CodonStarted",
+        data: { runId, codonId },
+      });
+      stateManager.transition({
+        type: "CodonTransitioned",
+        data: { runId, codonId, from: "preparing", to: "starting" },
+      });
+      stateManager.transition({
+        type: "CheckpointCreated",
+        data: {
+          runId,
+          codonId,
+          checkpointType: "rig-setup",
+          sha,
+          branch: `run-${runId}`,
+        },
+      });
+      await stateManager.waitForPendingTransitions();
+    }
+
+    test("a rig-setup checkpoint counts only inside the run that took it", async () => {
+      // Run 1: the rig ran (checkpoint recorded), then the process was killed.
+      await runWithRig(RunId("run-1"), "aaaaaaa1", { type: "fresh" });
+      stateManager.transition({
+        type: "RunCrashed",
+        data: {
+          runId: RunId("run-1"),
+          detectedAt: new Date().toISOString(),
+          lastCodonStatus: "starting",
+        },
+      });
+      await stateManager.waitForPendingTransitions();
+
+      // Run 2: the continuation a rollback created. The tree was restored to a
+      // completion checkpoint, so the rig's work is undone.
+      stateManager.transition({
+        type: "RunStarted",
+        data: {
+          runId: RunId("run-2"),
+          runFolder: path.join(tempDir, "runs", "run-2"),
+          gitBranch: "run-run-2",
+          startingConditions: {
+            type: "continuation",
+            source: { runId: RunId("run-1"), afterCodon: null, checkpointSha: "bbbbbbb2" },
+            reason: "rollback",
+          },
+          serverPid: process.pid,
+        },
+      });
+      await stateManager.waitForPendingTransitions();
+
+      // History still knows the old checkpoint (this is what the old rule keyed on)...
+      const history = await stateManager.getCodonHistory(CodonId("codon-1"));
+      expect(history.some((e) => "rigSetupCheckpoint" in e.codon)).toBe(true);
+      // ...but only run 1 may skip its rig; run 2 must run it again.
+      expect(stateManager.getRigSetupCheckpointInRun(CodonId("codon-1"), RunId("run-1"))).toBe(
+        "aaaaaaa1",
+      );
+      expect(
+        stateManager.getRigSetupCheckpointInRun(CodonId("codon-1"), RunId("run-2")),
+      ).toBeNull();
+    });
+
+    test("a retry within the same run reuses the rig-setup checkpoint", async () => {
+      await runWithRig(RunId("run-1"), "ccccccc3", { type: "fresh" });
+      expect(stateManager.getRigSetupCheckpointInRun(CodonId("codon-1"), RunId("run-1"))).toBe(
+        "ccccccc3",
+      );
+      expect(
+        stateManager.getRigSetupCheckpointInRun(CodonId("codon-2"), RunId("run-1")),
+      ).toBeNull();
+      expect(stateManager.getRigSetupCheckpointInRun(CodonId("codon-1"), RunId("nope"))).toBeNull();
+    });
+
+    test("a loop iteration is matched by its runtime id, not its config id", async () => {
+      // State records the iteration as "codon-1#0" (CodonStarted). The skip
+      // lookup must ask with that id; the bare config id names no record.
+      await runWithRig(RunId("run-1"), "ddddddd4", { type: "fresh" }, CodonId("codon-1#0"));
+      expect(stateManager.getRigSetupCheckpointInRun(CodonId("codon-1#0"), RunId("run-1"))).toBe(
+        "ddddddd4",
+      );
+      expect(
+        stateManager.getRigSetupCheckpointInRun(CodonId("codon-1"), RunId("run-1")),
+      ).toBeNull();
+    });
   });
 
   describe("Checkpoint Creation", () => {

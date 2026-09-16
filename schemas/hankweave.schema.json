@@ -65,6 +65,15 @@
           "maximum": 1800,
           "description": "Default shim idle timeout in seconds. Max time between agent events before the shim aborts. Per-codon and hank override settings take precedence."
         },
+        "dietOnFinalize": {
+          "type": "boolean",
+          "description": "If true, compress a finished run's event journal at shutdown (large file bodies move to a per-run content-addressed store; restore with hankweave --restore-journal). Only runs after the run reached a terminal state (completed/failed)."
+        },
+        "journalDietThresholdBytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "Minimum file-body size (bytes) extracted to the content-addressed store by the journal diet. Fixed default of 4096; not intended as a tunable."
+        },
         "ignoreRigFailures": {
           "type": "boolean",
           "description": "If true, ignore all rig setup failures (useful for resume workflows)"

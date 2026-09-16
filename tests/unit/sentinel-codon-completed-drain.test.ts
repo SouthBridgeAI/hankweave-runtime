@@ -238,8 +238,10 @@ describe("Sentinel codon.completed drain", () => {
       data: {
         path: "src/main.ts",
         filename: "main.ts",
-        content: "console.log('hello')",
         action: "modified",
+        sha256: "0".repeat(64),
+        bytes: 20,
+        source: { kind: "tool_use", toolUseId: "toolu_drain_1" },
       },
     });
 

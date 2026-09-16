@@ -47,8 +47,10 @@ const createMockEvent = (type: ServerEvent["type"], id?: string): ServerEvent =>
         data: {
           path: "test.txt",
           filename: "test.txt",
-          content: "test",
           action: "modified",
+          sha256: "0".repeat(64),
+          bytes: 4,
+          source: { kind: "codon-start" },
         },
       };
     case "token.usage":

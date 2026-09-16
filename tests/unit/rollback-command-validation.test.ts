@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { ExecutionLayout } from "../../server/execution-layout";
 import { StateManager } from "../../server/state-manager";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
 import type * as ST from "../../server/types/state-types";
@@ -35,7 +36,7 @@ describe("Rollback Command Validation", () => {
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_HANKWEAVE_DIR, mockLogger);
+    stateManager = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger);
     await stateManager.initialize();
   });
 
@@ -210,12 +211,14 @@ describe("Rollback Command Validation", () => {
       expect(codon).toBeUndefined();
     });
 
-    test("should handle missing checkpoint SHA", async () => {
+    // A completed codon must carry a non-empty checkpoint SHA. The transition
+    // guard rejects "" at write time (a swallowed checkpoint failure can no
+    // longer mint it), and state.json written by older builds that does carry
+    // "" is refused as a rollback target at load time.
+    async function driveCodonToRunning(sm: StateManager): Promise<void> {
       const runId = RunId("test-run");
       const codonId = CodonId("test-codon");
-
-      // Start and complete a codon without checkpoint
-      stateManager.transition({
+      sm.transition({
         type: "RunStarted",
         data: {
           runId,
@@ -225,13 +228,7 @@ describe("Rollback Command Validation", () => {
           serverPid: process.pid,
         },
       });
-
-      stateManager.transition({
-        type: "CodonStarted",
-        data: { runId, codonId },
-      });
-
-      // Progress through valid state transitions to completed
+      sm.transition({ type: "CodonStarted", data: { runId, codonId } });
       const transitions = [
         { from: "preparing", to: "starting" },
         {
@@ -244,15 +241,9 @@ describe("Rollback Command Validation", () => {
           to: "running",
           metadata: { claudeSessionId: SessionId("session-123") },
         },
-        {
-          from: "running",
-          to: "completed",
-          metadata: { checkpointSha: "" }, // Empty checkpointSha - this is what we're testing
-        },
       ];
-
       for (const t of transitions) {
-        stateManager.transition({
+        sm.transition({
           type: "CodonTransitioned",
           data: {
             runId,
@@ -262,28 +253,55 @@ describe("Rollback Command Validation", () => {
             metadata: t.metadata,
           },
         });
-        // Wait for each transition to complete
-        await stateManager.waitForPendingTransitions();
+        await sm.waitForPendingTransitions();
       }
+    }
 
-      // Give extra time for all async operations to complete
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    test.each([
+      ["a blank checkpoint SHA", { checkpointSha: "" }],
+      ["no checkpoint SHA", {}],
+    ])("completing a codon with %s is rejected", async (_label, metadata) => {
+      await driveCodonToRunning(stateManager);
 
-      const run = stateManager.getCurrentRun();
-      const codon = run?.codons[0];
+      const errors: Error[] = [];
+      stateManager.on("transitionError", ({ error }) => errors.push(error));
+      stateManager.transition({
+        type: "CodonTransitioned",
+        data: {
+          runId: RunId("test-run"),
+          codonId: CodonId("test-codon"),
+          from: "running",
+          to: "completed",
+          metadata,
+        },
+      });
+      await stateManager.waitForPendingTransitions();
 
-      // Debug: log the actual codon status if it's not what we expect
-      if (codon?.status !== "completed") {
-        console.log(`Debug: Expected 'completed' but got '${codon?.status}'`);
-        console.log(`Codon object:`, JSON.stringify(codon, null, 2));
-      }
+      expect(errors).toHaveLength(1);
+      expect(errors[0].name).toBe("MetadataValidationError");
+      expect(errors[0].message).toContain("checkpointSha");
+      // The codon never became completed, so nothing can continue from it.
+      const codon = stateManager.getCurrentRun()?.codons[0];
+      expect(codon?.status).toBe("running");
+      expect(stateManager.canContinueFrom(RunId("test-run"), CodonId("test-codon"))).toBe(false);
+    });
 
+    test("a completed codon with a real SHA is accepted", async () => {
+      await driveCodonToRunning(stateManager);
+      stateManager.transition({
+        type: "CodonTransitioned",
+        data: {
+          runId: RunId("test-run"),
+          codonId: CodonId("test-codon"),
+          from: "running",
+          to: "completed",
+          metadata: { checkpointSha: "abc123" },
+        },
+      });
+      await stateManager.waitForPendingTransitions();
+      const codon = stateManager.getCurrentRun()?.codons[0];
       expect(codon?.status).toBe("completed");
-
-      // In a completed codon, completionCheckpoint might be empty
-      if (codon?.status === "completed") {
-        expect(codon.completionCheckpoint).toBe("");
-      }
+      if (codon?.status === "completed") expect(codon.completionCheckpoint).toBe("abc123");
     });
   });
 

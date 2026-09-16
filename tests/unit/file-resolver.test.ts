@@ -494,4 +494,161 @@ describe("UnifiedFileResolver", () => {
       expect(files).toContain("file.txt");
     });
   });
+
+  describe("createPathMatcher", () => {
+    async function seedDivergenceFixture(): Promise<void> {
+      await fs.promises.mkdir(path.join(tempDir, "deep", "dir"), { recursive: true });
+      await fs.promises.mkdir(path.join(tempDir, "output", "tmp"), { recursive: true });
+      await fs.promises.mkdir(path.join(tempDir, "read_only_data_source"), { recursive: true });
+      await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "output/tmp/\n");
+      await fs.promises.writeFile(path.join(tempDir, "root.md"), "root");
+      await fs.promises.writeFile(path.join(tempDir, "deep", "dir", "notes.md"), "deep");
+      await fs.promises.writeFile(path.join(tempDir, "output", "keep.md"), "keep");
+      await fs.promises.writeFile(path.join(tempDir, "output", "tmp", "ignored.md"), "ignored");
+      await fs.promises.writeFile(path.join(tempDir, "read_only_data_source", "src.md"), "ro");
+    }
+
+    test("slash-less patterns address the root only — no basename magic", async () => {
+      await seedDivergenceFixture();
+      const matcher = await resolver.createPathMatcher(tempDir, ["notes.md", "*.md"]);
+
+      expect(matcher.match("root.md")).toBe("root.md");
+      expect(matcher.match("deep/dir/notes.md")).toBeNull();
+      expect(matcher.match("deep/dir/other.md")).toBeNull();
+    });
+
+    test("applies gitignore rules and hard exclusions", async () => {
+      await seedDivergenceFixture();
+      const matcher = await resolver.createPathMatcher(tempDir, [
+        "output/**",
+        "read_only_data_source/**",
+      ]);
+
+      expect(matcher.match("output/keep.md")).toBe("output/keep.md");
+      expect(matcher.match("output/tmp/ignored.md")).toBeNull();
+      expect(matcher.match("read_only_data_source/src.md")).toBeNull();
+    });
+
+    test("normalizes absolute and dot-prefixed paths, rejects escapes", async () => {
+      await seedDivergenceFixture();
+      const matcher = await resolver.createPathMatcher(tempDir, ["**/*.md", "./root.md"]);
+
+      expect(matcher.match(path.join(tempDir, "deep", "dir", "notes.md"))).toBe(
+        "deep/dir/notes.md",
+      );
+      expect(matcher.match("./root.md")).toBe("root.md");
+      expect(matcher.match("../outside.md")).toBeNull();
+      expect(matcher.match(path.join(tempDir, "..", "outside.md"))).toBeNull();
+      expect(matcher.match("/somewhere/else/notes.md")).toBeNull();
+      expect(matcher.match("")).toBeNull();
+    });
+
+    test("accepts a prospective path that does not exist yet", async () => {
+      await seedDivergenceFixture();
+      const matcher = await resolver.createPathMatcher(tempDir, ["*.md"]);
+
+      expect(matcher.match("brand-new.md")).toBe("brand-new.md");
+    });
+
+    test("matches dotfiles and brace patterns like fast-glob", async () => {
+      await fs.promises.writeFile(path.join(tempDir, ".hidden.md"), "dot");
+      await fs.promises.writeFile(path.join(tempDir, "a.ts"), "ts");
+      const matcher = await resolver.createPathMatcher(tempDir, ["*.md", "*.{ts,tsx}"]);
+
+      expect(matcher.match(".hidden.md")).toBe(".hidden.md");
+      expect(matcher.match("a.ts")).toBe("a.ts");
+      expect(matcher.match("a.js")).toBeNull();
+    });
+
+    test("empty pattern list matches nothing", async () => {
+      const matcher = await resolver.createPathMatcher(tempDir, []);
+      expect(matcher.match("anything.md")).toBeNull();
+    });
+
+    test("negative patterns apply globally regardless of list order", async () => {
+      // fast-glob extracts negations into its ignore option, so a negation
+      // listed before the positive still excludes. micromatch's ordered list
+      // semantics would accept a.tmp here — the matcher must not.
+      const matcher = await resolver.createPathMatcher(tempDir, ["!**/*.tmp", "**/*"]);
+
+      expect(matcher.match("a.tmp")).toBeNull();
+      expect(matcher.match("deep/b.tmp")).toBeNull();
+      expect(matcher.match("a.md")).toBe("a.md");
+    });
+
+    test("a negative-only pattern list matches nothing", async () => {
+      const matcher = await resolver.createPathMatcher(tempDir, ["!**/*.tmp"]);
+
+      expect(matcher.match("a.md")).toBeNull();
+      expect(matcher.match("a.tmp")).toBeNull();
+    });
+
+    test("negated character classes use POSIX semantics like fast-glob", async () => {
+      // fast-glob compiles patterns with posix: true, where "[!a]" means "any
+      // character except a". Without the option micromatch inverts the result.
+      await fs.promises.writeFile(path.join(tempDir, "a.txt"), "a");
+      await fs.promises.writeFile(path.join(tempDir, "foo.txt"), "foo");
+      const matcher = await resolver.createPathMatcher(tempDir, ["[!a]*.txt"]);
+
+      expect(matcher.match("foo.txt")).toBe("foo.txt");
+      expect(matcher.match("a.txt")).toBeNull();
+    });
+
+    test("collapses repeated slashes in patterns like fast-glob", async () => {
+      await seedDivergenceFixture();
+      const matcher = await resolver.createPathMatcher(tempDir, ["output//*.md"]);
+      expect(matcher.match("output/keep.md")).toBe("output/keep.md");
+
+      const negated = await resolver.createPathMatcher(tempDir, ["**/*.md", "!deep//**"]);
+      expect(negated.match("root.md")).toBe("root.md");
+      expect(negated.match("deep/dir/notes.md")).toBeNull();
+    });
+
+    test("a leading-dot-dot filename is not treated as a root escape", async () => {
+      await fs.promises.writeFile(path.join(tempDir, "..notes.md"), "in root");
+      const matcher = await resolver.createPathMatcher(tempDir, ["*.md", "..notes.md"]);
+
+      expect(matcher.match("..notes.md")).toBe("..notes.md");
+      expect(matcher.match(path.join(tempDir, "..notes.md"))).toBe("..notes.md");
+      expect(matcher.match("../notes.md")).toBeNull();
+      expect(matcher.match("..")).toBeNull();
+    });
+
+    test("parity: match() agrees with resolveFiles for every existing file", async () => {
+      await seedDivergenceFixture();
+      await fs.promises.writeFile(path.join(tempDir, "deep", "dir", "extra.txt"), "txt");
+      await fs.promises.writeFile(path.join(tempDir, "scratch.tmp"), "tmp");
+      await fs.promises.writeFile(path.join(tempDir, "..notes.md"), "leading dots");
+
+      const patternSets = [
+        ["*.md"],
+        ["notes.md"],
+        ["**/*.md"],
+        ["output/**"],
+        ["read_only_data_source/**"],
+        ["*.md", "output/**"],
+        ["**/*", "!**/*.txt"],
+        ["!**/*.tmp", "**/*"],
+        ["!**/*.tmp"],
+        ["..notes.md"],
+        ["[!r]*.md"],
+        ["output//*.md"],
+        ["**/*.md", "!deep//**"],
+      ];
+
+      const allFiles = await resolver.resolveFiles(tempDir, ["**/*"]);
+      expect(allFiles.length).toBeGreaterThan(0);
+
+      for (const patterns of patternSets) {
+        const resolved = new Set(await resolver.resolveFiles(tempDir, patterns));
+        const matcher = await resolver.createPathMatcher(tempDir, patterns);
+        for (const candidate of allFiles) {
+          const matched = matcher.match(candidate) !== null;
+          expect(`${patterns.join(",")} :: ${candidate} :: ${matched}`).toBe(
+            `${patterns.join(",")} :: ${candidate} :: ${resolved.has(candidate)}`,
+          );
+        }
+      }
+    });
+  });
 });

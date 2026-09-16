@@ -1,4 +1,3 @@
-import { createInterface } from "node:readline";
 import {
   isAgenticBackboneEvent,
   isSentinelEvent,
@@ -7,6 +6,9 @@ import {
 } from "./schemas/event-schemas.js";
 import type { IEventStorage } from "./storage/event-storage.js";
 import { MemoryEventStorage } from "./storage/memory-event-storage.js";
+
+/** Page size for cursor walks over the full journal. */
+const FULL_SCAN_PAGE_SIZE = 1000;
 
 /**
  * Event Journal System that stores all events in durable storage.
@@ -40,19 +42,16 @@ export class EventJournal {
   }
 
   async *getAllEvents(): AsyncGenerator<ServerEvent> {
-    const reader = createInterface({
-      input: await this.storage.createReadStream(),
-      crlfDelay: Number.POSITIVE_INFINITY,
-    });
-
-    try {
-      for await (const rawLine of reader) {
-        const line = rawLine.trim();
-        if (line.length === 0) continue;
-        yield JSON.parse(line) as ServerEvent;
+    // Cursor-paged walk: tolerant of corrupt journal lines (the storage skips
+    // them) and resumable by construction.
+    let cursor: string | null = null;
+    while (true) {
+      const page = await this.storage.getEventsAfter(cursor, FULL_SCAN_PAGE_SIZE);
+      for (const event of page.events) {
+        yield event;
       }
-    } finally {
-      reader.close();
+      cursor = page.nextCursor;
+      if (!page.hasMore) break;
     }
   }
 
@@ -60,14 +59,20 @@ export class EventJournal {
     events: ServerEvent[];
     totalEvents: number;
     hasMore: boolean;
+    corruptLines: number;
   }> {
-    const { events: recentEvents, totalEvents } = await this.storage.getRecentEvents(limit);
+    const {
+      events: recentEvents,
+      totalEvents,
+      corruptLines,
+    } = await this.storage.getRecentEvents(limit);
     const ordered = [...recentEvents].reverse();
 
     return {
       events: ordered,
       totalEvents,
       hasMore: totalEvents > ordered.length,
+      corruptLines,
     };
   }
 
@@ -77,5 +82,9 @@ export class EventJournal {
 
   async streamAllEvents(): Promise<NodeJS.ReadableStream> {
     return this.storage.createReadStream();
+  }
+
+  async close(): Promise<void> {
+    await this.storage.close();
   }
 }

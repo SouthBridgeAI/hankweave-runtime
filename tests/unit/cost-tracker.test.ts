@@ -166,6 +166,39 @@ describe("CostTracker", () => {
     expect(final?.modelId).toBe("claude-haiku-4-5");
   });
 
+  test("prices openai-codex (ChatGPT-login) models as openai, incrementally too", () => {
+    // The registry has no `openai-codex` provider. Before the alias, every
+    // incremental token.usage for a codex codon read $0 and only the final
+    // result carried pi's total — so budgets could not enforce mid-codon.
+    const { registry, calls } = createRegistry({
+      "openai/gpt-5.6-luna": 0.00046,
+      "openai-codex/gpt-5.6-luna": null,
+    });
+    const tracker = new CostTracker(
+      createModel({ providerId: "openai-codex", modelId: "gpt-5.6-luna", name: "GPT 5.6 Luna" }),
+      registry,
+      createLogger(),
+    );
+    const increments: CostTrackerEvents["costIncremented"][0][] = [];
+    tracker.on("costIncremented", (delta) => {
+      increments.push(delta);
+    });
+    let final: CostTrackerEvents["finalCostSet"][0] | undefined;
+    tracker.on("finalCostSet", (event) => {
+      final = event;
+    });
+
+    tracker.handleAssistantUsage({ input_tokens: 2_000, output_tokens: 50 });
+    tracker.handleResultUsage({ usage: { input_tokens: 2_000, output_tokens: 50 } });
+
+    expect(calls.map((c) => c.modelName)).toEqual(["openai/gpt-5.6-luna", "openai/gpt-5.6-luna"]);
+    expect(increments).toHaveLength(1);
+    expect(increments[0].cost).toBe(0.00046);
+    expect(final?.cost).toBe(0.00046);
+    // The executable identity is untouched: events still name the model pi ran.
+    expect(final?.modelId).toBe("gpt-5.6-luna");
+  });
+
   test("prices routing-derived pi models by their real provider key", () => {
     const { registry, calls } = createRegistry({
       "openai/gpt-4o": 0.321,

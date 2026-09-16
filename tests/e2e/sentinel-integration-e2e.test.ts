@@ -144,7 +144,7 @@ describe("Sentinel Integration: With Sentinels", () => {
         id: "sentinel-test-codon",
         name: "Sentinel Integration Test",
         promptFile: "prompts/codon1.md",
-        model: "sonnet",
+        model: "pi/openai-codex/gpt-5.6-luna",
         continuationMode: "fresh",
         checkpointedFiles: ["*.txt"],
         sentinels: [
@@ -646,7 +646,7 @@ describe("Sentinel Integration: Zero Sentinels", () => {
         id: "zero-sen-codon",
         name: "Codon Without Sentinels",
         promptFile: "prompts/codon1.md",
-        model: "sonnet",
+        model: "pi/openai-codex/gpt-5.6-luna",
         continuationMode: "fresh",
         checkpointedFiles: ["*.txt"],
         // NO sentinels field

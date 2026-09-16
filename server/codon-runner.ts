@@ -3,6 +3,11 @@ import path from "node:path";
 import type { Budget } from "./budget.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
+import {
+  CodonFileTracker,
+  type RecentFileAccess,
+  type WatchedFileUpdate,
+} from "./codon-file-tracker.js";
 import { TIMEOUTS } from "./config.js";
 import { CostTracker } from "./cost-tracker.js";
 import { classifyApiErrorText } from "./error-classification.js";
@@ -16,6 +21,7 @@ import {
   toPiTarget,
 } from "./provider-ids.js";
 import { ReplayProcessManager } from "./replay-process-manager.js";
+import type { FileNode } from "./schemas/event-schemas.js";
 import type { StateManager } from "./state-manager.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { CodonId, RunId, SessionId } from "./types/branded-types.js";
@@ -62,6 +68,12 @@ export interface CodonRunnerEvents extends Record<string, unknown[]> {
   assistantMessage: [msg: AssistantMessage];
   userMessage: [msg: UserMessage];
   resultMessage: [msg: ResultMessage];
+
+  // Per-codon watched-file events. These are protocol-neutral payloads; the
+  // runtime wraps them in public ServerEvents and owns routing/persistence.
+  fileUpdated: [data: WatchedFileUpdate];
+  fileTreeUpdated: [data: { tree: FileNode[] }];
+  fileTrackingError: [error: Error, context: string];
 
   // Cost events (enriched, ready for server forwarding)
   costIncremented: [
@@ -313,6 +325,7 @@ export function deriveAttemptFailure(evidence: {
 export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private readonly config: CodonRunnerConfig;
   private readonly logParser: ClaudeLogParser;
+  private readonly fileTracker: CodonFileTracker;
   // CostTracker: "how much did this cost?" — computes cost from raw API usage via LLM registry
   private readonly costTracker: CostTracker;
   private processManager: ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager;
@@ -352,6 +365,17 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   constructor(config: CodonRunnerConfig) {
     super();
     this.config = config;
+
+    this.fileTracker = new CodonFileTracker({
+      agentRootPath: config.agentRootPath,
+      patterns: [...(config.codon.checkpointedFiles ?? [])],
+      logger: config.logger,
+    });
+    this.fileTracker.on("fileUpdated", (data) => this.emit("fileUpdated", data));
+    this.fileTracker.on("fileTreeUpdated", (data) => this.emit("fileTreeUpdated", data));
+    this.fileTracker.on("trackingError", (error, context) =>
+      this.emit("fileTrackingError", error, context),
+    );
 
     // Use provided log path or calculate default
     this.logPath = config.logPath;
@@ -571,6 +595,11 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         if (this.detectAssistantTimeout(msg)) {
           return;
         }
+
+        // File tools are NOT pre-scanned here: the runtime calls
+        // observeToolUse() per content item while handling this message, so
+        // file.updated stays adjacent to its own tool's assistant.action
+        // instead of all file events front-running the message's thinking/text.
         this.emit("assistantMessage", msg);
       },
       onUserMessage: (msg) => this.emit("userMessage", msg),
@@ -775,7 +804,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           `[CodonRunner] Budget exceeded abort suppressed: ${error.message}`,
           "info",
         );
-        this.emit("exit", 0, false, this.extensionCount);
+        void this.emitFinalExit(0, false);
         return;
       }
 
@@ -793,7 +822,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
           "info",
         );
         // Transform error into normal exit - conversation completed successfully
-        this.emit("exit", 0, false, this.extensionCount);
+        void this.emitFinalExit(0, false);
       } else if (!isInProcessSdkManager) {
         // Non-SDK manager (replay): this `error` event is a LOCAL failure
         // (missing source log, bad cwd), not an API crash.
@@ -825,7 +854,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
         // runs. Passing `false` here would fail a `terminateOn:
         // contextExceeded` loop instead of terminating it. Pinned by
         // tests/integration/claude-sdk-context-exceeded-mock.test.ts.
-        this.emit("exit", 1, processManager.detectContextExceeded(), this.extensionCount);
+        void this.emitFinalExit(1, processManager.detectContextExceeded());
       }
     });
 
@@ -869,6 +898,11 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     // (shouldExtendCodon returns false when extensionConfig is undefined)
     // Also check currentSessionId - we need it to resume the session
     if (shouldExtend && this.currentSessionId && this.config.extensionConfig) {
+      // Parser callbacks are synchronous, but rebuilding a watched file tree
+      // is asynchronous. Keep those events inside this attempt before the
+      // extension starts reusing the same tracker and parser.
+      await this.fileTracker.drain();
+
       // Now TypeScript knows this.config is CodonRunnerConfigWithExtension
       // Pass currentSessionId explicitly to avoid non-null assertion in performExtension
       await this.performExtension(
@@ -880,8 +914,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       );
     } else {
       // No more extensions - emit final exit
-      this.emit("exit", code, isContextExceeded, this.extensionCount);
+      await this.emitFinalExit(code, isContextExceeded);
     }
+  }
+
+  private async emitFinalExit(code: number, isContextExceeded: boolean): Promise<void> {
+    await this.fileTracker.drain();
+    this.emit("exit", code, isContextExceeded, this.extensionCount);
   }
 
   /**
@@ -991,6 +1030,11 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       `CodonRunner: Starting execution of codon ${this.config.codonId}`,
       "info",
     );
+
+    // Runtime subscribes to runner events before run() is called, so the
+    // initial watched-file snapshot is routed through the same boundary as
+    // later tool-driven updates.
+    await this.fileTracker.initialize();
 
     await this.spawnCodonProcess(previousSessionId || null, {
       logPath: this.logPath,
@@ -1131,6 +1175,29 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     this.logParser.parseNow();
   }
 
+  /** Most recent watched-file activity for state.snapshot. */
+  getRecentFileAccess(): RecentFileAccess | undefined {
+    return this.fileTracker.getRecentFileAccess();
+  }
+
+  /**
+   * Feed one tool_use content item to this runner's file tracker.
+   *
+   * Called by the runtime at the item's position inside its
+   * handleAssistantMessage loop, before it emits the tool's assistant.action —
+   * the tracker emits fileUpdated synchronously, which keeps each file.updated
+   * adjacent to (and preceding) its own tool event, in the message's own
+   * content order. The tracker stays runner-owned, so patterns cannot leak
+   * across codons; it already filters by FILE_TOOLS and watched patterns.
+   */
+  observeToolUse(
+    toolName: string,
+    toolInput: Record<string, unknown> | undefined,
+    toolUseId: string,
+  ): void {
+    this.fileTracker.observeToolUse(toolName, toolInput, toolUseId);
+  }
+
   /**
    * Get the prompt frontmatter (if any was parsed from the prompt file)
    */
@@ -1179,6 +1246,10 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     if (this.logParser) {
       this.logParser.stop();
     }
+
+    // No parser callback can add more work after stop(). Drain before runtime
+    // listeners are removed so late tree updates are not silently dropped.
+    await this.fileTracker.close();
 
     // Clean up process manager
     if (this.processManager) {

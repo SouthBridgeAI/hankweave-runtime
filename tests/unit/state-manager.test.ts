@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import type { CheckpointGit } from "../../server/checkpoint-git";
+import { ExecutionLayout } from "../../server/execution-layout";
 import { InvalidTransitionError, PersistenceError, StateManager } from "../../server/state-manager";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
 import type * as ST from "../../server/types/state-types";
@@ -37,7 +38,7 @@ describe("StateManager", () => {
     mockLogger = new MockLogger("");
 
     // Create state manager
-    stateManager = new StateManager(TEST_HANKWEAVE_DIR, mockLogger);
+    stateManager = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger);
   });
 
   afterEach(async () => {
@@ -894,7 +895,11 @@ describe("StateManager", () => {
       ];
 
       // Create state manager with codon configs
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -952,7 +957,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -978,7 +987,7 @@ describe("StateManager", () => {
       expect(state.executionPlan).toHaveLength(2);
 
       // Create new state manager and load from disk to verify persistence
-      const smReloaded = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smReloaded = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger, codonConfigs);
       await smReloaded.initialize();
 
       const reloadedState = smReloaded.getState();
@@ -1005,7 +1014,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1030,7 +1043,7 @@ describe("StateManager", () => {
     });
 
     test("handles codon not found in plan", async () => {
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, []);
+      const smWithConfigs = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger, []);
       await smWithConfigs.initialize();
 
       // Try to expand non-existent codon - should return early without error
@@ -1062,7 +1075,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1108,7 +1125,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1148,7 +1169,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1180,7 +1205,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1202,7 +1231,7 @@ describe("StateManager", () => {
     });
 
     test("returns false for codon not found in plan", async () => {
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, []);
+      const smWithConfigs = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger, []);
       await smWithConfigs.initialize();
 
       // Codon doesn't exist in plan
@@ -1211,7 +1240,7 @@ describe("StateManager", () => {
     });
 
     test("returns false if no codon configs provided", async () => {
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger);
+      const smWithConfigs = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger);
       await smWithConfigs.initialize();
 
       // No codon configs means no loops
@@ -1245,7 +1274,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1300,7 +1333,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan
@@ -1342,7 +1379,11 @@ describe("StateManager", () => {
         }),
       ];
 
-      const smWithConfigs = new StateManager(TEST_HANKWEAVE_DIR, mockLogger, codonConfigs);
+      const smWithConfigs = new StateManager(
+        new ExecutionLayout(TEST_DIR),
+        mockLogger,
+        codonConfigs,
+      );
       await smWithConfigs.initialize();
 
       // Trigger RunStarted to build initial plan

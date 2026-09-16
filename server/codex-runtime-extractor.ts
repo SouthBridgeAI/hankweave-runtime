@@ -28,7 +28,7 @@ import { isCompiledExecutable } from "./utils.js";
 // Codex SDK version for directory naming.
 // Must match the @openai/codex-sdk version pinned in package.json — it is the
 // cache-busting key for the extraction directory (verified by a unit test).
-export const CODEX_SDK_VERSION = "0.144.6";
+export const CODEX_SDK_VERSION = "0.153.4";
 
 /**
  * Resolve the codex binary within a `vendor/<platform-triple>` directory.

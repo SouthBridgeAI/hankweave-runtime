@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { sentinelConfigSchema } from "../config-validation/sentinel.schema.js";
 import { checkRegularFile } from "../fs-guards.js";

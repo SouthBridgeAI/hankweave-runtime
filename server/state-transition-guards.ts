@@ -18,6 +18,12 @@ export interface RunningMetadata {
 
 // Metadata for transitioning to completed
 export interface CompletedMetadata {
+  /**
+   * The completion checkpoint commit. Never empty: a completed codon whose
+   * checkpoint failed is failed instead (see the completion path in
+   * hankweave-runtime), and recovery must never find a `completed` codon it
+   * cannot restore from.
+   */
   checkpointSha: string;
   resultMessageReceived?: boolean;
   budgetExceeded?: BudgetExceededData;
@@ -59,12 +65,9 @@ export function hasRunningMetadata(metadata: unknown): metadata is RunningMetada
 }
 
 export function hasCompletedMetadata(metadata: unknown): metadata is CompletedMetadata {
-  return (
-    typeof metadata === "object" &&
-    metadata !== null &&
-    "checkpointSha" in metadata &&
-    typeof (metadata as Record<string, unknown>).checkpointSha === "string"
-  );
+  if (typeof metadata !== "object" || metadata === null) return false;
+  const sha = (metadata as Record<string, unknown>).checkpointSha;
+  return typeof sha === "string" && sha.length > 0;
 }
 
 export function hasFailedMetadata(metadata: unknown): metadata is FailedMetadata {
@@ -140,6 +143,7 @@ export function validateTransitionMetadata(to: CodonStatus, metadata: unknown): 
           missing.push("metadata object");
         } else {
           if (!("checkpointSha" in metadata)) missing.push("checkpointSha");
+          else missing.push("checkpointSha (must be a non-empty commit SHA)");
         }
         throw new MetadataValidationError(to, missing);
       }

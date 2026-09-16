@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import path from "node:path";
+import { ExecutionLayout } from "./execution-layout.js";
 import type { Logger } from "./utils.js";
 
 /**
@@ -47,9 +47,10 @@ export interface ArchiveManifest {
 /**
  * Manages the archive manifest for tracking archived files.
  * The manifest is stored at .hankweave/archive-manifest.json (outside the agentRoot/
- * work tree) and is NOT checkpointed by git. Instead, rollback identifies which
- * archives to restore by querying entries after the target checkpoint SHA, then
- * programmatically updates the manifest via removeEntriesAfterCheckpoint().
+ * work tree) and is NOT checkpointed by git. Instead, rollback selects which
+ * archives to restore via selectEntriesToRestore() (driven by git reachability,
+ * see CheckpointGit.shasBetween) and afterwards removes exactly the entries
+ * that were successfully restored via removeEntries().
  */
 export class ArchiveManifestManager {
   private manifestPath: string;
@@ -57,7 +58,7 @@ export class ArchiveManifestManager {
   private manifest: ArchiveManifest;
 
   constructor(executionPath: string, logger: Logger) {
-    this.manifestPath = path.join(executionPath, ".hankweave", "archive-manifest.json");
+    this.manifestPath = new ExecutionLayout(executionPath).archiveManifestPath;
     this.logger = logger;
     this.manifest = { version: "1.0.0", entries: [] };
   }
@@ -101,74 +102,68 @@ export class ArchiveManifestManager {
   }
 
   /**
-   * Get all entries created AFTER a target checkpoint.
+   * Select the entries a rollback should restore, using git reachability
+   * instead of the manifest's list order.
    *
-   * Key insight: entries with checkpointSha === targetSha were created
-   * DURING that checkpoint's codon completion, so they should REMAIN
-   * (not be restored). Only entries AFTER are restored.
+   * An entry is restored only when it was archived strictly AFTER the
+   * rollback target on the line being abandoned:
+   * - `checkpointSha === 'orphan'`: always restored (origin unknown).
+   * - `checkpointSha` in `reachableAfterTarget` (the `git rev-list
+   *   target..originHead` set): restored.
+   * - Entry at or before the target, or on an unrelated timeline: stays
+   *   archived, silently — its files belong in rigArchive/.
+   * - Entry whose SHA is unknown to the checkpoint repository entirely:
+   *   stays archived, with a warning naming it. Restoring would overwrite
+   *   the workspace and delete the archive copy — destructive is the wrong
+   *   default for an entry we cannot place.
    *
-   * Special case: entries with checkpointSha === 'orphan' are always
-   * included in restoration since we don't know their origin checkpoint.
-   *
-   * @param targetSha The checkpoint SHA to compare against
-   * @returns Array of entries created after the target checkpoint
+   * @param reachableAfterTarget SHAs reachable from the pre-rollback HEAD but
+   *        not from (or equal to) the target (CheckpointGit.shasBetween)
+   * @param knownShas All SHAs in the checkpoint repository, used only to
+   *        distinguish "not selected by design" from "unknown SHA" warnings
    */
-  getEntriesAfterCheckpoint(targetSha: string): ArchiveEntry[] {
+  selectEntriesToRestore(
+    reachableAfterTarget: Set<string>,
+    knownShas: Set<string>,
+  ): ArchiveEntry[] {
     const result: ArchiveEntry[] = [];
-    let foundTarget = false;
 
     for (const entry of this.manifest.entries) {
-      // Always include orphan entries in restoration
-      if (entry.checkpointSha === "orphan") {
+      if (entry.checkpointSha === "orphan" || reachableAfterTarget.has(entry.checkpointSha)) {
         result.push(entry);
         continue;
       }
 
-      if (entry.checkpointSha === targetSha) {
-        foundTarget = true;
-        // Entry AT target stays (not restored)
-        continue;
+      if (!knownShas.has(entry.checkpointSha)) {
+        this.logger.log(
+          `Archive entry ${entry.sourcePath} (${entry.archivePath}) references checkpoint ` +
+            `${entry.checkpointSha}, which is unknown to the checkpoint repository. ` +
+            `Leaving it archived in rigArchive/ — restore it by hand if needed.`,
+          "error",
+        );
       }
-
-      if (foundTarget) {
-        // Entry AFTER target gets restored
-        result.push(entry);
-      }
-    }
-
-    // If target not found, return all entries (conservative: restore everything)
-    if (!foundTarget) {
-      this.logger.log(
-        `Target checkpoint ${targetSha} not found in manifest, returning all entries`,
-        "error",
-      );
-      return [...this.manifest.entries];
     }
 
     return result;
   }
 
   /**
-   * Remove entries created after a target checkpoint.
-   * Used after rollback to truncate the manifest to match restored state.
+   * Remove specific entries (by identity) from the manifest and persist.
+   * Used after rollback restoration: only the entries that were actually
+   * restored leave the manifest; failed or skipped entries stay recorded so
+   * their archive copies remain discoverable.
    *
-   * @param targetSha The checkpoint SHA to truncate after
+   * @param entries The exact entry objects to remove
    */
-  removeEntriesAfterCheckpoint(targetSha: string): void {
-    const targetIndex = this.manifest.entries.findIndex((e) => e.checkpointSha === targetSha);
-    if (targetIndex !== -1) {
-      const removedCount = this.manifest.entries.length - targetIndex - 1;
-      this.manifest.entries = this.manifest.entries.slice(0, targetIndex + 1);
-      this.logger.log(`Removed ${removedCount} entries after checkpoint ${targetSha}`);
-    }
-  }
+  async removeEntries(entries: ArchiveEntry[]): Promise<void> {
+    if (entries.length === 0) return;
 
-  /**
-   * Reload manifest from disk. Used after git checkout to sync with restored state.
-   */
-  async reload(): Promise<void> {
-    await this.load();
-    this.logger.log("Reloaded archive manifest from disk");
+    const toRemove = new Set(entries);
+    const before = this.manifest.entries.length;
+    this.manifest.entries = this.manifest.entries.filter((entry) => !toRemove.has(entry));
+    const removed = before - this.manifest.entries.length;
+    await this.save();
+    this.logger.log(`Removed ${removed} restored entries from archive manifest`);
   }
 
   /**

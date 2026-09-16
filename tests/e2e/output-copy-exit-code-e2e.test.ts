@@ -10,9 +10,9 @@
  * failure, so CI green-lit runs whose outputs never materialized.
  *
  * These tests exercise the whole contract end to end: the REAL CLI runs in
- * --headless mode, a single haiku codon runs against the live API, and the
- * assertion is on the actual process exit code after the process shuts itself
- * down.
+ * --headless mode, a single live gpt-5.6-luna codon (pi/openai-codex) runs,
+ * and the assertion is on the actual process exit code after the process
+ * shuts itself down.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
@@ -47,7 +47,7 @@ describe("E2E: output-stage failures must exit the headless process non-zero", (
   });
 
   /**
-   * Run one full headless execution: a single live haiku codon whose
+   * Run one full headless execution: a single live gpt-5.6-luna codon whose
    * outputFiles group runs `beforeCopyCommand` and then copies result.txt.
    * Resolves when the server process exits BY ITSELF — the exit code is the
    * value under test.
@@ -74,7 +74,7 @@ describe("E2E: output-stage failures must exit the headless process non-zero", (
             id: "emit-outputs",
             name: "Emit outputs",
             promptText: "Reply with exactly: OK. Do not use any tools.",
-            model: "haiku",
+            model: "pi/openai-codex/gpt-5.6-luna",
             continuationMode: "fresh",
             outputFiles: [
               {

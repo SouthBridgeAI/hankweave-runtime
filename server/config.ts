@@ -8,6 +8,7 @@ import {
   codonSentinelEntrySchema,
   sentinelConfigSchema,
 } from "./config-validation/sentinel.schema.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import { checkRegularFile } from "./fs-guards.js";
 import {
   codonOwnRefs,
@@ -1522,6 +1523,25 @@ export const runtimeConfigSchema = z
           "Per-codon and hank override settings take precedence.",
       ),
 
+    // Event Journal Diet (events.jsonl diet P4)
+    dietOnFinalize: z
+      .boolean()
+      .optional()
+      .describe(
+        "If true, compress a finished run's event journal at shutdown (large file bodies move " +
+          "to a per-run content-addressed store; restore with hankweave --restore-journal). " +
+          "Only runs after the run reached a terminal state (completed/failed).",
+      ),
+    journalDietThresholdBytes: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Minimum file-body size (bytes) extracted to the content-addressed store by the " +
+          "journal diet. Fixed default of 4096; not intended as a tunable.",
+      ),
+
     // Rig Setup Behavior
     // NOTE: Use .optional() WITHOUT .default() to keep TypeScript type optional.
     // Defaults are handled at runtime with nullish coalescing.
@@ -1738,7 +1758,7 @@ export const DEFAULT_CONFIG: Omit<
   // Informational only — nothing consumes this field. The actual root is resolved
   // at call time by getManagedExecutionsRoot() in utils.ts (env var HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR).
   executionBaseDir: path.join(os.homedir(), ".hankweave-executions"),
-  lockFile: ".hankweave/runtime.lock",
+  lockFile: ExecutionLayout.RELATIVE_LOCK_FILE,
   socketLogFile: ".hankweave/logs/websocket.log",
   serverLogFile: ".hankweave/logs/server.log",
   logParsingInterval: 1000, // Check for new log entries every second
@@ -1749,6 +1769,8 @@ export const DEFAULT_CONFIG: Omit<
   withoutProxy: true, // Proxy disabled by default (enable with --proxy)
   handshakeHistoryLimit: 50, // Maximum recent events to include in handshake response
   idleTimeout: 0, // 0 seconds idle timeout (ie no timeout) for WebSocket and proxy servers (0-255)
+  dietOnFinalize: true, // Compress finished runs' journals at shutdown (events.jsonl diet P4); restore with --restore-journal
+  journalDietThresholdBytes: 4096, // Fixed threshold for CAS extraction; not documented as tunable
   sentinel: {
     enablePersistence: true,
     healthCheckGracePeriodMs: 2000, // 2 seconds
@@ -1762,6 +1784,37 @@ export const DEFAULT_CONFIG: Omit<
 
 /** Default schema URL for hank.json files (unpkg CDN for npm package) */
 export const HANK_SCHEMA_URL = "https://unpkg.com/hankweave@latest/schemas/hank.schema.json";
+
+/**
+ * Return hank.json content exactly as ensureSchemaUrl would leave it on disk:
+ * a schema-less JSON object gets $schema prepended (2-space indent, trailing
+ * newline); anything else (has $schema already, or not parseable JSON) is
+ * returned unchanged.
+ *
+ * Shared with execution-setup's hank-hash computation so the hash always
+ * reflects the post-rewrite content — ensureSchemaUrl's rewrite alone must
+ * never register as a config change on the next resume.
+ */
+export function normalizeHankContent(content: string): string {
+  try {
+    const rawConfig = JSON.parse(content);
+
+    // Already has $schema - nothing to do
+    if (rawConfig.$schema) {
+      return content;
+    }
+
+    // Add $schema at the beginning of the object (2-space indent)
+    const updatedConfig = {
+      $schema: HANK_SCHEMA_URL,
+      ...rawConfig,
+    };
+    return `${JSON.stringify(updatedConfig, null, 2)}\n`;
+  } catch {
+    // Not valid JSON — leave untouched; validation will report it properly
+    return content;
+  }
+}
 
 /**
  * Ensure a hank.json file has a $schema property for editor support.
@@ -1778,21 +1831,14 @@ export function ensureSchemaUrl(hankPath: string): boolean {
   }
   try {
     const content = fs.readFileSync(hankPath, "utf-8");
-    const rawConfig = JSON.parse(content);
+    const normalized = normalizeHankContent(content);
 
-    // Already has $schema - nothing to do
-    if (rawConfig.$schema) {
+    // Already has $schema (or not rewritable JSON) - nothing to do
+    if (normalized === content) {
       return false;
     }
 
-    // Add $schema at the beginning of the object
-    const updatedConfig = {
-      $schema: HANK_SCHEMA_URL,
-      ...rawConfig,
-    };
-
-    // Write back with same formatting (2-space indent)
-    fs.writeFileSync(hankPath, `${JSON.stringify(updatedConfig, null, 2)}\n`);
+    fs.writeFileSync(hankPath, normalized);
     return true;
   } catch {
     // If anything goes wrong (file not found, invalid JSON, etc.), silently skip
@@ -1960,7 +2006,8 @@ export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
       key === "showCosts" ||
       key === "enablePersistence" ||
       key === "waitForAllHealthChecks" ||
-      key === "ignoreRigFailures"
+      key === "ignoreRigFailures" ||
+      key === "dietOnFinalize"
     ) {
       return value === "true" || value === "1";
     }
@@ -1971,7 +2018,8 @@ export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
       key === "logParsingInterval" ||
       key === "dataHashTimeLimit" ||
       key === "healthCheckGracePeriodMs" ||
-      key === "idleTimeout"
+      key === "idleTimeout" ||
+      key === "journalDietThresholdBytes"
     ) {
       const num = Number(value);
       if (Number.isNaN(num)) {

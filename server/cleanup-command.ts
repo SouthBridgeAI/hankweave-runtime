@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import path from "node:path";
 import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
+import { ExecutionLayout } from "./execution-layout.js";
 import { formatSize, getDirectorySize } from "./utils.js";
 
 export interface CleanupOptions {
@@ -70,7 +70,7 @@ export class CleanupCommand {
       console.log("The following execution directory will be removed:\n");
 
       for (const dir of dirsToRemove) {
-        const metaPath = path.join(dir, ".hankweave", "execution-meta.json");
+        const metaPath = new ExecutionLayout(dir).metaPath;
         try {
           const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
           console.log(`📁 ${dir}`);
@@ -123,7 +123,7 @@ export class CleanupCommand {
           }
 
           // Check for lock file
-          const lockFile = path.join(dir, ".hankweave", "runtime.lock");
+          const lockFile = new ExecutionLayout(dir).lockPath;
           if (fs.existsSync(lockFile)) {
             result.errors.push(`Cannot remove ${dir}: Server is running`);
             console.log(`❌ Skipped (server running): ${dir}`);

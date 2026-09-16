@@ -226,6 +226,8 @@ export type TelemetryEventName =
   | "cli_cleanup"
   | "cli_run"
   | "cli_help"
+  | "cli_restore_journal"
+  | "cli_diet_journal"
   // Run lifecycle
   | "run_started"
   | "run_completed"

@@ -3,6 +3,29 @@ import path from "node:path";
 import fg from "fast-glob";
 import type { Ignore } from "ignore";
 import ignore from "ignore";
+import micromatch from "micromatch";
+import { ExecutionLayout } from "./execution-layout.js";
+
+/**
+ * Single-candidate matcher sharing `resolveFiles` semantics.
+ *
+ * `match` is deliberately synchronous so callers inside synchronous event
+ * pipelines (e.g. CodonFileTracker's tool-use path) can decide without
+ * yielding. Matching is string-only: it accepts prospective paths that do not
+ * exist yet (a new Write target) and does not enforce the resolver's
+ * ordinary-file/symlink policy. The captured ignore rules come from the
+ * resolver's per-project cache, so an in-run .gitignore edit is invisible
+ * here exactly as it is to `resolveFiles`.
+ */
+export interface PathMatcher {
+  /**
+   * @param candidatePath - Absolute path, or path relative to the project root
+   * @returns The normalized project-relative path when the candidate would be
+   *          included by `resolveFiles` for the same patterns, else null
+   *          (no pattern match, ignored, or outside the project root).
+   */
+  match(candidatePath: string): string | null;
+}
 
 /**
  * Unified file resolver that applies gitignore rules consistently
@@ -10,6 +33,69 @@ import ignore from "ignore";
  */
 export class UnifiedFileResolver {
   private ignoreCache = new Map<string, Ignore>();
+
+  /**
+   * Build a {@link PathMatcher} answering "would `resolveFiles` include this
+   * path?" for a fixed pattern list, without scanning the filesystem per call.
+   *
+   * fast-glob compiles patterns with micromatch internally, so matching with
+   * micromatch here (dot enabled, basename matching off, negative patterns
+   * subtracting like fast-glob's) keeps both sites on the same glob dialect.
+   */
+  async createPathMatcher(projectPath: string, patterns: string[]): Promise<PathMatcher> {
+    const ig = await this.getIgnoreRules(projectPath);
+    const rootPath = path.resolve(projectPath);
+
+    // fast-glob's negation rule: a leading "!" negates unless it opens an
+    // extglob ("!(...)"). Negatives apply globally regardless of list order
+    // (fast-glob extracts them into its ignore option), and a list with no
+    // positive pattern matches nothing. micromatch's ordered list semantics
+    // differ on both points, so split the list and use `ignore` instead.
+    const isNegative = (pattern: string) => pattern.startsWith("!") && !pattern.startsWith("!(");
+    const stripDotSlash = (pattern: string) =>
+      pattern.startsWith("./") ? pattern.slice(2) : pattern;
+    // fast-glob collapses repeated slashes in every pattern before compiling
+    // (managers/tasks.js), keeping only a leading "//"; mirror that here.
+    const removeDuplicateSlashes = (pattern: string) => pattern.replace(/(?!^)\/{2,}/g, "/");
+    const normalizedPatterns = patterns.map(removeDuplicateSlashes);
+    const positivePatterns = normalizedPatterns.filter((p) => !isNegative(p)).map(stripDotSlash);
+    const negativePatterns = normalizedPatterns
+      .filter(isNegative)
+      .map((p) => stripDotSlash(p.slice(1)));
+
+    return {
+      match: (candidatePath: string): string | null => {
+        if (positivePatterns.length === 0) return null;
+
+        const relativePath = path.relative(rootPath, path.resolve(rootPath, candidatePath));
+        if (relativePath === "" || path.isAbsolute(relativePath)) {
+          return null;
+        }
+        // Escapes climb via a ".." *segment*; a legitimate in-root name like
+        // "..notes.md" must not be mistaken for one.
+        if (relativePath.split(path.sep)[0] === "..") {
+          return null;
+        }
+
+        const normalizedPath = relativePath.split(path.sep).join("/");
+        if (
+          !micromatch.isMatch(normalizedPath, positivePatterns, {
+            dot: true,
+            // fast-glob hardcodes posix: true (providers/provider.js), which
+            // flips negated-class patterns like "[!a]*.txt".
+            posix: true,
+            ignore: negativePatterns,
+          })
+        ) {
+          return null;
+        }
+        if (ig.ignores(normalizedPath)) {
+          return null;
+        }
+        return normalizedPath;
+      },
+    };
+  }
 
   /**
    * Resolve files matching the given patterns while respecting gitignore rules.
@@ -36,11 +122,14 @@ export class UnifiedFileResolver {
       onlyFiles: true,
       // Don't follow symlinks
       followSymbolicLinks: false,
-      // Don't use gitignore - we'll handle it ourselves
+      // Don't use gitignore - we'll handle it ourselves. Only the shadow git
+      // directories are pruned at traversal time; the rest of the mandatory
+      // exclusions are applied by the ignore filter below.
       ignore: [
         ".git/**",
-        ".hankweave/checkpoints/.hankweavecheckpoints/**",
-        ".hankweave.backup-*/checkpoints/.hankweavecheckpoints/**",
+        ...ExecutionLayout.MANDATORY_EXCLUDED_DIRS.filter((dir) =>
+          dir.endsWith(ExecutionLayout.CHECKPOINT_GIT),
+        ).map((dir) => `${dir}/**`),
       ],
     });
 
@@ -69,25 +158,16 @@ export class UnifiedFileResolver {
     // Always ignore .git directory (user's git)
     ig.add(".git");
 
-    // Always ignore the checkpoint shadow git directory
-    // Use leading slash for path patterns and trailing slash for directory-only matching
-    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints/");
-    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints/**");
-
-    // Also ignore any quarantine directories (created when both .git and .hankweavecheckpoints exist)
-    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints-quarantine-*/");
-    ig.add("/.hankweave/checkpoints/.hankweavecheckpoints-quarantine-*/**");
-
-    // Also ignore checkpoint git directories in backup directories (created by --start-new --force)
-    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints/");
-    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints/**");
-    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints-quarantine-*/");
-    ig.add("/.hankweave.backup-*/checkpoints/.hankweavecheckpoints-quarantine-*/**");
-
-    // IMPORTANT: Always ignore the read_only_data_source directory for checkpoints
-    // This is enforced here, not via gitignore
-    ig.add("/read_only_data_source/");
-    ig.add("/read_only_data_source/**");
+    // Always ignore the checkpoint shadow git directory, its quarantine
+    // siblings, the same under --start-new --force backups, and the
+    // read_only_data_source link. This is enforced here, not via gitignore;
+    // the list is owned by execution-layout.ts so it cannot drift from the
+    // on-disk names. Leading slash anchors the pattern to the root, trailing
+    // slash matches directories only.
+    for (const dir of ExecutionLayout.MANDATORY_EXCLUDED_DIRS) {
+      ig.add(`/${dir}/`);
+      ig.add(`/${dir}/**`);
+    }
 
     // Find all .gitignore files in the project
     const gitignoreFiles = await this.findGitignoreFiles(projectPath);

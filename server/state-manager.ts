@@ -1,10 +1,19 @@
 // server/state-manager.ts
 import fs from "node:fs";
-import path from "node:path";
 import type { CheckpointGit } from "./checkpoint-git.js";
+import { CheckpointStorageError } from "./checkpoint-git.js";
 import { normalizeLegacyProviderModelInfo } from "./config-validation/model-validator.js";
+import type { ExecutionLayout } from "./execution-layout.js";
 import { type ExecutionCodonEntry, ExecutionPlanner } from "./execution-planner.js";
-import { analyzeExecutionThread, type ExecutionThread } from "./execution-thread.js";
+import {
+  analyzeExecutionThread,
+  type ContinuationSeed,
+  decideRollback,
+  type ExecutionThread,
+  type RollbackDecision,
+  seedFromState,
+  seedFromThread,
+} from "./execution-thread.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { MetadataValidationError, validateTransitionMetadata } from "./state-transition-guards.js";
 import { type StateManagerEvents, TypedEventEmitter } from "./typed-event-emitter.js";
@@ -62,14 +71,14 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
   };
 
   constructor(
-    private readonly hankweaveDir: string,
+    private readonly layout: ExecutionLayout,
     logger: Logger,
     private readonly codonConfigs?: CodonConfig[],
   ) {
     super();
     this.logger = logger;
-    this.statePath = path.join(hankweaveDir, "state.json");
-    this.stateBackupPath = path.join(hankweaveDir, "state.json.bak");
+    this.statePath = layout.statePath;
+    this.stateBackupPath = layout.stateBackupPath;
 
     // Initialize execution planner
     this.planner = new ExecutionPlanner(codonConfigs || []);
@@ -83,6 +92,13 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
   }
 
   async initialize(): Promise<void> {
+    // Prove the checkpoint history is readable before anything else. Recovery
+    // decides on it, and "could not read the repository" must stop the boot
+    // rather than look like "no checkpoints" and fall through to a fresh run.
+    // Outside the state-file try below: the backup fallback is for a corrupt
+    // state.json, not for unreadable storage.
+    await this.assertCheckpointStorageReadable();
+
     try {
       if (fs.existsSync(this.statePath)) {
         const parsedState = await this.loadAndValidateStateFile(this.statePath);
@@ -97,6 +113,24 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
     // Detect any crashed runs
     await this.detectCrashedRuns();
+  }
+
+  /**
+   * Throws CheckpointStorageError when the checkpoint repository exists but
+   * cannot be read. Nothing has been written when it throws: it runs before
+   * the state file is loaded and before crashed runs are detected.
+   */
+  private async assertCheckpointStorageReadable(): Promise<void> {
+    try {
+      await this.getAllCheckpoints(true);
+    } catch (error) {
+      if (!(error instanceof CheckpointStorageError)) throw error;
+      const message =
+        `Recovery stopped: checkpoint storage could not be read (${error.message}). ` +
+        "Nothing has been changed; see .hankweave/logs/server.log.";
+      this.logger.log(message, "error");
+      throw new CheckpointStorageError(message, error);
+    }
   }
 
   /**
@@ -468,7 +502,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     }
 
     // Check for orphaned run folders
-    const runsDir = path.join(this.hankweaveDir, "runs");
+    const runsDir = this.layout.runsDir;
     if (fs.existsSync(runsDir)) {
       const runFolders = fs.readdirSync(runsDir);
       const stateRunIds = new Set(typedState.runs.map((r) => r.runId));
@@ -587,6 +621,33 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     return history;
   }
 
+  /**
+   * The rig-setup checkpoint `codonConfigId` recorded in `runId`, or null.
+   *
+   * A rig-setup checkpoint proves the codon's rig ran once; it proves the
+   * work tree is still in the rig's state only if it was taken in the run
+   * that is now executing. Every other way of reaching a codon start — a
+   * continuation created by a rollback, a fresh run over old history —
+   * restored the tree to a completion checkpoint, the state from BEFORE the
+   * rig ran (the checkout removes what the rig created and puts back what it
+   * moved). So a rig may be skipped on a retry within a run and must run
+   * again on any restart that crossed a run boundary. Matching is by the
+   * RUNTIME id state records at CodonStarted — a loop iteration is "plan#2",
+   * not its config id "plan" — so an iteration's retry skips its rig like
+   * any other codon's.
+   */
+  getRigSetupCheckpointInRun(codonId: CodonId, runId: RunId): string | null {
+    const run = this.getRun(runId);
+    if (!run) return null;
+    for (const codon of run.codons) {
+      if (codon.codonId !== codonId) continue;
+      if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
+        return codon.rigSetupCheckpoint;
+      }
+    }
+    return null;
+  }
+
   getCostSince(runId: RunId): number {
     let found = false;
     let total = 0;
@@ -611,9 +672,8 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     if (!run) return false;
 
     if (afterCodon) {
-      // Check if the codon exists and is completed
       const codon = run.codons.find((c) => c.codonId === afterCodon);
-      return codon?.status === "completed" || false;
+      return codon?.status === "completed";
     }
 
     // Can continue from beginning of any run
@@ -670,12 +730,62 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     targetRunId?: RunId,
     includeCheckpointValidation = true,
   ): Promise<ExecutionThread> {
-    // Get checkpoint data if requested and available
+    // A transient git read failure is tolerated here and shows as "no
+    // confirmed checkpoints": this thread feeds display and bookkeeping,
+    // which must not start failing over it. Recovery uses
+    // getExecutionThreadForRecovery.
     const checkpointData =
       includeCheckpointValidation && this.checkpointGit?.isInitialized()
-        ? await this.getCheckpointDataMap()
+        ? await this.getCheckpointDataMap(false)
         : undefined;
+    return this.buildExecutionThread(targetRunId, checkpointData);
+  }
 
+  /**
+   * The execution thread recovery decides on. validatedCheckpoints is built
+   * from what git actually holds, and a repository that cannot be read throws
+   * CheckpointStorageError: recovery must never mistake "unreadable" for
+   * "empty", which would fail forward to a fresh run over a good history.
+   */
+  async getExecutionThreadForRecovery(): Promise<ExecutionThread> {
+    const checkpointData = this.checkpointGit?.isInitialized()
+      ? await this.getCheckpointDataMap(true)
+      : undefined;
+    return this.buildExecutionThread(undefined, checkpointData);
+  }
+
+  /**
+   * Where recovery should roll back to, decided on the strict thread: the
+   * newest completed codon's git-confirmed completion, else the newest
+   * confirmed checkpoint of any type, else nothing (target null). Throws
+   * CheckpointStorageError when the repository cannot be read.
+   */
+  async findRollbackTarget(): Promise<RollbackDecision> {
+    return decideRollback(await this.getExecutionThreadForRecovery());
+  }
+
+  /**
+   * The codon a continuation may seed from, or null when no run has completed
+   * one: the newest completed codon in the strict thread, or — when the
+   * thread is empty because the latest run is an empty fresh run — anywhere
+   * in state. `confirmed` says whether git holds its completion checkpoint.
+   * Throws CheckpointStorageError when the repository cannot be read, so an
+   * unreadable store is never mistaken for "nothing to seed".
+   */
+  async findContinuationSeed(): Promise<ContinuationSeed | null> {
+    const checkpointData = this.checkpointGit?.isInitialized()
+      ? await this.getCheckpointDataMap(true)
+      : undefined;
+    const thread = await this.buildExecutionThread(undefined, checkpointData);
+    return thread.codons.length > 0
+      ? seedFromThread(thread)
+      : seedFromState(this.state, checkpointData);
+  }
+
+  private async buildExecutionThread(
+    targetRunId: RunId | undefined,
+    checkpointData: Map<string, { message: string; timestamp: string; branch: string }> | undefined,
+  ): Promise<ExecutionThread> {
     let effectivePlan: ExecutionCodonEntry[];
 
     if (this.state.executionPlan.length > 0) {
@@ -702,7 +812,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
   /**
    * Helper to convert checkpoint array to map for execution thread
    */
-  private async getCheckpointDataMap(): Promise<
+  private async getCheckpointDataMap(failOnStorageError = false): Promise<
     Map<
       string,
       {
@@ -712,7 +822,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
       }
     >
   > {
-    const checkpoints = await this.getAllCheckpoints();
+    const checkpoints = await this.getAllCheckpoints(failOnStorageError);
     if (!checkpoints) return new Map();
 
     const map = new Map<
@@ -741,7 +851,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
    *
    * @returns Array of checkpoint information ordered by timestamp (newest first), or null if git unavailable
    */
-  async getAllCheckpoints(): Promise<Array<{
+  async getAllCheckpoints(failOnStorageError = false): Promise<Array<{
     sha: string;
     message: string;
     timestamp: string;
@@ -755,6 +865,10 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
       return await this.checkpointGit.getAllCheckpoints();
     } catch (error) {
       this.logger.log(`Failed to get all checkpoints: ${error}`, "error");
+      // Tolerated by default: dozens of non-recovery callers (state
+      // snapshots, handshake, codon completion) reach this map and must not
+      // start failing on a transient read. Recovery opts into the error.
+      if (failOnStorageError && error instanceof CheckpointStorageError) throw error;
       return null;
     }
   }
@@ -1030,6 +1144,11 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
 
           case "completed": {
             // Can transition from running OR completing-sentinels
+            // validateTransition already rejected a blank SHA; this narrows the
+            // type and keeps the reducer honest if it is ever called directly.
+            if (!metadata?.checkpointSha) {
+              throw new Error("Invalid metadata for completed transition: checkpointSha required");
+            }
             const sourceCodon = currentCodon as ST.RunningCodon | ST.CompletingSentinelsCodon;
             const completedCodon: ST.CompletedCodon = {
               ...sourceCodon,
@@ -1047,7 +1166,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
                       cacheReadTokens: 0,
                     },
               resultMessageReceived: metadata?.resultMessageReceived || false,
-              completionCheckpoint: metadata?.checkpointSha || "",
+              completionCheckpoint: metadata.checkpointSha,
               sentinels: sourceCodon.sentinels
                 ? {
                     executed: sourceCodon.sentinels.loaded,
