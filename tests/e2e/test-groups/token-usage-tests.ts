@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TokenUsageEvent } from "../../../server/types/types.js";
-import { parseJSONL } from "../../utils/test-data-helpers.js";
+import { findFirstRunFolder } from "../../utils/run-folder.js";
+import { readJSONLFile } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
@@ -16,20 +17,12 @@ export function runTokenUsageTests(testState: TestState, testDir: string) {
     test(`${codonId} token usage events match log messages`, () => {
       // Log files are now in .hankweave/runs/{runId}/{codonId}-claude.log
       // We need to find the run directory first
-      const runsDir = path.join(testDir, ".hankweave/runs");
-      let runFolder = "";
-      if (fs.existsSync(runsDir)) {
-        const runFolders = fs.readdirSync(runsDir);
-        if (runFolders.length > 0) {
-          runFolder = path.join(runsDir, runFolders[0]);
-        }
-      }
+      const runFolder = findFirstRunFolder(testDir);
 
       if (runFolder) {
         const logPath = path.join(runFolder, `${codonId}-claude.log`);
         if (fs.existsSync(logPath)) {
-          const logContent = fs.readFileSync(logPath, "utf-8");
-          const logEntries = parseJSONL(logContent);
+          const logEntries = readJSONLFile(logPath);
 
           // Get all assistant messages with usage for this codon
           const assistantMessages = logEntries.filter(

@@ -19,13 +19,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { CheckpointGit } from "../../server/checkpoint-git.js";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
 import { StateManager } from "../../server/state-manager.js";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type * as ST from "../../server/types/state-types.js";
 import { Logger } from "../../server/utils.js";
+import { Workspace } from "../../server/workspace/index.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
 
 const codons = [
@@ -81,18 +81,17 @@ test("relaunch after the first codon failed retries that codon, not the next one
   const one = CodonId("one");
 
   // 1. Two real checkpoints on the run's branch: rig-setup:one, then error:one.
-  const seed = new CheckpointGit(
-    execDir,
-    execDir,
-    new Logger(path.join(hankweaveDir, "logs/seed.log")),
-  );
-  await seed.initialize();
-  await seed.addPatterns(["*.out"]);
-  await seed.switchToBranch(`run-${runId}`);
+  const seed = await Workspace.open(new ExecutionLayout(execDir, { agentRootPath: execDir }), {
+    logger: new Logger(path.join(hankweaveDir, "logs/seed.log")),
+  });
+
+  const history = seed.checkpoints.history(`run-${runId}`);
+  const parent = await seed.checkpoints.history("main").tip();
+  if (!parent) throw new Error("Missing initial checkpoint");
   fs.writeFileSync(path.join(execDir, "one.out"), "after rig");
-  const RIG = (await seed.commit("rig-setup:one")) as string;
+  const RIG = await history.checkpoint({ parent, message: "rig-setup:one", patterns: ["*.out"] });
   fs.writeFileSync(path.join(execDir, "one.out"), "partial work before failure");
-  const ERR = (await seed.commit("error:one")) as string;
+  const ERR = await history.checkpoint({ parent: RIG, message: "error:one", patterns: ["*.out"] });
 
   // 2. state.json through the real state manager, in the order the runtime
   //    fires the transitions: rig ran → `starting` carries the rig-setup SHA →

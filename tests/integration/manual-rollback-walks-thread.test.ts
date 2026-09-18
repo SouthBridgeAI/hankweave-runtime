@@ -15,7 +15,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { CheckpointGit } from "../../server/checkpoint-git.js";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
 import { StateManager } from "../../server/state-manager.js";
@@ -23,6 +22,8 @@ import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type * as ST from "../../server/types/state-types.js";
 import type { ServerEvent } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
+import type { CheckpointId } from "../../server/workspace/checkpoints.js";
+import { Workspace } from "../../server/workspace/index.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
 
 const ids = ["one", "two", "three"];
@@ -57,19 +58,34 @@ test("rollback.toCodon emits a rollback.codonCheckpoint event for every codon it
   const runId = RunId("run-1");
 
   // 1. Three real completion checkpoints on the run's branch.
-  const seed = new CheckpointGit(
-    execDir,
-    execDir,
-    new Logger(path.join(hankweaveDir, "logs/seed.log")),
-  );
-  await seed.initialize();
-  await seed.addPatterns(["*.out"]);
-  await seed.switchToBranch(`run-${runId}`);
-  const shas: Record<string, string> = {};
+  const seed = await Workspace.open(new ExecutionLayout(execDir, { agentRootPath: execDir }), {
+    logger: new Logger(path.join(hankweaveDir, "logs/seed.log")),
+  });
+
+  const history = seed.checkpoints.history(`run-${runId}`);
+  let parent = await seed.checkpoints.history("main").tip();
+  if (!parent) throw new Error("Missing initial checkpoint");
+  const shas: Record<string, CheckpointId> = {};
   for (const id of ids) {
     fs.writeFileSync(path.join(execDir, `${id}.out`), id);
-    shas[id] = (await seed.commit(`completed:${id}`)) as string;
+    parent = await history.checkpoint({ parent, message: `completed:${id}`, patterns: ["*.out"] });
+    shas[id] = parent;
+    const archivedFile = id === "one" ? "at-target.txt" : "report.txt";
+    fs.writeFileSync(path.join(execDir, archivedFile), id);
+    await seed.archives.archive(
+      seed.files.select([archivedFile]),
+      { kind: "codon", codonId: id },
+      shas[id],
+    );
   }
+  // This missing copy must remain a failed record, never a reported restore.
+  fs.writeFileSync(path.join(execDir, "missing.txt"), "missing archive");
+  await seed.archives.archive(
+    seed.files.select(["missing.txt"]),
+    { kind: "codon", codonId: "three" },
+    shas.three,
+  );
+  fs.unlinkSync(path.join(execDir, "rigArchive/three/missing.txt"));
 
   // 2. state.json through the real state manager: three completed codons.
   const sm = new StateManager(
@@ -163,6 +179,23 @@ test("rollback.toCodon emits a rollback.codonCheckpoint event for every codon it
 
   // And the work tree is at the target.
   expect(fs.readFileSync(path.join(execDir, "one.out"), "utf-8")).toBe("one");
+  // Workspace restores the abandoned archives in order and owns the ledger:
+  // the at-target entry and missing copy stay recorded, successes are removed.
+  expect(fs.readFileSync(path.join(execDir, "report.txt"), "utf8")).toBe("three");
+  expect(fs.existsSync(path.join(execDir, "at-target.txt"))).toBe(false);
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(hankweaveDir, "archive-manifest.json"), "utf8"),
+  );
+  expect(manifest.entries.map((entry: { sourcePath: string }) => entry.sourcePath)).toEqual([
+    "at-target.txt",
+    "missing.txt",
+  ]);
+  const archiveEvent = events.find((event) => event.type === "rollback.archiveRestore");
+  expect(archiveEvent?.data).toMatchObject({
+    restoredPaths: ["report.txt", "report.txt"],
+    failedPaths: [{ path: "missing.txt", error: "Archive not found" }],
+    status: "partial",
+  });
   const current = internals.stateManager.getState();
   const run = current.runs.find((r) => r.runId === current.currentRunId);
   expect(run?.startingConditions.type).toBe("continuation");

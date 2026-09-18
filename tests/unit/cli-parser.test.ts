@@ -1319,3 +1319,10 @@ describe("help/parser parity", () => {
     expect(row?.line).toContain("Deprecated");
   });
 });
+
+test.each(["my.hank", "./out/x.hank.tar.zst"])("bundle positional %s", (bundle) => {
+  expect(parseCliArgs([bundle]).hankPath).toBe(bundle);
+  const args = parseCliArgs([bundle, "./data"]);
+  expect(args.hankPath).toBe(bundle);
+  expect(args.dataPath).toBe("./data");
+});

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { ExecutionLayout } from "./execution-layout.js";
 
 /**
  * Inlined templates for init command
@@ -120,7 +121,7 @@ This hank was initialized with \`hankweave init\`.
 - \`hank.json\` — Workflow definition (codons, models, file tracking)
 - \`prompts/\` — Prompt files for each codon (one per model family: Haiku, Gemini, Pi, GPT)
 - \`data/\` — Sample data files to analyze
-- \`.gitignore\` — Ignore patterns for execution artifacts
+- \`.gitignore\` — Ignore patterns for execution artifacts; also governs what \`rigSetup\` copy trees include (THE one rules file: your rules layer on top of built-in defaults like node_modules/, a \`!negation\` re-admits a default, and path prefixes scope rules into subfolders; nested .gitignore files inside copied trees are rejected at validation; requires git)
 
 ## Auth
 
@@ -149,7 +150,7 @@ npx hankweave
 - [Hank Basics](https://hankweave.southbridge.ai/guides/building-a-hank)
 - [GitHub](https://github.com/SouthBridgeAI/hankweave-runtime)`,
 
-  ".gitignore": `.hankweave/
+  ".gitignore": `${ExecutionLayout.STATE_DIR}/
 *.log
 node_modules/`,
 

@@ -638,8 +638,8 @@ export function getHankSummary(hankPath: string, sourceUrl: string, ref: string)
  * Called when loading a remote hank to show the user what they're running.
  * No confirmation needed - "power user" model assumes intent to run.
  */
-export function displayHankSummary(summary: HankSummary): void {
-  console.log("\n📦 Remote Hank");
+export function displayHankSummary(summary: HankSummary, title = "Remote Hank"): void {
+  console.log(`\n📦 ${title}`);
   console.log("────────────────────────────────────────────");
 
   if (summary.name) {

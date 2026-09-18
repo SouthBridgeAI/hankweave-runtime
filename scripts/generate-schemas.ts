@@ -17,6 +17,7 @@ import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { hankFileAuthoringSchema, runtimeConfigSchema } from "../server/config.js";
 import { sentinelConfigSchema } from "../server/config-validation/sentinel.schema.js";
+import { hankLockSchema } from "../server/pack/lock-schema.js";
 
 // AJV instance for validating generated schemas are valid JSON Schema draft-07
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -39,6 +40,11 @@ interface SchemaConfig {
   outputFile: string;
   title: string;
   description: string;
+  /** Inject an editor-facing `$schema` string property into the generated
+   * schema. True for authoring documents users edit by hand; FALSE for
+   * machine artifacts like hank.lock — pack never writes a `$schema` field,
+   * and the generated schema must describe the artifact exactly. */
+  injectSchemaProp: boolean;
 }
 
 const schemas: SchemaConfig[] = [
@@ -48,6 +54,8 @@ const schemas: SchemaConfig[] = [
     title: "Hankweave Hank File",
     description:
       "Schema for hank.json - the main workflow configuration file for Hankweave. See https://hankweave.dev/reference/configuration for documentation.",
+    // hank.schema.json already has $schema via hankFileAuthoringSchema.
+    injectSchemaProp: false,
   },
   {
     zodSchema: runtimeConfigSchema,
@@ -55,6 +63,7 @@ const schemas: SchemaConfig[] = [
     title: "Hankweave Runtime Configuration",
     description:
       "Schema for hankweave.json - runtime settings for the Hankweave server. See https://hankweave.dev/reference/configuration for documentation.",
+    injectSchemaProp: true,
   },
   {
     zodSchema: sentinelConfigSchema,
@@ -62,6 +71,15 @@ const schemas: SchemaConfig[] = [
     title: "Hankweave Sentinel Configuration",
     description:
       "Schema for sentinel configuration files - parallel observation agents. Note: Some runtime validations cannot be expressed in JSON Schema. See https://hankweave.dev/reference/sentinel-config for documentation.",
+    injectSchemaProp: true,
+  },
+  {
+    zodSchema: hankLockSchema,
+    outputFile: "hank.lock.schema.json",
+    title: "Hankweave Bundle Lock",
+    description:
+      "Schema for hank.lock - the machine-written lockfile emitted by `hankweave pack` (per-member hashes, codon input digests, bundle identity). Not an authoring format.",
+    injectSchemaProp: false,
   },
 ];
 
@@ -103,10 +121,11 @@ async function generateSchemas() {
       delete schemaWithMeta.name;
     }
 
-    // For schemas without authoring variants (hankweave.json, sentinel.json),
-    // inject $schema property into the generated schema so editors show it in autocomplete.
-    // hank.schema.json already has $schema via hankFileAuthoringSchema.
-    if (config.outputFile !== "hank.schema.json") {
+    // For authoring schemas without built-in variants (hankweave.json,
+    // sentinel.json), inject a $schema property so editors show it in
+    // autocomplete. Machine artifacts (hank.lock) and hank.schema.json
+    // (which carries $schema via hankFileAuthoringSchema) opt out.
+    if (config.injectSchemaProp) {
       // Handle both direct properties and $ref-based schemas
       if ("properties" in schemaWithMeta && schemaWithMeta.properties) {
         (schemaWithMeta.properties as Record<string, unknown>).$schema = {

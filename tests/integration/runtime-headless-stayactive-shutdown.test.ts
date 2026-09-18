@@ -148,6 +148,9 @@ describe("Runtime: headless stay-active must shut down, not hang", () => {
         transitionTypes.push(t.type);
       },
       waitForPendingTransitions: async () => {},
+      // This test isolates failure policy; workspace finalization is covered
+      // by the real StateManager integration tests.
+      finalizeCodon: async () => {},
       isContextExceededAcceptable: () => false,
       getState: () => ({ executionPlan: [] }),
     };

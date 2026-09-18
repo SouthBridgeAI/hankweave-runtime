@@ -1,33 +1,45 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { CodonFileTracker, type WatchedFileUpdate } from "../../server/codon-file-tracker.js";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import type { FileNode } from "../../server/schemas/event-schemas.js";
 import { Logger } from "../../server/utils.js";
+import { Workspace } from "../../server/workspace/index.js";
 import { jsonl, sdkLog, useCodonRunnerSuite } from "../utils/codon-runner-test-harness.js";
 
 describe("CodonFileTracker", () => {
+  // Execution dir (holds the shadow checkpoint repo) and the agent root the
+  // tracker watches. A real shadow repo, because the tracker's snapshot,
+  // tree, and per-tool-use ignore verdicts all come from git (workspace/files.ts).
+  // os.tmpdir(), not tests/test-area: real git repos under a sync daemon
+  // flake (see checkpoint-git.test.ts).
+  let executionDir: string;
   let tempDir: string;
-  let counter = 0;
+  let workspace: Workspace;
 
   beforeEach(async () => {
-    tempDir = path.resolve(
-      "tests",
-      "test-area",
-      `temp-codon-file-tracker-${Date.now()}-${++counter}`,
-    );
+    executionDir = fs.mkdtempSync(path.join(os.tmpdir(), "hw-codon-file-tracker-"));
+    tempDir = path.join(executionDir, "agent");
     await fs.promises.mkdir(tempDir, { recursive: true });
+    workspace = await Workspace.open(
+      new ExecutionLayout(executionDir, { agentRootPath: tempDir }),
+      {
+        logger: new Logger(path.join(executionDir, "checkpoint-git.log")),
+      },
+    );
   });
 
   afterEach(async () => {
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
+    await fs.promises.rm(executionDir, { recursive: true, force: true });
   });
 
-  function makeTracker(patterns: readonly string[]): CodonFileTracker {
+  function makeTracker(patterns?: readonly string[]): CodonFileTracker {
     return new CodonFileTracker({
-      agentRootPath: tempDir,
-      patterns,
-      logger: new Logger(path.join(tempDir, "tracker.log")),
+      logger: new Logger(path.join(executionDir, "tracker.log")),
+      files: workspace.files,
+      checkpointedFiles: patterns,
     });
   }
 
@@ -65,7 +77,7 @@ describe("CodonFileTracker", () => {
   test("keeps watched patterns and recent-file state isolated per codon", async () => {
     const sourcePatterns = ["*.txt"];
     const trackerA = makeTracker(sourcePatterns);
-    const trackerB = makeTracker([]);
+    const trackerB = makeTracker();
     const updatesA: WatchedFileUpdate[] = [];
     const updatesB: WatchedFileUpdate[] = [];
     trackerA.on("fileUpdated", (data) => updatesA.push(data));
@@ -112,11 +124,9 @@ describe("CodonFileTracker", () => {
     await Promise.all([trackerA.close(), trackerB.close()]);
   });
 
-  test("tool-use matching follows resolver semantics: no basename magic, gitignore applied", async () => {
+  test("tool-use matching follows resolution semantics: no basename magic, gitignore applied", async () => {
     await fs.promises.mkdir(path.join(tempDir, "deep", "dir"), { recursive: true });
     await fs.promises.mkdir(path.join(tempDir, "output", "tmp"), { recursive: true });
-    // Must exist before initialize(): the resolver caches ignore rules on
-    // first use, exactly as in a real run where rig setup precedes the codon.
     await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "output/tmp/\n");
 
     const tracker = makeTracker(["*.md", "output/**"]);
@@ -140,9 +150,60 @@ describe("CodonFileTracker", () => {
       },
       "toolu_5",
     );
+    // Mandatory exclusions and the hard .git rule hold on the tool path too,
+    // whatever the patterns say.
+    tracker.observeToolUse(
+      "Write",
+      { file_path: "output/../read_only_data_source/src.md", content: "ro" },
+      "toolu_6",
+    );
+    tracker.observeToolUse("Write", { file_path: ".git/HEAD.md", content: "git" }, "toolu_7");
     await tracker.drain();
 
     expect(updates.map((event) => event.path)).toEqual(["root.md", "output/keep.md"]);
+    // A gitignored Write is invisible everywhere: no event, no recent-file
+    // state, and the tree does not list it.
+    expect(tracker.getRecentFileAccess()).toMatchObject({ path: "output/keep.md" });
+    await tracker.close();
+  });
+
+  test("ignore rules are read live: a .gitignore the agent writes mid-run applies to the next tool use", async () => {
+    const tracker = makeTracker(["**/*.md"]);
+    const updates: WatchedFileUpdate[] = [];
+    tracker.on("fileUpdated", (data) => updates.push(data));
+    await tracker.initialize();
+
+    tracker.observeToolUse("Write", { file_path: "scratch/a.md", content: "a" }, "toolu_a");
+    await tracker.drain();
+    expect(updates.map((event) => event.path)).toEqual(["scratch/a.md"]);
+
+    // The agent adds a rule (as a Write would land it on disk).
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "scratch/\n");
+    tracker.observeToolUse("Write", { file_path: "scratch/b.md", content: "b" }, "toolu_b");
+    await tracker.drain();
+    expect(updates.map((event) => event.path)).toEqual(["scratch/a.md"]);
+
+    await tracker.close();
+  });
+
+  test("the initial snapshot is git-native: ignored files and mandatory exclusions are skipped", async () => {
+    await fs.promises.mkdir(path.join(tempDir, "node_modules", "pkg"), { recursive: true });
+    await fs.promises.mkdir(path.join(tempDir, "read_only_data_source"), { recursive: true });
+    await fs.promises.writeFile(path.join(tempDir, ".gitignore"), "node_modules/\n");
+    await fs.promises.writeFile(path.join(tempDir, "keep.md"), "keep");
+    await fs.promises.writeFile(path.join(tempDir, "node_modules", "pkg", "x.md"), "dep");
+    await fs.promises.writeFile(path.join(tempDir, "read_only_data_source", "ro.md"), "ro");
+
+    const tracker = makeTracker(["**/*.md"]);
+    const updates: WatchedFileUpdate[] = [];
+    const trees: FileNode[][] = [];
+    tracker.on("fileUpdated", (data) => updates.push(data));
+    tracker.on("fileTreeUpdated", ({ tree }) => trees.push(tree));
+    await tracker.initialize();
+
+    expect(updates.map((event) => event.path)).toEqual(["keep.md"]);
+    expect(trees).toHaveLength(1);
+    expect(trees[0].map((node) => node.path)).toEqual(["keep.md"]);
     await tracker.close();
   });
 

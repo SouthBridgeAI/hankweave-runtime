@@ -22,12 +22,14 @@ import type {
   ExtensionInfo,
 } from "../../server/codon-runner.js";
 import { CodonRunner } from "../../server/codon-runner.js";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import type { ExecutionCodonEntry } from "../../server/execution-planner.js";
 import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { StateManager } from "../../server/state-manager.js";
 import type { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type { FailureReason } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
+import { Workspace } from "../../server/workspace/index.js";
 import { createTestCodon } from "./test-codon-factory.js";
 
 /** The Claude CLI's exact API-timeout text, matched verbatim by the runner. */
@@ -246,6 +248,7 @@ let logFileCounter = 0;
  */
 export function useCodonRunnerSuite(prefix: string): CodonRunnerSuite {
   let tempDir = "";
+  let workspace: Workspace;
   const handles: CodonRunnerHandle[] = [];
 
   beforeEach(async () => {
@@ -255,6 +258,12 @@ export function useCodonRunnerSuite(prefix: string): CodonRunnerSuite {
       `temp-codon-runner-${prefix}-${Date.now()}-${++suiteDirCounter}`,
     );
     await fs.promises.mkdir(tempDir, { recursive: true });
+    // A real workspace over a real shadow repo (workspace/files.ts): the runner's
+    // file tracker enumerates, judges, and builds trees through it exactly
+    // as the runtime wires it — there is no "harness mode" without one.
+    workspace = await Workspace.open(new ExecutionLayout(tempDir, { agentRootPath: tempDir }), {
+      logger: new Logger(path.join(tempDir, "checkpoint-git.log")),
+    });
   });
 
   afterEach(async () => {
@@ -297,6 +306,7 @@ export function useCodonRunnerSuite(prefix: string): CodonRunnerSuite {
       codonId,
       executionPath: tempDir,
       agentRootPath: tempDir,
+      files: workspace.files,
       logger: new Logger(path.join(tempDir, `runner-${logFileCounter}.log`)),
       llmRegistry: (options.llmRegistry ?? defaultLlmRegistry) as unknown as LlmProviderRegistry,
       runId: mockRunId,

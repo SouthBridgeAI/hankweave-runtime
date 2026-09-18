@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { HankweaveState } from "../../../server/types/state-types.js";
+import { checkpointFiles } from "../../utils/checkpoint-history.js";
 
 /**
  * Checkpoint system tests.
@@ -31,15 +33,16 @@ export async function runCheckpointSystemTests(executionPath: string, agentRootP
 
   test("git exclude file exists", () => {
     const excludePath = path.join(gitDir, "info", "exclude");
-    // The exclude file should exist, but we no longer use it for patterns
-    // (patterns are handled by UnifiedFileResolver)
+    // The exclude file should exist, but it is not the pattern mechanism
+    // (patterns are matched in-process by workspace-files.ts; the exclude
+    // file only mirrors the mandatory exclusions to keep git output tidy)
     expect(fs.existsSync(excludePath)).toBe(true);
   });
 
   test("git commits created for each codon", () => {
     // No try/catch here: the checkpoint repo is created by the server via git,
     // so a git failure at this point is a real test failure, not a skip.
-    const gitLog = execSync("git log --oneline", {
+    const gitLog = execSync("git log --all --oneline", {
       cwd: agentRootPath,
       env: {
         ...process.env,
@@ -61,7 +64,7 @@ export async function runCheckpointSystemTests(executionPath: string, agentRootP
   });
 
   test("commit messages follow expected format", () => {
-    const gitLog = execSync("git log --pretty=format:%s", {
+    const gitLog = execSync("git log --all --pretty=format:%s", {
       cwd: agentRootPath,
       env: {
         ...process.env,
@@ -94,15 +97,7 @@ export async function runCheckpointSystemTests(executionPath: string, agentRootP
   });
 
   test("only tracked files are in git", () => {
-    const gitFiles = execSync("git ls-files", {
-      cwd: agentRootPath,
-      env: {
-        ...process.env,
-        GIT_DIR: gitDir,
-        GIT_WORK_TREE: agentRootPath,
-      },
-      encoding: "utf-8",
-    });
+    const gitFiles = checkpointFiles(executionPath, agentRootPath);
 
     const checkpointedFiles = gitFiles.trim()
       ? gitFiles
@@ -135,31 +130,28 @@ export async function runCheckpointSystemTests(executionPath: string, agentRootP
     }
   });
 
-  test("all commits on main branch (no error branches)", () => {
-    const gitBranches = execSync("git branch", {
-      cwd: agentRootPath,
-      env: {
-        ...process.env,
-        GIT_DIR: gitDir,
-        GIT_WORK_TREE: agentRootPath,
-      },
-      encoding: "utf-8",
-    });
-
-    const branches = gitBranches
-      .trim()
-      .split("\n")
-      .map((b) => b.trim());
-
-    // Should have main branch and a run-specific branch
-    // The run branch should be the current one (marked with *)
-    expect(branches.length).toBeGreaterThanOrEqual(2);
-    expect(branches).toContain("main");
-    // One branch should be marked as current with *
-    const currentBranch = branches.find((b) => b.startsWith("*"));
-    expect(currentBranch).toBeDefined();
-    // Current branch should be a run-specific branch
-    expect(currentBranch).toMatch(/\* run-\d+-\w+/);
+  test("run checkpoints belong to the persisted history without selecting a Git branch", () => {
+    const state = JSON.parse(
+      fs.readFileSync(path.join(executionPath, ".hankweave", "state.json"), "utf8"),
+    ) as HankweaveState;
+    const run = state.runs[0];
+    expect(run.gitBranch).toMatch(/^run-\d+-\w+/);
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: agentRootPath,
+        env: { ...process.env, GIT_DIR: gitDir, GIT_WORK_TREE: agentRootPath },
+        encoding: "utf8",
+      }).trim();
+    const branches = git("for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n");
+    expect(branches.sort()).toEqual(["main", run.gitBranch].sort());
+    const history = `refs/heads/${run.gitBranch}`;
+    const commits = git("rev-list", history).split("\n");
+    for (const codon of run.codons) {
+      expect(codon.status).toBe("completed");
+      if (codon.status !== "completed") throw new Error(`Codon ${codon.codonId} did not complete`);
+      expect(commits).toContain(codon.completionCheckpoint);
+    }
+    expect(git("branch", "--show-current")).toBe("");
   });
 
   test("git status shows clean working directory", () => {

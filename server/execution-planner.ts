@@ -45,11 +45,8 @@ export interface ExecutionCodonEntry {
  * occurrence wins. Null when the codon is not in the plan.
  *
  * The plan is the source, not the top-level codon list: a loop iteration
- * ("plan#2") is not a top-level codon, so looked up there it registered
- * nothing. That was harmless in one process (earlier codons had already
- * filled the pattern set) and destructive after a crash restart, where the
- * set starts empty: the first codon's completion checkpoint captured none
- * of its output, and a later rollback onto it deleted files.
+ * ("plan#2") is not a top-level codon. StateManager derives this policy at
+ * each checkpoint so a rollback or restart cannot retain stale patterns.
  */
 export function checkpointPatternsThrough(
   plan: ExecutionCodonEntry[],

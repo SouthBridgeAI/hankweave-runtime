@@ -1,35 +1,33 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { ArchiveManifestManager } from "./archive-manifest.js";
 import { BodyResolver } from "./body-resolver.js";
 import { Budget } from "./budget.js";
-import {
-  assertGitAvailable,
-  CheckpointGit,
-  CheckpointNotFoundError,
-  CheckpointStorageError,
-  type RecoverySnapshot,
-  type RestorePreconditions,
-} from "./checkpoint-git.js";
+import type {
+  PreparationFailure,
+  PreparationProgress,
+  SentinelLoadResult,
+} from "./codon-preparation.js";
 import { CodonRunner, type ExtensionInfo } from "./codon-runner.js";
 import { type ClientCommand, clientCommandSchema } from "./command-schemas.js";
 import { DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { synthesizeMissingFailureReason } from "./error-classification.js";
 import { EventJournal } from "./event-journal.js";
 import { ExecutionLayout } from "./execution-layout.js";
-import { checkpointPatternsThrough } from "./execution-planner.js";
-import {
-  analyzeExecutionThread,
-  bestConfirmedCheckpoint,
-  findContinuationSessionId,
-} from "./execution-thread.js";
-import { fileResolver } from "./file-resolver.js";
+import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
+import { assertGitAvailable } from "./git-support.js";
+import { describeIgnoredEntries, HankDir } from "./hank-dir.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import { ProxyRunner } from "./llm-proxy.js";
 import { Replay } from "./replay.js";
 import { RetryCoordinator } from "./retry-coordinator.js";
+import {
+  type RollbackCheckpointType,
+  RollbackMutatedWorkspaceError,
+  type RollbackProgress,
+  RollbackRejectedError,
+  type RollbackTarget,
+} from "./rollback-types.js";
 // Import event types from new schema file
 import type {
   AssistantActionEvent,
@@ -41,7 +39,6 @@ import type {
   FileUpdatedEvent,
   HistoryBatchEvent,
   InfoEvent,
-  LoopIterationCompletedEvent,
   PongEvent,
   RigOutputEvent,
   RigSetupCompletedEvent,
@@ -60,7 +57,10 @@ import {
 import { SentinelConfigLoader } from "./sentinels/sentinel-config-loader.js";
 import { SentinelManager } from "./sentinels/sentinel-manager.js";
 import { ShutdownWatchdog, shutdownWatchdogWanted } from "./shutdown-watchdog.js";
-import { StateManager } from "./state-manager.js";
+
+export { RollbackMutatedWorkspaceError } from "./rollback-types.js";
+
+import { type ArchiveResult, StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
 import {
   dietJournal,
@@ -82,12 +82,10 @@ import type {
   ToolUseContent,
   UserMessage,
 } from "./types/claude-session-schema.js";
-import { APITimeoutError, CommandError, ErrorSeverity } from "./types/error-types.js";
+import { APITimeoutError, ErrorSeverity } from "./types/error-types.js";
 import {
   type CodonExecution,
   type CodonStatus,
-  getCodonCost,
-  getCodonTokens,
   isTerminalCodonStatus,
   type Run,
 } from "./types/state-types.js";
@@ -100,15 +98,11 @@ import type {
   HandshakeRequest,
   HandshakeResponse,
   HankweaveConfig,
-  RigShellCommand,
-  ShellCommand,
 } from "./types/types.js";
 // Import remaining types from old file
 import { ClientMode } from "./types/types.js";
 import {
   assertNever,
-  copyFiles,
-  escapeShellArg,
   generateId,
   type HankweaveServer,
   type HankweaveWebSocket,
@@ -116,35 +110,13 @@ import {
   serve,
   toError,
 } from "./utils.js";
+import { CheckpointStorageError } from "./workspace/checkpoints.js";
+import { Workspace } from "./workspace/index.js";
 
 /**
  * This file is organized into logical sections for easier navigation.
  * Use `grep -A1 "// ====" hankweave-runtime.ts | grep "//"` to see all sections.
  */
-
-/**
- * Thrown when a rollback failed AFTER it had started changing the work tree
- * (a checkpoint was checked out or rig directories were removed). The tree
- * may be half-restored; the pre-rollback tree is on a recovery/* branch.
- * Callers must not start new work on it — unlike a rollback rejected up
- * front (CheckpointNotFoundError), which left the tree untouched and may be
- * degraded around.
- */
-interface ArchiveRestoreResult {
-  entry: import("./archive-manifest.js").ArchiveEntry;
-  path: string;
-  success: boolean;
-  error?: string;
-}
-
-export class RollbackMutatedWorkspaceError extends Error {
-  constructor(cause: unknown) {
-    super(`Rollback failed after the work tree was changed: ${toError(cause).message}`, {
-      cause,
-    });
-    this.name = "RollbackMutatedWorkspaceError";
-  }
-}
 
 /**
  * Main server class that orchestrates Claude codons.
@@ -224,20 +196,19 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    */
   private initialAutostartTriggered = false;
 
-  // Checkpoint-related properties. Both objects are built in the constructor
-  // (neither touches disk there) and brought up by initializeCheckpoints() in
-  // start(), which throws rather than leave them unusable. Non-nullable so no
-  // caller has to ask whether the repo "is there".
-  private readonly checkpointGit: CheckpointGit;
-  /**
-   * The recovery snapshot taken during this boot, if any. start() may reach
-   * the fresh-run fallback after a rung that already snapshotted the work
-   * tree; nothing changes the tree in between, so one snapshot is enough.
-   */
-  private bootRecoverySnapshot: RecoverySnapshot | null = null;
+  /** Published only after startup has opened every workspace capability. */
+  private openedWorkspace?: Workspace;
 
-  // Archive manifest for archiveOnSuccess feature
-  private readonly archiveManifest: ArchiveManifestManager;
+  private get workspace(): Workspace {
+    if (!this.openedWorkspace) throw new Error("Runtime workspace has not been opened");
+    return this.openedWorkspace;
+  }
+  /** The hank directory (hank-dir.ts): ref resolution and copy-tree rules
+   * for rig copies, one instance per runtime so verdicts cannot shift for
+   * paths already judged within a run. null for programmatic runtimes
+   * without a configPath (no hank dir, no ignore rules). Disposed at
+   * shutdown. */
+  private readonly hankDir: HankDir | null;
 
   // Failure tracking
   private codonFailureReason?: FailureReason;
@@ -310,18 +281,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       : path.join(this.config.executionPath, this.config.lockFile);
 
     // Initialize state manager with execution path
-    this.layout = new ExecutionLayout(this.config.executionPath);
+    this.layout = new ExecutionLayout(this.config.executionPath, {
+      agentRootPath: this.config.agentRootPath,
+    });
     this.stateManager = new StateManager(this.layout, this.logger, this.config.codons);
 
-    // Checkpoint repository and archive manifest: constructing either is pure
-    // bookkeeping (paths + logger); initializeCheckpoints() does the disk work.
-    this.checkpointGit = new CheckpointGit(
-      this.config.executionPath,
-      this.config.agentRootPath,
-      this.logger,
-    );
-    this.stateManager.setCheckpointGit(this.checkpointGit);
-    this.archiveManifest = new ArchiveManifestManager(this.config.executionPath, this.logger);
+    this.hankDir = this.config.configPath ? HankDir.forConfig(this.config.configPath) : null;
 
     // Initialize Event Journal with file-based storage
     this.eventJournal = new EventJournal(new FileEventStorage(this.layout.eventsDir));
@@ -395,6 +360,17 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           } as CodonStartedEvent);
         }
       }
+    });
+
+    this.stateManager.on("archivesProcessed", (result) => this.emitArchiveResult(result));
+    this.stateManager.on("executionPlanChanged", (plan) => this.budget?.updateExecutionPlan(plan));
+    this.stateManager.on("loopIterationCompleted", (data) => {
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "loop.iteration.completed",
+        data,
+      });
     });
 
     // Listen to all state transitions and journal them
@@ -696,12 +672,16 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // transitions.
     this.assertNoLiveSiblingLock();
 
-    // Initialize checkpoint system (checks for existing .hankweave)
-    this.logger.log(`[DEBUG] Initializing checkpoints...`);
-    await this.initializeCheckpoints();
-    this.logger.log(`[DEBUG] Checkpoints initialized`);
+    // Direct runtime callers also need the preflight; the CLI shares this cached probe.
+    assertGitAvailable("runtime startup");
 
-    // Initialize state manager
+    // Open only after the sibling check: storage initialization can rebuild
+    // repositories and remove stale locks. Publish ready capabilities before
+    // loading state or detecting crashed runs.
+    const workspace = await Workspace.open(this.layout, { logger: this.logger });
+    this.openedWorkspace = workspace;
+    this.stateManager.setWorkspace(workspace);
+
     this.logger.log(`[DEBUG] Initializing state manager...`);
     await this.stateManager.initialize();
     this.logger.log(`[DEBUG] State manager initialized`);
@@ -860,25 +840,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       // Every rollback path above either created the run or left the tree
       // untouched; pick a continuation seed or start fresh from history.
       await this.establishRunFromHistory();
-
-      // Now switch to the new run's branch if we have checkpoints
-      const currentRun = this.stateManager.getCurrentRun();
-      if (currentRun?.gitBranch) {
-        // For fresh runs, the branch doesn't exist yet - it will be created on first checkpoint
-        // Check if this is a fresh run to avoid unnecessary warnings
-        const isFreshRun = currentRun.startingConditions?.type === "fresh";
-        if (!isFreshRun) {
-          try {
-            await this.checkpointGit.switchToBranch(currentRun.gitBranch);
-          } catch (error) {
-            this.logger.log(`Failed to switch to run branch: ${error}`, "error");
-          }
-        } else {
-          this.logger.log(
-            `Fresh run ${currentRun.runId} - branch will be created on first checkpoint`,
-          );
-        }
-      }
     }
 
     // Start WebSocket server FIRST (to get dynamic port before proxy starts)
@@ -1958,7 +1919,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * 7. Spawn Claude process with prompt
    *
    * @param codonId - The codon to start
-   * @param skipPreCommands - If true, skip rig setup (for runner failures where rig setup already succeeded)
+   * @param skipPreCommands - Explicit client override to skip rig setup
    * @param isAutoRetry - If true, skip continuation run creation (for automatic retries within same run)
    */
   private async startCodon(
@@ -1980,20 +1941,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     const codon = entry.codon;
 
     this.logger.log(`Starting codon: ${codon.name}`);
-
-    // Skip the rig only if it already ran in THIS run (a retry). A rig-setup
-    // checkpoint from an earlier run does not count: the restart that led
-    // here restored a completion checkpoint, i.e. the tree from before the
-    // rig ran, so the rig's work must be redone. See
-    // StateManager.getRigSetupCheckpointInRun (66).
-    const rigSetupCheckpoint = this.currentRunId
-      ? (this.stateManager.getRigSetupCheckpointInRun(codonId, this.currentRunId) ?? undefined)
-      : undefined;
-    if (rigSetupCheckpoint) {
-      this.logger.log(
-        `Rig already ran in this run (checkpoint ${rigSetupCheckpoint.substring(0, 7)}); skipping rig setup`,
-      );
-    }
 
     // Check if codon already running via state manager (single source of truth)
     const currentCodon = this.stateManager.getCurrentlyRunningCodon();
@@ -2036,580 +1983,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // Create codon started transition (fire-and-forget)
-
-    if (!this.currentRunId) {
-      await this.handleError(new Error("No active run"), "startCodon", ErrorSeverity.FATAL);
-      return;
-    }
-
-    this.stateManager.transition({
-      type: "CodonStarted",
-      data: {
-        runId: this.currentRunId,
-        codonId: codonId, // Use the runtime-generated ID (e.g., "review#0", "review#1")
-        loopContext: entry.loopContext,
-      },
+    const preparation = await this.stateManager.prepareCodon(codonId, {
+      hankDir: this.hankDir,
+      replay: Boolean(this.replay),
+      skipRequested: skipPreCommands,
+      ignoreRigFailures: this.config.ignoreRigFailures,
+      shouldAbort: () => this.isShuttingDown,
+      onProgress: (progress) => this.reportPreparationProgress(codonId, codon, progress),
+      // TODO: fix this.
+      loadSentinels: () => this.loadSentinelsForCodon(codon, codonId),
     });
-
-    // Always transition from preparing to starting
-    if (!this.currentRunId) {
-      await this.handleError(
-        new Error("No active run during codon start"),
-        "startCodon",
-        ErrorSeverity.FATAL,
-      );
+    if (preparation.status === "aborted") return;
+    if (preparation.status === "failed") {
+      await this.handlePreparationFailure(codonId, codon, preparation);
       return;
-    }
-
-    let rigSetupTelemetry:
-      | {
-          commandCount: number;
-          durationMs: number;
-        }
-      | undefined;
-
-    // Run rig setup operations if configured, not explicitly skipped, and no checkpoint exists.
-    //
-    // Rig setup is intentionally skipped in replay mode. In replay, the execution directory
-    // is copied wholesale from the original run (cpSync in index.ts), so it already contains
-    // the post-rig-setup filesystem state. Re-running rig setup would be redundant and fragile —
-    // source paths may have moved, network-dependent commands (e.g. installs) may fail, and
-    // shell commands may behave differently on a different machine or at a different time.
-    // Replay's goal is fast, deterministic reproduction of codon LLM output, not full
-    // behavioral re-execution of the setup pipeline.
-    if (
-      !this.replay &&
-      !skipPreCommands &&
-      !rigSetupCheckpoint &&
-      codon.rigSetup &&
-      codon.rigSetup.length > 0
-    ) {
-      const rigSetupCount = codon.rigSetup.length;
-      const rigSetupStartTime = Date.now();
-
-      // CRITICAL: Initialize counters BEFORE the loop for completion event
-      let rigSetupCompletedCount = 0;
-      let rigSetupFailedCount = 0;
-
-      this.logger.log(`Running rig setup for codon: ${codon.name}`);
-
-      // Emit rig setup started info event
-      // MESSAGE FORMAT CONTRACT: TUI uses string matching on "Rig setup started"
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "info",
-        data: {
-          message: `Rig setup started for codon '${codon.name}': ${rigSetupCount} operation${rigSetupCount !== 1 ? "s" : ""}`,
-        },
-      } as InfoEvent);
-
-      let lastCopiedPath: string | null = null;
-
-      for (const [index, item] of codon.rigSetup.entries()) {
-        // Rig shells are untracked local children, so shutdown's kill pass
-        // cannot stop them — cooperative cancellation between steps is the
-        // bound. A shutdown (fencing included) that starts mid-setup must
-        // not have further rig steps mutating what may now be a successor's
-        // workspace. ABORT the whole codon start, not just the loop: falling
-        // through would report completed setup, cut a rig-setup checkpoint
-        // missing steps, and let a later resume skip them forever
-        // (skipPreCommands trusts that checkpoint).
-        if (this.isShuttingDown) {
-          this.logger.log(
-            `Codon start aborted before rig step ${index + 1}/${codon.rigSetup.length}: ` +
-              `shutdown in progress — no completion is reported and no checkpoint is cut`,
-          );
-          return;
-        }
-        const operationNum = index + 1;
-        const operationType = item.type;
-        const operationDetails =
-          item.type === "copy" && item.copy
-            ? `${item.copy.from} → ${item.copy.to}`
-            : item.type === "command" && item.command
-              ? `'${item.command.run}'`
-              : "unknown";
-
-        // Emit operation start info event
-        // MESSAGE FORMAT CONTRACT: TUI uses string matching on "Rig operation"
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "info",
-          data: {
-            message: `Rig operation ${operationNum}/${rigSetupCount}: ${operationType} ${operationDetails}`,
-          },
-        } as InfoEvent);
-        try {
-          if (item.type === "copy" && item.copy) {
-            const targetPath = path.join(this.config.agentRootPath, item.copy.to);
-            this.logger.log(`Copying ${item.copy.from} to ${targetPath}`);
-            // Check if target path already exists
-            if (fs.existsSync(targetPath)) {
-              this.logger.log(
-                `Warning: Target path already exists: ${targetPath}. Removing it before copying.`,
-              );
-              // TODO: let's discuss if this is too controversial
-              // Remove the existing directory/file recursively
-              await fs.promises.rm(targetPath, {
-                recursive: true,
-              });
-              this.logger.log(`Removed existing path: ${targetPath}`);
-            }
-
-            // Removal + copy are two operations: a shutdown landing during
-            // the awaited removal must not be followed by a fresh cp -r
-            // into what may now be a successor-owned workspace.
-            if (this.isShuttingDown) {
-              this.logger.log(
-                `Codon start aborted between rig removal and copy for ${targetPath}: ` +
-                  `shutdown in progress`,
-              );
-              return;
-            }
-            await this.copyPath(item.copy.from, targetPath);
-            lastCopiedPath = targetPath;
-            this.logger.log(`Copied ${item.copy.from} to ${targetPath}`);
-          } else if (item.type === "command" && item.command) {
-            await this.runCommand(item, lastCopiedPath || undefined, codon.env, {
-              codonId: codon.id,
-              commandIndex: index,
-            });
-            const resolvedWorkingDir =
-              item.command.workingDirectory === "lastCopied" && lastCopiedPath
-                ? lastCopiedPath
-                : this.config.agentRootPath;
-            this.logger.log(`Ran command in ${resolvedWorkingDir}: ${item.command.run}`);
-          }
-          // Operation succeeded
-          rigSetupCompletedCount++;
-        } catch (error) {
-          const errorObj = toError(error);
-          const errorMessage = errorObj.message;
-
-          // Extract exit code if available (from command failures)
-          const isCommandError = error instanceof CommandError;
-          const exitCode = isCommandError ? error.exitCode : -1;
-          const stdout = isCommandError ? error.stdout : "";
-          const stderr = isCommandError ? error.stderr : "";
-
-          // Diagnostic logging
-          this.logger.log(`[DEBUG] Rig setup error details - Exit code: ${exitCode}`, "error");
-          if (stdout) {
-            this.logger.log(`[DEBUG] Rig setup error stdout: ${stdout}`, "info");
-          }
-          if (stderr) {
-            this.logger.log(`[DEBUG] Rig setup error stderr: ${stderr}`, "error");
-          }
-
-          // Check if this operation allows failure (either per-operation or global flag)
-          // NOTE: Use nullish coalescing since ignoreRigFailures is optional in the type
-          const ignoreFailure = item.allowFailure || (this.config.ignoreRigFailures ?? false);
-          this.emit("event", {
-            id: EventId(generateId()),
-            timestamp: new Date().toISOString(),
-            type: "rig.setup.failed",
-            data: {
-              codonId: codonId,
-              failureType: this.classifyRigSetupFailureType(error, item.type),
-              exitCode: isCommandError ? exitCode : undefined,
-              commandIndex: index,
-              ignored: ignoreFailure,
-            },
-          } as RigSetupFailedEvent);
-          if (ignoreFailure) {
-            const reason = item.allowFailure ? "allowFailure=true" : "--ignore-rig-failures";
-            // Log warning but continue execution
-            this.logger.log(
-              `Rig setup operation failed (${reason}) at item ${
-                index + 1
-              } (${JSON.stringify(item)}): ${errorMessage}`,
-              "info",
-            );
-
-            // Emit non-fatal warning event
-            this.emit("event", {
-              id: EventId(generateId()),
-              timestamp: new Date().toISOString(),
-              type: "error",
-              data: {
-                message: `Rig setup operation failed but continuing (${reason}): ${errorMessage}`,
-                context: `Codon ${codon.id} - ${item.type} operation (item ${index + 1})`,
-                codon: codon.id,
-                fatal: false,
-                severity: ErrorSeverity.OPERATION,
-              },
-            } as ErrorEvent);
-
-            // Operation failed but allowed
-            rigSetupFailedCount++;
-
-            // Continue to next rig setup item
-            continue;
-          }
-
-          // Fatal error - operation does not allow failure
-          this.logger.log(
-            `Rig setup failed at item ${index + 1} (${JSON.stringify(item)}): ${errorMessage}`,
-            "error",
-          );
-
-          // Set failure reason with detailed information
-          this.codonFailureReason = {
-            type: "unknown",
-            retriable: true,
-            message: `Rig setup failed at ${item.type} operation: ${errorMessage}`,
-          };
-          this.codonFailureError = errorObj;
-
-          // Transition codon to failed state
-          if (this.currentRunId) {
-            this.stateManager.transition({
-              type: "CodonTransitioned",
-              data: {
-                runId: this.currentRunId,
-                codonId: codonId,
-                from: "preparing",
-                to: "failed",
-                metadata: {
-                  exitCode, // Include exit code in metadata
-                  failedDuring: "preparing",
-                  failureReason: this.codonFailureReason,
-                },
-              },
-            });
-          }
-
-          // Send error event with details
-          this.emit("event", {
-            id: EventId(generateId()),
-            timestamp: new Date().toISOString(),
-            type: "error",
-            data: {
-              message: `Rig setup failed: ${errorMessage}`,
-              context: `Codon ${codon.id} - ${item.type} operation (item ${index + 1})`,
-              codon: codon.id,
-              fatal: true,
-              severity: ErrorSeverity.FATAL,
-            },
-          } as ErrorEvent);
-
-          // Apply failure policy
-          const decision = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
-
-          if (decision.action === "continue") {
-            // Emit codon.completed event with failureIgnored flag
-            // (Early failure paths don't go through handleCodonComplete)
-            this.emit("event", {
-              id: EventId(generateId()),
-              timestamp: new Date().toISOString(),
-              type: "codon.completed",
-              data: {
-                codonId: codonId,
-                success: false,
-                cost: 0, // No cost incurred during rig setup
-                duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
-                exitStatus: { type: "error", code: exitCode },
-                failureReason: this.codonFailureReason,
-                failureIgnored: true,
-              },
-            } as CodonCompletedEvent);
-
-            // Emit info event about the ignored failure
-            this.emit("event", {
-              id: EventId(generateId()),
-              timestamp: new Date().toISOString(),
-              type: "info",
-              data: {
-                message: `Codon ${codonId} rig setup failed, continuing (onFailure=ignore)`,
-              },
-            } as InfoEvent);
-
-            this.cleanupCurrentCodon();
-
-            await this.stateManager.waitForPendingTransitions();
-            await this.stateManager.expandNextIterationForCodon({
-              codonId: CodonId(codonId),
-              contextExceeded: false,
-              budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
-            });
-
-            // Ignored failure - proceed to next codon
-            if (this.config.autostart) {
-              await this.autoStartNextCodon();
-            }
-            return;
-          }
-
-          if (decision.action === "retry") {
-            // Rig setup failures with retry policy - retry the codon
-            // (rig setup will run again since we're not skipping)
-            const { attempt, maxAttempts, delayBeforeThisAttemptMs } = decision;
-            this.retryCoordinator.recordAttempt(codonId);
-
-            this.emit("event", {
-              id: EventId(generateId()),
-              timestamp: new Date().toISOString(),
-              type: "info",
-              data: {
-                message: `Retrying codon ${codonId} after rig setup failure (attempt ${attempt}/${maxAttempts}) in ${delayBeforeThisAttemptMs}ms`,
-              },
-            } as InfoEvent);
-
-            this.cleanupCurrentCodon();
-            await this.delay(delayBeforeThisAttemptMs);
-
-            // Check if shutdown was requested during delay
-            if (this.isShuttingDown) {
-              this.logger.log(`Server shutting down, skipping retry for ${codonId}`);
-              return;
-            }
-
-            // Don't skip rig setup on retry - that's what failed!
-            // Pass isAutoRetry=true to prevent creating a new run
-            await this.startCodon(codonId, false, true);
-            return;
-          }
-
-          // Fall through to original error handling for shutdown cases
-          this.cleanupCurrentCodon();
-          await this.handleError(
-            toError(error),
-            `Rig setup item ${index + 1}`,
-            ErrorSeverity.FATAL,
-          );
-          return;
-        }
-      }
-
-      // Re-check after the LAST in-flight rig step: a shutdown that began
-      // during it gets no next loop iteration to abort on, and falling
-      // through would report completion and cut a rig-setup checkpoint
-      // post-shutdown.
-      if (this.isShuttingDown) {
-        this.logger.log(
-          "Codon start aborted after final rig step: shutdown in progress — " +
-            "no completion is reported and no checkpoint is cut",
-        );
-        return;
-      }
-
-      // Emit rig setup completed info event
-      // MESSAGE FORMAT CONTRACT: TUI uses string matching on "Rig setup completed" and "failed"
-      const rigSetupDuration = Date.now() - rigSetupStartTime;
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "info",
-        data: {
-          message: `Rig setup completed for codon '${codon.name}' (${rigSetupDuration}ms, ${rigSetupCompletedCount} succeeded${rigSetupFailedCount > 0 ? `, ${rigSetupFailedCount} failed` : ""})`,
-        },
-      } as InfoEvent);
-
-      rigSetupTelemetry = {
-        commandCount: rigSetupCount,
-        durationMs: rigSetupDuration,
-      };
-    }
-
-    let rigSetupCheckpointCreated = false;
-
-    // Transition to starting after preparing (regardless of rig setup)
-    this.stateManager.transition({
-      type: "CodonTransitioned",
-      data: {
-        runId: this.currentRunId,
-        codonId: codonId,
-        from: "preparing",
-        to: "starting",
-        metadata: {
-          checkpointSha: rigSetupCheckpoint,
-        },
-      },
-    });
-
-    // Load sentinels for this codon (during "starting" state).
-    //
-    // Sentinels are intentionally skipped in replay mode for several reasons:
-    // 1. They make real LLM API calls with real cost — replay should be free to run.
-    // 2. Sentinel LLM responses are non-deterministic, so re-running them would produce
-    //    different output than the original run, undermining replay's reproducibility.
-    // 3. Replay's goal is fast, deterministic codon output reproduction — sentinel
-    //    analysis is orthogonal to that goal.
-    // 4. The original sentinel events aren't part of the codon JSONL logs that replay
-    //    reads from, so there's no recorded sentinel behavior to reproduce.
-    const sentinelResult = this.replay
-      ? { loaded: [], errors: [] }
-      : await this.loadSentinelsForCodon(codon, codonId);
-
-    // Check for fatal sentinel load failures
-    const fatalFailures = sentinelResult.errors.filter((e) => e.fatal);
-    if (fatalFailures.length > 0) {
-      const failedSentinels = fatalFailures.map((e) => e.ref).join(", ");
-      const errorMsg = `Required sentinels failed to load (failCodonIfNotLoaded=true): ${failedSentinels}`;
-
-      // Use specific failure reason type
-      this.codonFailureError = new Error(errorMsg);
-      this.codonFailureReason = {
-        type: "sentinel-load-failure",
-        retriable: false,
-        message: errorMsg,
-        sentinelRefs: fatalFailures.map((e) => e.ref),
-      };
-
-      this.stateManager.transition({
-        type: "CodonTransitioned",
-        data: {
-          runId: this.currentRunId,
-          codonId: CodonId(codon.id),
-          from: "starting",
-          to: "failed",
-          metadata: {
-            exitCode: -1,
-            failedDuring: "starting",
-            failureReason: this.codonFailureReason,
-          },
-        },
-      });
-
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: errorMsg,
-          context: `Failed sentinels: ${failedSentinels}`,
-          codon: codon.id,
-          fatal: true,
-          severity: ErrorSeverity.CODON,
-          code: "SENTINEL_LOAD_FAILURE",
-        },
-      } as ErrorEvent);
-
-      // Apply failure policy (sentinel failures respect codon onFailure config)
-      const { action } = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
-
-      if (action === "continue") {
-        // Emit codon.completed event with failureIgnored flag
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "codon.completed",
-          data: {
-            codonId: codonId,
-            success: false,
-            cost: 0,
-            duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
-            exitStatus: { type: "error", code: -1 },
-            failureReason: this.codonFailureReason,
-            failureIgnored: true,
-          },
-        } as CodonCompletedEvent);
-
-        // Emit info event
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "info",
-          data: {
-            message: `Codon ${codonId} sentinel load failed, continuing (onFailure=ignore)`,
-          },
-        } as InfoEvent);
-
-        this.cleanupCurrentCodon();
-
-        await this.stateManager.waitForPendingTransitions();
-        await this.stateManager.expandNextIterationForCodon({
-          codonId: CodonId(codonId),
-          contextExceeded: false,
-          budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
-        });
-
-        if (this.config.autostart) {
-          await this.autoStartNextCodon();
-        }
-        return;
-      }
-
-      // shutdown/stay-active - original behavior
-      // Note: Sentinel failures have retriable=false, so retry policy falls through to shutdown
-      this.cleanupCurrentCodon();
-
-      if (action === "shutdown") {
-        if (this.currentRunId) {
-          this.stateManager.transition({
-            type: "RunFailed",
-            data: { runId: this.currentRunId },
-          });
-          await this.stateManager.waitForPendingTransitions();
-        }
-        await this.shutdown("sentinel load failure");
-      }
-      return;
-    }
-
-    // Log warnings for non-fatal failures
-    for (const error of sentinelResult.errors.filter((e) => !e.fatal)) {
-      this.logger.log(
-        `Non-required sentinel failed to load (${error.ref}): ${error.error}`,
-        "info",
-      );
-    }
-
-    // Register the checkpoint patterns in force for this codon: every plan
-    // entry up to and including it (see checkpointPatternsThrough for why the
-    // plan, not this.config.codons, is the source). The pattern set lives in
-    // memory only, so this must run on every start — a crash restart begins
-    // with an empty set.
-    await this.registerCheckpointPatternsThrough(codonId, true);
-
-    // A shutdown that began during the awaited sentinel/pattern work above
-    // must not be followed by fresh checkpoint git operations (branch
-    // checkout/commit) — abort the codon start instead.
-    if (this.isShuttingDown) {
-      this.logger.log("Codon start aborted before rig-setup checkpoint: shutdown in progress");
-      return;
-    }
-
-    // Create checkpoint after rig setup if we have rig setup
-    if (!skipPreCommands && codon.rigSetup) {
-      try {
-        await this.createCheckpoint({
-          status: "rig-setup",
-          codonId: codonId,
-          codonName: codon.name,
-          runId: this.currentRunId || RunId("unknown"),
-          timestamp: new Date().toISOString(),
-        });
-        rigSetupCheckpointCreated = true;
-      } catch (error) {
-        // The codon is in `starting` here (rig work done, no runner yet).
-        // Fail it the same way a missing continuation session does.
-        await this.failCodonAtStart(
-          codonId,
-          codon,
-          `Rig-setup checkpoint failed for codon ${codonId}: ${toError(error).message}`,
-          toError(error),
-        );
-        return;
-      }
-    }
-
-    if (rigSetupTelemetry) {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "rig.setup.completed",
-        data: {
-          codonId: codonId,
-          rigType: rigSetupTelemetry.commandCount === 1 ? "command" : "commands",
-          commandCount: rigSetupTelemetry.commandCount,
-          durationMs: rigSetupTelemetry.durationMs,
-          createdCheckpoint: rigSetupCheckpointCreated,
-        },
-      } as RigSetupCompletedEvent);
     }
 
     // Get previous session ID if needed
@@ -2692,62 +2079,22 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
         if (action === "continue") {
           // Emit codon.completed event with failureIgnored flag
-          this.emit("event", {
-            id: EventId(generateId()),
-            timestamp: new Date().toISOString(),
-            type: "codon.completed",
-            data: {
-              codonId: codonId,
-              success: false,
-              cost: 0,
-              duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
-              exitStatus: { type: "error", code: -1 },
-              failureReason: this.codonFailureReason,
-              failureIgnored: true,
-            },
-          } as CodonCompletedEvent);
+          this.emitIgnoredStartFailure(codonId, -1);
 
           // Emit info event
-          this.emit("event", {
-            id: EventId(generateId()),
-            timestamp: new Date().toISOString(),
-            type: "info",
-            data: {
-              message: `Codon ${codonId} continuation session not found, continuing (onFailure=ignore)`,
-            },
-          } as InfoEvent);
+          this.emitInfoEvent(
+            `Codon ${codonId} continuation session not found, continuing (onFailure=ignore)`,
+          );
 
           // Note: This is an unusual case - ignoring a continuation failure
           // The next codon may also fail if it expects to continue
-          this.cleanupCurrentCodon();
-
-          await this.stateManager.waitForPendingTransitions();
-          await this.stateManager.expandNextIterationForCodon({
-            codonId: CodonId(codonId),
-            contextExceeded: false,
-            budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
-          });
-
-          if (this.config.autostart) {
-            await this.autoStartNextCodon();
-          }
+          await this.advanceAfterIgnoredStartFailure(codonId);
           return;
         }
 
         // shutdown/stay-active - let existing behavior proceed
         // (Missing continuation is non-retriable, so retry policy won't apply)
-        this.cleanupCurrentCodon();
-
-        if (action === "shutdown") {
-          if (this.currentRunId) {
-            this.stateManager.transition({
-              type: "RunFailed",
-              data: { runId: this.currentRunId },
-            });
-            await this.stateManager.waitForPendingTransitions();
-          }
-          await this.shutdown("continuation session not found");
-        }
+        await this.finishStartFailure(action, "continuation session not found");
         return;
       }
     }
@@ -2825,6 +2172,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         globalSystemPrompt: this.config.globalSystemPrompt,
         // Wiring: CLI --shim-idle-timeout → resolveSettings → serverConfig → here → CodonRunner → ClaudeAgentSDKManager / PiSdkManager
         shimIdleTimeout: this.config.shimIdleTimeout,
+        files: this.workspace.files,
         // Budget is always initialized in startNewRun() before any codon execution
         budget: this.budget as Budget,
         replayConfig,
@@ -3877,7 +3225,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
                   outItem.beforeCopy.length
                 }: ${command.command.run}`,
               );
-              await this.runCommand(command, undefined, codonConfig.env);
+              await this.workspace.rigs.runCommand(command, undefined, codonConfig.env);
             }
 
             this.logger.log(
@@ -3889,11 +3237,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
           beforeCopySuccess = true;
 
-          const { conflicts } = await copyFiles(
-            this.config.agentRootPath, // Agent workspace — where output files actually live
+          const { conflicts } = await this.workspace.outputs.copyOut(
             outItem.copy,
             this.config.outputDirectory, // Already resolved to absolute path in index.ts
-            this.logger,
             { overwrite: this.config.overwriteOutput },
           );
 
@@ -3947,50 +3293,12 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
     }
 
-    // Execute archiveOnSuccess if configured (after outputFiles, before loop expansion)
-    if (finalStatus === "completed" && codonConfig.archiveOnSuccess) {
-      const loopCtx = currentCodon.loopContext;
-      await this.executeArchiveRigs(
-        codonConfig.archiveOnSuccess,
-        codonId,
-        checkpointSha || "orphan", // Use 'orphan' if no checkpoint (shouldn't happen for completed)
-        loopCtx ? { loopId: loopCtx.loopId, iteration: loopCtx.iteration } : undefined,
-        false, // not a loop-level archive
-      );
-    }
-
-    // Loop expansion logic
-    // Check if this completed codon is part of a loop and expand next iteration if needed
-    if (finalStatus === "completed" || finalStatus === "skipped") {
-      const expansionResult = await this.stateManager.expandNextIterationForCodon({
-        codonId: CodonId(codonId),
-        contextExceeded: isContextExceeded,
-        budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
-      });
-
-      // Update budget's execution plan after loop expansion may have added new entries
-      this.budget?.updateExecutionPlan(this.stateManager.getState().executionPlan);
-
-      // Handle loop termination archives
-      if (expansionResult.loopTerminated?.archiveOnSuccess?.length) {
-        const { loopId, archiveOnSuccess, completedIterations } = expansionResult.loopTerminated;
-        this.logger.log(
-          `Loop '${loopId}' terminated after ${completedIterations} iterations, executing archiveOnSuccess`,
-        );
-        await this.executeArchiveRigs(
-          archiveOnSuccess,
-          loopId, // Use loop ID as the codon ID for archive path construction
-          checkpointSha || "orphan",
-          undefined, // No loop context for loop-level archives
-          true, // This IS a loop-level archive
-        );
-      }
-
-      this.emitLoopIterationCompletedEvent({
-        codonId: CodonId(codonId),
-        isContextExceeded,
-      });
-    }
+    // Output publication must finish before finalization can archive its source files.
+    await this.stateManager.finalizeCodon(codonId, {
+      contextExceeded: isContextExceeded,
+      budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
+      shouldAbort: () => this.isShuttingDown,
+    });
 
     // Capture the classified failure context BEFORE cleanup. cleanupCurrentCodon()
     // (below) nulls this.codonFailureReason/Error, but the failure-policy
@@ -4174,9 +3482,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
           // NOTE: Cleanup already happened above for all status values.
           // Do NOT call cleanupCurrentCodon() again here.
 
-          // Retry the codon with skipPreCommands=true (rig setup already succeeded)
-          // and isAutoRetry=true to prevent creating a new continuation run
-          await this.startCodon(CodonId(codonId), true, true);
+          // Retry in the same run; StateManager reuses its rig checkpoint.
+          await this.startCodon(CodonId(codonId), undefined, true);
           break;
         }
 
@@ -4196,15 +3503,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
 
           // Note: The codon.completed event was already emitted above with failureIgnored flag
 
-          // Run loop expansion (normally only for completed/skipped, but also for ignored failures)
-          await this.stateManager.expandNextIterationForCodon({
-            codonId: CodonId(codonId),
-            contextExceeded: false, // Failed codon, not context exceeded
+          // Failure policy has now selected continuation; finalize without success archives.
+          await this.stateManager.finalizeCodon(codonId, {
+            failureIgnored: true,
             budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
-          });
-          this.emitLoopIterationCompletedEvent({
-            codonId: CodonId(codonId),
-            isContextExceeded: false,
+            shouldAbort: () => this.isShuttingDown,
           });
 
           // Check if there's a next codon to run
@@ -4520,14 +3823,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * filters to just that run's checkpoints.
    */
   private async listCheckpoints(runId?: string): Promise<void> {
-    const state = this.stateManager.getState();
+    const result = this.stateManager.queryCheckpoints(runId ? RunId(runId) : undefined);
 
-    // Get the target run for metadata (gitBranch, runId to report)
-    const targetRun = runId
-      ? this.stateManager.getRun(RunId(runId))
-      : this.stateManager.getCurrentRun();
-
-    if (!targetRun) {
+    if (!result) {
       this.emit("event", {
         id: EventId(generateId()),
         timestamp: new Date().toISOString(),
@@ -4540,81 +3838,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       return;
     }
 
-    const checkpoints: import("./types/types.js").CheckpointQueryInfo[] = [];
-
-    // If a specific runId is provided, only list that run's checkpoints
-    // Otherwise, list ALL checkpoints from ALL runs (not just current thread)
-    const runsToProcess = runId ? state.runs.filter((r) => r.runId === runId) : state.runs;
-
-    // Process runs in reverse order (oldest first) so checkpoints are in chronological order
-    // Then we'll reverse at the end to show most recent first
-    for (const run of [...runsToProcess].reverse()) {
-      for (const codon of run.codons) {
-        const codonConfig = this.config.codons.find((p) => p.id === codon.codonId);
-        const codonName = codonConfig?.name || codon.codonId;
-
-        // Rig setup checkpoint
-        if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
-          checkpoints.push({
-            codonId: codon.codonId,
-            codonName,
-            checkpointType: "rig-setup",
-            sha: codon.rigSetupCheckpoint,
-            status: codon.status,
-            timestamp: codon.startTime,
-          });
-        }
-
-        // Completion checkpoint
-        if (codon.status === "completed" && codon.completionCheckpoint) {
-          checkpoints.push({
-            codonId: codon.codonId,
-            codonName,
-            checkpointType: "completed",
-            sha: codon.completionCheckpoint,
-            status: codon.status,
-            timestamp: codon.endTime,
-          });
-        }
-
-        // Error checkpoint
-        if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
-          checkpoints.push({
-            codonId: codon.codonId,
-            codonName,
-            checkpointType: "error",
-            sha: codon.errorCheckpoint,
-            status: codon.status,
-            timestamp: codon.endTime,
-          });
-        }
-
-        // Skip checkpoint
-        if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
-          checkpoints.push({
-            codonId: codon.codonId,
-            codonName,
-            checkpointType: "skipped",
-            sha: codon.skipCheckpoint,
-            status: codon.status,
-            timestamp: codon.endTime,
-          });
-        }
-      }
-    }
-
-    // Reverse to show most recent first
-    checkpoints.reverse();
-
     this.emit("event", {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
       type: "checkpoint.list",
-      data: {
-        runId: targetRun.runId,
-        checkpoints,
-        currentBranch: targetRun.gitBranch,
-      },
+      data: result,
     } as import("./types/types.js").CheckpointListEvent);
   }
 
@@ -4696,568 +3924,66 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * allowing rollback to any historical checkpoint including those from
    * previously rolled-back timelines.
    */
-  private async rollbackToCheckpoint(sha: string, autoRestart: boolean): Promise<void> {
-    // Check if codon is running
-    const currentCodon = this.stateManager.getCurrentlyRunningCodon();
-    if (currentCodon && !isTerminalCodonStatus(currentCodon.status)) {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
-          codon: currentCodon.codonId,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
-
-    // Build execution thread for current timeline, with git's checkpoint
-    // map: the codon-by-codon walk steps through validatedCheckpoints, so a
-    // thread built without it walks nothing and emits no per-codon events.
-    const state = this.stateManager.getState();
-    const thread = await this.stateManager.getExecutionThread();
-
-    // Find all matching checkpoints across the thread
-    const matches: Array<{
-      threadCodon: import("./execution-thread.js").ThreadCodon;
-      checkpointType: string;
-      fullSha: string;
-      codonIndex: number;
-    }> = [];
-
-    thread.codons.forEach((threadCodon, index) => {
-      const codon = threadCodon.codon;
-
-      // Check rig setup checkpoint
-      if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
-        if (codon.rigSetupCheckpoint.startsWith(sha)) {
-          matches.push({
-            threadCodon,
-            checkpointType: "rig-setup",
-            fullSha: codon.rigSetupCheckpoint,
-            codonIndex: index,
-          });
-        }
-      }
-
-      // Check completion checkpoint
-      if (codon.status === "completed" && codon.completionCheckpoint) {
-        if (codon.completionCheckpoint.startsWith(sha)) {
-          matches.push({
-            threadCodon,
-            checkpointType: "completed",
-            fullSha: codon.completionCheckpoint,
-            codonIndex: index,
-          });
-        }
-      }
-
-      // Check error checkpoint
-      if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
-        if (codon.errorCheckpoint.startsWith(sha)) {
-          matches.push({
-            threadCodon,
-            checkpointType: "error",
-            fullSha: codon.errorCheckpoint,
-            codonIndex: index,
-          });
-        }
-      }
-
-      // Check skip checkpoint
-      if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
-        if (codon.skipCheckpoint.startsWith(sha)) {
-          matches.push({
-            threadCodon,
-            checkpointType: "skipped",
-            fullSha: codon.skipCheckpoint,
-            codonIndex: index,
-          });
-        }
-      }
-    });
-
-    // If not found in current thread, search ALL runs (allows rollback to old timelines)
-    if (matches.length === 0) {
-      this.logger.log(`SHA ${sha} not found in current thread, searching all historical runs...`);
-
-      // Search through all runs in state
-      for (const run of state.runs) {
-        for (let codonIndex = 0; codonIndex < run.codons.length; codonIndex++) {
-          const codon = run.codons[codonIndex];
-
-          // Create a synthetic ThreadCodon for compatibility
-          const syntheticThreadCodon: import("./execution-thread.js").ThreadCodon = {
-            codon,
-            runId: run.runId,
-            runStatus: run.status,
-            runStartTime: run.startTime,
-            runEndTime: run.endTime || null,
-            gitBranch: run.gitBranch,
-            globalIndex: -1, // Not relevant for historical search
-            runIndex: codonIndex,
-            codonIndexInRun: codonIndex,
-            validatedCheckpoints: [],
-            continuationSessionId: null,
-          };
-
-          // Check rig setup checkpoint
-          if ("rigSetupCheckpoint" in codon && codon.rigSetupCheckpoint) {
-            if (codon.rigSetupCheckpoint.startsWith(sha)) {
-              matches.push({
-                threadCodon: syntheticThreadCodon,
-                checkpointType: "rig-setup",
-                fullSha: codon.rigSetupCheckpoint,
-                codonIndex: codonIndex,
-              });
-            }
-          }
-
-          // Check completion checkpoint
-          if (codon.status === "completed" && codon.completionCheckpoint) {
-            if (codon.completionCheckpoint.startsWith(sha)) {
-              matches.push({
-                threadCodon: syntheticThreadCodon,
-                checkpointType: "completed",
-                fullSha: codon.completionCheckpoint,
-                codonIndex: codonIndex,
-              });
-            }
-          }
-
-          // Check error checkpoint
-          if (codon.status === "failed" && "errorCheckpoint" in codon && codon.errorCheckpoint) {
-            if (codon.errorCheckpoint.startsWith(sha)) {
-              matches.push({
-                threadCodon: syntheticThreadCodon,
-                checkpointType: "error",
-                fullSha: codon.errorCheckpoint,
-                codonIndex: codonIndex,
-              });
-            }
-          }
-
-          // Check skip checkpoint
-          if (codon.status === "skipped" && "skipCheckpoint" in codon && codon.skipCheckpoint) {
-            if (codon.skipCheckpoint.startsWith(sha)) {
-              matches.push({
-                threadCodon: syntheticThreadCodon,
-                checkpointType: "skipped",
-                fullSha: codon.skipCheckpoint,
-                codonIndex: codonIndex,
-              });
-            }
-          }
-        }
-      }
-
-      if (matches.length > 0) {
-        this.logger.log(`Found ${matches.length} match(es) in historical runs`);
-      }
-    }
-
-    // Handle matches
-    if (matches.length === 0) {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: `Checkpoint ${sha} not found in any run (current or historical)`,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
-
-    if (matches.length > 1) {
-      // Ambiguous SHA - provide helpful error message
-      const matchDetails = matches
-        .map((m) => {
-          const codonConfig = this.config.codons.find((p) => p.id === m.threadCodon.codon.codonId);
-          const codonName = codonConfig?.name || m.threadCodon.codon.codonId;
-          return `  - ${m.fullSha.substring(0, 7)}... (${codonName} - ${
-            m.checkpointType
-          }) in run ${m.threadCodon.runId}`;
-        })
-        .join("\n");
-
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: `Ambiguous checkpoint SHA '${sha}'. Multiple checkpoints match:\n${matchDetails}\nPlease provide more characters to uniquely identify the checkpoint.`,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
-
-    // Single match found - proceed with rollback
-    const match = matches[0];
-    try {
-      // Check if the match is from the current execution thread
-      const isInCurrentThread = thread.codons.some(
-        (tc) =>
-          tc.runId === match.threadCodon.runId &&
-          tc.codon.codonId === match.threadCodon.codon.codonId,
-      );
-
-      if (isInCurrentThread) {
-        // Find the correct index in the current thread
-        const threadIndex = thread.codons.findIndex(
-          (tc) =>
-            tc.runId === match.threadCodon.runId &&
-            tc.codon.codonId === match.threadCodon.codon.codonId,
-        );
-
-        this.logger.log(
-          `Executing rollback to ${match.fullSha.substring(0, 7)} (${
-            match.checkpointType
-          }) at thread index ${threadIndex}`,
-        );
-        await this.executeRollback(
-          thread,
-          threadIndex,
-          match.fullSha,
-          match.checkpointType,
-          autoRestart,
-        );
-      } else {
-        // Historical checkpoint from an old run - use direct rollback
-        this.logger.log(
-          `Executing direct rollback to historical checkpoint ${match.fullSha.substring(
-            0,
-            7,
-          )} (${match.checkpointType}) from run ${match.threadCodon.runId}`,
-        );
-        await this.executeDirectRollback(
-          match.threadCodon,
-          match.fullSha,
-          match.checkpointType,
-          autoRestart,
-        );
-      }
-    } catch (error) {
-      const err = toError(error);
-      this.logger.log(`Rollback failed: ${err.message}`, "error");
-      if (err.stack) {
-        this.logger.log(`Stack trace: ${err.stack}`, "error");
-      }
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: `Rollback failed: ${err.message}`,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      throw error; // Re-throw to propagate to command handler
-    }
+  private async rollbackToCheckpoint(id: string, autoRestart: boolean): Promise<void> {
+    await this.runRollback({ type: "checkpoint", id }, autoRestart);
   }
 
-  /**
-   * Execute a direct rollback to a historical checkpoint from an old run.
-   * This is simpler than the codon-by-codon rollback - it just:
-   * 1. Resets git to the checkpoint
-   * 2. Creates a new continuation run from that point
-   */
-  private async executeDirectRollback(
-    targetCodon: import("./execution-thread.js").ThreadCodon,
-    sha: string,
-    checkpointType: string,
-    autoRestart: boolean,
-  ): Promise<void> {
-    const codonConfig = this.config.codons.find((p) => p.id === targetCodon.codon.codonId);
-    const codonName = codonConfig?.name || targetCodon.codon.codonId;
-
-    this.logger.log(
-      `Direct rollback to ${checkpointType} checkpoint ${sha} ` +
-        `in codon ${targetCodon.codon.codonId} (${codonName}) from run ${targetCodon.runId}`,
-    );
-
-    // Set the rollback flag
-    this.isRollingBack = true;
-    // Checkpoint restore changes files underneath the retained-body map —
-    // drop it so sentinel resolution never serves a pre-rollback body.
-    this.bodyResolver.clear();
-
-    try {
-      // 0. Preflight the target and snapshot the work tree BEFORE any state
-      // or workspace mutation, exactly as the codon-by-codon rollback does:
-      // a dangling reference must fail here, not after the current run has
-      // already been marked completed.
-      sha = (await this.confirmAndSnapshot(sha, `direct rollback to ${sha.substring(0, 7)}`))
-        .checkpoint;
-      const entriesToRestore = await this.planArchiveRestore(sha);
-
-      // 1. Clean up current codon state
-      this.cleanupCurrentCodon();
-
-      // 2. Get current run info for events
-      const currentRun = this.stateManager.getCurrentRun();
-      const fromRun = currentRun?.runId || targetCodon.runId;
-      const fromCodon = currentRun?.codons[0]?.codonId || targetCodon.codon.codonId;
-
-      // 3. Emit rollback started event
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "rollback.started",
-        data: {
-          fromRun,
-          fromCodon,
-          toCodon: targetCodon.codon.codonId,
-          toCheckpoint: sha,
-          checkpointType,
-          codonsToProcess: [targetCodon.codon.codonId], // Direct rollback, just one codon
-        },
-      } as import("./types/types.js").RollbackStartedEvent);
-
-      // 4. Complete current run as rollback
-      if (currentRun && currentRun.status !== "completed") {
-        this.stateManager.transition({
-          type: "RunCompleted",
-          data: {
-            runId: currentRun.runId,
-          },
-        });
-        await this.stateManager.waitForPendingTransitions();
-      }
-
-      // 5. Put the work tree at the target checkpoint.
-      // The awaits above (pending transitions) yield — a fencing shutdown
-      // landing there must stop this rollback before its first workspace
-      // mutation.
-      if (this.isShuttingDown) {
-        throw new Error("Direct rollback aborted: shutdown in progress");
-      }
-      this.logger.log(`Resetting to checkpoint ${sha.substring(0, 7)}`);
-      try {
-        await this.restoreWorkTreeToCheckpoint(sha, entriesToRestore);
-      } catch (error) {
-        throw new RollbackMutatedWorkspaceError(error);
-      }
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "rollback.codonCheckpoint",
-        data: {
-          codonId: targetCodon.codon.codonId,
-          codonName,
-          checkpointType,
-          checkpoint: sha,
-          message: `Reset to ${codonName} ${checkpointType} checkpoint`,
-        },
-      } as import("./types/types.js").RollbackCodonCheckpointEvent);
-
-      // 6. Start new continuation run
-      const afterCodon = checkpointType === "rig-setup" ? null : targetCodon.codon.codonId;
-      await this.startNewRun({
-        type: "continuation",
-        source: {
-          runId: targetCodon.runId,
-          afterCodon: afterCodon ? CodonId(afterCodon) : null,
-          checkpointSha: sha,
-        },
-        reason: "rollback",
-      });
-
-      // 7. Emit rollback completed event
-      const newRun = this.stateManager.getCurrentRun();
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "rollback.completed",
-        data: {
-          fromRun,
-          toRun: newRun?.runId || targetCodon.runId,
-          codonId: targetCodon.codon.codonId,
-          codonName,
-          checkpointType,
-          checkpoint: sha,
-          autoRestart,
-        },
-      } as import("./types/types.js").RollbackCompletedEvent);
-
-      // 8. Auto-restart if requested
-      if (autoRestart && newRun) {
-        this.logger.log("Auto-starting next codon after rollback");
-        await this.autoStartNextCodon();
-      } else {
-        // Not auto-restarting — tell the user we're waiting
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "server.idle",
-          data: {
-            reason: "rollback-completed",
-            message: `Rollback completed. Use 'codon.next' to continue.`,
-          },
-        } as import("./types/types.js").ServerIdleEvent);
-      }
-    } finally {
-      this.isRollingBack = false;
-    }
-  }
-
-  /**
-   * Rollback to a codon + checkpoint type
-   */
   private async rollbackToCodon(
     codonId: CodonId,
-    checkpointType: "start" | "end" | "rig-setup" | "completed" | "error" | "skipped",
+    checkpointType: RollbackCheckpointType | "start" | "end",
     autoRestart: boolean,
   ): Promise<void> {
-    // Check if codon is running
-    const currentCodon = this.stateManager.getCurrentlyRunningCodon();
-    if (currentCodon && !isTerminalCodonStatus(currentCodon.status)) {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: "Cannot rollback while codon is running. Use 'codon.forceStop' first.",
-          codon: currentCodon.codonId,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
-
-    // Build execution thread to search across all runs, with git's
-    // checkpoint map (see rollbackToCheckpoint).
-    const thread = await this.stateManager.getExecutionThread();
-
-    // Find the codon in the thread
-    let targetThreadCodon: import("./execution-thread.js").ThreadCodon | null = null;
-    let targetCodonIndex = -1;
-
-    for (let i = 0; i < thread.codons.length; i++) {
-      if (thread.codons[i].codon.codonId === codonId) {
-        targetThreadCodon = thread.codons[i];
-        targetCodonIndex = i;
-        break;
-      }
-    }
-
-    if (!targetThreadCodon) {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: `Codon ${codonId} not found in execution history`,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
-
-    const targetCodon = targetThreadCodon.codon;
-
-    // Resolve checkpoint type aliases
-    let actualCheckpointType: "rig-setup" | "completed" | "error" | "skipped" | undefined;
-    let sha: string | null = null;
-
-    if (checkpointType === "start") {
-      // Find first checkpoint in codon
-      if ("rigSetupCheckpoint" in targetCodon && targetCodon.rigSetupCheckpoint) {
-        sha = targetCodon.rigSetupCheckpoint;
-        actualCheckpointType = "rig-setup";
-      } else if (targetCodon.status === "completed" && targetCodon.completionCheckpoint) {
-        sha = targetCodon.completionCheckpoint;
-        actualCheckpointType = "completed";
-      } else if (
-        targetCodon.status === "failed" &&
-        "errorCheckpoint" in targetCodon &&
-        targetCodon.errorCheckpoint
-      ) {
-        sha = targetCodon.errorCheckpoint;
-        actualCheckpointType = "error";
-      } else if (
-        targetCodon.status === "skipped" &&
-        "skipCheckpoint" in targetCodon &&
-        targetCodon.skipCheckpoint
-      ) {
-        sha = targetCodon.skipCheckpoint;
-        actualCheckpointType = "skipped";
-      }
-    } else if (checkpointType === "end") {
-      // Find last checkpoint in codon based on status
-      if (targetCodon.status === "completed" && targetCodon.completionCheckpoint) {
-        sha = targetCodon.completionCheckpoint;
-        actualCheckpointType = "completed";
-      } else if (
-        targetCodon.status === "failed" &&
-        "errorCheckpoint" in targetCodon &&
-        targetCodon.errorCheckpoint
-      ) {
-        sha = targetCodon.errorCheckpoint;
-        actualCheckpointType = "error";
-      } else if (
-        targetCodon.status === "skipped" &&
-        "skipCheckpoint" in targetCodon &&
-        targetCodon.skipCheckpoint
-      ) {
-        sha = targetCodon.skipCheckpoint;
-        actualCheckpointType = "skipped";
-      } else if ("rigSetupCheckpoint" in targetCodon && targetCodon.rigSetupCheckpoint) {
-        // Fallback to rig setup if no end checkpoint
-        sha = targetCodon.rigSetupCheckpoint;
-        actualCheckpointType = "rig-setup";
-      }
-    } else {
-      // Direct checkpoint type specified
-      actualCheckpointType = checkpointType as "rig-setup" | "completed" | "error" | "skipped";
-
-      switch (checkpointType) {
-        case "rig-setup":
-          sha = "rigSetupCheckpoint" in targetCodon ? targetCodon.rigSetupCheckpoint || null : null;
-          break;
-        case "completed":
-          sha = targetCodon.status === "completed" ? targetCodon.completionCheckpoint : null;
-          break;
-        case "error":
-          sha =
-            targetCodon.status === "failed" && "errorCheckpoint" in targetCodon
-              ? targetCodon.errorCheckpoint || null
-              : null;
-          break;
-        case "skipped":
-          sha =
-            targetCodon.status === "skipped" && "skipCheckpoint" in targetCodon
-              ? targetCodon.skipCheckpoint || null
-              : null;
-          break;
-      }
-    }
-
-    if (!sha || !actualCheckpointType) {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "error",
-        data: {
-          message: `No ${checkpointType} checkpoint found for codon ${codonId}`,
-          fatal: false,
-        },
-      } as ErrorEvent);
-      return;
-    }
-
-    await this.executeRollback(thread, targetCodonIndex, sha, actualCheckpointType, autoRestart);
+    await this.runRollback({ type: "codon", codonId, checkpointType }, autoRestart);
   }
 
-  /**
-   * Rollback to last successful codon
-   */
   private async rollbackToLastSuccess(autoRestart: boolean): Promise<void> {
-    // Check if codon is running
+    await this.runRollback({ type: "last-success" }, autoRestart);
+  }
+
+  private async completeRollback(
+    result: NonNullable<Awaited<ReturnType<StateManager["rollback"]>>>,
+    autoRestart: boolean,
+  ): Promise<void> {
+    await this.startNewRun(result.continuation);
+    await this.stateManager.waitForPendingTransitions();
+    this.isRollingBack = false;
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "rollback.completed",
+      data: {
+        fromRun: result.fromRun,
+        toRun: this.currentRunId || "",
+        checkpoint: result.checkpoint,
+        codonId: result.codonId,
+        codonName: result.codonName,
+        checkpointType: result.checkpointType,
+        autoRestart,
+      },
+    } as import("./types/types.js").RollbackCompletedEvent);
+    await this.sendStateSnapshot();
+    if (autoRestart && this.config.autostart) {
+      const nextCodon = await this.stateManager.getNextCodonToExecute();
+      if (nextCodon) {
+        await this.startCodon(nextCodon);
+        return;
+      }
+    }
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "server.idle",
+      data: {
+        reason: "rollback-completed",
+        message:
+          autoRestart && this.config.autostart
+            ? "Rollback completed. No next codon to run."
+            : "Rollback completed. Use 'codon.next' to continue.",
+      },
+    } as import("./types/types.js").ServerIdleEvent);
+  }
+
+  private async runRollback(target: RollbackTarget, autoRestart: boolean): Promise<void> {
     const currentCodon = this.stateManager.getCurrentlyRunningCodon();
     if (currentCodon && !isTerminalCodonStatus(currentCodon.status)) {
       this.emitErrorEvent("Cannot rollback while codon is running. Use 'codon.forceStop' first.", {
@@ -5265,497 +3991,155 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       });
       return;
     }
-
-    // Rungs 0 and 1 are decided by the state manager on the strict thread
-    // (unreadable storage throws CheckpointStorageError for start()'s catch).
-    const { thread, target, passedOverCompletion } = await this.stateManager.findRollbackTarget();
-    if (passedOverCompletion?.codon.status === "completed") {
-      this.logger.log(
-        `Completed codon ${passedOverCompletion.codon.codonId} (run ${passedOverCompletion.runId}) ` +
-          "has no git-confirmed completion checkpoint (reference " +
-          `${JSON.stringify(passedOverCompletion.codon.completionCheckpoint)}) — not a rollback target`,
-        "error",
-      );
-    }
-    if (target) {
-      const tc = thread.codons[target.index];
-      this.logger.log(
-        `Rolling back to ${target.type} checkpoint of codon ${tc.codon.codonId} (run ${tc.runId}): ` +
-          JSON.stringify(tc),
-      );
-      await this.executeRollback(thread, target.index, target.sha, target.type, autoRestart);
+    if (this.isRollingBack) {
+      this.emitErrorEvent("Rollback already in progress");
       return;
     }
-
-    // Rung 2: nothing restorable. start() will fall back to a continuation or
-    // a fresh run; a fresh run's rig setup deletes its copy.to directories and
-    // every codon re-runs, so snapshot the work tree first and say so loudly.
-    const snapshot = await this.snapshotWorkspaceForRecovery("no restorable checkpoint");
-    const message =
-      "Recovery degraded: no git-confirmed checkpoint in execution history; falling back to " +
-      `continuation or a fresh run (work tree snapshotted to ${snapshot.recoveryBranch})`;
-    this.logger.log(message, "error");
-    this.emitErrorEvent(message);
-  }
-
-  /**
-   * Save the work tree on a recovery branch before recovery changes or
-   * discards files. Throws CheckpointStorageError if git cannot record it —
-   * proceeding to change files without a snapshot is the one thing recovery
-   * must never do.
-   */
-  private async snapshotWorkspaceForRecovery(reason: string): Promise<RecoverySnapshot> {
-    try {
-      const snapshot = await this.checkpointGit.snapshotForRecovery(reason);
-      this.noteRecoverySnapshot(snapshot, reason);
-      return snapshot;
-    } catch (error) {
-      throw this.recoverySnapshotFailed(reason, error);
-    }
-  }
-
-  /**
-   * Confirm a restore target and save the work tree, in that order, before
-   * anything is touched. A reference git does not hold is a
-   * CheckpointNotFoundError (nothing changed; callers may degrade); anything
-   * else is a CheckpointStorageError (callers must stop).
-   */
-  private async confirmAndSnapshot(sha: string, reason: string): Promise<RestorePreconditions> {
-    try {
-      const preconditions = await this.checkpointGit.confirmAndSnapshot(sha, reason);
-      this.noteRecoverySnapshot(preconditions, reason);
-      return preconditions;
-    } catch (error) {
-      if (error instanceof CheckpointNotFoundError) throw error;
-      throw this.recoverySnapshotFailed(reason, error);
-    }
-  }
-
-  private noteRecoverySnapshot(snapshot: RecoverySnapshot, reason: string): void {
-    this.emitInfoEvent(
-      `Recovery snapshot: work tree saved to ${snapshot.recoveryBranch} ` +
-        `(${snapshot.recoveryCommit.substring(0, 7)}) before ${reason}`,
-    );
-    this.bootRecoverySnapshot = snapshot;
-  }
-
-  private recoverySnapshotFailed(reason: string, error: unknown): CheckpointStorageError {
-    const message = `Recovery snapshot failed before ${reason}: ${toError(error).message}`;
-    this.logger.log(message, "error");
-    this.emitErrorEvent(message);
-    return error instanceof CheckpointStorageError
-      ? error
-      : new CheckpointStorageError(message, error);
-  }
-
-  /**
-   * Execute the actual rollback
-   */
-  private async executeRollback(
-    thread: import("./execution-thread.js").ExecutionThread,
-    targetCodonIndex: number,
-    sha: string,
-    checkpointType: string,
-    autoRestart: boolean,
-  ): Promise<void> {
-    const targetThreadCodon = thread.codons[targetCodonIndex];
-    if (!targetThreadCodon) {
-      throw new Error(`Invalid target codon index: ${targetCodonIndex}`);
-    }
-
-    const codonConfig = this.config.codons.find((p) => p.id === targetThreadCodon.codon.codonId);
-    const codonName = codonConfig?.name || targetThreadCodon.codon.codonId;
-
-    this.logger.log(
-      `Starting codon-by-codon rollback to ${checkpointType} checkpoint ${sha} ` +
-        `in codon ${targetThreadCodon.codon.codonId} (${codonName})`,
-    );
-
-    // Set the rollback flag
     this.isRollingBack = true;
-    // Checkpoint restore changes files underneath the retained-body map —
-    // drop it so sentinel resolution never serves a pre-rollback body.
     this.bodyResolver.clear();
-
-    // Execute the new codon-by-codon rollback
-    // The flag will be cleared inside executeCodonByCodonRollback before sending events
-    await this.executeCodonByCodonRollback(
-      thread,
-      targetCodonIndex,
-      sha,
-      checkpointType,
-      codonName,
-      autoRestart,
-    ).finally(() => {
-      this.isRollingBack = false;
-    });
-  }
-
-  /**
-   * Execute codon-by-codon rollback with rig cleanup
-   */
-  private async executeCodonByCodonRollback(
-    thread: import("./execution-thread.js").ExecutionThread,
-    targetCodonIndex: number,
-    requestedSha: string,
-    checkpointType: string,
-    targetCodonName: string,
-    autoRestart: boolean,
-  ): Promise<void> {
-    // 0. Confirm the target and snapshot the work tree BEFORE anything is
-    // touched (see confirmAndSnapshot for what each failure means).
-    const targetSha = (
-      await this.confirmAndSnapshot(requestedSha, `rollback to ${requestedSha.substring(0, 7)}`)
-    ).checkpoint;
-
-    // Decide the archive restore now, from the HEAD this rollback abandons:
-    // the per-codon checkouts below move HEAD. Still read-only.
-    const originHead = await this.checkpointGit.getHeadSha();
-    const entriesToRestore = await this.planArchiveRestore(targetSha, originHead);
-
-    // 1. Clean up current codon state
-    this.cleanupCurrentCodon();
-
-    // 2. Get target codon and codons to process from thread
-    const targetThreadCodon = thread.codons[targetCodonIndex];
-    if (!targetThreadCodon) {
-      throw new Error(`Invalid target codon index: ${targetCodonIndex}`);
-    }
-
-    // Get all codons before target (they're already in reverse order)
-    const codonsToProcess = thread.codons.slice(0, targetCodonIndex);
-
-    // 3. Emit rollback started event
-    const fromRun = thread.codons[0]?.runId || targetThreadCodon.runId;
-    const fromCodon = thread.codons[0]?.codon.codonId || targetThreadCodon.codon.codonId;
-
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "rollback.started",
-      data: {
-        fromRun,
-        fromCodon,
-        toCodon: targetThreadCodon.codon.codonId,
-        toCheckpoint: targetSha,
-        checkpointType,
-        codonsToProcess: codonsToProcess.map((tp) => tp.codon.codonId),
-      },
-    } as import("./types/types.js").RollbackStartedEvent);
-
-    // 4. Process each codon (they're already in reverse order). From the
-    // first checkout or rig deletion on, the work tree is changing; an error
-    // after that point is reported as RollbackMutatedWorkspaceError so the
-    // caller knows it must not start new work on this tree.
-    let currentStep = 0;
-    const totalSteps = codonsToProcess.length + 1; // +1 for final checkpoint
-    let mutated = false;
-
+    let restored = false;
     try {
-      for (const threadCodon of codonsToProcess) {
-        // A rollback accepted while ownership was valid can be overtaken by a
-        // fencing shutdown mid-flight (each await below yields). Every further
-        // checkout and rig deletion would then mutate a successor-owned
-        // workspace — abort between steps rather than only at dispatch.
-        if (this.isShuttingDown) {
-          throw new Error("Rollback aborted: shutdown in progress");
-        }
-        currentStep++;
-
-        // Emit progress
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "rollback.progress",
-          data: {
-            currentStep,
-            totalSteps,
-            message: `Rolling back through ${threadCodon.codon.codonId}`,
-          },
-        } as import("./types/types.js").RollbackProgressEvent);
-
-        // Step through this codon's best git-confirmed checkpoint, if it has
-        // one; the final target below is what the work tree ends up as.
-        const checkpoint = bestConfirmedCheckpoint(threadCodon);
-        if (checkpoint) {
-          mutated = true;
-          await this.checkpointGit.resetToCheckpoint(checkpoint.sha);
-
-          // Emit checkpoint event
-          const codonConfig = this.config.codons.find((p) => p.id === threadCodon.codon.codonId);
-          this.emit("event", {
-            id: EventId(generateId()),
-            timestamp: new Date().toISOString(),
-            type: "rollback.codonCheckpoint",
-            data: {
-              codonId: threadCodon.codon.codonId,
-              codonName: codonConfig?.name || threadCodon.codon.codonId,
-              checkpoint: checkpoint.sha,
-              checkpointType: checkpoint.type,
-              message: `Reset to ${threadCodon.codon.codonId} ${checkpoint.type} checkpoint`,
-            },
-          } as import("./types/types.js").RollbackCodonCheckpointEvent);
-        }
-
-        // Clean up rig directories from this codon — re-check after the
-        // awaited reset above: a shutdown landing during it must not be
-        // followed by fresh recursive rig deletion.
-        if (this.isShuttingDown) {
-          throw new Error("Rollback aborted before rig cleanup: shutdown in progress");
-        }
-        mutated = true;
-        await this.cleanupCodonRigDirectories(threadCodon.codon);
-      }
-
-      // 5. Final reset to target checkpoint
-      if (this.isShuttingDown) {
-        throw new Error("Rollback aborted before final checkpoint reset: shutdown in progress");
-      }
-      currentStep++;
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "rollback.progress",
-        data: {
-          currentStep,
-          totalSteps,
-          message: `Applying final checkpoint`,
-        },
-      } as import("./types/types.js").RollbackProgressEvent);
-
-      mutated = true;
-      await this.restoreWorkTreeToCheckpoint(targetSha, entriesToRestore);
-    } catch (error) {
-      throw mutated ? new RollbackMutatedWorkspaceError(error) : error;
-    }
-
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "rollback.codonCheckpoint",
-      data: {
-        codonId: targetThreadCodon.codon.codonId,
-        codonName: targetCodonName,
-        checkpoint: targetSha,
-        checkpointType,
-        message: `Reset to target checkpoint ${targetThreadCodon.codon.codonId} (${checkpointType})`,
-      },
-    } as import("./types/types.js").RollbackCodonCheckpointEvent);
-
-    // 6. Complete current run
-    const currentRun = this.stateManager.getCurrentRun();
-    if (currentRun) {
-      this.stateManager.transition({
-        type: "RunCompleted",
-        data: { runId: currentRun.runId },
+      const result = await this.stateManager.rollback(target, {
+        shouldAbort: () => this.isShuttingDown,
+        onProgress: (progress) => this.reportRollbackProgress(progress),
       });
+      if (!result) return;
+      restored = true;
+      await this.completeRollback(result, autoRestart);
+    } catch (error) {
+      if (error instanceof RollbackRejectedError) {
+        this.emitErrorEvent(error.message);
+        return;
+      }
+      this.logger.log(`Rollback failed: ${toError(error).message}`, "error");
+      this.emitErrorEvent(`Rollback failed: ${toError(error).message}`);
+      throw restored && !(error instanceof RollbackMutatedWorkspaceError)
+        ? new RollbackMutatedWorkspaceError(error)
+        : error;
+    } finally {
+      this.isRollingBack = false;
     }
+  }
 
-    // 7. Wait for state transition
-    await this.stateManager.waitForPendingTransitions();
-
-    // 8. Start new continuation run
-    const afterCodon = checkpointType === "rig-setup" ? null : targetThreadCodon.codon.codonId;
-
-    await this.startNewRun({
-      type: "continuation",
-      source: {
-        runId: targetThreadCodon.runId,
-        afterCodon: afterCodon ? CodonId(afterCodon) : null,
-        checkpointSha: targetSha,
-      },
-      reason: "rollback",
-    });
-
-    // 9. Restore checkpoint patterns: everything in force at the target. A
-    // rig-setup target was taken after the target codon's rig ran, so its own
-    // patterns count too; a completion target does not include the codon
-    // that will run next.
-    await this.registerCheckpointPatternsThrough(
-      targetThreadCodon.codon.codonId,
-      checkpointType === "rig-setup",
+  private reportArchives(
+    progress: Extract<RollbackProgress, { type: "archives" }>,
+    envelope: { id: EventId; timestamp: string },
+  ): void {
+    const restoredPaths = progress.outcomes
+      .filter((outcome) => outcome.status === "restored")
+      .map((outcome) => outcome.path);
+    const failedPaths = progress.outcomes.flatMap((outcome) =>
+      outcome.status === "restored" ? [] : [{ path: outcome.path, error: outcome.error }],
     );
-
-    // 8.b. Wait for transitions
-
-    await this.stateManager.waitForPendingTransitions();
-
-    // 10. Clear rollback flag BEFORE sending events
-    this.isRollingBack = false;
-
-    // 11. Send completion event
     this.emit("event", {
+      ...envelope,
+      type: "rollback.archiveRestore",
+      data: {
+        codonId: progress.checkpoint,
+        restoredPaths,
+        failedPaths: failedPaths.length ? failedPaths : undefined,
+        status: failedPaths.length ? (restoredPaths.length ? "partial" : "failed") : "completed",
+      },
+    });
+    return;
+  }
+
+  private reportRigCleanup(
+    progress: Extract<RollbackProgress, { type: "rig-cleanup" }>,
+    envelope: { id: EventId; timestamp: string },
+  ): void {
+    const { type: _, ...data } = progress;
+    this.emit("event", {
+      ...envelope,
+      type: "rollback.rigCleanup",
+      data: {
+        ...data,
+        error: data.failedCleanups?.length
+          ? data.failedCleanups
+              .map((failure) => `${failure.directory}: ${failure.error}`)
+              .join(", ")
+          : undefined,
+      },
+    });
+    return;
+  }
+
+  private reportStep(
+    progress: Extract<RollbackProgress, { type: "step" }>,
+    envelope: { id: EventId; timestamp: string },
+  ): void {
+    this.emit("event", {
+      ...envelope,
+      type: "rollback.progress",
+      data: {
+        currentStep: progress.currentStep,
+        totalSteps: progress.totalSteps,
+        message: progress.codonId
+          ? `Rolling back through ${progress.codonId}`
+          : "Applying final checkpoint",
+      },
+    });
+    return;
+  }
+
+  /** Translate recovery facts into the existing client protocol. */
+  private reportRollbackProgress(progress: RollbackProgress): void {
+    const envelope = {
       id: EventId(generateId()),
       timestamp: new Date().toISOString(),
-      type: "rollback.completed",
-      data: {
-        fromRun,
-        toRun: this.currentRunId || "",
-        checkpoint: targetSha,
-        codonId: targetThreadCodon.codon.codonId,
-        codonName: targetCodonName,
-        checkpointType,
-        autoRestart,
-      },
-    } as import("./types/types.js").RollbackCompletedEvent);
-
-    // 12. Send state snapshot
-    await this.sendStateSnapshot();
-
-    // 12. Auto-restart if requested
-    if (autoRestart && this.config.autostart) {
-      const nextCodon = await this.stateManager.getNextCodonToExecute();
-      if (nextCodon) {
-        await this.startCodon(nextCodon, checkpointType === "rig-setup");
-      } else {
-        // Rollback succeeded but no next codon found
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "server.idle",
-          data: {
-            reason: "rollback-completed",
-            message: "Rollback completed. No next codon to run.",
-          },
-        } as import("./types/types.js").ServerIdleEvent);
-      }
-    } else {
-      // Not auto-restarting — tell the user we're waiting
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "server.idle",
-        data: {
-          reason: "rollback-completed",
-          message: `Rollback completed. Use 'codon.next' to continue.`,
-        },
-      } as import("./types/types.js").ServerIdleEvent);
-    }
-  }
-
-  /**
-   * Get rig setup directories for a codon
-   */
-  private getRigSetupDirectories(codonId: CodonId): string[] {
-    const codonConfig = this.config.codons.find((p) => p.id === codonId);
-    if (!codonConfig) return [];
-
-    // Only codons have rigSetup (not loops)
-    // TODO: this is needs more attention (how does rig setup work in the loopy context)
-    if (codonConfig.type === "loop") return [];
-
-    const codon = codonConfig;
-    if (!codon.rigSetup) return [];
-
-    const directories: string[] = [];
-    for (const item of codon.rigSetup) {
-      if (item.type === "copy" && item.copy) {
-        directories.push(item.copy.to);
-      }
-    }
-    return directories;
-  }
-
-  /**
-   * Execute archiveOnSuccess for a codon - moves files to rigArchive/ after successful completion.
-   *
-   * @param archiveOnSuccess - Array of paths to archive (relative to agentRoot/)
-   * @param codonId - The codon ID (with iteration suffix for loops)
-   * @param checkpointSha - The checkpoint SHA at time of archiving
-   * @param loopContext - Loop context if codon is part of a loop
-   * @param isLoopLevelArchive - If true, this is a loop-level archive (uses -loop suffix)
-   */
-  private async executeArchiveRigs(
-    archiveOnSuccess: string[],
-    codonId: string,
-    checkpointSha: string,
-    loopContext?: { loopId: string; iteration: number },
-    isLoopLevelArchive = false,
-  ): Promise<void> {
-    if (!archiveOnSuccess || archiveOnSuccess.length === 0) return;
-    // Archiving is a chain of mkdir/rm/cp/manifest operations — none of it
-    // may START once shutdown has begun (archives are re-creatable on the
-    // next successful run of the codon).
-    if (this.isShuttingDown) {
-      this.logger.log(`Archive rigs skipped for codon ${codonId}: shutdown in progress`);
-      return;
-    }
-
-    this.logger.log(`Executing archiveOnSuccess for ${codonId}: ${archiveOnSuccess.join(", ")}`);
-
-    // Resolve glob patterns to actual files
-    const resolvedFiles = await fileResolver.resolveFiles(
-      this.config.agentRootPath,
-      archiveOnSuccess,
-    );
-
-    this.logger.log(`Resolved ${resolvedFiles.length} files to archive from patterns`);
-
-    const results: { path: string; success: boolean; error?: string }[] = [];
-
-    for (const sourcePath of resolvedFiles) {
-      const fullSourcePath = path.join(this.config.agentRootPath, sourcePath);
-
-      // Build archive destination path
-      // Note: Only codonId needs sanitization (# -> -) since loop IDs don't contain #
-      let archiveSubdir: string;
-      if (isLoopLevelArchive) {
-        // Loop-level archive: rigArchive/<loopId>-loop/<path>
-        // (codonId here is actually the loop ID)
-        archiveSubdir = `${codonId}-loop`;
-      } else if (loopContext) {
-        // Loop codon: rigArchive/<loopId>-<iteration>/<codonId>/<path>
-        archiveSubdir = path.join(
-          `${loopContext.loopId}-${loopContext.iteration}`,
-          codonId.replace(/#/g, "-"), // Only codonId needs sanitization
+    };
+    switch (progress.type) {
+      case "snapshot":
+        this.emitInfoEvent(
+          `Recovery snapshot: work tree saved to ${progress.snapshot.branch} ` +
+            `(${progress.snapshot.snapshotId}) before ${progress.reason}`,
         );
-      } else {
-        // Non-loop codon: rigArchive/<codonId>/<path>
-        archiveSubdir = codonId.replace(/#/g, "-");
+        return;
+      case "diagnostic":
+        this.emitErrorEvent(progress.message);
+        return;
+      case "started": {
+        this.cleanupCurrentCodon();
+        const { type: _, ...data } = progress;
+        this.emit("event", { ...envelope, type: "rollback.started", data });
+        return;
       }
-
-      const archivePath = path.join(this.config.rigArchivePath, archiveSubdir, sourcePath);
-
-      try {
-        // Check if source exists
-        if (!fs.existsSync(fullSourcePath)) {
-          this.logger.log(`Archive source not found (skipping): ${sourcePath}`, "info");
-          results.push({ path: sourcePath, success: true }); // Not an error, just skip
-          continue;
-        }
-
-        // Create archive directory
-        await fs.promises.mkdir(path.dirname(archivePath), { recursive: true });
-
-        // Remove existing archive if present (overwrite semantics)
-        if (fs.existsSync(archivePath)) {
-          this.logger.log(`Archive path collision, overwriting: ${archivePath}`, "error");
-          await fs.promises.rm(archivePath, { recursive: true, force: true });
-        }
-
-        // Move files (copy then remove)
-        await fs.promises.cp(fullSourcePath, archivePath, { recursive: true });
-        await fs.promises.rm(fullSourcePath, { recursive: true, force: true });
-
-        // Record in manifest
-        await this.archiveManifest.addEntry({
-          sourcePath,
-          archivePath: path.relative(this.config.executionPath, archivePath),
-          codonId,
-          loopContext: isLoopLevelArchive ? undefined : loopContext,
-          checkpointSha,
-          timestamp: new Date().toISOString(),
+      case "step":
+        this.reportStep(progress, envelope);
+        return;
+      case "checkpoint": {
+        const { type: _, final, ...data } = progress;
+        this.emit("event", {
+          ...envelope,
+          type: "rollback.codonCheckpoint",
+          data: {
+            ...data,
+            message: final
+              ? `Reset to target checkpoint ${data.codonId} (${data.checkpointType})`
+              : `Reset to ${data.codonId} ${data.checkpointType} checkpoint`,
+          },
         });
-
-        this.logger.log(`Archived: ${sourcePath} → ${archivePath}`, "info");
-        results.push({ path: sourcePath, success: true });
-      } catch (error) {
-        // Graceful degradation: log error and continue with next path
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        this.logger.log(`Failed to archive ${sourcePath}: ${errorMsg}`, "error");
-        results.push({ path: sourcePath, success: false, error: errorMsg });
+        return;
       }
+      case "rig-cleanup":
+        this.reportRigCleanup(progress, envelope);
+        return;
+      case "archives":
+        this.reportArchives(progress, envelope);
+        return;
+      default:
+        assertNever(progress);
     }
+  }
+
+  /** Translate archive outcomes into client events; policy belongs to StateManager. */
+  private emitArchiveResult(result: ArchiveResult): void {
+    const { codonId, outcomes } = result;
+    const results = outcomes.map((outcome) => ({
+      path: outcome.path,
+      success: outcome.status !== "failed",
+      error: outcome.status === "failed" ? outcome.error : undefined,
+    }));
 
     // Emit archive completed event (includes partial successes)
     const successfulPaths = results.filter((r) => r.success).map((r) => r.path);
@@ -5790,286 +4174,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     }
   }
 
-  /**
-   * Restore archived files back to agentRoot/ during rollback.
-   * Called after git reset has restored the workspace to checkpoint state.
-   *
-   * The target checkpoint tree is authoritative: when a destination path
-   * already exists in the post-checkout workspace BEFORE restoration begins,
-   * the entry is SKIPPED (with a warning) and its archive copy and manifest
-   * entry stay in place — nothing the target tree contains is silently
-   * overwritten by an archived copy. Destinations created by earlier entries
-   * of the same restoration (multiple loop iterations archiving one path)
-   * are overwritten newest-wins, as before.
-   *
-   * @param entries - Archive entries to restore (from planArchiveRestore)
-   * @param targetCheckpointSha - The checkpoint we're rolling back to
-   * @returns Per-entry outcomes; callers remove ONLY the successfully
-   *          restored entries from the manifest
-   */
-  private async restoreArchiveEntries(
-    entries: import("./archive-manifest.js").ArchiveEntry[],
-    targetCheckpointSha: string,
-  ): Promise<ArchiveRestoreResult[]> {
-    if (entries.length === 0) return [];
-
-    this.logger.log(
-      `Restoring ${entries.length} archived files during rollback to ${targetCheckpointSha}`,
-    );
-
-    // Destinations the TARGET TREE owns, captured before any restoration
-    // touches the workspace. Only these are protected by the collision rule.
-    const targetTreeOwned = new Set<string>();
-    for (const entry of entries) {
-      const sourceFullPath = path.join(this.config.agentRootPath, entry.sourcePath);
-      if (fs.existsSync(sourceFullPath)) {
-        targetTreeOwned.add(sourceFullPath);
-      }
-    }
-
-    const results: ArchiveRestoreResult[] = [];
-
-    for (const entry of entries) {
-      // Each entry is several destructive operations (removals, copies,
-      // pruning) — a shutdown mid-restore must not start further entries
-      // against what may now be a successor-owned workspace.
-      if (this.isShuttingDown) {
-        throw new Error(
-          `Archive restoration aborted after ${results.length}/${entries.length} entries: ` +
-            `shutdown in progress`,
-        );
-      }
-      const archiveFullPath = path.join(this.config.executionPath, entry.archivePath);
-      const sourceFullPath = path.join(this.config.agentRootPath, entry.sourcePath);
-
-      try {
-        // Check if archive exists
-        if (!fs.existsSync(archiveFullPath)) {
-          this.logger.log(`Archive file not found (skipping): ${entry.archivePath}`, "error");
-          results.push({
-            entry,
-            path: entry.sourcePath,
-            success: false,
-            error: "Archive not found",
-          });
-          continue;
-        }
-
-        // The target checkpoint tree is authoritative: keep the workspace
-        // file AND the archive copy (plus its manifest entry).
-        if (targetTreeOwned.has(sourceFullPath)) {
-          this.logger.log(
-            `Restore destination already exists in target checkpoint tree, ` +
-              `leaving archived: ${entry.sourcePath} (archive kept at ${entry.archivePath})`,
-            "error",
-          );
-          results.push({
-            entry,
-            path: entry.sourcePath,
-            success: false,
-            error: "Destination exists in target checkpoint tree; archive copy kept",
-          });
-          continue;
-        }
-
-        // Create parent directory for restoration
-        await fs.promises.mkdir(path.dirname(sourceFullPath), {
-          recursive: true,
-        });
-
-        // Remove a destination created by an earlier entry of this loop (the
-        // same sourcePath archived by several iterations — newest wins).
-        if (fs.existsSync(sourceFullPath)) {
-          await fs.promises.rm(sourceFullPath, {
-            recursive: true,
-            force: true,
-          });
-        }
-
-        // Move files from archive back to source
-        await fs.promises.cp(archiveFullPath, sourceFullPath, {
-          recursive: true,
-        });
-        await fs.promises.rm(archiveFullPath, { recursive: true, force: true });
-
-        this.logger.log(`Restored: ${entry.archivePath} → ${entry.sourcePath}`, "info");
-        results.push({ entry, path: entry.sourcePath, success: true });
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        this.logger.log(`Failed to restore ${entry.sourcePath}: ${errorMsg}`, "error");
-        results.push({
-          entry,
-          path: entry.sourcePath,
-          success: false,
-          error: errorMsg,
-        });
-      }
-    }
-
-    // Emit rollback archive restore event
-    const successfulPaths = results.filter((r) => r.success).map((r) => r.path);
-    const failedResults = results.filter((r) => !r.success);
-
-    let status: "completed" | "partial" | "failed";
-    if (failedResults.length === 0) {
-      status = "completed";
-    } else if (successfulPaths.length > 0) {
-      status = "partial";
-    } else {
-      status = "failed";
-    }
-
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "rollback.archiveRestore",
-      data: {
-        codonId: targetCheckpointSha, // Use checkpoint SHA as identifier
-        restoredPaths: successfulPaths,
-        failedPaths:
-          failedResults.length > 0
-            ? failedResults.map((r) => ({
-                path: r.path,
-                error: r.error || "Unknown error",
-              }))
-            : undefined,
-        status,
-      },
-    });
-
-    // Clean up empty archive directories after restoration
-    // Collect unique archive parent directories (e.g., rigArchive/archive-loop-1/process-iteration-1)
-    const archiveDirs = new Set<string>();
-    for (const entry of entries) {
-      const archiveFullPath = path.join(this.config.executionPath, entry.archivePath);
-      // Get the directory containing the archived file
-      let currentDir = path.dirname(archiveFullPath);
-      // Walk up until we reach rigArchivePath, collecting directories
-      while (
-        currentDir !== this.config.rigArchivePath &&
-        currentDir.startsWith(this.config.rigArchivePath)
-      ) {
-        archiveDirs.add(currentDir);
-        currentDir = path.dirname(currentDir);
-      }
-    }
-
-    // Remove empty directories (deepest first) — skipped once shutdown has
-    // begun (a shutdown during the final archive entry would otherwise fall
-    // through into fresh rmdir operations); leftover empty dirs are pruned
-    // by any later archive pass.
-    if (this.isShuttingDown) return results;
-    const sortedDirs = Array.from(archiveDirs).sort((a, b) => b.length - a.length);
-    for (const dir of sortedDirs) {
-      try {
-        if (fs.existsSync(dir)) {
-          const contents = await fs.promises.readdir(dir);
-          if (contents.length === 0) {
-            await fs.promises.rmdir(dir);
-            this.logger.log(
-              `Cleaned up empty archive directory: ${path.relative(this.config.executionPath, dir)}`,
-              "info",
-            );
-          }
-        }
-      } catch (error) {
-        // Ignore errors (directory might not be empty or already removed)
-        this.logger.log(`Could not clean up archive directory ${dir}: ${error}`, "debug");
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * Clean up rig directories created by a codon
-   */
-  private async cleanupCodonRigDirectories(codon: CodonExecution): Promise<void> {
-    const directories = this.getRigSetupDirectories(codon.codonId);
-    if (directories.length === 0) return;
-
-    const codonConfig = this.config.codons.find((p) => p.id === codon.codonId);
-    const codonName = codonConfig?.name || codon.codonId;
-
-    // Emit cleanup started
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "rollback.rigCleanup",
-      data: {
-        codonId: codon.codonId,
-        codonName,
-        directories,
-        status: "started",
-      },
-    } as import("./types/types.js").RollbackRigCleanupEvent);
-
-    const successfulCleanups: string[] = [];
-    const failedCleanups: { directory: string; error: string }[] = [];
-
-    for (const dir of directories) {
-      // Each target is its own recursive deletion — do not start the next
-      // one once shutdown has begun.
-      if (this.isShuttingDown) {
-        throw new Error(
-          `Rig cleanup aborted after ${successfulCleanups.length}/${directories.length} ` +
-            `directories: shutdown in progress`,
-        );
-      }
-      const fullPath = path.join(this.config.agentRootPath, dir);
-      try {
-        if (fs.existsSync(fullPath)) {
-          await fs.promises.rm(fullPath, { recursive: true, force: true });
-          this.logger.log(`Removed rig setup directory: ${dir}`);
-          successfulCleanups.push(dir);
-        } else {
-          // Directory doesn't exist, consider it a success
-          this.logger.log(`Rig setup directory already absent: ${dir}`);
-          successfulCleanups.push(dir);
-        }
-      } catch (error) {
-        const errorMessage = toError(error).message;
-        this.logger.log(`Failed to remove rig directory ${dir}: ${errorMessage}`, "error");
-        failedCleanups.push({ directory: dir, error: errorMessage });
-      }
-    }
-
-    // Emit cleanup result with detailed information
-    if (failedCleanups.length > 0) {
-      // Partial or complete failure
-      const status = successfulCleanups.length > 0 ? "partial" : "failed";
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "rollback.rigCleanup",
-        data: {
-          codonId: codon.codonId,
-          codonName,
-          directories,
-          status,
-          successfulCleanups,
-          failedCleanups,
-          error: failedCleanups.map((f) => `${f.directory}: ${f.error}`).join(", "),
-        },
-      } as import("./types/types.js").RollbackRigCleanupEvent);
-    } else {
-      // Complete success
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "rollback.rigCleanup",
-        data: {
-          codonId: codon.codonId,
-          codonName,
-          directories,
-          status: "completed",
-          successfulCleanups,
-          failedCleanups: [],
-        },
-      } as import("./types/types.js").RollbackRigCleanupEvent);
-    }
-  }
-
   // -------------
   // Sentinel Integration
   // -------------
@@ -6083,10 +4187,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private async loadSentinelsForCodon(
     codon: Codon,
     runtimeCodonId: CodonId,
-  ): Promise<{
-    loaded: string[];
-    errors: { ref: string; error: string; fatal: boolean }[];
-  }> {
+  ): Promise<SentinelLoadResult> {
     // FIX: Clear previous sentinels immediately to prevent state leaking
     this.currentCodonSentinels.clear();
 
@@ -6102,7 +4203,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Relative sentinel config paths like "sentinels/check.json" are resolved
     // from the folder hank.json lives in. path.resolve makes that folder
     // absolute in case hank.json itself was given as a relative path — the
-    // loader (via hank-refs) rejects relative base dirs. If there is no
+    // loader (via HankDir) rejects relative base dirs. If there is no
     // configPath, the configured cwd is used instead.
     const hankDirectory = this.config.configPath
       ? path.dirname(path.resolve(this.config.configPath))
@@ -6212,27 +4313,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         } as import("./schemas/event-schemas.js").SentinelLoadedEvent);
       }
 
-      // Codon 2: Capture initial sentinel states in codon state
-      if (this.currentRunId && loadedIds.length > 0) {
-        const sentinelStates = this.sentinelManager.getSentinelStates();
-        const totalCost = sentinelStates.reduce((sum, state) => sum + state.totalCost, 0);
-
-        this.stateManager.transition({
-          type: "SentinelStatesUpdated",
-          data: {
-            runId: this.currentRunId,
-            codonId: codon.id as CodonId,
-            sentinelStates,
-            totalCost,
-          },
-        });
-
-        this.logger.log(`Captured initial state for ${sentinelStates.length} sentinel(s)`, "debug");
-      }
-
       return {
         loaded: loadedIds,
         errors: loadResult.errors,
+        sentinelStates: this.sentinelManager.getSentinelStates(),
       };
     } catch (error) {
       const errorMsg = `Failed to instantiate sentinels in SentinelManager: ${error}`;
@@ -6308,33 +4392,298 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.pendingToolUses.clear();
   }
 
-  private classifyRigSetupFailureType(
-    error: unknown,
-    operationType: "copy" | "command",
-  ): "command_failed" | "timeout" | "other" {
-    const errorText = toError(error).message.toLowerCase();
-    const stderrText =
-      error instanceof CommandError && typeof error.stderr === "string"
-        ? error.stderr.toLowerCase()
-        : "";
+  private reportRigOperationFailed(
+    codonId: CodonId,
+    progress: Extract<PreparationProgress, { type: "rig-operation-failed" }>,
+    envelope: { id: EventId; timestamp: string },
+  ): void {
+    const { item, index, error, ignored, exitCode, failureType } = progress;
+    this.logger.log(
+      `Rig setup failed at item ${index + 1} (${JSON.stringify(item)}): ${error.message}`,
+      "error",
+    );
+    this.emit("event", {
+      ...envelope,
+      type: "rig.setup.failed",
+      data: {
+        codonId,
+        failureType,
+        exitCode,
+        commandIndex: index,
+        ignored,
+      },
+    } as RigSetupFailedEvent);
+    if (ignored) {
+      const reason = item.allowFailure ? "allowFailure=true" : "--ignore-rig-failures";
+      this.emitErrorEvent(
+        `Rig setup operation failed but continuing (${reason}): ${error.message}`,
+        {
+          context: `Codon ${codonId} - ${item.type} operation (item ${index + 1})`,
+          codon: codonId,
+          severity: ErrorSeverity.OPERATION,
+        },
+      );
+    }
+    return;
+  }
 
-    // Timeout-like failures should be categorized separately even for command operations.
-    if (
-      errorText.includes("timed out") ||
-      errorText.includes("timeout") ||
-      errorText.includes("etimedout") ||
-      stderrText.includes("timed out") ||
-      stderrText.includes("timeout") ||
-      stderrText.includes("etimedout")
-    ) {
-      return "timeout";
+  private reportRigOperation(
+    progress: Extract<PreparationProgress, { type: "rig-operation" }>,
+  ): void {
+    const { item, index, operationCount } = progress;
+    const details =
+      item.type === "copy" ? `${item.copy.from} → ${item.copy.to}` : `'${item.command.run}'`;
+    this.emitInfoEvent(`Rig operation ${index + 1}/${operationCount}: ${item.type} ${details}`);
+    return;
+  }
+
+  private reportRigOperationsCompleted(
+    codon: Codon,
+    progress: Extract<PreparationProgress, { type: "rig-operations-completed" }>,
+  ): void {
+    this.emitInfoEvent(
+      `Rig setup completed for codon '${codon.name}' (${progress.durationMs}ms, ${progress.succeeded} succeeded${progress.failed > 0 ? `, ${progress.failed} failed` : ""})`,
+    );
+    return;
+  }
+
+  private reportRigStarted(
+    codon: Codon,
+    progress: Extract<PreparationProgress, { type: "rig-started" }>,
+  ): void {
+    this.logger.log(`Running rig setup for codon: ${codon.name}`);
+    // MESSAGE FORMAT CONTRACT: the TUI matches these setup/progress strings.
+    this.emitInfoEvent(
+      `Rig setup started for codon '${codon.name}': ${progress.operationCount} operation${progress.operationCount !== 1 ? "s" : ""}`,
+    );
+    return;
+  }
+
+  /**
+   * The rig-setup NARRATION: progress that becomes an info line (and a log
+   * line), not a typed event. Returns false for progress it does not own.
+   */
+  private reportRigNarration(codon: Codon, progress: PreparationProgress): boolean {
+    switch (progress.type) {
+      case "rig-started":
+        this.reportRigStarted(codon, progress);
+        return true;
+      case "rig-operation":
+        this.reportRigOperation(progress);
+        return true;
+      case "rig-copy-excluded":
+        // develop copied everything; the ignore rules now prune rig copies,
+        // so a dropped file must have a line here to be found.
+        this.emitInfoEvent(
+          `Rig operation ${progress.index + 1}: copy source "${progress.from}": ${describeIgnoredEntries(progress.ignored)}`,
+        );
+        return true;
+      case "rig-operations-completed":
+        this.reportRigOperationsCompleted(codon, progress);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private reportPreparationProgress(
+    codonId: CodonId,
+    codon: Codon,
+    progress: PreparationProgress,
+  ): void {
+    if (this.reportRigNarration(codon, progress)) return;
+    const envelope = {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+    };
+    switch (progress.type) {
+      case "rig-output":
+        this.emit("event", {
+          ...envelope,
+          type: "rig.output",
+          data: {
+            codonId,
+            stream: progress.stream,
+            line: progress.line,
+            commandIndex: progress.index,
+          },
+        } as RigOutputEvent);
+        return;
+      case "rig-operation-failed":
+        this.reportRigOperationFailed(codonId, progress, envelope);
+        return;
+      case "rig-completed":
+        this.emit("event", {
+          ...envelope,
+          type: "rig.setup.completed",
+          data: {
+            codonId,
+            rigType: progress.operationCount === 1 ? "command" : "commands",
+            commandCount: progress.operationCount,
+            durationMs: progress.durationMs,
+            createdCheckpoint: progress.createdCheckpoint,
+          },
+        } as RigSetupCompletedEvent);
+        return;
+      case "sentinel-warning":
+        this.logger.log(
+          `Non-required sentinel failed to load (${progress.ref}): ${progress.error}`,
+          "info",
+        );
+        return;
+    }
+  }
+
+  private async handleRigPreparationFailure(
+    codonId: CodonId,
+    codon: Codon,
+    failure: Extract<PreparationFailure, { phase: "rig" }>,
+  ): Promise<void> {
+    const { item, index, exitCode, error } = failure;
+    const errorMessage = error.message;
+    // Send error event with details
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "error",
+      data: {
+        message: `Rig setup failed: ${errorMessage}`,
+        context: `Codon ${codon.id} - ${item.type} operation (item ${index + 1})`,
+        codon: codon.id,
+        fatal: true,
+        severity: ErrorSeverity.FATAL,
+      },
+    } as ErrorEvent);
+
+    // Apply failure policy
+    const decision = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
+
+    if (decision.action === "continue") {
+      // Emit codon.completed event with failureIgnored flag
+      // (Early failure paths don't go through handleCodonComplete)
+      this.emitIgnoredStartFailure(codonId, exitCode);
+
+      // Emit info event about the ignored failure
+      this.emitInfoEvent(`Codon ${codonId} rig setup failed, continuing (onFailure=ignore)`);
+
+      await this.advanceAfterIgnoredStartFailure(codonId);
+      return;
     }
 
-    if (error instanceof CommandError || operationType === "command") {
-      return "command_failed";
+    if (decision.action === "retry") {
+      // Rig setup failures with retry policy - retry the codon
+      // (rig setup will run again since we're not skipping)
+      const { attempt, maxAttempts, delayBeforeThisAttemptMs } = decision;
+      this.retryCoordinator.recordAttempt(codonId);
+
+      this.emit("event", {
+        id: EventId(generateId()),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        data: {
+          message: `Retrying codon ${codonId} after rig setup failure (attempt ${attempt}/${maxAttempts}) in ${delayBeforeThisAttemptMs}ms`,
+        },
+      } as InfoEvent);
+
+      this.cleanupCurrentCodon();
+      await this.delay(delayBeforeThisAttemptMs);
+
+      // Check if shutdown was requested during delay
+      if (this.isShuttingDown) {
+        this.logger.log(`Server shutting down, skipping retry for ${codonId}`);
+        return;
+      }
+
+      // Don't skip rig setup on retry - that's what failed!
+      // Pass isAutoRetry=true to prevent creating a new run
+      await this.startCodon(codonId, false, true);
+      return;
     }
 
-    return "other";
+    // Fall through to original error handling for shutdown cases
+    this.cleanupCurrentCodon();
+    await this.handleError(toError(error), `Rig setup item ${index + 1}`, ErrorSeverity.FATAL);
+    return;
+  }
+
+  private async handleSentinelPreparationFailure(
+    codonId: CodonId,
+    codon: Codon,
+    failure: Extract<PreparationFailure, { phase: "sentinels" }>,
+  ): Promise<void> {
+    const failedSentinels = failure.refs.join(", ");
+    const errorMsg = failure.error.message;
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "error",
+      data: {
+        message: errorMsg,
+        context: `Failed sentinels: ${failedSentinels}`,
+        codon: codon.id,
+        fatal: true,
+        severity: ErrorSeverity.CODON,
+        code: "SENTINEL_LOAD_FAILURE",
+      },
+    } as ErrorEvent);
+
+    // Apply failure policy (sentinel failures respect codon onFailure config)
+    const { action } = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
+
+    if (action === "continue") {
+      // Emit codon.completed event with failureIgnored flag
+      this.emitIgnoredStartFailure(codonId, -1);
+
+      // Emit info event
+      this.emitInfoEvent(`Codon ${codonId} sentinel load failed, continuing (onFailure=ignore)`);
+
+      await this.advanceAfterIgnoredStartFailure(codonId);
+      return;
+    }
+
+    // shutdown/stay-active - original behavior
+    // Note: Sentinel failures have retriable=false, so retry policy falls through to shutdown
+    this.cleanupCurrentCodon();
+
+    if (action === "shutdown") {
+      if (this.currentRunId) {
+        this.stateManager.transition({
+          type: "RunFailed",
+          data: { runId: this.currentRunId },
+        });
+        await this.stateManager.waitForPendingTransitions();
+      }
+      await this.shutdown("sentinel load failure");
+    }
+    return;
+  }
+
+  /** StateManager has already recorded the failure; apply runtime retry/stop policy. */
+  private async handlePreparationFailure(
+    codonId: CodonId,
+    codon: Codon,
+    failure: PreparationFailure,
+  ): Promise<void> {
+    this.codonFailureReason = failure.failureReason;
+    this.codonFailureError = failure.error;
+    if (failure.phase === "checkpoint") {
+      await this.failCodonAtStart(
+        codonId,
+        codon,
+        failure.failureReason.message ?? failure.error.message,
+        failure.error,
+        true,
+      );
+      return;
+    }
+    if (failure.phase === "rig") {
+      await this.handleRigPreparationFailure(codonId, codon, failure);
+      return;
+    }
+    if (failure.phase === "sentinels") {
+      await this.handleSentinelPreparationFailure(codonId, codon, failure);
+      return;
+    }
   }
 
   /**
@@ -6349,307 +4698,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     return codonExceeded || loopExceeded;
   }
 
-  private emitLoopIterationCompletedEvent(params: {
-    codonId: CodonId;
-    isContextExceeded: boolean;
-  }): void {
-    const codon = this.stateManager.getCodonInCurrentRun(params.codonId);
-    if (!codon?.loopContext) return;
-
-    const { loopId, iteration, codonIndexInLoop } = codon.loopContext;
-    const loopConfig = this.config.codons.find(
-      (item): item is Extract<CodonConfig, { type: "loop" }> =>
-        item.type === "loop" && item.id === loopId,
-    );
-    if (!loopConfig) return;
-
-    const isLastCodonInIteration = codonIndexInLoop === loopConfig.codons.length - 1;
-    const contextExceededTermination =
-      params.isContextExceeded && loopConfig.terminateOn.type === "contextExceeded";
-    const isIterationCompleted = contextExceededTermination || isLastCodonInIteration;
-    if (!isIterationCompleted) return;
-
-    let isFinal = false;
-    let terminationReason:
-      | "iteration_limit"
-      | "context_exceeded"
-      | "sentinel_skip"
-      | "failure"
-      | undefined;
-
-    if (contextExceededTermination) {
-      isFinal = true;
-      terminationReason = "context_exceeded";
-    } else if (
-      loopConfig.terminateOn.type === "iterationLimit" &&
-      iteration >= loopConfig.terminateOn.limit - 1
-    ) {
-      isFinal = true;
-      terminationReason = "iteration_limit";
-    }
-
-    const currentRun = this.currentRunId ? this.stateManager.getRunById(this.currentRunId) : null;
-    if (!currentRun) return;
-
-    const iterationCodons = currentRun.codons.filter(
-      (entry) =>
-        entry.loopContext?.loopId === loopId &&
-        entry.loopContext?.iteration === iteration &&
-        isTerminalCodonStatus(entry.status),
-    );
-
-    const durationMs = iterationCodons.reduce((sum, entry) => {
-      const startMs = new Date(entry.startTime).getTime();
-      const endMs = "endTime" in entry ? new Date(entry.endTime).getTime() : startMs;
-      return sum + Math.max(0, endMs - startMs);
-    }, 0);
-    const costUsd = iterationCodons.reduce((sum, entry) => sum + getCodonCost(entry), 0);
-    const tokensUsed = iterationCodons.reduce((sum, entry) => {
-      const tokens = getCodonTokens(entry);
-      return sum + tokens.inputTokens + tokens.outputTokens;
-    }, 0);
-
-    this.emit("event", {
-      id: EventId(generateId()),
-      timestamp: new Date().toISOString(),
-      type: "loop.iteration.completed",
-      data: {
-        loopId,
-        iteration,
-        durationMs,
-        costUsd,
-        tokensUsed,
-        isFinal,
-        terminationReason,
-      },
-    } as LoopIterationCompletedEvent);
-  }
-
-  private async runCommand(
-    shellCommand: ShellCommand | RigShellCommand | string,
-    lastCopiedPath?: string,
-    env?: Record<string, string>,
-    rigContext?: { codonId: string; commandIndex: number },
-  ): Promise<void> {
-    // Handle working directory resolution
-    let workingDir: string;
-    const cmd: ShellCommand | RigShellCommand =
-      typeof shellCommand === "string"
-        ? {
-            type: "command",
-            command: {
-              run: shellCommand,
-            },
-          }
-        : shellCommand;
-    if (cmd.command.workingDirectory === "lastCopied") {
-      if (lastCopiedPath) {
-        workingDir = lastCopiedPath;
-      } else {
-        // Fallback to agentRootPath if lastCopiedPath not provided
-        workingDir = this.config.agentRootPath;
-      }
-    } else {
-      // Default to agentRootPath for "agentRoot" (formerly "project")
-      workingDir = this.config.agentRootPath;
-    }
-
-    // Diagnostic logging: log working directory and its contents
-    this.logger.log(`[DEBUG] Running command: ${cmd.command.run}`, "info");
-    this.logger.log(`[DEBUG] Working directory: ${workingDir}`, "info");
-    try {
-      const dirContents = await fs.promises.readdir(workingDir);
-      this.logger.log(`[DEBUG] Directory contents: ${dirContents.join(", ")}`, "info");
-    } catch (e) {
-      this.logger.log(`[DEBUG] Could not read directory contents: ${toError(e).message}`, "error");
-    }
-
-    return new Promise((resolve, reject) => {
-      const proc = spawn(cmd.command.run, {
-        shell: true,
-        cwd: workingDir,
-        env: env ? { ...process.env, ...env } : undefined,
-      });
-
-      // Capture stdout and stderr for diagnostic purposes
-      let stdout = "";
-      let stderr = "";
-
-      // Throttle rig.output events: max 1 per second per stream
-      let lastStdoutEmit = 0;
-      let lastStderrEmit = 0;
-      let pendingStdoutLine: string | null = null;
-      let pendingStderrLine: string | null = null;
-
-      const emitRigOutput = (stream: "stdout" | "stderr", line: string) => {
-        if (!rigContext || !line.trim()) return;
-        this.emit("event", {
-          id: EventId(generateId()),
-          timestamp: new Date().toISOString(),
-          type: "rig.output",
-          data: {
-            codonId: rigContext.codonId,
-            stream,
-            line: line.trim().slice(0, 500),
-            commandIndex: rigContext.commandIndex,
-          },
-        } as RigOutputEvent);
-      };
-
-      proc.stdout?.on("data", (data) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        this.logger.log(`[DEBUG] Command stdout: ${chunk.trim()}`, "info");
-
-        if (rigContext) {
-          const lastLine = chunk.trim().split("\n").pop() ?? "";
-          const now = Date.now();
-          if (now - lastStdoutEmit >= 1000) {
-            emitRigOutput("stdout", lastLine);
-            lastStdoutEmit = now;
-            pendingStdoutLine = null;
-          } else {
-            pendingStdoutLine = lastLine;
-          }
-        }
-      });
-
-      proc.stderr?.on("data", (data) => {
-        const chunk = data.toString();
-        stderr += chunk;
-        this.logger.log(`[DEBUG] Command stderr: ${chunk.trim()}`, "error");
-
-        if (rigContext) {
-          const lastLine = chunk.trim().split("\n").pop() ?? "";
-          const now = Date.now();
-          if (now - lastStderrEmit >= 1000) {
-            emitRigOutput("stderr", lastLine);
-            lastStderrEmit = now;
-            pendingStderrLine = null;
-          } else {
-            pendingStderrLine = lastLine;
-          }
-        }
-      });
-
-      // Flush pending lines every second
-      const flushInterval = rigContext
-        ? setInterval(() => {
-            if (pendingStdoutLine) {
-              emitRigOutput("stdout", pendingStdoutLine);
-              lastStdoutEmit = Date.now();
-              pendingStdoutLine = null;
-            }
-            if (pendingStderrLine) {
-              emitRigOutput("stderr", pendingStderrLine);
-              lastStderrEmit = Date.now();
-              pendingStderrLine = null;
-            }
-          }, 1000)
-        : null;
-
-      proc.on("exit", (code) => {
-        if (flushInterval) clearInterval(flushInterval);
-        if (code === 0) {
-          this.logger.log(`[DEBUG] Command completed successfully`, "info");
-          resolve();
-        } else {
-          // Handle null exit code (killed by signal)
-          const exitCode = code ?? -1;
-          this.logger.log(`[DEBUG] Command failed with exit code ${exitCode}`, "error");
-          this.logger.log(`[DEBUG] Full stdout: ${stdout}`, "info");
-          this.logger.log(`[DEBUG] Full stderr: ${stderr}`, "error");
-
-          // Create CommandError with exit code and output
-          const error = new CommandError(
-            `Command failed with exit code ${exitCode}`,
-            exitCode,
-            stdout,
-            stderr,
-          );
-          reject(error);
-        }
-      });
-
-      proc.on("error", (err) => {
-        if (flushInterval) clearInterval(flushInterval);
-        this.logger.log(`[DEBUG] Command error: ${err.message}`, "error");
-        reject(err);
-      });
-    });
-  }
-
-  private async copyPath(from: string, to: string): Promise<void> {
-    // Check if source exists
-    const sourceStats = await fs.promises.stat(from).catch(() => null);
-    if (!sourceStats) {
-      throw new Error(`Source path does not exist: ${from}`);
-    }
-
-    // Check if target parent directory exists
-    const targetParent = path.dirname(to);
-    const parentStats = await fs.promises.stat(targetParent).catch(() => null);
-    if (!parentStats || !parentStats.isDirectory()) {
-      throw new Error(`Target parent directory does not exist: ${targetParent}`);
-    }
-
-    // Check if target already exists
-    const targetStats = await fs.promises.stat(to).catch(() => null);
-    if (targetStats) {
-      throw new Error(`Target path already exists: ${to}`);
-    }
-
-    // Copy using cp command with recursive flag
-    await this.runCommand(`cp -r ${escapeShellArg(from)} ${escapeShellArg(to)}`);
-  }
-
-  /**
-   * Decide what run this boot continues with, given execution history that
-   * was not (or could not be) rolled back: a continuation from the newest
-   * completed codon when git holds its checkpoint, otherwise a fresh run.
-   * The state manager picks the seed; this method only acts on it. The
-   * checkpoint repository is reused whole or rebuilt empty, never partially,
-   * so if the newest completed codon's checkpoint is missing no older one is
-   * held either; there is no older seed to fall back to. A fresh run over
-   * existing history is snapshotted first: rig setup deletes its copy.to
-   * directories and every codon re-runs.
-   *
-   * On return `currentRunId` is set. Throws when checkpoint storage cannot
-   * be read.
-   */
+  /** StateManager prepares recovery; the runtime starts the selected run. */
   private async establishRunFromHistory(): Promise<void> {
-    const seed = await this.stateManager.findContinuationSeed();
-
-    if (seed?.confirmed) {
-      this.logger.log(`Resuming from last completed codon: ${seed.codonId} in run ${seed.runId}`);
-      await this.startNewRun({
-        type: "continuation",
-        source: { runId: seed.runId, afterCodon: seed.codonId, checkpointSha: seed.sha },
-        reason: "continue",
-      });
-      return;
-    }
-
-    if (seed) {
-      const message =
-        `Recovery degraded: newest completed codon ${seed.codonId} (run ${seed.runId}) has no ` +
-        `git-confirmed completion checkpoint (reference ${JSON.stringify(seed.sha)}); ` +
-        "starting fresh instead";
-      this.logger.log(message, "error");
-      this.emitErrorEvent(message);
-    }
-
-    // No seedable completed codon — start fresh. A fresh run's rig setup
-    // deletes its copy.to directories and every codon re-runs, so when there
-    // is history on disk snapshot the work tree first. The failed-thread
-    // ladder does this in rung 2; this is the non-failed counterpart. Any run
-    // at all counts as history: a kill during the first rig setup, before
-    // CodonStarted was persisted, leaves a zero-codon run and a partly
-    // mutated tree.
-    if (this.stateManager.getState().runs.length > 0 && !this.bootRecoverySnapshot) {
-      await this.snapshotWorkspaceForRecovery("fresh run over existing history");
-    }
-    await this.startNewRun();
+    const conditions = await this.stateManager.prepareRunFromHistory({
+      shouldAbort: () => this.isShuttingDown,
+      onProgress: (progress) => this.reportRollbackProgress(progress),
+    });
+    await this.startNewRun(conditions);
   }
 
   /** Emit a non-fatal `error` event with the given message. */
@@ -6700,70 +4755,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   }
 
   /**
-   * Decide which archive-manifest entries a rollback to `targetSha` restores:
-   * exactly the entries archived strictly after the target on the line being
-   * abandoned (`git rev-list target..originHead`), plus 'orphan' entries.
-   * Entries at or before the target, on unrelated timelines, or with SHAs the
-   * repository does not know stay archived (the last with a warning). The
-   * manifest is not a checkpoint registry — most checkpoints never appear in
-   * it — so its list order says nothing about what to restore (#228).
-   *
-   * Read-only git work: call it BEFORE the first mutation, with `originHead`
-   * captured before any intermediate checkout moves HEAD. Storage trouble
-   * surfaces as CheckpointStorageError so start() stops rather than restoring
-   * an incomplete selection.
-   */
-  private async planArchiveRestore(
-    targetSha: string,
-    originHead?: string | null,
-  ): Promise<import("./archive-manifest.js").ArchiveEntry[]> {
-    if (this.archiveManifest.getManifest().entries.length === 0) {
-      return [];
-    }
-    const head = originHead ?? (await this.checkpointGit.getHeadSha());
-    if (!head) {
-      throw new CheckpointStorageError(
-        "Could not resolve checkpoint HEAD to select archive entries for rollback",
-      );
-    }
-    const reachableAfterTarget = await this.checkpointGit.shasBetween(targetSha, head);
-    const knownShas = await this.checkpointGit.getAllCheckpointShas();
-    const entries = this.archiveManifest.selectEntriesToRestore(reachableAfterTarget, knownShas);
-    if (entries.length > 0) {
-      this.logger.log(`Found ${entries.length} archive entries to restore during rollback`);
-    }
-    return entries;
-  }
-
-  /**
-   * Put the work tree at a checkpoint: check the commit out, copy the
-   * archived files `planArchiveRestore` selected back into place, and drop
-   * exactly the restored entries from the manifest (which lives outside the
-   * work tree, so the checkout never touches it). Every rollback path ends
-   * with this; it is the one place the archive-rewind protocol lives. The
-   * caller has already preflighted `sha` (a full, git-confirmed id),
-   * planned the restore, and snapshotted the tree, so this changes files
-   * from its first step.
-   */
-  private async restoreWorkTreeToCheckpoint(
-    sha: string,
-    entriesToRestore: import("./archive-manifest.js").ArchiveEntry[],
-  ): Promise<void> {
-    await this.checkpointGit.resetToCheckpoint(sha);
-
-    // Archive restoration must not START once shutdown has begun.
-    if (this.isShuttingDown) {
-      throw new Error("Rollback aborted after reset: shutdown in progress");
-    }
-    if (entriesToRestore.length > 0) {
-      const results = await this.restoreArchiveEntries(entriesToRestore, sha);
-      await this.archiveManifest.removeEntries(
-        results.filter((r) => r.success).map((r) => r.entry),
-      );
-    }
-  }
-
-  /**
    * Fail a codon that is in `starting` (rig work done, no runner yet) with a
    * non-retriable reason, applying the codon's failure policy exactly as the
    * missing-continuation-session path does.
@@ -6773,12 +4764,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     codon: Codon,
     message: string,
     error: Error,
+    alreadyFailed = false,
   ): Promise<void> {
     this.logger.log(message, "error");
     this.codonFailureError = error;
     this.codonFailureReason = { type: "unknown", retriable: false, message };
 
-    if (this.currentRunId) {
+    if (!alreadyFailed && this.currentRunId) {
       this.stateManager.transition({
         type: "CodonTransitioned",
         data: {
@@ -6797,46 +4789,61 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       });
     }
 
-    this.emitErrorEvent(message, { codon: codon.id, fatal: true, severity: ErrorSeverity.CODON });
+    this.emitErrorEvent(message, {
+      codon: codon.id,
+      fatal: true,
+      severity: ErrorSeverity.CODON,
+    });
 
     const { action } = this.retryCoordinator.decide(codonId, codon, this.codonFailureReason);
 
     if (action === "continue") {
-      this.emit("event", {
-        id: EventId(generateId()),
-        timestamp: new Date().toISOString(),
-        type: "codon.completed",
-        data: {
-          codonId,
-          success: false,
-          cost: 0,
-          duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
-          exitStatus: { type: "error", code: -1 },
-          failureReason: this.codonFailureReason,
-          failureIgnored: true,
-        },
-      } as CodonCompletedEvent);
+      this.emitIgnoredStartFailure(codonId, -1);
       this.emitInfoEvent(`Codon ${codonId} failed at start, continuing (onFailure=ignore)`);
-      this.cleanupCurrentCodon();
-      await this.stateManager.waitForPendingTransitions();
-      await this.stateManager.expandNextIterationForCodon({
-        codonId: CodonId(codonId),
-        contextExceeded: false,
-        budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
-      });
-      if (this.config.autostart) {
-        await this.autoStartNextCodon();
-      }
+      await this.advanceAfterIgnoredStartFailure(codonId);
       return;
     }
 
+    await this.finishStartFailure(action, "codon failed at start");
+  }
+
+  private async finishStartFailure(action: string, reason: string): Promise<void> {
     this.cleanupCurrentCodon();
-    if (action === "shutdown") {
-      if (this.currentRunId) {
-        this.stateManager.transition({ type: "RunFailed", data: { runId: this.currentRunId } });
-        await this.stateManager.waitForPendingTransitions();
-      }
-      await this.shutdown("codon failed at start");
+    if (action !== "shutdown") return;
+    if (this.currentRunId) {
+      this.stateManager.transition({ type: "RunFailed", data: { runId: this.currentRunId } });
+      await this.stateManager.waitForPendingTransitions();
+    }
+    await this.shutdown(reason);
+  }
+
+  private emitIgnoredStartFailure(codonId: string, exitCode: number): void {
+    this.emit("event", {
+      id: EventId(generateId()),
+      timestamp: new Date().toISOString(),
+      type: "codon.completed",
+      data: {
+        codonId,
+        success: false,
+        cost: 0,
+        duration: Date.now() - (this.currentCodon?.startTime?.getTime() || Date.now()),
+        exitStatus: { type: "error", code: exitCode },
+        failureReason: this.codonFailureReason,
+        failureIgnored: true,
+      },
+    } as CodonCompletedEvent);
+  }
+
+  private async advanceAfterIgnoredStartFailure(codonId: string): Promise<void> {
+    this.cleanupCurrentCodon();
+    await this.stateManager.waitForPendingTransitions();
+    await this.stateManager.expandNextIterationForCodon({
+      codonId: CodonId(codonId),
+      contextExceeded: false,
+      budgetExceeded: this.isLoopOrCodonBudgetExceeded(codonId),
+    });
+    if (this.config.autostart) {
+      await this.autoStartNextCodon();
     }
   }
 
@@ -6845,66 +4852,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   // -------------
 
   /**
-   * Initialize checkpoint system. git must be runnable: a missing git fails
-   * the boot here (GitUnavailableError) rather than silently downgrading to a
-   * run without rollback or crash recovery. The CLI proves the same thing
-   * even earlier, before the execution directory is set up.
-   */
-  private async initializeCheckpoints(): Promise<void> {
-    await assertGitAvailable();
-
-    // initialize() returns a real HEAD or throws; a repository on disk that
-    // git cannot use is rebuilt there.
-    await this.checkpointGit.initialize();
-
-    // Load the archive manifest (for archiveOnSuccess feature)
-    // Note: The manifest is NOT checkpointed because it lives outside the git work tree
-    // (at .hankweave/archive-manifest.json, sibling to agentRoot/). Instead, its state
-    // is managed programmatically during rollback: planArchiveRestore() selects entries
-    // by git reachability and removeEntries() drops exactly the restored ones.
-    await this.archiveManifest.load();
-
-    this.logger.log("Checkpoint system initialized");
-  }
-
-  /**
-   * Add checkpoint patterns for a codon (cumulative)
-   */
-  /**
-   * Register the checkpoint patterns in force at `codonId` (plan order,
-   * loop iterations included). Not being in the plan is a programming error
-   * worth a loud log, not a silent empty pattern set.
-   */
-  private async registerCheckpointPatternsThrough(
-    codonId: CodonId,
-    includeSelf: boolean,
-  ): Promise<void> {
-    const patterns = checkpointPatternsThrough(
-      this.stateManager.getState().executionPlan,
-      codonId,
-      includeSelf,
-    );
-    if (patterns === null) {
-      this.logger.log(
-        `Codon ${codonId} is not in the execution plan; no checkpoint patterns registered`,
-        "error",
-      );
-      return;
-    }
-    await this.addCheckpointPatterns(patterns);
-  }
-
-  private async addCheckpointPatterns(patterns: string[]): Promise<void> {
-    if (patterns.length === 0) return;
-
-    // Add new patterns
-    await this.checkpointGit.addPatterns(patterns);
-    this.logger.log(`Added checkpoint patterns: ${patterns.join(", ")}`);
-  }
-
-  /**
-   * Create a checkpoint commit. Returns the commit SHA; throws on any failure
-   * (never returns without a checkpoint).
+   * Cut a checkpoint on the current run's timeline (StateManager records
+   * the id on the codon). Returns the commit SHA; throws on any failure
+   * (never returns without a checkpoint), after reporting it to clients.
    */
   private async createCheckpoint(info: CheckpointInfo): Promise<string> {
     this.logger.log(
@@ -6913,68 +4863,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(`[CHECKPOINT-DEBUG] Checkpoint info: ${JSON.stringify(info)}`);
 
     try {
-      // Format commit message
-      const firstLine = `${info.status}:${info.codonId} [run:${info.runId}] ${info.codonName}`;
-      const body = [
-        "",
-        `Codon: ${info.codonName}`,
-        `Status: ${info.status}`,
-        `Timestamp: ${info.timestamp}`,
-      ];
-
-      if (info.duration !== undefined) {
-        body.push(`Duration: ${info.duration}ms`);
-      }
-
-      const commitMessage = `${firstLine}\n${body.join("\n")}`;
-      this.logger.log(`[CHECKPOINT-DEBUG] Commit message: ${commitMessage}`);
-
-      // Get current run's branch
-      const currentRun = this.stateManager.getCurrentRun();
-      const branchName = currentRun?.gitBranch || `run-${this.currentRunId}`;
-      this.logger.log(`[CHECKPOINT-DEBUG] Using branch: ${branchName}`);
-
-      // Create checkpoint on run-specific branch
-      await this.checkpointGit.switchToBranch(branchName);
-      const commitHash = await this.checkpointGit.commit(commitMessage);
-
-      this.logger.log(`[CHECKPOINT-DEBUG] Checkpoint commit returned: ${commitHash}`);
-
-      if (commitHash) {
-        this.logger.log(
-          `[CHECKPOINT-DEBUG] Created checkpoint: ${commitHash} (${info.status}) on branch ${branchName}`,
-        );
-
-        // Fire checkpoint created transition to store SHA in state
-        const checkpointType =
-          info.status === "rig-setup"
-            ? "rig-setup"
-            : info.status === "completed"
-              ? "completed"
-              : info.status === "error"
-                ? "error"
-                : "skipped";
-
-        this.logger.log(
-          `[CHECKPOINT-DEBUG] Firing CheckpointCreated transition with type: ${checkpointType}`,
-        );
-
-        if (this.currentRunId) {
-          this.stateManager.transition({
-            type: "CheckpointCreated",
-            data: {
-              runId: this.currentRunId,
-              codonId: CodonId(info.codonId),
-              checkpointType,
-              sha: commitHash,
-              branch: branchName,
-            },
-          });
-        }
-
-        return commitHash;
-      }
-      throw new Error("checkpoint commit returned no SHA");
+      return await this.stateManager.createCheckpoint(info);
     } catch (error) {
       // Disk full, a broken repo, a stale lock — whatever it is, it must be
       // loud and it must reach the caller. Swallowing it here (and switching
@@ -7017,6 +4906,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     this.logger.log(`Shutting down server: ${reason}`);
     this.isShuttingDown = true;
 
+    // Remove the hank's ignore-rules mirror repo (scratch dir in tmp).
+    try {
+      this.hankDir?.dispose();
+    } catch (error) {
+      this.logger.log(`Failed to dispose ignore mirror: ${toError(error).message}`, "debug");
+    }
+
     // Arm the force-exit backstop BEFORE any awaited cleanup, so a wedged step
     // can never leave the process hanging after a fatal condition was detected.
     if (shutdownWatchdogWanted(exitProcess, reason)) {
@@ -7049,7 +4945,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       try {
         await this.createCheckpoint({
           status: "exit",
-          codonId: CodonId(this.currentCodon.codon.id),
+          codonId: this.currentCodon.codonId,
           codonName: this.currentCodon.codon.name,
           runId: this.currentRunId || RunId("unknown"),
           timestamp: new Date().toISOString(),
@@ -7323,6 +5219,14 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    */
   async forceShutdown(reason: string, exitProcess = true): Promise<void> {
     this.logger.log(`Force shutting down server: ${reason}`);
+
+    // A direct force shutdown (no graceful pass first) must still remove
+    // the hank's ignore-rules mirror scratch dir.
+    try {
+      this.hankDir?.dispose();
+    } catch (error) {
+      this.logger.log(`Failed to dispose ignore mirror: ${toError(error).message}`, "debug");
+    }
 
     // Arm the backstop here too: forceShutdown still awaits forceKill, which can
     // wedge on an in-flight SDK stream. forceShutdown always exits with code 1,

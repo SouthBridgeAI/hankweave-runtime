@@ -12,18 +12,23 @@
  * Uses a REAL temp checkpoint repo so the reachability sets come from actual
  * `git rev-list` / `git log --all` calls, exactly as the runtime computes them.
  */
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type ArchiveEntry, ArchiveManifestManager } from "../../server/archive-manifest";
-import { CheckpointGit } from "../../server/checkpoint-git";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import { Logger } from "../../server/utils";
+import { type ArchiveEntry, ArchiveManifestManager } from "../../server/workspace/archive-manifest";
+import type { CheckpointId } from "../../server/workspace/checkpoints.js";
+import { Workspace } from "../../server/workspace/index.js";
+import { requireHistoryTip } from "../utils/checkpoint-history.js";
 
 function makeEntry(overrides: Partial<ArchiveEntry> & { checkpointSha: string }): ArchiveEntry {
   return {
     sourcePath: overrides.sourcePath ?? "some/file.md",
-    archivePath: overrides.archivePath ?? "rigArchive/codon/some/file.md",
+    archivePath:
+      overrides.archivePath ?? `rigArchive/codon/${overrides.sourcePath ?? "some/file.md"}`,
     codonId: overrides.codonId ?? "codon-x",
     checkpointSha: overrides.checkpointSha,
     timestamp: overrides.timestamp ?? new Date().toISOString(),
@@ -35,15 +40,15 @@ describe("archive manifest rollback selection (issue #228)", () => {
   let tempDir: string;
   let logPath: string;
   let logger: Logger;
-  let checkpointGit: CheckpointGit;
+  let workspace: Workspace;
   let manifest: ArchiveManifestManager;
 
   // Real checkpoint history: c1 -> c2 -> c3 on main, plus f1 on a sibling
   // branch off c2. Rolling back "to c2 from c3" abandons only c3.
-  let c1: string;
-  let c2: string;
-  let c3: string;
-  let f1: string;
+  let c1: CheckpointId;
+  let c2: CheckpointId;
+  let c3: CheckpointId;
+  let f1: CheckpointId;
 
   beforeEach(async () => {
     // OS tmpdir, not tests/test-area: real git repos in synced folders are
@@ -52,21 +57,34 @@ describe("archive manifest rollback selection (issue #228)", () => {
     logPath = path.join(tempDir, "test.log");
     logger = new Logger(logPath);
 
-    checkpointGit = new CheckpointGit(tempDir, tempDir, logger);
-    await checkpointGit.initialize();
-    await checkpointGit.addPatterns(["*.txt"]);
+    workspace = await Workspace.open(new ExecutionLayout(tempDir, { agentRootPath: tempDir }), {
+      logger,
+    });
 
     await fs.promises.writeFile(path.join(tempDir, "w.txt"), "1");
-    c1 = (await checkpointGit.commit("c1")) ?? "";
+    c1 = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "c1",
+      patterns: ["*.txt"],
+    });
     await fs.promises.writeFile(path.join(tempDir, "w.txt"), "2");
-    c2 = (await checkpointGit.commit("c2")) ?? "";
+    c2 = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "c2",
+      patterns: ["*.txt"],
+    });
 
-    // Sibling branch off c2 (commit() restores the original branch after)
+    // Sibling timeline off c2, then back to main
+    const sibling = workspace.checkpoints.history("sibling");
     await fs.promises.writeFile(path.join(tempDir, "w.txt"), "f");
-    f1 = (await checkpointGit.commit("f1", { branch: "sibling" })) ?? "";
+    f1 = await sibling.checkpoint({ parent: c2, message: "f1", patterns: ["*.txt"] });
 
     await fs.promises.writeFile(path.join(tempDir, "w.txt"), "3");
-    c3 = (await checkpointGit.commit("c3")) ?? "";
+    c3 = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "c3",
+      patterns: ["*.txt"],
+    });
 
     expect(c1 && c2 && c3 && f1).toBeTruthy();
 
@@ -80,12 +98,14 @@ describe("archive manifest rollback selection (issue #228)", () => {
   });
 
   /** Compute the sets the runtime hands to selectEntriesToRestore for a rollback to `target`. */
-  async function setsFor(target: string): Promise<{ after: Set<string>; known: Set<string> }> {
-    const head = await checkpointGit.getHeadSha();
+  async function setsFor(
+    target: CheckpointId,
+  ): Promise<{ after: Set<string>; known: Set<string> }> {
+    const head = await workspace.checkpoints.history("main").tip();
     if (!head) throw new Error("no HEAD");
     return {
-      after: await checkpointGit.shasBetween(target, head),
-      known: await checkpointGit.getAllCheckpointShas(),
+      after: await workspace.checkpoints.reachableDifference(head, target),
+      known: await workspace.checkpoints.allReachableIds(),
     };
   }
 

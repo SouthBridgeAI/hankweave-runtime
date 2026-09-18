@@ -870,7 +870,7 @@ describe("Loop E2E Test", () => {
       expect(restore.failedPaths).toEqual([
         {
           path: "temp/iteration.json",
-          error: expect.stringContaining("Destination exists in target checkpoint tree"),
+          error: expect.stringContaining("Destination existed before archive restoration"),
         },
       ]);
       expect(restore.status).toBe("failed");

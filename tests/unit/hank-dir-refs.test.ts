@@ -1,56 +1,53 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import * as fs from "node:fs";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { HankDir, type HankRef, type ResolvedPath } from "../../server/hank-dir.js";
 import {
   forbiddenRefSpelling,
   lexicallyEscapesBase,
   normalizeRefField,
-  RefReadError,
-  readRef,
   refViolationMessage,
-  resolveRef,
-  resolveRefField,
-  type ValidatedRef,
-  validateRef,
-} from "../../server/hank-refs";
+} from "../../server/utils.js";
 
-// validateRef returns the branded ref for a legal spelling; these unwrap the
-// union for assertions.
-const kindOf = (r: ReturnType<typeof validateRef>) => (typeof r === "string" ? undefined : r.kind);
-const vet = (raw: string, baseDir: string, hankDir: string): ValidatedRef => {
-  const r = validateRef(raw, baseDir, hankDir);
-  if (typeof r !== "string") throw new Error(`expected a legal ref, got ${r.kind}`);
-  return r;
-};
+const kindOf = (r: ReturnType<HankRef["validate"]>) => r?.kind;
 
-describe("resolveRef", () => {
-  const base = path.resolve(os.tmpdir(), "hank-refs-base");
+function resolveRefField(
+  hank: HankDir,
+  value: string | string[] | undefined | null,
+  baseDir: string = hank.root,
+): ResolvedPath[] {
+  return normalizeRefField(value).map((ref) => hank.ref(ref, { baseDir: baseDir }).path);
+}
+
+describe("HankRef.path", () => {
+  const base = path.resolve(os.tmpdir(), "hank-dir-refs-base");
+  const hank = new HankDir(base);
 
   test("resolves a relative ref against the base dir", () => {
-    expect(resolveRef("prompts/main.md", base) as string).toBe(
+    expect(hank.ref("prompts/main.md", { baseDir: base }).path as string).toBe(
       path.join(base, "prompts", "main.md"),
     );
   });
 
   test("passes an absolute ref through exactly as written", () => {
     const abs = `${base}${path.sep}a${path.sep}..${path.sep}b.md`;
-    expect(resolveRef(abs, base) as string).toBe(abs);
+    expect(hank.ref(abs, { baseDir: base }).path as string).toBe(abs);
   });
 
   test("resolves .. traversal in relative refs", () => {
-    expect(resolveRef("../shared/x.md", base) as string).toBe(
+    expect(hank.ref("../shared/x.md", { baseDir: base }).path as string).toBe(
       path.join(path.dirname(base), "shared", "x.md"),
     );
   });
 
   test("throws on an empty ref", () => {
-    expect(() => resolveRef("", base)).toThrow(/empty file reference/);
+    expect(() => hank.ref("", { baseDir: base }).path).toThrow(/empty file reference/);
   });
 
   test("throws on a relative base dir", () => {
-    expect(() => resolveRef("a.md", "relative/dir")).toThrow(/must be absolute/);
-    expect(() => resolveRef("a.md", "")).toThrow(/must be absolute/);
+    expect(() => hank.ref("a.md", { baseDir: "relative/dir" }).path).toThrow(/must be absolute/);
+    expect(() => hank.ref("a.md", { baseDir: "" }).path).toThrow(/must be absolute/);
   });
 });
 
@@ -77,21 +74,47 @@ describe("normalizeRefField", () => {
   });
 });
 
-describe("resolveRefField", () => {
-  const base = path.resolve(os.tmpdir(), "hank-refs-base");
+describe("reference field resolution", () => {
+  const base = path.resolve(os.tmpdir(), "hank-dir-refs-base");
+  const hank = new HankDir(base);
 
   test("composes normalization and resolution", () => {
-    expect(resolveRefField("a.md", base) as string[]).toEqual([path.join(base, "a.md")]);
-    expect(resolveRefField(["a.md", "b/c.md"], base) as string[]).toEqual([
+    expect(resolveRefField(hank, "a.md", base) as string[]).toEqual([path.join(base, "a.md")]);
+    expect(resolveRefField(hank, ["a.md", "b/c.md"], base) as string[]).toEqual([
       path.join(base, "a.md"),
       path.join(base, "b", "c.md"),
     ]);
-    expect(resolveRefField(undefined, base) as string[]).toEqual([]);
-    expect(resolveRefField("", base) as string[]).toEqual([]);
+    expect(resolveRefField(hank, undefined, base)).toEqual([]);
+    expect(resolveRefField(hank, "", base)).toEqual([]);
   });
 
   test("an empty element inside an array throws", () => {
-    expect(() => resolveRefField(["a.md", ""], base)).toThrow(/empty file reference/);
+    expect(() => resolveRefField(hank, ["a.md", ""], base)).toThrow(/empty file reference/);
+  });
+});
+
+describe("HankRef.isRoot", () => {
+  const hankDir = path.resolve(os.tmpdir(), "hank-dir-refs-root", "hank");
+  const hank = new HankDir(hankDir);
+
+  test("flags every lexical spelling of the hank dir", () => {
+    expect(hank.ref(".", { baseDir: hankDir }).isRoot()).toBe(true);
+    expect(hank.ref("./", { baseDir: hankDir }).isRoot()).toBe(true);
+    expect(hank.ref("sub/..", { baseDir: hankDir }).isRoot()).toBe(true);
+    expect(hank.ref(hankDir, { baseDir: hankDir }).isRoot()).toBe(true);
+  });
+
+  test("accepts subdirectories, siblings, and parents", () => {
+    expect(hank.ref("sub", { baseDir: hankDir }).isRoot()).toBe(false);
+    expect(hank.ref("..", { baseDir: hankDir }).isRoot()).toBe(false);
+    expect(hank.ref("../other", { baseDir: hankDir }).isRoot()).toBe(false);
+  });
+
+  test("pure path math: does not follow symlinks", () => {
+    // A ref that only reaches the hank dir through a link is not flagged
+    // here — callers that copy from the live filesystem (config.ts) layer
+    // a realpath comparison on top.
+    expect(hank.ref("../link-to-hank", { baseDir: hankDir }).isRoot()).toBe(false);
   });
 });
 
@@ -108,7 +131,7 @@ describe.skipIf(process.platform === "win32")("absolute refs with .. through a s
   let authoredRef: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-refs-symlink-"));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-dir-refs-symlink-"));
     // The real file, reachable only by traversing the symlink then ..
     fs.mkdirSync(path.join(tempDir, "shared", "subdir"), { recursive: true });
     fs.writeFileSync(path.join(tempDir, "shared", "prompt.md"), "reached through the symlink");
@@ -131,20 +154,21 @@ describe.skipIf(process.platform === "win32")("absolute refs with .. through a s
   });
 
   // The resolver's passthrough contract is unchanged; POLICY (rejecting this
-  // spelling entirely) lives in validateRef, tested below.
-  test("resolveRef keeps an absolute authored ref exactly as written", () => {
-    expect(resolveRef(authoredRef, hankDir) as string).toBe(authoredRef);
+  // spelling entirely) lives in validate(), tested below.
+  test("path keeps an absolute authored ref exactly as written", () => {
+    expect(new HankDir(hankDir).ref(authoredRef, { baseDir: hankDir }).path as string).toBe(
+      authoredRef,
+    );
   });
 
-  test("readRef reads the file the OS would, not the lexically collapsed one", () => {
-    // Forged brand: policy forbids absolute refs, so no ValidatedRef like
-    // this can exist in production — the cast documents the RESOLVER's
-    // passthrough semantics in isolation from policy.
-    expect(readRef(authoredRef as ValidatedRef, hankDir).text).toBe("reached through the symlink");
+  test("readText rejects an absolute spelling before reading", () => {
+    expect(() =>
+      new HankDir(hankDir).ref(authoredRef, { baseDir: hankDir }).readText({ what: "Prompt" }),
+    ).toThrow(/absolute or drive-qualified/);
   });
 
-  test("validateRef rejects the authored absolute spelling outright", () => {
-    expect(validateRef(authoredRef, hankDir, hankDir)).toEqual({
+  test("validate rejects the authored absolute spelling outright", () => {
+    expect(new HankDir(hankDir).ref(authoredRef, { baseDir: hankDir }).validate()).toEqual({
       kind: "absolute",
       raw: authoredRef,
     });
@@ -189,35 +213,38 @@ describe("lexicallyEscapesBase", () => {
   );
 });
 
-describe("validateRef", () => {
+describe("HankRef.validate", () => {
   let tempDir: string;
   let hankDir: string;
+  let hank: HankDir;
   let sentinelsDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-refs-policy-"));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-dir-refs-policy-"));
     hankDir = path.join(tempDir, "hank");
     sentinelsDir = path.join(hankDir, "sentinels");
     fs.mkdirSync(path.join(hankDir, "prompts"), { recursive: true });
     fs.mkdirSync(sentinelsDir);
+    hank = new HankDir(hankDir);
     fs.writeFileSync(path.join(hankDir, "prompts", "x.md"), "in-hank prompt");
     fs.writeFileSync(path.join(tempDir, "outside.md"), "outside the hank");
   });
 
   afterEach(() => {
+    hank.dispose();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   test("forbidden spellings are rejected with their kind, on every platform", () => {
-    expect(kindOf(validateRef("/etc/passwd", hankDir, hankDir))).toBe("absolute");
-    expect(kindOf(validateRef("C:/x", hankDir, hankDir))).toBe("absolute");
-    expect(kindOf(validateRef("C:foo", hankDir, hankDir))).toBe("absolute");
-    expect(kindOf(validateRef("..\\..\\outside", hankDir, hankDir))).toBe("backslash");
-    expect(kindOf(validateRef("a\0b", hankDir, hankDir))).toBe("invalid");
+    expect(kindOf(hank.ref("/etc/passwd", { baseDir: hankDir }).validate())).toBe("absolute");
+    expect(kindOf(hank.ref("C:/x", { baseDir: hankDir }).validate())).toBe("absolute");
+    expect(kindOf(hank.ref("C:foo", { baseDir: hankDir }).validate())).toBe("absolute");
+    expect(kindOf(hank.ref("..\\..\\outside", { baseDir: hankDir }).validate())).toBe("backslash");
+    expect(kindOf(hank.ref("a\0b", { baseDir: hankDir }).validate())).toBe("invalid");
   });
 
   test("../outside.md from the hank root escapes", () => {
-    const v = validateRef("../outside.md", hankDir, hankDir);
+    const v = hank.ref("../outside.md", { baseDir: hankDir }).validate();
     expect(kindOf(v)).toBe("escapes");
   });
 
@@ -225,45 +252,37 @@ describe("validateRef", () => {
     // Same verdict at the schema layer: R2 is defined on the spelling.
     const raw = `../${path.basename(hankDir)}/prompts/x.md`;
     expect(lexicallyEscapesBase(raw)).toBe(true);
-    expect(kindOf(validateRef(raw, hankDir, hankDir))).toBe("escapes");
+    expect(kindOf(hank.ref(raw, { baseDir: hankDir }).validate())).toBe("escapes");
   });
 
   test("..templates and internal .. hops that stay inside are legal", () => {
-    expect(validateRef("..templates/x.md", hankDir, hankDir) as string).toBe("..templates/x.md");
-    expect(validateRef("sub/../prompts/x.md", hankDir, hankDir) as string).toBe(
-      "sub/../prompts/x.md",
-    );
+    expect(hank.ref("..templates/x.md", { baseDir: hankDir }).validate()).toBeNull();
+    expect(hank.ref("sub/../prompts/x.md", { baseDir: hankDir }).validate()).toBeNull();
   });
 
   test("from sentinels/, climbing back into the hank is legal but leaving it is not", () => {
-    expect(validateRef("../prompts/x.md", sentinelsDir, hankDir) as string).toBe("../prompts/x.md");
-    expect(kindOf(validateRef("../../x.md", sentinelsDir, hankDir))).toBe("escapes");
+    expect(hank.ref("../prompts/x.md", { baseDir: sentinelsDir }).validate()).toBeNull();
+    expect(kindOf(hank.ref("../../x.md", { baseDir: sentinelsDir }).validate())).toBe("escapes");
   });
 
   test("a missing file is not a policy violation (existence checks own it)", () => {
-    expect(validateRef("prompts/missing.md", hankDir, hankDir) as string).toBe(
-      "prompts/missing.md",
-    );
-    expect(validateRef("no-such-dir/deep/x.md", hankDir, hankDir) as string).toBe(
-      "no-such-dir/deep/x.md",
-    );
+    expect(hank.ref("prompts/missing.md", { baseDir: hankDir }).validate()).toBeNull();
+    expect(hank.ref("no-such-dir/deep/x.md", { baseDir: hankDir }).validate()).toBeNull();
   });
 
   test("a component that is a plain file (ENOTDIR below it) defers like a missing file", () => {
-    expect(validateRef("prompts/x.md/impossible.md", hankDir, hankDir) as string).toBe(
-      "prompts/x.md/impossible.md",
-    );
+    expect(hank.ref("prompts/x.md/impossible.md", { baseDir: hankDir }).validate()).toBeNull();
   });
 
   test("wrong-case spelling of an on-disk name is never a symlink violation", () => {
     // Case-insensitive FS: legal ref. Case-sensitive FS: merely missing.
-    expect(validateRef("Prompts/x.md", hankDir, hankDir) as string).toBe("Prompts/x.md");
+    expect(hank.ref("Prompts/x.md", { baseDir: hankDir }).validate()).toBeNull();
   });
 
   describe.skipIf(process.platform === "win32")("symlink rejection (R3)", () => {
     test("final component is a symlink", () => {
       fs.symlinkSync(path.join(hankDir, "prompts", "x.md"), path.join(hankDir, "alias.md"));
-      expect(validateRef("alias.md", hankDir, hankDir)).toEqual({
+      expect(hank.ref("alias.md", { baseDir: hankDir }).validate()).toEqual({
         kind: "symlink",
         raw: "alias.md",
         component: path.join(fs.realpathSync(hankDir), "alias.md"),
@@ -272,27 +291,29 @@ describe("validateRef", () => {
 
     test("a parent component is a symlink", () => {
       fs.symlinkSync(path.join(hankDir, "prompts"), path.join(hankDir, "link"));
-      expect(kindOf(validateRef("link/x.md", hankDir, hankDir))).toBe("symlink");
+      expect(kindOf(hank.ref("link/x.md", { baseDir: hankDir }).validate())).toBe("symlink");
     });
 
     test("a dangling symlink is a symlink first, not a missing file", () => {
       fs.symlinkSync(path.join(hankDir, "gone.md"), path.join(hankDir, "dangling.md"));
-      expect(kindOf(validateRef("dangling.md", hankDir, hankDir))).toBe("symlink");
+      expect(kindOf(hank.ref("dangling.md", { baseDir: hankDir }).validate())).toBe("symlink");
     });
 
     test("missing leaf behind a real symlink parent is still rejected", () => {
       fs.symlinkSync(path.join(hankDir, "prompts"), path.join(hankDir, "link"));
-      expect(kindOf(validateRef("link/missing.md", hankDir, hankDir))).toBe("symlink");
+      expect(kindOf(hank.ref("link/missing.md", { baseDir: hankDir }).validate())).toBe("symlink");
     });
 
     test("a broken symlink as a parent is still rejected", () => {
       fs.symlinkSync(path.join(hankDir, "gone"), path.join(hankDir, "broken-link"));
-      expect(kindOf(validateRef("broken-link/child", hankDir, hankDir))).toBe("symlink");
+      expect(kindOf(hank.ref("broken-link/child", { baseDir: hankDir }).validate())).toBe(
+        "symlink",
+      );
     });
 
     test("a self-loop symlink parent is a clean violation naming the loop, not ELOOP", () => {
       fs.symlinkSync(path.join(hankDir, "loop"), path.join(hankDir, "loop"));
-      const v = validateRef("loop/child", hankDir, hankDir);
+      const v = hank.ref("loop/child", { baseDir: hankDir }).validate();
       expect(kindOf(v)).toBe("symlink");
       expect(v && "component" in v ? path.basename(v.component) : null).toBe("loop");
     });
@@ -300,7 +321,9 @@ describe("validateRef", () => {
     test("the hank dir reached through a symlinked path is fine (anchor is realpath'd)", () => {
       const aliasedHank = path.join(tempDir, "hank-alias");
       fs.symlinkSync(hankDir, aliasedHank);
-      expect(validateRef("prompts/x.md", aliasedHank, aliasedHank) as string).toBe("prompts/x.md");
+      expect(
+        new HankDir(aliasedHank).ref("prompts/x.md", { baseDir: aliasedHank }).validate(),
+      ).toBeNull();
     });
 
     test("a symlinked BASE dir below the hank is rejected, not silently dissolved", () => {
@@ -308,7 +331,7 @@ describe("validateRef", () => {
       // hank/linked must inspect the AUTHORED route (linked/x.md, through
       // the symlink), not the resolved one (prompts/x.md, clean).
       fs.symlinkSync(path.join(hankDir, "prompts"), path.join(hankDir, "linked"));
-      const v = validateRef("x.md", path.join(hankDir, "linked"), hankDir);
+      const v = hank.ref("x.md", { baseDir: path.join(hankDir, "linked") }).validate();
       expect(kindOf(v)).toBe("symlink");
       expect(v && "component" in v ? path.basename(v.component) : null).toBe("linked");
     });
@@ -324,7 +347,7 @@ describe("validateRef", () => {
       const aliasedHank = path.join(tempDir, "hank-alias2");
       fs.symlinkSync(hankDir, aliasedHank);
       fs.symlinkSync(path.join(hankDir, "prompts"), path.join(hankDir, "linked2"));
-      const v = validateRef("linked2/x.md", aliasedHank, aliasedHank);
+      const v = new HankDir(aliasedHank).ref("linked2/x.md", { baseDir: aliasedHank }).validate();
       expect(kindOf(v)).toBe("symlink");
     });
   });
@@ -348,57 +371,84 @@ describe("refViolationMessage", () => {
   });
 });
 
-describe("readRef", () => {
+describe("HankRef.readText", () => {
   let tempDir: string;
+  let hank: HankDir;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-refs-read-"));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-dir-refs-read-"));
     fs.mkdirSync(path.join(tempDir, "prompts"));
     fs.writeFileSync(path.join(tempDir, "prompts", "main.md"), "hello prompt");
+    hank = new HankDir(tempDir);
   });
 
   afterEach(() => {
+    hank.dispose();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   test("resolves and reads utf-8 content, returning the resolved path", () => {
-    const { path: resolved, text } = readRef(vet("prompts/main.md", tempDir, tempDir), tempDir);
+    const { path: resolved, text } = hank
+      .ref("prompts/main.md", { baseDir: tempDir })
+      .readText({ what: "Prompt" });
     expect(text).toBe("hello prompt");
     expect(resolved as string).toBe(path.join(tempDir, "prompts", "main.md"));
   });
 
-  test("throws RefReadError with authored ref, resolved path, and ENOENT cause", () => {
-    let caught: unknown;
-    try {
-      readRef(vet("prompts/missing.md", tempDir, tempDir), tempDir);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(RefReadError);
-    const err = caught as RefReadError;
-    expect(err.authoredRef).toBe("prompts/missing.md");
-    expect(err.resolvedPath as string).toBe(path.join(tempDir, "prompts", "missing.md"));
-    expect((err.cause as NodeJS.ErrnoException).code).toBe("ENOENT");
-    expect(err.message).toContain("prompts/missing.md");
+  test("missing-file and policy errors retain the caller's context", () => {
+    const options = { what: "Prompt file", context: "codon example" };
+    expect(() => hank.ref("prompts/missing.md", { baseDir: tempDir }).readText(options)).toThrow(
+      `Prompt file not found: ${path.join(tempDir, "prompts", "missing.md")}\n  (codon example)`,
+    );
+    const violation = hank.ref("../outside.md").validate();
+    if (!violation) throw new Error("expected an escape violation");
+    expect(() => hank.ref("../outside.md", { baseDir: tempDir }).readText(options)).toThrow(
+      `${refViolationMessage(violation)}\n  (codon example)`,
+    );
   });
 
   test("rejects a directory ref with 'is not a regular file', not a raw EISDIR", () => {
-    expect(() => readRef(vet("prompts", tempDir, tempDir), tempDir)).toThrow(
+    expect(() => hank.ref("prompts", { baseDir: tempDir }).readText({ what: "Prompt" })).toThrow(
       /is not a regular file/,
     );
   });
+
+  test("propagates non-ENOENT read errors unchanged", () => {
+    const failure = Object.assign(new Error("simulated read failure"), { code: "EIO" });
+    const readSpy = spyOn(fs, "readFileSync").mockImplementation(() => {
+      throw failure;
+    });
+    let caught: unknown;
+    try {
+      hank.ref("prompts/main.md", { baseDir: tempDir }).readText({ what: "Prompt" });
+    } catch (error) {
+      caught = error;
+    } finally {
+      readSpy.mockRestore();
+    }
+    expect(caught).toBe(failure);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "revalidates a previously vetted ref before reading",
+    () => {
+      const ref = hank.ref("prompts/main.md");
+      expect(ref.validate()).toBeNull();
+      const target = path.join(tempDir, "prompts", "main.md");
+      fs.unlinkSync(target);
+      fs.symlinkSync("missing.md", target);
+      expect(() => ref.readText({ what: "Prompt" })).toThrow(/symlink/);
+    },
+  );
 });
 
-describe.skipIf(process.platform === "win32")("readRef non-regular file guard", () => {
-  // readRef is the choke point for every nested config ref (sentinel
-  // userPromptFile/systemPromptFile/schemaFile, global system prompts).
-  // Reading a FIFO would block codon startup forever, so the guard must
-  // reject it before the read.
-  const { execSync } = require("node:child_process") as typeof import("node:child_process");
+describe.skipIf(process.platform === "win32")("HankRef.readText non-regular file guard", () => {
+  // A FIFO would block codon startup forever, so reject it before reading.
+  const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-refs-fifo-"));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hank-dir-refs-fifo-"));
   });
 
   afterEach(() => {
@@ -407,14 +457,10 @@ describe.skipIf(process.platform === "win32")("readRef non-regular file guard", 
 
   test("rejects a FIFO ref before any read", () => {
     const fifo = path.join(tempDir, "pipe.md");
-    execSync(`mkfifo ${JSON.stringify(fifo)}`);
-    let caught: unknown;
-    try {
-      readRef(vet("pipe.md", tempDir, tempDir), tempDir);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(RefReadError);
-    expect(((caught as RefReadError).cause as Error).message).toMatch(/is not a regular file/);
+    execFileSync("mkfifo", [fifo]);
+    const hank = new HankDir(tempDir);
+    expect(() => hank.ref("pipe.md", { baseDir: tempDir }).readText({ what: "Prompt" })).toThrow(
+      /is not a regular file/,
+    );
   });
 });

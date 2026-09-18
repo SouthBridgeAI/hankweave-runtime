@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import type { CheckpointGit } from "../../server/checkpoint-git";
 import { ExecutionLayout } from "../../server/execution-layout";
 import { InvalidTransitionError, PersistenceError, StateManager } from "../../server/state-manager";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types";
 import type * as ST from "../../server/types/state-types";
 import { Logger } from "../../server/utils";
+import {
+  CheckpointId,
+  type CheckpointRecord,
+  type WorkspaceCheckpoints,
+} from "../../server/workspace/checkpoints.js";
 import { createTestCodon, createTestConfig } from "../utils/test-codon-factory.js";
 
 // Test directory setup
@@ -500,6 +504,220 @@ describe("StateManager", () => {
       const statePath = path.join(TEST_HANKWEAVE_DIR, "state.json");
       const savedState = JSON.parse(await fs.promises.readFile(statePath, "utf-8"));
       expect(savedState.runs[0].codons).toHaveLength(5);
+    });
+  });
+
+  describe("checkpoint queries", () => {
+    const newestRun = RunId("newest");
+    const olderRun = RunId("older");
+    const startTime = "2024-01-01T00:00:00Z";
+    const endTime = "2024-01-01T01:00:00Z";
+    const tokens = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
+    const completed: ST.CompletedCodon = {
+      codonId: CodonId("named"),
+      status: "completed",
+      startTime,
+      endTime,
+      claudeSessionId: SessionId("session"),
+      claudeLogPath: "session.jsonl",
+      exitCode: 0,
+      finalCost: 0,
+      finalTokens: tokens,
+      resultMessageReceived: true,
+      extensionCount: 0,
+      rigSetupCheckpoint: "new-rig",
+      completionCheckpoint: "new-completed",
+    };
+    const failed: ST.FailedCodon = {
+      codonId: CodonId("removed"),
+      status: "failed",
+      startTime,
+      endTime,
+      failedDuring: "running",
+      exitCode: 1,
+      failureReason: { type: "unknown", retriable: false },
+      partialCost: 0,
+      partialTokens: tokens,
+      rigSetupCheckpoint: "failed-rig",
+      errorCheckpoint: "failed-error",
+    };
+    const skipped: ST.SkippedCodon = {
+      codonId: CodonId("loop#2"),
+      status: "skipped",
+      startTime,
+      endTime,
+      skippedDuring: "starting",
+      partialCost: 0,
+      partialTokens: tokens,
+      rigSetupCheckpoint: "skipped-rig",
+      skipCheckpoint: "skipped-skip",
+    };
+
+    async function loadHistory(currentRunId: RunId | null = newestRun) {
+      const run = (runId: RunId, codons: ST.CodonExecution[]): ST.Run => ({
+        runId,
+        codons,
+        runFolder: `/test/runs/${runId}`,
+        gitBranch: `run-${runId}`,
+        startingConditions: { type: "fresh" },
+        status: "completed",
+        startTime,
+        endTime,
+        serverPid: process.pid,
+      });
+      const state: ST.HankweaveState = {
+        currentRunId,
+        executionPlan: [],
+        runs: [
+          run(newestRun, [completed, failed, skipped]),
+          run(olderRun, [
+            { ...completed, rigSetupCheckpoint: "old-rig", completionCheckpoint: "old-completed" },
+            { ...failed, rigSetupCheckpoint: undefined, errorCheckpoint: undefined },
+            { ...skipped, rigSetupCheckpoint: "", skipCheckpoint: "" },
+          ]),
+        ],
+      };
+      await fs.promises.writeFile(
+        path.join(TEST_HANKWEAVE_DIR, "state.json"),
+        JSON.stringify(state),
+      );
+      stateManager = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger, [
+        createTestCodon({
+          id: "named",
+          name: "Configured name",
+          model: "sonnet",
+          continuationMode: "fresh",
+          promptText: "test",
+        }),
+        createTestCodon({
+          id: "loop",
+          name: "Loop base name",
+          model: "sonnet",
+          continuationMode: "fresh",
+          promptText: "test",
+        }),
+      ]);
+      await stateManager.initialize();
+    }
+
+    test("lists every checkpoint type across runs in the existing order without mutating history", async () => {
+      await loadHistory();
+      const before = JSON.stringify(stateManager.getState());
+      const result = stateManager.queryCheckpoints();
+      expect(result?.runId).toBe(newestRun);
+      expect(result?.currentBranch).toBe("run-newest");
+      expect(result?.checkpoints.map((checkpoint) => checkpoint.sha)).toEqual([
+        "skipped-skip",
+        "skipped-rig",
+        "failed-error",
+        "failed-rig",
+        "new-completed",
+        "new-rig",
+        "old-completed",
+        "old-rig",
+      ]);
+      expect(result?.checkpoints.slice(0, 6)).toEqual([
+        {
+          codonId: "loop#2",
+          codonName: "loop#2",
+          checkpointType: "skipped",
+          sha: "skipped-skip",
+          status: "skipped",
+          timestamp: endTime,
+        },
+        {
+          codonId: "loop#2",
+          codonName: "loop#2",
+          checkpointType: "rig-setup",
+          sha: "skipped-rig",
+          status: "skipped",
+          timestamp: startTime,
+        },
+        {
+          codonId: "removed",
+          codonName: "removed",
+          checkpointType: "error",
+          sha: "failed-error",
+          status: "failed",
+          timestamp: endTime,
+        },
+        {
+          codonId: "removed",
+          codonName: "removed",
+          checkpointType: "rig-setup",
+          sha: "failed-rig",
+          status: "failed",
+          timestamp: startTime,
+        },
+        {
+          codonId: "named",
+          codonName: "Configured name",
+          checkpointType: "completed",
+          sha: "new-completed",
+          status: "completed",
+          timestamp: endTime,
+        },
+        {
+          codonId: "named",
+          codonName: "Configured name",
+          checkpointType: "rig-setup",
+          sha: "new-rig",
+          status: "completed",
+          timestamp: startTime,
+        },
+      ]);
+      expect(JSON.stringify(stateManager.getState())).toBe(before);
+    });
+
+    test("filters by run and uses that run's metadata", async () => {
+      await loadHistory();
+      const result = stateManager.queryCheckpoints(olderRun);
+      expect(result?.runId).toBe(olderRun);
+      expect(result?.currentBranch).toBe("run-older");
+      expect(result?.checkpoints.map((checkpoint) => checkpoint.sha)).toEqual([
+        "old-completed",
+        "old-rig",
+      ]);
+      expect(stateManager.queryCheckpoints(RunId("missing"))).toBeNull();
+    });
+
+    test("requires a current run only when no run id is supplied", async () => {
+      await loadHistory(null);
+      expect(stateManager.queryCheckpoints()).toBeNull();
+      expect(stateManager.queryCheckpoints(olderRun)?.checkpoints).toHaveLength(2);
+    });
+
+    test("falls back to codon ids when constructed without configs", async () => {
+      await loadHistory();
+      stateManager = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger);
+      await stateManager.initialize();
+      expect(stateManager.queryCheckpoints(olderRun)?.checkpoints[0].codonName).toBe("named");
+    });
+
+    test("returns null before any run exists and an empty list for a run without checkpoints", async () => {
+      await stateManager.initialize();
+      expect(stateManager.queryCheckpoints()).toBeNull();
+      stateManager.transition({
+        type: "RunStarted",
+        data: {
+          runId: newestRun,
+          runFolder: "/test/runs/newest",
+          gitBranch: "run-newest",
+          startingConditions: { type: "fresh" },
+          serverPid: process.pid,
+        },
+      });
+      await stateManager.waitForPendingTransitions();
+      expect(stateManager.queryCheckpoints()).toEqual({
+        runId: newestRun,
+        currentBranch: "run-newest",
+        checkpoints: [],
+      });
     });
   });
 
@@ -1411,61 +1629,48 @@ describe("StateManager", () => {
   });
 
   describe("getAllCheckpoints", () => {
-    // Mock CheckpointGit so checkpoint queries never touch a real repo
-    const mockIsInitialized = mock(() => false);
-    const mockGetAllCheckpoints = mock(
-      async () =>
-        [] as Array<{
-          sha: string;
-          message: string;
-          timestamp: string;
-          branch: string;
-        }>,
-    );
-    const mockCheckpointGit = {
-      isInitialized: mockIsInitialized,
-      getAllCheckpoints: mockGetAllCheckpoints,
-    } as unknown as CheckpointGit;
+    // Mock the workspace checkpoint API so queries never touch a real repo
+    const mockGetAllCheckpoints = mock(async (): Promise<CheckpointRecord[]> => []);
+    const mockCheckpointSource = {
+      histories: async () => [{ name: "run-2024-01-01-abc", list: mockGetAllCheckpoints }],
+      allReachableIds: async () => new Set(),
+    } as unknown as WorkspaceCheckpoints;
 
     beforeEach(() => {
       // Wire the mock into the StateManager built by the outer beforeEach
-      stateManager.setCheckpointGit(mockCheckpointGit);
+      stateManager.setWorkspaceCheckpoints(mockCheckpointSource);
 
       // Reset mocks
-      mockIsInitialized.mockRestore();
       mockGetAllCheckpoints.mockRestore();
-      mockIsInitialized.mockImplementation(() => false);
       mockGetAllCheckpoints.mockImplementation(async () => []);
     });
 
-    test("returns null when git is not initialized", async () => {
-      mockIsInitialized.mockImplementation(() => false);
+    test("returns null when no checkpoint capability is wired", async () => {
+      const unwired = new StateManager(new ExecutionLayout(TEST_DIR), mockLogger);
 
-      const result = await stateManager.getAllCheckpoints();
+      const result = await unwired.getAllCheckpoints();
       expect(result).toBeNull();
     });
 
     test("returns ordered checkpoints when git is available", async () => {
-      mockIsInitialized.mockImplementation(() => true);
-
       const mockCheckpointData = [
         {
-          sha: "abc123",
+          id: CheckpointId("abc123"),
           message: "completed:codon-3 [run:2024-01-01-abc] Codon 3: Final",
           timestamp: "2024-01-01T03:00:00Z",
-          branch: "run-2024-01-01-abc",
+          parents: [],
         },
         {
-          sha: "def456",
+          id: CheckpointId("def456"),
           message: "rig-setup:codon-2 [run:2024-01-01-abc] Codon 2: Middle",
           timestamp: "2024-01-01T02:00:00Z",
-          branch: "run-2024-01-01-abc",
+          parents: [],
         },
         {
-          sha: "ghi789",
+          id: CheckpointId("ghi789"),
           message: "completed:codon-1 [run:2024-01-01-abc] Codon 1: Start",
           timestamp: "2024-01-01T01:00:00Z",
-          branch: "run-2024-01-01-abc",
+          parents: [],
         },
       ];
 
@@ -1485,10 +1690,15 @@ describe("StateManager", () => {
       expect(result?.[0]).toHaveProperty("message");
       expect(result?.[0]).toHaveProperty("timestamp");
       expect(result?.[0]).toHaveProperty("branch");
+      expect(Object.keys(result?.[0] ?? {}).sort()).toEqual([
+        "branch",
+        "message",
+        "sha",
+        "timestamp",
+      ]);
     });
 
     test("handles git errors gracefully", async () => {
-      mockIsInitialized.mockImplementation(() => true);
       mockGetAllCheckpoints.mockImplementation(async () => {
         throw new Error("Git error");
       });
@@ -1498,7 +1708,6 @@ describe("StateManager", () => {
     });
 
     test("returns empty array when no checkpoints exist", async () => {
-      mockIsInitialized.mockImplementation(() => true);
       mockGetAllCheckpoints.mockImplementation(async () => []);
 
       const result = await stateManager.getAllCheckpoints();

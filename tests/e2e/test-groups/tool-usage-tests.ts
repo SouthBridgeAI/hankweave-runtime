@@ -2,23 +2,14 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AssistantActionEvent } from "../../../server/types/types.js";
-import { parseJSONL } from "../../utils/test-data-helpers.js";
+import { isNonAnthropicModel } from "../../utils/model-family.js";
+import { findFirstRunFolder } from "../../utils/run-folder.js";
+import { readJSONLFile } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
   client: TestWSClient | null;
   codonModels: Record<string, string>;
-}
-
-/** Check if a model string refers to a non-Anthropic provider */
-function isNonAnthropicModel(model: string): boolean {
-  const lower = model.toLowerCase();
-  return (
-    !lower.includes("claude") &&
-    !lower.includes("sonnet") &&
-    !lower.includes("opus") &&
-    !lower.includes("haiku")
-  );
 }
 
 export function runToolUsageTests(testState: TestState, testDir: string) {
@@ -83,15 +74,7 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
 
   test("tool uses reported via WebSocket for each codon", () => {
     // Find the run folder - there should be exactly one
-    const runsDir = path.join(testDir, ".hankweave/runs");
-    let runFolder = "";
-
-    if (fs.existsSync(runsDir)) {
-      const runFolders = fs.readdirSync(runsDir);
-      if (runFolders.length > 0) {
-        runFolder = path.join(runsDir, runFolders[0]);
-      }
-    }
+    const runFolder = findFirstRunFolder(testDir);
 
     if (!runFolder) return;
 
@@ -99,8 +82,7 @@ export function runToolUsageTests(testState: TestState, testDir: string) {
       // Logs are now in .hankweave/runs/{runId}/codon-{codonId}-claude.log
       const logPath = path.join(runFolder, `${codonId}-claude.log`);
       if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const logEntries = parseJSONL(logContent);
+        const logEntries = readJSONLFile(logPath);
 
         // Count assistant messages in logs
         const logAssistantMessages = logEntries.filter((e) => e.type === "assistant");

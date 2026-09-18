@@ -6,7 +6,8 @@ import type {
   ServerEvent,
   StateSnapshotEvent,
 } from "../../../server/types/types.js";
-import { parseJSONL } from "../../utils/test-data-helpers.js";
+import { findFirstRunFolder } from "../../utils/run-folder.js";
+import { readJSONLFile } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 
 interface TestState {
@@ -57,21 +58,13 @@ export function runCostTrackingTests(testState: TestState, testDir: string) {
     const codonLogCosts: Record<string, number> = {};
 
     // Find the run folder
-    const runsDir = path.join(testDir, ".hankweave/runs");
-    let runFolder = "";
-    if (fs.existsSync(runsDir)) {
-      const runFolders = fs.readdirSync(runsDir);
-      if (runFolders.length > 0) {
-        runFolder = path.join(runsDir, runFolders[0]);
-      }
-    }
+    const runFolder = findFirstRunFolder(testDir);
 
     // Calculate from logs using result messages
     for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
       const logPath = path.join(runFolder, `${codonId}-claude.log`); // Corrected path
       if (fs.existsSync(logPath)) {
-        const logContent = fs.readFileSync(logPath, "utf-8");
-        const logEntries = parseJSONL(logContent);
+        const logEntries = readJSONLFile(logPath);
         const resultMessage = logEntries.find(
           (e) => e.type === "result" && e.subtype === "success",
         );

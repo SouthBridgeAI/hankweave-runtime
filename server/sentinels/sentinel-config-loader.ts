@@ -1,16 +1,9 @@
 import path from "node:path";
 import { sentinelConfigSchema } from "../config-validation/sentinel.schema.js";
-import { checkRegularFile } from "../fs-guards.js";
-import {
-  readRef,
-  refViolationMessage,
-  resolveRef,
-  sentinelOwnRefs,
-  validateRef,
-} from "../hank-refs.js";
+import { HankDir } from "../hank-dir.js";
 import type { SentinelConfig } from "../types/sentinel-types.js";
 import type { CodonSentinelEntry } from "../types/types.js";
-import type { Logger } from "../utils.js";
+import { checkRegularFile, type Logger, refViolationMessage, sentinelOwnRefs } from "../utils.js";
 
 /**
  * Loaded sentinel config with metadata.
@@ -64,6 +57,7 @@ export class SentinelConfigLoader {
     codonId: string,
     codonConfigDir: string,
   ): SentinelConfigLoadResult {
+    const hank = new HankDir(codonConfigDir);
     const configs: LoadedSentinelConfig[] = [];
     const errors: SentinelConfigLoadResult["errors"] = [];
     const seenIds = new Set<string>();
@@ -80,14 +74,23 @@ export class SentinelConfigLoader {
         const outputPaths = entry.settings?.outputPaths;
 
         if (typeof entry.sentinelConfig === "string") {
-          // File reference — strict-ref policy on the entry ref before it is
-          // resolved or read (sentinels load at codon start, not only during
-          // static validation, so this gate runs here too).
-          const vettedEntry = validateRef(entry.sentinelConfig, codonConfigDir, codonConfigDir);
-          if (typeof vettedEntry !== "string") {
-            throw new Error(refViolationMessage(vettedEntry));
+          // File reference. ANCHOR RULE, mirrored by the pack walker
+          // (server/pack/closure.ts :: walkFileSentinelConfig): the config
+          // path itself resolves from the hank dir; the config's OWN refs
+          // (promptFile/schemaFile) resolve from the config file's dir —
+          // set via configDir below. Inline configs anchor to the hank dir
+          // instead. Changing either anchor without the walker breaks
+          // bundles silently; the resolution-parity tests are the tripwire.
+          //
+          // Strict-ref policy runs on the entry ref before it is resolved or
+          // read (sentinels load at codon start, not only during static
+          // validation, so this gate runs here too).
+          const configRef = hank.ref(entry.sentinelConfig, { baseDir: codonConfigDir });
+          const violation = configRef.validate();
+          if (violation) {
+            throw new Error(refViolationMessage(violation));
           }
-          const resolvedPath = resolveRef(vettedEntry, codonConfigDir);
+          const resolvedPath = configRef.path;
 
           // Check cache first
           if (this.configCache.has(resolvedPath)) {
@@ -114,7 +117,7 @@ export class SentinelConfigLoader {
               );
             }
 
-            const content = readRef(vettedEntry, codonConfigDir).text;
+            const content = configRef.readText({ what: "Config file" }).text;
             const parsed = JSON.parse(content);
             config = sentinelConfigSchema.parse(parsed);
 
@@ -143,8 +146,8 @@ export class SentinelConfigLoader {
         // hits too — the parsed config is reusable, but the disk can change
         // between codons and re-checking a handful of refs is nearly free.
         for (const { field, raw } of sentinelOwnRefs(config)) {
-          const violation = validateRef(raw, configDir, codonConfigDir);
-          if (typeof violation !== "string") {
+          const violation = hank.ref(raw, { baseDir: configDir }).validate();
+          if (violation) {
             throw new Error(`${field}: ${refViolationMessage(violation)}`);
           }
         }

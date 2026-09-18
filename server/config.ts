@@ -3,23 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { validateModel } from "./config-validation/model-validator.js";
-import { hankRefFieldSchema, hankRefStringSchema } from "./config-validation/ref-schema.js";
 import {
   codonSentinelEntrySchema,
   sentinelConfigSchema,
 } from "./config-validation/sentinel.schema.js";
 import { ExecutionLayout } from "./execution-layout.js";
-import { checkRegularFile } from "./fs-guards.js";
-import {
-  codonOwnRefs,
-  normalizeRefField,
-  refViolationMessage,
-  resolveRef,
-  sentinelOwnRefs,
-  validateCopyTree,
-  validateRef,
-  vetAndReadRef,
-} from "./hank-refs.js";
+import { describeIgnoredEntries, HankConfigFile, HankDir, type HankRef } from "./hank-dir.js";
+import { hankweaveEnvEntries } from "./hankweave-env.js";
 import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 import { selectHarness } from "./provider-ids.js";
@@ -27,7 +17,22 @@ import { type TelemetryConfig, telemetryConfigSchema } from "./telemetry/telemet
 import { CodonId } from "./types/branded-types.js";
 import type { AllocationMode, OnExceededPolicy } from "./types/budget-types.js";
 import type { ModelName, SelfTestFailureCategory, ShimSelfTestResult } from "./types/types.js";
-import { deepMerge, getMetadata, type Logger, rmSyncWithRetry } from "./utils.js";
+import {
+  checkRegularFile,
+  codonOwnRefs,
+  deepMerge,
+  findOnPath,
+  getMetadata,
+  type Logger,
+  normalizeRefField,
+  refFieldSchema,
+  refStringSchema,
+  refViolationMessage,
+  rmSyncWithRetry,
+  sentinelOwnRefs,
+  toPosix,
+} from "./utils.js";
+import { workspaceMutationPath } from "./workspace/paths.js";
 
 // Get version from package metadata
 const PACKAGE_VERSION = getMetadata().version;
@@ -272,7 +277,7 @@ export const rigSetupItemSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("copy").describe("Type of setup operation"),
     copy: z.object({
-      from: hankRefStringSchema("copy.from").describe(
+      from: refStringSchema("copy.from").describe(
         "Source path, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
       ),
       to: z
@@ -687,6 +692,10 @@ export function computeBudgetWarnings(
 /**
  * Base codon object schema (before refinements).
  * The type field is optional and defaults to "codon".
+ *
+ * Adding a path-valued field? See the checklist at hankFileSchema — new
+ * file refs have three consumers (loader, pack walker, drift canary) that
+ * must agree.
  */
 export const codonObjectSchema = z.object({
   type: z
@@ -708,7 +717,7 @@ export const codonObjectSchema = z.object({
       "Codon name cannot be empty. This is the human-readable name shown in the UI. Fix: Add a descriptive name field.",
     )
     .describe("Human-readable name displayed in UI and logs"),
-  promptFile: hankRefFieldSchema("promptFile")
+  promptFile: refFieldSchema("promptFile")
     .optional()
     .describe(
       "Path to a file containing the prompt (mutually exclusive with promptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
@@ -717,7 +726,7 @@ export const codonObjectSchema = z.object({
     .string()
     .optional()
     .describe("Inline prompt text (mutually exclusive with promptFile)"),
-  appendSystemPromptFile: hankRefFieldSchema("appendSystemPromptFile")
+  appendSystemPromptFile: refFieldSchema("appendSystemPromptFile")
     .optional()
     .describe(
       "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
@@ -758,7 +767,7 @@ export const codonObjectSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      "Glob patterns for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved using gitignore rules for consistency.",
+      "Glob patterns (or file/directory names — a directory resolves to its contents) for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved with git's own gitignore handling (rules re-read live, so a .gitignore written mid-run takes effect).",
     ),
   env: z
     .record(z.string())
@@ -1321,6 +1330,20 @@ export const hankRequirementsSchema = z.object({
     )
     .optional()
     .describe("Environment variables that must be set for this hank to run"),
+  tools: z
+    .array(
+      z
+        .string()
+        .transform((s) => s.trim())
+        .refine((s) => s.length > 0, { message: "Tool name cannot be empty" })
+        .refine((s) => !/[\s/\\]/.test(s), {
+          message: "Tool name must be a bare program name (no whitespace or path separators)",
+        }),
+    )
+    .optional()
+    .describe(
+      'Host programs (bare names, resolved on PATH) that must be installed for this hank to run, e.g. ["bun", "jq"]. The runtime checks these before the run starts but never infers them from commands: hank authors — human or agent — are responsible for keeping this list current as rigSetup, beforeCopy, and other commands change.',
+    ),
 });
 
 /**
@@ -1330,6 +1353,20 @@ export const hankRequirementsSchema = z.object({
  *
  * Uses codonConfigArraySchemaWithDetailedErrors for better validation errors
  * when codon fields have typos or unrecognized fields.
+ *
+ * ADDING A PATH-VALUED FIELD to this schema (or any schema it nests)?
+ * It has three consumers that must agree, or bundles will pack different
+ * files than the runtime loads:
+ *   1. The loader you are about to write — use HankDir.resolve and
+ *      normalizeRefField, never hand-rolled path.resolve,
+ *      and pick the anchor deliberately (hank dir, or a file-based sentinel
+ *      config's own dir).
+ *   2. The pack walker (server/pack/closure.ts, spec §4.1 field table) —
+ *      must visit the field with the SAME anchor.
+ *   3. The drift canary (tests/unit/pack-closure.test.ts) — will fail until
+ *      the field is classified as closure input or known non-input; that is
+ *      by design, do not silence it without doing 1–2.
+ * If the field is an input, also add a resolution-parity test case there.
  */
 // Root fields shared verbatim between the runtime root (hankFileSchema) and
 // the authoring root (hankFileAuthoringSchema): the published hank.schema.json
@@ -1339,7 +1376,7 @@ const sharedHankRootFields = {
   requirements: hankRequirementsSchema
     .optional()
     .describe("Requirements that must be met for this hank to run (optional)"),
-  globalSystemPromptFile: hankRefFieldSchema("globalSystemPromptFile")
+  globalSystemPromptFile: refFieldSchema("globalSystemPromptFile")
     .optional()
     .describe(
       "Global system prompt file(s) applied to all codons. Must be relative path(s) inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
@@ -1824,22 +1861,8 @@ export function normalizeHankContent(content: string): string {
  * @returns true if $schema was added, false if it already existed
  */
 export function ensureSchemaUrl(hankPath: string): boolean {
-  // Same "silently skip" treatment as the catch below, but checked up front:
-  // reading a FIFO would block forever instead of throwing.
-  if (checkRegularFile(hankPath, { read: false })) {
-    return false;
-  }
   try {
-    const content = fs.readFileSync(hankPath, "utf-8");
-    const normalized = normalizeHankContent(content);
-
-    // Already has $schema (or not rewritable JSON) - nothing to do
-    if (normalized === content) {
-      return false;
-    }
-
-    fs.writeFileSync(hankPath, normalized);
-    return true;
+    return new HankConfigFile(hankPath).updateText(normalizeHankContent);
   } catch {
     // If anything goes wrong (file not found, invalid JSON, etc.), silently skip
     // The actual validation will catch these errors with proper messages
@@ -1859,18 +1882,13 @@ export function loadHankFile(options: {
   hankPath: string;
   modelOverride?: string;
 }): z.infer<typeof hankFileSchema> {
-  const problem = checkRegularFile(options.hankPath, { read: false });
-  if (problem) {
-    throw new Error(
-      problem.kind === "missing"
-        ? `Hank file not found: ${options.hankPath}`
-        : `Hank file ${problem.phrase}: ${options.hankPath}`,
-    );
-  }
   try {
     const { hankPath, modelOverride } = options;
-    const content = fs.readFileSync(hankPath, "utf-8");
-    const rawConfig = JSON.parse(content);
+    const source = new HankConfigFile(hankPath).readSnapshot();
+    if (source.kind === "irregular") {
+      throw new Error(`Hank file is not a regular file: ${hankPath}`);
+    }
+    const rawConfig = JSON.parse(source.bytes.toString("utf-8"));
 
     // Apply model override directly to the raw hank JSON before schema validation.
     // This keeps the full Zod validation + model transformation pipeline intact while ensuring per-codon model strings don't block a
@@ -1915,7 +1933,8 @@ export function loadHankFile(options: {
 
     return result.data;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
       throw new Error(`Hank file not found: ${options.hankPath}`);
     }
     throw error;
@@ -1934,19 +1953,12 @@ export function loadHankFile(options: {
  */
 export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
   const configPath = runtimeConfigPath || path.join(process.cwd(), "hankweave.json");
-
-  // If file doesn't exist, return empty object (runtime config is optional)
-  const problem = checkRegularFile(configPath, { read: false });
-  if (problem?.kind === "missing") {
-    return {};
-  }
-  if (problem) {
-    throw new Error(`Failed to load runtime config from ${configPath}: ${problem.phrase}`);
-  }
-
   try {
-    const content = fs.readFileSync(configPath, "utf-8");
-    const rawConfig = JSON.parse(content);
+    const source = new HankConfigFile(configPath).readSnapshot();
+    if (source.kind === "irregular") {
+      throw new Error("is not a regular file");
+    }
+    const rawConfig = JSON.parse(source.bytes.toString("utf-8"));
 
     // Validate with runtimeConfigSchema
     const result = runtimeConfigSchema.safeParse(rawConfig);
@@ -1957,6 +1969,10 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
 
     return result.data;
   } catch (error) {
+    // Runtime config is optional; inspection/read errors other than absence
+    // remain errors instead of silently selecting defaults.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return {};
     // Re-throw validation errors
     if (error instanceof Error && error.message.startsWith("Invalid runtime config")) {
       throw error;
@@ -2173,10 +2189,24 @@ export function resolveSettings(options?: {
  * Load and resolve global system prompt content.
  * Returns raw text with template variables intact (replacement happens at runtime).
  * @throws Error if globalSystemPromptFile references a file that doesn't exist
+ *
+ * PRECEDENCE IS MIRRORED: truthy text wins over file, empty string counts
+ * as absent. server/pack/lock.ts (buildCodonInputs) imitates this selection
+ * for the codonInputs hash preimage, and a parity test compares this
+ * function's output against pack's captured bytes. Changing the precedence
+ * here without the mirror breaks bundles silently — the parity test is the
+ * tripwire; fix both sides, never the test.
  */
 export function loadGlobalSystemPrompt(
   hankFile: z.infer<typeof hankFileSchema>,
   hankDir: string,
+): string | null {
+  return readGlobalSystemPrompt(hankFile, new HankDir(hankDir));
+}
+
+function readGlobalSystemPrompt(
+  hankFile: z.infer<typeof hankFileSchema>,
+  hank: HankDir,
 ): string | null {
   if (hankFile.globalSystemPromptText) {
     return hankFile.globalSystemPromptText;
@@ -2188,7 +2218,7 @@ export function loadGlobalSystemPrompt(
     const parts: string[] = [];
     for (const file of files) {
       parts.push(
-        vetAndReadRef(file, hankDir, hankDir, {
+        hank.ref(file).readText({
           what: "Global system prompt file",
           context: "configured via globalSystemPromptFile in hank.json",
         }).text,
@@ -2206,9 +2236,10 @@ export function loadGlobalSystemPrompt(
  * plain codons), so this is a flat enumeration, not a recursion — a loop
  * itself is never yielded, only its codons, each labeled with its loop.
  */
-function* codonsWithContext(
-  configs: CodonConfig[],
-): Generator<{ codon: Exclude<CodonConfig, { type: "loop" }>; context: string }> {
+function* codonsWithContext(configs: CodonConfig[]): Generator<{
+  codon: Exclude<CodonConfig, { type: "loop" }>;
+  context: string;
+}> {
   for (const [index, config] of configs.entries()) {
     if (config.type === "loop") {
       for (const [codonIndex, codon] of config.codons.entries()) {
@@ -2240,15 +2271,11 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
   globalSystemPrompt: string | null;
 } {
   const { configPath, modelOverride } = options;
+  const hank = HankDir.forConfig(configPath);
   try {
     // Load and validate hank file (apply model override before validation when provided)
     const hankFile = loadHankFile({ hankPath: configPath, modelOverride });
     const rawCodons = hankFile.hank;
-
-    // Resolve relative paths for promptFile and appendSystemPromptFile.
-    // resolveRef requires an absolute base, so anchor a relative configPath
-    // to cwd once here (path.resolve did the same implicitly before).
-    const configDir = path.dirname(path.resolve(configPath));
 
     // Strict-ref preflight (spec 63 §3b): validate every authored ref BEFORE
     // any resolution and before the existence walk below — that walk READS
@@ -2259,22 +2286,21 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
     // Violations are collected, not thrown one at a time, so a broken hank
     // reports every bad ref at once.
     const preflightViolations: string[] = [];
+    // The hank directory entity (hank-dir.ts) is created eagerly but is
+    // itself LAZY — it spawns git and reads .gitignore only when a copy
+    // TREE is first judged, i.e. once a copy source is classified a
+    // DIRECTORY. A hank with no copy trees (or only file copies) never
+    // touches git or .gitignore, and a broken root .gitignore only fails
+    // hanks it governs — its throw propagates like any other loader read
+    // error.
     for (const { codon, context } of codonsWithContext(rawCodons as CodonConfig[])) {
       for (const { field, raw, scanTree } of codonOwnRefs(codon)) {
         if (raw === "") continue; // surfaces as its own error downstream
-        const vetted = validateRef(raw, configDir, configDir);
-        if (typeof vetted !== "string") {
-          preflightViolations.push(`${context}: ${field} ${refViolationMessage(vetted)}`);
-          continue;
-        }
-        // Only scan inside a copy tree once the ref itself is legal — a
-        // forbidden ref must be rejected without its target being walked
-        // (validateCopyTree's ValidatedRef parameter enforces the order).
-        if (scanTree) {
-          const treeViolation = validateCopyTree(vetted, configDir);
-          if (treeViolation) {
-            preflightViolations.push(`${context}: ${field} ${refViolationMessage(treeViolation)}`);
-          }
+        const ref = hank.ref(raw);
+        // Tree validation checks the reference before walking its target.
+        const violation = scanTree ? hank.validateCopyTree(ref) : ref.validate();
+        if (violation) {
+          preflightViolations.push(`${context}: ${field} ${refViolationMessage(violation)}`);
         }
       }
     }
@@ -2302,15 +2328,15 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
       // Handle promptFile - can be string or array (keep scalar/array shape)
       if (resolved.promptFile) {
         resolved.promptFile = Array.isArray(resolved.promptFile)
-          ? resolved.promptFile.map((file: string) => resolveRef(file, configDir))
-          : resolveRef(resolved.promptFile, configDir);
+          ? resolved.promptFile.map((file: string) => hank.ref(file).path)
+          : hank.ref(resolved.promptFile).path;
       }
 
       // Handle appendSystemPromptFile - can be string or array (keep scalar/array shape)
       if (resolved.appendSystemPromptFile) {
         resolved.appendSystemPromptFile = Array.isArray(resolved.appendSystemPromptFile)
-          ? resolved.appendSystemPromptFile.map((file: string) => resolveRef(file, configDir))
-          : resolveRef(resolved.appendSystemPromptFile, configDir);
+          ? resolved.appendSystemPromptFile.map((file: string) => hank.ref(file).path)
+          : hank.ref(resolved.appendSystemPromptFile).path;
       }
 
       // Handle rigSetup - resolve paths for copy operations
@@ -2320,7 +2346,7 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
             return {
               ...item,
               copy: {
-                from: resolveRef(item.copy.from, configDir),
+                from: hank.ref(item.copy.from).path,
                 to: item.copy.to, // Keep 'to' as relative to projectPath
               },
             };
@@ -2379,21 +2405,15 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
 
       // Validate rigSetup items
       if (config.rigSetup) {
-        const hankDir = path.resolve(path.dirname(configPath));
         for (const [itemIndex, item] of config.rigSetup.entries()) {
           if (item.type === "copy" && item.copy) {
-            // copy.from is already resolved against the config dir, so lexical
-            // spellings of the hank dir ("." or "sub/..") compare equal; the
-            // realpath comparison additionally catches symlinks back to it.
-            let isHankDirItself = path.resolve(item.copy.from) === hankDir;
-            if (!isHankDirItself) {
-              try {
-                isHankDirItself = fs.realpathSync(item.copy.from) === fs.realpathSync(hankDir);
-              } catch {
-                // Unresolvable path: leave it to the existence check below.
-              }
-            }
-            if (isHankDirItself) {
+            // copy.from is already resolved against the config dir, so the
+            // shared lexical predicate flags every spelling of the hank dir
+            // ("." or "sub/.."); the physical comparison additionally catches
+            // symlinks back to it, which matter here because this copy runs
+            // against the live filesystem (pack snapshots instead).
+            const source: HankRef = hank.refFromPath(item.copy.from);
+            if (source.isRoot({ physical: true })) {
               // Copying the whole hank dir sweeps hank.json, prompts, and
               // any pack/runtime artifacts sitting next to it into the rig;
               // it also cannot be represented faithfully in a packed bundle.
@@ -2416,7 +2436,6 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
       // Validate sentinels
       if (config.sentinels && config.sentinels.length > 0) {
         const seenSentinelIds = new Set<string>();
-        const configDir = path.dirname(path.resolve(configPath));
 
         for (const [sentIndex, entry] of config.sentinels.entries()) {
           const entryLabel = `Codon ${index + 1} (${config.id}), sentinel ${sentIndex + 1}`;
@@ -2432,7 +2451,8 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
               );
               continue;
             }
-            const resolvedPath = resolveRef(entry.sentinelConfig, configDir);
+            const configRef: HankRef = hank.ref(entry.sentinelConfig);
+            const resolvedPath = configRef.path;
 
             const problem = checkRegularFile(resolvedPath, { read: false });
             if (problem) {
@@ -2447,7 +2467,7 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
 
             let parsedJson: unknown;
             try {
-              const content = vetAndReadRef(entry.sentinelConfig, configDir, configDir, {
+              const content = configRef.readText({
                 what: "Sentinel config file",
               }).text;
               parsedJson = JSON.parse(content);
@@ -2482,8 +2502,8 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
             const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
             const ownRefBase = path.dirname(resolvedPath);
             for (const { field, raw } of sentinelOwnRefs(parsed.data)) {
-              const violation = validateRef(raw, ownRefBase, configDir);
-              if (typeof violation !== "string") {
+              const violation = hank.ref(raw, { baseDir: ownRefBase }).validate();
+              if (violation) {
                 validationErrors.push(
                   `${entryLabel}: ${field} ${refViolationMessage(violation)} [${severity}]`,
                 );
@@ -2496,8 +2516,8 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
             // configs; this catches symlinks (R3), which need the filesystem.
             const severity = entry.settings?.failCodonIfNotLoaded ? "ERROR" : "WARNING";
             for (const { field, raw } of sentinelOwnRefs(entry.sentinelConfig)) {
-              const violation = validateRef(raw, configDir, configDir);
-              if (typeof violation !== "string") {
+              const violation = hank.ref(raw).validate();
+              if (violation) {
                 validationErrors.push(
                   `${entryLabel}: ${field} ${refViolationMessage(violation)} [${severity}]`,
                 );
@@ -2548,9 +2568,8 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
       };
     }
 
-    // Load global system prompt (if configured)
-    // Note: configDir is already declared above (line 1249)
-    const globalSystemPrompt = loadGlobalSystemPrompt(hankFile, configDir);
+    // Load the global system prompt through the same hank directory.
+    const globalSystemPrompt = readGlobalSystemPrompt(hankFile, hank);
 
     return {
       codons: resolvedConfig.map((config) => transformIds(config as CodonConfig)),
@@ -2561,6 +2580,8 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
       throw new Error(`Failed to load codon config from ${configPath}: ${error.message}`);
     }
     throw error;
+  } finally {
+    hank.dispose();
   }
 }
 
@@ -2630,6 +2651,24 @@ export function validateRequiredEnv(requiredEnv: string[] | undefined): {
     return value === undefined || value === "";
   });
 
+  return { valid: missing.length === 0, missing };
+}
+
+/**
+ * Validate required host tools (`requirements.tools`) resolve on PATH.
+ * Returns { valid: boolean, missing: string[] }
+ */
+export function validateRequiredTools(
+  requiredTools: string[] | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  valid: boolean;
+  missing: string[];
+} {
+  if (!requiredTools || requiredTools.length === 0) {
+    return { valid: true, missing: [] };
+  }
+  const missing = requiredTools.filter((name) => findOnPath(name, env) === null);
   return { valid: missing.length === 0, missing };
 }
 
@@ -2718,6 +2757,7 @@ export async function validateHank(options: {
   skipSelfTests?: boolean;
 }): Promise<ValidationResult> {
   const { configPath, executionPath, logger, modelOverride, skipSelfTests } = options;
+  const hank = HankDir.forConfig(configPath);
 
   // Load hank file first to get requirements
   const hankFile = loadHankFile({ hankPath: configPath, modelOverride });
@@ -2729,6 +2769,19 @@ export async function validateHank(options: {
       throw new Error(
         `Missing required environment variables: ${envValidation.missing.join(", ")}\n` +
           `These are declared in the hank's requirements.env field.`,
+      );
+    }
+  }
+
+  // Validate required host tools early (fail fast) — rig commands run
+  // through `sh -c`, so a tool the author declared but PATH cannot resolve
+  // would only surface mid-run as a failed rigSetup.
+  if (hankFile.requirements?.tools) {
+    const toolValidation = validateRequiredTools(hankFile.requirements.tools);
+    if (!toolValidation.valid) {
+      throw new Error(
+        `Missing required tools on PATH: ${toolValidation.missing.join(", ")}\n` +
+          `These are declared in the hank's requirements.tools field. Either remove the dependency as a requirement if it is not needed, or install it first`,
       );
     }
   }
@@ -2757,17 +2810,9 @@ export async function validateHank(options: {
     hankBudget: hankFile.overrides?.budget,
   };
 
-  // Collect HANKWEAVE_ prefixed environment variables from system
-  // Exclude HANKWEAVE_RUNTIME_* (server config) and HANKWEAVE_SENTINEL_* (sentinel API keys)
-  for (const key in process.env) {
-    if (
-      key.startsWith("HANKWEAVE_") &&
-      !key.startsWith("HANKWEAVE_RUNTIME_") &&
-      !key.startsWith("HANKWEAVE_SENTINEL_")
-    ) {
-      const newKey = key.substring("HANKWEAVE_".length);
-      result.environmentVariables.fromSystem[newKey] = process.env[key] || "";
-    }
+  // Report the HANKWEAVE_ overlay the server would apply to codon environments.
+  for (const { name, value } of hankweaveEnvEntries()) {
+    result.environmentVariables.fromSystem[name] = value;
   }
 
   /**
@@ -2914,21 +2959,21 @@ export async function validateHank(options: {
       // Verify files are readable (loadCodonSequence checks existence) and count lines
       for (const file of files) {
         try {
-          const stats = await fs.promises.stat(file);
-          if (stats.size === 0) {
+          const prompt: HankRef = hank.refFromPath(file);
+          const { text, bytes } = await prompt.inspect();
+          if (bytes === 0) {
             result.warnings.push(`${codonLabel}: Prompt file "${file}" is empty`);
           }
-          if (stats.size > 1024 * 1024) {
+          if (bytes > 1024 * 1024) {
             // 1MB
             result.warnings.push(
-              `${codonLabel}: Prompt file "${file}" is large (${(stats.size / 1024 / 1024).toFixed(
+              `${codonLabel}: Prompt file "${file}" is large (${(bytes / 1024 / 1024).toFixed(
                 2,
               )}MB)`,
             );
           }
           // Count lines in the file
-          const content = await fs.promises.readFile(file, "utf-8");
-          totalLines += content.split("\n").length;
+          totalLines += text.split("\n").length;
         } catch (error) {
           // Should not happen as loadCodonSequence already checked
           throw new Error(`${codonLabel}: Cannot stat prompt file "${file}": ${error}`);
@@ -2952,24 +2997,28 @@ export async function validateHank(options: {
 
       for (const [itemIndex, item] of codon.rigSetup.entries()) {
         if (item.type === "copy" && item.copy) {
-          // Check source exists (already done by loadCodonSequence)
-          // Check target parent directory
-          const targetPath = path.join(executionPath, item.copy.to);
-          const targetParent = path.dirname(targetPath);
-
-          try {
-            const relativeParent = path.relative(executionPath, targetParent);
-            if (relativeParent.startsWith("..")) {
-              throw new Error(
-                `${codonLabel}, rig setup item ${itemIndex + 1}: ` +
-                  `Target path "${item.copy.to}" would write outside execution directory`,
+          // Check source exists (already done by loadCodonSequence). What
+          // the hank's ignore rules will drop from a DIRECTORY source is a
+          // warning here
+          if (fs.statSync(item.copy.from, { throwIfNoEntry: false })?.isDirectory()) {
+            const ignored = hank.scanIgnored(item.copy.from);
+            if (ignored.length > 0) {
+              const source = toPosix(path.relative(hank.root, item.copy.from));
+              result.warnings.push(
+                `${codonLabel}: Copy source "${source}": ${describeIgnoredEntries(ignored)}`,
               );
             }
-          } catch (_error) {
-            // Path resolution error
+          }
+          // Judge the target with the predicate the rig copy itself uses, so
+          // validation and run time cannot disagree (absolute paths, escapes,
+          // and protected workspace names are all rejected here)
+          let targetPath: string;
+          try {
+            targetPath = workspaceMutationPath(executionPath, item.copy.to);
+          } catch (error) {
             throw new Error(
               `${codonLabel}, rig setup item ${itemIndex + 1}: ` +
-                `Invalid target path "${item.copy.to}"`,
+                `Invalid target path "${item.copy.to}": ${(error as Error).message}`,
             );
           }
 

@@ -184,7 +184,8 @@ export const SUITES: SuiteSpec[] = [
       "classification, checkpoint-git). Suspect the last change to that server/ module, not " +
       "the environment; these are deterministic.",
     perTestTimeoutMs: 15_000,
-    suiteTimeoutSeconds: 600,
+    // Windows CI took 550s for a completed run; allow headroom for runner variance.
+    suiteTimeoutSeconds: process.platform === "win32" ? 900 : 600,
     estSeconds: 80,
     estCostUsd: 0,
   },
@@ -299,7 +300,7 @@ export const SUITES: SuiteSpec[] = [
     suspects: [
       "server/hankweave-runtime.ts",
       "server/state-manager.ts",
-      "server/checkpoint-git.ts",
+      "server/workspace/git-storage.ts",
     ],
     env: { HANKWEAVE_REPLAY_SPEED_MS: "0" },
     perTestTimeoutMs: 300_000,
@@ -405,16 +406,16 @@ export const SUITES: SuiteSpec[] = [
     tier: "e2e-live",
     files: ["tests/e2e/events-journal-integrity-e2e.test.ts"],
     description:
-      "Live Haiku codons: file.updated journal integrity — tool-path matching follows resolver " +
+      "Live Haiku codons: file.updated journal integrity — tool-path matching follows resolution " +
       "semantics, Read fabricates nothing, watched patterns stay scoped to their codon.",
     failureMeans:
       "A file.updated event landed in (or vanished from) the journal wrongly: the tool-call " +
-      "matcher diverged from the shared resolver (basename magic or ignored gitignore), a Read " +
-      "was journaled as a mutation, or per-codon watched-file state leaked across the " +
-      "completion/start overlap into a codon with no checkpointedFiles.",
+      "matcher diverged from checkpoint resolution (basename magic or an ignored gitignore " +
+      "verdict), a Read was journaled as a mutation, or per-codon watched-file state leaked " +
+      "across the completion/start overlap into a codon with no checkpointedFiles.",
     suspects: [
       "server/codon-file-tracker.ts",
-      "server/file-resolver.ts",
+      "server/workspace",
       "server/codon-runner.ts",
       "server/hankweave-runtime.ts",
     ],
@@ -452,7 +453,7 @@ export const SUITES: SuiteSpec[] = [
       "Live server lifecycle broke: startup, websocket command handling, history sync, KILL " +
       "recovery, or stop. First distinguish assertion failures (regression) from provider-call " +
       "timeouts (outage) — this suite runs real models and reddens on both.",
-    suspects: ["server/index.ts", "server/hankweave-runtime.ts", "server/checkpoint-git.ts"],
+    suspects: ["server/index.ts", "server/hankweave-runtime.ts", "server/workspace/git-storage.ts"],
     // The default test config's codons all run pi/openai-codex/gpt-5.6-luna
     // (credential from pi's store), and several tests run them to completion;
     // its anthropic-modeled sentinels also need the Anthropic key.
@@ -473,7 +474,11 @@ export const SUITES: SuiteSpec[] = [
       "groups are runtime contracts (real regressions); model-output groups are quarantined " +
       "behind isNonAnthropicModel hatches, so 'model produced X' flakes should already be " +
       "impossible. The most model-quality-coupled suite in the tier.",
-    suspects: ["server/hankweave-runtime.ts", "server/checkpoint-git.ts", "server/telemetry"],
+    suspects: [
+      "server/hankweave-runtime.ts",
+      "server/workspace/git-storage.ts",
+      "server/telemetry",
+    ],
     needsEnv: ANTHROPIC_CODEX,
     perTestTimeoutMs: 600_000,
     suiteTimeoutSeconds: 2400,
@@ -490,7 +495,7 @@ export const SUITES: SuiteSpec[] = [
       "archive/cleanup on rollback. The shadow repo in .hankweavecheckpoints is the mechanism " +
       "under test.",
     suspects: [
-      "server/checkpoint-git.ts",
+      "server/workspace/git-storage.ts",
       "server/hankweave-runtime.ts",
       "server/cleanup-command.ts",
     ],
@@ -798,17 +803,23 @@ export const SUITES: SuiteSpec[] = [
     // The generated hank pins anthropic/claude-haiku-4-5 (pi provider raw API).
     needsRawAnthropicKey: true,
     description:
-      "`hankweave init` scaffolding, then running the generated hank. Needs Anthropic + Gemini.",
+      "`hankweave init` scaffolding, direct execution, then pack and positional bundle execution. Needs Anthropic + Gemini + Codex.",
     failureMeans:
       "`hankweave init` scaffolding or the generated hank stopped running end to end — wizard " +
       "templates, packaging/registry surface, or the scaffolded config drifted from current " +
-      "schema requirements.",
-    suspects: ["server/wizard", "schemas"],
+      "schema requirements; bundle verification, extraction, metadata or byte preservation regressed.",
+    suspects: [
+      "server/wizard",
+      "server/pack",
+      "server/bundle-resolver.ts",
+      "server/index.ts",
+      "schemas",
+    ],
     needsEnv: ANTHROPIC_GEMINI_CODEX,
     perTestTimeoutMs: 900_000,
     suiteTimeoutSeconds: 2400,
-    estSeconds: 65,
-    estCostUsd: 0.08,
+    estSeconds: 150,
+    estCostUsd: 0.16,
   },
   {
     id: "e2e-context-exhaustion",
@@ -851,6 +862,8 @@ const UNCLAIMED_ALLOWLIST: Record<string, string> = {
   // would load them and report zero tests. Driven by `bun run test:cross-runtime:*`.
   "tests/cross-runtime/dynamic-port.test.ts": "Standalone script; run by test:cross-runtime:*.",
   "tests/cross-runtime/runtime-metadata.test.ts": "Standalone script; run by test:cross-runtime:*.",
+  "tests/cross-runtime/pack-bundle-hash.test.ts":
+    "Standalone script; run manually under bun AND node (tsx) and compare the identity lines.",
 };
 
 /**

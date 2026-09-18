@@ -1,6 +1,26 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
-import { ExecutionLayout } from "./execution-layout.js";
-import type { Logger } from "./utils.js";
+import path from "node:path";
+import { z } from "zod";
+import { ExecutionLayout } from "../execution-layout.js";
+import { type Logger, renameWithRetry } from "../utils.js";
+import { containedPath, lstatIfPresent } from "./paths.js";
+
+const manifestSchema = z.object({
+  version: z.literal("1.0.0"),
+  entries: z.array(
+    z.object({
+      sourcePath: z.string().min(1),
+      archivePath: z.string().min(1),
+      codonId: z.string(),
+      loopContext: z
+        .object({ loopId: z.string(), iteration: z.number().int().nonnegative() })
+        .optional(),
+      checkpointSha: z.string(),
+      timestamp: z.string(),
+    }),
+  ),
+});
 
 /**
  * Represents a single archived file or directory entry.
@@ -49,15 +69,17 @@ export interface ArchiveManifest {
  * The manifest is stored at .hankweave/archive-manifest.json (outside the agentRoot/
  * work tree) and is NOT checkpointed by git. Instead, rollback selects which
  * archives to restore via selectEntriesToRestore() (driven by git reachability,
- * see CheckpointGit.shasBetween) and afterwards removes exactly the entries
+ * see WorkspaceStorage.snapshotsBetween) and afterwards removes exactly the entries
  * that were successfully restored via removeEntries().
  */
 export class ArchiveManifestManager {
   private manifestPath: string;
-  private logger: Logger;
+  private logger?: Logger;
   private manifest: ArchiveManifest;
+  private readonly executionPath: string;
 
-  constructor(executionPath: string, logger: Logger) {
+  constructor(executionPath: string, logger?: Logger) {
+    this.executionPath = executionPath;
     this.manifestPath = new ExecutionLayout(executionPath).archiveManifestPath;
     this.logger = logger;
     this.manifest = { version: "1.0.0", entries: [] };
@@ -68,37 +90,63 @@ export class ArchiveManifestManager {
    * @returns The loaded manifest
    */
   async load(): Promise<ArchiveManifest> {
-    if (fs.existsSync(this.manifestPath)) {
-      try {
-        const content = await fs.promises.readFile(this.manifestPath, "utf-8");
-        this.manifest = JSON.parse(content);
-        this.logger.log(`Loaded archive manifest with ${this.manifest.entries.length} entries`);
-      } catch (error) {
-        this.logger.log(`Error loading archive manifest, starting fresh: ${error}`, "error");
-        this.manifest = { version: "1.0.0", entries: [] };
-      }
-    } else {
+    this.validatePath();
+    try {
+      const content = await fs.promises.readFile(this.manifestPath, "utf-8");
+      this.manifest = manifestSchema.parse(JSON.parse(content));
+      this.logger?.log(`Loaded archive manifest with ${this.manifest.entries.length} entries`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       this.manifest = { version: "1.0.0", entries: [] };
-      this.logger.log("No archive manifest found, starting with empty manifest");
+      this.logger?.log("No archive manifest found, starting with empty manifest");
     }
     return this.manifest;
   }
 
-  /**
-   * Save manifest to disk.
-   */
-  async save(): Promise<void> {
-    await fs.promises.writeFile(this.manifestPath, JSON.stringify(this.manifest, null, 2));
+  /** Publish a complete file before changing in-memory state. A failed save
+   * must not leave phantom additions/removals in the running process. */
+  private async persist(manifest: ArchiveManifest, shouldAbort?: () => boolean): Promise<void> {
+    const assertActive = () => {
+      if (shouldAbort?.()) throw new Error("Archive manifest update aborted: shutdown in progress");
+    };
+    assertActive();
+    this.validatePath();
+    await fs.promises.mkdir(path.dirname(this.manifestPath), { recursive: true });
+    assertActive();
+    this.validatePath();
+    const temporary = `${this.manifestPath}.${randomUUID()}.tmp`;
+    try {
+      await fs.promises.writeFile(temporary, JSON.stringify(manifest, null, 2), { flag: "wx" });
+      assertActive();
+      this.validatePath();
+      await renameWithRetry(temporary, this.manifestPath);
+    } finally {
+      if (!shouldAbort?.()) {
+        this.validatePath();
+        await fs.promises.rm(temporary, { force: true }).catch(() => {});
+      }
+    }
+  }
+
+  private validatePath(): void {
+    containedPath(this.executionPath, path.relative(this.executionPath, this.manifestPath));
+    const existing = lstatIfPresent(this.manifestPath);
+    if (existing && !existing.isFile()) throw new Error("Archive manifest is not a regular file");
   }
 
   /**
    * Add a new entry and persist to disk.
    * @param entry The archive entry to add
    */
-  async addEntry(entry: ArchiveEntry): Promise<void> {
-    this.manifest.entries.push(entry);
-    await this.save();
-    this.logger.log(`Added archive entry: ${entry.sourcePath} -> ${entry.archivePath}`);
+  async addEntry(entry: ArchiveEntry, shouldAbort?: () => boolean): Promise<void> {
+    const next: ArchiveManifest = {
+      ...this.manifest,
+      // One physical archive location has one owner after an overwrite.
+      entries: [...this.manifest.entries.filter((e) => e.archivePath !== entry.archivePath), entry],
+    };
+    await this.persist(next, shouldAbort);
+    this.manifest = next;
+    this.logger?.log(`Added archive entry: ${entry.sourcePath} -> ${entry.archivePath}`);
   }
 
   /**
@@ -118,13 +166,13 @@ export class ArchiveManifestManager {
    *   default for an entry we cannot place.
    *
    * @param reachableAfterTarget SHAs reachable from the pre-rollback HEAD but
-   *        not from (or equal to) the target (CheckpointGit.shasBetween)
+   *        not from (or equal to) the target (WorkspaceStorage.snapshotsBetween)
    * @param knownShas All SHAs in the checkpoint repository, used only to
    *        distinguish "not selected by design" from "unknown SHA" warnings
    */
   selectEntriesToRestore(
-    reachableAfterTarget: Set<string>,
-    knownShas: Set<string>,
+    reachableAfterTarget: ReadonlySet<string>,
+    knownShas: ReadonlySet<string>,
   ): ArchiveEntry[] {
     const result: ArchiveEntry[] = [];
 
@@ -135,7 +183,7 @@ export class ArchiveManifestManager {
       }
 
       if (!knownShas.has(entry.checkpointSha)) {
-        this.logger.log(
+        this.logger?.log(
           `Archive entry ${entry.sourcePath} (${entry.archivePath}) references checkpoint ` +
             `${entry.checkpointSha}, which is unknown to the checkpoint repository. ` +
             `Leaving it archived in rigArchive/ — restore it by hand if needed.`,
@@ -155,15 +203,19 @@ export class ArchiveManifestManager {
    *
    * @param entries The exact entry objects to remove
    */
-  async removeEntries(entries: ArchiveEntry[]): Promise<void> {
+  async removeEntries(entries: ArchiveEntry[], shouldAbort?: () => boolean): Promise<void> {
     if (entries.length === 0) return;
 
     const toRemove = new Set(entries);
     const before = this.manifest.entries.length;
-    this.manifest.entries = this.manifest.entries.filter((entry) => !toRemove.has(entry));
-    const removed = before - this.manifest.entries.length;
-    await this.save();
-    this.logger.log(`Removed ${removed} restored entries from archive manifest`);
+    const next = {
+      ...this.manifest,
+      entries: this.manifest.entries.filter((entry) => !toRemove.has(entry)),
+    };
+    const removed = before - next.entries.length;
+    await this.persist(next, shouldAbort);
+    this.manifest = next;
+    this.logger?.log(`Removed ${removed} restored entries from archive manifest`);
   }
 
   /**
@@ -171,12 +223,5 @@ export class ArchiveManifestManager {
    */
   getManifest(): ArchiveManifest {
     return this.manifest;
-  }
-
-  /**
-   * Get the manifest file path.
-   */
-  getManifestPath(): string {
-    return this.manifestPath;
   }
 }

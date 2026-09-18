@@ -6,9 +6,9 @@ import readline from "node:readline";
 import { DEFAULT_CONFIG, normalizeHankContent } from "./config.js";
 import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
 import { ExecutionLayout } from "./execution-layout.js";
-import { checkRegularFile } from "./fs-guards.js";
 import { ensureJournalRestored } from "./storage/journal-diet.js";
 import {
+  checkRegularFile,
   detectRuntime,
   getManagedExecutionsRoot,
   getMetadata,
@@ -133,6 +133,8 @@ export interface ExecutionSetup {
     version: string;
     hankHash?: string;
     hankPath?: string;
+    bundleHash?: string;
+    bundlePath?: string;
     hankweaveVersion: string;
     environment: {
       invocationMethod: string;
@@ -152,6 +154,8 @@ export async function setupExecutionEnvironment(options: {
   startNew?: boolean; // Force new execution
   forceMode?: boolean; // Force operation in existing directories with .hankweave
   skipConfirmation?: boolean; // Skip confirmation prompts (-y/--yes)
+  bundleHash?: string;
+  bundlePath?: string;
   hankPath?: string; // Path to hank.json for hash tracking
   ignoreDataMismatch?: boolean; // Skip data hash verification on resume
   noWipe?: boolean; // Preserve existing agentRoot/ on --start-new --force
@@ -566,7 +570,10 @@ export async function setupExecutionEnvironment(options: {
   const invocationMethod = isCompiledExecutable() ? "binary" : detectRuntime();
 
   const meta = {
-    version: "1.1.0",
+    version: "1.2.0",
+    ...(options.bundleHash
+      ? { bundleHash: options.bundleHash, bundlePath: options.bundlePath }
+      : {}),
     readOnlySourceDataPath,
     readOnlySourceResolvedDataPath: await fs.promises.realpath(readOnlySourceDataPath),
     dataHash,

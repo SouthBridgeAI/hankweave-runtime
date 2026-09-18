@@ -1,17 +1,7 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-
-/** Check if a model string refers to a non-Anthropic provider (known to be flakier on creative output) */
-function isNonAnthropicModel(model: string): boolean {
-  const lower = model.toLowerCase();
-  return (
-    !lower.includes("claude") &&
-    !lower.includes("sonnet") &&
-    !lower.includes("opus") &&
-    !lower.includes("haiku")
-  );
-}
+import { isNonAnthropicModel } from "../../utils/model-family.js";
 
 export function runFileContentTests(testDir: string, codonModels: Record<string, string> = {}) {
   const codon3IsNonAnthropic = isNonAnthropicModel(codonModels["codon-3"] || "");

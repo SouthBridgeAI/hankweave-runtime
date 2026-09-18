@@ -294,7 +294,9 @@ describe("Execution Setup - startNew flag", () => {
       const metaPath = path.join(EXECUTION_DIR, ".hankweave", "execution-meta.json");
       const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
 
-      expect(meta.version).toBe("1.1.0");
+      expect(meta.version).toBe("1.2.0");
+      expect(meta.bundleHash).toBeUndefined();
+      expect(meta.bundlePath).toBeUndefined();
       expect(meta.readOnlySourceDataPath).toBe(DATA_SOURCE_DIR);
       expect(meta.dataHash).toBeTruthy();
       expect(meta.linkType).toBeOneOf(["symlink", "copy"]);

@@ -7,11 +7,11 @@ import {
 } from "../schemas/event-schemas.js";
 import { hankweaveLlmCallParamsSchema } from "../types/llm-call-types.js";
 import {
-  hankRefStringSchema,
   inlineSentinelRefsEscapeIssues,
   portableRefFieldSchema,
   portableRefStringSchema,
-} from "./ref-schema.js";
+  refStringSchema,
+} from "../utils.js";
 
 // Helper function to check if a string is a valid event type or wildcard
 const isValidEventType = (type: string): boolean => {
@@ -558,7 +558,7 @@ export const codonSentinelSettingsSchema = z
 export const codonSentinelEntrySchema = z.object({
   sentinelConfig: z.union([
     // File path — hank-dir anchored, so the full textual rules (R1+R2) apply.
-    hankRefStringSchema("sentinelConfig").describe(
+    refStringSchema("sentinelConfig").describe(
       "Path to a sentinel config file, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected.",
     ),
     // Inline config — its base is knowably the hank dir, so this wrapper

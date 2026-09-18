@@ -20,6 +20,7 @@ import {
 import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { ExecutionLayout } from "./execution-layout.js";
+import { HANKWEAVE_ENV_UNSET, hankweaveEnvEntries } from "./hankweave-env.js";
 import {
   ensurePublicToolId,
   makeAssistantMessage,
@@ -166,19 +167,11 @@ export interface EnvOverlay {
 export function buildEnvOverlay(codonEnv?: Record<string, string>): EnvOverlay {
   const set: Record<string, string> = {};
   const unset: string[] = [];
-  for (const key in process.env) {
-    if (
-      key.startsWith("HANKWEAVE_") &&
-      !key.startsWith("HANKWEAVE_RUNTIME_") &&
-      !key.startsWith("HANKWEAVE_SENTINEL_")
-    ) {
-      const newKey = key.substring("HANKWEAVE_".length);
-      const value = process.env[key];
-      if (value === "unset") {
-        unset.push(newKey);
-      } else if (value !== undefined) {
-        set[newKey] = value;
-      }
+  for (const { name, value } of hankweaveEnvEntries()) {
+    if (value === HANKWEAVE_ENV_UNSET) {
+      unset.push(name);
+    } else {
+      set[name] = value;
     }
   }
   if (codonEnv) Object.assign(set, codonEnv);

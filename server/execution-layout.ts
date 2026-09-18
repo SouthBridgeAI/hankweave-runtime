@@ -69,24 +69,6 @@ export class ExecutionLayout {
   static readonly QUARANTINE_PREFIX = `${ExecutionLayout.CHECKPOINT_GIT}-quarantine-`;
 
   /**
-   * Directories the file resolver must always exclude from checkpointing and
-   * file listing, regardless of any .gitignore. Paths are relative to the
-   * resolver's project root with POSIX separators; a trailing `*` is a glob.
-   *
-   * The state-directory entries predate the agentRoot/ split (when the work
-   * tree was the execution directory itself) and are kept as defense in depth.
-   * The data-source entry is live: it lives inside the work tree and must
-   * never be snapshotted.
-   */
-  static readonly MANDATORY_EXCLUDED_DIRS: readonly string[] = [
-    `${ExecutionLayout.STATE_DIR}/${ExecutionLayout.CHECKPOINTS}/${ExecutionLayout.CHECKPOINT_GIT}`,
-    `${ExecutionLayout.STATE_DIR}/${ExecutionLayout.CHECKPOINTS}/${ExecutionLayout.QUARANTINE_PREFIX}*`,
-    `${ExecutionLayout.STATE_BACKUP_PREFIX}*/${ExecutionLayout.CHECKPOINTS}/${ExecutionLayout.CHECKPOINT_GIT}`,
-    `${ExecutionLayout.STATE_BACKUP_PREFIX}*/${ExecutionLayout.CHECKPOINTS}/${ExecutionLayout.QUARANTINE_PREFIX}*`,
-    ExecutionLayout.DATA_SOURCE,
-  ];
-
-  /**
    * The lock file relative to the execution directory. The config default
    * before any execution directory exists; the runtime resolves it against
    * `executionPath` at boot.
@@ -96,11 +78,75 @@ export class ExecutionLayout {
     ExecutionLayout.RUNTIME_LOCK_FILE,
   );
 
-  /** The .gitignore line that keeps rigArchive/ out of checkpoints. */
-  static readonly RIG_ARCHIVE_IGNORE_LINE = `${ExecutionLayout.RIG_ARCHIVE}/`;
+  // -------------
+  // Mandatory exclusions
+  // -------------
 
-  /** git pathspec that keeps the data source out of `git add` in the work tree. */
-  static readonly DATA_SOURCE_PATHSPEC_EXCLUDE = `:(exclude)${ExecutionLayout.DATA_SOURCE}`;
+  /** The protected names, folded the way isMandatoryExcluded folds the path
+   * it judges (NFC + lower-case), computed once. */
+  private static readonly FOLDED = {
+    dataSource: ExecutionLayout.fold(ExecutionLayout.DATA_SOURCE),
+    rigArchive: ExecutionLayout.fold(ExecutionLayout.RIG_ARCHIVE),
+    stateDir: ExecutionLayout.fold(ExecutionLayout.STATE_DIR),
+    stateBackupPrefix: ExecutionLayout.fold(ExecutionLayout.STATE_BACKUP_PREFIX),
+    checkpointGit: ExecutionLayout.fold(ExecutionLayout.CHECKPOINT_GIT),
+    quarantinePrefix: ExecutionLayout.fold(ExecutionLayout.QUARANTINE_PREFIX),
+  };
+
+  private static fold(name: string): string {
+    return name.normalize("NFC").toLowerCase();
+  }
+
+  /**
+   * Is this work-tree-relative POSIX path one of hankweave's own? The
+   * mandatory checkpoint/visibility exclusion, which the Workspace applies
+   * at listing, in every checkpoint delta, and at event time. Component-aware
+   * and case/Unicode-FOLDED: on a case-insensitive filesystem a case-renamed
+   * READ_ONLY_DATA_SOURCE is the same protected directory and git reports
+   * the new spelling — the guard must still hold. On case-sensitive systems
+   * this over-excludes a look-alike name; for a safety exclusion that is the
+   * right direction to err.
+   *
+   * read_only_data_source/ and rigArchive/ are protected at the work-tree
+   * root (the archive only appears there when the work tree IS the execution
+   * directory); hankweave's own state dirs at ANY depth — defense in depth
+   * for a nested execution directory that ends up inside a work tree.
+   */
+  static isMandatoryExcluded(relPosix: string): boolean {
+    const components = relPosix.split("/").map(ExecutionLayout.fold);
+    const first = components[0] as string;
+    const F = ExecutionLayout.FOLDED;
+    if (first === F.dataSource || first === F.rigArchive) return true;
+    return components.some(
+      (c) =>
+        c === F.stateDir ||
+        c.startsWith(F.stateBackupPrefix) ||
+        c === F.checkpointGit ||
+        c.startsWith(F.quarantinePrefix),
+    );
+  }
+
+  /** The belt-and-braces mirror of isMandatoryExcluded for the shadow
+   * checkpoint repo's info/exclude (keeps `git status` output sane for
+   * humans; NOT the enforcement). Written by GitWorkspaceStorage at repo setup. */
+  static readonly CHECKPOINT_INFO_EXCLUDE =
+    `# Managed by hankweave. Mandatory exclusions are enforced in-process
+# (execution-layout.ts :: isMandatoryExcluded); these entries just keep git output tidy.
+/${ExecutionLayout.DATA_SOURCE}/
+/${ExecutionLayout.RIG_ARCHIVE}/
+/${ExecutionLayout.STATE_DIR}/
+/${ExecutionLayout.STATE_BACKUP_PREFIX}*/
+`;
+
+  /**
+   * The exact stanza older versions appended to `<executionPath>/.gitignore`
+   * (a dead file: outside the work tree, so git never read it). Kept only so
+   * the Workspace can recognise and remove it.
+   */
+  static readonly LEGACY_EXECUTION_GITIGNORE_STANZA =
+    `# Hankweave archive directory - not checkpointed
+${ExecutionLayout.RIG_ARCHIVE}/
+`;
 
   // -------------
   // Name-level predicates
@@ -144,11 +190,13 @@ export class ExecutionLayout {
   readonly executionPath: string;
   /** `<executionPath>/.hankweave` */
   readonly stateDir: string;
-  /** `<executionPath>/agentRoot` */
+  /** The agent's working directory: `<executionPath>/agentRoot` unless the
+   * caller overrides it (tests that run the work tree at the execution
+   * directory itself — the flat layout the mandatory exclusions defend). */
   readonly agentRootPath: string;
   /** `<executionPath>/rigArchive` */
   readonly rigArchivePath: string;
-  /** `<executionPath>/agentRoot/read_only_data_source` */
+  /** `<agentRootPath>/read_only_data_source` */
   readonly dataPathInExecutionDir: string;
   /** `<executionPath>/.hankweave/checkpoints` */
   readonly checkpointsPath: string;
@@ -171,12 +219,15 @@ export class ExecutionLayout {
 
   /**
    * Derive every well-known path of an execution directory. Pure; the caller
-   * decides whether anything exists or gets created.
+   * decides whether anything exists or gets created. `agentRootPath` is the
+   * one input the runtime config carries independently; it defaults to the
+   * standard `agentRoot/` child.
    */
-  constructor(executionPath: string) {
+  constructor(executionPath: string, options: { agentRootPath?: string } = {}) {
     this.executionPath = executionPath;
     this.stateDir = path.join(executionPath, ExecutionLayout.STATE_DIR);
-    this.agentRootPath = path.join(executionPath, ExecutionLayout.AGENT_ROOT);
+    this.agentRootPath =
+      options.agentRootPath ?? path.join(executionPath, ExecutionLayout.AGENT_ROOT);
     this.rigArchivePath = path.join(executionPath, ExecutionLayout.RIG_ARCHIVE);
     this.dataPathInExecutionDir = path.join(this.agentRootPath, ExecutionLayout.DATA_SOURCE);
     this.checkpointsPath = path.join(this.stateDir, ExecutionLayout.CHECKPOINTS);

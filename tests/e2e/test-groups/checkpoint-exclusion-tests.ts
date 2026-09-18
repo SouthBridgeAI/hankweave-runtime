@@ -1,17 +1,8 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-
-/** Check if a model string refers to a non-Anthropic provider */
-function isNonAnthropicModel(model: string): boolean {
-  const lower = model.toLowerCase();
-  return (
-    !lower.includes("claude") &&
-    !lower.includes("sonnet") &&
-    !lower.includes("opus") &&
-    !lower.includes("haiku")
-  );
-}
+import { checkpointFiles } from "../../utils/checkpoint-history.js";
+import { isNonAnthropicModel } from "../../utils/model-family.js";
 
 /**
  * Checkpoint exclusion tests.
@@ -40,7 +31,7 @@ export async function runCheckpointExclusionTests(
 
     // Check git status shows them as untracked
     // Work tree is agentRootPath where agent files live
-    const gitStatus = execSync("git status --porcelain", {
+    const gitStatus = execSync("git status --porcelain --untracked-files=all", {
       cwd: agentRootPath,
       env: {
         ...process.env,
@@ -56,15 +47,7 @@ export async function runCheckpointExclusionTests(
     expect(gitStatus).toContain("?? notes/untracked.log");
 
     // .hankweave directory should never be tracked (it's outside agentRootPath)
-    const gitFiles = execSync("git ls-files", {
-      cwd: agentRootPath,
-      env: {
-        ...process.env,
-        GIT_DIR: gitDir,
-        GIT_WORK_TREE: agentRootPath,
-      },
-      encoding: "utf-8",
-    });
+    const gitFiles = checkpointFiles(executionPath, agentRootPath);
 
     expect(gitFiles).not.toContain(".hankweave/");
   });
@@ -72,7 +55,7 @@ export async function runCheckpointExclusionTests(
   test("checkpoint commits include proper metadata", async () => {
     const { execSync } = await import("node:child_process");
 
-    const gitLog = execSync("git log --pretty=format:%B%n---", {
+    const gitLog = execSync("git log --all --pretty=format:%B%n---", {
       cwd: agentRootPath,
       env: {
         ...process.env,
@@ -101,7 +84,7 @@ export async function runCheckpointExclusionTests(
     const { execSync } = await import("node:child_process");
 
     // Get commit times
-    const gitLog = execSync("git log --pretty=format:'%H|%ct|%s'", {
+    const gitLog = execSync("git log --all --pretty=format:'%H|%ct|%s'", {
       cwd: agentRootPath,
       env: {
         ...process.env,
@@ -126,14 +109,14 @@ export async function runCheckpointExclusionTests(
   });
 
   test("checkpoint system respects .gitignore in subfolders", async () => {
-    const { execSync } = await import("node:child_process");
-
-    // Codon 3 copies typescript_structure which has a .gitignore (in agentRootPath)
+    // Hank copy sources can no longer carry nested .gitignore files
+    // (root-only hank rules; rejected at validation), so the WORKSPACE
+    // rules file under test is written here — exactly what an agent doing
+    // `git init`-style scaffolding would do, and the live-rules behavior
+    // the checkpoint system must honor.
     const typescriptDir = path.join(agentRootPath, "typescript_code");
     const gitignorePath = path.join(typescriptDir, ".gitignore");
-
-    // Verify .gitignore exists
-    expect(fs.existsSync(gitignorePath)).toBe(true);
+    fs.writeFileSync(gitignorePath, "node_modules/\ndist/\n.env\n.DS_Store\n");
 
     // Create files that should be ignored according to the .gitignore
     const nodeModulesDir = path.join(typescriptDir, "node_modules");
@@ -151,15 +134,7 @@ export async function runCheckpointExclusionTests(
     fs.writeFileSync(dsStoreFile, "mac finder metadata");
 
     // Get all files tracked by the checkpoint git
-    const gitFiles = execSync("git ls-files", {
-      cwd: agentRootPath,
-      env: {
-        ...process.env,
-        GIT_DIR: gitDir,
-        GIT_WORK_TREE: agentRootPath,
-      },
-      encoding: "utf-8",
-    });
+    const gitFiles = checkpointFiles(executionPath, agentRootPath);
 
     // Verify that ignored files are not tracked
     expect(gitFiles).not.toContain("node_modules");

@@ -7,11 +7,10 @@ import { serve as crosswsServe } from "crossws/server";
 // Import cross-platform WebSocket client from crossws
 // This works in Node.js (18+), Bun, Deno, and browsers
 import WebSocket from "crossws/websocket";
-import glob from "fast-glob";
 import merge from "lodash.merge";
 import { z } from "zod";
-import { fileResolver } from "./file-resolver.js";
-import type { ClientCommand, FileNode, ServerEvent } from "./types/types.js";
+import { containsGitComponent } from "./git-support.js";
+import type { ClientCommand, ServerEvent } from "./types/types.js";
 import type { WebSocketLogEntry } from "./types/websocket-log-types.js";
 
 // Re-export WebSocket for use throughout the codebase
@@ -101,105 +100,6 @@ export class Logger {
     // For backward compatibility, convert to new format
     this.logWebSocketMessage(socketLogFile, direction, data as ClientCommand | ServerEvent);
   }
-}
-
-// -------------
-// File System Utilities
-// -------------
-
-/**
- * Build a hierarchical file tree from files matching a pattern.
- *
- * Creates a tree structure suitable for UI display, with directories
- * as nodes containing their children. Used for filetree.updated events.
- * Includes last modified times for files.
- *
- * @param projectPath - Base directory
- * @param pattern - Glob pattern to match files
- * @returns Root nodes of the file tree
- */
-export async function buildFileTree(projectPath: string, pattern: string): Promise<FileNode[]> {
-  const tree: FileNode[] = [];
-
-  try {
-    // Use unified file resolver to respect gitignore
-    const resolvedFiles = await fileResolver.resolveFiles(projectPath, [pattern]);
-
-    // Get file metadata for each resolved file
-    const files = await Promise.all(
-      resolvedFiles.map(async (filePath) => {
-        const fullPath = path.join(projectPath, filePath);
-        const stats = await fs.promises.stat(fullPath);
-        const content = await fs.promises.readFile(fullPath, "utf-8");
-        return {
-          path: filePath,
-          content,
-          lastModified: stats.mtime.toISOString(),
-        };
-      }),
-    );
-
-    const dirMap = new Map<string, FileNode>();
-
-    // Sort files to ensure directories are created before their children
-    files.sort((a, b) => a.path.localeCompare(b.path));
-
-    for (const file of files) {
-      // Normalize path to remove leading "./"
-      const normalizedPath = file.path.startsWith("./") ? file.path.slice(2) : file.path;
-      // Glob patterns always use forward slashes, even on Windows
-      const parts = normalizedPath.split("/");
-      let currentPath = "";
-      let parent: FileNode | null = null;
-
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        currentPath = currentPath ? path.join(currentPath, part) : part;
-
-        if (i === parts.length - 1) {
-          // This is a file
-          const fileNode: FileNode = {
-            name: part,
-            path: currentPath,
-            isDirectory: false,
-            lastModified: file.lastModified,
-            children: [], // Empty array for files
-          };
-
-          if (parent) {
-            if (!parent.children) parent.children = [];
-            parent.children.push(fileNode);
-          } else {
-            tree.push(fileNode);
-          }
-        } else {
-          // This is a directory
-          if (!dirMap.has(currentPath)) {
-            const dirNode: FileNode = {
-              name: part,
-              path: currentPath,
-              isDirectory: true,
-              children: [],
-            };
-            dirMap.set(currentPath, dirNode);
-
-            if (parent) {
-              if (!parent.children) parent.children = [];
-              parent.children.push(dirNode);
-            } else {
-              tree.push(dirNode);
-            }
-          }
-          parent = dirMap.get(currentPath) || null;
-        }
-      }
-    }
-  } catch (error) {
-    // Error building file tree
-    console.error("Error building file tree:", error);
-  }
-
-  return tree;
 }
 
 // -------------
@@ -638,21 +538,9 @@ export async function* withIdleTimeout<T>(
   const iterator = events[Symbol.asyncIterator]();
   try {
     while (true) {
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const result = await Promise.race([
-          iterator.next(),
-          new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              reject(new IdleTimeoutError(timeoutMs));
-            }, timeoutMs);
-          }),
-        ]);
-        if (result.done) break;
-        yield result.value;
-      } finally {
-        clearTimeout(timeoutId);
-      }
+      const result = await nextBeforeIdleTimeout(iterator, timeoutMs);
+      if (result.done) break;
+      yield result.value;
     }
   } finally {
     // Fire-and-forget: don't await because the iterator may be stuck
@@ -662,9 +550,350 @@ export async function* withIdleTimeout<T>(
   }
 }
 
+async function nextBeforeIdleTimeout<T>(
+  iterator: AsyncIterator<T>,
+  timeoutMs: number,
+): Promise<IteratorResult<T>> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  // Start requesting the next event before arming its idle deadline.
+  const next = iterator.next();
+  const deadline = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new IdleTimeoutError(timeoutMs)), timeoutMs);
+  });
+  try {
+    return await Promise.race([next, deadline]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // -------------
-// Directory Utilities
+// Hank Reference Utilities
 // -------------
+
+/** A portable-path, containment, symlink, or copy-tree policy violation. */
+export type RefViolation =
+  | { kind: "absolute"; raw: string }
+  | { kind: "backslash"; raw: string }
+  | { kind: "invalid"; raw: string }
+  | { kind: "git-metadata"; raw: string }
+  | { kind: "escapes"; raw: string; resolved: string }
+  | { kind: "symlink"; raw: string; component: string }
+  | { kind: "tree-symlink"; raw: string; entry: string }
+  | { kind: "tree-special"; raw: string; entry: string }
+  | { kind: "tree-nested-gitignore"; raw: string; entry: string }
+  | { kind: "tree-ignored-root"; raw: string };
+
+/** An authored reference and its diagnostic field; scanTree marks copy.from sources. */
+export interface AuthoredRef {
+  field: string;
+  raw: string;
+  scanTree?: boolean;
+}
+
+/** Reference-bearing fields of a sentinel config, without a schema dependency. */
+export interface SentinelRefFields {
+  systemPromptFile?: string | string[];
+  userPromptFile?: string | string[];
+  structuredOutput?: { schemaFile?: string };
+}
+
+/** Reference-bearing fields of a codon; callers handle loop traversal. */
+export interface CodonRefFields {
+  promptFile?: string | string[];
+  appendSystemPromptFile?: string | string[];
+  rigSetup?: Array<{ type: string; copy?: { from: string } }>;
+  sentinels?: Array<{ sentinelConfig: string | object }>;
+}
+
+/** Normalize a scalar/list reference field. An empty scalar means absent;
+ * empty array elements remain so validation can report them. */
+export function normalizeRefField(v: string | string[] | undefined | null): string[] {
+  if (v === undefined || v === null || v === "") return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+/** Portable spelling check, independent of the host platform and filesystem. */
+export function forbiddenRefSpelling(
+  raw: string,
+): "absolute" | "backslash" | "invalid" | "git-metadata" | null {
+  if (raw.startsWith("/")) return "absolute";
+  // C:\x, C:/x, drive-relative C:foo, bare C: — checked before the backslash
+  // rule so every drive-qualified spelling reports "absolute": the real
+  // problem is that the ref names a fixed location, not how it is spelled.
+  if (/^[A-Za-z]:/.test(raw)) return "absolute";
+  // What's left: Windows separators mid-path, the drive-less absolute form
+  // (\foo), and UNC paths (\\srv\share) — and "\" is a legal filename
+  // CHARACTER on POSIX, so a ref containing one cannot be portable at all.
+  if (raw.includes("\\")) return "backslash";
+  if (raw.includes("\0")) return "invalid";
+  // The hard `.git` prohibition overrides explicit references: `.git` — the
+  // directory, or the worktree/submodule marker FILE holding a
+  // machine-specific gitdir path — is never copied or bundled, so a ref that
+  // names it (or reaches through it) is an error, not an admitted file.
+  // Checked on the LEXICALLY NORMALIZED spelling, because that is what every
+  // consumer resolves and reads: "sub/.git/../safe.md" collapses to
+  // "sub/safe.md" and never touches git metadata, so it stays legal
+  // (internal ".." hops are permitted policy). ".github" and ".gitignore"
+  // are ordinary names.
+  if (containsGitComponent(path.posix.normalize(raw))) return "git-metadata";
+  return null;
+}
+
+/** Whether a POSIX reference climbs above its base after lexical normalization. */
+export function lexicallyEscapesBase(raw: string): boolean {
+  const normalized = path.posix.normalize(raw);
+  return normalized === ".." || normalized.startsWith("../");
+}
+
+/** Schema for a root-relative reference: spelling and lexical containment
+ * only. Disk checks still happen through HankRef.validate(). */
+export const refStringSchema = (what: string) =>
+  z
+    .string()
+    .min(1, `${what} cannot be an empty string; omit the field instead`)
+    .superRefine((raw, ctx) => {
+      const kind = forbiddenRefSpelling(raw);
+      if (kind !== null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: refViolationMessage({ kind, raw }),
+        });
+        return;
+      }
+      if (lexicallyEscapesBase(raw)) {
+        // Same first clause as refViolationMessage's "escapes"; the resolved
+        // path is omitted because the schema layer never resolves.
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `"${raw}" resolves outside the hank directory; move the file into the hank directory`,
+        });
+      }
+    });
+
+/** The same reference schema accepting either a string or an array. */
+export const refFieldSchema = (what: string) =>
+  z.union([refStringSchema(what), z.array(refStringSchema(what))]);
+
+/** Spelling-only schema for refs whose base inside the hank is not yet
+ * known. Parent traversal may be valid; containment is checked at load. */
+export const portableRefStringSchema = (what: string) =>
+  z
+    .string()
+    .min(1, `${what} cannot be an empty string; omit the field instead`)
+    .superRefine((raw, ctx) => {
+      const kind = forbiddenRefSpelling(raw);
+      if (kind !== null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: refViolationMessage({ kind, raw }),
+        });
+      }
+    });
+
+/** The spelling-only schema accepting either a string or an array. */
+export const portableRefFieldSchema = (what: string) =>
+  z.union([portableRefStringSchema(what), z.array(portableRefStringSchema(what))]);
+
+/** Inline sentinel refs are anchored at the hank root, so their schema
+ * can also reject lexical escapes. Returns messages for the caller's Zod context. */
+export function inlineSentinelRefsEscapeIssues(config: SentinelRefFields): string[] {
+  const issues: string[] = [];
+  for (const { field, raw } of sentinelOwnRefs(config)) {
+    if (forbiddenRefSpelling(raw) === null && lexicallyEscapesBase(raw)) {
+      issues.push(
+        `${field}: "${raw}" resolves outside the hank directory; move the file into the hank directory`,
+      );
+    }
+  }
+  return issues;
+}
+
+/** Enumerate a codon's authored source references, including copy trees. */
+export function codonOwnRefs(codon: CodonRefFields): AuthoredRef[] {
+  const refs: AuthoredRef[] = [
+    ...normalizeRefField(codon.promptFile).map((raw) => ({ field: "promptFile", raw })),
+    ...normalizeRefField(codon.appendSystemPromptFile).map((raw) => ({
+      field: "appendSystemPromptFile",
+      raw,
+    })),
+  ];
+  for (const item of codon.rigSetup ?? []) {
+    if (item.type === "copy" && item.copy) {
+      refs.push({ field: "copy.from", raw: item.copy.from, scanTree: true });
+    }
+  }
+  for (const entry of codon.sentinels ?? []) {
+    if (typeof entry.sentinelConfig === "string") {
+      refs.push({ field: "sentinelConfig", raw: entry.sentinelConfig });
+    }
+  }
+  return refs;
+}
+
+/** Enumerate references owned by a sentinel config. */
+export function sentinelOwnRefs(config: SentinelRefFields): AuthoredRef[] {
+  return [
+    ["systemPromptFile", config.systemPromptFile],
+    ["userPromptFile", config.userPromptFile],
+    ["structuredOutput.schemaFile", config.structuredOutput?.schemaFile],
+  ].flatMap(([field, value]) =>
+    normalizeRefField(value as string | string[] | undefined).map((raw) => ({
+      field: field as string,
+      raw,
+    })),
+  );
+}
+
+/** Shared author-facing wording for reference and copy-tree violations. */
+export function refViolationMessage(v: RefViolation): string {
+  switch (v.kind) {
+    case "absolute":
+      return `"${v.raw}" is an absolute or drive-qualified path; hank refs must be relative paths inside the hank directory`;
+    case "backslash":
+      return `"${v.raw}" contains a backslash; hank refs use "/" as the only path separator`;
+    case "invalid":
+      return `"${v.raw}" contains an invalid character (NUL)`;
+    case "git-metadata":
+      return `"${v.raw}" names git metadata (.git); git metadata is never copied or bundled — reference the files you need directly`;
+    case "escapes":
+      return `"${v.raw}" resolves outside the hank directory (${v.resolved}); move the file into the hank directory`;
+    case "symlink":
+      return `"${v.raw}" passes through a symlink at "${v.component}"; symlinks are not allowed in hank refs`;
+    default:
+      return copyTreeViolationMessage(v);
+  }
+}
+
+/** Copy-tree diagnostics describe entries or ignore rules, rather than
+ * the spelling and route of an individual reference. */
+function copyTreeViolationMessage(v: Extract<RefViolation, { kind: `tree-${string}` }>): string {
+  switch (v.kind) {
+    case "tree-symlink":
+      return `"${v.raw}" contains a symlink at "${v.entry}"; symlinks are not allowed anywhere in a copied tree`;
+    case "tree-special":
+      return `"${v.raw}" contains a non-regular file at "${v.entry}"; only regular files and directories can be copied`;
+    case "tree-nested-gitignore":
+      return `"${v.raw}" contains a nested .gitignore at "${v.entry}"; hank ignore rules live in ONE .gitignore at the hank root — move the rules there, prefixed with the folder path (e.g. "sub/build/")`;
+    case "tree-ignored-root":
+      return `"${v.raw}" is a directory excluded by the hank's ignore rules (.gitignore or the default set), so every file in it would be excluded; adjust the rules or copy a different source`;
+  }
+}
+
+// -------------
+// String Utilities
+// -------------
+
+const utf8Encoder = new TextEncoder();
+
+/** Compare two strings by their UTF-8 byte sequences. */
+export function compareUtf8(a: string, b: string): number {
+  const ab = utf8Encoder.encode(a);
+  const bb = utf8Encoder.encode(b);
+  const len = Math.min(ab.length, bb.length);
+  for (let i = 0; i < len; i++) {
+    const d = (ab[i] as number) - (bb[i] as number);
+    if (d !== 0) return d;
+  }
+  return ab.length - bb.length;
+}
+
+// -------------
+// File and Directory Utilities
+// -------------
+
+/** Convert the host platform's path separators to POSIX separators. */
+export function toPosix(p: string): string {
+  return p.split(path.sep).join("/");
+}
+
+/**
+ * Whether a name carries a packed-bundle suffix. One definition keeps `pack`'s
+ * output check, the run-mode positional heuristic, and the bundle resolver in
+ * lockstep: a file `pack` accepts as output is a file the runner recognizes.
+ */
+export function isBundlePath(name: string): boolean {
+  return name.endsWith(".hank") || name.endsWith(".tar.zst");
+}
+
+/** What checkRegularFile found wrong with a path. */
+export interface RegularFileProblem {
+  kind: "missing" | "irregular" | "unreadable";
+  /** Message fragment phrased to follow the file name (`promptFile "x" does not exist`). */
+  phrase: string;
+}
+
+/**
+ * Guard for paths that must be readable regular files. Returns null when the
+ * path is one, otherwise the problem kind plus a message fragment phrased to
+ * follow the file name (`promptFile "x" does not exist`).
+ *
+ * The regular-file check must run before any read: readFileSync on a FIFO
+ * blocks forever, and on a directory throws a confusing EISDIR. Pass
+ * { read: false } when the caller does its own read right after (the trial
+ * read here would just double it).
+ */
+export function checkRegularFile(
+  filePath: string,
+  options?: { read?: boolean },
+): RegularFileProblem | null {
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(filePath);
+  } catch {
+    return { kind: "missing", phrase: "does not exist" };
+  }
+  if (!stats.isFile()) {
+    return { kind: "irregular", phrase: "is not a regular file" };
+  }
+  if (options?.read !== false) {
+    try {
+      fs.readFileSync(filePath, "utf-8");
+    } catch (error) {
+      return {
+        kind: "unreadable",
+        phrase: `is not readable: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Locate a program on PATH the way `sh -c` (or cmd.exe) would: first
+ * executable regular file named `name` in a PATH entry, honouring PATHEXT
+ * on Windows. Returns null when nothing matches. Runs under Node as well as
+ * Bun, so it never touches `Bun.which`.
+ */
+export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const isWin = process.platform === "win32";
+  const dirs = (env.PATH ?? "").split(path.delimiter).filter((d) => d.length > 0);
+  // On Windows a bare name tries each PATHEXT suffix; a name that already
+  // carries an extension, and every POSIX name, is tried verbatim.
+  const suffixes =
+    isWin && path.extname(name) === ""
+      ? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter((e) => e.length > 0)
+      : [""];
+  for (const dir of dirs) {
+    for (const suffix of suffixes) {
+      const candidate = path.join(dir, name + suffix);
+      if (isExecutableFile(candidate, isWin)) return candidate;
+    }
+  }
+  return null;
+}
+
+/** A regular file that the current user may execute (Windows has no
+ * execute bit; existence as a regular file is the whole test there). */
+function isExecutableFile(candidate: string, isWin: boolean): boolean {
+  try {
+    if (!fs.statSync(candidate).isFile()) return false;
+    if (!isWin) fs.accessSync(candidate, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Root for auto-managed executions. `HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR`
@@ -781,106 +1010,6 @@ export async function resolveFileConflict(destPath: string): Promise<{
     conflictNumber: counter - 1,
     timestamp,
   };
-}
-
-/**
- * Copy files from a source directory to a destination directory using glob patterns.
- *
- * This function uses fast-glob directly to resolve file patterns without respecting
- * .gitignore rules (unlike UnifiedFileResolver), ensuring all matching files are copied regardless of git ignore status.
- *
- * @param sourceDirectory - The source directory path from which to copy files
- * @param filesToCopy - Array of glob patterns to match files for copying (e.g., `["*.txt"]`)
- * @param destinationDirectory - The destination directory path where files will be copied
- * @param logger - Logger instance for debug and info messages
- * @param options - Optional settings
- * @param options.overwrite - When true, overwrite existing files instead of renaming
- * @returns Promise with conflicts array listing any files that were renamed
- */
-export async function copyFiles(
-  sourceDirectory: string,
-  filesToCopy: string[],
-  destinationDirectory: string,
-  logger: Logger,
-  options?: { overwrite?: boolean },
-): Promise<{ conflicts: Array<{ original: string; resolved: string }> }> {
-  const conflicts: Array<{ original: string; resolved: string }> = [];
-
-  // Log the copy operation with source, destination, and glob patterns
-  logger.log(
-    `Copying files from ${sourceDirectory} to ${destinationDirectory} using globs ${filesToCopy.join(
-      ", ",
-    )}`,
-    "debug",
-  );
-
-  // Ensure destination directory exists before starting copy operations
-  await fs.promises.mkdir(destinationDirectory, { recursive: true });
-
-  // Use fast-glob directly to resolve patterns without gitignore filtering
-  // This ensures all matching files are found, regardless of .gitignore rules
-  const files = await glob(filesToCopy, {
-    cwd: sourceDirectory, // Set working directory for glob patterns
-    dot: true, // Include hidden files (files starting with .)
-    onlyFiles: false, // Include directories in results for recursive copying
-  });
-
-  // Early return if no files match the provided glob patterns
-  if (files.length === 0) {
-    logger.log("No files matched the copy globs.", "debug");
-    return { conflicts };
-  }
-
-  // Log all resolved files for debugging purposes
-  logger.log(`Resolved files: ${files.join(", ")}`, "debug");
-
-  // Process each matched file/directory
-  for (const file of files) {
-    // Build absolute paths for source and destination
-    const sourcePath = path.join(sourceDirectory, file);
-    let destPath = path.join(destinationDirectory, file);
-
-    logger.log(`Copying ${sourcePath} to ${destPath}`, "debug");
-
-    // Skip files that don't exist (edge case handling)
-    if (!fs.existsSync(sourcePath)) {
-      logger.log(`Source file ${sourcePath} does not exist`, "info");
-      continue;
-    }
-
-    // Check for conflicts and resolve (skip when overwrite mode is on)
-    if (!options?.overwrite) {
-      const { resolvedPath, hadConflict } = await resolveFileConflict(destPath);
-
-      if (hadConflict) {
-        logger.log(
-          `Output file conflict: '${path.basename(destPath)}' already exists, saving as '${path.basename(resolvedPath)}'`,
-          "info",
-        );
-        conflicts.push({ original: destPath, resolved: resolvedPath });
-        destPath = resolvedPath;
-      }
-    } else if (fs.existsSync(destPath)) {
-      logger.log(`Overwriting output file: '${path.basename(destPath)}'`, "info");
-    }
-
-    // Create parent directories in destination if they don't exist
-    // This preserves the directory structure from source
-    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
-
-    // Copy the file or directory recursively using Node.js built-in fs.cp
-    // The recursive option handles both files and directories uniformly
-    // verbatimSymlinks: preserves symlinks as symlinks rather than dereferencing them.
-    // This prevents EINVAL errors when copying node_modules/.bin/ which contains
-    // symlinks pointing to parent directories.
-    await fs.promises.cp(sourcePath, destPath, {
-      recursive: true,
-      verbatimSymlinks: true,
-      force: options?.overwrite ?? false,
-    });
-  }
-
-  return { conflicts };
 }
 
 // -------------

@@ -1,10 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_CONFIG } from "../../server/config.js";
 import { ExecutionLayout } from "../../server/execution-layout.js";
-import { UnifiedFileResolver } from "../../server/file-resolver.js";
 
 describe("execution-layout", () => {
   test("directory and file names are the on-disk spellings", () => {
@@ -25,8 +24,7 @@ describe("execution-layout", () => {
     expect(ExecutionLayout.ARCHIVE_MANIFEST_FILE).toBe("archive-manifest.json");
     expect(ExecutionLayout.STATE_BACKUP_PREFIX).toBe(".hankweave.backup-");
     expect(ExecutionLayout.QUARANTINE_PREFIX).toBe(".hankweavecheckpoints-quarantine-");
-    expect(ExecutionLayout.RIG_ARCHIVE_IGNORE_LINE).toBe("rigArchive/");
-    expect(ExecutionLayout.DATA_SOURCE_PATHSPEC_EXCLUDE).toBe(":(exclude)read_only_data_source");
+    expect(ExecutionLayout.LEGACY_EXECUTION_GITIGNORE_STANZA).toContain("\nrigArchive/\n");
   });
 
   test("ExecutionLayout derives every path from one execution directory", () => {
@@ -105,74 +103,54 @@ describe("execution-layout", () => {
     expect(ExecutionLayout.isInsideStateBackup("/x/.hankweave.backup-1/checkpoints")).toBe(true);
     expect(ExecutionLayout.isInsideStateBackup("/x/.hankweave/checkpoints")).toBe(false);
   });
-
-  test("MANDATORY_EXCLUDED_DIRS names exactly the protected work-tree paths", () => {
-    expect([...ExecutionLayout.MANDATORY_EXCLUDED_DIRS]).toEqual([
-      ".hankweave/checkpoints/.hankweavecheckpoints",
-      ".hankweave/checkpoints/.hankweavecheckpoints-quarantine-*",
-      ".hankweave.backup-*/checkpoints/.hankweavecheckpoints",
-      ".hankweave.backup-*/checkpoints/.hankweavecheckpoints-quarantine-*",
-      "read_only_data_source",
-    ]);
-  });
 });
 
 describe("mandatory exclusion policy follows the layout", () => {
-  let workTree: string;
-  const resolver = new UnifiedFileResolver();
-
-  // One concrete instance of every protected directory (globs made concrete),
-  // each holding a file that would otherwise be matched by "**/*".
-  const protectedFiles = [
+  // One concrete instance of every protected name (globs made concrete). The
+  // policy is ExecutionLayout.isMandatoryExcluded, built from the layout's
+  // names: data source and archive at the work-tree root, the
+  // state directory, its backups, the shadow git dir and its quarantines at
+  // ANY depth (defense in depth for a work tree that is the execution
+  // directory itself).
+  const protectedPaths = [
+    ".hankweave/state.json",
+    ".hankweave/checkpoints/notes.txt",
     ".hankweave/checkpoints/.hankweavecheckpoints/HEAD",
     ".hankweave/checkpoints/.hankweavecheckpoints-quarantine-2026-01-01T00-00-00/HEAD",
     ".hankweave.backup-2026-01-01T00-00-00/checkpoints/.hankweavecheckpoints/HEAD",
     ".hankweave.backup-2026-01-01T00-00-00/checkpoints/.hankweavecheckpoints-quarantine-x/HEAD",
+    "sub/.hankweave/state.json",
+    "sub/.hankweavecheckpoints/HEAD",
     "read_only_data_source/input.csv",
     "read_only_data_source/nested/deep.txt",
+    "rigArchive/codon-1/out.md",
   ];
-  // Siblings the policy must NOT touch: ordinary work, and state files that
-  // are not the shadow git directory (the resolver is not a .hankweave filter).
-  const keptFiles = [
+  // Siblings the policy must NOT touch: ordinary work, and look-alikes that
+  // are not the protected names at the protected depth.
+  const keptPaths = [
     "output.md",
     "src/main.ts",
-    ".hankweave/state.json",
-    ".hankweave/checkpoints/notes.txt",
     "not_read_only_data_source/x.txt",
     "sub/read_only_data_source/x.txt", // only the root-level link is protected
+    "sub/rigArchive/x.txt", // only the root-level archive is protected
+    ".hankweaverc",
   ];
 
-  beforeAll(async () => {
-    workTree = await fs.promises.mkdtemp(path.join(os.tmpdir(), "hw-exclusion-"));
-    for (const rel of [...protectedFiles, ...keptFiles]) {
-      const abs = path.join(workTree, rel);
-      await fs.promises.mkdir(path.dirname(abs), { recursive: true });
-      await fs.promises.writeFile(abs, rel);
+  test("isMandatoryExcluded drops every protected path and keeps everything else", () => {
+    for (const rel of protectedPaths) {
+      expect(ExecutionLayout.isMandatoryExcluded(rel)).toBe(true);
+    }
+    for (const rel of keptPaths) {
+      expect(ExecutionLayout.isMandatoryExcluded(rel)).toBe(false);
     }
   });
 
-  afterAll(async () => {
-    await fs.promises.rm(workTree, { recursive: true, force: true });
-  });
-
-  test("resolveFiles drops every protected path and keeps everything else", async () => {
-    const files = await resolver.resolveFiles(workTree, ["**/*"]);
-    const got = new Set(files.map((f) => f.split(path.sep).join("/")));
-    for (const rel of protectedFiles) {
-      expect(got.has(rel)).toBe(false);
-    }
-    for (const rel of keptFiles) {
-      expect(got.has(rel)).toBe(true);
-    }
-  });
-
-  test("createPathMatcher agrees with resolveFiles on the protected set", async () => {
-    const matcher = await resolver.createPathMatcher(workTree, ["**/*"]);
-    for (const rel of protectedFiles) {
-      expect(matcher.match(rel)).toBeNull();
-    }
-    for (const rel of keptFiles) {
-      expect(matcher.match(rel)).toBe(rel);
-    }
+  test("the shadow repo's cosmetic info/exclude names the same layout entries", () => {
+    expect(ExecutionLayout.CHECKPOINT_INFO_EXCLUDE).toContain(`/${ExecutionLayout.DATA_SOURCE}/`);
+    expect(ExecutionLayout.CHECKPOINT_INFO_EXCLUDE).toContain(`/${ExecutionLayout.RIG_ARCHIVE}/`);
+    expect(ExecutionLayout.CHECKPOINT_INFO_EXCLUDE).toContain(`/${ExecutionLayout.STATE_DIR}/`);
+    expect(ExecutionLayout.CHECKPOINT_INFO_EXCLUDE).toContain(
+      `/${ExecutionLayout.STATE_BACKUP_PREFIX}*/`,
+    );
   });
 });

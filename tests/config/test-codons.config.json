@@ -111,6 +111,13 @@
         {
           "type": "command",
           "command": {
+            "run": "printf 'node_modules/\\n' > .gitignore",
+            "workingDirectory": "lastCopied"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
             "run": "bun install",
             "workingDirectory": "lastCopied"
           }

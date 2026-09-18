@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import type { ExecutionCodonEntry } from "./execution-planner.js";
+import type { ArchiveResult, LoopIterationCompletion } from "./state-manager.js";
 import type { CodonId, RunId } from "./types/branded-types.js";
 import type { CodonStatus, StateTransition } from "./types/state-types.js";
 import type { ServerEvent } from "./types/types.js";
@@ -104,6 +106,9 @@ export interface ProcessEvents {
 
 // Define state manager event map
 export interface StateManagerEvents {
+  archivesProcessed: [ArchiveResult];
+  executionPlanChanged: [ExecutionCodonEntry[]];
+  loopIterationCompleted: [LoopIterationCompletion];
   stateChanged: [StateTransition];
   codonRunning: [
     {

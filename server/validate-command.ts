@@ -56,7 +56,7 @@ interface ValidationDisplayOptions {
   dataPath: string;
   executionPath: string;
   result: ValidationResult;
-  originalUrl?: string; // Original remote hank URL (if remote)
+  originalUrl?: string; // Original remote hank URL or bundle path
   resolvedBudget?: { maxDollars?: number; maxTimeSeconds?: number };
 }
 
@@ -187,6 +187,8 @@ export interface ValidateOptions {
   modelOverride?: string;
   /** Original URL if this is a remote hank (for display in run hint) */
   originalUrl?: string;
+  /** Preserve verified bundle bytes, including during replay. */
+  skipSchemaRewrite?: boolean;
   /** Resolved budget from all config layers (runtime, hank, CLI) for accurate ceiling display */
   resolvedBudget?: { maxDollars?: number; maxTimeSeconds?: number };
 }
@@ -235,11 +237,7 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
     performHealthCheckOnInit: false,
   });
 
-  // 6. Auto-add $schema for editor support if missing
-  const schemaAdded = ensureSchemaUrl(configPath);
-  if (schemaAdded) {
-    console.log(`+ Added $schema to ${path.basename(configPath)} for editor support`);
-  }
+  addValidationSchema(configPath, options.skipSchemaRewrite);
 
   // 7. Print validation header
   console.log(`\n> Validating configuration: ${configPath}\n`);
@@ -263,4 +261,11 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
     originalUrl: options.originalUrl,
     resolvedBudget: options.resolvedBudget,
   });
+}
+
+function addValidationSchema(configPath: string, skipSchemaRewrite = false): void {
+  if (skipSchemaRewrite) return;
+  if (ensureSchemaUrl(configPath)) {
+    console.log(`+ Added $schema to ${path.basename(configPath)} for editor support`);
+  }
 }

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { normalizeRefField, vetAndReadRef } from "../hank-refs.js";
+import { HankDir } from "../hank-dir.js";
 import type { ServerEvent } from "../schemas/event-schemas.js";
 import { type CodonId, EventId } from "../types/branded-types.js";
 import type {
@@ -16,7 +16,7 @@ import type {
   SentinelOutputPaths,
   StructuredOutputContext,
 } from "../types/sentinel-types.js";
-import { generateId, type Logger, renameWithRetrySync } from "../utils.js";
+import { generateId, type Logger, normalizeRefField, renameWithRetrySync } from "../utils.js";
 import "../../tests/types/global-test-types.js";
 import { HistoryManager } from "./history-manager.js";
 import { type TemplateContext, TemplateRenderer } from "./prompt-templating-engine.js";
@@ -134,12 +134,15 @@ export class Sentinel {
     this.llmParams = mergeWithDefaults(this.config.llmParams);
     this.triggerEngine = createTriggerEngine(config.trigger, logger);
 
+    // One source-file authority for schema and prompt reads. Keep the config
+    // directory as the resolution base; the hank root is the containment bound.
+    // These reads never initialize copy-tree ignore rules or a Git mirror.
+    const hank =
+      configDirectory === undefined ? undefined : new HankDir(hankDirectory ?? configDirectory);
+
     // Load structured output schema if configured
     if (config.structuredOutput) {
-      this.structuredOutputContext = this.loadStructuredOutputSchema(
-        configDirectory,
-        hankDirectory,
-      );
+      this.structuredOutputContext = this.loadStructuredOutputSchema(configDirectory, hank);
 
       // Validate we have llmObjectCall if needed
       if (this.structuredOutputContext && !llmObjectCall) {
@@ -163,7 +166,7 @@ export class Sentinel {
       config.userPromptText,
       configDirectory,
       "user prompt",
-      hankDirectory,
+      hank,
     );
 
     if (!userPrompt) {
@@ -176,34 +179,10 @@ export class Sentinel {
       config.systemPromptText,
       configDirectory,
       "system prompt",
-      hankDirectory,
+      hank,
     );
 
-    // Create history manager if conversational mode is enabled
-    if (config.conversational) {
-      // Validate that conversational sentinels have system prompt
-      if (!this.systemPromptTemplate) {
-        throw new SentinelFatalError(
-          config.id,
-          "Conversational sentinel missing required system prompt",
-          "configuration",
-          true,
-        );
-      }
-
-      this.historyManager = new HistoryManager(
-        config.id,
-        this.codonId,
-        config.conversational.trimmingStrategy,
-        sentinelDir, // May be undefined - that's OK, runs in memory-only mode
-        this.logger,
-      );
-
-      this.logger?.log(
-        `[Sentinel:${config.id}] Initialized conversational mode with ${config.conversational.trimmingStrategy.type} trimming`,
-        "info",
-      );
-    }
+    this.historyManager = this.initializeHistoryManager(sentinelDir);
 
     // Initialize output files (ALWAYS - auto-generate if not provided)
     this.outputPaths = this.initializeOutputFiles(outputPaths, executionPath);
@@ -212,6 +191,33 @@ export class Sentinel {
       `[Sentinel:${config.id}] Initialized with ${config.execution.strategy} strategy`,
       "debug",
     );
+  }
+
+  /** Conversational mode requires a system prompt and owns its history.
+   * Without a persistence directory, the history remains in memory. */
+  private initializeHistoryManager(sentinelDir?: string): HistoryManager | undefined {
+    const { config } = this;
+    if (!config.conversational) return undefined;
+    if (!this.systemPromptTemplate) {
+      throw new SentinelFatalError(
+        config.id,
+        "Conversational sentinel missing required system prompt",
+        "configuration",
+        true,
+      );
+    }
+    const historyManager = new HistoryManager(
+      config.id,
+      this.codonId,
+      config.conversational.trimmingStrategy,
+      sentinelDir,
+      this.logger,
+    );
+    this.logger?.log(
+      `[Sentinel:${config.id}] Initialized conversational mode with ${config.conversational.trimmingStrategy.type} trimming`,
+      "info",
+    );
+    return historyManager;
   }
 
   /**
@@ -1180,7 +1186,7 @@ export class Sentinel {
    */
   private loadStructuredOutputSchema(
     configDirectory?: string,
-    hankDirectory?: string,
+    hank?: HankDir,
   ): StructuredOutputContext {
     // Safe to assert: constructor only calls this when structuredOutput exists
     const cfg =
@@ -1210,7 +1216,7 @@ export class Sentinel {
     let schemaCode: string;
     if (cfg.schemaFile) {
       // No cwd fallback: a file-based schema ref requires a config directory
-      if (configDirectory === undefined) {
+      if (configDirectory === undefined || hank === undefined) {
         throw new SentinelFatalError(
           this.config.id,
           `Cannot resolve schema file "${cfg.schemaFile}": no config directory provided`,
@@ -1223,14 +1229,9 @@ export class Sentinel {
         // Strict-ref gate at the point of read; the anchor falls back to the
         // config directory when no hank dir was provided (direct construction
         // in tests), which is strictly narrower, never wider.
-        schemaCode = vetAndReadRef(
-          cfg.schemaFile,
-          configDirectory,
-          hankDirectory ?? configDirectory,
-          {
-            what: "Schema file",
-          },
-        ).text;
+        schemaCode = hank
+          .ref(cfg.schemaFile, { baseDir: configDirectory })
+          .readText({ what: "Schema file" }).text;
       } catch (error) {
         throw new SentinelFatalError(
           this.config.id,
@@ -1290,7 +1291,7 @@ export class Sentinel {
     text: string | undefined,
     configDirectory: string | undefined,
     promptType: string,
-    hankDirectory?: string,
+    hank?: HankDir,
   ): string | undefined {
     const parts: string[] = [];
 
@@ -1298,7 +1299,7 @@ export class Sentinel {
     const fileArray = normalizeRefField(files);
     if (fileArray.length > 0) {
       // No cwd fallback: file-based prompt refs require a config directory
-      if (configDirectory === undefined) {
+      if (configDirectory === undefined || hank === undefined) {
         throw new Error(
           `[Sentinel:${this.config.id}] Cannot resolve ${promptType} file(s): no config directory provided`,
         );
@@ -1308,7 +1309,7 @@ export class Sentinel {
           // Strict-ref gate at the point of read (anchor falls back to the
           // config directory when no hank dir was provided).
           parts.push(
-            vetAndReadRef(file, configDirectory, hankDirectory ?? configDirectory, {
+            hank.ref(file, { baseDir: configDirectory }).readText({
               what: `${promptType} file`,
             }).text,
           );

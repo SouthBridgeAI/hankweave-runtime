@@ -1,19 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { findFirstRunFolder } from "../../utils/run-folder.js";
 import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runLogFilesTests(testDir: string) {
   // Find the run folder - there should be exactly one
-  const runsDir = path.join(testDir, ".hankweave/runs");
-  let runFolder = "";
-
-  if (fs.existsSync(runsDir)) {
-    const runFolders = fs.readdirSync(runsDir);
-    if (runFolders.length > 0) {
-      runFolder = path.join(runsDir, runFolders[0]);
-    }
-  }
+  const runFolder = findFirstRunFolder(testDir);
 
   for (const codonId of ["codon-1", "codon-2", "codon-3"]) {
     describe(`${codonId} logs`, () => {

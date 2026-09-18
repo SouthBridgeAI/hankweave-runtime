@@ -19,15 +19,15 @@ describe("Budget carry-over across resume", () => {
   it("should carry over budget spending from previous run on resume", async () => {
     const port = await getFreePort();
 
-    // Global maxDollars=$0.002, 2 codons with shared allocation (default).
-    // First codon (file creation) costs ~$0.003–0.005, exceeding its uniform share of $0.001.
+    // Global maxDollars=$0.0005, 2 codons with shared allocation (default).
+    // First codon (file creation) should exceed the shared global pool of $0.0005.
     // After stop and resume, the continuation run's Budget should account for
     // Run 1's spending when computing the remaining pool for followup-codon.
     //
-    // Correct behavior: alreadySpent=$0.003+, globalRemaining=max(0,$0.002-$0.003)=$0,
+    // Correct behavior: alreadySpent>$0.0005, globalRemaining=$0,
     //   followup-codon gets $0 → immediately exceeds budget.
     // Bug behavior: Budget starts fresh on resume (alreadySpent=0),
-    //   followup-codon gets full $0.002 → completes normally without budget exceeded.
+    //   followup-codon gets full $0.0005 → completes normally without budget exceeded.
     const hankweave = await launchHankweave({
       configPath: "tests/config/test-budget-resume.config.json",
       port,
@@ -41,7 +41,7 @@ describe("Budget carry-over across resume", () => {
       expect(readyEvent.data.executionPath).toBeDefined();
       execDir = hankweave.executionDir;
 
-      // --- Run 1: budget-codon should exceed its uniform share ---
+      // --- Run 1: budget-codon should exhaust the shared global pool ---
 
       await hankweave.waitForCodonStart("budget-codon", undefined, 120_000);
 
@@ -57,7 +57,7 @@ describe("Budget carry-over across resume", () => {
 
       // Record how much the first codon actually spent
       const firstCodonCost = budgetCompleted.data.budgetExceeded?.used ?? 0;
-      expect(firstCodonCost).toBeGreaterThan(0.001); // Should exceed the $0.001 uniform share
+      expect(firstCodonCost).toBeGreaterThan(0.0005); // Should exceed the global limit
 
       // Stop the server (graceful SIGINT) before followup-codon finishes
       await hankweave.stop();
@@ -96,8 +96,8 @@ describe("Budget carry-over across resume", () => {
 
       expect(followupCompleted.data.success).toBe(true);
 
-      // KEY ASSERTION: If budget carry-over works correctly, the global pool ($0.002)
-      // is already exhausted by budget-codon's spending ($0.003+) from Run 1.
+      // KEY ASSERTION: If budget carry-over works correctly, the global pool ($0.0005)
+      // is already exhausted by budget-codon's spending from Run 1.
       // The followup-codon should get maxDollars=$0 and immediately exceed.
       expect(followupCompleted.data.budgetExceeded).toBeDefined();
       expect(followupCompleted.data.budgetExceeded?.currency).toBe("cost");

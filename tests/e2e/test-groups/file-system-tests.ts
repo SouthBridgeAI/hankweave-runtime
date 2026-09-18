@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CodonCompletedEvent, CodonStartedEvent } from "../../../server/types/types.js";
+import { isNonAnthropicModel } from "../../utils/model-family.js";
 
 interface TestState {
   codon1Started: CodonStartedEvent | null;
@@ -11,17 +12,6 @@ interface TestState {
   codon3Started: CodonStartedEvent | null;
   codon3Completed: CodonCompletedEvent | null;
   codonModels: Record<string, string>;
-}
-
-/** Check if a model string refers to a non-Anthropic provider (known to be flakier on file creation) */
-function isNonAnthropicModel(model: string): boolean {
-  const lower = model.toLowerCase();
-  return (
-    !lower.includes("claude") &&
-    !lower.includes("sonnet") &&
-    !lower.includes("opus") &&
-    !lower.includes("haiku")
-  );
 }
 
 export function runFileSystemTests(testState: TestState, testDir: string) {

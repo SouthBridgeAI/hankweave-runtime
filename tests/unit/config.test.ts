@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as codonRunnerModule from "../../server/codon-runner.js";
 import {
@@ -13,6 +14,7 @@ import {
   loadRuntimeConfig,
   validateHank,
 } from "../../server/config";
+import { HankConfigFile } from "../../server/hank-dir.js";
 import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
 import { CodonId } from "../../server/types/branded-types";
 import type { ModelName, ShimSelfTestResult } from "../../server/types/types";
@@ -1008,6 +1010,36 @@ describe("validateHank", () => {
         logger: testLogger,
       }),
     ).rejects.toThrow("Invalid target path");
+  });
+
+  // The loader judges copy.to with the predicate the rig copy uses at run
+  // time, so anything plantCopy would refuse is refused by --validate too
+  test.each([
+    ["an absolute path", "/rig", "Expected a relative path"],
+    ["a Windows absolute path", "C:\\rig", "Expected a relative path"],
+    ["a path under the state directory", ".hankweave/rig", "Protected workspace path"],
+    ["a path with a .git component", ".git/hooks", "Protected workspace path"],
+  ])("rejects copy.to that is %s", async (_label, to, reason) => {
+    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
+    createTestFile(path.join(tempDir, "source.txt"), "Source content");
+
+    writeHankConfig(configPath, [
+      {
+        id: "test-codon",
+        name: "Test Codon",
+        model: "opus",
+        continuationMode: "fresh",
+        promptFile: "./prompt.md",
+        rigSetup: [{ type: "copy", copy: { from: "./source.txt", to } }],
+      },
+    ]);
+    const validation = validateHank({
+      configPath,
+      executionPath: projectPath,
+      logger: testLogger,
+    });
+    await expect(validation).rejects.toThrow(`Invalid target path "${to}"`);
+    await expect(validation).rejects.toThrow(reason);
   });
 
   test("warns about potentially dangerous commands", async () => {
@@ -2357,6 +2389,28 @@ describe("loadRuntimeConfig", () => {
     expect(result).toEqual({});
   });
 
+  test("treats a path below a regular file as missing", () => {
+    fs.writeFileSync(runtimeConfigPath, "{}");
+    const missing = path.join(runtimeConfigPath, "nested.json");
+    expect(loadRuntimeConfig(missing)).toEqual({});
+    expect(() => loadHankFile({ hankPath: missing })).toThrow("Hank file not found");
+  });
+
+  test("reports snapshot failures instead of treating the config as missing", () => {
+    const error = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    const snapshotSpy = spyOn(HankConfigFile.prototype, "readSnapshot").mockImplementation(() => {
+      throw error;
+    });
+    try {
+      expect(() => loadRuntimeConfig(runtimeConfigPath)).toThrow(
+        `Failed to load runtime config from ${runtimeConfigPath}: permission denied`,
+      );
+      expect(() => loadHankFile({ hankPath: runtimeConfigPath })).toThrow("permission denied");
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+  });
+
   test("loads valid runtime config with all fields", () => {
     const runtimeContent = {
       port: 8080,
@@ -3646,7 +3700,8 @@ describe("loadCodonSequence", () => {
 // ENG-121: Required Environment Variables Tests
 // -------------
 
-import { hankFileSchema, validateRequiredEnv } from "../../server/config";
+import { hankFileSchema, validateRequiredEnv, validateRequiredTools } from "../../server/config";
+import { findOnPath } from "../../server/utils";
 
 describe("validateRequiredEnv (ENG-121)", () => {
   let savedEnv: Record<string, string | undefined>;
@@ -3787,6 +3842,105 @@ describe("hankFileSchema with requirements (ENG-121)", () => {
 
     const result = hankFileSchema.parse(config);
     expect(result.requirements?.env?.[0]).toBe("ANTHROPIC_API_KEY");
+  });
+});
+
+describe("hankFileSchema with requirements.tools", () => {
+  test("accepts bare tool names and trims whitespace", () => {
+    const config = {
+      requirements: { tools: ["bun", "  jq  "] },
+      hank: [MINIMAL_CODON],
+    };
+    const result = hankFileSchema.parse(config);
+    expect(result.requirements?.tools).toEqual(["bun", "jq"]);
+  });
+
+  test("rejects empty tool names after trim", () => {
+    const config = {
+      requirements: { tools: ["bun", "   "] },
+      hank: [MINIMAL_CODON],
+    };
+    expect(() => hankFileSchema.parse(config)).toThrow(/empty/i);
+  });
+
+  test("rejects paths and multi-word strings — a tool is a bare program name", () => {
+    for (const bad of ["/usr/bin/jq", "bin\\jq.exe", "bun install"]) {
+      const config = { requirements: { tools: [bad] }, hank: [MINIMAL_CODON] };
+      expect(() => hankFileSchema.parse(config)).toThrow(/bare program name/);
+    }
+  });
+
+  test("rejects non-string entries", () => {
+    const config = { requirements: { tools: ["bun", 1] }, hank: [MINIMAL_CODON] };
+    expect(() => hankFileSchema.parse(config)).toThrow();
+  });
+
+  test("env and tools coexist and both stay optional", () => {
+    expect(() => hankFileSchema.parse({ requirements: {}, hank: [MINIMAL_CODON] })).not.toThrow();
+    const result = hankFileSchema.parse({
+      requirements: { env: ["A_KEY"], tools: ["jq"] },
+      hank: [MINIMAL_CODON],
+    });
+    expect(result.requirements).toEqual({ env: ["A_KEY"], tools: ["jq"] });
+  });
+});
+
+describe("validateRequiredTools", () => {
+  // A private PATH with exactly one executable, so the checks do not depend
+  // on what the host happens to have installed.
+  let binDir: string;
+  let env: NodeJS.ProcessEnv;
+  const exe = process.platform === "win32" ? "present-tool.cmd" : "present-tool";
+
+  beforeEach(() => {
+    binDir = fs.mkdtempSync(path.join(os.tmpdir(), "hw-required-tools-"));
+    fs.writeFileSync(path.join(binDir, exe), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    // A same-named file that is NOT executable must not count (POSIX only).
+    fs.writeFileSync(path.join(binDir, "plain-file"), "", { mode: 0o644 });
+    fs.mkdirSync(path.join(binDir, "a-directory"));
+    env = { PATH: binDir, PATHEXT: ".CMD;.EXE" };
+  });
+
+  afterEach(() => {
+    fs.rmSync(binDir, { recursive: true, force: true });
+  });
+
+  test("findOnPath resolves an executable file and nothing else", () => {
+    const resolved = findOnPath("present-tool", env);
+    const expected = path.join(binDir, exe);
+    // PATHEXT supplies uppercase .CMD, which still resolves the lowercase
+    // fixture on Windows. POSIX paths must retain their exact casing.
+    if (process.platform === "win32") {
+      expect(resolved?.toLowerCase()).toBe(expected.toLowerCase());
+    } else {
+      expect(resolved).toBe(expected);
+    }
+    expect(findOnPath("a-directory", env)).toBeNull();
+    expect(findOnPath("definitely-not-installed-xyz", env)).toBeNull();
+    if (process.platform !== "win32") {
+      expect(findOnPath("plain-file", env)).toBeNull();
+    }
+  });
+
+  test("findOnPath treats an unset or empty PATH as nothing found", () => {
+    expect(findOnPath("present-tool", {})).toBeNull();
+    expect(findOnPath("present-tool", { PATH: "" })).toBeNull();
+  });
+
+  test("passes when every tool resolves", () => {
+    const result = validateRequiredTools(["present-tool"], env);
+    expect(result).toEqual({ valid: true, missing: [] });
+  });
+
+  test("reports every missing tool, in declared order", () => {
+    const result = validateRequiredTools(["zzz-missing", "present-tool", "aaa-missing"], env);
+    expect(result.valid).toBe(false);
+    expect(result.missing).toEqual(["zzz-missing", "aaa-missing"]);
+  });
+
+  test("passes with an empty array or undefined", () => {
+    expect(validateRequiredTools([], env).valid).toBe(true);
+    expect(validateRequiredTools(undefined, env).valid).toBe(true);
   });
 });
 

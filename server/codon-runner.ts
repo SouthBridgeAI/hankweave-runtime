@@ -36,6 +36,7 @@ import { APITimeoutError } from "./types/error-types.js";
 import type { ClaudeLogMessage, Codon, ShimSelfTestResult, TokenUsage } from "./types/types.js";
 import { isSyntheticTimeout } from "./types/types.js";
 import type { Logger } from "./utils.js";
+import type { WorkspaceFiles } from "./workspace/files.js";
 
 /**
  * Information about an extension, passed to the onExtension callback
@@ -119,6 +120,8 @@ interface BaseCodonRunnerConfig {
   stateManager: StateManager;
   executionPath: string;
   agentRootPath: string; // Agent workspace directory (where agents work)
+  /** Workspace files; the tracker selects this codon's watched scope. */
+  files: WorkspaceFiles;
   logger: Logger;
   llmRegistry: LlmProviderRegistry;
   logParsingInterval?: number;
@@ -367,9 +370,9 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     this.config = config;
 
     this.fileTracker = new CodonFileTracker({
-      agentRootPath: config.agentRootPath,
-      patterns: [...(config.codon.checkpointedFiles ?? [])],
       logger: config.logger,
+      files: config.files,
+      checkpointedFiles: config.codon.checkpointedFiles,
     });
     this.fileTracker.on("fileUpdated", (data) => this.emit("fileUpdated", data));
     this.fileTracker.on("fileTreeUpdated", (data) => this.emit("fileTreeUpdated", data));

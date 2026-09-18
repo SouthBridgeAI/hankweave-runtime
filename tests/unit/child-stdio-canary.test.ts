@@ -18,7 +18,7 @@ import * as fs from "node:fs";
  * tests/test-area/execution-* dirs carry installed node_modules trees inside
  * their agent workspaces; ~40 of them reached 281,277 directories and parked
  * every bun-test process at ~10,204 fds — where importing fast-glob's module
- * graph (+58 dirfds) crossed the cliff. Downstream: CheckpointGit commits
+ * graph (+58 dirfds) crossed the cliff. Downstream: GitWorkspaceStorage commits
  * "returning null", servers with empty stderr, SDK sessions never
  * establishing — 30+ phantom failures, one cause.
  *
@@ -49,7 +49,7 @@ test("child processes still produce observable stdout after fast-glob loads", as
   // (and open its dirfds) before the spawn below, in this exact order.
   await import("fast-glob");
 
-  // Minimal env mirrors CheckpointGit's replaced-env children, the first
+  // Minimal env mirrors GitWorkspaceStorage's replaced-env children, the first
   // observed victims of the defect. Windows child processes need SystemRoot
   // (winsock init) and PATH (executable resolution) to run at all — keep
   // exactly those, nothing else.

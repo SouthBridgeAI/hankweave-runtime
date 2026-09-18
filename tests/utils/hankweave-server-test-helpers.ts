@@ -217,6 +217,8 @@ export interface LaunchServerOptions {
   generatePingEvents?: number;
   /** Custom config path (default: tests/config/test-codons.config.json) */
   configPath?: string;
+  /** Pass config/bundle and data as positional inputs instead of legacy flags. */
+  positionalInputs?: boolean;
   /** Explicit execution directory path (default: auto-generated tests/test-area/execution-{timestamp}) */
   executionDir?: string;
   /** Custom data directory path (default: tests/config/poem_guides.txt) */
@@ -598,10 +600,9 @@ export async function launchHankweave(options: LaunchServerOptions): Promise<Lau
     // Use space-separated syntax (not --flag=value which is deprecated)
     // Skip --execution when --replay is set (replay mode auto-copies the execution dir)
     const serverArgs = [
-      "--config",
-      configPath,
-      "--data",
-      dataSourcePath,
+      ...(options.positionalInputs
+        ? [configPath, dataSourcePath]
+        : ["--config", configPath, "--data", dataSourcePath]),
       ...(options.replayDir ? [] : ["--execution", executionDir]),
       "--port",
       String(activePort),

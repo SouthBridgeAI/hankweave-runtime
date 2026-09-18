@@ -343,7 +343,7 @@ export function costFromStateFile(statePath: string, sinceMs: number): number {
     // execution plan (including expanded loop ids and CLI model overrides).
     // Unknown/missing identities remain billable, as do OpenAI API models with
     // the same model name. Also recognize the pre-migration Pi identity shape.
-    const codexCodons = new Set(
+    const codexCodons = new Set<string>(
       (state.executionPlan ?? [])
         .filter((entry: { codon?: { model?: { providerId?: string; modelId?: string } } }) => {
           const model = entry.codon?.model;
@@ -356,22 +356,34 @@ export function costFromStateFile(statePath: string, sinceMs: number): number {
     );
     for (const run of state.runs ?? []) {
       for (const codon of run.codons ?? []) {
-        const startedMs = Date.parse(codon.startTime ?? "");
-        if (!Number.isFinite(startedMs) || startedMs < sinceMs) continue;
-        // Sentinel spend is persisted beside the agent's cost, not inside it
-        // (state-manager writes finalCost/partialCost from currentCost and
-        // sentinels.totalCost separately). Sentinels use billed APIs even when
-        // their parent codon runs on openai-codex.
-        const agentCost = codexCodons.has(codon.codonId)
-          ? 0
-          : (codon.finalCost ?? codon.partialCost ?? 0);
-        total += agentCost + (codon.sentinels?.totalCost ?? 0);
+        total += billableCodonCost(codon, codexCodons, sinceMs);
       }
     }
   } catch {
     // A half-written state.json during a crash is not worth failing over.
   }
   return total;
+}
+
+interface CostCodon {
+  codonId: string;
+  startTime?: string;
+  finalCost?: number;
+  partialCost?: number;
+  sentinels?: { totalCost?: number };
+}
+
+function billableCodonCost(codon: CostCodon, codexCodons: Set<string>, sinceMs: number): number {
+  const startedMs = Date.parse(codon.startTime ?? "");
+  if (!Number.isFinite(startedMs) || startedMs < sinceMs) return 0;
+  // Sentinel spend is persisted beside the agent's cost, not inside it
+  // (state-manager writes finalCost/partialCost from currentCost and
+  // sentinels.totalCost separately). Sentinels use billed APIs even when
+  // their parent codon runs on openai-codex.
+  const agentCost = codexCodons.has(codon.codonId)
+    ? 0
+    : (codon.finalCost ?? codon.partialCost ?? 0);
+  return agentCost + (codon.sentinels?.totalCost ?? 0);
 }
 
 // ─── JUnit parsing ────────────────────────────────────────────────────
@@ -492,11 +504,14 @@ interface SuiteAttempt {
 }
 
 /**
- * Env vars a suite still lacks, deciding a credential skip. Mirrors
- * isLegacyClaudeAuthEnabled (server/claude-agent-sdk-manager.ts): with
- * HW_INTERNAL_CLAUDE_LEGACY_AUTH set, the Agent SDK resolves a local Claude
- * Code login (Keychain) itself, so a missing ANTHROPIC_API_KEY is not a
- * reason to skip — Agent-SDK suites run on the subscription login, while
+ * Env vars a suite still lacks, deciding a credential skip. A key is
+ * satisfied by the bare variable or by its `HANKWEAVE_SENTINEL_` alias (the
+ * registry prefers the alias, and `buildSuiteEnv` passes it through for
+ * declared keys — a shell that only exports the alias can genuinely run the
+ * suite). Mirrors isLegacyClaudeAuthEnabled (server/claude-agent-sdk-manager.ts):
+ * with HW_INTERNAL_CLAUDE_LEGACY_AUTH set, the Agent SDK resolves a local
+ * Claude Code login (Keychain) itself, so a missing ANTHROPIC_API_KEY is not
+ * a reason to skip — Agent-SDK suites run on the subscription login, while
  * tests that need the raw HTTP API (pi, sentinels) keep their own in-test
  * key guards.
  */
@@ -506,9 +521,11 @@ function missingSuiteEnv(suite: Pick<SuiteSpec, "needsEnv" | "needsRawAnthropicK
   // Suites that hit Anthropic's raw HTTP API (pi provider, sentinels) cannot
   // run on the subscription login — for them the real key stays required.
   const exemptAnthropicKey = legacyAuth && !suite.needsRawAnthropicKey;
-  return (suite.needsEnv ?? []).filter(
-    (k) => !process.env[k]?.trim() && !(k === "ANTHROPIC_API_KEY" && exemptAnthropicKey),
-  );
+  return (suite.needsEnv ?? []).filter((k) => {
+    if (process.env[k]?.trim()) return false;
+    if (process.env[`HANKWEAVE_SENTINEL_${k}`]?.trim()) return false;
+    return !(k === "ANTHROPIC_API_KEY" && exemptAnthropicKey);
+  });
 }
 
 // `needsEnv` is a contract, not a note: a suite gets exactly the provider

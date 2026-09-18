@@ -1,19 +1,13 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { findFirstRunFolder } from "../../utils/run-folder.js";
 import { parseJSONL } from "../../utils/test-data-helpers.js";
 
 export function runSessionContinuityTests(testDir: string) {
   test("Codon 2 log shows continuation from Codon 1 session", () => {
     // Find the run folder
-    const runsDir = path.join(testDir, ".hankweave/runs");
-    let runFolder = "";
-    if (fs.existsSync(runsDir)) {
-      const runFolders = fs.readdirSync(runsDir);
-      if (runFolders.length > 0) {
-        runFolder = path.join(runsDir, runFolders[0]);
-      }
-    }
+    const runFolder = findFirstRunFolder(testDir);
 
     if (!runFolder) return;
 

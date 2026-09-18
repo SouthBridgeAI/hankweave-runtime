@@ -135,6 +135,13 @@
                 "type": "string"
               },
               "description": "Environment variables that must be set for this hank to run"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Host programs (bare names, resolved on PATH) that must be installed for this hank to run, e.g. [\"bun\", \"jq\"]. The runtime checks these before the run starts but never infers them from commands: hank authors — human or agent — are responsible for keeping this list current as rigSetup, beforeCopy, and other commands change."
             }
           },
           "additionalProperties": false,
@@ -336,7 +343,7 @@
                     "items": {
                       "type": "string"
                     },
-                    "description": "Glob patterns for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved using gitignore rules for consistency."
+                    "description": "Glob patterns (or file/directory names — a directory resolves to its contents) for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved with git's own gitignore handling (rules re-read live, so a .gitignore written mid-run takes effect)."
                   },
                   "env": {
                     "type": "object",
@@ -1479,7 +1486,7 @@
                           "items": {
                             "type": "string"
                           },
-                          "description": "Glob patterns for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved using gitignore rules for consistency."
+                          "description": "Glob patterns (or file/directory names — a directory resolves to its contents) for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved with git's own gitignore handling (rules re-read live, so a .gitignore written mid-run takes effect)."
                         },
                         "env": {
                           "type": "object",

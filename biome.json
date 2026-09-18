@@ -27,7 +27,7 @@
           "level": "error",
           "options": {
             "paths": {
-              "minimatch": "Glob matching must go through UnifiedFileResolver (micromatch + shared ignore rules) so every site applies identical semantics. See intermediates/65-watched-patterns-bugs/02-divergent-pattern-matching.md."
+              "minimatch": "Workspace glob matching must go through server/workspace selections (fast-glob dialect via micromatch) with the shared live git ignore policy, so every site applies identical semantics. See intermediates/65-watched-patterns-bugs/02-divergent-pattern-matching.md."
             }
           }
         }

@@ -6,6 +6,8 @@ import * as fs from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256Hex } from "../../server/pack/closure.js";
+import type { HankLock } from "../../server/pack/lock-schema.js";
 import type { ServerReadyEvent } from "../../server/schemas/event-schemas.js";
 import {
   type BinarySetup,
@@ -52,33 +54,26 @@ let INIT_TEST_DIR: string;
  * Spawns the init command using either binary, package manager (npx/bunx/pnpm dlx/deno), or direct bun execution.
  * Automatically configures registry URL if using Verdaccio.
  */
-function spawnInitCommand(options: {
-  cwd: string;
-  stdio?: Parameters<typeof spawn>[2]["stdio"];
-}): ReturnType<typeof spawn> {
-  let command: string;
-  let args: string[];
-
-  // Priority order: binary > package manager > default bun
-  if (binarySetup) {
-    // Using compiled binary
-    const binaryCommandOverride = getBinaryCommandOverride(binarySetup.binaryPath);
-    command = binaryCommandOverride.command;
-    args = [...binaryCommandOverride.args, "--init"];
-  } else if (needsVerdaccio()) {
-    // Using package manager (npx/bunx/pnpm dlx/deno)
-    const commandOverride = getCommandOverride();
-    if (!commandOverride) {
-      throw new Error("Verdaccio mode enabled but no command override configured");
-    }
-    command = commandOverride.command;
-    args = [...commandOverride.args, "--init"];
-  } else {
-    // Default: direct bun execution
-    const serverEntry = path.join(TEST_ROOT, "server/index.ts");
-    command = "bun";
-    args = [serverEntry, "--init"];
+function cliCommand(cliArgs: string[]) {
+  const selected = binarySetup
+    ? getBinaryCommandOverride(binarySetup.binaryPath)
+    : getCommandOverride();
+  if (needsVerdaccio() && !binarySetup && !selected) {
+    throw new Error("Verdaccio mode enabled but no command override configured");
   }
+  const command = selected?.command ?? "bun";
+  const args = [...(selected?.args ?? [path.join(TEST_ROOT, "server/index.ts")]), ...cliArgs];
+  return { command, args };
+}
+
+function spawnCliCommand(
+  cliArgs: string[],
+  options: {
+    cwd: string;
+    stdio?: Parameters<typeof spawn>[2]["stdio"];
+  },
+): ReturnType<typeof spawn> {
+  const { command, args } = cliCommand(cliArgs);
 
   const spawnOptions: Parameters<typeof spawn>[2] = {
     cwd: options.cwd,
@@ -103,19 +98,163 @@ function spawnInitCommand(options: {
     ["npx", "bunx", "pnpm", "npm"].includes(command);
   spawnOptions.shell = needsShell;
 
-  // Log the command being executed for debugging
-  console.log("\n=== Spawning Init Command ===");
-  console.log("Mode:", binarySetup ? "Binary" : verdaccioSetup ? "Verdaccio" : "Default");
-  console.log("Command:", command);
-  console.log("Args:", args);
+  console.log(`\n=== Spawning CLI: ${command} ${args.join(" ")} ===`);
   console.log("CWD:", options.cwd);
-  if (verdaccioSetup && !binarySetup) {
-    console.log("Registry:", verdaccioSetup.registry.registryURL);
-  }
-  console.log("Shell:", spawnOptions.shell);
-  console.log("===========================\n");
 
   return spawn(command, args, spawnOptions);
+}
+
+let directHankHash: string;
+
+function configureLaunch(serverOptions: Parameters<typeof launchHankweave>[0]): void {
+  if (binarySetup) {
+    // Use binary command override
+    serverOptions.commandOverride = getBinaryCommandOverride(binarySetup.binaryPath);
+  } else if (needsVerdaccio()) {
+    // Use package manager command override
+    const commandOverride = getCommandOverride();
+    if (commandOverride) {
+      serverOptions.commandOverride = commandOverride;
+    }
+    // Add registry URL to env for verdaccio
+    if (verdaccioSetup) {
+      serverOptions.env = {
+        ...serverOptions.env,
+        npm_config_registry: verdaccioSetup.registry.registryURL,
+        NPM_CONFIG_USERCONFIG: verdaccioSetup.npmrcPath,
+      };
+    }
+  }
+}
+
+function assertGeneratedRun(executionDir: string, agentRootPath: string) {
+  // Verify that the analysis files were created in the agent workspace
+  // With the new default behavior, outputs stay in agentRoot/ instead of being copied to hankweave-results/
+  const analysisHaikuFile = path.join(agentRootPath, "analysis-haiku.md");
+  expect(fs.existsSync(analysisHaikuFile)).toBe(true);
+
+  const analysisGeminiFile = path.join(agentRootPath, "analysis-gemini.md");
+  expect(fs.existsSync(analysisGeminiFile)).toBe(true);
+
+  // Pi analysis file (in-process embedded Pi agent, no binary needed)
+  const analysisPiFile = path.join(agentRootPath, "analysis-pi.md");
+  expect(fs.existsSync(analysisPiFile)).toBe(true);
+
+  // GPT analysis file (pi/openai-codex — authenticates from pi's
+  // credential store, ~/.pi/agent/auth.json)
+  const analysisGptFile = path.join(agentRootPath, "analysis-gpt.md");
+  expect(fs.existsSync(analysisGptFile)).toBe(true);
+
+  // Verify analysis files have content
+  const analysisHaikuContent = fs.readFileSync(analysisHaikuFile, "utf-8");
+  expect(analysisHaikuContent.length).toBeGreaterThan(0);
+
+  const analysisGeminiContent = fs.readFileSync(analysisGeminiFile, "utf-8");
+  expect(analysisGeminiContent.length).toBeGreaterThan(0);
+
+  // Verify pi analysis file has content
+  const analysisPiContent = fs.readFileSync(analysisPiFile, "utf-8");
+  expect(analysisPiContent.length).toBeGreaterThan(0);
+
+  // Verify gpt analysis file has content
+  const analysisGptContent = fs.readFileSync(analysisGptFile, "utf-8");
+  expect(analysisGptContent.length).toBeGreaterThan(0);
+
+  // Verify the in-process Pi agent persisted its session transcripts.
+  // Only when a codon actually ran on Pi: HANKWEAVE_RUNTIME_MODEL
+  // overrides EVERY codon's model (scripts/e2e/test-new-models.ts uses it
+  // for new-model smoke runs), and an anthropic/ override routes all
+  // codons — including analyze-pi — through the Claude SDK, so no Pi
+  // session ever exists.
+  const runtimeModelOverride = process.env.HANKWEAVE_RUNTIME_MODEL ?? "";
+  const allCodonsOnClaudeSdk = runtimeModelOverride.toLowerCase().startsWith("anthropic/");
+  if (!allCodonsOnClaudeSdk) {
+    const piSessionsDir = path.join(executionDir, ".hankweave/logs/pi-sessions");
+    expect(fs.existsSync(piSessionsDir)).toBe(true);
+
+    const piSessionFiles = fs.readdirSync(piSessionsDir).filter((file) => file.endsWith(".jsonl"));
+    expect(piSessionFiles.length).toBeGreaterThan(0);
+
+    // Verify at least one session transcript has content (agent events)
+    const sessionPath = path.join(piSessionsDir, piSessionFiles[0]);
+    const sessionContent = fs.readFileSync(sessionPath, "utf-8");
+    expect(sessionContent.split("\n").filter((line) => line.trim()).length).toBeGreaterThan(0);
+  }
+
+  // Verify the Claude SDK path persisted its session transcripts into
+  // the execution dir (FileSessionStore mirror — parity with the Pi
+  // block above). Guarded symmetrically: a non-Anthropic
+  // HANKWEAVE_RUNTIME_MODEL override routes every codon (including
+  // analyze-haiku) through Pi, so no Claude session exists then.
+  const someCodonOnClaudeSdk = runtimeModelOverride === "" || allCodonsOnClaudeSdk;
+  if (someCodonOnClaudeSdk) {
+    const claudeSessionsDir = path.join(executionDir, ".hankweave/logs/claude-sessions");
+    expect(fs.existsSync(claudeSessionsDir)).toBe(true);
+
+    const claudeSessionFiles = fs
+      .readdirSync(claudeSessionsDir)
+      .filter((file) => file.endsWith(".jsonl"));
+    expect(claudeSessionFiles.length).toBeGreaterThan(0);
+
+    // Verify at least one mirrored transcript has content
+    const claudeSessionPath = path.join(claudeSessionsDir, claudeSessionFiles[0]);
+    const claudeSessionContent = fs.readFileSync(claudeSessionPath, "utf-8");
+    expect(claudeSessionContent.split("\n").filter((line) => line.trim()).length).toBeGreaterThan(
+      0,
+    );
+  }
+
+  // Verify execution metadata contains environment info
+  const executionMetaPath = path.join(executionDir, ".hankweave/execution-meta.json");
+  expect(fs.existsSync(executionMetaPath)).toBe(true);
+
+  const executionMeta = JSON.parse(fs.readFileSync(executionMetaPath, "utf-8"));
+
+  // Schema version should be 1.2.0
+  expect(executionMeta.version).toBe("1.2.0");
+
+  // Hankweave version should be present
+  expect(executionMeta.hankweaveVersion).toBeTruthy();
+
+  // Environment block should be present with all fields
+  expect(executionMeta.environment).toBeDefined();
+  expect(executionMeta.environment.platform).toBe(process.platform);
+  expect(executionMeta.environment.arch).toBe(process.arch);
+  expect(executionMeta.environment.osRelease).toBeTruthy();
+  expect(executionMeta.environment.runtime).toMatch(/^(bun|node|deno) /);
+
+  // Invocation method should match the test mode
+  if (binarySetup) {
+    expect(executionMeta.environment.invocationMethod).toBe("binary");
+  } else {
+    expect(executionMeta.environment.invocationMethod).toBeOneOf(["bun", "node", "deno"]);
+  }
+  return executionMeta;
+}
+
+async function packGeneratedHank(bundlePath: string): Promise<HankLock | null> {
+  const child = spawnCliCommand(["pack", INIT_TEST_DIR, "-o", bundlePath], { cwd: TEST_AREA });
+  let output = "";
+  child.stdout?.on("data", (data) => {
+    output += data.toString();
+  });
+  child.stderr?.on("data", (data) => {
+    output += data.toString();
+  });
+  const timer = setTimeout(() => child.kill("SIGKILL"), 120_000);
+  try {
+    const [code] = await once(child, "close");
+    if (cliCommand([]).command === "deno") {
+      expect(code).not.toBe(0);
+      expect(output).toContain("pack requires Node >=22.15 or Bun (zstd)");
+      return null;
+    }
+    if (code !== 0) throw new Error(`pack failed (${code}): ${output}`);
+    expect(fs.statSync(bundlePath).size).toBeGreaterThan(0);
+    return JSON.parse(fs.readFileSync(path.join(INIT_TEST_DIR, "hank.lock"), "utf8"));
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 describe("init command e2e", () => {
@@ -179,7 +318,7 @@ describe("init command e2e", () => {
       fs.mkdirSync(INIT_TEST_DIR, { recursive: true });
 
       // Run init command
-      const child = spawnInitCommand({ cwd: INIT_TEST_DIR });
+      const child = spawnCliCommand(["--init"], { cwd: INIT_TEST_DIR });
 
       let stdout = "";
       let stderr = "";
@@ -261,7 +400,7 @@ describe("init command e2e", () => {
     fs.writeFileSync(path.join(nonEmptyDir, "existing.txt"), "content");
 
     // Run init command
-    const child = spawnInitCommand({ cwd: nonEmptyDir });
+    const child = spawnCliCommand(["--init"], { cwd: nonEmptyDir });
 
     let stderr = "";
     child.stderr?.on("data", (data) => {
@@ -298,23 +437,7 @@ describe("init command e2e", () => {
         logPrefix: "[Init E2E]",
       };
 
-      if (binarySetup) {
-        // Use binary command override
-        serverOptions.commandOverride = getBinaryCommandOverride(binarySetup.binaryPath);
-      } else if (needsVerdaccio()) {
-        // Use package manager command override
-        const commandOverride = getCommandOverride();
-        if (commandOverride) {
-          serverOptions.commandOverride = commandOverride;
-        }
-        // Add registry URL to env for verdaccio
-        if (verdaccioSetup) {
-          serverOptions.env = {
-            ...serverOptions.env,
-            npm_config_registry: verdaccioSetup.registry.registryURL,
-          };
-        }
-      }
+      configureLaunch(serverOptions);
 
       // Launch server using the data directory created by init
       // Use INIT_TEST_DIR as both cwd (for output files) and execution directory
@@ -327,116 +450,61 @@ describe("init command e2e", () => {
         // Wait for the run to complete
         await server.waitForRunToComplete(INIT_RUN_TIMEOUT_MS);
 
-        // Verify that the analysis files were created in the agent workspace
-        // With the new default behavior, outputs stay in agentRoot/ instead of being copied to hankweave-results/
-        const analysisHaikuFile = path.join(agentRootPath, "analysis-haiku.md");
-        expect(fs.existsSync(analysisHaikuFile)).toBe(true);
-
-        const analysisGeminiFile = path.join(agentRootPath, "analysis-gemini.md");
-        expect(fs.existsSync(analysisGeminiFile)).toBe(true);
-
-        // Pi analysis file (in-process embedded Pi agent, no binary needed)
-        const analysisPiFile = path.join(agentRootPath, "analysis-pi.md");
-        expect(fs.existsSync(analysisPiFile)).toBe(true);
-
-        // GPT analysis file (pi/openai-codex — authenticates from pi's
-        // credential store, ~/.pi/agent/auth.json)
-        const analysisGptFile = path.join(agentRootPath, "analysis-gpt.md");
-        expect(fs.existsSync(analysisGptFile)).toBe(true);
-
-        // Verify analysis files have content
-        const analysisHaikuContent = fs.readFileSync(analysisHaikuFile, "utf-8");
-        expect(analysisHaikuContent.length).toBeGreaterThan(0);
-
-        const analysisGeminiContent = fs.readFileSync(analysisGeminiFile, "utf-8");
-        expect(analysisGeminiContent.length).toBeGreaterThan(0);
-
-        // Verify pi analysis file has content
-        const analysisPiContent = fs.readFileSync(analysisPiFile, "utf-8");
-        expect(analysisPiContent.length).toBeGreaterThan(0);
-
-        // Verify gpt analysis file has content
-        const analysisGptContent = fs.readFileSync(analysisGptFile, "utf-8");
-        expect(analysisGptContent.length).toBeGreaterThan(0);
-
-        // Verify the in-process Pi agent persisted its session transcripts.
-        // Only when a codon actually ran on Pi: HANKWEAVE_RUNTIME_MODEL
-        // overrides EVERY codon's model (scripts/e2e/test-new-models.ts uses it
-        // for new-model smoke runs), and an anthropic/ override routes all
-        // codons — including analyze-pi — through the Claude SDK, so no Pi
-        // session ever exists.
-        const runtimeModelOverride = process.env.HANKWEAVE_RUNTIME_MODEL ?? "";
-        const allCodonsOnClaudeSdk = runtimeModelOverride.toLowerCase().startsWith("anthropic/");
-        if (!allCodonsOnClaudeSdk) {
-          const piSessionsDir = path.join(INIT_TEST_DIR, ".hankweave/logs/pi-sessions");
-          expect(fs.existsSync(piSessionsDir)).toBe(true);
-
-          const piSessionFiles = fs
-            .readdirSync(piSessionsDir)
-            .filter((file) => file.endsWith(".jsonl"));
-          expect(piSessionFiles.length).toBeGreaterThan(0);
-
-          // Verify at least one session transcript has content (agent events)
-          const sessionPath = path.join(piSessionsDir, piSessionFiles[0]);
-          const sessionContent = fs.readFileSync(sessionPath, "utf-8");
-          expect(sessionContent.split("\n").filter((line) => line.trim()).length).toBeGreaterThan(
-            0,
-          );
-        }
-
-        // Verify the Claude SDK path persisted its session transcripts into
-        // the execution dir (FileSessionStore mirror — parity with the Pi
-        // block above). Guarded symmetrically: a non-Anthropic
-        // HANKWEAVE_RUNTIME_MODEL override routes every codon (including
-        // analyze-haiku) through Pi, so no Claude session exists then.
-        const someCodonOnClaudeSdk = runtimeModelOverride === "" || allCodonsOnClaudeSdk;
-        if (someCodonOnClaudeSdk) {
-          const claudeSessionsDir = path.join(INIT_TEST_DIR, ".hankweave/logs/claude-sessions");
-          expect(fs.existsSync(claudeSessionsDir)).toBe(true);
-
-          const claudeSessionFiles = fs
-            .readdirSync(claudeSessionsDir)
-            .filter((file) => file.endsWith(".jsonl"));
-          expect(claudeSessionFiles.length).toBeGreaterThan(0);
-
-          // Verify at least one mirrored transcript has content
-          const claudeSessionPath = path.join(claudeSessionsDir, claudeSessionFiles[0]);
-          const claudeSessionContent = fs.readFileSync(claudeSessionPath, "utf-8");
-          expect(
-            claudeSessionContent.split("\n").filter((line) => line.trim()).length,
-          ).toBeGreaterThan(0);
-        }
-
-        // Verify execution metadata contains environment info
-        const executionMetaPath = path.join(INIT_TEST_DIR, ".hankweave/execution-meta.json");
-        expect(fs.existsSync(executionMetaPath)).toBe(true);
-
-        const executionMeta = JSON.parse(fs.readFileSync(executionMetaPath, "utf-8"));
-
-        // Schema version should be 1.1.0
-        expect(executionMeta.version).toBe("1.1.0");
-
-        // Hankweave version should be present
-        expect(executionMeta.hankweaveVersion).toBeTruthy();
-
-        // Environment block should be present with all fields
-        expect(executionMeta.environment).toBeDefined();
-        expect(executionMeta.environment.platform).toBe(process.platform);
-        expect(executionMeta.environment.arch).toBe(process.arch);
-        expect(executionMeta.environment.osRelease).toBeTruthy();
-        expect(executionMeta.environment.runtime).toMatch(/^(bun|node|deno) /);
-
-        // Invocation method should match the test mode
-        if (binarySetup) {
-          expect(executionMeta.environment.invocationMethod).toBe("binary");
-        } else {
-          expect(executionMeta.environment.invocationMethod).toBeOneOf(["bun", "node", "deno"]);
-        }
+        const executionMeta = assertGeneratedRun(INIT_TEST_DIR, agentRootPath);
+        expect(executionMeta.bundleHash).toBeUndefined();
+        expect(executionMeta.bundlePath).toBeUndefined();
+        directHankHash = executionMeta.hankHash;
       } finally {
         // Clean up server
         await server.stop(10000);
       }
     },
     GENERATED_HANK_TEST_TIMEOUT_MS,
+  );
+  test(
+    "generated hank can be packed and executed as a .hank bundle",
+    async () => {
+      const bundlePath = path.join(TEST_AREA, `generated-${TEST_TIMESTAMP}.hank`);
+      const lock = await packGeneratedHank(bundlePath);
+      if (!lock) return; // Deno's documented unsupported-zstd branch was asserted above.
+      const receiverDir = path.join(TEST_AREA, `receiver-${TEST_TIMESTAMP}`);
+      const receiverDataDir = path.join(receiverDir, "data");
+      const bundleExecutionDir = path.join(receiverDir, "execution");
+      fs.mkdirSync(receiverDir, { recursive: true });
+      fs.cpSync(path.join(INIT_TEST_DIR, "data"), receiverDataDir, { recursive: true });
+      const serverOptions: Parameters<typeof launchHankweave>[0] = {
+        configPath: bundlePath,
+        dataDir: receiverDataDir,
+        cwd: receiverDir,
+        executionDir: bundleExecutionDir,
+        port: await getFreePort(),
+        positionalInputs: true,
+        extraArgs: ["-y"],
+        logPrefix: "[Init Bundle E2E]",
+      };
+      configureLaunch(serverOptions);
+      const server = await launchHankweave(serverOptions);
+      try {
+        const ready = (await server.waitForEvent("server.ready")) as ServerReadyEvent;
+        await server.waitForRunToComplete(INIT_RUN_TIMEOUT_MS);
+        const meta = assertGeneratedRun(bundleExecutionDir, ready.data.agentRootPath);
+        expect(meta.bundleHash).toBe(lock.bundleHash);
+        expect(meta.bundlePath).toBe(path.resolve(bundlePath));
+        expect(meta.hankHash).toBe(directHankHash);
+        const extractedDir = path.dirname(meta.hankPath);
+        expect(extractedDir).not.toBe(INIT_TEST_DIR);
+        // Content-addressed extraction: <tmpdir>/hankweave-bundles/<bundleHash>.
+        expect(path.basename(extractedDir)).toBe(lock.bundleHash);
+        expect(path.basename(path.dirname(extractedDir))).toBe("hankweave-bundles");
+        for (const [name, entry] of Object.entries(lock.files)) {
+          expect(sha256Hex(fs.readFileSync(path.join(path.dirname(meta.hankPath), name)))).toBe(
+            entry.sha256,
+          );
+        }
+      } finally {
+        await server.stop(10_000);
+      }
+    },
+    INIT_RUN_TIMEOUT_MS + 180_000,
   );
 });

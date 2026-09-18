@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { CheckpointGit } from "../../server/checkpoint-git.js";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import { Logger } from "../../server/utils.js";
+import { Workspace } from "../../server/workspace/index.js";
+import { requireHistoryTip } from "../utils/checkpoint-history.js";
 
 // Test directory setup
 const _TEST_DIR = path.join(__dirname, "test-checkpoint-files");
@@ -22,7 +24,8 @@ class MockLogger extends Logger {
 
 describe("Checkpoint File Resolution", () => {
   let tempDir: string;
-  let checkpointGit: CheckpointGit;
+  let workspace: Workspace;
+  let layout: ExecutionLayout;
   let mockLogger: MockLogger;
 
   beforeEach(async () => {
@@ -33,9 +36,12 @@ describe("Checkpoint File Resolution", () => {
     // Create mock logger
     mockLogger = new MockLogger("");
 
-    // Initialize CheckpointGit (for tests, use same dir for execution and agent root)
-    checkpointGit = new CheckpointGit(tempDir, tempDir, mockLogger);
-    await checkpointGit.initialize();
+    // A workspace over a real shadow repo (for tests, the work tree is the
+    // execution directory itself)
+    layout = new ExecutionLayout(tempDir, { agentRootPath: tempDir });
+    workspace = await Workspace.open(layout, {
+      logger: mockLogger,
+    });
   });
 
   afterEach(async () => {
@@ -48,20 +54,21 @@ describe("Checkpoint File Resolution", () => {
   });
 
   test("should find no files when patterns match nothing", async () => {
-    // Add patterns that don't match any files
-    await checkpointGit.addPatterns(["*.nonexistent", "missing/**/*"]);
-
-    // Try to commit - should return current HEAD since no files match
-    const commitHash = await checkpointGit.commit("Empty commit");
+    // Try to commit - should create an empty checkpoint when no files match
+    const commitHash = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Empty commit",
+      patterns: ["*.nonexistent", "missing/**/*"],
+    });
     expect(commitHash).not.toBeNull();
 
     // Verify no files were added to the commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    const proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -69,7 +76,7 @@ describe("Checkpoint File Resolution", () => {
     expect(checkpointedFiles.trim()).toBe("");
   });
 
-  test("should find files matching accumulated patterns", async () => {
+  test("should find files matching the complete pattern list", async () => {
     // Create test files
     await fs.promises.mkdir(path.join(tempDir, "src"), { recursive: true });
     await fs.promises.mkdir(path.join(tempDir, "docs"), { recursive: true });
@@ -79,22 +86,21 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "docs", "README.md"), "# Docs");
     await fs.promises.writeFile(path.join(tempDir, "package.json"), "{}");
 
-    // Add patterns incrementally (simulating multiple codons)
-    await checkpointGit.addPatterns(["src/**/*.ts"]);
-    await checkpointGit.addPatterns(["*.md", "docs/**/*"]);
-    await checkpointGit.addPatterns(["package.json"]);
-
     // Commit should include files matching all patterns
-    const commitHash = await checkpointGit.commit("Test commit");
+    const commitHash = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Test commit",
+      patterns: ["src/**/*.ts", "*.md", "docs/**/*", "package.json"],
+    });
     expect(commitHash).not.toBeNull();
 
     // Verify correct files were tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    const proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -122,19 +128,20 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "src.js"), "code");
     await fs.promises.writeFile(path.join(tempDir, "README.md"), "# Project");
 
-    // Add broad patterns
-    await checkpointGit.addPatterns(["**/*"]);
-
-    const commitHash = await checkpointGit.commit("Test gitignore");
+    const commitHash = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Test gitignore",
+      patterns: ["**/*"],
+    });
     expect(commitHash).not.toBeNull();
 
     // Verify gitignored files are not tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    const proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -155,21 +162,20 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "src", "utils.ts"), "export {}");
     await fs.promises.writeFile(path.join(tempDir, "test.ts"), "test");
 
-    // Add overlapping patterns
-    await checkpointGit.addPatterns(["src/**/*.ts"]);
-    await checkpointGit.addPatterns(["**/*.ts"]); // Overlaps with first pattern
-    await checkpointGit.addPatterns(["src/main.ts"]); // Specific file already covered
-
-    const commitHash = await checkpointGit.commit("Test overlaps");
+    const commitHash = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Test overlaps",
+      patterns: ["src/**/*.ts", "**/*.ts", "src/main.ts"],
+    });
     expect(commitHash).not.toBeNull();
 
     // Verify all TypeScript files are tracked (no duplicates in git)
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    const proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -193,19 +199,21 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "file1.txt"), "content 1");
     await fs.promises.writeFile(path.join(tempDir, "file2.txt"), "content 2");
 
-    await checkpointGit.addPatterns(["*.txt"]);
-
     // First commit
-    const commit1 = await checkpointGit.commit("First commit");
+    const commit1 = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "First commit",
+      patterns: ["*.txt"],
+    });
     expect(commit1).not.toBeNull();
 
     // Verify both files are in first commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    let proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    let proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -218,7 +226,11 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "file1.txt"), "modified content 1");
 
     // Second commit should only include new/changed files
-    const commit2 = await checkpointGit.commit("Second commit");
+    const commit2 = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Second commit",
+      patterns: ["*.txt"],
+    });
     expect(commit2).not.toBeNull();
     expect(commit2).not.toBe(commit1);
 
@@ -263,25 +275,20 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "docs", "api", "README.md"), "# API");
     await fs.promises.writeFile(path.join(tempDir, "package.json"), "{}");
 
-    // Add nested patterns
-    await checkpointGit.addPatterns([
-      "src/**/*.ts",
-      "src/**/*.tsx",
-      "tests/**/*.spec.ts",
-      "docs/**/*.md",
-      "*.json",
-    ]);
-
-    const commitHash = await checkpointGit.commit("Nested structure");
+    const commitHash = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Nested structure",
+      patterns: ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.spec.ts", "docs/**/*.md", "*.json"],
+    });
     expect(commitHash).not.toBeNull();
 
     // Verify all expected files are tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    const proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -303,20 +310,21 @@ describe("Checkpoint File Resolution", () => {
       recursive: true,
     });
 
-    // Add patterns that would match files in these directories
-    await checkpointGit.addPatterns(["empty1/**/*", "empty2/**/*"]);
-
     // Should return current HEAD since no files match
-    const commitHash = await checkpointGit.commit("Empty directories");
+    const commitHash = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Empty directories",
+      patterns: ["empty1/**/*", "empty2/**/*"],
+    });
     expect(commitHash).not.toBeNull();
 
     // Verify no files were added
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    const proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -331,18 +339,20 @@ describe("Checkpoint File Resolution", () => {
     await fs.promises.writeFile(path.join(tempDir, "file_with_underscores.txt"), "content");
     await fs.promises.writeFile(path.join(tempDir, "file.with.dots.txt"), "content");
 
-    await checkpointGit.addPatterns(["*.txt"]);
-
-    const commitHash = await checkpointGit.commit("Special characters");
+    const commitHash = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Special characters",
+      patterns: ["*.txt"],
+    });
     expect(commitHash).not.toBeNull();
 
     // Verify all files with special characters are tracked
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 
-    const proc = Bun.spawn(["git", "ls-tree", "-r", "HEAD", "--name-only"], {
+    const proc = Bun.spawn(["git", "ls-tree", "-r", "refs/heads/main", "--name-only"], {
       cwd: tempDir,
       env: { ...process.env, ...gitEnv },
     });
@@ -354,33 +364,39 @@ describe("Checkpoint File Resolution", () => {
     expect(checkpointedFiles).toContain("file.with.dots.txt");
   });
 
-  test("should clear patterns correctly", async () => {
-    // Add some patterns
-    await checkpointGit.addPatterns(["*.ts", "*.js"]);
-
+  test("should use only the patterns supplied to each checkpoint", async () => {
     // Create files
     await fs.promises.writeFile(path.join(tempDir, "test.ts"), "typescript");
     await fs.promises.writeFile(path.join(tempDir, "test.js"), "javascript");
     await fs.promises.writeFile(path.join(tempDir, "test.py"), "python");
 
     // First commit should include .ts and .js files
-    const commit1 = await checkpointGit.commit("First commit");
+    const commit1 = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "First commit",
+      patterns: ["*.ts", "*.js"],
+    });
     expect(commit1).not.toBeNull();
 
-    // Clear patterns and add new ones
-    checkpointGit.clearPatterns();
-    await checkpointGit.addPatterns(["*.py"]);
+    // Change previously checkpointed files too: the next policy must not
+    // stage their edits merely because an earlier checkpoint matched them.
+    await fs.promises.writeFile(path.join(tempDir, "test.ts"), "changed typescript");
+    await fs.promises.writeFile(path.join(tempDir, "test.js"), "changed javascript");
 
     // Create new Python file
     await fs.promises.writeFile(path.join(tempDir, "new.py"), "new python");
 
     // Second commit should only include .py files
-    const commit2 = await checkpointGit.commit("Second commit");
+    const commit2 = await workspace.checkpoints.history("main").checkpoint({
+      parent: await requireHistoryTip(workspace.checkpoints.history("main")),
+      message: "Second commit",
+      patterns: ["*.py"],
+    });
     expect(commit2).not.toBeNull();
 
     // Check what changed in the second commit
     const gitEnv = {
-      GIT_DIR: path.join(checkpointGit.getPath(), ".hankweavecheckpoints"),
+      GIT_DIR: path.join(layout.checkpointsPath, ".hankweavecheckpoints"),
       GIT_WORK_TREE: tempDir,
     };
 

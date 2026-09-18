@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+
 // Utilities for test data parsing and validation
 
 // -------------
@@ -80,4 +82,8 @@ export function extractPathsFromTree(tree: FileNode[]): string[] {
 
   traverse(tree);
   return paths;
+}
+
+export function readJSONLFile(filePath: string): ClaudeLogEntry[] {
+  return parseJSONL(fs.readFileSync(filePath, "utf-8"));
 }

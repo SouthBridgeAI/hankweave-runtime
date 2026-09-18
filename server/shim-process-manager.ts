@@ -7,6 +7,7 @@ import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { ensureCodexAvailable } from "./codex-runtime-extractor.js";
 import { TIMEOUTS } from "./config.js";
 import { ExecutionLayout } from "./execution-layout.js";
+import { HANKWEAVE_ENV_UNSET, hankweaveEnvEntries } from "./hankweave-env.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import { escapeShellArg, type Logger } from "./utils.js";
@@ -202,22 +203,14 @@ export class ShimProcessManager extends BaseProcessManager {
   private buildEnvironment(codon: Codon): NodeJS.ProcessEnv {
     const env = { ...process.env }; // Start with server's environment
 
-    // Pass through HANKWEAVE_ prefixed variables from server environment
-    // Exclude HANKWEAVE_RUNTIME_* (server config) and HANKWEAVE_SENTINEL_* (sentinel API keys)
-    for (const key in process.env) {
-      if (
-        key.startsWith("HANKWEAVE_") &&
-        !key.startsWith("HANKWEAVE_RUNTIME_") &&
-        !key.startsWith("HANKWEAVE_SENTINEL_")
-      ) {
-        const newKey = key.substring("HANKWEAVE_".length);
-        if (process.env[key] === "unset") {
-          delete env[newKey];
-          this.logger.log(`Unsetting env var: ${newKey}`);
-        } else {
-          env[newKey] = process.env[key];
-          this.logger.log(`Passing through env var: ${newKey}`);
-        }
+    // Apply the HANKWEAVE_ overlay from the server environment
+    for (const { name, value } of hankweaveEnvEntries()) {
+      if (value === HANKWEAVE_ENV_UNSET) {
+        delete env[name];
+        this.logger.log(`Unsetting env var: ${name}`);
+      } else {
+        env[name] = value;
+        this.logger.log(`Passing through env var: ${name}`);
       }
     }
 

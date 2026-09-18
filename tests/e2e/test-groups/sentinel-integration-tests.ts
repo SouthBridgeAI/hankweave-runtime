@@ -1,3 +1,4 @@
+import { isNonAnthropicModel } from "../../utils/model-family.js";
 /**
  * Sentinel Integration Test Group
  *
@@ -25,17 +26,6 @@ interface TestState {
   events?: ServerEvent[];
   executionPath?: string;
   codonModels: Record<string, string>;
-}
-
-/** Check if a model string refers to a non-Anthropic provider */
-function isNonAnthropicModel(model: string): boolean {
-  const lower = model.toLowerCase();
-  return (
-    !lower.includes("claude") &&
-    !lower.includes("sonnet") &&
-    !lower.includes("opus") &&
-    !lower.includes("haiku")
-  );
 }
 
 export function runSentinelIntegrationTests(testState: TestState): void {

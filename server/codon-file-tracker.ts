@@ -1,10 +1,9 @@
-import fs from "node:fs";
 import path from "node:path";
-import { fileResolver, type PathMatcher } from "./file-resolver.js";
 import type { FileNode, FileUpdatedSource } from "./schemas/event-schemas.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { ToolInputMap, ToolName } from "./types/tool-types.js";
-import { buildFileTree, type Logger, toError } from "./utils.js";
+import { type Logger, toError } from "./utils.js";
+import type { WorkspaceFiles, WorkspaceSelection } from "./workspace/files.js";
 
 export interface WatchedFileUpdate {
   path: string;
@@ -32,8 +31,8 @@ interface CodonFileTrackerEvents extends Record<string, unknown[]> {
 }
 
 interface CodonFileTrackerConfig {
-  agentRootPath: string;
-  patterns: readonly string[];
+  files: WorkspaceFiles;
+  checkpointedFiles?: readonly string[];
   logger: Logger;
 }
 
@@ -48,24 +47,25 @@ const FILE_TOOLS = new Set<string>(["Write", "Edit", "MultiEdit"]);
  * The tracker deliberately emits protocol-neutral payloads. CodonRunner owns
  * its lifecycle, while HankweaveRuntime remains responsible for wrapping the
  * payloads in public server events and routing them to journals/sentinels.
+ *
+ * What the tracker knows that the workspace does not: which tools mutate
+ * files, the shape of their inputs, and that an event describes the
+ * ATTEMPTED call — so a path is judged as it would be once written (the
+ * selection's `admit`), and a Write to a path with nothing there yet is the
+ * `created` case.
  */
 export class CodonFileTracker extends TypedEventEmitter<CodonFileTrackerEvents> {
-  private readonly agentRootPath: string;
-  private readonly patterns: string[];
+  /** This codon's view of the workspace, scoped to its watched patterns. */
+  private readonly watched: WorkspaceSelection;
   private readonly logger: Logger;
   private readonly pendingOperations = new Set<Promise<void>>();
-  private pathMatcher: PathMatcher | undefined;
   private recentFileAccess: RecentFileAccess | undefined;
   private initialized = false;
   private closed = false;
 
   constructor(config: CodonFileTrackerConfig) {
     super();
-    this.agentRootPath = config.agentRootPath;
-    // Each runner receives its own authoritative copy, including an empty
-    // array. A later codon can therefore never inherit an earlier codon's
-    // patterns through shared runtime state.
-    this.patterns = [...config.patterns];
+    this.watched = config.files.select(config.checkpointedFiles ?? []);
     this.logger = config.logger;
   }
 
@@ -74,28 +74,34 @@ export class CodonFileTracker extends TypedEventEmitter<CodonFileTrackerEvents> 
     if (this.initialized || this.closed) return;
     this.initialized = true;
 
-    if (this.patterns.length === 0) return;
+    if (this.watched.patterns.length === 0) return;
 
-    this.logger.log(`Watching patterns: ${this.patterns.join(", ")}`);
+    this.logger.log(`Watching patterns: ${this.watched.patterns.join(", ")}`);
 
-    // Built once here so the per-tool-use check stays synchronous. The same
-    // resolver supplies the initial snapshot below, so both emission sites
-    // share one set of glob and ignore semantics.
-    this.pathMatcher = await fileResolver.createPathMatcher(this.agentRootPath, this.patterns);
+    // An enumeration failure here (broken .gitignore, corrupt shadow index)
+    // degrades to "no initial states" and is reported, never thrown: the
+    // codon is already marked starting, and a runner that never launches
+    // would block every later start as "already running".
+    try {
+      await this.emitInitialStates();
+    } catch (error) {
+      this.emit(
+        "trackingError",
+        toError(error),
+        "initial watched-file enumeration (continuing without initial states)",
+      );
+    }
+  }
 
-    const resolvedFiles = await fileResolver.resolveFiles(this.agentRootPath, this.patterns);
-    const files = await Promise.all(
-      resolvedFiles.map(async (filePath) => {
-        const fullPath = path.join(this.agentRootPath, filePath);
-        const stats = await fs.promises.stat(fullPath);
-        const content = await fs.promises.readFile(fullPath, "utf-8");
-        return {
-          path: filePath,
-          content,
-          lastModified: stats.mtime,
-        };
-      }),
-    );
+  private async emitInitialStates(): Promise<void> {
+    // Git-native listing over the shadow repo: gitignore respected with
+    // git's own engine, paths POSIX-relative to the agent root. A file
+    // vanishing between enumeration and read is skipped, not fatal.
+    const files: Array<{ path: string; content: string; lastModified: Date }> = [];
+    for (const filePath of await this.watched.files()) {
+      const file = this.watched.read(filePath);
+      if (file !== null) files.push({ path: filePath, ...file });
+    }
 
     if (files.length === 0) return;
 
@@ -132,7 +138,7 @@ export class CodonFileTracker extends TypedEventEmitter<CodonFileTrackerEvents> 
     toolInput: Record<string, unknown> | undefined,
     toolUseId: string,
   ): void {
-    if (this.closed || this.patterns.length === 0 || !FILE_TOOLS.has(toolName)) return;
+    if (this.closed || this.watched.patterns.length === 0 || !FILE_TOOLS.has(toolName)) return;
 
     const operation = this.handleFileToolCall(toolName as ToolName, toolInput, toolUseId).catch(
       (error) => {
@@ -206,30 +212,23 @@ export class CodonFileTracker extends TypedEventEmitter<CodonFileTrackerEvents> 
 
     if (!rawPath) return;
 
-    if (!this.pathMatcher) {
+    if (!this.initialized) {
       throw new Error("CodonFileTracker.observeToolUse called before initialize()");
     }
 
-    const filePath = this.pathMatcher.match(rawPath);
+    // One question to the workspace, answered synchronously (the emit below
+    // must precede the tool's own event): is this path — normalized, inside
+    // the workspace, in the watched set, and not ignored or excluded — one
+    // the file tree would show? An event streams iff it would. Fail-closed:
+    // a verdict failure surfaces as a trackingError, and nothing is emitted.
+    const filePath = this.watched.admit(rawPath);
     if (!filePath) return;
 
-    const fullPath = path.join(this.agentRootPath, filePath);
-    let action: WatchedFileUpdate["action"] = "modified";
-    if (toolName === "Write") {
-      action = fs.existsSync(fullPath) ? "modified" : "created";
-    }
-
-    if (content === null) {
-      content = "";
-      if (fs.existsSync(fullPath)) {
-        try {
-          content = fs.readFileSync(fullPath, "utf-8");
-        } catch (error) {
-          this.logger.log(`Error reading file ${filePath}: ${toError(error).message}`, "error");
-          return;
-        }
-      }
-    }
+    // What is on disk BEFORE the tool runs: absent means a Write creates it.
+    const existing = this.watched.read(filePath);
+    const action: WatchedFileUpdate["action"] =
+      toolName === "Write" && existing === null ? "created" : "modified";
+    if (content === null) content = existing?.content ?? "";
 
     this.recentFileAccess = {
       path: filePath,
@@ -248,11 +247,13 @@ export class CodonFileTracker extends TypedEventEmitter<CodonFileTrackerEvents> 
   }
 
   private async emitFileTreeUpdate(): Promise<void> {
-    if (this.patterns.length === 0) return;
+    if (this.watched.patterns.length === 0) return;
 
-    const allTrees = await Promise.all(
-      this.patterns.map((pattern) => buildFileTree(this.agentRootPath, pattern)),
-    );
-    this.emit("fileTreeUpdated", { tree: allTrees.flat() });
+    // ONE listing pass for every watched pattern (this runs on each file
+    // tool call). Enumeration failures propagate to the caller (surfaced as
+    // a trackingError), and no tree is published: clients keep the last
+    // good tree instead of receiving an authoritative-looking empty one.
+    const tree = await this.watched.tree();
+    this.emit("fileTreeUpdated", { tree });
   }
 }

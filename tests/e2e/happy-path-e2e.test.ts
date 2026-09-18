@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
+
 import { afterAll, describe, expect, it } from "bun:test";
 import { type ChildProcess, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CI_DETECTION_ENV_VARS } from "../../server/telemetry/telemetry-config.js";
+import { checkpointFiles } from "../utils/checkpoint-history.js";
 import {
   type CleanupIntegrationResult,
   executeTestCleanup,
@@ -590,7 +592,7 @@ async function validateCheckpointSystem(): Promise<void> {
     };
 
     // Get commit messages
-    const gitLog = execSync("git log --pretty=format:%s", {
+    const gitLog = execSync("git log --all --pretty=format:%s", {
       cwd: testState.executionPath,
       env: gitEnv,
       encoding: "utf-8",
@@ -612,11 +614,7 @@ async function validateCheckpointSystem(): Promise<void> {
       .map((b) => b.trim());
 
     // Get tracked files - but exclude read_only_data_source directory
-    const gitFiles = execSync("git ls-files", {
-      cwd: testState.executionPath,
-      env: gitEnv,
-      encoding: "utf-8",
-    });
+    const gitFiles = checkpointFiles(testState.executionPath, testState.executionPath);
     testState.checkpointValidation.checkpointedFiles = gitFiles.trim()
       ? gitFiles
           .trim()

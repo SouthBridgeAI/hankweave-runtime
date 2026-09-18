@@ -1,5 +1,6 @@
 import { SHIM_IDLE_TIMEOUT_MAX_SECONDS } from "./config.js";
 import type { HankweaveConfig } from "./types/types.js";
+import { isBundlePath } from "./utils.js";
 
 /**
  * Show deprecation warnings for old flags.
@@ -82,12 +83,23 @@ export const HELP_TEXT = `
 Hankweave Runtime - Codon Orchestration
 
 Usage: hankweave [options] [config-or-data-path]
+       hankweave <bundle.hank> [data-path]
+       hankweave pack [hankPathOrDir] [options]
+
+Commands:
+  pack                      Create a deterministic .hank bundle + hank.lock
+                            (own flag namespace; see: hankweave pack --help)
 
 Arguments:
   config-or-data-path       Path to hank.json or project directory
                             When only one argument provided:
                             - If ends with .json: treated as hank-path
+                            - If ends with .hank or .tar.zst: treated as a packed bundle
+                              (verified against hank.lock and extracted to a directory named
+                              by its bundleHash, reused on later runs after re-verification)
                             - Otherwise: treated as data-path
+                            (a data directory literally named "pack" must be
+                            written "./pack")
 
 Execution Control:
   -e, --execution <path>    Use specific execution directory
@@ -299,7 +311,11 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     s.startsWith("https://") || s.startsWith("http://") || s.startsWith("git@");
 
   if (positional.length === 1) {
-    if (positional[0].endsWith(".json") || looksLikeRemoteUrl(positional[0])) {
+    if (
+      positional[0].endsWith(".json") ||
+      isBundlePath(positional[0]) ||
+      looksLikeRemoteUrl(positional[0])
+    ) {
       result.hankPath = positional[0];
     } else {
       result.dataPath = positional[0];

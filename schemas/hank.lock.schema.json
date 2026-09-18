@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://unpkg.com/hankweave@latest/schemas/hank.lock.schema.json",
+  "title": "Hankweave Bundle Lock",
+  "description": "Schema for hank.lock - the machine-written lockfile emitted by `hankweave pack` (per-member hashes, codon input digests, bundle identity). Not an authoring format.",
+  "$ref": "#/definitions/HankweaveBundleLock",
+  "definitions": {
+    "HankweaveBundleLock": {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bundleHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "644",
+                  "755"
+                ]
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "mode",
+              "sha256"
+            ],
+            "additionalProperties": false
+          },
+          "propertyNames": {
+            "minLength": 1
+          }
+        },
+        "codonInputs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "propertyNames": {
+            "minLength": 1
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+            }
+          },
+          "required": [
+            "min"
+          ],
+          "additionalProperties": false
+        },
+        "ignoreDefaults": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "v",
+        "name",
+        "version",
+        "bundleHash",
+        "files",
+        "codonInputs",
+        "runtime",
+        "ignoreDefaults"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

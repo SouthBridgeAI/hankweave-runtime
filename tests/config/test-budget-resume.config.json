@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
   "overrides": {
-    "budget": { "maxDollars": 0.002 }
+    "budget": { "maxDollars": 0.0005 }
   },
   "hank": [
     {

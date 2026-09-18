@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { FileTreeUpdatedEvent, ServerEvent } from "../../../server/types/types.js";
+import { isNonAnthropicModel } from "../../utils/model-family.js";
 import { type FileNode, findInTree } from "../../utils/test-data-helpers.js";
 import type { TestWSClient } from "../../utils/test-helpers.js";
 import { colors } from "../../utils/test-helpers.js";
@@ -10,17 +11,6 @@ interface TestState {
   client: TestWSClient | null;
   events: ServerEvent[];
   codonModels: Record<string, string>;
-}
-
-/** Check if a model string refers to a non-Anthropic provider */
-function isNonAnthropicModel(model: string): boolean {
-  const lower = model.toLowerCase();
-  return (
-    !lower.includes("claude") &&
-    !lower.includes("sonnet") &&
-    !lower.includes("opus") &&
-    !lower.includes("haiku")
-  );
 }
 
 export function runFileTreeTests(testState: TestState, testDir: string) {

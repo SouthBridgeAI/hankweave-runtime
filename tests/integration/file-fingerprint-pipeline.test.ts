@@ -4,10 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { BodyResolver } from "../../server/body-resolver.js";
 import { CodonFileTracker } from "../../server/codon-file-tracker.js";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import type { FileUpdatedEvent, ServerEvent } from "../../server/schemas/event-schemas.js";
 import { FileEventStorage } from "../../server/storage/file-event-storage.js";
 import { EventId } from "../../server/types/branded-types.js";
 import { Logger } from "../../server/utils.js";
+import { Workspace } from "../../server/workspace/index.js";
 
 /**
  * The fingerprint chokepoint at the runtime boundary, exercised through the
@@ -20,6 +22,7 @@ describe("file.updated fingerprint pipeline", () => {
   let tempDir: string;
   let agentDir: string;
   let eventsDir: string;
+  let workspace: Workspace;
   let counter = 0;
 
   beforeEach(async () => {
@@ -32,6 +35,11 @@ describe("file.updated fingerprint pipeline", () => {
     eventsDir = path.join(tempDir, "events");
     await fs.promises.mkdir(agentDir, { recursive: true });
     await fs.promises.mkdir(eventsDir, { recursive: true });
+    // The tracker enumerates through the git-native lister over a shadow
+    // checkpoint repo, exactly as the runtime wires it.
+    workspace = await Workspace.open(new ExecutionLayout(tempDir, { agentRootPath: agentDir }), {
+      logger: new Logger(path.join(tempDir, "checkpoint-git.log")),
+    });
   });
 
   afterEach(async () => {
@@ -40,9 +48,9 @@ describe("file.updated fingerprint pipeline", () => {
 
   function makeTracker(patterns: readonly string[]): CodonFileTracker {
     return new CodonFileTracker({
-      agentRootPath: agentDir,
-      patterns,
       logger: new Logger(path.join(tempDir, "tracker.log")),
+      files: workspace.files,
+      checkpointedFiles: patterns,
     });
   }
 

@@ -26,6 +26,7 @@ import {
 } from "./claude-runtime-extractor.js";
 import { TIMEOUTS } from "./config.js";
 import { ExecutionLayout } from "./execution-layout.js";
+import { HANKWEAVE_ENV_UNSET, hankweaveEnvEntries } from "./hankweave-env.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
@@ -611,21 +612,16 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
         options.env[key] = process.env[key];
         this.logger.log(`Passing through Anthropic env var: ${key}`);
       }
-      // Pass through HANKWEAVE_* variables (with prefix stripped)
-      // Exclude HANKWEAVE_RUNTIME_* (server config) and HANKWEAVE_SENTINEL_* (sentinel API keys)
-      else if (
-        key.startsWith("HANKWEAVE_") &&
-        !key.startsWith("HANKWEAVE_RUNTIME_") &&
-        !key.startsWith("HANKWEAVE_SENTINEL_")
-      ) {
-        const newKey = key.substring("HANKWEAVE_".length);
-        if (process.env[key] === "unset") {
-          delete options.env[newKey];
-          this.logger.log(`Unsetting env var: ${newKey}`);
-        } else {
-          options.env[newKey] = process.env[key];
-          this.logger.log(`Passing through env var: ${newKey}`);
-        }
+    }
+
+    // Apply the HANKWEAVE_ overlay (prefix stripped) on top of the passthrough
+    for (const { name, value } of hankweaveEnvEntries()) {
+      if (value === HANKWEAVE_ENV_UNSET) {
+        delete options.env[name];
+        this.logger.log(`Unsetting env var: ${name}`);
+      } else {
+        options.env[name] = value;
+        this.logger.log(`Passing through env var: ${name}`);
       }
     }
 

@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "name": "pack-fixture",
+    "version": "1.0.0",
+    "description": "Fixture hank for hankweave pack unit tests (U2)"
+  },
+  "requirements": {
+    "env": ["PACK_FIXTURE_TOKEN"]
+  },
+  "globalSystemPromptFile": "prompts/global-system.md",
+  "hank": [
+    {
+      "id": "codon-1",
+      "name": "First codon",
+      "model": "sonnet",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/codon1.md",
+      "rigSetup": [
+        {
+          "type": "copy",
+          "copy": {
+            "from": "tpl",
+            "to": "workspace/tpl"
+          }
+        },
+        {
+          "type": "command",
+          "command": {
+            "run": "git clone https://example.invalid/repo.git deps && echo $HOME"
+          }
+        }
+      ],
+      "env": {
+        "FIXTURE_API_KEY": "inline-fixture-value"
+      },
+      "sentinels": [
+        {
+          "sentinelConfig": "sentinels/check.json"
+        }
+      ],
+      "outputFiles": [
+        {
+          "copy": ["out/**"],
+          "beforeCopy": [
+            {
+              "type": "command",
+              "command": {
+                "run": "bun install"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "loop",
+      "id": "loop-1",
+      "name": "Refinement loop",
+      "terminateOn": {
+        "type": "iterationLimit",
+        "limit": 2
+      },
+      "codons": [
+        {
+          "id": "codon-2",
+          "name": "Second codon",
+          "model": "sonnet",
+          "continuationMode": "continue-previous",
+          "promptFile": "prompts/codon2.md",
+          "appendSystemPromptFile": "prompts/append-system.md"
+        }
+      ]
+    }
+  ]
+}

@@ -22,7 +22,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { CheckpointGit, CheckpointStorageError } from "../../server/checkpoint-git.js";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
 import { StateManager } from "../../server/state-manager.js";
@@ -30,6 +29,8 @@ import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type * as ST from "../../server/types/state-types.js";
 import type { ServerEvent } from "../../server/types/types.js";
 import { Logger } from "../../server/utils.js";
+import { CheckpointStorageError, GitWorkspaceStorage } from "../../server/workspace/git-storage.js";
+import { Workspace } from "../../server/workspace/index.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
 
 const codons = [
@@ -280,16 +281,18 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
   }, 60_000);
 
   test("unreadable checkpoint storage stops the boot instead of starting fresh", async () => {
-    const seed = new CheckpointGit(
-      execDir,
-      execDir,
-      new Logger(path.join(hankweaveDir, "logs/seed.log")),
-    );
-    await seed.initialize();
+    const seed = await Workspace.open(new ExecutionLayout(execDir, { agentRootPath: execDir }), {
+      logger: new Logger(path.join(hankweaveDir, "logs/seed.log")),
+    });
+
     fs.writeFileSync(path.join(execDir, "transform.out"), "v1");
-    await seed.addPatterns(["*.out"]);
-    await seed.switchToBranch("run-run-incident");
-    const transformSha = await seed.commit("completed:transform");
+    const parent = await seed.checkpoints.history("main").tip();
+    if (!parent) throw new Error("Missing initial checkpoint");
+    const transformSha = await seed.checkpoints.history("run-run-incident").checkpoint({
+      parent,
+      message: "completed:transform",
+      patterns: ["*.out"],
+    });
     await writeState(async (_sm, { complete }) => {
       await complete("transform", transformSha as string);
     });
@@ -298,15 +301,15 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
     // init time makes HEAD unresolvable, and the repo is rebuilt instead).
     // Without the preflight, validation would be empty and start() would
     // snapshot and start fresh.
-    const original = CheckpointGit.prototype.getAllCheckpoints;
-    CheckpointGit.prototype.getAllCheckpoints = async () => {
+    const original = GitWorkspaceStorage.prototype.listSnapshots;
+    GitWorkspaceStorage.prototype.listSnapshots = async () => {
       throw new CheckpointStorageError("injected: could not enumerate checkpoints");
     };
     try {
       runtime = makeRuntime();
       await expect(runtime.start()).rejects.toThrow(/checkpoint storage could not be read/);
     } finally {
-      CheckpointGit.prototype.getAllCheckpoints = original;
+      GitWorkspaceStorage.prototype.listSnapshots = original;
     }
     const state = await readPersistedState();
     expect(state.runs.length).toBe(1); // no fresh run was created
@@ -318,12 +321,10 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
     // reference, so nothing can seed a continuation. A fresh run's rig setup
     // deletes copy.to directories — the pre-recovery work tree must be on a
     // recovery/* branch first.
-    const seed = new CheckpointGit(
-      execDir,
-      execDir,
-      new Logger(path.join(hankweaveDir, "logs/seed.log")),
-    );
-    await seed.initialize();
+    await Workspace.open(new ExecutionLayout(execDir, { agentRootPath: execDir }), {
+      logger: new Logger(path.join(hankweaveDir, "logs/seed.log")),
+    });
+
     fs.writeFileSync(path.join(execDir, "transform.out"), "uncheckpointed");
 
     await writeState(async (_sm, { complete }) => {

@@ -1,0 +1,17 @@
+{
+  "id": "check",
+  "name": "One-line rule checker",
+  "trigger": {
+    "type": "event",
+    "on": ["*"]
+  },
+  "execution": {
+    "strategy": "immediate"
+  },
+  "model": "anthropic/claude-haiku-4-5",
+  "userPromptFile": "../prompts/check-user.md",
+  "structuredOutput": {
+    "output": "object",
+    "schemaFile": "check-schema.ts"
+  }
+}
