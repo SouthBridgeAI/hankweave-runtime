@@ -20,7 +20,7 @@ import urllib.request
 import zipfile
 
 CACHE_FORMAT = 10  # Optional source coverage and retained missing-source graph identities
-DEFAULT_VERSION = "0.10.0"
+DEFAULT_VERSION = "0.11.0"
 MISSING_SOURCE = ("Source pack unavailable: attach the matching pack with --source-parquet PATH "
                   "or HANKWEAVE_SOURCE_PARQUET; source bodies are not bundled in the core skill.")
 SEARCH_CHARS = 1800

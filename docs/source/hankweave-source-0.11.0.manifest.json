@@ -1,0 +1,3209 @@
+{
+  "accepted": true,
+  "broken_links": 0,
+  "bytes": 10591556,
+  "canonical_docs_url": "https://hankweave.southbridge.ai/0.11.0/files/",
+  "canonical_url_status": "planned",
+  "columns": [
+    "id",
+    "slug",
+    "section",
+    "title",
+    "quadrant",
+    "ptype",
+    "version",
+    "url",
+    "body_md",
+    "word_count",
+    "aliases",
+    "sections",
+    "links_out",
+    "broken_links",
+    "related",
+    "next",
+    "deps",
+    "digest",
+    "diagrams",
+    "content_bytes",
+    "media_type",
+    "content_sha256",
+    "fixture_role",
+    "fixture_manifest_id",
+    "source_symbols"
+  ],
+  "deployed": false,
+  "diagrams": 0,
+  "editorial_source": {
+    "base_parquet": "efc23547a27ec56b6516f686baf129368871098d4c777110139fc05a8e583cd6",
+    "example": [
+      {
+        "bytes": 780,
+        "path": "check.mjs",
+        "sha256": "f1ed3ba0b013c1ac1d69a15fe4d968d327f87aa208a4c4fb069bcf4fe180ecbc"
+      },
+      {
+        "bytes": 145,
+        "path": "data/notes.txt",
+        "sha256": "e59fcf33ede2f448882972e8f1d1c0920e5ce5566dffa968abd185a7df32d02f"
+      },
+      {
+        "bytes": 1957,
+        "path": "hank.json",
+        "sha256": "e27c67194abb43b93a9e06392832841481ac1d2c2c1f5ee18bb34e5e192027b0"
+      }
+    ],
+    "format": "astra.editorial-projection.v1",
+    "link_overrides": "06e9f518b2150ab115d6a0797fb46f0d136d1bbf8e0f977193ce20a124cc23df",
+    "navigation": "068f508f5b7f565399344ce96a000561a0a0f169b5e1dd1957f6051e1b7aa1e8",
+    "source_pages": [
+      {
+        "bytes": 38349,
+        "path": "author/designing-codons-and-handoffs.mdx",
+        "sha256": "84c5d91a60df56d0183fd7156607a491043d02dd69ef339de7eb54dbbd9b0774"
+      },
+      {
+        "bytes": 22506,
+        "path": "author/discover-before-you-freeze.mdx",
+        "sha256": "e18dde48cea0fb4285f8938e29a3c54f5dbb88cc44be89c35d8088a0611e7e07"
+      },
+      {
+        "bytes": 20630,
+        "path": "author/maturing-and-versioning.mdx",
+        "sha256": "a1e434add0f214f75a557bd64129ec6ea0820a39afa492027199c31446a1f201"
+      },
+      {
+        "bytes": 24520,
+        "path": "author/patterns/completion.mdx",
+        "sha256": "1bf6e9c509f8619f28768fbd3d66154d84fac27b957c0ceee446051be5a2e4e3"
+      },
+      {
+        "bytes": 23767,
+        "path": "author/patterns/composition.mdx",
+        "sha256": "0582162ef42dbdae1d077e2be825f141e4ad3ddd08a1e25c3f7a7bf55cf18ba0"
+      },
+      {
+        "bytes": 18282,
+        "path": "author/patterns/context.mdx",
+        "sha256": "34e9c8c5760ca02e124184f9cc9a2adf46350d45f9fb51e4e133699d18b5be4a"
+      },
+      {
+        "bytes": 18384,
+        "path": "author/patterns/gallery.mdx",
+        "sha256": "f332e1a54659c9f4891b92b31cfe12fa2e2da5f97c98357390535568bf4e67bf"
+      },
+      {
+        "bytes": 26298,
+        "path": "author/patterns/human-judgment.mdx",
+        "sha256": "4979b41f5b6c1e2b874ca2d236cc2810cd229f535c5db108ea754bc2b547fc7c"
+      },
+      {
+        "bytes": 29627,
+        "path": "author/patterns/reliability.mdx",
+        "sha256": "91b2ab0419c3eb67c3c100f8c12ec7472015fd6660aa08edd1e4df220026090d"
+      },
+      {
+        "bytes": 22160,
+        "path": "author/prompts.mdx",
+        "sha256": "3001a0888b501a5a7fd9c987f4bdaf16668558fb47bb111400453b00c5f3a0f9"
+      },
+      {
+        "bytes": 36118,
+        "path": "author/testing-and-hardening.mdx",
+        "sha256": "dc1dd2342fc07c738be5eec7767cc48f378deb81140bac21217ff20e740c5337"
+      },
+      {
+        "bytes": 27999,
+        "path": "concepts/budgets.mdx",
+        "sha256": "4197a13cc08470ef323d30e3962f3f85140ed6983fa000ddad44ecc034671b5a"
+      },
+      {
+        "bytes": 25289,
+        "path": "concepts/checkpoints.mdx",
+        "sha256": "34a1f507ea5d2bfc7c0d467faec896f84b5024c3ed7691234653c7ac7beb4a79"
+      },
+      {
+        "bytes": 30041,
+        "path": "concepts/codons.mdx",
+        "sha256": "4ecef4794ecaff23b43ccac98ce5361f8f417ddb36815656de2eb9364b332faa"
+      },
+      {
+        "bytes": 19792,
+        "path": "concepts/hanks.mdx",
+        "sha256": "4864760caa81932bc2208a7b14b56992af68d2dc3cefbb97a9a281d0155bd913"
+      },
+      {
+        "bytes": 21566,
+        "path": "concepts/loops.mdx",
+        "sha256": "272f6726b4f3200ff7df81e32e404270bd677afb16cb4888fe28426b7a04399d"
+      },
+      {
+        "bytes": 19218,
+        "path": "concepts/rigs.mdx",
+        "sha256": "42895841b7a9e7533c89bcf27a29972658ff24682c7af949b7e4d33a241417cc"
+      },
+      {
+        "bytes": 35104,
+        "path": "concepts/sentinels.mdx",
+        "sha256": "523cef3cd223236f8daa5d902d4acd565d07edae63bfad2faaf45937cb8ca734"
+      },
+      {
+        "bytes": 30634,
+        "path": "contribute/documentation-pipeline.mdx",
+        "sha256": "cb26129d05484a6ab20100401fd0fd4117369f186f59f904278e768dce59bc5b"
+      },
+      {
+        "bytes": 37609,
+        "path": "contribute/execution-thread.mdx",
+        "sha256": "3849ef50b506fa4d585357cdc91ee8496d8290cd2250cb3b6c9d7c223d7ec5eb"
+      },
+      {
+        "bytes": 23070,
+        "path": "contribute/runtime-architecture.mdx",
+        "sha256": "d525f6a3dbd0e638cfd23c57f76af3831c3ccbb31e592885f4893952c66ba994"
+      },
+      {
+        "bytes": 32354,
+        "path": "contribute/state-machine.mdx",
+        "sha256": "9e36280e35980ac04b07370a4db7b2c300459fca203b89a800245c232fe44f54"
+      },
+      {
+        "bytes": 40064,
+        "path": "examples/connector-build-test.mdx",
+        "sha256": "f87077331f46627a650daae2594bc6d7f730e2dd118385f7e3beaf911a6c9389"
+      },
+      {
+        "bytes": 74247,
+        "path": "examples/docs-maintenance.mdx",
+        "sha256": "456abdc421c9ef111db39303a11ab699e72f2c287b2257869bd2bae02e2c0e51"
+      },
+      {
+        "bytes": 18160,
+        "path": "examples/index.mdx",
+        "sha256": "0305d2505b5c30ef60c009ef33ee7d7f99659f9528b263af3c504f5bb51fedec"
+      },
+      {
+        "bytes": 35639,
+        "path": "examples/minimal-single-provider.mdx",
+        "sha256": "53e46d6e2e1ea267c3ba1b253689aca9ca1558378c21e4fa4025f7a6cd3841e5"
+      },
+      {
+        "bytes": 19631,
+        "path": "examples/plan-review-update.mdx",
+        "sha256": "5d2fc2a47289c2a275d0112dce4f9468ab42c6e4a19a1733faf15965ed325dac"
+      },
+      {
+        "bytes": 47740,
+        "path": "examples/quote-template-unification.mdx",
+        "sha256": "0c5270b201858d3a6d4d6963e592172ad2203039583953d85980c7060a0ef4c4"
+      },
+      {
+        "bytes": 9186,
+        "path": "faq.mdx",
+        "sha256": "2c97ff4c75fcd0ae224ab233d4a418986c04934789ecc4df811e3f1c8342706f"
+      },
+      {
+        "bytes": 14272,
+        "path": "help.mdx",
+        "sha256": "2c7da1d72e1c33d1cea3e0fc155eb5aea4983bbd88188a5f755d0025aab1efd7"
+      },
+      {
+        "bytes": 18175,
+        "path": "index.mdx",
+        "sha256": "9bddf479f4d326ab2c300ffeca08a066ee9c5b0cd10e8c80b6aaa15775087254"
+      },
+      {
+        "bytes": 18217,
+        "path": "integrate/client-and-exported-types.mdx",
+        "sha256": "9cc517ef2a41a298db5cadaaefa2aa3bceb4234c969aca16341c219d716cab68"
+      },
+      {
+        "bytes": 20484,
+        "path": "integrate/deployment-model.mdx",
+        "sha256": "d926da2f32f281c3b4d8ffa82be87bbae2517ecd2dd20f03b7046b07eec8bc2a"
+      },
+      {
+        "bytes": 34425,
+        "path": "integrate/event-journal.mdx",
+        "sha256": "1406afa28fe7bd0722373ef19c501f57b804538ee63b5f23d41f498b8597cd52"
+      },
+      {
+        "bytes": 27324,
+        "path": "integrate/protocol.mdx",
+        "sha256": "4bffb92008b79b00f46c8242e823c938b55463dbe0b43221ff24a2d4879b9fc4"
+      },
+      {
+        "bytes": 26391,
+        "path": "integrate/websocket-quickstart.mdx",
+        "sha256": "fecd45aa7d43ec1293c5219eb32045c85f446f105bf8087e30de2f59090f1309"
+      },
+      {
+        "bytes": 21360,
+        "path": "operate/authentication-and-models.mdx",
+        "sha256": "2d50fdeaa2a3d8573905a6b1610e39bbf1c932a2d5f454ea8bb17cc47dd8dfba"
+      },
+      {
+        "bytes": 19055,
+        "path": "operate/deployment.mdx",
+        "sha256": "1a42d8862bbae9ddd649e1227b5e306c60b47cf15259b9d0b210fcc1e94219b8"
+      },
+      {
+        "bytes": 19573,
+        "path": "operate/observability.mdx",
+        "sha256": "a08875bd3e01b5ed6ffc3f2372995351c2748b8cc6a995f09cae4c7d92c220fb"
+      },
+      {
+        "bytes": 60417,
+        "path": "operate/observe-and-debug.mdx",
+        "sha256": "4b0d971a41abb79e4a0fdd8ccef2c93465574ea2bb3aaaaf4360b454e146db63"
+      },
+      {
+        "bytes": 32409,
+        "path": "operate/resume-rollback-and-retry.mdx",
+        "sha256": "bc95d3a846af518a2572a2acefa9e97754a0cbffe7a83d46bca1b3da5cd5b9f3"
+      },
+      {
+        "bytes": 41030,
+        "path": "operate/runbook.mdx",
+        "sha256": "a690fc764d52b706d38af8ec1a6cd5b5b23a618568f8c49f48c2ffbbe4e0022c"
+      },
+      {
+        "bytes": 27754,
+        "path": "operate/troubleshooting.mdx",
+        "sha256": "7c4d1bb8e00c1f531c2ef7f15f706681239855e360b09f4fa62a28c772ec5f64"
+      },
+      {
+        "bytes": 17965,
+        "path": "reference/aws-bedrock.mdx",
+        "sha256": "1b75ca5de3ef7da998ce923acdebfd6762966273ecbef20eee41d50ea45a6f60"
+      },
+      {
+        "bytes": 49912,
+        "path": "reference/cli.mdx",
+        "sha256": "c2ccb302fdce88ff115fe2e56913549849bf54d598f78d1a5a0cc78323bbf094"
+      },
+      {
+        "bytes": 37518,
+        "path": "reference/environment-variables.mdx",
+        "sha256": "5086b3e5e6b3d849c1f9e02c2787e5c02823fe07553847a5bfdc7ab9e9d2d0b9"
+      },
+      {
+        "bytes": 21348,
+        "path": "reference/errors-and-exit-codes.mdx",
+        "sha256": "c32a8a23d50e37a1e2824e57d47716b9ad0a6dbc4c5682f5a3774e6a2510ba6c"
+      },
+      {
+        "bytes": 24929,
+        "path": "reference/events.mdx",
+        "sha256": "2a43ee8645a94fe44aa39072d1dcff16f843ef215a44aa07d749ed04d1b457e1"
+      },
+      {
+        "bytes": 22088,
+        "path": "reference/execution-directory.mdx",
+        "sha256": "33f15798025449a103b48356fdea681984c6831177de5e45a7b79975491c5d56"
+      },
+      {
+        "bytes": 37840,
+        "path": "reference/hank-json.mdx",
+        "sha256": "fb47368e9258726329f8be665285df51735c0e27c7a71d97b7a5c75e454b8f47"
+      },
+      {
+        "bytes": 40588,
+        "path": "reference/hankweave-json.mdx",
+        "sha256": "f287e45503a8431ecae8359cdfbc02725d55274d30c429a40556ea996f08466e"
+      },
+      {
+        "bytes": 13965,
+        "path": "reference/llm-proxy.mdx",
+        "sha256": "9ef14f456dca22f50d86c742757facc17198e4dadd12e0fe1ed99200360503b2"
+      },
+      {
+        "bytes": 18539,
+        "path": "reference/model-resolution.mdx",
+        "sha256": "87f36ff268ef8d7ea3568883dbe9a8600d9087efae37833f72b2594fbcda8a9d"
+      },
+      {
+        "bytes": 35102,
+        "path": "reference/models-and-harnesses.mdx",
+        "sha256": "7c8aa3e654cc04d576d3e9315cb7e321191f1ebb8672ef6528b79599d818ba5e"
+      },
+      {
+        "bytes": 35348,
+        "path": "reference/sentinel-config.mdx",
+        "sha256": "d9da1d9112b77ec18b42cf48914513f3b5a40ddc6e80f4d0bc0f89d9aaff6a33"
+      },
+      {
+        "bytes": 46569,
+        "path": "reference/state-file.mdx",
+        "sha256": "0c36552522fee6d6422fdfca544ef307b4ee89b586b7b6bbceae42f903de179a"
+      },
+      {
+        "bytes": 31171,
+        "path": "reference/telemetry.mdx",
+        "sha256": "9c3d07cf8e3c1586e3d8384207cf784e490eba890653f23dbda369b5f6107fee"
+      },
+      {
+        "bytes": 18878,
+        "path": "start/first-run.mdx",
+        "sha256": "ed07703758dc1fac82a7a1e8ef17ab9b77fbdde6175bfa77a9a092a042d3cf84"
+      },
+      {
+        "bytes": 15540,
+        "path": "start/how-a-run-works.mdx",
+        "sha256": "2ed4ce533e2d8b39e36240259b3c44ac91a8fbb548c0af62b4cebfc76254f8df"
+      },
+      {
+        "bytes": 10733,
+        "path": "start/is-it-right-for-you.mdx",
+        "sha256": "0962a9528b4a547dbb3889229ecdb0ac796f1d6a50791b1ba10103c9e7bb2a10"
+      },
+      {
+        "bytes": 13784,
+        "path": "start/quickstart.mdx",
+        "sha256": "19009c3cccd28c0bb65e070c1ed85ef1e3895c8ff617288e5b1e6c63acec8adc"
+      },
+      {
+        "bytes": 19112,
+        "path": "start/upgrading.mdx",
+        "sha256": "abc0c5c0c227ba37b311274102f58253f8c90507a60771d6d5e41b48abdbc120"
+      },
+      {
+        "bytes": 9351,
+        "path": "start/why-hankweave.mdx",
+        "sha256": "9a081deb5ec439c2f8899df2ba91ba37fdc49c752f34d5e996bd04ef961d1287"
+      },
+      {
+        "bytes": 26926,
+        "path": "tutorial/0-tour.mdx",
+        "sha256": "0c6ea0d2447debcbfdc492d6839d887406fa1373fbce7ba2f4c1eb3c1c58c224"
+      },
+      {
+        "bytes": 27389,
+        "path": "tutorial/1-baseline.mdx",
+        "sha256": "ae186724fa4c8fdf656d02b5d8bbef80f7ff5aaa767f767238c90c8d5bbd0979"
+      },
+      {
+        "bytes": 22611,
+        "path": "tutorial/2-determinism.mdx",
+        "sha256": "746b7425f2662028e84c3e965cfe383f335e504175822f6c5b344c0a443e965a"
+      },
+      {
+        "bytes": 32976,
+        "path": "tutorial/3-validate-and-repair.mdx",
+        "sha256": "a475c74be3205f88f5fbd95bcc8f8946429fe467c924834b2092e82e51edcc61"
+      },
+      {
+        "bytes": 36805,
+        "path": "tutorial/4-observe-and-budget.mdx",
+        "sha256": "1c419312dbc3adeae11a78afcbd9ebae74e029bb7581cfefe65b86a4ad59724f"
+      },
+      {
+        "bytes": 34061,
+        "path": "tutorial/5-break-resume-inspect.mdx",
+        "sha256": "886b173e63c7cf0e33a4b3517088fe48254ded93c875ff3aa80b778482514365"
+      },
+      {
+        "bytes": 35713,
+        "path": "tutorial/fixtures.mdx",
+        "sha256": "b6c0d53f62f2b5233d7582a43136c5404d4059bf89a5a5b086f1a11cc53b4484"
+      }
+    ]
+  },
+  "evidence_graph": {
+    "deps_by_status": {
+      "ambiguous": 8,
+      "resolved": 95,
+      "unresolved": 94
+    },
+    "fixture_grouping": "Fixture grouping is navigation by manifest/path, not proof that every member was executed. Read the manifest's scope and limits.",
+    "fixture_manifests": 36,
+    "fixtures_without_manifest": 38,
+    "format": 1,
+    "links_by_kind": {
+      "fixture-manifest": 1036,
+      "fixture-member": 563,
+      "link": 2042,
+      "source-citation": 4561,
+      "source-import": 1262
+    },
+    "unresolved": [
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/designing-codons-and-handoffs",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/designing-codons-and-handoffs",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/designing-codons-and-handoffs",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/designing-codons-and-handoffs",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "inspect-the-boundaries-on-disk",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/designing-codons-and-handoffs",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "separate-building-from-review",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 3,
+        "page": "author/designing-codons-and-handoffs",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "inspect-the-boundaries-on-disk",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/anchor-hank/design-notes.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/designing-codons-and-handoffs",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "decide-codon-boundary-or-same-codon",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/discover-before-you-freeze",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/discover-before-you-freeze",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/discover-before-you-freeze",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/anchor-hank/design-notes.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/discover-before-you-freeze",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "sketch-the-skeleton-before-any-prompt",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/maturing-and-versioning",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/maturing-and-versioning",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/maturing-and-versioning",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/completion",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/completion",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/completion",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/composition",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/composition",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/composition",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/context",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/context",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/context",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/context",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "when-the-work-is-bigger-than-the-window",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "author/patterns/gallery",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-checked-examples",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-checked-examples",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 4,
+        "page": "author/patterns/gallery",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "anchor-normalize-validate-reconcile-publish",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/anchor-hank/README.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "anchor-normalize-validate-reconcile-publish",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "chapters-grow-the-same-anchor-in-checkpoints",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/chapters/ch1/expected/CAPTURE.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "chapters-grow-the-same-anchor-in-checkpoints",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/chapters/ch2/expected/CAPTURE.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "chapters-grow-the-same-anchor-in-checkpoints",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/chapters/ch3/expected/CAPTURE.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "chapters-grow-the-same-anchor-in-checkpoints",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/chapters/ch4/expected/CAPTURE.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "chapters-grow-the-same-anchor-in-checkpoints",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/chapters/ch5/expected/CAPTURE.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "chapters-grow-the-same-anchor-in-checkpoints",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/connector-build-test/README.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "polymorphic-connector-build",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/README.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "minimal-one-provider-one-codon",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/plan-review-update/README.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "build-review-loop",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "run-checked-examples",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/human-judgment",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/human-judgment",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/human-judgment",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/human-judgment",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "feed-review-into-the-next-run",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 4,
+        "page": "author/patterns/human-judgment",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-the-queue-and-catch-omissions",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/reliability",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/reliability",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/patterns/reliability",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/prompts",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/prompts",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/prompts",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/testing-and-hardening",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/testing-and-hardening",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/testing-and-hardening",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/testing-and-hardening",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "how-much-certainty-can-you-buy-before-the-run",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "author/testing-and-hardening",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "which-layer-catches-this-failure",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "author/testing-and-hardening",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "evaluate-the-delivered-artifact",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "author/testing-and-hardening",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "apply-the-cheapest-first-rule",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "contribute/documentation-pipeline",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "contribute/execution-thread",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "contribute/runtime-architecture",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "contribute/state-machine",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/connector-build-test",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/connector-build-test/hank.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/connector-build-test",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "what-a-successful-run-leaves-behind",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/connector-build-test",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "what-a-successful-run-leaves-behind",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/docs-maintenance",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/docs-maintenance/README.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/docs-maintenance",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "follow-the-docs-forge-pipeline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/docs-maintenance/hank/hank-polish.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/docs-maintenance",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "follow-the-docs-forge-pipeline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/docs-maintenance/runner/accept-pipeline.sh",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/docs-maintenance",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "follow-the-docs-forge-pipeline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/docs-maintenance/runner/compile-polish-stage.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/docs-maintenance",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "follow-the-docs-forge-pipeline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/docs-maintenance/start_here.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/docs-maintenance",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "follow-the-docs-forge-pipeline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/index",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "which-example-shows-what-you-need",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/index",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-a-checked-example-yourself",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/docs-maintenance/README.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/index",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "which-example-shows-what-you-need",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/index",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-a-checked-example-yourself",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "examples/index",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "quote-template-unification-1",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/index",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "run-a-checked-example-yourself",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/capture.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/minimal-single-provider",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "how-the-example-captures-were-recorded",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/plan-review-update",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/plan-review-update",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "run-from-the-fixture-directory",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/quote-template-unification",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-the-hank-with-task-only-inputs",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/quote-template-unification",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "what-this-hank-turns-eight-quote-inputs-into",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/quote-template-unification",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-the-hank-with-task-only-inputs",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/quote-template-unification",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "check-the-records-before-trusting-the-brief",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/quote-template-unification",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "extend-the-example-without-losing-its-checks",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "examples/quote-template-unification",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "run-the-hank-with-task-only-inputs",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "faq",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "faq",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "lock",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "help",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "help",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "lock",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "index",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "index",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "follow-one-workflow-from-quotes-to-awards",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "index",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "follow-one-workflow-from-quotes-to-awards",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "lock",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/client-and-exported-types",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/client-and-exported-types",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/deployment-model",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/deployment-model",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/event-journal",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/event-journal",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "generated:events",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/protocol",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/protocol",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "generated:events",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/websocket-quickstart",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/websocket-quickstart",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/websocket-quickstart/monitor.ts",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/websocket-quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/websocket-quickstart/refusal-probe.ts",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/websocket-quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "integrate/websocket-quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/authentication-and-models",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/authentication-and-models",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/deployment",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/deployment",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/deployment",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "choose-the-image-that-matches-your-job",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/observability",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/observability",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/observe-and-debug",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/observe-and-debug",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/resume-rollback-and-retry",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/resume-rollback-and-retry",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/runbook",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/runbook",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/troubleshooting",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "operate/troubleshooting",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/aws-bedrock",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/environment-variables",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "generated:errors",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/errors-and-exit-codes",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/errors-and-exit-codes",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "generated:events",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/events",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/execution-directory",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/execution-directory",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/llm-proxy",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/models-and-harnesses",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "generated:models",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/models-and-harnesses",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "pi-catalog",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/models-and-harnesses",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/state-file",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "source-server",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "reference/telemetry",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "init-fixture",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/first-run",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "source/learning/examples/clausetta/eval-suite/src/tests/index.ts",
+          "source/learning/examples/plan-gen-v2-general/codons/codon-1-fetch/rigs/linear-pull/index.ts",
+          "source/server/index.ts",
+          "source/server/telemetry/index.ts",
+          "source/shims/codex/common/src/index.ts",
+          "source/shims/codex/src/index.ts",
+          "source/shims/gemini/common/src/index.ts",
+          "source/shims/gemini/src/index.ts",
+          "source/shims/opencode/common/src/index.ts",
+          "source/shims/opencode/src/index.ts",
+          "source/shims/pi/common/src/index.ts",
+          "source/shims/pi/src/index.ts",
+          "source/tests/index.ts"
+        ],
+        "kind": "dependency",
+        "label": "source:index.ts",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/first-run",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "review",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/is-it-right-for-you",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "init-fixture",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "get-the-example-onto-your-machine",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/expected/fail-no-key.txt",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "break-it-on-purpose",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/expected/final-events.txt",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "run-it-and-inspect-the-result",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/expected/validate-output.txt",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "check-the-run-before-spending",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "get-the-example-onto-your-machine",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "lockdiff",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/upgrading",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "why-corpus",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/why-hankweave",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "fixtures/chapters/ch1/expected/MANIFEST.md",
+          "fixtures/chapters/ch2/expected/MANIFEST.md",
+          "fixtures/chapters/ch3/expected/MANIFEST.md",
+          "fixtures/chapters/ch4/expected/MANIFEST.md",
+          "fixtures/chapters/ch5/expected/MANIFEST.md"
+        ],
+        "kind": "dependency",
+        "label": "fixtures:chapters",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "tutorial/0-tour",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "start-chapter-1-with-a-clean-fixture",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "see-the-destination-before-the-mechanism",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "protect-the-data-boundary",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "start-chapter-1-with-a-clean-fixture",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "start-chapter-1-with-a-clean-fixture",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "fixtures/chapters/ch1/expected/MANIFEST.md",
+          "fixtures/chapters/ch2/expected/MANIFEST.md",
+          "fixtures/chapters/ch3/expected/MANIFEST.md",
+          "fixtures/chapters/ch4/expected/MANIFEST.md",
+          "fixtures/chapters/ch5/expected/MANIFEST.md"
+        ],
+        "kind": "dependency",
+        "label": "fixtures:chapters",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/1-baseline",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/1-baseline",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/1-baseline",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "before-we-start",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/1-baseline",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "roll-back-and-run-it-again",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 4,
+        "page": "tutorial/1-baseline",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "before-we-start",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/1-baseline",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "check-it-did-it-work",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/1-baseline",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "roll-back-and-run-it-again",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/1-baseline",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "before-we-start",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "fixtures/chapters/ch1/expected/MANIFEST.md",
+          "fixtures/chapters/ch2/expected/MANIFEST.md",
+          "fixtures/chapters/ch3/expected/MANIFEST.md",
+          "fixtures/chapters/ch4/expected/MANIFEST.md",
+          "fixtures/chapters/ch5/expected/MANIFEST.md"
+        ],
+        "kind": "dependency",
+        "label": "fixtures:chapters",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/2-determinism",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/2-determinism",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/2-determinism",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "start-from-the-sealed-aster-baseline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/2-determinism",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "constrain-variance-without-claiming-certainty",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/2-determinism",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "stop-before-judgment-enters-the-hank",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 3,
+        "page": "tutorial/2-determinism",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "start-from-the-sealed-aster-baseline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 4,
+        "page": "tutorial/2-determinism",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "constrain-variance-without-claiming-certainty",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/2-determinism",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "check-the-captured-outputs",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/2-determinism",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "start-from-the-sealed-aster-baseline",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "fixtures/chapters/ch1/expected/MANIFEST.md",
+          "fixtures/chapters/ch2/expected/MANIFEST.md",
+          "fixtures/chapters/ch3/expected/MANIFEST.md",
+          "fixtures/chapters/ch4/expected/MANIFEST.md",
+          "fixtures/chapters/ch5/expected/MANIFEST.md"
+        ],
+        "kind": "dependency",
+        "label": "fixtures:chapters",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "where-we-left-off-and-what-were-adding",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "did-we-get-it-right--the-check-it",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "did-we-get-it-right--the-check-it",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "validate-run-and-compare",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "validate-run-and-compare",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "fixtures/chapters/ch1/expected/MANIFEST.md",
+          "fixtures/chapters/ch2/expected/MANIFEST.md",
+          "fixtures/chapters/ch3/expected/MANIFEST.md",
+          "fixtures/chapters/ch4/expected/MANIFEST.md",
+          "fixtures/chapters/ch5/expected/MANIFEST.md"
+        ],
+        "kind": "dependency",
+        "label": "fixtures:chapters",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/4-observe-and-budget",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/4-observe-and-budget",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/4-observe-and-budget",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "what-changes-after-chapter-3",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/4-observe-and-budget",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "how-do-we-check-ch4s-output",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/4-observe-and-budget",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "what-changes-after-chapter-3",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "fixtures/chapters/ch1/expected/MANIFEST.md",
+          "fixtures/chapters/ch2/expected/MANIFEST.md",
+          "fixtures/chapters/ch3/expected/MANIFEST.md",
+          "fixtures/chapters/ch4/expected/MANIFEST.md",
+          "fixtures/chapters/ch5/expected/MANIFEST.md"
+        ],
+        "kind": "dependency",
+        "label": "fixtures:chapters",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "complete-the-hank-then-operate-it",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "account-for-all-eight-suppliers",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "complete-the-hank-then-operate-it",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "trace-one-dollar-figure-to-its-source",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "account-for-all-eight-suppliers",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/5-break-resume-inspect",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [
+          "fixtures/chapters/ch1/expected/MANIFEST.md",
+          "fixtures/chapters/ch2/expected/MANIFEST.md",
+          "fixtures/chapters/ch3/expected/MANIFEST.md",
+          "fixtures/chapters/ch4/expected/MANIFEST.md",
+          "fixtures/chapters/ch5/expected/MANIFEST.md"
+        ],
+        "kind": "dependency",
+        "label": "fixtures:chapters",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "ambiguous"
+      },
+      {
+        "candidates": [],
+        "kind": "dependency",
+        "label": "forge-record",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No unique published row for declared label",
+        "source_anchor": null,
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "chapter-captures",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "chapter-captures",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "the-anchor-run",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/ambiguous-ocr-part-number.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/award-brief-unsupported-number.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/bad-source-sha256.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/broken-source-ref.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/datalab-missing-block-id.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/duplicate-source-line.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/expired-quote.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/freight-exclusion-omitted.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/missing-currency.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/no-bid-as-zero.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/per-pack-as-per-each.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/quote-revision-a.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/reducto-citation-page-out-of-range.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/reducto-result-type-url.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/stated-total-mismatch.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/unknown-part-alias.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/unknown-uom-conversion.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/unlabeled-synthetic-document.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "fixtures/failures/unsupported-substitution.json",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/fixtures",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "corpus-files",
+        "status": "unresolved"
+      }
+    ]
+  },
+  "file": "hankweave-source-0.11.0.parquet",
+  "fixture_manifest": "/fixtures/0.11.0/manifest.json",
+  "format": 3,
+  "graph_contract": {
+    "deps": {
+      "fields": [
+        "label",
+        "target_id",
+        "status",
+        "candidates"
+      ],
+      "statuses": [
+        "resolved",
+        "ambiguous",
+        "unresolved"
+      ],
+      "target_id": "A real public row ID only when resolved; declared labels are retained verbatim"
+    },
+    "fixture_manifest_id": "Real scope-manifest row ID, or null; manifests identify themselves",
+    "fixture_role": [
+      "manifest",
+      "evidence"
+    ],
+    "links_out": {
+      "kinds": [
+        "link",
+        "source-citation",
+        "source-import",
+        "fixture-manifest",
+        "fixture-member"
+      ],
+      "line_end": "Inclusive one-based target source line",
+      "line_start": "Inclusive one-based target source line",
+      "source_anchor": "Rendered section anchor on the citing page; null when unavailable"
+    }
+  },
+  "links": 1262,
+  "publication_inputs": {
+    "fixture_digest": "b9e74d5499d3a19d9d1afa003cb296b1e99de076be42713c2487869921fe3eea",
+    "generated_digest": "40362c12b2ff276a691d9ab4bd2f314afab3ffa8273ea572c8ef7e57e8a47ab1",
+    "lock_digest": "f6f59b3c6a22a37a901c1664358f2aeb47e02093c9b840ab0ee38e88b01eabd8",
+    "publication_controls_digest": "95632e55ea531c17671d854e267675f3a5f6be03ea96aac5688528c7b0fc3cb7",
+    "source_digest": "7805c6111a154c50f919f6d9fe588dacc387505bbc77a4f727b1fd297e72a26f"
+  },
+  "queries": {
+    "docs": "SELECT * FROM read_parquet('hankweave-docs-0.11.0.parquet') WHERE ptype NOT IN ('source','fixture')",
+    "fixture": "SELECT * FROM read_parquet('hankweave-docs-0.11.0.parquet') WHERE ptype='fixture'",
+    "source": "SELECT * FROM read_parquet('hankweave-source-0.11.0.parquet') WHERE ptype='source'"
+  },
+  "role": "source",
+  "rows": 722,
+  "rows_by_ptype": {
+    "source": 722
+  },
+  "sections": 16474,
+  "set_digest": "adf46470f90ac12e89d2576665d8d0b56c590758df99f7104ba04b3e28df0e04",
+  "set_digest_format": "astra.editorial-projection.v1",
+  "sha256": "d3d1be61b920af6915aafc5bb37a36b701022a463eebad7127c9870dc6e9d349",
+  "source_commit": "8216cf3fb2984223cd7175c6d8ae7ead0dec12c0",
+  "source_symbols_contract": {
+    "compatibility": "Additive format-3 field; absent in older files. Original sections and citation bounds are unchanged",
+    "default": [],
+    "empty": "Non-source rows, unsupported extensions, syntax-invalid files, or no selected named constructs",
+    "extensions": [
+      ".ts",
+      ".tsx",
+      ".mts",
+      ".cts",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".cjs"
+    ],
+    "kinds": [
+      "function",
+      "method",
+      "getter",
+      "setter",
+      "constructor",
+      "class",
+      "interface",
+      "type",
+      "enum"
+    ],
+    "line_end": "Inclusive one-based last construct line, not a fixed declaration window",
+    "line_start": "Inclusive one-based first construct line, including decorators/modifiers but not leading comments",
+    "name": "Local declared name; nested symbols remain separate entries in source traversal order",
+    "optional": true,
+    "parser": "TypeScript 5.9.3 createSourceFile; syntax only, one Bun batch",
+    "scope": "Named declarations and class members; not ordinary object properties or anonymous callbacks",
+    "signature": "Source header with whitespace collapsed, capped at 400 characters including any truncation marker"
+  },
+  "status": "accepted",
+  "version": "0.11.0"
+}
