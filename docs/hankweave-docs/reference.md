@@ -4,19 +4,19 @@ Read this when the quick workflow in `SKILL.md` does not cover pack selection, q
 
 ## Select and inspect the data
 
-Base selection order is an explicit `--parquet` path, `HANKWEAVE_DOCS_PARQUET`, then the package's bundled `data/hankweave-docs-0.10.0.parquet`. In the development checkout only, the publisher can supply `out/0.10.0/hankweave-docs-0.10.0.parquet` when bundled data is absent. A missing or unreadable selected base is an error; there is no fallback to another checkout or remembered cache. An explicitly selected legacy single parquet containing docs, fixtures and source remains supported.
+Base selection order is an explicit `--parquet` path, `HANKWEAVE_DOCS_PARQUET`, then the package's bundled `data/hankweave-docs-0.11.0.parquet`. In the development checkout only, the publisher can supply `out/0.11.0/hankweave-docs-0.11.0.parquet` when bundled data is absent. A missing or unreadable selected base is an error; there is no fallback to another checkout or remembered cache. An explicitly selected legacy single parquet containing docs, fixtures and source remains supported.
 
-The core data file is about **1.92 MB**, with 623 docs and fixture rows (`ptype != 'source'`). The optional `hankweave-source-0.10.0.parquet` is about **10.51 MB**, with 693 source rows. Both parts preserve the original 1,316 rows and complete bodies; source references remain available when source bodies are absent. Each file has an adjacent `.manifest.json`.
+The core data file is about **2.07 MB**, with 662 docs and fixture rows (`ptype != 'source'`). The optional `hankweave-source-0.11.0.parquet` is about **10.59 MB**, with 722 source rows. Both parts preserve the original 1,384 rows and complete bodies; source references remain available when source bodies are absent. Each file has an adjacent `.manifest.json`.
 
 Attach source with `--source-parquet PATH` or `HANKWEAVE_SOURCE_PARQUET`, in that order. Otherwise, when the docs manifest declares `source_pack`, the helper looks for its filename beside the selected docs parquet and in the package's sibling `../source/` directory. In the whole-repository layout these are `docs/hankweave-docs/data/` and `docs/source/`. An installed core normally has neither source copy. The helper never downloads source automatically.
 
 ```bash
 bash scripts/hankweave-docs.sh info
 bash scripts/hankweave-docs.sh info --parquet /absolute/path/to/docs.parquet --json
-bash scripts/hankweave-docs.sh info --source-parquet /absolute/path/to/hankweave-source-0.10.0.parquet --json
+bash scripts/hankweave-docs.sh info --source-parquet /absolute/path/to/hankweave-source-0.11.0.parquet --json
 bash scripts/build-index.sh
-bash scripts/build-index.sh /absolute/path/to/hankweave-docs-0.10.0.parquet
-bash scripts/hankweave-docs.sh toc --parquet /absolute/path/to/hankweave-docs-0.10.0.parquet
+bash scripts/build-index.sh /absolute/path/to/hankweave-docs-0.11.0.parquet
+bash scripts/hankweave-docs.sh toc --parquet /absolute/path/to/hankweave-docs-0.11.0.parquet
 ```
 
 A one-command selection does not select either part for later commands. Keep passing the selection options, or export `HANKWEAVE_DOCS_PARQUET` and, when needed, `HANKWEAVE_SOURCE_PARQUET` for the session. Prefer verified local copies for repeated lookup.
@@ -70,7 +70,7 @@ Use the hosted documentation API when local DuckDB/FTS setup is unavailable. Loc
 
 The hosted corpus contains authored/generated documentation pages. It does **not** contain runtime source or fixture files and has no equivalent of `term`, `neighbors` evidence traversal, source-line reads or arbitrary SQL. Its `prev`/`next` sections and `related`/`next` pages are reading navigation, not evidence edges. You may follow a source or fixture URL separately, but do not claim that the API searched or verified those files.
 
-Once per session, inspect `/v1/versions`, then `/v1/healthz?version=0.10.0` for the chosen release. Health reports the loaded version, page/section counts, embedding model and `source_sha256`: the parquet used to build the hosted docs bundle. Record that provenance when relevant. The health response does not report or establish release acceptance.
+Once per session, inspect `/v1/versions`, then `/v1/healthz?version=0.11.0` for the chosen release. Health reports the loaded version, page/section counts, embedding model and `source_sha256`: the parquet used to build the hosted docs bundle. Record that provenance when relevant. The health response does not report or establish release acceptance.
 
 Pass `version` explicitly on data requests; do not rely on the moving `latest` default. Honor the version in the user's runtime or URL. If it is unavailable, report that limitation rather than substitute another release. JSON responses identify their version; check it. A matching version does not prove byte identity with a selected local pack, which may contain later corrections. If their parquet hashes differ, identify the hosted snapshot rather than claiming it is the local one. Do not silently replace an explicitly selected or corrupt local corpus with hosted results.
 
@@ -88,7 +88,7 @@ This Bash example identifies a Claude UI client; change `AGENT` and `HARNESS` to
 
 ```bash
 BASE=https://hankweave-docs-search.operations-aa6.workers.dev
-VERSION=0.10.0
+VERSION=0.11.0
 AGENT=claude
 HARNESS=claude-ui
 PURPOSE='look up run recovery'
@@ -233,7 +233,7 @@ bash scripts/hankweave-docs.sh info --json
 duckdb :memory: -bail -c "SELECT id, url, word_count,
   length(body_md) AS chars, count(*) OVER () AS matching_files,
   substr(body_md, greatest(1, strpos(lower(body_md), lower('checkpoint')) - 80), 320) AS excerpt
-FROM read_parquet('/absolute/path/to/hankweave-source-0.10.0.parquet')
+FROM read_parquet('/absolute/path/to/hankweave-source-0.11.0.parquet')
 WHERE ptype = 'source' AND contains(lower(body_md), lower('checkpoint'))
 ORDER BY id LIMIT 12 OFFSET 0;"
 ```

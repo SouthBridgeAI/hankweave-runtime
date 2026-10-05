@@ -92,13 +92,13 @@ Copy the actual line range from the result; `L46-L55` is only an example. With s
 
 ## Attach source only when needed
 
-The core skill bundles `data/hankweave-docs-0.10.0.parquet` and its adjacent manifest: about **1.92 MB**, with 623 documentation and fixture rows. The optional `hankweave-source-0.10.0.parquet` is about **10.51 MB**, with 693 source rows. Both together preserve the 1,316-row corpus; the small core alone does not contain source bodies.
+The core skill bundles `data/hankweave-docs-0.11.0.parquet` and its adjacent manifest: about **2.07 MB**, with 662 documentation and fixture rows. The optional `hankweave-source-0.11.0.parquet` is about **10.59 MB**, with 722 source rows. Both together preserve the 1,384-row corpus; the small core alone does not contain source bodies.
 
 In the repository layout, the source pack lives in `docs/source/`, beside `docs/hankweave-docs/`. The helper automatically attaches a matching local pack there, or beside the selected docs parquet, when the docs manifest declares it. An installed core skill normally has neither location populated. It never downloads source automatically. To attach a local copy elsewhere:
 
 ```bash
-bash scripts/hankweave-docs.sh info --source-parquet /absolute/path/to/hankweave-source-0.10.0.parquet
-bash scripts/hankweave-docs.sh read '<source ID>' L46-L55 --scope source --source-parquet /absolute/path/to/hankweave-source-0.10.0.parquet
+bash scripts/hankweave-docs.sh info --source-parquet /absolute/path/to/hankweave-source-0.11.0.parquet
+bash scripts/hankweave-docs.sh read '<source ID>' L46-L55 --scope source --source-parquet /absolute/path/to/hankweave-source-0.11.0.parquet
 ```
 
 Pass `--source-parquet` on each command or export `HANKWEAVE_SOURCE_PARQUET` for the session. A present but mismatched pack is an error, not permission to ignore it. Use `info` to check the selected parts and actual sizes before a full-source investigation.
@@ -136,16 +136,14 @@ See [Setup](#setup) for DuckDB and restricted-network FTS installation. `info` n
 
 | Reference | URL |
 |---|---|
-| Pinned docs root | https://hankweave.southbridge.ai/0.10.0/files/ |
-| First-run page | https://hankweave.southbridge.ai/0.10.0/files/start/first-run/ |
-| Core docs and fixtures | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/bc07b43bae4917fd370e905ea6f51f542db7000f/docs/hankweave-docs/data/hankweave-docs-0.10.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/bc07b43bae4917fd370e905ea6f51f542db7000f/docs/hankweave-docs/data/hankweave-docs-0.10.0.manifest.json) |
-| Optional source pack | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/bc07b43bae4917fd370e905ea6f51f542db7000f/docs/source/hankweave-source-0.10.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/bc07b43bae4917fd370e905ea6f51f542db7000f/docs/source/hankweave-source-0.10.0.manifest.json) |
+| Pinned docs root | https://hankweave.southbridge.ai/0.11.0/files/ |
+| First-run page | https://hankweave.southbridge.ai/0.11.0/files/start/first-run/ |
+| Core docs and fixtures | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/<%DOCS_PIN_COMMIT%>/docs/hankweave-docs/data/hankweave-docs-0.11.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/<%DOCS_PIN_COMMIT%>/docs/hankweave-docs/data/hankweave-docs-0.11.0.manifest.json) |
+| Optional source pack | [Parquet](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/<%DOCS_PIN_COMMIT%>/docs/source/hankweave-source-0.11.0.parquet) · [matching manifest](https://raw.githubusercontent.com/SouthBridgeAI/hankweave-runtime/<%DOCS_PIN_COMMIT%>/docs/source/hankweave-source-0.11.0.manifest.json) |
 
-These links pin two different artifacts: **`bc07b43b…` is the documentation-distribution commit**, containing the parquet files and manifests; **`d0f0a86…` is the runtime v0.10.0 source commit**, recorded as `source_commit` and used by code citations. The docs were added after the runtime release, so the hashes differ intentionally. Download each parquet with its matching manifest. Documentation pages live under `/<version>/files/`; the pinned root resolves to `start/introduction/`. Use each figure's returned asset URL rather than appending `diagrams/` to a page route. A sandbox proxy denial does not establish whether a public URL exists.
+These links pin two different artifacts: **`<%DOCS_PIN_COMMIT_SHORT%>…` is the documentation-distribution commit**, containing the parquet files and manifests; **`8216cf3…` is the runtime v0.11.0 source commit**, recorded as `source_commit` and used by code citations. The docs were added after the runtime release, so the hashes differ intentionally. Download each parquet with its matching manifest. Documentation pages live under `/<version>/files/`; the pinned root resolves to `start/introduction/`. Use each figure's returned asset URL rather than appending `diagrams/` to a page route. A sandbox proxy denial does not establish whether a public URL exists.
 
 ### Install the core skill
-
-For Claude UI and other ZIP-based skill uploaders, download the [v0.10.0 skill ZIP](https://github.com/SouthBridgeAI/hankweave-runtime/releases/download/v0.10.0/hankweave-docs-skill-0.10.0.zip) and upload it as a custom skill. The ZIP contains this core skill and its docs/fixtures; the optional source pack stays separate. Local setup and the hosted fallback are described above.
 
 Install from the repository:
 
