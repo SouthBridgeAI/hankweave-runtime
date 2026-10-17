@@ -119,6 +119,33 @@ describe("Model Validator — Passthrough Providers", () => {
     });
   });
 
+  describe("cursor passthrough routing", () => {
+    test("cursor/composer-2.5-fast forces the cursor harness without a registry lookup", () => {
+      const result = validateModel("cursor/composer-2.5-fast", registry);
+      expect(result.valid).toBe(true);
+      expect(result.modelInfo?.providerId).toBe("cursor");
+      expect(result.modelInfo?.modelId).toBe("composer-2.5-fast");
+      expect(result.modelInfo?.harnessOverride).toBe("cursor");
+      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("cursor");
+      expect(result.matchType).toBe("exact");
+    });
+
+    test("bare cursor/ is not a model", () => {
+      expect(validateModel("cursor/", registry).valid).toBe(false);
+    });
+
+    test("sonnet and pi/... spellings are unaffected", () => {
+      const sonnet = validateModel("sonnet", registry);
+      expect(sonnet.valid).toBe(true);
+      expect(sonnet.modelInfo?.harnessOverride).toBeUndefined();
+      if (sonnet.modelInfo) expect(selectHarness(sonnet.modelInfo)).toBe("claude-agent-sdk");
+
+      const pi = validateModel("pi/anthropic/claude-haiku-4-5", registry);
+      expect(pi.modelInfo?.harnessOverride).toBe("pi");
+      if (pi.modelInfo) expect(selectHarness(pi.modelInfo)).toBe("pi");
+    });
+  });
+
   describe("kimi-k3 routing to OpenRouter via pi shim", () => {
     test("bare kimi-k3 resolves to moonshotai and routes via openrouter at dispatch", () => {
       const result = validateModel("kimi-k3", registry);

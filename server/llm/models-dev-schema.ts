@@ -1,7 +1,7 @@
 import { z } from "zod";
 // Value-only import; provider-ids' ModelInfo import is type-only, so there is
 // no runtime cycle between the two modules.
-import { PI_HARNESS } from "../provider-ids.js";
+import { CURSOR_HARNESS, PI_HARNESS } from "../provider-ids.js";
 
 // Cost schema for model pricing
 export const modelCostSchema = z
@@ -46,11 +46,10 @@ export const modelInfoSchema = z.object({
   modalities: modalitiesSchema,
 
   // Harness routing override: set only by config validation when the user
-  // explicitly spelled "pi/…" — never present in models.dev data. Harness
-  // selection is otherwise late-bound at dispatch (selectHarness in
-  // provider-ids.ts); this field forces the pi harness for models that would
-  // default to the Claude Agent SDK.
-  harnessOverride: z.literal(PI_HARNESS).optional(),
+  // explicitly spelled "pi/…" or "cursor/…" — never present in models.dev
+  // data. Harness selection is otherwise late-bound at dispatch (selectHarness
+  // in provider-ids.ts).
+  harnessOverride: z.enum([PI_HARNESS, CURSOR_HARNESS]).optional(),
 
   // Optional metadata
   knowledge: z.string().optional(), // Knowledge cutoff date (YYYY-MM or YYYY-MM-DD)

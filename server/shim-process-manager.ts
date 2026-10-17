@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { ensureCodexAvailable } from "./codex-runtime-extractor.js";
@@ -10,7 +11,23 @@ import { ExecutionLayout } from "./execution-layout.js";
 import { HANKWEAVE_ENV_UNSET, hankweaveEnvEntries } from "./hankweave-env.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
-import { escapeShellArg, type Logger } from "./utils.js";
+import type { Logger } from "./utils.js";
+
+/** Environment variable holding a full command (split on spaces) for the Cursor shim. */
+export const CURSOR_SHIM_ENV = "HANKWEAVE_CURSOR_SHIM";
+
+/**
+ * Command that launches the Cursor Agent CLI shim: `HANKWEAVE_CURSOR_SHIM` when
+ * set, otherwise `node <repo>/shims/cursor/index.js`. The npm package does not
+ * ship `shims/`, so outside a repository checkout the default path is missing
+ * and the self-test reports it.
+ */
+export function resolveCursorShimCommand(): string[] {
+  const override = process.env[CURSOR_SHIM_ENV]?.trim();
+  if (override) return override.split(/\s+/);
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  return ["node", path.resolve(moduleDir, "../shims/cursor/index.js")];
+}
 
 /**
  * Manages shim subprocess lifecycle, including spawning, monitoring, and cleanup.
@@ -22,6 +39,7 @@ export class ShimProcessManager extends BaseProcessManager {
   private logStream: fs.WriteStream | undefined;
   private stdoutReader: readline.Interface | undefined;
   private killed = false;
+  private sessionEstablished = false;
   private promptBuilder: PromptBuilder;
 
   constructor(
@@ -29,7 +47,7 @@ export class ShimProcessManager extends BaseProcessManager {
     private agentRootPath: string,
     logger: Logger,
     logParser: ClaudeLogParser,
-    private anthropicBaseUrl?: string,
+    private command: string[],
     private globalSystemPrompt?: string | null,
     private defaultShimIdleTimeout?: number,
   ) {
@@ -55,7 +73,6 @@ export class ShimProcessManager extends BaseProcessManager {
    * From the shim's perspective, both are identical: resume a session with a new prompt.
    * The difference is only where the prompt comes from.
    *
-   * @param command - Command to execute (e.g., ["claude"] or ["bun", "run", "shims/gemini/dist/index.mjs"])
    * @param codon - Codon configuration (not Loop - loops must be expanded first)
    * @param sessionToResume - Session ID to resume (if any)
    * @param options - Optional spawn configuration
@@ -64,7 +81,6 @@ export class ShimProcessManager extends BaseProcessManager {
    *                                   instead of codon config, appends to log.
    */
   async spawn(
-    command: string[],
     codon: Codon,
     sessionToResume: string | null,
     options?: {
@@ -119,7 +135,7 @@ export class ShimProcessManager extends BaseProcessManager {
 
     // Combine shim command with shim flags
     // Example: ["bun", "run", "shim.ts"] + ["--model", "gemini...", "-p", "..."]
-    const [bin, ...binArgs] = command;
+    const [bin, ...binArgs] = this.command;
     const finalArgs = [...binArgs, ...args];
 
     // Log the exact command being run
@@ -159,6 +175,9 @@ export class ShimProcessManager extends BaseProcessManager {
           let timestampedLine: string;
           try {
             const parsed = JSON.parse(line);
+            if (parsed.type === "system" && parsed.subtype === "init") {
+              this.sessionEstablished = true;
+            }
             parsed.timestamp = new Date().toISOString();
             timestampedLine = JSON.stringify(parsed);
           } catch {
@@ -214,11 +233,6 @@ export class ShimProcessManager extends BaseProcessManager {
       }
     }
 
-    if (this.anthropicBaseUrl) {
-      env.ANTHROPIC_BASE_URL = this.anthropicBaseUrl;
-      this.logger.log(`Using custom Anthropic base URL: ${this.anthropicBaseUrl}`);
-    }
-
     // Add codon-specific environment variables from config
     // These will override any existing variables with the same name
     if (codon.env) {
@@ -259,7 +273,7 @@ export class ShimProcessManager extends BaseProcessManager {
     // Handle system prompt if provided
     const systemPrompt = this.promptBuilder.buildSystemPrompt(codon);
     if (systemPrompt) {
-      args.push("--append-system-prompt", escapeShellArg(systemPrompt));
+      args.push("--append-system-prompt", systemPrompt);
       this.logger.log(`Added system prompt to shim (${systemPrompt.length} chars)`);
       this.logger.log(`System prompt content:\n${systemPrompt}`);
     }
@@ -286,11 +300,19 @@ export class ShimProcessManager extends BaseProcessManager {
   private setupProcessHandlers(): void {
     if (!this.process) return;
 
-    this.process.on("exit", (code, signal) => {
+    // "close" (not "exit") so stdout is fully drained, and the log stream is
+    // flushed before emitExit force-parses the log for the result message.
+    this.process.on("close", (code, signal) => {
       this.logger.log(`Shim process exited with code: ${code}, signal: ${signal}`);
 
+      const logStream = this.logStream;
+      this.logStream = undefined;
       this.cleanup();
-      this.emitExit(code || 0);
+      const flushed =
+        logStream && !logStream.destroyed
+          ? new Promise<void>((resolve) => logStream.end(() => resolve()))
+          : Promise.resolve();
+      void flushed.then(() => this.emitExit(code || 0));
     });
 
     this.process.on("error", (error) => {
@@ -409,6 +431,14 @@ export class ShimProcessManager extends BaseProcessManager {
   }
 
   /**
+   * Whether the shim has emitted its system init line. Read synchronously by
+   * CodonRunner when an error arrives before the log parser catches up.
+   */
+  getSessionEstablished(): boolean {
+    return this.sessionEstablished;
+  }
+
+  /**
    * Check if process is running.
    */
   isRunning(): boolean {
@@ -438,15 +468,14 @@ export class ShimProcessManager extends BaseProcessManager {
    * Run the shim's self-test to verify environment setup.
    * Executes the shim with --self-test flag and returns the results.
    *
-   * @param command - Command to execute shim (e.g., ["bun", "shims/gemini/index.js"])
    * @param providerId - Optional provider ID (e.g., "openai", "google") to set up provider-specific requirements
    * @returns Promise resolving to self-test results
    * @throws Error if self-test execution fails or returns invalid JSON
    */
-  async runSelfTest(command: string[], providerId?: string): Promise<ShimSelfTestResult> {
+  async runSelfTest(providerId?: string): Promise<ShimSelfTestResult> {
     this.logger.log("Running shim self-test...");
 
-    const [bin, ...binArgs] = command;
+    const [bin, ...binArgs] = this.command;
     const args = [...binArgs, "--self-test"];
 
     const fullCommand = `${bin} ${args.join(" ")}`;

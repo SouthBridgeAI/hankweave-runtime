@@ -17,11 +17,14 @@ import { PiSdkManager } from "./pi-sdk-manager.js";
 import {
   AMAZON_BEDROCK_PROVIDER_ID,
   CLAUDE_AGENT_SDK_HARNESS,
+  CURSOR_HARNESS,
+  PI_HARNESS,
   selectHarness,
   toPiTarget,
 } from "./provider-ids.js";
 import { ReplayProcessManager } from "./replay-process-manager.js";
 import type { FileNode } from "./schemas/event-schemas.js";
+import { resolveCursorShimCommand, ShimProcessManager } from "./shim-process-manager.js";
 import type { StateManager } from "./state-manager.js";
 import { TypedEventEmitter } from "./typed-event-emitter.js";
 import type { CodonId, RunId, SessionId } from "./types/branded-types.js";
@@ -331,7 +334,11 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   private readonly fileTracker: CodonFileTracker;
   // CostTracker: "how much did this cost?" — computes cost from raw API usage via LLM registry
   private readonly costTracker: CostTracker;
-  private processManager: ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager;
+  private processManager:
+    | ClaudeAgentSDKManager
+    | PiSdkManager
+    | ShimProcessManager
+    | ReplayProcessManager;
   private readonly logPath: string;
   private readonly budgetExceededListener: (data: {
     codonId: string;
@@ -460,6 +467,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    *
    * CodonRunner supports:
    * - Anthropic models via ClaudeAgentSDKManager (in-process Claude SDK)
+   * - "cursor/…" models via ShimProcessManager (Cursor Agent CLI shim)
    * - Everything else via PiSdkManager (in-process Pi coding agent)
    *
    * selectHarness covers the whole model space (pi is the universal fallback),
@@ -502,44 +510,58 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     try {
       let result: ShimSelfTestResult;
 
-      if (harness === CLAUDE_AGENT_SDK_HARNESS) {
-        // Use Claude Agent SDK Manager for Anthropic models
-        logger.log(
-          `Testing Claude Agent SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
-          "info",
-        );
-
-        // For self-tests, use executionPath as agentRootPath (temporary directory, no nested structure)
-        const manager = new ClaudeAgentSDKManager(
-          executionPath,
-          executionPath, // Self-tests don't need the full nested structure
-          logger,
-          tempLogParser,
-          anthropicBaseUrl,
-          undefined,
-          undefined,
-          modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
-        );
-
-        result = await manager.runSelfTest();
-      } else {
-        // Use the in-process Pi SDK manager for non-Anthropic models
-        logger.log(
-          `Testing Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
-          "info",
-        );
-
-        // For self-tests, use executionPath as agentRootPath (temporary directory, no nested structure)
-        const manager = new PiSdkManager(
-          executionPath,
-          executionPath, // Self-tests don't need the full nested structure
-          logger,
-          tempLogParser,
-        );
-
-        // Pass the dispatch-derived pi routing string — the stored modelId no
-        // longer carries a provider prefix.
-        result = await manager.runSelfTest(toPiTarget(modelInfo.providerId, modelInfo.modelId));
+      // For self-tests, executionPath doubles as agentRootPath (temporary
+      // directory, no nested structure).
+      switch (harness) {
+        case CLAUDE_AGENT_SDK_HARNESS: {
+          logger.log(
+            `Testing Claude Agent SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+            "info",
+          );
+          const manager = new ClaudeAgentSDKManager(
+            executionPath,
+            executionPath,
+            logger,
+            tempLogParser,
+            anthropicBaseUrl,
+            undefined,
+            undefined,
+            modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
+          );
+          result = await manager.runSelfTest();
+          break;
+        }
+        case CURSOR_HARNESS: {
+          const command = resolveCursorShimCommand();
+          logger.log(
+            `Testing Cursor Agent shim for model: ${modelInfo.name} (${command.join(" ")})`,
+            "info",
+          );
+          const manager = new ShimProcessManager(
+            executionPath,
+            executionPath,
+            logger,
+            tempLogParser,
+            command,
+          );
+          result = await manager.runSelfTest(modelInfo.providerId);
+          break;
+        }
+        case PI_HARNESS: {
+          logger.log(
+            `Testing Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+            "info",
+          );
+          const manager = new PiSdkManager(executionPath, executionPath, logger, tempLogParser);
+          // Pass the dispatch-derived pi routing string — the stored modelId no
+          // longer carries a provider prefix.
+          result = await manager.runSelfTest(toPiTarget(modelInfo.providerId, modelInfo.modelId));
+          break;
+        }
+        default: {
+          const unhandled: never = harness;
+          throw new Error(`Unknown harness: ${String(unhandled)}`);
+        }
       }
 
       // Log results
@@ -726,8 +748,16 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   /**
    * Create process manager (SDK, Shim, or Replay) based on model type with event forwarding
    */
-  private createProcessManager(): ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager {
-    let processManager: ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager;
+  private createProcessManager():
+    | ClaudeAgentSDKManager
+    | PiSdkManager
+    | ShimProcessManager
+    | ReplayProcessManager {
+    let processManager:
+      | ClaudeAgentSDKManager
+      | PiSdkManager
+      | ShimProcessManager
+      | ReplayProcessManager;
 
     // Replay mode: use ReplayProcessManager instead of real process managers
     if (this.config.replayConfig) {
@@ -747,41 +777,65 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       const modelInfo = this.config.codon.model;
       const harness = selectHarness(modelInfo);
 
-      if (harness === CLAUDE_AGENT_SDK_HARNESS) {
-        // Use Claude Agent SDK for Anthropic models (Bedrock-hosted included)
-        this.config.logger.log(
-          `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
-          "info",
-        );
-
-        processManager = new ClaudeAgentSDKManager(
-          this.config.executionPath,
-          this.config.agentRootPath,
-          this.config.logger,
-          this.logParser,
-          this.config.anthropicBaseUrl,
-          this.config.globalSystemPrompt ?? null,
-          this.config.shimIdleTimeout,
-          modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
-        );
-      } else {
-        // Everything non-Anthropic (and explicit pi overrides) runs on the
-        // IN-PROCESS Pi SDK — like the Claude SDK, not as a child shim. The
-        // pi routing string is derived inside PiSdkManager from the real
-        // (providerId, modelId) at launch.
-        this.config.logger.log(
-          `Using in-process Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
-          "info",
-        );
-
-        processManager = new PiSdkManager(
-          this.config.executionPath,
-          this.config.agentRootPath,
-          this.config.logger,
-          this.logParser,
-          this.config.globalSystemPrompt ?? null,
-          this.config.shimIdleTimeout,
-        );
+      switch (harness) {
+        case CLAUDE_AGENT_SDK_HARNESS:
+          // Use Claude Agent SDK for Anthropic models (Bedrock-hosted included)
+          this.config.logger.log(
+            `Using Claude Agent SDK for Anthropic model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+            "info",
+          );
+          processManager = new ClaudeAgentSDKManager(
+            this.config.executionPath,
+            this.config.agentRootPath,
+            this.config.logger,
+            this.logParser,
+            this.config.anthropicBaseUrl,
+            this.config.globalSystemPrompt ?? null,
+            this.config.shimIdleTimeout,
+            modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
+          );
+          break;
+        case CURSOR_HARNESS: {
+          // "cursor/<model>" runs the Cursor Agent CLI through its
+          // Claude-compatible JSONL shim, as a child process.
+          const command = resolveCursorShimCommand();
+          this.config.logger.log(
+            `Using Cursor Agent shim for model: ${modelInfo.name} (${command.join(" ")})`,
+            "info",
+          );
+          processManager = new ShimProcessManager(
+            this.config.executionPath,
+            this.config.agentRootPath,
+            this.config.logger,
+            this.logParser,
+            command,
+            this.config.globalSystemPrompt ?? null,
+            this.config.shimIdleTimeout,
+          );
+          break;
+        }
+        case PI_HARNESS:
+          // Everything else (and explicit pi overrides) runs on the
+          // IN-PROCESS Pi SDK — like the Claude SDK, not as a child shim. The
+          // pi routing string is derived inside PiSdkManager from the real
+          // (providerId, modelId) at launch.
+          this.config.logger.log(
+            `Using in-process Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
+            "info",
+          );
+          processManager = new PiSdkManager(
+            this.config.executionPath,
+            this.config.agentRootPath,
+            this.config.logger,
+            this.logParser,
+            this.config.globalSystemPrompt ?? null,
+            this.config.shimIdleTimeout,
+          );
+          break;
+        default: {
+          const unhandled: never = harness;
+          throw new Error(`Unknown harness: ${String(unhandled)}`);
+        }
       }
     }
 
@@ -791,13 +845,15 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
       this.handleProcessExit(code, isContextExceeded);
     });
 
-    // The in-process SDK managers (Claude Agent SDK, Pi SDK) surface *API/SDK*
-    // crashes through their `error` event (a rejected query/run promise).
-    // ReplayProcessManager emits `error` solely for LOCAL failures — those
-    // carry no API status and must stay fatal, never get classified as a
-    // retriable API crash.
+    // The agent managers (Claude Agent SDK, Pi SDK, Cursor shim) surface
+    // agent crashes through their `error` event (a rejected query/run promise,
+    // or a shim spawn failure). ReplayProcessManager emits `error` solely for
+    // LOCAL failures — those carry no API status and must stay fatal, never get
+    // classified as a retriable API crash.
     const isInProcessSdkManager =
-      processManager instanceof ClaudeAgentSDKManager || processManager instanceof PiSdkManager;
+      processManager instanceof ClaudeAgentSDKManager ||
+      processManager instanceof PiSdkManager ||
+      processManager instanceof ShimProcessManager;
 
     processManager.on("error", (error: Error) => {
       // Handle budget exceeded: process was killed by us due to budget limit.
@@ -1140,8 +1196,8 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
    * observed). Gates the retriability of unrecognized crashes: dying before
    * establishment is a local setup failure.
    *
-   * ORs the log-parser-fed flag with the SDK managers' synchronous
-   * `getSessionEstablished()`: both SDKs emit "error" without force-parsing
+   * ORs the log-parser-fed flag with the agent managers' synchronous
+   * `getSessionEstablished()`: they emit "error" without force-parsing
    * the log, so the parser-fed flag can lag a genuine establishment and
    * misclassify an established-session crash as a permanent pre-session
    * failure, skipping onFailure: "retry".
@@ -1150,7 +1206,8 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     return (
       this.systemMessageReceived ||
       ((this.processManager instanceof ClaudeAgentSDKManager ||
-        this.processManager instanceof PiSdkManager) &&
+        this.processManager instanceof PiSdkManager ||
+        this.processManager instanceof ShimProcessManager) &&
         this.processManager.getSessionEstablished())
     );
   }

@@ -1,15 +1,17 @@
 import type { ModelInfo } from "./llm/models-dev-schema.js";
 
 /**
- * Canonical ids of the two in-process runtimes a codon can execute on. Single
- * source of truth — every schema, dispatch branch, and comparison uses these
- * constants, never the string literals.
+ * Canonical ids of the runtimes a codon can execute on: two in-process SDKs and
+ * the Cursor Agent CLI shim (a child process). Single source of truth — every
+ * schema, dispatch branch, and comparison uses these constants, never the
+ * string literals.
  */
 export const CLAUDE_AGENT_SDK_HARNESS = "claude-agent-sdk" as const;
 export const PI_HARNESS = "pi" as const;
+export const CURSOR_HARNESS = "cursor" as const;
 
-/** The in-process runtime a codon executes on. */
-export type Harness = typeof CLAUDE_AGENT_SDK_HARNESS | typeof PI_HARNESS;
+/** The runtime a codon executes on. */
+export type Harness = typeof CLAUDE_AGENT_SDK_HARNESS | typeof PI_HARNESS | typeof CURSOR_HARNESS;
 
 // The pi harness name doubles as the explicit config-spelling prefix
 // ("pi/<provider>/<model>") that validateModel step 0 detects.
@@ -23,6 +25,7 @@ export const SUPPORTED_CODON_PROVIDER_IDS = [
   "anthropic",
   AMAZON_BEDROCK_PROVIDER_ID,
   PI_HARNESS,
+  CURSOR_HARNESS,
 ] as const;
 
 const passthroughShimProviderSet = new Set<string>(PASSTHROUGH_SHIM_PROVIDER_IDS);
@@ -60,16 +63,26 @@ export function runsOnClaudeAgentSdk(providerId: string, modelId: string): boole
 /**
  * The single late-bound harness-selection rule, computed at dispatch time from
  * the model's REAL identity. `harnessOverride` is set only when the user
- * explicitly spelled "pi/…" — it forces the pi harness for models that would
- * otherwise run on the Claude Agent SDK.
+ * explicitly spelled "pi/…" (forces pi for models that would otherwise run on
+ * the Claude Agent SDK) or "cursor/…" (runs the Cursor Agent CLI shim).
  */
 export function selectHarness(
   model: Pick<ModelInfo, "providerId" | "modelId" | "harnessOverride">,
 ): Harness {
-  if (model.harnessOverride === PI_HARNESS) return PI_HARNESS;
-  return runsOnClaudeAgentSdk(model.providerId, model.modelId)
-    ? CLAUDE_AGENT_SDK_HARNESS
-    : PI_HARNESS;
+  switch (model.harnessOverride) {
+    case PI_HARNESS:
+      return PI_HARNESS;
+    case CURSOR_HARNESS:
+      return CURSOR_HARNESS;
+    case undefined:
+      return runsOnClaudeAgentSdk(model.providerId, model.modelId)
+        ? CLAUDE_AGENT_SDK_HARNESS
+        : PI_HARNESS;
+    default: {
+      const unhandled: never = model.harnessOverride;
+      throw new Error(`Unknown harness override: ${String(unhandled)}`);
+    }
+  }
 }
 
 /**

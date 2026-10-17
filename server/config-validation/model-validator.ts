@@ -2,6 +2,7 @@ import { CodonRunner } from "../codon-runner.js";
 import type { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import type { ModelInfo } from "../llm/models-dev-schema.js";
 import {
+  CURSOR_HARNESS,
   getSupportedCodonProviderIds,
   inferPiProviderForBareId,
   isPassthroughShimProvider,
@@ -121,6 +122,10 @@ export function normalizeLegacyProviderModelInfo(
  * "pi/" gets its provider from the registry, because pi routes
  * "provider/model" strings and would default a bare id to anthropic.
  *
+ * "cursor/<model>" runs the Cursor Agent CLI shim. The remainder is Cursor's
+ * own model id (from `agent models`), passed through verbatim and never looked
+ * up in the registry: Cursor ids and billing are not in models.dev.
+ *
  * @param model - The model string to validate (e.g., "sonnet", "deepseek-v4-pro")
  * @param registry - The LlmProviderRegistry instance to use for resolution
  * @param providerId - Optional provider ID to narrow the search (e.g., "anthropic", "google")
@@ -144,6 +149,28 @@ export function validateModel(
   // a model name, not a provider qualifier.
   if (model.toLowerCase().startsWith("openrouter/") && model.length > "openrouter/".length) {
     model = `pi/openrouter/${model.substring("openrouter/".length)}`;
+  }
+  const cursorPrefix = `${CURSOR_HARNESS}/`;
+  if (model.toLowerCase().startsWith(cursorPrefix) && model.length > cursorPrefix.length) {
+    const cursorModelId = model.substring(cursorPrefix.length);
+    return {
+      valid: true,
+      modelInfo: {
+        providerId: CURSOR_HARNESS,
+        modelId: cursorModelId,
+        name: `${CURSOR_HARNESS}/${cursorModelId}`,
+        harnessOverride: CURSOR_HARNESS,
+        attachment: false,
+        reasoning: true,
+        tool_call: true,
+        cost: undefined,
+        limit: { context: 200000, output: 64000 },
+        modalities: { input: ["text"], output: ["text"] },
+        release_date: "2025-01-01",
+        last_updated: "2025-01-01",
+      },
+      matchType: "exact",
+    };
   }
   model = aliasQualifiedProvider(model);
 
